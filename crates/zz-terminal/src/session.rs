@@ -2823,7 +2823,7 @@ fn run_terminal(
 ) -> Result<(), WorkerError> {
     install_kitty_png_decoder();
     #[cfg(any(target_os = "linux", not(unix)))]
-    let _ = wake_rx;
+    let () = wake_rx;
     let mut geometry = Geometry::default();
     let pty_system = native_pty_system();
     let pair = pty_system

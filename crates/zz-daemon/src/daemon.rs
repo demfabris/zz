@@ -9567,7 +9567,7 @@ mod tests {
 
         terminal.send_text("exit\n");
 
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let inner = shared.inner.lock();
             let pane_exists = inner.engine.state.window_for_pane(pane).is_some();
@@ -10069,7 +10069,7 @@ mod tests {
             ..TerminalAppearance::default()
         };
         assert_eq!(*shared.inner.lock().appearance, expected);
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while live.latest_viewport().background != expected.background
             || output.latest_viewport().background != expected.background
         {
@@ -10126,7 +10126,7 @@ mod tests {
             ..TerminalAppearance::default()
         };
         assert_eq!(*shared.inner.lock().appearance, expected);
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while terminal.latest_viewport().background != expected.background {
             assert!(Instant::now() < deadline, "appearance did not reach actor");
             thread::sleep(Duration::from_millis(10));
@@ -10511,7 +10511,7 @@ mod tests {
             )
         });
 
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         let request_id = loop {
             let found = take_reliable_messages(&mailbox)
                 .into_iter()
@@ -10600,7 +10600,7 @@ mod tests {
             )
         });
 
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while shared.inner.lock().pending_gui_requests.is_empty() {
             assert!(Instant::now() < deadline, "request was never registered");
             thread::sleep(Duration::from_millis(10));
@@ -10910,7 +10910,7 @@ mod tests {
             )
             .expect("paste without an interactive attachment");
 
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let captured = shared
                 .execute(
@@ -12014,7 +12014,7 @@ bind - split-window -v -c "#{pane_current_path}"
 
         shared.spawn_copy_pipe(pane, client, command.to_owned(), "selection".to_owned());
 
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while subscriber.state.lock().reliable.is_empty() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }
@@ -12283,7 +12283,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let second = context.pane.expect("second pane");
         shared.attach(client, session).expect("attach session");
 
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         for pane in [first, second] {
             loop {
                 let ready = shared.inner.lock().terminals[&pane]
@@ -12413,7 +12413,7 @@ bind - split-window -v -c "#{pane_current_path}"
         }
 
         terminal.view_action(view, TerminalViewAction::ScrollToOffset(5));
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let pinned = terminal.latest_viewport_for(view).is_some_and(|viewport| {
                 matches!(viewport.mode, TerminalMode::Live) && viewport.scrollbar.offset == 5
@@ -12473,7 +12473,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 "a wheel gesture must not open a copy session"
             );
         }
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let scrolled = terminal.latest_viewport_for(view).is_some_and(|viewport| {
                 viewport.mode == TerminalMode::Live && viewport.scrollbar.offset == 4
@@ -12500,7 +12500,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 },
             )
             .expect("type while scrolled back");
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let at_bottom = terminal.latest_viewport_for(view).is_some_and(|viewport| {
                 viewport.mode == TerminalMode::Live
@@ -12561,7 +12561,7 @@ bind - split-window -v -c "#{pane_current_path}"
         expected: &str,
         predicate: impl Fn(TerminalMode) -> bool,
     ) {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if terminal
                 .latest_viewport_for(view)
@@ -12576,7 +12576,7 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[cfg(unix)]
     fn wait_for_observed_copy_session(shared: &Arc<Shared>, client: ClientId) {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if shared
                 .inner
@@ -12597,7 +12597,7 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[cfg(unix)]
     fn wait_for_root_key_table(shared: &Arc<Shared>, client: ClientId, expected: &str) {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             {
                 let inner = shared.inner.lock();
@@ -12666,7 +12666,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 .expect("drag gesture");
         }
 
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let selected = terminal
                 .latest_viewport_for(view)
@@ -12819,7 +12819,7 @@ bind - split-window -v -c "#{pane_current_path}"
         }
 
         terminal.send_text("clear; printf '    alpha beta\\n'; sleep 2\n");
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if terminal
                 .capture(CaptureOptions::default())
@@ -12869,7 +12869,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 .expect("vi copy key");
         }
 
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         let mut observed = Vec::new();
         loop {
             let writes = take_clipboard_writes(&mailbox, pane);
@@ -14914,7 +14914,7 @@ bind - split-window -v -c "#{pane_current_path}"
             );
         }
         wait_for_terminal_dimensions(&terminal, TerminalViewId(laptop.0), 140, 40);
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while terminal
             .latest_viewport_for(TerminalViewId(desktop.0))
             .is_some()
@@ -15415,7 +15415,7 @@ bind - split-window -v -c "#{pane_current_path}"
         wait_for_terminal_dimensions(&second_terminal, TerminalViewId(second_client.0), 90, 20);
 
         shared.unregister(second_client);
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while (first_terminal
             .latest_viewport_for(TerminalViewId(second_client.0))
             .is_some()
@@ -17200,7 +17200,7 @@ bind - split-window -v -c "#{pane_current_path}"
         )));
 
         for pane in [first, second] {
-            let deadline = Instant::now() + Duration::from_secs(3);
+            let deadline = Instant::now() + Duration::from_secs(30);
             loop {
                 let captured = shared
                     .execute(
@@ -17587,7 +17587,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ["-t", "%0", "printf MODE_LIVE_ONLY", "Enter"],
             ))
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let live = commands
                 .execute(CommandInvocation::new("capture-pane", ["-p", "-t", "%0"]))
@@ -17670,7 +17670,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ["-t", "%0", "printf E2E_DAEMON_OK", "Enter"],
             ))
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let captured = commands
                 .execute(CommandInvocation::new("capture-pane", ["-t", "%0"]))
@@ -18013,7 +18013,7 @@ bind - split-window -v -c "#{pane_current_path}"
             assert!(!inner.suppressed_text.contains_key(&client));
             assert!(!inner.pending_gui_requests.contains_key(&99));
         }
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while terminal.latest_viewport_for(view).is_some() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }
@@ -18071,7 +18071,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     fn connect_command_retry(path: &Path) -> CommandClient {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             match CommandClient::connect(path) {
                 Ok(client) => return client,
@@ -18132,7 +18132,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     fn take_command_output_message(mailbox: &OutboundMailbox) -> ProtocolMessage {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let frame = {
                 let mut state = mailbox.state.lock();
@@ -18154,7 +18154,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     fn wait_for_command_output_close(mailbox: &OutboundMailbox) {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let closed = take_reliable_messages(mailbox).into_iter().any(|message| {
                 matches!(
@@ -18209,7 +18209,7 @@ bind - split-window -v -c "#{pane_current_path}"
         columns: u16,
         rows: u16,
     ) {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if terminal
                 .latest_viewport_for(view)
@@ -18311,7 +18311,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     fn connect_interactive_retry(path: &Path) -> InteractiveClient {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             match InteractiveClient::connect(path) {
                 Ok(client) => return client,

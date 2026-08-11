@@ -175,8 +175,83 @@ jobs:
         run: security delete-keychain "$ZZ_KEYCHAIN"
 
   # The macOS job owns creating the release and validating the tag against the
-  # workspace version, so this one only uploads. Serializing the two also keeps
-  # them from racing to create the same release object.
+  # workspace version, so this job and the Windows one below only upload.
+  # Serializing on it also keeps anyone from racing to create the same release
+  # object. The aarch64 leg rides GitHub's arm runners, which are free only
+  # while the repository is public.
+  linux:
+    name: Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    needs: macos
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    env:
+      CEF_PATH: ${{ github.workspace }}/.cef-cache
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Resolve the release artifact names
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          {
+            echo "ZZ_VERSION=$version"
+            echo "ZZ_TARBALL=dist/zz-$version-linux-${{ matrix.arch }}.tar.gz"
+            echo "ZZ_APPIMAGE=dist/zz-$version-linux-${{ matrix.arch }}.AppImage"
+          } >> "$GITHUB_ENV"
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes cmake curl desktop-file-utils ninja-build libfontconfig-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Cache matching CEF distribution
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.cef-cache
+          key: cef-151.3.14-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Build the CEF bundle
+        run: cargo xtask bundle-cef --release --output dist/zz
+
+      - name: Download verified AppImage tools
+        run: scripts/fetch-appimage-tools.sh
+
+      - name: Package the tarball and AppImage
+        shell: bash
+        run: |
+          scripts/package-linux-tarball.sh dist/zz "$ZZ_TARBALL"
+          scripts/package-appimage.sh dist/zz "$ZZ_APPIMAGE"
+
+      - name: Checksum the release artifacts
+        shell: bash
+        run: |
+          (cd dist && sha256sum "$(basename "$ZZ_TARBALL")" > "$(basename "$ZZ_TARBALL").sha256")
+          (cd dist && sha256sum "$(basename "$ZZ_APPIMAGE")" > "$(basename "$ZZ_APPIMAGE").sha256")
+          cat "$ZZ_TARBALL.sha256" "$ZZ_APPIMAGE.sha256"
+
+      - name: Attach the artifacts to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            "$ZZ_TARBALL" "$ZZ_TARBALL.sha256" \
+            "$ZZ_APPIMAGE" "$ZZ_APPIMAGE.sha256" --clobber
+
   windows:
     name: Windows x64
     runs-on: windows-2025
@@ -201,11 +276,13 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          echo "ZZ_VERSION=$version" >> "$GITHUB_ENV"
-          # VersionInfoVersion in the installer rejects a prerelease suffix.
-          echo "ZZ_VERSION_INFO=${version%%-*}" >> "$GITHUB_ENV"
-          echo "ZZ_ZIP=dist/zz-$version-windows-x64.zip" >> "$GITHUB_ENV"
-          echo "ZZ_SETUP=dist/zz-$version-windows-x64-setup.exe" >> "$GITHUB_ENV"
+          {
+            echo "ZZ_VERSION=$version"
+            # VersionInfoVersion in the installer rejects a prerelease suffix.
+            echo "ZZ_VERSION_INFO=${version%%-*}"
+            echo "ZZ_ZIP=dist/zz-$version-windows-x64.zip"
+            echo "ZZ_SETUP=dist/zz-$version-windows-x64-setup.exe"
+          } >> "$GITHUB_ENV"
 
       - uses: mlugg/setup-zig@v2.2.1
         with:
@@ -274,3 +351,64 @@ jobs:
         run: |
           gh release upload "$GITHUB_REF_NAME" \
             "$ZZ_ZIP" "$ZZ_ZIP.sha256" "$ZZ_SETUP" "$ZZ_SETUP.sha256" --clobber
+
+  # Prereleases stay off the AUR for the same reason they stay off the tap,
+  # and render-aur.sh would reject their hyphenated pkgver anyway. Publishing
+  # needs an SSH key registered on the AUR account, stored as the
+  # AUR_SSH_PRIVATE_KEY secret; until it is provisioned the step below skips
+  # and the AUR package stays at its previous version.
+  aur:
+    name: AUR zz-bin
+    runs-on: ubuntu-24.04
+    needs: linux
+    if: ${{ !contains(github.ref_name, '-') }}
+    env:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Render and push the AUR package
+        if: ${{ env.AUR_SSH_PRIVATE_KEY != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+
+          sums="$RUNNER_TEMP/sums"
+          mkdir -p "$sums"
+          gh release download "$GITHUB_REF_NAME" --dir "$sums" \
+            --pattern 'zz-*-linux-*.tar.gz.sha256'
+          x86_64_sha256="$(cut -d' ' -f1 "$sums/zz-$version-linux-x86_64.tar.gz.sha256")"
+          aarch64_sha256="$(cut -d' ' -f1 "$sums/zz-$version-linux-aarch64.tar.gz.sha256")"
+
+          key="$RUNNER_TEMP/aur-key"
+          known_hosts="$RUNNER_TEMP/aur-known-hosts"
+          trap 'rm -f "$key" "$known_hosts"' EXIT
+          install -m 600 /dev/null "$key"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$key"
+          # Pinned from archlinux/infrastructure docs/ssh-hostkeys.txt: trust
+          # on first use authenticates nothing on a runner that is always
+          # first use.
+          printf '%s %s\n' aur.archlinux.org \
+            'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' \
+            > "$known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$known_hosts"
+
+          # The clone is empty (with a warning) until the first push creates
+          # the package base.
+          pkg="$RUNNER_TEMP/zz-bin"
+          git clone "ssh://aur@aur.archlinux.org/zz-bin.git" "$pkg"
+          scripts/render-aur.sh "$version" "$x86_64_sha256" "$aarch64_sha256" "$pkg"
+
+          git -C "$pkg" add PKGBUILD .SRCINFO
+          if git -C "$pkg" diff --cached --quiet; then
+            echo "the AUR already carries this version"
+            exit 0
+          fi
+          git -C "$pkg" \
+            -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit --message "zz-bin $version"
+          git -C "$pkg" push origin HEAD:master

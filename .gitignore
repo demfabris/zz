@@ -7,6 +7,10 @@
 /IDEAS.md
 /.env
 .DS_Store
+
+# Release signing material: Developer ID key/p12, notary API key, tap deploy
+# key. Feeds the Actions secrets consumed by .github/workflows/release.yml.
+/.zz-signing*
 *.log
 
 # Development run logs (just run defaults ZZ_LOG_DIR here)

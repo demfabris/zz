@@ -62,45 +62,7 @@ jobs:
 
       - name: Download verified AppImage tools
         if: runner.os == 'Linux'
-        shell: bash
-        env:
-          APPIMAGETOOL_VERSION: 1.9.1
-          APPIMAGE_RUNTIME_VERSION: "20251108"
-          APPIMAGETOOL_X64_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
-          APPIMAGETOOL_ARM64_SHA256: f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158
-          APPIMAGE_RUNTIME_X64_SHA256: 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
-          APPIMAGE_RUNTIME_ARM64_SHA256: 00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444
-        run: |
-          case "$RUNNER_ARCH" in
-            X64)
-              tool_arch="x86_64"
-              tool_checksum="$APPIMAGETOOL_X64_SHA256"
-              runtime_checksum="$APPIMAGE_RUNTIME_X64_SHA256"
-              ;;
-            ARM64)
-              tool_arch="aarch64"
-              tool_checksum="$APPIMAGETOOL_ARM64_SHA256"
-              runtime_checksum="$APPIMAGE_RUNTIME_ARM64_SHA256"
-              ;;
-            *)
-              echo "unsupported AppImage runner architecture: $RUNNER_ARCH" >&2
-              exit 2
-              ;;
-          esac
-
-          tool="$RUNNER_TEMP/appimagetool-${tool_arch}.AppImage"
-          runtime="$RUNNER_TEMP/runtime-${tool_arch}"
-          curl --fail --location --retry 3 \
-            "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-${tool_arch}.AppImage" \
-            --output "$tool"
-          curl --fail --location --retry 3 \
-            "https://github.com/AppImage/type2-runtime/releases/download/${APPIMAGE_RUNTIME_VERSION}/runtime-${tool_arch}" \
-            --output "$runtime"
-          echo "$tool_checksum  $tool" | sha256sum --check
-          echo "$runtime_checksum  $runtime" | sha256sum --check
-          chmod +x "$tool"
-          echo "APPIMAGETOOL=$tool" >> "$GITHUB_ENV"
-          echo "APPIMAGE_RUNTIME=$runtime" >> "$GITHUB_ENV"
+        run: scripts/fetch-appimage-tools.sh
 
       - name: Package Linux release outputs
         if: runner.os == 'Linux'

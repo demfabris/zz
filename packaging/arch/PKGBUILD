@@ -1,5 +1,7 @@
 # This is a local-development PKGBUILD. Use `just pacman-package` or
 # `just pacman-install` from the repository root so dist/zz is built first.
+# The published AUR package is its sibling in aur/, rendered per release by
+# scripts/render-aur.sh; keep the two in sync.
 #
 # The name carries the AUR's -bin suffix because this packages an already-built
 # bundle rather than compiling one, and because plain `zz` on the AUR belongs to

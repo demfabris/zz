@@ -1,0 +1,153 @@
+# Example zz configuration: every supported knob, set to its built-in default.
+#
+# zz loads the first existing file from, in order:
+#   $XDG_CONFIG_HOME/zz/config, then ~/.config/zz/config
+#   (macOS also checks ~/Library/Application Support/zz/config;
+#    see knowledge/configuration/app-config.md for the Windows search order.)
+#
+# Install: mkdir -p ~/.config/zz && cp examples/config ~/.config/zz/config
+#
+# A running GUI picks up edits live (the file is polled every 500ms), no
+# restart needed. An invalid line warns in the log and the key keeps its
+# built-in default (an earlier valid line for the same key still wins);
+# out-of-range numbers are rejected, not clamped. Deleting the file falls
+# back to the defaults below.
+#
+# zz's configuration is authoritative: this file plus ~/.config/zz/mux.conf
+# (tmux grammar: options, key bindings, status line) are the only configs zz
+# reads. (One exception: a `theme = <name>` line here makes zz load that
+# Ghostty theme file at runtime.) Existing Ghostty and tmux configs can be
+# imported via the first-run prompt, or later from Settings → Terminal →
+# Import Ghostty… and Settings → Multiplexer → Import tmux…; importing again
+# re-syncs, and the original files are never modified.
+#
+# Application chrome is colored by zz's own light/dark palette and follows the
+# system appearance. It is independent of the terminal palette: Ghostty colors
+# reach terminal panes only. (The terminal's font-family is still shared with
+# the chrome: a font, not chroma.)
+
+# Panes are flush and square until pane-gaps turns the card treatment on.
+pane-gaps = false
+
+# Pane geometry renders app-side on every platform, in logical pixels, and
+# applies only while pane-gaps is on: pane-corner-radius (0..=32) rounds all
+# four corners of each pane, pane-margin (0..=32) is the single gap between
+# neighbors and at the window edge, and pane-border-width (0..=8) outlines each
+# pane (0 disables it). Gapped panes carry a crisp outer edge ring in the gap,
+# without the soft falloff used by floating surfaces.
+pane-corner-radius = 13.5
+pane-margin = 6
+pane-border-width = 1
+
+# The corner every widget turns (buttons, inputs, tags, menus, dialogs) in
+# logical pixels (0..=24). One value for the whole chrome: 0 squares it off,
+# larger values round it (a control never exceeds half its own height).
+widget-corner-radius = 6
+
+# Follow the desktop's light/dark setting, or pin one: system, light, or dark.
+theme-mode = system
+
+# The dock/taskbar icon variant: automatic follows the OS appearance,
+# light or dark pins one.
+app-icon = automatic
+
+# Recolor the whole chrome with a built-in paired palette. Each preset ships a
+# light and a dark variant, so unlike the explicit chrome-* roots below it
+# composes with theme-mode = system. Unset means zz's own palette.
+# One of: tokyo-night, catppuccin, gruvbox, nord, breeze, adwaita, rose-pine,
+# ayu, solarized, macos-classic.
+#
+# chrome-preset = tokyo-night
+
+# Recolor the application chrome. These six are the palette *roots*: every panel,
+# hover state, muted label, focus ring and status wash is derived from them, so
+# setting a root reaches everything built on it. Accepts #rgb, #rrggbb or
+# #rrggbbaa. Leave a key out to inherit that root from the active preset (if
+# any) or the built-in palette for the active mode.
+#
+# An explicit color is one value and cannot suit both built-in palettes, so pin
+# theme-mode above to whichever mode you tuned these for. Commented out here
+# because unset means inherit, which is not the same as any particular color.
+#
+# chrome-background = #1a1b26   # the window's base plane
+# chrome-foreground = #c0caf5   # default text, muted text, rings, links
+# chrome-border     = #292e42   # every edge
+# chrome-success    = #9ece6a
+# chrome-warning    = #e0af68
+# chrome-danger     = #f7768e
+
+# Corner radius of the window frame zz draws with client-side decorations on
+# Linux, in logical pixels (0..=32). Desktops agree on no radius and expose no
+# way to query one, so match your compositor's rounding here, or set 0 for
+# square. Ignored wherever the frame is native (macOS, system titlebar).
+window-corner-radius = 13.5
+
+# Linux only: use the system's window frame instead of zz's client-side
+# titlebar. Applies to open windows immediately. Elsewhere the frame is
+# always native and this key does nothing.
+use-system-titlebar = false
+
+# Show the desktop, blurred, through the workspace sidebar (the titlebar
+# strip when use-system-titlebar is on), where the platform supports it.
+window-background-blur = false
+
+# Overlay frame-rate readouts: the GPUI window draw rate pinned to the
+# window's top-right, and each browser pane's delivered CEF frame rate. These
+# are two independent pipelines and can legitimately disagree.
+show-fps = false
+
+# Stop the zz daemon when the app quits, even if sessions are still open.
+# Off by default: the daemon outliving the app is what lets sessions survive a
+# restart, and it already exits on its own once no sessions and no attached
+# clients remain, so closing the last pane no longer strands you on a dead
+# daemon.
+quit-daemon-on-exit = false
+
+# Where non-URL text typed in a browser pane's address bar searches:
+# google, duckduckgo, or brave.
+browser-search-provider = google
+
+# Keystroke that toggles a browser pane's element picker. Unset uses the
+# platform default: cmd-shift-c on macOS, ctrl-shift-c elsewhere.
+#
+# browser-element-selector-hotkey = cmd-shift-c
+
+# The Editor pane, in logical pixels (8..=32) for the font and booleans for
+# the rest. Relative line numbers count outward from the cursor's line and
+# only apply while editor-line-numbers is on.
+editor-font-size = 13
+editor-line-numbers = true
+editor-relative-line-numbers = true
+editor-soft-wrap = true
+editor-vim-mode = true
+
+# Whether the experimental panes can be created at all: each key gates its
+# pane picker row, command palette entry, and the daemon's select-pane-kind
+# command. Panes already open keep running when a key is turned back off.
+# Only meaningful in builds compiled with the matching cargo feature
+# (agent-pane / editor-pane); stock builds compile both panes out.
+experimental-agent-pane = false
+experimental-editor-pane = false
+
+# The commands Agent panes spawn, per adapter. Versions are pinned so npx
+# spawns from its cache, offline; bumps are deliberate edits here.
+agent-command = npx -y @agentclientprotocol/codex-acp@1.1.7
+agent-claude-code-command = npx -y @agentclientprotocol/claude-agent-acp@0.63.0
+
+# Absolute path Agent panes start in. Unset starts them in your home
+# directory.
+#
+# agent-working-directory = /home/me/dev
+
+# Remote hosts, one key per host: host-<name> = ssh://[user@]host[:port].
+# Each host joins the sidebar tree and its sessions live on that machine's
+# daemon. The name must contain no whitespace and `local` is reserved;
+# a duplicate name warns and the last entry wins.
+#
+# host-desktop = ssh://fabrico@desktop:2222
+
+# This file also accepts the terminal appearance keys (Ghostty grammar:
+# theme, font-family, font-size, background-opacity, cursor-style, palette,
+# …) and the multiplexer option keys (prefix, mode-keys, history-limit, …),
+# which zz forwards to the daemon; they are what Import Ghostty writes here.
+# See knowledge/configuration/app-config.md for the full list.

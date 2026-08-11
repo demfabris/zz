@@ -1,0 +1,160 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    env:
+      CEF_PATH: ${{ github.workspace }}/.cef-cache
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes cmake curl desktop-file-utils ninja-build libfontconfig-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Cache matching CEF distribution
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.cef-cache
+          key: cef-151.3.14-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Check formatting
+        if: runner.os == 'Linux'
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        if: runner.os == 'Linux'
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Check UI showcase
+        if: runner.os == 'Linux'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          cargo check --manifest-path examples/ui-showcase/Cargo.toml --all-targets --locked
+          rustup toolchain install nightly --profile minimal --target wasm32-unknown-unknown
+          rustup run nightly cargo check --manifest-path examples/ui-showcase/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
+
+      - name: Test workspace
+        run: cargo test --workspace --all-features
+
+      - name: Build and validate CEF bundle
+        run: cargo xtask bundle-cef --release --output target/cef-bundle
+
+      - name: Download verified AppImage tools
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          APPIMAGETOOL_VERSION: 1.9.1
+          APPIMAGE_RUNTIME_VERSION: "20251108"
+          APPIMAGETOOL_X64_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+          APPIMAGETOOL_ARM64_SHA256: f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158
+          APPIMAGE_RUNTIME_X64_SHA256: 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+          APPIMAGE_RUNTIME_ARM64_SHA256: 00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444
+        run: |
+          case "$RUNNER_ARCH" in
+            X64)
+              tool_arch="x86_64"
+              tool_checksum="$APPIMAGETOOL_X64_SHA256"
+              runtime_checksum="$APPIMAGE_RUNTIME_X64_SHA256"
+              ;;
+            ARM64)
+              tool_arch="aarch64"
+              tool_checksum="$APPIMAGETOOL_ARM64_SHA256"
+              runtime_checksum="$APPIMAGE_RUNTIME_ARM64_SHA256"
+              ;;
+            *)
+              echo "unsupported AppImage runner architecture: $RUNNER_ARCH" >&2
+              exit 2
+              ;;
+          esac
+
+          tool="$RUNNER_TEMP/appimagetool-${tool_arch}.AppImage"
+          runtime="$RUNNER_TEMP/runtime-${tool_arch}"
+          curl --fail --location --retry 3 \
+            "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-${tool_arch}.AppImage" \
+            --output "$tool"
+          curl --fail --location --retry 3 \
+            "https://github.com/AppImage/type2-runtime/releases/download/${APPIMAGE_RUNTIME_VERSION}/runtime-${tool_arch}" \
+            --output "$runtime"
+          echo "$tool_checksum  $tool" | sha256sum --check
+          echo "$runtime_checksum  $runtime" | sha256sum --check
+          chmod +x "$tool"
+          echo "APPIMAGETOOL=$tool" >> "$GITHUB_ENV"
+          echo "APPIMAGE_RUNTIME=$runtime" >> "$GITHUB_ENV"
+
+      - name: Package Linux release outputs
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          binary_artifact="target/zz-linux-${RUNNER_ARCH}-binary.tar.gz"
+          package_artifact="target/zz-linux-${RUNNER_ARCH}.AppImage"
+
+          test -x target/release/zz
+          tar -C target/release -czf "$binary_artifact" zz
+          scripts/package-appimage.sh target/cef-bundle "$package_artifact"
+
+          echo "ZZ_BINARY_ARTIFACT_PATH=$binary_artifact" >> "$GITHUB_ENV"
+          echo "ZZ_PACKAGE_ARTIFACT_PATH=$package_artifact" >> "$GITHUB_ENV"
+
+      - name: Package macOS release outputs
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          binary_artifact="target/zz-macos-${RUNNER_ARCH}-binaries.tar.gz"
+          package_artifact="target/zz-macos-${RUNNER_ARCH}.dmg"
+
+          test -x target/release/zz
+          test -x target/release/zz_helper
+          test -x target/release/zz_cli
+          tar -C target/release -czf "$binary_artifact" zz zz_helper zz_cli
+          scripts/package-dmg.sh target/cef-bundle/zz.app "$package_artifact"
+
+          echo "ZZ_BINARY_ARTIFACT_PATH=$binary_artifact" >> "$GITHUB_ENV"
+          echo "ZZ_PACKAGE_ARTIFACT_PATH=$package_artifact" >> "$GITHUB_ENV"
+
+      - name: Package Windows release outputs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $artifact = "target/zz-windows-$env:RUNNER_ARCH.zip"
+          ./scripts/package-windows.ps1 target/cef-bundle $artifact
+          "ZZ_PACKAGE_ARTIFACT_PATH=$artifact" >> $env:GITHUB_ENV
+
+      - name: Upload release binaries
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: zz-${{ runner.os }}-${{ runner.arch }}-binaries
+          path: ${{ env.ZZ_BINARY_ARTIFACT_PATH }}
+          if-no-files-found: error
+          archive: false
+
+      # Every leg packages now; only the loose binaries above stay Unix-only,
+      # since the Windows bundle is unusable without its DLLs beside it.
+      - name: Upload distribution package
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: zz-${{ runner.os }}-${{ runner.arch }}-package
+          path: ${{ env.ZZ_PACKAGE_ARTIFACT_PATH }}
+          if-no-files-found: error
+          archive: false

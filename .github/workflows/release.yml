@@ -1,0 +1,276 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    name: macOS arm64
+    runs-on: macos-15
+    permissions:
+      contents: write
+    env:
+      CEF_PATH: ${{ github.workspace }}/.cef-cache
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      MACOS_NOTARY_PROFILE: zz-notary
+      TAP_REPOSITORY: demfabris/homebrew-zz
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      # The DMG carries CFBundleShortVersionString from the workspace manifest,
+      # and the cask carries the tag. A mismatch would leave brew permanently
+      # convinced the installed app is the wrong version.
+      - name: Check the tag against the workspace version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          manifest="$(sed -nE 's/^version = "([^"]+)"$/\1/p' Cargo.toml | head -1)"
+          if [[ "$version" != "$manifest" ]]; then
+            echo "tag $GITHUB_REF_NAME does not match the workspace version $manifest" >&2
+            exit 1
+          fi
+          echo "ZZ_VERSION=$version" >> "$GITHUB_ENV"
+          echo "ZZ_DMG=dist/zz-$version-macos-arm64.dmg" >> "$GITHUB_ENV"
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Cache matching CEF distribution
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.cef-cache
+          key: cef-151.3.14-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install just
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+        run: brew install just
+
+      # codesign and notarytool both read the default keychain, so the release
+      # runs against one throwaway keychain holding the Developer ID identity
+      # and the notary credentials.
+      - name: Load the signing and notary credentials
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        shell: bash
+        run: |
+          keychain="$RUNNER_TEMP/zz-release.keychain-db"
+          password="$(uuidgen)"
+          certificate="$RUNNER_TEMP/developer-id.p12"
+          notary_key="$RUNNER_TEMP/notary.p8"
+          trap 'rm -f "$certificate" "$notary_key"' EXIT
+
+          base64 -d <<<"$MACOS_CERTIFICATE_P12_BASE64" > "$certificate"
+          base64 -d <<<"$APPLE_API_KEY_P8_BASE64" > "$notary_key"
+
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security default-keychain -s "$keychain"
+          # Prepend rather than replace: dropping the runner's own keychains from
+          # the search list breaks unrelated tooling for the rest of the job.
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+          security import "$certificate" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" \
+            "$keychain" >/dev/null
+
+          # notarytool wants --issuer for a Team API key and rejects it for an
+          # Individual one, so it follows the secret being set.
+          issuer=()
+          if [[ -n "$APPLE_API_ISSUER_ID" ]]; then
+            issuer=(--issuer "$APPLE_API_ISSUER_ID")
+          fi
+          xcrun notarytool store-credentials "$MACOS_NOTARY_PROFILE" \
+            --key "$notary_key" \
+            --key-id "$APPLE_API_KEY_ID" \
+            "${issuer[@]}" \
+            --keychain "$keychain"
+
+          echo "ZZ_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Build, sign, package, and notarize
+        run: scripts/release-macos.sh release "$ZZ_VERSION"
+
+      - name: Checksum the disk image
+        shell: bash
+        run: |
+          (cd dist && shasum -a 256 "$(basename "$ZZ_DMG")" > "$(basename "$ZZ_DMG").sha256")
+          cat "$ZZ_DMG.sha256"
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          prerelease=()
+          if [[ "$ZZ_VERSION" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$ZZ_DMG" "$ZZ_DMG.sha256" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$ZZ_DMG" "$ZZ_DMG.sha256" \
+              --title "zz $ZZ_VERSION" \
+              --generate-notes \
+              --verify-tag \
+              "${prerelease[@]}"
+          fi
+
+      # Prereleases stay off the tap: `brew upgrade` would hand every user an rc.
+      - name: Update the Homebrew tap
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        shell: bash
+        run: |
+          tap="$RUNNER_TEMP/tap"
+          key="$RUNNER_TEMP/tap-deploy-key"
+          known_hosts="$RUNNER_TEMP/tap-known-hosts"
+          trap 'rm -f "$key" "$known_hosts"' EXIT
+
+          install -m 600 /dev/null "$key"
+          printf '%s\n' "$TAP_DEPLOY_KEY" > "$key"
+          # Pinned from api.github.com/meta rather than ssh-keyscan: trust on
+          # first use authenticates nothing on a runner that is always first use.
+          printf '%s %s\n' github.com \
+            'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+            > "$known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$known_hosts"
+
+          git clone --depth 1 "git@github.com:$TAP_REPOSITORY.git" "$tap"
+          mkdir -p "$tap/Casks"
+          scripts/render-cask.sh "$ZZ_VERSION" "$ZZ_DMG" > "$tap/Casks/zz.rb"
+
+          git -C "$tap" add Casks/zz.rb
+          if git -C "$tap" diff --cached --quiet; then
+            echo "the tap already carries this cask"
+            exit 0
+          fi
+          git -C "$tap" \
+            -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit --message "zz $ZZ_VERSION"
+          git -C "$tap" push
+
+      - name: Remove the signing keychain
+        if: ${{ always() && env.ZZ_KEYCHAIN != '' }}
+        run: security delete-keychain "$ZZ_KEYCHAIN"
+
+  # The macOS job owns creating the release and validating the tag against the
+  # workspace version, so this one only uploads. Serializing the two also keeps
+  # them from racing to create the same release object.
+  windows:
+    name: Windows x64
+    runs-on: windows-2025
+    needs: macos
+    permissions:
+      contents: write
+    env:
+      CEF_PATH: ${{ github.workspace }}/.cef-cache
+      # Provision these repository secrets to sign the release. Without them
+      # every signing step below is skipped and the artifacts ship unsigned,
+      # which costs users a SmartScreen warning but nothing else.
+      #   WINDOWS_CERTIFICATE_PFX_BASE64  base64 of the code-signing PKCS#12
+      #   WINDOWS_CERTIFICATE_PASSWORD    its password
+      # See scripts/sign-windows.ps1 for where such a certificate comes from.
+      WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Resolve the release artifact names
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "ZZ_VERSION=$version" >> "$GITHUB_ENV"
+          # VersionInfoVersion in the installer rejects a prerelease suffix.
+          echo "ZZ_VERSION_INFO=${version%%-*}" >> "$GITHUB_ENV"
+          echo "ZZ_ZIP=dist/zz-$version-windows-x64.zip" >> "$GITHUB_ENV"
+          echo "ZZ_SETUP=dist/zz-$version-windows-x64-setup.exe" >> "$GITHUB_ENV"
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Cache matching CEF distribution
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.cef-cache
+          key: cef-151.3.14-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Build the CEF bundle
+        run: cargo xtask bundle-cef --release --output dist/zz
+
+      # Signing the payload before packaging, then the installer afterwards, is
+      # the order Authenticode wants: the installer's signature covers files
+      # that already carry their own.
+      - name: Sign the bundled executables
+        if: ${{ env.WINDOWS_CERTIFICATE_PFX_BASE64 != '' }}
+        shell: pwsh
+        run: |
+          # Only zz's own binaries: signing the CEF DLLs would assert authorship
+          # of code we redistribute, and SmartScreen only reads the entry point.
+          $binaries = @('dist/zz/zz.exe', 'dist/zz/zz.dll') |
+            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+          ./scripts/sign-windows.ps1 @binaries
+
+      - name: Package the archive
+        shell: pwsh
+        run: ./scripts/package-windows.ps1 dist/zz $env:ZZ_ZIP
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          $isccPath = if ($iscc) { $iscc.Path } else { 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' }
+          if (-not (Test-Path -LiteralPath $isccPath)) {
+            throw "error: Inno Setup compiler not found: $isccPath"
+          }
+          & $isccPath packaging\windows\zz.iss `
+            "/DAppVersion=$env:ZZ_VERSION" `
+            "/DVersionInfo=$env:ZZ_VERSION_INFO" `
+            /DBundleDir=dist\zz `
+            /DOutputDir=dist `
+            "/DOutputBaseFilename=$([System.IO.Path]::GetFileNameWithoutExtension($env:ZZ_SETUP))"
+
+      - name: Sign the installer
+        if: ${{ env.WINDOWS_CERTIFICATE_PFX_BASE64 != '' }}
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 $env:ZZ_SETUP
+
+      - name: Checksum the release artifacts
+        shell: bash
+        run: |
+          (cd dist && sha256sum "$(basename "$ZZ_ZIP")" > "$(basename "$ZZ_ZIP").sha256")
+          (cd dist && sha256sum "$(basename "$ZZ_SETUP")" > "$(basename "$ZZ_SETUP").sha256")
+          cat "$ZZ_ZIP.sha256" "$ZZ_SETUP.sha256"
+
+      # The winget and scoop templates in packaging/windows still carry
+      # placeholder versions and hashes; publishing them is manual until a
+      # bucket and a winget-pkgs fork exist.
+      - name: Attach the artifacts to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            "$ZZ_ZIP" "$ZZ_ZIP.sha256" "$ZZ_SETUP" "$ZZ_SETUP.sha256" --clobber

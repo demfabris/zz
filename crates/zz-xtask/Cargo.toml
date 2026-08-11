@@ -1,0 +1,22 @@
+[package]
+name = "zz-xtask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Build tooling: CEF bundling, packaging"
+publish = false
+
+[dependencies]
+cargo_metadata.workspace = true
+cef.workspace = true
+plist.workspace = true
+
+# The Windows executable a bundle ships is CEF's prebuilt bootstrap, so its
+# icon and DPI manifest cannot come from the compiler the way they do for a
+# binary this repository links; they are written into the copy's PE resources.
+[target.'cfg(target_os = "windows")'.dependencies]
+editpe = "0.2.3"
+
+[lints]
+workspace = true

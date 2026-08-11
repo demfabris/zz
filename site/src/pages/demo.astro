@@ -1,0 +1,56 @@
+---
+// The zz workspace UI, on its own page and at its own size. Everything the page
+// shows lives in the WorkspaceDemo component, which the landing page hero mounts
+// too — this is the same shell with room around it.
+import WorkspaceDemo from '../components/zz/WorkspaceDemo.astro';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>zz · UI demo</title>
+		<meta name="description" content="The zz workspace UI, rebuilt as HTML and CSS." />
+		<meta name="robots" content="noindex" />
+		<link rel="icon" href={`${base}/favicon.svg`} type="image/svg+xml" />
+	</head>
+	<body>
+		<main>
+			<p class="caption">
+				zz workspace · HTML/CSS replica at 2232 × 1360 logical px · click the tree, drag the gaps,
+				randomize the look
+			</p>
+
+			<WorkspaceDemo />
+		</main>
+	</body>
+</html>
+
+<style is:global>
+	:root { color-scheme: dark; }
+	* { margin: 0; box-sizing: border-box; }
+	html, body { background: #070707; }
+	body {
+		display: flex;
+		justify-content: center;
+		min-height: 100vh;
+		padding: 48px 24px 64px;
+		color: #fafafa;
+		font-family: var(--zz-font-ui);
+		-webkit-font-smoothing: antialiased;
+	}
+	main {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 20px;
+	}
+	.caption {
+		font-family: var(--zz-font-mono);
+		font-size: 12px;
+		color: #6b6b6b;
+	}
+</style>

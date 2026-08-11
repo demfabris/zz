@@ -1,0 +1,475 @@
+use serde::{Deserialize, Serialize};
+
+use crate::Modifiers;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TerminalViewId(pub u64);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PointerCellEvent {
+    pub column: u16,
+    pub row: u16,
+    pub click_count: u8,
+    pub rectangle: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TerminalMousePhase {
+    Press,
+    Release,
+    Motion,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TerminalMouseButton {
+    Left,
+    Middle,
+    Right,
+    ScrollUp,
+    ScrollDown,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct TerminalMouseInput {
+    pub x: u32,
+    pub y: u32,
+    pub screen_width: u32,
+    pub screen_height: u32,
+    pub cell_width: u32,
+    pub cell_height: u32,
+    pub cell: PointerCellEvent,
+    routing: u16,
+}
+
+#[allow(
+    clippy::missing_fields_in_debug,
+    reason = "debug output preserves the logical public fields instead of exposing packed routing storage"
+)]
+impl std::fmt::Debug for TerminalMouseInput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TerminalMouseInput")
+            .field("phase", &self.phase())
+            .field("button", &self.button())
+            .field("cell", &self.cell)
+            .field("x", &self.x)
+            .field("y", &self.y)
+            .field("screen_width", &self.screen_width)
+            .field("screen_height", &self.screen_height)
+            .field("cell_width", &self.cell_width)
+            .field("cell_height", &self.cell_height)
+            .field("modifiers", &self.modifiers())
+            .field("force_selection", &self.force_selection())
+            .finish()
+    }
+}
+
+impl TerminalMouseInput {
+    const PHASE_MASK: u16 = 0b11;
+    const BUTTON_SHIFT: u32 = 2;
+    const BUTTON_MASK: u16 = 0b111;
+    const MODIFIERS_SHIFT: u32 = 5;
+    const MODIFIERS_MASK: u16 = 0b1111;
+    const FORCE_SELECTION: u16 = 1 << 9;
+
+    /// Build one compact terminal pointer event.
+    #[must_use]
+    pub const fn new(
+        phase: TerminalMousePhase,
+        button: Option<TerminalMouseButton>,
+        cell: PointerCellEvent,
+        x: u32,
+        y: u32,
+        screen_width: u32,
+        screen_height: u32,
+        cell_width: u32,
+        cell_height: u32,
+        modifiers: Modifiers,
+        force_selection: bool,
+    ) -> Self {
+        let phase = match phase {
+            TerminalMousePhase::Press => 0,
+            TerminalMousePhase::Release => 1,
+            TerminalMousePhase::Motion => 2,
+        };
+        let button = match button {
+            None => 0,
+            Some(TerminalMouseButton::Left) => 1,
+            Some(TerminalMouseButton::Middle) => 2,
+            Some(TerminalMouseButton::Right) => 3,
+            Some(TerminalMouseButton::ScrollUp) => 4,
+            Some(TerminalMouseButton::ScrollDown) => 5,
+        };
+        Self {
+            x,
+            y,
+            screen_width,
+            screen_height,
+            cell_width,
+            cell_height,
+            cell,
+            routing: phase
+                | button << Self::BUTTON_SHIFT
+                | (modifiers.bits() as u16) << Self::MODIFIERS_SHIFT
+                | if force_selection {
+                    Self::FORCE_SELECTION
+                } else {
+                    0
+                },
+        }
+    }
+
+    #[must_use]
+    pub const fn phase(self) -> TerminalMousePhase {
+        match self.routing & Self::PHASE_MASK {
+            1 => TerminalMousePhase::Release,
+            2 => TerminalMousePhase::Motion,
+            _ => TerminalMousePhase::Press,
+        }
+    }
+
+    #[must_use]
+    pub const fn button(self) -> Option<TerminalMouseButton> {
+        match (self.routing >> Self::BUTTON_SHIFT) & Self::BUTTON_MASK {
+            1 => Some(TerminalMouseButton::Left),
+            2 => Some(TerminalMouseButton::Middle),
+            3 => Some(TerminalMouseButton::Right),
+            4 => Some(TerminalMouseButton::ScrollUp),
+            5 => Some(TerminalMouseButton::ScrollDown),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn modifiers(self) -> Modifiers {
+        let bits = ((self.routing >> Self::MODIFIERS_SHIFT) & Self::MODIFIERS_MASK) as u8;
+        Modifiers::from_packed_bits(bits)
+    }
+
+    #[must_use]
+    pub const fn force_selection(self) -> bool {
+        self.routing & Self::FORCE_SELECTION != 0
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct TerminalMouseInputWire {
+    phase: TerminalMousePhase,
+    button: Option<TerminalMouseButton>,
+    cell: PointerCellEvent,
+    x: u32,
+    y: u32,
+    screen_width: u32,
+    screen_height: u32,
+    cell_width: u32,
+    cell_height: u32,
+    modifiers: Modifiers,
+    force_selection: bool,
+}
+
+impl Serialize for TerminalMouseInput {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        TerminalMouseInputWire {
+            phase: self.phase(),
+            button: self.button(),
+            cell: self.cell,
+            x: self.x,
+            y: self.y,
+            screen_width: self.screen_width,
+            screen_height: self.screen_height,
+            cell_width: self.cell_width,
+            cell_height: self.cell_height,
+            modifiers: self.modifiers(),
+            force_selection: self.force_selection(),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TerminalMouseInput {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = TerminalMouseInputWire::deserialize(deserializer)?;
+        Ok(Self::new(
+            wire.phase,
+            wire.button,
+            wire.cell,
+            wire.x,
+            wire.y,
+            wire.screen_width,
+            wire.screen_height,
+            wire.cell_width,
+            wire.cell_height,
+            wire.modifiers,
+            wire.force_selection,
+        ))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClipboardTarget {
+    Clipboard,
+    Primary,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PasteBufferAction {
+    Create { prefix: Option<String> },
+    Append,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopyModeCopy {
+    pub request_id: u64,
+    pub clipboard: bool,
+    pub buffer: Option<PasteBufferAction>,
+    pub pipe: Option<String>,
+    pub clear_selection: bool,
+    pub cancel: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CopyJumpDirection {
+    Forward,
+    Backward,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopyJump {
+    pub target: String,
+    pub direction: CopyJumpDirection,
+    pub to: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SearchMode {
+    #[default]
+    Literal,
+    Regex,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SearchCase {
+    #[default]
+    Smart,
+    Sensitive,
+    Insensitive,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SearchDirection {
+    #[default]
+    Forward,
+    Backward,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchQuery {
+    pub text: String,
+    pub mode: SearchMode,
+    pub case: SearchCase,
+    pub direction: SearchDirection,
+}
+
+impl SearchQuery {
+    #[must_use]
+    pub fn literal(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            mode: SearchMode::Literal,
+            case: SearchCase::Smart,
+            direction: SearchDirection::Forward,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CopyModeAction {
+    Left,
+    Right,
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    HalfPageUp,
+    HalfPageDown,
+    Top,
+    Bottom,
+    TopLine,
+    MiddleLine,
+    BottomLine,
+    StartOfLine,
+    BackToIndentation,
+    EndOfLine,
+    NextWord,
+    PreviousWord,
+    NextWordEnd,
+    NextParagraph,
+    PreviousParagraph,
+    NextPrompt {
+        output: bool,
+    },
+    PreviousPrompt {
+        output: bool,
+    },
+    SearchAgain {
+        reverse: bool,
+    },
+    StartSelection,
+    SelectWord,
+    SelectLine,
+    ClearSelection,
+    /// Clear an active selection, or leave copy mode when there is none.
+    ClearSelectionOrCancel,
+    ToggleRectangle,
+    RectangleOn,
+    RectangleOff,
+    OtherEnd,
+    SetMark,
+    JumpToMark,
+    Jump(CopyJump),
+    RepeatJump {
+        reverse: bool,
+    },
+    CopySelection(Box<CopyModeCopy>),
+    Cancel,
+    // Keep new variants after `Cancel`: postcard encodes this protocol enum by
+    // discriminant, so additions are append-only even when the protocol bumps.
+    NextSpace,
+    PreviousSpace,
+    NextSpaceEnd,
+    ScrollUp,
+    ScrollDown,
+    ScrollMiddle,
+    NextMatchingBracket,
+    SearchCursorWord {
+        direction: SearchDirection,
+    },
+    CopyEndOfLine(Box<CopyModeCopy>),
+    GotoLine(u32),
+}
+
+impl CopyModeAction {
+    /// Boxed constructor for [`Self::CopySelection`].
+    #[must_use]
+    pub fn copy_selection(copy: CopyModeCopy) -> Self {
+        Self::CopySelection(Box::new(copy))
+    }
+
+    /// Boxed constructor for [`Self::CopyEndOfLine`].
+    #[must_use]
+    pub fn copy_end_of_line(copy: CopyModeCopy) -> Self {
+        Self::CopyEndOfLine(Box::new(copy))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TerminalViewAction {
+    /// Scroll by logical rows. Negative values move toward older history.
+    ScrollLines(i32),
+    /// Scroll by terminal pages. Negative values move toward older history.
+    ScrollPages(i32),
+    ScrollTop,
+    ScrollBottom,
+    /// Move to an absolute scrollbar fraction (`0` is top, `u32::MAX` bottom).
+    ScrollToFraction(u32),
+    SelectionPress(PointerCellEvent),
+    SelectionDrag(PointerCellEvent),
+    SelectionAutoscroll {
+        lines: i32,
+        pointer: PointerCellEvent,
+    },
+    SelectionRelease(PointerCellEvent),
+    Mouse(TerminalMouseInput),
+    /// Clear presentation-only URI hover without synthesizing application mouse input.
+    ClearLinkHover,
+    ScrollWheel {
+        lines: i32,
+        input: TerminalMouseInput,
+    },
+    SelectAll,
+    ClearHistory,
+    ClearSelection,
+    EnterCopyMode,
+    CopyMode(CopyModeAction),
+    SearchBegin(SearchQuery),
+    SearchUpdate(SearchQuery),
+    SearchNext,
+    SearchPrevious,
+    SearchClose,
+    CopySelection {
+        request_id: u64,
+        target: ClipboardTarget,
+    },
+    Focus(bool),
+    Paste(String),
+    /// Move the live viewport top to an absolute scrollbar offset.
+    ScrollToOffset(u32),
+}
+
+#[cfg(test)]
+mod tests {
+    use std::mem::{align_of, size_of};
+
+    use super::*;
+
+    #[test]
+    fn pointer_records_keep_their_packed_layout() {
+        assert_eq!(size_of::<PointerCellEvent>(), 6);
+        assert_eq!(align_of::<PointerCellEvent>(), align_of::<u16>());
+        assert_eq!(size_of::<TerminalMouseInput>(), 32);
+        assert_eq!(align_of::<TerminalMouseInput>(), align_of::<u32>());
+    }
+
+    #[test]
+    fn terminal_mouse_routing_metadata_round_trips_every_variant() {
+        let phases = [
+            TerminalMousePhase::Press,
+            TerminalMousePhase::Release,
+            TerminalMousePhase::Motion,
+        ];
+        let buttons = [
+            None,
+            Some(TerminalMouseButton::Left),
+            Some(TerminalMouseButton::Middle),
+            Some(TerminalMouseButton::Right),
+            Some(TerminalMouseButton::ScrollUp),
+            Some(TerminalMouseButton::ScrollDown),
+        ];
+        let modifiers = Modifiers::new(true, true, true, true);
+        for phase in phases {
+            for button in buttons {
+                for force_selection in [false, true] {
+                    let input = TerminalMouseInput::new(
+                        phase,
+                        button,
+                        PointerCellEvent {
+                            column: 0,
+                            row: 0,
+                            click_count: 0,
+                            rectangle: false,
+                        },
+                        0,
+                        0,
+                        1,
+                        1,
+                        1,
+                        1,
+                        modifiers,
+                        force_selection,
+                    );
+                    assert_eq!(input.phase(), phase);
+                    assert_eq!(input.button(), button);
+                    assert_eq!(input.modifiers(), modifiers);
+                    assert_eq!(input.force_selection(), force_selection);
+                }
+            }
+        }
+    }
+}

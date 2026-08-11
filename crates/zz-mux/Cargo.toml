@@ -1,0 +1,15 @@
+[package]
+name = "zz-mux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "tmux-compatible multiplexer model: sessions, windows, panes, key tables"
+publish = false
+
+[dependencies]
+zz-protocol = { path = "../zz-protocol" }
+zz-terminal = { path = "../zz-terminal", default-features = false }
+
+[lints]
+workspace = true

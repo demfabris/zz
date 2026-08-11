@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>flicker: idle</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #808080; }
+  #bars { display: flex; width: 100vw; height: 100vh; }
+  #bars > i { flex: 1 1 0; background: #808080; }
+  /* No text, no chrome, no cursor: every pixel in the viewport is signal. */
+  * { cursor: none; }
+</style>
+</head>
+<body>
+<div id="bars"></div>
+<script>
+"use strict";
+// Paints the frame index as a binary bar pattern, one new pattern per
+// requestAnimationFrame. A camera pointed at the screen can therefore count
+// how many of these frames actually reached the display -- which is the only
+// measurement that is comparable across a windowed Chromium view (Chrome,
+// Electron) and an offscreen-rendered one pumped through a host compositor (zz).
+//
+// Bar 0 is a run marker (white while running, grey while idle) so the decoder
+// can find the run region without being told where it is. Bars 1..N-1 carry
+// bits 0..N-2 of the frame index, LSB first.
+
+var q      = new URLSearchParams(location.search);
+var BARS   = clampInt(q.get("bars"), 13, 4, 24);
+var SECS   = clampInt(q.get("secs"), 20, 1, 600);
+var LOAD   = Math.max(0, +(q.get("load") || 0) || 0);   // ms of busy work per frame
+var LABEL  = q.get("label") || "";
+var AUTO   = q.get("auto") !== "0";
+var BITS   = BARS - 1;
+var MOD    = Math.pow(2, BITS);
+
+var GREY = "#808080", WHITE = "#fff", BLACK = "#000";
+
+function clampInt(v, dflt, lo, hi) {
+  var n = parseInt(v, 10);
+  if (!isFinite(n)) return dflt;
+  return Math.min(hi, Math.max(lo, n));
+}
+
+var host = document.getElementById("bars");
+var bar = [];
+for (var i = 0; i < BARS; i++) {
+  var el = document.createElement("i");
+  host.appendChild(el);
+  bar.push(el);
+}
+
+var stamps = new Float64Array(SECS * 1000 + 4096); // generous: 1000fps headroom
+var count = 0;
+var idx = 0;
+var prevPattern = -1;
+var startT = 0;
+var state = "idle";
+var watchdog = 0;
+var tainted = [];
+
+// Every one of these hosts throttles or suspends rAF for content it thinks is
+// hidden or occluded, so a run that loses visibility is measuring the wrong
+// thing entirely. Record it rather than quietly reporting 3fps.
+function taint(why) {
+  if (tainted.indexOf(why) < 0) tainted.push(why);
+}
+document.addEventListener("visibilitychange", function () {
+  if (document.hidden && state === "running") taint("went hidden mid-run");
+});
+
+function paint(n) {
+  // Only touch the bars whose bit flipped since the last frame; keeps the
+  // page's own cost near zero so we are measuring the pipeline, not the page.
+  var diff = prevPattern < 0 ? MOD - 1 : (prevPattern ^ n);
+  for (var b = 0; b < BITS; b++) {
+    if (diff & (1 << b)) {
+      bar[b + 1].style.background = (n >> b) & 1 ? WHITE : BLACK;
+    }
+  }
+  prevPattern = n;
+}
+
+function frame(now) {
+  if (state !== "running") return;
+
+  if (LOAD > 0) {
+    var until = performance.now() + LOAD;
+    while (performance.now() < until) { /* deliberate busy-wait */ }
+  }
+
+  paint(idx);
+  if (count < stamps.length) stamps[count++] = now;
+  idx = (idx + 1) % MOD;
+
+  if (now - startT >= SECS * 1000) { stop(); return; }
+  requestAnimationFrame(frame);
+}
+
+function start() {
+  if (state === "running") return;
+  state = "running";
+  count = 0; idx = 0; prevPattern = -1; tainted = [];
+  if (document.hidden) taint("hidden at start");
+  bar[0].style.background = WHITE;
+  document.title = "flicker: REC " + SECS + "s";
+  // rAF stops being delivered outright when the page is hidden or occluded, so
+  // the loop's own deadline can never arrive. Always land on a report.
+  watchdog = setTimeout(function () {
+    if (state === "running") { taint("rAF stopped delivering"); stop(); }
+  }, SECS * 1000 + 3000);
+  requestAnimationFrame(function (t) { startT = t; frame(t); });
+}
+
+function stop() {
+  clearTimeout(watchdog);
+  state = "done";
+  for (var i = 0; i < BARS; i++) bar[i].style.background = GREY;
+  document.title = tainted.length ? "flicker: TAINTED" : "flicker: done";
+  report();
+}
+
+function quantiles(sorted) {
+  function at(p) {
+    if (!sorted.length) return 0;
+    var i = Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))));
+    return +sorted[i].toFixed(3);
+  }
+  return { p50: at(0.5), p90: at(0.9), p99: at(0.99), max: at(1) };
+}
+
+function report() {
+  var iv = [];
+  for (var i = 1; i < count; i++) iv.push(stamps[i] - stamps[i - 1]);
+  var sorted = iv.slice().sort(function (a, b) { return a - b; });
+  var qs = quantiles(sorted);
+  var wall = count > 1 ? stamps[count - 1] - stamps[0] : 0;
+  var longFrames = 0;
+  for (var j = 0; j < iv.length; j++) if (iv[j] > qs.p50 * 1.5) longFrames++;
+
+  var out = {
+    kind: "engine",
+    label: LABEL,
+    ts: new Date().toISOString(),
+    bars: BARS,
+    bits: BITS,
+    secs: SECS,
+    load_ms: LOAD,
+    frames: count,
+    wall_ms: +wall.toFixed(1),
+    engine_fps: wall > 0 ? +(((count - 1) / wall) * 1000).toFixed(2) : 0,
+    interval_ms: qs,
+    long_frames: longFrames,
+    long_frame_pct: iv.length ? +((longFrames / iv.length) * 100).toFixed(2) : 0,
+    tainted: tainted,
+    refresh_hint_hz: qs.p50 > 0 ? +(1000 / qs.p50).toFixed(1) : 0,
+    inner: [innerWidth, innerHeight],
+    dpr: devicePixelRatio,
+    ua: navigator.userAgent
+  };
+
+  fetch("/report", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(out)
+  }).then(function () {
+    document.title = "flicker: reported";
+  }).catch(function () {
+    // Served from file:// or the server went away: show the JSON so it can be
+    // copied out by hand rather than silently losing the run.
+    document.title = "flicker: REPORT FAILED";
+    var pre = document.createElement("pre");
+    pre.textContent = JSON.stringify(out, null, 2);
+    pre.style.cssText = "position:fixed;inset:0;margin:0;padding:1rem;background:#111;" +
+                        "color:#0f0;font:12px ui-monospace,monospace;overflow:auto;z-index:9";
+    document.body.appendChild(pre);
+  });
+}
+
+document.title = "flicker: idle (click or wait)";
+addEventListener("click", start);
+addEventListener("keydown", function (e) { if (e.key === " " || e.key === "Enter") start(); });
+// Two seconds of grey first: gives the capture an unambiguous "not started yet"
+// region, which is what the decoder trims against.
+if (AUTO) setTimeout(start, 2000);
+</script>
+</body>
+</html>

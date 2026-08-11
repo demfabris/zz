@@ -1,0 +1,173 @@
+/* zz chrome presets. The app ships ten paired light/dark palettes
+   (zz/src/theme.rs:222 CHROME_PRESETS); the demo is a dark capture, so only the
+   `dark` half of each pair is transcribed here.
+
+   A preset only ever moves six roots — [background, foreground, border, success,
+   warning, danger], in ChromeColor::ALL order (theme.rs:23-30). Everything else
+   the chrome paints is derived from those six with Colorize
+   (zz-ui/src/widget/foundation/color.rs:247-298), so this file mirrors the app:
+   one derivation block, then six hex values per preset.
+
+   The derivations are Oklab mixes toward a contrast pole, which is exactly CSS
+   `color-mix(in oklab, ..)` (color.rs:149). Checked against the shipped defaults:
+   feeding #0a0a0a / #fafafa / #262626 through the block below reproduces
+   zz.css's raised planes (#111111 #191919 #212121 #292929), hover (#151515),
+   muted text (#8c8c8c #4c4c4c) and divider (#353535) byte for byte.
+
+   Nothing here applies until a scheme is chosen: `Default` removes the
+   attribute, so the shipped achromatic palette in zz.css is never re-expressed
+   through a derivation that could round differently. Terminal, ANSI and Claude
+   Code tokens are absent on purpose — a chrome preset restyles chrome, and pane
+   content keeps its own colors. */
+
+/* ── derivations ─────────────────────────────────────────────────────────── */
+.zz-scope[data-scheme] {
+	/* Planes are background.raised(1..4): a 4% Oklab step toward the contrast
+	   pole per level (RAISE_STEP, color.rs:61). Every preset's dark background
+	   sits below l=0.5, so that pole is white for all ten. */
+	--zz-bg-1: color-mix(in oklab, var(--zz-bg) 96%, #fff);
+	--zz-bg-2: color-mix(in oklab, var(--zz-bg) 92%, #fff);
+	--zz-bg-3: color-mix(in oklab, var(--zz-bg) 88%, #fff);
+	--zz-bg-4: color-mix(in oklab, var(--zz-bg) 84%, #fff);
+	--zz-bg-blur: color-mix(in oklab, var(--zz-bg) 90%, transparent);
+
+	/* hover() is 6% of a step, active() twice that (color.rs:62-63). The ghost
+	   pair is the raised(1) plane at the ghost fill's alpha. */
+	--zz-hover: color-mix(in oklab, var(--zz-bg) 94%, #fff);
+	--zz-hover-1: color-mix(in oklab, var(--zz-bg-1) 94%, #fff);
+	--zz-active-1: color-mix(in oklab, var(--zz-bg-1) 88%, #fff);
+	--zz-ghost-hover: color-mix(in oklab, var(--zz-hover-1) 80%, transparent);
+	--zz-ghost-active: color-mix(in oklab, var(--zz-active-1) 80%, transparent);
+
+	/* muted() is 35% toward the pole (MUTED, color.rs:64) — black here, since
+	   every preset's dark foreground is the light half of its pair. Dim text is
+	   that step taken twice. */
+	--zz-fg-muted: color-mix(in oklab, var(--zz-fg) 65%, #000);
+	--zz-fg-dim: color-mix(in oklab, var(--zz-fg-muted) 65%, #000);
+
+	/* Edges: subtle() 0.75 alpha, the sidebar divider border.raised(2), the
+	   indent guide muted text at wash() 0.28 (color.rs:66-70). */
+	--zz-border-subtle: color-mix(in oklab, var(--zz-border) 75%, transparent);
+	--zz-divider: color-mix(in oklab, var(--zz-border) 92%, #fff);
+	--zz-guide: color-mix(in oklab, var(--zz-fg-muted) 28%, transparent);
+	--zz-guide-active: var(--zz-fg-muted);
+
+	/* Focus, selection and flat fills all come off the foreground (styled.rs:76). */
+	--zz-focus: var(--zz-fg);
+	--zz-focus-soft: color-mix(in oklab, var(--zz-fg) 20%, transparent);
+	--zz-selection: color-mix(in oklab, var(--zz-fg) 28%, transparent);
+	--zz-fill: color-mix(in oklab, var(--zz-fg) 12%, transparent);
+
+	/* fill() is the semantic root at 12% alpha (FILL_ALPHA, color.rs:65). */
+	--zz-success-fill: color-mix(in oklab, var(--zz-success) 12%, transparent);
+	--zz-warning-fill: color-mix(in oklab, var(--zz-warning) 12%, transparent);
+	--zz-danger-fill: color-mix(in oklab, var(--zz-danger) 12%, transparent);
+
+	/* The washes stay as zz.css has them: washed(n) is the contrast pole at
+	   alpha, not a mix of the plane (color.rs:252), and that pole is white for
+	   every preset here. The scrim likewise never moves with a root
+	   (theme_color.rs:24). */
+}
+
+/* ── presets ─────────────────────────────────────────────────────────────── */
+/* Each block is theme.rs's `dark` array, in order. */
+
+/* theme.rs:229-231 */
+.zz-scope[data-scheme='tokyo-night'] {
+	--zz-bg: #1a1b26;
+	--zz-fg: #c0caf5;
+	--zz-border: #292e42;
+	--zz-success: #9ece6a;
+	--zz-warning: #e0af68;
+	--zz-danger: #f7768e;
+}
+
+/* theme.rs:239-241 */
+.zz-scope[data-scheme='catppuccin'] {
+	--zz-bg: #1e1e2e;
+	--zz-fg: #cdd6f4;
+	--zz-border: #313244;
+	--zz-success: #a6e3a1;
+	--zz-warning: #f9e2af;
+	--zz-danger: #f38ba8;
+}
+
+/* theme.rs:249-251 */
+.zz-scope[data-scheme='gruvbox'] {
+	--zz-bg: #282828;
+	--zz-fg: #ebdbb2;
+	--zz-border: #3c3836;
+	--zz-success: #b8bb26;
+	--zz-warning: #fabd2f;
+	--zz-danger: #fb4934;
+}
+
+/* theme.rs:259-261 */
+.zz-scope[data-scheme='nord'] {
+	--zz-bg: #2e3440;
+	--zz-fg: #eceff4;
+	--zz-border: #434c5e;
+	--zz-success: #a3be8c;
+	--zz-warning: #ebcb8b;
+	--zz-danger: #bf616a;
+}
+
+/* theme.rs:269-271 */
+.zz-scope[data-scheme='breeze'] {
+	--zz-bg: #202326;
+	--zz-fg: #fcfcfc;
+	--zz-border: #31363b;
+	--zz-success: #27ae60;
+	--zz-warning: #f67400;
+	--zz-danger: #da4453;
+}
+
+/* theme.rs:279-281 */
+.zz-scope[data-scheme='adwaita'] {
+	--zz-bg: #222226;
+	--zz-fg: #ffffff;
+	--zz-border: #36363a;
+	--zz-success: #78e9ab;
+	--zz-warning: #ffc252;
+	--zz-danger: #ff938c;
+}
+
+/* theme.rs:289-291 */
+.zz-scope[data-scheme='rose-pine'] {
+	--zz-bg: #191724;
+	--zz-fg: #e0def4;
+	--zz-border: #2e2c3c;
+	--zz-success: #31748f;
+	--zz-warning: #f6c177;
+	--zz-danger: #eb6f92;
+}
+
+/* theme.rs:299-301 */
+.zz-scope[data-scheme='ayu'] {
+	--zz-bg: #0d1017;
+	--zz-fg: #bfbdb6;
+	--zz-border: #1e242f;
+	--zz-success: #70bf56;
+	--zz-warning: #e6b450;
+	--zz-danger: #d95757;
+}
+
+/* theme.rs:309-311 */
+.zz-scope[data-scheme='solarized'] {
+	--zz-bg: #002b36;
+	--zz-fg: #93a1a1;
+	--zz-border: #16404b;
+	--zz-success: #859900;
+	--zz-warning: #b58900;
+	--zz-danger: #dc322f;
+}
+
+/* theme.rs:319-321 */
+.zz-scope[data-scheme='macos-classic'] {
+	--zz-bg: #131313;
+	--zz-fg: #caccca;
+	--zz-border: #272727;
+	--zz-success: #62ba46;
+	--zz-warning: #b0a878;
+	--zz-danger: #d2602d;
+}

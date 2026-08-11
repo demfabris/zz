@@ -1,0 +1,36 @@
+{
+    "##": [
+        "Template for the manifest published to a Scoop bucket. The version, url,",
+        "and hash below are placeholders; scoop's own excavator fills them from the",
+        "checkver and autoupdate blocks once the manifest is in a bucket, so a",
+        "release only has to exist on GitHub. Edit this template, not the published",
+        "copy."
+    ],
+    "version": "0.0.0",
+    "description": "Terminal multiplexer with terminal, browser, and agent panes",
+    "homepage": "https://github.com/demfabris/zz",
+    "license": "MIT|Apache-2.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/demfabris/zz/releases/download/v0.0.0/zz-0.0.0-windows-x64.zip",
+            "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+    },
+    "bin": "zz.exe",
+    "shortcuts": [
+        [
+            "zz.exe",
+            "zz"
+        ]
+    ],
+    "checkver": {
+        "github": "https://github.com/demfabris/zz"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/demfabris/zz/releases/download/v$version/zz-$version-windows-x64.zip"
+            }
+        }
+    }
+}

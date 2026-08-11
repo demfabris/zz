@@ -1,0 +1,344 @@
+---
+import Button from './Button.astro';
+import Icon from './Icon.astro';
+
+// BrowserToolbar (zz-ui/src/browser.rs:53) over the CEF frame
+// (zz/src/browser/view.rs:3109). The address bar *is* the active tab: the tab
+// strip emits tabs in order and swaps the active one for the input
+// (browser.rs:207). "+ New tab" is always last inside the strip, even with one tab.
+//
+// The arithmetic is exact on both ends: 8 + 3*24 + 2*4 + 4 = 92px lead-in, and
+// 4 + 24 + 4 + 24 + 4 + 24 + 8 = 92px tail.
+interface Props {
+	/** Empty on about:blank — the field then shows the placeholder (view.rs:517). */
+	url: string;
+	/** Inactive tabs, as pills. Label is the host with scheme/www. stripped. */
+	tabs?: string[];
+	/** Start-page rows. The app keeps 8, deduped (EMPTY_STATE_RECENT_LIMIT, view.rs:75). */
+	recents?: string[];
+	/** Names a BrowserPages donor the demo clones into the mount at boot. */
+	bootPage?: string;
+	canBack?: boolean;
+	canForward?: boolean;
+	/** Page plane behind the slot. The CEF frame owns it in the app. */
+	background?: string;
+	class?: string;
+}
+
+const {
+	url,
+	tabs = [],
+	recents = [],
+	bootPage,
+	// A blank tab has nowhere to go back to; every other button here is inert.
+	canBack = Boolean(url),
+	canForward = false,
+	background = 'var(--zz-bg)',
+	class: cls,
+} = Astro.props;
+---
+
+<div class:list={['browser', cls]} data-browser data-url={url} data-boot-page={bootPage}>
+	<div class="toolbar">
+		<div class="cluster">
+			<Button icon="arrow-left" label="Back" disabled={!canBack} />
+			<Button icon="arrow-right" label="Forward" disabled={!canForward} />
+			<Button icon="redo-2" label="Reload" />
+		</div>
+
+		<div class="strip">
+			{/* TextInput, not a label: focus selects the whole value (view.rs:566-576),
+			    Enter submits (view.rs:561-565), Escape reverts (view.rs:1856-1884). */}
+			<div class="address">
+				<input
+					class="url"
+					type="text"
+					value={url}
+					placeholder="Search or enter a URL"
+					aria-label="Address"
+					spellcheck="false"
+					autocomplete="off"
+					autocapitalize="off"
+					autocorrect="off"
+				/>
+				<span class="spinner" aria-hidden="true"></span>
+			</div>
+			{
+				tabs.map((tab) => (
+					<div class="pill">
+						<span class="pill-label">{tab}</span>
+						<Button icon="close" label="Close tab" class="pill-close" />
+					</div>
+				))
+			}
+			<Button icon="plus" label="New tab" />
+		</div>
+
+		<div class="cluster">
+			<Button icon="inspector" label="Select element" />
+			<Button icon="ellipsis-vertical" label="More" />
+		</div>
+	</div>
+
+	<div class="content" style={`--page-bg:${background}`}>
+		{/* about:blank is a start page, not a white document: the CEF frame is
+		    suppressed and the pane paints chrome background (view.rs:3057-3068,
+		    :3120-3124) under render_empty_state (view.rs:2441-2489). The two
+		    variants are either/or — recents replace the hint outright, and the
+		    list is not a card and carries no header (view.rs:2455-2470). */}
+		<div class="blank" data-blank hidden={Boolean(url)}>
+			<div class="hint" data-blank-hint hidden={recents.length > 0}>
+				<span class="hint-badge"><Icon name="globe" size={12} /></span>
+				<span class="hint-title">Where to?</span>
+				<span class="hint-body">
+					Type a URL to get started. Pages you visit will show up here.
+				</span>
+			</div>
+
+			<div class="recents" data-blank-recents hidden={recents.length === 0}>
+				{
+					recents.slice(0, 8).map((recent) => (
+						<div class="recent" data-recent-url={recent}>
+							<Icon name="globe" size={12} />
+							<span class="recent-url">{recent}</span>
+						</div>
+					))
+				}
+			</div>
+		</div>
+
+		<div class="mount" data-mount hidden={!url}><slot /></div>
+	</div>
+</div>
+
+<style>
+	.browser {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+		background: var(--zz-bg);
+		color: var(--zz-fg);
+		font-family: var(--zz-font-ui);
+	}
+
+	.toolbar {
+		display: flex;
+		align-items: center;
+		flex: none;
+		gap: 4px;
+		height: 40px;
+		padding: 0 8px;
+		border-bottom: 1px solid var(--zz-border);
+	}
+	.cluster {
+		display: flex;
+		align-items: center;
+		flex: none;
+		gap: 4px;
+		color: var(--zz-fg-muted);
+	}
+
+	.strip {
+		display: flex;
+		align-items: center;
+		flex: 1;
+		gap: 4px;
+		height: 100%;
+		min-width: 0;
+		overflow: hidden;
+	}
+
+	/* Input at Size::XSmall — height 24, no border, washed(1) fill (browser.rs:85). */
+	.address {
+		display: flex;
+		align-items: center;
+		flex: 1;
+		min-width: 160px;
+		height: 24px;
+		padding: 0 8px;
+		border-radius: var(--zz-radius);
+		corner-shape: squircle;
+		background: var(--zz-wash-1);
+	}
+	/* bordered(false) + focus_bordered(false) (browser.rs:85-108): focused looks
+	   identical to at rest, caret and selection aside — so no outline, ever. */
+	.url {
+		flex: 1;
+		min-width: 0;
+		padding: 0;
+		border: 0;
+		outline: none;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		background: transparent;
+		color: var(--zz-fg);
+		font-family: inherit;
+		font-size: 12px;
+		line-height: 1;
+		-webkit-appearance: none;
+		appearance: none;
+	}
+	/* Placeholder runs are drawn in foreground.muted() (input/element.rs:333). */
+	.url::placeholder { color: var(--zz-fg-muted); opacity: 1; }
+	.url::selection { background: var(--zz-selection); }
+
+	/* A navigation in flight hangs a spinner off the field's suffix slot
+	   (view.rs:989-991, input/field.rs:355-365). */
+	.spinner {
+		display: none;
+		flex: none;
+		width: 12px;
+		height: 12px;
+		margin-left: 6px;
+		border: 1.5px solid var(--zz-fg-muted);
+		border-top-color: transparent;
+		border-radius: 50%;
+		corner-shape: round;
+		animation: zz-browser-spin 0.7s linear infinite;
+	}
+	.browser[data-loading] .spinner { display: block; }
+	@keyframes zz-browser-spin { to { transform: rotate(1turn); } }
+	@media (prefers-reduced-motion: reduce) {
+		.spinner { animation: none; }
+	}
+
+	.pill {
+		display: flex;
+		align-items: center;
+		flex: 1;
+		gap: 2px;
+		min-width: 40px;
+		height: 24px;
+		padding: 0 4px 0 10px;
+		border-radius: var(--zz-radius);
+		corner-shape: squircle;
+		background: var(--zz-bg-1);
+		cursor: pointer;
+	}
+	.pill:hover { background: var(--zz-hover-1); }
+	.pill-label {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		font-size: 12px;
+		color: var(--zz-fg-muted);
+	}
+	.pill :global(.pill-close) {
+		width: 18px;
+		min-width: 18px;
+		height: 18px;
+		visibility: hidden;
+	}
+	.pill:hover :global(.pill-close) { visibility: visible; }
+
+	.content {
+		position: relative;
+		display: flex;
+		flex: 1;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+		background: var(--page-bg);
+	}
+
+	/* The page plane. Whatever is mounted here fills it, same as the frame. */
+	.mount {
+		display: flex;
+		flex: 1;
+		min-width: 0;
+		min-height: 0;
+	}
+	.mount > :global(*) {
+		flex: 1;
+		min-width: 0;
+		min-height: 0;
+	}
+
+	/* render_empty_state is absolute inset-0 over the pane, centred column. */
+	.blank {
+		position: absolute;
+		inset: 0;
+		z-index: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: 24px;
+		overflow: hidden;
+	}
+	.blank[hidden],
+	.mount[hidden] { display: none; }
+
+	/* BrowserEmptyHint (zz-ui/src/browser.rs:312-352): max-w 440, gap 10, a 32px
+	   circle in washed(2) around an xsmall globe. */
+	.hint {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 10px;
+		max-width: 440px;
+		text-align: center;
+	}
+	.hint[hidden] { display: none; }
+	.hint-badge {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex: none;
+		width: 32px;
+		height: 32px;
+		border-radius: 50%;
+		corner-shape: round;
+		background: var(--zz-wash-2);
+		color: var(--zz-fg-muted);
+	}
+	.hint-title { font-size: 13px; font-weight: 600; }
+	.hint-body {
+		font-size: 11px;
+		line-height: 1.45;
+		color: var(--zz-fg-muted);
+	}
+
+	/* With recents the hint is gone and the column stands bare — no card, no
+	   header, 360px wide, gap 4 (view.rs:2455-2470). */
+	.recents {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		max-width: 360px;
+		gap: 4px;
+	}
+	.recents[hidden] { display: none; }
+
+	/* browser_recent_row (zz-ui/src/browser.rs:354-392). The row is the URL and
+	   nothing else — no favicon, no title (display_url, view.rs:3186-3188). */
+	.recent {
+		display: flex;
+		align-items: center;
+		flex: none;
+		gap: 8px;
+		height: 32px;
+		padding: 0 12px;
+		border-radius: var(--zz-radius);
+		corner-shape: squircle;
+		background: var(--zz-wash-1);
+		color: var(--zz-fg-muted);
+		cursor: pointer;
+	}
+	.recent:hover { background: var(--zz-wash-2); }
+	.recent-url {
+		min-width: 0;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--zz-fg);
+	}
+</style>

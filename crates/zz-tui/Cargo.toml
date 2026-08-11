@@ -1,0 +1,28 @@
+[package]
+name = "zz-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "A raw-terminal attach client for zz daemon sessions"
+publish = false
+
+[lib]
+
+[[bin]]
+name = "zz-tui"
+path = "src/main.rs"
+
+[dependencies]
+async-signal.workspace = true
+base64.workspace = true
+futures-lite.workspace = true
+log.workspace = true
+miniz_oxide = "0.8.9"
+rustix.workspace = true
+zz-daemon = { path = "../zz-daemon", default-features = false }
+zz-protocol = { path = "../zz-protocol" }
+zz-terminal = { path = "../zz-terminal", default-features = false }
+
+[lints]
+workspace = true

@@ -1,0 +1,18 @@
+{
+  "name": "@zz/browser-element-picker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/build.mjs --check",
+    "test": "node scripts/test.mjs"
+  },
+  "dependencies": {
+    "react-grab": "0.1.48"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
+  },
+  "packageManager": "pnpm@11.3.0"
+}

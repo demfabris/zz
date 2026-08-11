@@ -1,0 +1,114 @@
+[package]
+name = "zz"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The zz desktop client: GPUI shell, terminal/browser/agent panes, settings, daemon client"
+publish = false
+default-run = "zz"
+
+[features]
+default = ["desktop"]
+desktop = []
+agent-pane = ["dep:agent-client-protocol", "dep:ignore", "dep:nucleo-matcher", "zz-ui/agent"]
+editor-pane = ["dep:ignore", "dep:nucleo-matcher", "zz-ui/editor"]
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "zz"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "zz_helper"
+path = "src/bin/zz_helper.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "zz_cli"
+path = "src/bin/zz_cli.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "zz_browser_fixture"
+path = "src/bin/zz_browser_fixture.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "zz_external_texture_fixture"
+path = "src/bin/zz_external_texture_fixture.rs"
+required-features = ["desktop"]
+
+[dependencies]
+agent-client-protocol = { workspace = true, optional = true }
+async-channel.workspace = true
+base64.workspace = true
+chrono.workspace = true
+env_logger.workspace = true
+gpui.workspace = true
+ignore = { version = "0.4.31", optional = true }
+image.workspace = true
+log.workspace = true
+nucleo-matcher = { version = "0.3.1", optional = true }
+parking_lot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+smallvec.workspace = true
+sysinfo.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+zz-mux = { path = "../zz-mux" }
+zz-protocol = { path = "../zz-protocol" }
+zz-ui = { path = "../zz-ui", features = ["editor", "tree-sitter"] }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+gpui_platform.workspace = true
+mimalloc.workspace = true
+wgpu.workspace = true
+zz-browser = { path = "../zz-browser" }
+zz-chrome-import = { path = "../zz-chrome-import" }
+zz-daemon = { path = "../zz-daemon" }
+zz-terminal = { path = "../zz-terminal" }
+zz-tui = { path = "../zz-tui" }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+zz-browser = { path = "../zz-browser", default-features = false }
+zz-daemon = { path = "../zz-daemon", default-features = false }
+zz-gpui-ios = { path = "../zz-gpui-ios" }
+zz-terminal = { path = "../zz-terminal", default-features = false }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+cef.workspace = true
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation.workspace = true
+core-video.workspace = true
+objc2.workspace = true
+objc2-app-kit = { workspace = true, features = ["NSButton", "NSControl", "NSEvent", "NSGraphics", "NSImage", "NSMenu", "NSMenuItem", "NSScreen", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSVisualEffectView", "objc2-core-foundation"] }
+objc2-foundation = { workspace = true, features = ["NSBundle", "NSData", "NSPathUtilities", "NSString"] }
+raw-window-handle.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "=0.3.6", default-features = false, features = ["async-io", "blocking"] }
+raw-window-handle.workspace = true
+wayland-client.workspace = true
+x11rb.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+pollster.workspace = true
+tempfile.workspace = true
+
+[target.'cfg(not(target_os = "ios"))'.dev-dependencies]
+wayland-client.workspace = true
+x11rb.workspace = true
+
+[package.metadata.cef.bundle]
+helper_name = "zz_helper"
+
+[lints]
+workspace = true

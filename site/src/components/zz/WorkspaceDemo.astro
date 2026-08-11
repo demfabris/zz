@@ -1,0 +1,1563 @@
+---
+// The zz workspace, rebuilt from the components in this directory and made
+// interactive: one scene per window in the sidebar tree, all of them
+// server-rendered, one small script switching which is on the canvas. Mounted by
+// the landing page hero and by /demo, so both pages run the same shell.
+//
+// Below the shell is a control strip. It is marketing chrome, not zz chrome —
+// it lives outside the window and inherits the host page's type and colors.
+import './zz.css';
+import './schemes.css';
+import AgentPane from './AgentPane.astro';
+import AppShell from './AppShell.astro';
+import BrowserPane from './BrowserPane.astro';
+import BrowserPages from './BrowserPages.astro';
+import Chooser from './Chooser.astro';
+import Pane from './Pane.astro';
+import Sidebar from './Sidebar.astro';
+import TerminalPane from './TerminalPane.astro';
+import type { ZzNode } from './Sidebar.astro';
+
+interface Props {
+	/** `hero` caps the scale for the landing page's narrower column. */
+	fit?: 'page' | 'hero';
+}
+
+const { fit = 'page' } = Astro.props;
+
+// ── sidebar tree ──────────────────────────────────────────────────────────
+// The ✳ prefixes are pane *title* text set by the Claude Code CLI, not zz
+// glyphs — pane_label just echoes the title (zz/src/mux/nav.rs:535).
+// `scene` / `paneId` are the demo's hooks: a row attaches the canvas to that
+// scene, a pane row also focuses that pane.
+const tree: ZzNode[] = [
+	{
+		kind: 'host',
+		label: 'macbook',
+		active: true,
+		children: [
+			{
+				kind: 'session',
+				label: 'zz',
+				active: true,
+				children: [
+					{
+						kind: 'window',
+						label: 'hello-world',
+						scene: 'hello-world',
+						active: true,
+						target: true,
+						children: [
+							{
+								kind: 'pane',
+								pane: 'agent',
+								label: '✳ Check if zz is built on macOS',
+								scene: 'hello-world',
+								paneId: 'hw-agent',
+								active: true,
+								target: true,
+							},
+							{
+								kind: 'pane',
+								pane: 'browser',
+								// A blank tab is titled "New Tab" (view.rs:240-252) and the row
+								// just echoes that title — until the demo navigates the pane.
+								label: 'New Tab',
+								scene: 'hello-world',
+								paneId: 'hw-web',
+							},
+						],
+					},
+				],
+			},
+		],
+	},
+	{
+		kind: 'host',
+		label: 'desktop',
+		children: [
+			{
+				kind: 'session',
+				label: 'socks5',
+				children: [
+					{
+						kind: 'window',
+						label: 'hello-socks5',
+						scene: 'hello-socks5',
+						children: [
+							{
+								kind: 'pane',
+								pane: 'agent',
+								label: '✳ Explain the socks5 tunnel',
+								scene: 'hello-socks5',
+								paneId: 'hs-agent',
+							},
+							{
+								kind: 'pane',
+								pane: 'browser',
+								label: 'hello from desktop',
+								scene: 'hello-socks5',
+								paneId: 'hs-web',
+							},
+						],
+					},
+				],
+			},
+		],
+	},
+];
+
+// ── chrome presets ────────────────────────────────────────────────────────
+// zz/src/theme.rs:222 CHROME_PRESETS, in ChromePresetId::ALL order
+// (theme.rs:159-170). The value is the config spelling (theme.rs:172-185) and
+// the palette behind it is the matching block in schemes.css; Default is the
+// absence of an attribute, i.e. zz.css untouched.
+const schemes = [
+	{ id: 'tokyo-night', name: 'Tokyo Night' },
+	{ id: 'catppuccin', name: 'Catppuccin' },
+	{ id: 'gruvbox', name: 'Gruvbox' },
+	{ id: 'nord', name: 'Nord' },
+	{ id: 'breeze', name: 'Breeze' },
+	{ id: 'adwaita', name: 'Adwaita' },
+	{ id: 'rose-pine', name: 'Rosé Pine' },
+	{ id: 'ayu', name: 'Ayu' },
+	{ id: 'solarized', name: 'Solarized' },
+	{ id: 'macos-classic', name: 'macOS Classic' },
+];
+
+// ── terminal text ─────────────────────────────────────────────────────────
+// Rows are data, not markup: a `white-space: pre` element would print the
+// template's own indentation as terminal cells. A cell is either a plain string
+// (default foreground) or [text, class] where the class is an ANSI span.
+type Cell = string | [string, string];
+type Row = { bar?: boolean; spans: { t: string; c?: string }[] };
+
+const line = (...cells: Cell[]): Row => ({
+	spans: cells.map((c) => (typeof c === 'string' ? { t: c } : { t: c[0], c: c[1] })),
+});
+
+const CURSOR: Cell = ['', 'zz-cursor'];
+const BLANK = line(' ');
+const GREY = 'zz-fg-black-b';
+
+// `host:path $` — bash's default two-tone prompt.
+const prompt = (host: string, path: string): Cell[] => [
+	[host, 'zz-fg-green'],
+	[':', GREY],
+	[path, 'zz-fg-blue-b'],
+	' $ ',
+];
+
+const freshShell: Row[] = [line(...prompt('macbook', '~/dev/zz'), CURSOR)];
+
+// ── Claude Code transcripts ───────────────────────────────────────────────
+const DIM = 'zz-cc-dim';
+const BRIGHT = 'zz-cc-bright';
+const LINK = 'zz-cc-link';
+const GREEN = 'zz-cc-green';
+const RED = 'zz-cc-red';
+
+const transcript: Row[] = [
+	BLANK,
+	BLANK,
+	{ bar: true, spans: [{ t: '›', c: DIM }, { t: ' /clear' }] },
+	BLANK,
+	{ bar: true, spans: [{ t: '›', c: DIM }, { t: ' is zz built on gpui?' }] },
+	BLANK,
+	{
+		spans: [
+			{ t: '●', c: BRIGHT },
+			{
+				t: " Yes — zz is built on gpui (Zed's UI framework), specifically via a fork with several carried patches",
+			},
+		],
+	},
+	{
+		spans: [
+			{
+				t: '  (RenderImage::into_frames, WgpuDeviceContext, external-texture element, window corner mask, superellipse corner',
+			},
+		],
+	},
+	{
+		spans: [
+			{ t: '  smoothing, refresh_rate exposure, etc.), maintained through ' },
+			{ t: 'scripts/forks.conf', c: LINK },
+			{ t: ' against ' },
+			{ t: 'demfabris/zed', c: LINK },
+			{ t: '.' },
+		],
+	},
+	BLANK,
+	{ spans: [{ t: '✳ Churned for 3s', c: DIM }] },
+	BLANK,
+];
+
+// The desktop session's agent explaining what the reader is looking at: the
+// browser pane on the right egresses through the ssh -D tunnel, so it sees the
+// remote host's own localhost.
+const socksTranscript: Row[] = [
+	BLANK,
+	BLANK,
+	{ bar: true, spans: [{ t: '›', c: DIM }, { t: " why is localhost:8000 showing desktop's server?" }] },
+	BLANK,
+	{
+		spans: [
+			{ t: '●', c: BRIGHT },
+			{
+				t: ' Because localhost is not your macbook here — zz opens the ssh connection with -D, a SOCKS5 proxy, and',
+			},
+		],
+	},
+	{
+		spans: [
+			{
+				t: "  points the browser's egress at it. Hostnames travel through the tunnel unresolved, so localhost lands on",
+			},
+		],
+	},
+	{ spans: [{ t: "  desktop's loopback, not yours." }] },
+	BLANK,
+	{
+		spans: [
+			{ t: '●', c: BRIGHT },
+			{
+				t: ' That is why http.server never has to leave 127.0.0.1. Attach to any host in the sidebar and',
+			},
+		],
+	},
+	{ spans: [{ t: '  localhost:8000 is that machine — nothing gets exposed on the network.' }] },
+	BLANK,
+	{ spans: [{ t: '✳ Churned for 2s', c: DIM }] },
+	BLANK,
+];
+
+const statusLines: Row[] = [
+	{
+		spans: [
+			{ t: '🌿 ' },
+			{ t: 'main', c: GREEN },
+			{ t: ' ' },
+			{ t: '│', c: DIM },
+			{ t: ' 🤖 ' },
+			{ t: 'Sonnet 5', c: BRIGHT },
+			{ t: ' ' },
+			{ t: '(claude-sonnet-5)', c: DIM },
+			{ t: ' ' },
+			{ t: '│', c: DIM },
+			{ t: ' 💰 ' },
+			{ t: '$0.3120', c: BRIGHT },
+			{ t: ' ' },
+			{ t: '│', c: DIM },
+			{ t: ' ⏱ ' },
+			{ t: '12s', c: BRIGHT },
+			{ t: ' ' },
+			{ t: '│', c: DIM },
+			{ t: ' 📝 ' },
+			{ t: '+0/-0', c: GREEN },
+		],
+	},
+	{
+		spans: [
+			{ t: '▶▶ bypass permissions on', c: RED },
+			{ t: ' (shift+tab to cycle) · ← for agents', c: DIM },
+		],
+	},
+];
+
+const chooserRows = [
+	{ icon: 'square-terminal', label: 'Terminal', key: 't', choice: 'terminal', selected: true },
+	{ icon: 'globe', label: 'Browser', key: 'b', choice: 'browser' },
+];
+
+// ── browser start page ────────────────────────────────────────────────────
+// The recents every browser pane boots with — display_url spelling, scheme
+// kept, no query or fragment (view.rs:3186-3188). Static demo data: the app
+// accumulates these from history, this list never grows.
+const RECENTS = ['https://gpui.rs/', 'https://ghostty.org/', 'https://github.com/tmux/tmux'];
+---
+
+<div class="demo" data-fit={fit}>
+	<div class="stage">
+		<AppShell sidebarWidth={278}>
+			<Sidebar slot="sidebar" tree={tree} />
+
+			<div id="canvas">
+				{/* ── hello-world: the reference capture ───────────────────────── */}
+				<div class="scene" data-scene="hello-world">
+					<div class="split" data-axis="x" style="--frac:0.5">
+						<Pane id="hw-agent" background="var(--zz-cc-bg)" focused>
+							<AgentPane
+								version="v2.1.227"
+								subtitle="Sonnet 5 with xhigh effort · Claude Max"
+								cwd="~/dev/zz"
+							>
+								{
+									transcript.map((row) => (
+										<span class={row.bar ? 'zz-cc-user' : 'zz-cc-row'}>
+											{row.spans.map((s) => (s.c ? <span class={s.c}>{s.t}</span> : s.t))}
+										</span>
+									))
+								}
+								<Fragment slot="status">
+									{
+										statusLines.map((row) => (
+											<span class="zz-cc-row">
+												{row.spans.map((s) => (s.c ? <span class={s.c}>{s.t}</span> : s.t))}
+											</span>
+										))
+									}
+								</Fragment>
+							</AgentPane>
+						</Pane>
+
+						<Pane id="hw-web">
+							{/* Boots on about:blank: chrome background plus the start page, and
+							    every page in the demo is one click down the recents column. */}
+							<BrowserPane url="" recents={RECENTS} />
+						</Pane>
+
+						<span class="split-handle" data-handle role="separator" aria-orientation="vertical"></span>
+					</div>
+				</div>
+
+				{/* ── hello-socks5 (desktop): Claude explains the tunnel next to the
+				    page it tunnels ─────────────────────────────────────────────── */}
+				<div class="scene" data-scene="hello-socks5" hidden>
+					<div class="split" data-axis="x" style="--frac:0.55">
+						<Pane id="hs-agent" background="var(--zz-cc-bg)" focused>
+							<AgentPane
+								version="v2.1.227"
+								subtitle="Sonnet 5 with xhigh effort · Claude Max"
+								cwd="~/serve"
+							>
+								{
+									socksTranscript.map((row) => (
+										<span class={row.bar ? 'zz-cc-user' : 'zz-cc-row'}>
+											{row.spans.map((s) => (s.c ? <span class={s.c}>{s.t}</span> : s.t))}
+										</span>
+									))
+								}
+								<Fragment slot="status">
+									{
+										statusLines.map((row) => (
+											<span class="zz-cc-row">
+												{row.spans.map((s) => (s.c ? <span class={s.c}>{s.t}</span> : s.t))}
+											</span>
+										))
+									}
+								</Fragment>
+							</AgentPane>
+						</Pane>
+
+						<Pane id="hs-web">
+							{/* The page itself lives in BrowserPages, so this pane boots with an
+							    empty mount and the script clones the donor in. One copy of the
+							    markup, and the pane sits in a hidden scene at first paint. */}
+							<BrowserPane url="http://localhost:8000/" recents={RECENTS} bootPage="plain" />
+						</Pane>
+
+						<span class="split-handle" data-handle role="separator" aria-orientation="vertical"></span>
+					</div>
+				</div>
+			</div>
+
+			{/* Astro scope-stamps template innards at build time. Every runtime pane
+			    and split is cloned from these donors instead of being hand-built. */}
+			<template data-tpl="pane">
+				<Pane>
+					<div class="slot" data-slot="picker">
+						<Chooser rows={chooserRows} />
+					</div>
+					<div class="slot" data-slot="terminal" hidden>
+						<TerminalPane lineHeight={1.2} padding={4}>
+							{
+								freshShell.map((row) => (
+									<span class="zz-line">
+										{row.spans.map((s) => (s.c ? <span class={s.c}>{s.t}</span> : s.t))}
+									</span>
+								))
+							}
+						</TerminalPane>
+					</div>
+					<div class="slot" data-slot="browser" hidden>
+						<BrowserPane url="" recents={RECENTS} />
+					</div>
+				</Pane>
+			</template>
+
+			<template data-tpl="split">
+				<div class="split">
+					<span class="split-handle" data-handle role="separator"></span>
+				</div>
+			</template>
+
+			<template data-tpl="dp-card">
+				<button class="dp-card" data-dp-card type="button">
+					<strong data-dp-index>0</strong>
+					<kbd data-dp-key>0</kbd>
+				</button>
+			</template>
+
+			{/* Same trick, one level down: the pages a browser pane can show are
+			    donors of their own, and their styles ride along in that component. */}
+			<BrowserPages />
+		</AppShell>
+	</div>
+
+	<div class="demo-controls">
+		<div class="drive-hint">
+			<span data-drive-idle>click the window, then press <kbd>⌃B</kbd> to take it for a spin</span>
+			<span data-drive-keys>
+				<span><kbd data-prefix>⌃B</kbd> <kbd>%</kbd> split</span>
+				<i>·</i>
+				<span><kbd data-prefix>⌃B</kbd> <kbd>"</kbd> split down</span>
+				<i>·</i>
+				<span><kbd data-prefix>⌃B</kbd> <kbd>x</kbd> close</span>
+				<i>·</i>
+				<span><kbd data-prefix>⌃B</kbd> <kbd>z</kbd> zoom</span>
+				<i>·</i>
+				<span><kbd data-prefix>⌃B</kbd> <kbd>←→</kbd> move</span>
+				<i>·</i>
+				<span><kbd data-prefix>⌃B</kbd> <kbd>s</kbd> sidebar</span>
+				<i>·</i>
+				<span><kbd data-prefix>⌃B</kbd> <kbd>q</kbd> panes</span>
+			</span>
+		</div>
+
+		<button type="button" data-randomize>Randomize look</button>
+	</div>
+</div>
+
+<script>
+	// Behaviour only. The server renders the boot state and scope-stamped donors,
+	// so the first paint does not wait for this script.
+	const demo = document.querySelector('.demo') as HTMLElement;
+	const stage = demo.querySelector('.stage') as HTMLElement;
+	const canvas = document.getElementById('canvas') as HTMLElement;
+	const tree = demo.querySelector('[role="tree"]') as HTMLElement;
+	// The shell root carries the pane geometry as inline custom properties, so
+	// state writes must land on that same element to override them — restyling
+	// every scene at once, including the hidden ones. ('.shell' would collide
+	// with AppShell's internal flex row; '.zz-scope' is unique to the root.)
+	const shell = demo.querySelector('.zz-scope') as HTMLElement;
+	shell.tabIndex = 0;
+	shell.style.outline = 'none';
+
+	type Mode = 'root' | 'armed' | 'tree' | 'display';
+	type PaneKind = 'picker' | 'terminal' | 'browser';
+	type Direction = 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight';
+
+	let mode: Mode = 'root';
+	let treeCursor: HTMLElement | null = null;
+	let displayTimer: number | undefined;
+	let paneCounter = 1;
+
+	function setMode(next: Mode) {
+		if (mode === 'tree' && next !== 'tree') {
+			treeCursor?.removeAttribute('data-selected');
+			treeCursor = null;
+		}
+		mode = next;
+		const armed = next === 'armed';
+		shell.toggleAttribute('data-armed', armed);
+		demo.toggleAttribute('data-armed', armed);
+	}
+
+	// The root/prefix table only runs while this window owns focus. Meta chords
+	// are never claimed, matching the app's early refusal (workspace/view.rs:754-756).
+	function syncFocusGate() {
+		demo.toggleAttribute('data-shell-focused', shell.matches(':focus-within'));
+	}
+	shell.addEventListener('focusin', syncFocusGate);
+	shell.addEventListener('focusout', () => queueMicrotask(syncFocusGate));
+	syncFocusGate();
+
+	function cloneTemplate(name: string): HTMLElement {
+		const template = demo.querySelector<HTMLTemplateElement>(`template[data-tpl="${name}"]`)!;
+		return template.content.firstElementChild!.cloneNode(true) as HTMLElement;
+	}
+
+	// The whole state: which scene is on the canvas, and the attached pane per
+	// scene. Seeded from the markup so nothing is duplicated in JS.
+	const focus = new Map<string, string>();
+	for (const scene of canvas.children) {
+		const pane = scene.querySelector<HTMLElement>('[data-focused]');
+		if (pane?.dataset.pane) focus.set((scene as HTMLElement).dataset.scene!, pane.dataset.pane);
+	}
+	let current = canvas.querySelector<HTMLElement>('[data-scene]:not([hidden])')!.dataset.scene!;
+
+	function activeScene(): HTMLElement {
+		return canvas.querySelector<HTMLElement>(`[data-scene="${current}"]`)!;
+	}
+
+	function scenePanes(scene = activeScene()): HTMLElement[] {
+		// Sidebar rows also carry data-pane; canvas scoping is not optional here.
+		return [...scene.querySelectorAll<HTMLElement>('[data-pane]')];
+	}
+
+	function focusedPane(): HTMLElement | null {
+		const id = focus.get(current);
+		return id ? activeScene().querySelector<HTMLElement>(`[data-pane="${id}"]`) : null;
+	}
+
+	function shellScale(): number {
+		const cs = getComputedStyle(stage);
+		return (
+			(parseFloat(cs.getPropertyValue('--zz-scale')) || 1) *
+			(parseFloat(cs.getPropertyValue('--zz-zoom')) || 1)
+		);
+	}
+
+	function syncSceneState(scene: HTMLElement) {
+		scene.toggleAttribute('data-multi', scenePanes(scene).length > 1);
+		const zoomed = Boolean(scene.querySelector('[data-zoomed]'));
+		scene.toggleAttribute('data-has-zoom', zoomed);
+		if (scene.dataset.scene === current) shell.toggleAttribute('data-has-zoom', zoomed);
+	}
+
+	function clearZoom(scene = activeScene()) {
+		for (const pane of scene.querySelectorAll<HTMLElement>('[data-zoomed]')) {
+			pane.removeAttribute('data-zoomed');
+		}
+		syncSceneState(scene);
+	}
+
+	function attach(scene: string, pane?: string) {
+		if (!focus.has(scene)) return;
+		const sceneEl = canvas.querySelector<HTMLElement>(`[data-scene="${scene}"]`);
+		if (!sceneEl || (pane && !sceneEl.querySelector(`[data-pane="${pane}"]`))) return;
+		if (pane) {
+			clearZoom(sceneEl);
+			focus.set(scene, pane);
+		}
+		current = scene;
+		for (const el of canvas.children) {
+			(el as HTMLElement).hidden = (el as HTMLElement).dataset.scene !== current;
+		}
+		const active = focus.get(scene);
+		for (const el of canvas.querySelectorAll<HTMLElement>('[data-pane]')) {
+			el.toggleAttribute('data-focused', el.dataset.pane === active);
+		}
+		syncSceneState(sceneEl);
+		syncTree();
+		routeBrowserFocus();
+	}
+
+	// Rows follow the attached pane: full-strength text up the ancestor chain,
+	// weight 500 on the pane and its window (navigation.rs:287), brighter guide
+	// on the path — except the level-0 one, which never lights up (tree.rs:107).
+	function syncTree() {
+		for (const row of tree.querySelectorAll<HTMLElement>('.row')) {
+			row.dataset.tone = row.dataset.kind === 'host' ? 'bright' : 'muted';
+			row.removeAttribute('data-target');
+		}
+		for (const sub of tree.querySelectorAll('.subtree')) sub.removeAttribute('data-active');
+
+		const pane = focus.get(current);
+		const row =
+			tree.querySelector<HTMLElement>(`.row[data-pane="${pane}"]`) ??
+			tree.querySelector<HTMLElement>(`.row[data-scene="${current}"]`);
+		if (!row) return;
+		row.dataset.tone = 'bright';
+		row.setAttribute('data-target', '');
+		for (let sub = row.closest('.subtree'); sub; ) {
+			const owner = sub.previousElementSibling as HTMLElement;
+			if (owner.dataset.kind !== 'host') sub.setAttribute('data-active', '');
+			owner.dataset.tone = 'bright';
+			if (owner.dataset.kind === 'window') owner.setAttribute('data-target', '');
+			sub = owner.closest('.subtree');
+		}
+	}
+
+	// Gaps: on = Modern, off = stock Simple (zz.css [data-gaps='off']).
+	// Scheme ids mirror the frontmatter list — that array is server-only.
+	const schemeIds = [
+		'',
+		'tokyo-night',
+		'catppuccin',
+		'gruvbox',
+		'nord',
+		'breeze',
+		'adwaita',
+		'rose-pine',
+		'ayu',
+		'solarized',
+		'macos-classic',
+	];
+	function randomizeLook() {
+		shell.dataset.gaps = Math.random() < 0.5 ? 'on' : 'off';
+		const scheme = schemeIds[(Math.random() * schemeIds.length) | 0];
+		if (scheme) shell.dataset.scheme = scheme;
+		else delete shell.dataset.scheme;
+		// Widget radius only (buttons, tabs, picker rows…) — frame/pane stay put.
+		shell.style.setProperty('--zz-radius', Math.random() < 0.5 ? '0px' : '24px');
+	}
+
+	function cloneSidebarRow(kind: PaneKind, scene: string, pane: string): HTMLElement {
+		const row = cloneTemplate(`row-${kind}`);
+		row.dataset.scene = scene;
+		row.dataset.pane = pane;
+		return row;
+	}
+
+	function sidebarRow(pane: string | undefined): HTMLElement | null {
+		return pane ? tree.querySelector<HTMLElement>(`.row[data-pane="${pane}"]`) : null;
+	}
+
+	// The picker is pane content, not a modal, so choosing swaps the pane's own
+	// body (pane/picker.rs:259) and swaps its server-stamped sidebar donor row.
+	function pick(pane: HTMLElement, kind: string) {
+		if (kind !== 'terminal' && kind !== 'browser') return;
+		for (const slot of pane.querySelectorAll<HTMLElement>('[data-slot]')) {
+			slot.hidden = slot.dataset.slot !== kind;
+		}
+		const id = pane.dataset.pane;
+		const row = sidebarRow(id);
+		if (!id || !row) return;
+		const replacement = cloneSidebarRow(kind, row.dataset.scene!, id);
+		replacement.style.cssText = row.style.cssText;
+		row.replaceWith(replacement);
+		syncTree();
+		routeBrowserFocus();
+	}
+
+	// ── browser panes ─────────────────────────────────────────────────────────
+	// The pages a pane can reach. The RECENTS array is server-only, so the map is
+	// restated here — same pattern as schemeIds above — and the two have to stay
+	// in step: a recents row that resolves to nothing lands on the error page.
+	const PAGES: Record<string, { url: string; title: string }> = {
+		gpui: { url: 'https://gpui.rs/', title: 'gpui' },
+		ghostty: { url: 'https://ghostty.org/', title: 'Ghostty' },
+		tmux: { url: 'https://github.com/tmux/tmux', title: 'tmux/tmux' },
+		plain: { url: 'http://localhost:8000/', title: 'hello from desktop' },
+	};
+
+	/** One navigation in flight per pane; a second submit cancels the first. */
+	const navTimers = new WeakMap<HTMLElement, number>();
+
+	function clonePage(key: string): HTMLElement | null {
+		const template = demo.querySelector<HTMLTemplateElement>(`template[data-page="${key}"]`);
+		return template ? (template.content.firstElementChild!.cloneNode(true) as HTMLElement) : null;
+	}
+
+	function normalizeUrl(value: string): string {
+		return value
+			.trim()
+			.toLowerCase()
+			.replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+			.replace(/^www\./, '')
+			.replace(/\/+$/, '');
+	}
+
+	// resolve_address is an omnibox with a search fallback (url_input.rs:68-82).
+	// The demo has no results page to mock, so everything it does not recognise
+	// — queries included — lands on the DNS failure page instead.
+	function resolveAddress(input: string): string {
+		const wanted = normalizeUrl(input);
+		for (const [key, page] of Object.entries(PAGES)) {
+			if (normalizeUrl(page.url) === wanted) return key;
+		}
+		return 'err';
+	}
+
+	// A picker pane keeps its browser slot in the DOM, hidden, until it is chosen.
+	function browserRoot(pane: HTMLElement | null): HTMLElement | null {
+		const root = pane?.querySelector<HTMLElement>('[data-browser]');
+		return root && !root.closest('[hidden]') ? root : null;
+	}
+
+	function addressInput(root: HTMLElement): HTMLInputElement {
+		return root.querySelector<HTMLInputElement>('input.url')!;
+	}
+
+	function navigate(root: HTMLElement, input: string) {
+		const typed = input.trim();
+		if (!typed) return;
+		const key = resolveAddress(typed);
+		const host = normalizeUrl(typed).split('/')[0];
+		const url = PAGES[key]?.url ?? `https://${normalizeUrl(typed)}/`;
+
+		// Submitting hands focus back to the page (view.rs:561-565); the field
+		// shows the canonical URL immediately, with the in-flight spinner as its
+		// suffix (view.rs:989-991).
+		const field = addressInput(root);
+		field.value = url;
+		if (document.activeElement === field) shell.focus();
+		root.setAttribute('data-loading', '');
+
+		const pending = navTimers.get(root);
+		if (pending !== undefined) window.clearTimeout(pending);
+		navTimers.set(
+			root,
+			window.setTimeout(() => {
+				navTimers.delete(root);
+				root.removeAttribute('data-loading');
+				root.dataset.url = url;
+
+				const mount = root.querySelector<HTMLElement>('[data-mount]')!;
+				const page = clonePage(key);
+				if (page) {
+					const missing = page.querySelector<HTMLElement>('[data-err-host]');
+					if (missing) missing.textContent = host;
+					mount.replaceChildren(page);
+				}
+				root.querySelector<HTMLElement>('[data-blank]')!.hidden = true;
+				mount.hidden = false;
+
+				// The sidebar row echoes the page title (zz/src/mux/nav.rs:535).
+				const label = sidebarRow(
+					root.closest<HTMLElement>('[data-pane]')?.dataset.pane,
+				)?.querySelector<HTMLElement>('.label');
+				if (label) label.textContent = PAGES[key]?.title ?? 'New Tab';
+			}, 450),
+		);
+	}
+
+	// A blank tab routes pane focus straight into the address input
+	// (pane_focus_handle, view.rs:716-724). Gated on the window already owning
+	// focus, so boot and scene restores never steal the caret from the page.
+	function routeBrowserFocus() {
+		const pane = focusedPane();
+		const active = document.activeElement;
+		if (active instanceof HTMLInputElement && active.classList.contains('url')) {
+			if (active.closest('[data-pane]') !== pane) shell.focus();
+		}
+		if (!demo.hasAttribute('data-shell-focused')) return;
+		const root = browserRoot(pane);
+		if (!root || root.hasAttribute('data-loading')) return;
+		if (!root.querySelector<HTMLElement>('[data-blank]')!.hidden) addressInput(root).focus();
+	}
+
+	// Clicks inside the field's own wash, and anywhere on the blank overlay that
+	// is not a recents row, land on the address bar (view.rs:2482-2485).
+	function addressTarget(target: HTMLElement): HTMLInputElement | null {
+		if (target.closest('[data-recent-url]')) return null;
+		const root = target.closest('.address, [data-blank]')?.closest<HTMLElement>('[data-browser]');
+		return root ? addressInput(root) : null;
+	}
+
+	// The field takes text, but the client claims the prefix over any pane
+	// content — so ctrl+b arms the table from inside the input too.
+	function handleAddressKey(event: KeyboardEvent, field: HTMLInputElement): boolean {
+		if (isPrefix(event)) {
+			shell.focus();
+			setMode('armed');
+			return true;
+		}
+		if (event.ctrlKey || event.altKey) return false;
+		const root = field.closest<HTMLElement>('[data-browser]')!;
+
+		switch (event.key) {
+			case 'Enter':
+				// A blank submit is ignored outright (view.rs:894-910).
+				if (field.value.trim()) navigate(root, field.value);
+				return true;
+			case 'Escape':
+				// Escape reverts the field to the current URL — empty while the tab
+				// is blank — and refocuses the page (view.rs:1856-1884).
+				field.value = root.dataset.url ?? '';
+				shell.focus();
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	function selectPickerRow(row: HTMLElement) {
+		const picker = row.closest<HTMLElement>('[data-slot="picker"]');
+		if (!picker) return;
+		for (const choice of picker.querySelectorAll<HTMLElement>('[data-choice]')) {
+			choice.toggleAttribute('data-selected', choice === row);
+		}
+	}
+
+	function pickerPane(): HTMLElement | null {
+		const pane = focusedPane();
+		return pane?.querySelector('[data-slot="picker"]:not([hidden])') ? pane : null;
+	}
+
+	function movePickerSelection(pane: HTMLElement, delta: number) {
+		const rows = [
+			...pane.querySelectorAll<HTMLElement>('[data-slot="picker"]:not([hidden]) [data-choice]'),
+		];
+		if (!rows.length) return;
+		const selected = rows.findIndex((row) => row.hasAttribute('data-selected'));
+		const next = ((Math.max(0, selected) + delta) % rows.length + rows.length) % rows.length;
+		selectPickerRow(rows[next]);
+	}
+
+	// Picker navigation wraps, Enter commits, and Escape kills its pending pane
+	// (pane/picker.rs:61-134).
+	function handlePickerKey(event: KeyboardEvent, pane: HTMLElement): boolean {
+		if (event.metaKey || event.ctrlKey || event.altKey) return false;
+		const direct = [
+			...pane.querySelectorAll<HTMLElement>('[data-slot="picker"]:not([hidden]) [data-key]'),
+		].find((row) => row.dataset.key === event.key);
+		if (direct) {
+			pick(pane, direct.dataset.choice!);
+			return true;
+		}
+
+		switch (event.key) {
+			case 'j':
+			case 'ArrowDown':
+			case 'ArrowRight':
+				movePickerSelection(pane, 1);
+				return true;
+			case 'k':
+			case 'ArrowUp':
+			case 'ArrowLeft':
+				movePickerSelection(pane, -1);
+				return true;
+			case 'Enter': {
+				const selected = pane.querySelector<HTMLElement>(
+					'[data-slot="picker"]:not([hidden]) [data-choice][data-selected]',
+				);
+				if (selected) pick(pane, selected.dataset.choice!);
+				return true;
+			}
+			case 'Escape':
+				killPane(pane);
+				return true;
+			case 'h':
+			case 'l':
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	// split-window replaces one leaf with a fresh 0.5 binary split; new-pane is
+	// an unresolved picker pane (key.rs:45-46, daemon.rs:7547-7554).
+	function nextPaneId(): string {
+		while (canvas.querySelector(`[data-pane="td-${paneCounter}"]`)) paneCounter++;
+		return `td-${paneCounter++}`;
+	}
+
+	function spawn(axis: 'x' | 'y') {
+		const scene = activeScene();
+		clearZoom(scene);
+		const pane = focusedPane();
+		const oldRow = sidebarRow(pane?.dataset.pane);
+		if (!pane || !oldRow) return;
+
+		const rect = pane.getBoundingClientRect();
+		const span = axis === 'x' ? rect.width : rect.height;
+		if (span < 240 * shellScale()) return;
+
+		const id = nextPaneId();
+		const newPane = cloneTemplate('pane');
+		newPane.dataset.pane = id;
+		newPane.removeAttribute('data-focused');
+
+		const split = cloneTemplate('split');
+		split.dataset.axis = axis;
+		split.style.setProperty('--frac', '0.5');
+		const handle = split.querySelector<HTMLElement>('[data-handle]')!;
+		handle.setAttribute('aria-orientation', axis === 'x' ? 'vertical' : 'horizontal');
+
+		const parent = pane.parentNode!;
+		parent.replaceChild(split, pane);
+		split.insertBefore(pane, handle);
+		split.insertBefore(newPane, handle);
+
+		const newRow = cloneSidebarRow('picker', current, id);
+		newRow.style.cssText = oldRow.style.cssText;
+		oldRow.after(newRow);
+
+		focus.set(current, id);
+		attach(current, id);
+		syncSceneState(scene);
+	}
+
+	// Removing a leaf promotes its sibling subtree into the parent, preserving
+	// every nested allocation (zz-mux/src/model.rs remove_leaf).
+	function killPane(pane = focusedPane()) {
+		const scene = activeScene();
+		if (!pane || scenePanes(scene).length <= 1) return;
+		clearZoom(scene);
+
+		const split = pane.parentElement;
+		if (!split?.matches('.split')) return;
+		const survivor = [...split.children].find(
+			(child) => child !== pane && !(child as HTMLElement).hasAttribute('data-handle'),
+		) as HTMLElement | undefined;
+		const survivorPane = survivor?.matches('[data-pane]')
+			? survivor
+			: survivor?.querySelector<HTMLElement>('[data-pane]');
+		if (!survivor || !survivorPane?.dataset.pane) return;
+
+		sidebarRow(pane.dataset.pane)?.remove();
+		split.parentNode!.replaceChild(survivor, split);
+		focus.set(current, survivorPane.dataset.pane);
+		attach(current, survivorPane.dataset.pane);
+		syncSceneState(scene);
+	}
+
+	// resize-pane -Z keeps the split tree intact (zz-mux/src/key.rs:74).
+	function toggleZoom() {
+		const scene = activeScene();
+		const pane = focusedPane();
+		if (!pane) return;
+		if (pane.hasAttribute('data-zoomed')) {
+			clearZoom(scene);
+			return;
+		}
+		clearZoom(scene);
+		pane.setAttribute('data-zoomed', '');
+		syncSceneState(scene);
+	}
+
+	// select-pane is spatial, not a walk of the split DOM. The demo uses the
+	// nearest center inside a 90-degree cone for the requested direction.
+	function focusDirectional(direction: Direction) {
+		const scene = activeScene();
+		clearZoom(scene);
+		const active = focusedPane();
+		if (!active) return;
+		const from = active.getBoundingClientRect();
+		const fx = from.left + from.width / 2;
+		const fy = from.top + from.height / 2;
+
+		const candidates = scenePanes(scene)
+			.filter((pane) => pane !== active)
+			.map((pane) => {
+				const rect = pane.getBoundingClientRect();
+				const dx = rect.left + rect.width / 2 - fx;
+				const dy = rect.top + rect.height / 2 - fy;
+				return { pane, dx, dy, distance: Math.hypot(dx, dy) };
+			})
+			.filter(({ dx, dy }) => {
+				switch (direction) {
+					case 'ArrowUp':
+						return dy < 0 && Math.abs(dy) >= Math.abs(dx);
+					case 'ArrowDown':
+						return dy > 0 && Math.abs(dy) >= Math.abs(dx);
+					case 'ArrowLeft':
+						return dx < 0 && Math.abs(dx) >= Math.abs(dy);
+					case 'ArrowRight':
+						return dx > 0 && Math.abs(dx) >= Math.abs(dy);
+				}
+			})
+			.sort((a, b) => a.distance - b.distance);
+
+		const next = candidates[0]?.pane.dataset.pane;
+		if (next) attach(current, next);
+	}
+
+	function cyclePane() {
+		const scene = activeScene();
+		clearZoom(scene);
+		const panes = scenePanes(scene);
+		const active = focus.get(current);
+		const index = panes.findIndex((pane) => pane.dataset.pane === active);
+		const next = panes[((index < 0 ? -1 : index) + 1) % panes.length]?.dataset.pane;
+		if (next) attach(current, next);
+	}
+
+	// display-panes is a one-second, pane-local overlay. Cards are cloned into
+	// the pane surfaces so Astro's scoped styles survive (workspace/view.rs:2076-2107).
+	function dismissDisplayPanes() {
+		if (displayTimer !== undefined) window.clearTimeout(displayTimer);
+		displayTimer = undefined;
+		for (const card of canvas.querySelectorAll<HTMLElement>('[data-dp-card]')) card.remove();
+		if (mode === 'display') setMode('root');
+	}
+
+	function showDisplayPanes() {
+		dismissDisplayPanes();
+		const active = focus.get(current);
+		for (const [index, pane] of scenePanes().entries()) {
+			const key = index < 10 ? String(index) : undefined;
+			const card = cloneTemplate('dp-card');
+			if (key) card.dataset.key = key;
+			card.toggleAttribute('data-active', pane.dataset.pane === active);
+			card.setAttribute('aria-label', `Select pane ${index}`);
+			card.querySelector<HTMLElement>('[data-dp-index]')!.textContent = String(index);
+			const keyChip = card.querySelector<HTMLElement>('[data-dp-key]')!;
+			keyChip.hidden = key === undefined;
+			if (key) keyChip.textContent = key;
+			pane.append(card);
+		}
+		setMode('display');
+		displayTimer = window.setTimeout(dismissDisplayPanes, 1000);
+	}
+
+	function handleDisplayKey(event: KeyboardEvent): boolean {
+		const card = [...activeScene().querySelectorAll<HTMLElement>('[data-dp-card]')].find(
+			(candidate) => candidate.dataset.key === event.key,
+		);
+		const pane = card?.closest<HTMLElement>('[data-pane]');
+		if (pane?.dataset.pane) attach(current, pane.dataset.pane);
+		dismissDisplayPanes();
+		return true;
+	}
+
+	function toggleBranch(row: HTMLElement, force?: boolean): boolean {
+		const subtree = row.nextElementSibling as HTMLElement | null;
+		if (!subtree?.matches('.subtree')) return false;
+		const open = force ?? row.getAttribute('aria-expanded') !== 'true';
+		row.setAttribute('aria-expanded', String(open));
+		subtree.hidden = !open;
+		return true;
+	}
+
+	function visibleTreeRows(): HTMLElement[] {
+		return [...tree.querySelectorAll<HTMLElement>('.row')].filter(
+			(row) => !row.closest('.subtree[hidden]'),
+		);
+	}
+
+	function setTreeCursor(row: HTMLElement) {
+		treeCursor?.removeAttribute('data-selected');
+		treeCursor = row;
+		row.setAttribute('data-selected', '');
+		row.scrollIntoView({ block: 'nearest' });
+	}
+
+	// focus-sidebar expands the active path before it moves keyboard focus there
+	// (workspace/sidebar.rs:371-388).
+	function enterTree() {
+		const row = sidebarRow(focus.get(current));
+		if (!row) return;
+		for (let subtree = row.closest<HTMLElement>('.subtree'); subtree; ) {
+			const owner = subtree.previousElementSibling as HTMLElement;
+			toggleBranch(owner, true);
+			subtree = owner.closest<HTMLElement>('.subtree');
+		}
+		setMode('tree');
+		setTreeCursor(row);
+		shell.focus();
+	}
+
+	function exitTree() {
+		setMode('root');
+		shell.focus();
+	}
+
+	function handleTreeKey(event: KeyboardEvent): boolean {
+		if (!treeCursor) return false;
+		const rows = visibleTreeRows();
+		const index = Math.max(0, rows.indexOf(treeCursor));
+
+		switch (event.key) {
+			case 'j':
+			case 'ArrowDown':
+				setTreeCursor(rows[Math.min(rows.length - 1, index + 1)]);
+				return true;
+			case 'k':
+			case 'ArrowUp':
+				setTreeCursor(rows[Math.max(0, index - 1)]);
+				return true;
+			case 'g':
+			case 'Home':
+				setTreeCursor(rows[0]);
+				return true;
+			case 'G':
+			case 'End':
+				setTreeCursor(rows[rows.length - 1]);
+				return true;
+			case 'h':
+			case 'ArrowLeft':
+				if (treeCursor.getAttribute('aria-expanded') === 'true') {
+					toggleBranch(treeCursor, false);
+				} else {
+					const parent = treeCursor.closest<HTMLElement>('.subtree')?.previousElementSibling;
+					if (parent instanceof HTMLElement) setTreeCursor(parent);
+				}
+				return true;
+			case 'l':
+			case 'ArrowRight': {
+				if (treeCursor.getAttribute('aria-expanded') === 'false') {
+					toggleBranch(treeCursor, true);
+				} else {
+					const child = treeCursor.nextElementSibling?.querySelector<HTMLElement>('.row');
+					if (child) setTreeCursor(child);
+				}
+				return true;
+			}
+			case 'Enter':
+				if (treeCursor.dataset.scene) {
+					attach(treeCursor.dataset.scene, treeCursor.dataset.pane);
+					exitTree();
+				} else {
+					toggleBranch(treeCursor);
+				}
+				return true;
+			case 'Escape':
+			case 'q':
+				exitTree();
+				return true;
+			case 'r':
+			case ':':
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	function isPrefix(event: KeyboardEvent): boolean {
+		return event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'b';
+	}
+
+	// One daemon-side table resolves root -> prefix -> root. Arrow bindings are
+	// repeat entries and deliberately leave the table armed (zz-mux/src/key.rs:480-527).
+	function handleArmedKey(event: KeyboardEvent): boolean {
+		if (isPrefix(event) || event.key === 'Escape') {
+			setMode('root');
+			return true;
+		}
+		if (event.ctrlKey || event.altKey) {
+			setMode('root');
+			return true;
+		}
+
+		switch (event.key) {
+			case 'ArrowUp':
+			case 'ArrowDown':
+			case 'ArrowLeft':
+			case 'ArrowRight':
+				if (!event.shiftKey) {
+					focusDirectional(event.key);
+					return true;
+				}
+				break;
+			case '%':
+				setMode('root');
+				spawn('x');
+				return true;
+			case '"':
+				setMode('root');
+				spawn('y');
+				return true;
+			case 'x':
+				setMode('root');
+				killPane();
+				return true;
+			case 'z':
+				setMode('root');
+				toggleZoom();
+				return true;
+			case 'o':
+				setMode('root');
+				cyclePane();
+				return true;
+			case 's':
+			case 'w':
+				setMode('root');
+				enterTree();
+				return true;
+			case 'q':
+				setMode('root');
+				showDisplayPanes();
+				return true;
+		}
+
+		setMode('root');
+		return true;
+	}
+
+	demo.addEventListener('click', (e) => {
+		const target = e.target as HTMLElement;
+		// The address bar and the start page keep focus in the url field; every
+		// other click in the window hands it back to the shell.
+		const field = addressTarget(target);
+		if (field) field.focus();
+		else if (shell.contains(target)) shell.focus();
+
+		if (target.closest('[data-randomize]')) {
+			randomizeLook();
+			return;
+		}
+
+		const card = target.closest<HTMLElement>('[data-dp-card]');
+		if (card) {
+			const pane = card.closest<HTMLElement>('[data-pane]');
+			if (pane?.dataset.pane) attach(current, pane.dataset.pane);
+			dismissDisplayPanes();
+			return;
+		}
+
+		const row = target.closest<HTMLElement>('[role="treeitem"]');
+		if (row) {
+			if (row.dataset.scene) {
+				if (mode === 'display') dismissDisplayPanes();
+				attach(row.dataset.scene, row.dataset.pane);
+				if (mode === 'tree') exitTree();
+			}
+			return;
+		}
+
+		const choice = target.closest<HTMLElement>('[data-choice]');
+		if (choice) {
+			selectPickerRow(choice);
+			pick(choice.closest<HTMLElement>('[data-pane]')!, choice.dataset.choice!);
+			return;
+		}
+
+		// Recents commit on mouse-down in the app (view.rs:2491-2508); a click is
+		// close enough here. The row still attaches the pane it landed in, and
+		// navigate() then takes focus off the address bar.
+		const recent = target.closest<HTMLElement>('[data-recent-url]');
+		const pane = target.closest<HTMLElement>('#canvas [data-pane]');
+		if (pane) {
+			if (mode === 'display') dismissDisplayPanes();
+			attach(current, pane.dataset.pane);
+			if (mode === 'tree') exitTree();
+		}
+		if (recent) navigate(recent.closest<HTMLElement>('[data-browser]')!, recent.dataset.recentUrl!);
+	});
+
+	// Focusing the address selects the whole value (view.rs:566-576). The
+	// mouse-down has to be swallowed or the mouse-up would collapse that
+	// selection back to a caret.
+	demo.addEventListener('mousedown', (e) => {
+		const target = e.target;
+		if (!(target instanceof HTMLInputElement) || !target.classList.contains('url')) return;
+		if (document.activeElement === target) return;
+		e.preventDefault();
+		target.focus();
+	});
+
+	demo.addEventListener('focusin', (e) => {
+		const target = e.target;
+		if (target instanceof HTMLInputElement && target.classList.contains('url')) target.select();
+	});
+
+	// Picker selection follows hover before click/Enter (pane/picker.rs:205).
+	demo.addEventListener('pointerover', (e) => {
+		const choice = (e.target as HTMLElement).closest<HTMLElement>('[data-choice]');
+		if (choice) selectPickerRow(choice);
+	});
+
+	// Collapse is double-click: a single-click hotspot on the marker steals
+	// attaches from clicks aimed at the row (the icon sits mid click-path).
+	demo.addEventListener('dblclick', (e) => {
+		const row = (e.target as HTMLElement).closest<HTMLElement>('.row[aria-expanded]');
+		if (!row) return;
+		toggleBranch(row);
+	});
+
+	// Root input is intentionally inert: this is no fake PTY. The only entry is
+	// Ctrl-b, and every consumed path prevents the host browser's shortcut.
+	shell.addEventListener('keydown', (e) => {
+		if (e.metaKey) return;
+
+		// A focused address bar owns its keys before any of the tables below —
+		// otherwise typing a URL would drive the picker or the tree.
+		const typing = e.target;
+		if (typing instanceof HTMLInputElement && typing.classList.contains('url')) {
+			if (handleAddressKey(e, typing)) e.preventDefault();
+			return;
+		}
+
+		let consumed = false;
+
+		if (mode === 'display') {
+			consumed = handleDisplayKey(e);
+		} else if (mode === 'tree') {
+			consumed = handleTreeKey(e);
+		} else if (mode === 'armed') {
+			consumed = handleArmedKey(e);
+		} else {
+			const picker = pickerPane();
+			if (picker) consumed = handlePickerKey(e, picker);
+			else if (isPrefix(e)) {
+				setMode('armed');
+				consumed = true;
+			}
+		}
+
+		if (consumed) e.preventDefault();
+	});
+
+	// Split drag. pane.rs:237-267 hangs a 16px hit target over the slot;
+	// --frac is the first child's share of the space the two siblings divide.
+	demo.addEventListener('pointerdown', (e) => {
+		const handle = (e.target as HTMLElement).closest<HTMLElement>('[data-handle]');
+		if (!handle) return;
+		const split = handle.parentElement as HTMLElement;
+		const horizontal = split.dataset.axis === 'x';
+		const scale = shellScale();
+		const box = split.getBoundingClientRect();
+		// The slot is whatever the split is laying out with, so a margin change
+		// cannot desynchronise the drag from the geometry it is dragging.
+		const track = getComputedStyle(split);
+		const gap = parseFloat(horizontal ? track.columnGap : track.rowGap) * scale;
+		const span = (horizontal ? box.width : box.height) - gap;
+		const min = Math.min(0.4, (120 * scale) / span);
+
+		e.preventDefault();
+		handle.setPointerCapture(e.pointerId);
+		const drag = (ev: PointerEvent) => {
+			const at = horizontal ? ev.clientX - box.left : ev.clientY - box.top;
+			const frac = Math.min(1 - min, Math.max(min, (at - gap / 2) / span));
+			split.style.setProperty('--frac', frac.toFixed(4));
+		};
+		handle.addEventListener('pointermove', drag);
+		handle.addEventListener(
+			'lostpointercapture',
+			() => handle.removeEventListener('pointermove', drag),
+			{ once: true },
+		);
+	});
+
+	// A pane that boots showing a page takes its markup from the same donor a
+	// navigation would clone, so the page exists in exactly one place.
+	for (const root of demo.querySelectorAll<HTMLElement>('[data-boot-page]')) {
+		const page = clonePage(root.dataset.bootPage!);
+		if (page) root.querySelector<HTMLElement>('[data-mount]')!.replaceChildren(page);
+	}
+
+	for (const scene of canvas.querySelectorAll<HTMLElement>('[data-scene]')) {
+		syncSceneState(scene);
+	}
+	syncTree();
+	setMode('root');
+</script>
+
+<style>
+	/* Scoped, not global: the landing page brings its own `.split`, `.logo`,
+	   `.url` and `h1` rules, and the shell has to be able to sit inside them. */
+	.demo {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 20px;
+	}
+
+	/* Frame radius is screen px (not logical): keep the outer rim at 24px no
+	   matter what --zz-scale / --zz-zoom are doing to the contents. */
+	.stage {
+		--zz-scale: 0.62;
+		/* Larger chrome via a smaller logical window (see AppShell) — not a crop. */
+		--zz-zoom: 1.35;
+		--zz-frame-radius: 24px;
+		/* One machine, one terminal config: the capture's host paints terminals at
+		   #131313 (90% opacity ⇒ #121212) rather than the shipped #101318. */
+		--zz-term-bg: var(--zz-cc-bg);
+		--zz-term-fg: var(--zz-cc-fg);
+		overflow: hidden;
+		border-radius: var(--zz-frame-radius);
+		corner-shape: squircle;
+		box-shadow:
+			0 0 0 1px rgba(255, 255, 255, 0.07),
+			0 2px 4px rgba(0, 0, 0, 0.28),
+			0 12px 28px rgba(0, 0, 0, 0.3),
+			0 40px 90px -20px rgba(0, 0, 0, 0.7);
+	}
+	@media (min-width: 2100px) { .stage { --zz-scale: 0.9; } }
+	@media (max-width: 1460px) { .stage { --zz-scale: 0.54; } }
+	@media (max-width: 1280px) { .stage { --zz-scale: 0.46; } }
+	@media (max-width: 1100px) { .stage { --zz-scale: 0.38; } }
+	@media (max-width: 920px) { .stage { --zz-scale: 0.3; } }
+	@media (max-width: 740px) { .stage { --zz-scale: 0.24; } }
+	@media (max-width: 600px) { .stage { --zz-scale: 0.19; } }
+
+	/* The landing hero column stops at 1360px where the demo page's body keeps
+	   going, so above that breakpoint the hero takes the widest scale that still
+	   fits it: 2232 * 0.6 = 1339. Below it the ladder above already fits both,
+	   down to the point where 0.19 stops fitting a phone — the landing page
+	   clips overflow, so the hero carries two more steps of its own. */
+	@media (min-width: 1461px) {
+		.demo[data-fit='hero'] .stage { --zz-scale: 0.6; }
+	}
+	@media (max-width: 480px) {
+		.demo[data-fit='hero'] .stage { --zz-scale: 0.15; }
+	}
+	@media (max-width: 380px) {
+		.demo[data-fit='hero'] .stage { --zz-scale: 0.12; }
+	}
+
+	/* ── control strip ──────────────────────────────────────────────────────
+	   Page furniture, so it borrows the host page's type and palette and falls
+	   back to the demo page's own when it is mounted there. */
+	.demo-controls {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: center;
+		width: min(100%, 1360px);
+		gap: 8px 12px;
+		color-scheme: dark;
+		font-family: var(--sans, var(--zz-font-ui));
+	}
+	.drive-hint {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex: 1 1 760px;
+		min-height: 40px;
+		color: var(--mute, #737373);
+		font-size: 12px;
+		font-weight: 500;
+		line-height: 1.4;
+	}
+	[data-drive-keys] {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: center;
+		gap: 5px 7px;
+	}
+	.demo:not([data-shell-focused]) [data-drive-keys],
+	.demo[data-shell-focused] [data-drive-idle] { display: none; }
+	.drive-hint i { color: var(--hair, rgba(255, 255, 255, 0.09)); font-style: normal; }
+	.drive-hint kbd {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 22px;
+		height: 22px;
+		padding: 0 5px;
+		border-radius: 6px;
+		background: rgba(255, 255, 255, 0.06);
+		box-shadow: inset 0 0 0 1px var(--hair, rgba(255, 255, 255, 0.09));
+		color: var(--dim, #a3a3a3);
+		font-family: inherit;
+		font-size: 11px;
+		line-height: 1;
+		transition: color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+	}
+	.demo[data-armed] .drive-hint [data-prefix] {
+		background: rgba(255, 255, 255, 0.12);
+		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+		color: var(--fg, #fafafa);
+	}
+	[data-randomize] {
+		display: inline-flex;
+		align-items: center;
+		min-height: 40px;
+		padding: 0 14px;
+		border: 0;
+		border-radius: 999px;
+		background: transparent;
+		box-shadow: inset 0 0 0 1px var(--hair, rgba(255, 255, 255, 0.09));
+		color: var(--mute, #737373);
+		font-family: inherit;
+		font-size: 14px;
+		font-weight: 500;
+		line-height: 1;
+		cursor: pointer;
+		transition:
+			color 0.15s var(--ease, cubic-bezier(0.2, 0, 0, 1)),
+			background-color 0.15s var(--ease, cubic-bezier(0.2, 0, 0, 1)),
+			box-shadow 0.15s var(--ease, cubic-bezier(0.2, 0, 0, 1));
+	}
+	[data-randomize]:hover {
+		color: var(--fg, #fafafa);
+		background: rgba(255, 255, 255, 0.08);
+		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+	}
+	[data-randomize]:focus-visible {
+		outline: 2px solid var(--fg, #fafafa);
+		outline-offset: 3px;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		[data-randomize] { transition: none; }
+	}
+
+	/* ── scenes and splits ──────────────────────────────────────────────────
+	   One scene per window; only the attached one is in the layout. A split is
+	   two children plus a 6px slot — the slot is the pane margin, and the split
+	   slot is max(margin, 1) (pane.rs:231). --frac is the first child's share of
+	   what is left after the slot, so it matches the app's ratio exactly.
+	   Defaults measured off the capture: 48.5/51.5 across, 50.2/49.8 down. */
+	#canvas { height: 100%; }
+	.scene { position: relative; height: 100%; }
+	.scene > :global([data-pane]) { width: 100%; height: 100%; }
+	.scene[hidden] { display: none; }
+
+	/* --slot has to be substituted here rather than inherited from a token: a
+	   custom property resolves its var()s where it is declared, and --zz-pane-margin
+	   is a live knob set further up the tree. Everything below reads --slot, so
+	   the split, its handle and the drag maths can never disagree. */
+	.split {
+		--slot: max(var(--zz-pane-margin), 1px);
+		position: relative;
+		display: grid;
+		gap: var(--slot);
+		min-width: 0;
+		min-height: 0;
+		height: 100%;
+		/* The slot shows the split's own background: the gap plane while gaps are
+		   on (already the window colour), the border hairline when they are off
+		   (pane.rs:306-326). */
+		background: var(--zz-split-ink, transparent);
+	}
+	.split[data-axis='x'] {
+		grid-template-columns: calc((100% - var(--slot)) * var(--frac)) minmax(0, 1fr);
+		grid-template-rows: minmax(0, 1fr);
+	}
+	.split[data-axis='y'] {
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: calc((100% - var(--slot)) * var(--frac)) minmax(0, 1fr);
+	}
+
+	/* 16px thick, centred on the slot (pane.rs:237-267) — so a thinner slot widens
+	   the overhang rather than shrinking the hit target. */
+	.split-handle {
+		position: absolute;
+		z-index: 2;
+		touch-action: none;
+	}
+	.split[data-axis='x'] > .split-handle {
+		top: 0;
+		bottom: 0;
+		left: calc((100% - var(--slot)) * var(--frac) - (16px - var(--slot)) / 2);
+		width: 16px;
+		cursor: col-resize;
+	}
+	.split[data-axis='y'] > .split-handle {
+		left: 0;
+		right: 0;
+		top: calc((100% - var(--slot)) * var(--frac) - (16px - var(--slot)) / 2);
+		height: 16px;
+		cursor: row-resize;
+	}
+
+	.slot {
+		display: flex;
+		flex: 1;
+		min-width: 0;
+		min-height: 0;
+	}
+	.slot[hidden] { display: none; }
+
+	/* display-panes uses the same centered index + key card as pane.rs:442-500. */
+	.dp-card {
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		z-index: 8;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 7px;
+		min-width: 72px;
+		padding: 12px 14px;
+		transform: translate(-50%, -50%);
+		border: 1px solid var(--zz-border);
+		border-radius: var(--zz-radius);
+		background: var(--zz-bg-blur);
+		box-shadow: var(--zz-shadow-float);
+		color: var(--zz-fg);
+		font-family: var(--zz-font-ui);
+		cursor: pointer;
+		-webkit-appearance: none;
+		appearance: none;
+	}
+	.dp-card strong { font-size: 30px; font-weight: 700; line-height: 1; }
+	.dp-card kbd {
+		min-width: 20px;
+		padding: 2px 5px;
+		border-radius: var(--zz-radius);
+		background: var(--zz-bg-2);
+		color: var(--zz-fg-muted);
+		font-family: var(--zz-font-ui);
+		font-size: 12px;
+		line-height: 1;
+	}
+	.dp-card[data-active] { border-color: var(--zz-danger); color: var(--zz-danger); }
+</style>

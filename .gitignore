@@ -1,0 +1,31 @@
+/target
+# The ui-showcase is an excluded sub-workspace, so its build output lands here
+# rather than under the root /target above.
+/examples/ui-showcase/target
+/dist
+/TODO.md
+/IDEAS.md
+/.env
+.DS_Store
+*.log
+
+# Development run logs (just run defaults ZZ_LOG_DIR here)
+/logs/
+
+# Terminal IO-throughput bench harness scratch (see bench/README.md):
+# third-party clones/builds, 150 MiB fixtures, and captured results.
+/bench/.cache/
+/bench/fixtures/
+/bench/results/
+
+# Browser-rendering bench (see bench/browser-rendering/README.md):
+# screen captures are large and machine-specific; results are derived from them.
+/bench/browser-rendering/captures/
+/bench/browser-rendering/results/
+
+# Generated single-page render of the knowledge bundle; the markdown is the source.
+/knowledge/site.html
+
+node_modules/
+knowledge/
+.astro/

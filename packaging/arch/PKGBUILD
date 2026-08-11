@@ -1,0 +1,89 @@
+# This is a local-development PKGBUILD. Use `just pacman-package` or
+# `just pacman-install` from the repository root so dist/zz is built first.
+#
+# The name carries the AUR's -bin suffix because this packages an already-built
+# bundle rather than compiling one, and because plain `zz` on the AUR belongs to
+# an unrelated project.
+
+pkgname=zz-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Terminal, browser, and agent workspace'
+arch=('x86_64' 'aarch64')
+url='https://github.com/demfabris/zz'
+license=('MIT OR Apache-2.0')
+depends=(
+    'alsa-lib'
+    'at-spi2-core'
+    'cairo'
+    'dbus'
+    'expat'
+    'fontconfig'
+    'glib2'
+    'glibc'
+    'hicolor-icon-theme'
+    'libcups'
+    'libgcc'
+    'libx11'
+    'libxcb'
+    'libxcomposite'
+    'libxdamage'
+    'libxext'
+    'libxfixes'
+    'libxkbcommon'
+    'libxkbcommon-x11'
+    'libxrandr'
+    'mesa'
+    'nspr'
+    'nss'
+    'pango'
+    'systemd-libs'
+    'wayland'
+)
+optdepends=('org.freedesktop.secrets: import encrypted Chrome cookies')
+# /usr/bin/zz and /usr/lib/zz can only have one owner, including the package
+# this one used to be called.
+provides=('zz')
+conflicts=('zz')
+options=('!debug')
+
+_bundle_dir="${ZZ_BUNDLE_DIR:-$startdir/../../dist/zz}"
+_linux_assets="$startdir/../linux"
+_icon_assets="$startdir/../../assets/linux/hicolor"
+
+package() {
+    local required
+    for required in \
+        zz libcef.so icudtl.dat resources.pak locales/en-US.pak chrome-sandbox \
+        CREDITS.html CEF_LICENSE.txt; do
+        if [[ ! -s "$_bundle_dir/$required" ]]; then
+            printf 'error: Linux CEF bundle file is missing or empty: %s\n' "$required" >&2
+            return 1
+        fi
+    done
+    if [[ ! -x "$_bundle_dir/zz" ]]; then
+        printf 'error: Linux CEF bundle executable is not executable: %s\n' "$_bundle_dir/zz" >&2
+        return 1
+    fi
+    if [[ ! -s "$_icon_assets/scalable/apps/zz.svg" ]]; then
+        printf 'error: scalable Linux icon is missing or empty\n' >&2
+        return 1
+    fi
+    local size
+    for size in 16 24 32 48 64 128 256 512; do
+        if [[ ! -s "$_icon_assets/${size}x${size}/apps/zz.png" ]]; then
+            printf 'error: %sx%s Linux icon is missing or empty\n' "$size" "$size" >&2
+            return 1
+        fi
+    done
+
+    install -d "$pkgdir/usr/bin" "$pkgdir/usr/lib/zz"
+    cp -a --no-preserve=ownership "$_bundle_dir/." "$pkgdir/usr/lib/zz/"
+    chmod 0755 "$pkgdir/usr/lib/zz/zz" "$pkgdir/usr/lib/zz/chrome-sandbox"
+    ln -s ../lib/zz/zz "$pkgdir/usr/bin/zz"
+
+    install -Dm0644 "$_linux_assets/zz.desktop" \
+        "$pkgdir/usr/share/applications/zz.desktop"
+    install -d "$pkgdir/usr/share/icons/hicolor"
+    cp -a --no-preserve=ownership "$_icon_assets/." "$pkgdir/usr/share/icons/hicolor/"
+}

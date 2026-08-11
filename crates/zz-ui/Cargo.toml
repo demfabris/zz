@@ -1,0 +1,70 @@
+[package]
+name = "zz-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Widget layer: a maintained fork of gpui-component (see UPSTREAM.md)"
+publish = false
+
+[features]
+default = []
+# The agent transcript widgets (timeline, tools, composer chrome). Off by
+# default: v1 ships without the agent pane; `zz/agent-pane` turns it on.
+agent = []
+# The code-editor widget stack. Off by default for standalone zz-ui users; the
+# desktop app enables it for the Multiplexer file editor in Settings even when
+# its editor pane is compiled out. `tree-sitter` stays independent: the markdown
+# renderer needs it regardless of the editor.
+editor = []
+tree-sitter = [
+    "dep:tree-sitter",
+    "dep:tree-sitter-json",
+    "dep:tree-sitter-md",
+    "dep:tree-sitter-rust",
+    "dep:tree-sitter-tmux",
+    "dep:tree-sitter-toml-ng",
+]
+
+[dependencies]
+anyhow = "1"
+gpui.workspace = true
+# The only crate in the workspace allowed to name these: `zz-ui` re-exports a
+# narrow slice of the widget layer so the rest of the app depends on us, not on
+# upstream. See the crate docs before widening the surface.
+# `include-exclude` is required by the `#[include]` attribute in
+# `widget/icon/assets.rs`.
+rust-embed = { version = "8.12", features = ["include-exclude"] }
+merman.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+similar = "2.7.0"
+smallvec.workspace = true
+# Cross-platform monotonic clock for the scrollbar's fade timing; zero-cost on
+# native, backed by web APIs under WASM.
+instant = { version = "0.1", features = ["wasm-bindgen"] }
+# Markdown parsing for the agent transcript. Only the AST is used: `widget/text`
+# owns the rendering, and re-exports this crate's `mdast` as `markdown_ast`.
+markdown = { version = "1.0", features = ["serde"] }
+# Grapheme-cluster boundaries, so backspace/delete/arrow in `widget/input` step
+# over an emoji or a combining sequence as one unit rather than splitting it.
+unicode-segmentation = "1.13"
+async-channel.workspace = true
+log.workspace = true
+ropey = { version = "=2.0.0-beta.1", features = ["metric_lines_lf", "metric_utf16"] }
+sum-tree = { version = "0.2.0", package = "zed-sum-tree" }
+tracing = "0.1.41"
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tree-sitter = { version = "0.26", optional = true }
+tree-sitter-json = { version = "0.24.8", optional = true }
+tree-sitter-md = { version = "0.5.1", optional = true }
+tree-sitter-rust = { version = "0.24.0", optional = true }
+tree-sitter-tmux = { version = "0.1", optional = true }
+tree-sitter-toml-ng = { version = "0.7.0", optional = true }
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

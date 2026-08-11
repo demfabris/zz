@@ -1,0 +1,54 @@
+---
+// A terminal cell grid. Not chrome: the palette comes from
+// zz-terminal/src/appearance.rs:664, and the default line height is the cell
+// height itself — ratio 1.0 under CellHeightAdjustment::None (appearance.rs:314).
+interface Props {
+	background?: string;
+	foreground?: string;
+	/** 13px is the shipped default (appearance.rs:675). */
+	fontSize?: number;
+	/** Ratio. 1.0 stock; the reference capture was configured to 1.2. */
+	lineHeight?: number;
+	/** Terminal padding, all four sides (appearance.rs:682). */
+	padding?: number;
+	class?: string;
+}
+
+const {
+	background = 'var(--zz-term-bg)',
+	foreground = 'var(--zz-term-fg)',
+	fontSize = 13,
+	lineHeight = 1,
+	padding = 10,
+	class: cls,
+} = Astro.props;
+
+const style = [
+	`--term-bg:${background}`,
+	`--term-fg:${foreground}`,
+	`--term-fs:${fontSize}px`,
+	`--term-lh:${(fontSize * lineHeight).toFixed(2)}px`,
+	`--term-pad:${padding}px`,
+].join(';');
+---
+
+<div class:list={['term', cls]} style={style}><slot /></div>
+
+<style>
+	.term {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+		padding: var(--term-pad);
+		background: var(--term-bg);
+		color: var(--term-fg);
+		font-family: var(--zz-font-mono);
+		font-size: var(--term-fs);
+		line-height: var(--term-lh);
+		font-variant-ligatures: none;
+		white-space: pre;
+	}
+</style>

@@ -1,0 +1,335 @@
+/* zz design tokens. Every value here is read out of the app's source, not eyeballed;
+   the `path:line` notes point into the zz repo. The chrome is achromatic by
+   construction — a unit test asserts saturation == 0 for bg/fg/border
+   (zz-ui/src/widget/foundation/palette.rs:79). Do not add an accent hue.
+
+   Sizes are px, not rem: the shell renders at a fixed logical size and is scaled
+   as one unit via --zz-scale (see AppShell). In the app the same metrics go
+   through rems_from_px(v) = rems(v / 16) so they track UiZoom instead. */
+
+:root {
+	/* planes — elevation is a 4% Oklab lightness step, not a hex ramp (color.rs:61) */
+	--zz-bg: #0a0a0a;              /* neutral_950; window base + gap plane */
+	--zz-bg-1: #111111;            /* raised(1): popover, panel, default control */
+	--zz-bg-2: #191919;            /* raised(2): tag, kbd pill, secondary control */
+	--zz-bg-3: #212121;            /* raised(3) */
+	--zz-bg-4: #292929;            /* raised(4): picker kbd pill */
+	--zz-bg-blur: rgba(10, 10, 10, 0.9);
+	--zz-wash-1: rgba(255, 255, 255, 0.04);
+	--zz-wash-2: rgba(255, 255, 255, 0.08);
+	--zz-wash-3: rgba(255, 255, 255, 0.12);
+
+	/* text */
+	--zz-fg: #fafafa;
+	--zz-fg-muted: #8c8c8c;        /* foreground.muted() = 35% toward the pole */
+	--zz-fg-dim: #4c4c4c;
+	--zz-fg-on: #010101;           /* label on a light fill */
+
+	/* edges */
+	--zz-border: #262626;
+	--zz-border-subtle: rgba(38, 38, 38, 0.75);
+	--zz-divider: #353535;         /* border.raised(2) — sidebar right edge only */
+	--zz-ring: rgba(0, 0, 0, 0.2);
+	--zz-scrim: rgba(0, 0, 0, 0.2);
+	--zz-guide: rgba(140, 140, 140, 0.28);
+	--zz-guide-active: #8c8c8c;
+
+	/* semantics — chrome only, never terminal output */
+	--zz-success: #4ade80;
+	--zz-warning: #facc15;
+	--zz-danger: #f87171;
+	--zz-success-fill: rgba(74, 222, 128, 0.12);
+	--zz-warning-fill: rgba(250, 204, 21, 0.12);
+	--zz-danger-fill: rgba(248, 113, 113, 0.12);
+
+	/* states */
+	--zz-hover: #151515;           /* background.hover() = 6% toward the pole */
+	--zz-hover-1: #1c1c1c;
+	--zz-active-1: #282828;
+	--zz-ghost-hover: rgba(27, 27, 27, 0.8);
+	--zz-ghost-active: rgba(30, 30, 30, 0.8);
+	--zz-selection: rgba(250, 250, 250, 0.28);
+	--zz-fill: rgba(250, 250, 250, 0.12);
+	--zz-focus: #fafafa;
+	--zz-focus-soft: rgba(250, 250, 250, 0.2);
+
+	/* terminal surface — a different palette from the chrome (appearance.rs:664) */
+	--zz-term-bg: #101318;
+	--zz-term-fg: #d8dee9;
+	--zz-term-cursor: #e5c07b;
+	--zz-term-sel: rgba(80, 125, 184, 0.58);
+	--zz-term-link: #4da3eb;
+
+	/* ANSI 0-15 — the classic xterm ramp (appearance.rs:2219) */
+	--zz-ansi-0: #000000;  --zz-ansi-8: #7f7f7f;
+	--zz-ansi-1: #cd0000;  --zz-ansi-9: #ff0000;
+	--zz-ansi-2: #00cd00;  --zz-ansi-10: #00ff00;
+	--zz-ansi-3: #cdcd00;  --zz-ansi-11: #ffff00;
+	--zz-ansi-4: #0000ee;  --zz-ansi-12: #5c5cff;
+	--zz-ansi-5: #cd00cd;  --zz-ansi-13: #ff00ff;
+	--zz-ansi-6: #00cdcd;  --zz-ansi-14: #00ffff;
+	--zz-ansi-7: #e5e5e5;  --zz-ansi-15: #ffffff;
+
+	/* geometry — marketing demo uses a uniform 24px squircle */
+	--zz-radius: 24px;
+	--zz-radius-window: 24px;
+	--zz-radius-content: 24px;
+	--zz-radius-pane: 24px;
+	--zz-gap: 6px;                 /* CHROME_GAP, foundation/theme.rs:17 */
+	--zz-pane-margin: 6px;         /* DEFAULT_PANE_MARGIN, config/mod.rs:55 */
+	--zz-pane-border: 1px;
+	--zz-titlebar-h: 34px;         /* TITLE_BAR_HEIGHT, title_bar/mod.rs:23 */
+	--zz-control-h: 36px;
+	--zz-row-h: 32px;              /* WORKSPACE_TREE_ROW_HEIGHT, navigation.rs:12 */
+	--zz-indent: 20px;             /* WORKSPACE_TREE_INDENT_WIDTH */
+	--zz-inset: 8px;               /* WORKSPACE_TREE_CONTENT_INSET */
+	--zz-marker-slot: 18px;
+	--zz-sidebar-w: 256px;
+	--zz-traffic-inset: 80px;      /* AppKit spans x = 9..69, rounded up (navigation.rs:32) */
+
+	/* type */
+	--zz-font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+	--zz-font-mono: Menlo, 'Cascadia Mono', 'DejaVu Sans Mono', ui-monospace, monospace;
+
+	/* shadows — rings, not drop shadows (styled.rs:111) */
+	--zz-shadow-control: 0 0 0 0.5px rgba(0, 0, 0, 0.2), 0 1px 2px 0 rgba(0, 0, 0, 0.15);
+	--zz-shadow-ring: 0 0 0 0.5px rgba(0, 0, 0, 0.2);
+	--zz-shadow-ring-in: inset 0 0 0 0.5px rgba(0, 0, 0, 0.2);
+	--zz-shadow-popover: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+	--zz-shadow-palette: 0 0 0 1px rgba(38, 38, 38, 0.75), 0 12px 32px -4px rgba(0, 0, 0, 0.2);
+	--zz-shadow-chooser: 0 0 0 1px rgba(38, 38, 38, 0.75), 0 14px 36px 0 rgba(0, 0, 0, 0.2);
+	--zz-shadow-float: 0 8px 24px -8px rgba(0, 0, 0, 0.2);
+	--zz-shadow-window: 0 0 6px 0 rgba(0, 0, 0, 0.2); /* SHADOW_SIZE 12, blur half (frame.rs:16) */
+
+	/* Claude Code CLI palette. NOT zz tokens — this is a terminal program's own
+	   output, sampled off the 2720x1658 reference capture. It runs at 90% opacity, so
+	   e.g. the coral reads #c16b4e on screen where the source colour is #d97757. */
+	--zz-cc-bg: #121212;
+	--zz-cc-fg: #cdcdcd;
+	--zz-cc-bright: #e2e2e2;
+	--zz-cc-dim: #909090;
+	--zz-cc-rule: #3a3a3a;
+	--zz-cc-bar: #373737;
+	--zz-cc-coral: #c16b4e;
+	--zz-cc-link: #a8afe8;
+	--zz-cc-green: #7dbb62;
+	--zz-cc-red: #fa697e;
+}
+
+/* pane-gaps off, which is what stock zz ships (config/mod.rs:53). The setting is
+   a gate, not a second look: with it off, margin, border width and corner radius
+   all resolve to 0, leaving the panes flush against the 1px slot the split
+   always keeps (config/mod.rs:744). The two inks come back because there is no
+   pane border left to draw those edges — the split's own background becomes the
+   divider between panes, and the sidebar redraws the right edge it blanks while
+   gaps are on (sidebar.rs:985). */
+.zz-scope[data-gaps='off'] {
+	--zz-pane-margin: 0px;
+	--zz-radius-pane: 0px;
+	--zz-pane-border: 0px;
+	--zz-split-ink: var(--zz-border);
+	--zz-sidebar-divider: var(--zz-divider);
+}
+
+/* Every metric below is a border-box measurement, so the shell carries its own
+   box-sizing instead of depending on the host page's reset. */
+.zz-scope,
+.zz-scope *,
+.zz-scope *::before,
+.zz-scope *::after {
+	box-sizing: border-box;
+	corner-shape: squircle;
+}
+
+/* The window is a window: text inside it is laid out by zz's own metrics, never
+   by the prose settings of whatever page is hosting it. Everything here is a
+   value the app's widgets already assume, so this only matters where a host page
+   inherits something else down (a marketing `line-height: 1.55`, say). */
+.zz-scope {
+	font-family: var(--zz-font-ui);
+	font-size: 16px;
+	font-weight: 400;
+	font-style: normal;
+	line-height: normal;
+	letter-spacing: normal;
+	text-align: left;
+	text-wrap: wrap;
+}
+
+/* AppKit greys the traffic lights while its window is inactive. The demo's
+   focusable shell is the equivalent focus boundary. */
+.zz-scope:not(:focus-within) .lights i {
+	background: #4a4a4a;
+}
+
+/* Prefix mode exposes the app's pane drag surface: border at 8% opacity and an
+   open-hand cursor, but only for a multi-pane, unzoomed scene (view.rs:2191-2203). */
+.zz-scope[data-armed]:not([data-has-zoom]) #canvas .scene[data-multi]:not([hidden]) .pane::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 6;
+	border-radius: inherit;
+	background: color-mix(in srgb, var(--zz-border) 8%, transparent);
+	cursor: grab;
+}
+
+/* A zoomed leaf escapes every nested split and resolves its absolute inset
+   against the scene, leaving the binary layout untouched underneath. */
+.zz-scope #canvas .scene[data-has-zoom] .split {
+	position: static;
+}
+.zz-scope #canvas .scene [data-pane][data-zoomed] {
+	position: absolute;
+	inset: 0;
+	z-index: 5;
+	width: 100%;
+	height: 100%;
+}
+
+/* Every rounded quad in zz is a superellipse of exponent 4 (theme.rs:384).
+   `corner-shape` lands it exactly in Chrome 139+; elsewhere the plain
+   border-radius below it is the fallback and reads slightly rounder. */
+.zz-squircle {
+	corner-shape: squircle;
+}
+
+/* ── icons ───────────────────────────────────────────────────────────────── */
+/* Lucide at 24px with stroke-width 2 — at 14px the effective stroke is 1.17px,
+   at 12px exactly 1px (icon/mod.rs:91). */
+.zz-icon {
+	display: inline-flex;
+	flex: none;
+	line-height: 0;
+}
+.zz-icon > svg {
+	display: block;
+	width: var(--zz-icon-size, 14px);
+	height: var(--zz-icon-size, 14px);
+}
+
+/* ── primitives ──────────────────────────────────────────────────────────── */
+
+/* Ghost button — the workhorse of all zz chrome (button.rs:683, 852). */
+.zz-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	flex: none;
+	border: 0;
+	border-radius: var(--zz-radius);
+	corner-shape: squircle;
+	background: transparent;
+	color: var(--zz-fg);
+	font-family: var(--zz-font-ui);
+	font-size: 12px;
+	line-height: 1;
+	cursor: pointer;
+	-webkit-appearance: none;
+	appearance: none;
+}
+.zz-btn--xsmall { height: 24px; min-width: 24px; padding: 0 4px; font-size: 12px; }
+.zz-btn--small { height: 28px; min-width: 28px; padding: 0 12px; font-size: 12px; }
+.zz-btn--medium { height: 36px; min-width: 36px; padding: 0 16px; font-size: 14px; }
+.zz-btn--icon { padding: 0; }
+
+.zz-btn--ghost:hover { background: var(--zz-ghost-hover); }
+.zz-btn--ghost:active { background: var(--zz-ghost-active); }
+.zz-btn--ghost[aria-pressed='true'] { background: var(--zz-wash-2); }
+
+.zz-btn--default {
+	background: var(--zz-bg-1);
+	border: 1px solid var(--zz-border);
+	box-shadow: var(--zz-shadow-control);
+}
+.zz-btn--default:hover { background: var(--zz-hover-1); }
+.zz-btn--default:active { background: var(--zz-active-1); }
+
+.zz-btn[disabled] { opacity: 0.4; cursor: default; }
+.zz-btn[disabled]:hover { background: transparent; }
+
+/* Tag / status pill (tag.rs:139). */
+.zz-tag {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 10px;
+	border: 1px solid var(--zz-border);
+	border-radius: var(--zz-radius);
+	corner-shape: squircle;
+	background: var(--zz-bg-2);
+	color: var(--zz-fg);
+	font-family: var(--zz-font-ui);
+	font-size: 12px;
+	line-height: 1;
+}
+.zz-tag--compact { padding: 2px 6px; }
+.zz-tag--primary { background: var(--zz-fg); border-color: var(--zz-fg); color: var(--zz-fg-on); }
+.zz-tag--success { background: var(--zz-success); border-color: var(--zz-success); color: var(--zz-fg-on); }
+.zz-tag--danger { background: var(--zz-danger-fill); border-color: var(--zz-danger); color: var(--zz-danger); }
+
+/* Kbd pill (kbd.rs:153). The pane picker raises its fill to raised(4)
+   because it sits on a washed row (picker.rs:242). */
+.zz-kbd {
+	display: inline-block;
+	min-width: 20px;
+	padding: 2px 4px;
+	border-radius: var(--zz-radius);
+	corner-shape: squircle;
+	background: var(--zz-bg-2);
+	color: var(--zz-fg-muted);
+	font-family: var(--zz-font-ui);
+	font-size: 12px;
+	line-height: 1;
+	text-align: center;
+	text-transform: lowercase;
+}
+.zz-kbd--raised { background: var(--zz-bg-4); }
+
+/* Terminal text. Global because these are used from the panes' slots, which
+   carry the caller's style scope, not the component's. One row = one terminal
+   line; a blank row is a row holding a single space. */
+.zz-line,
+.zz-cc-row {
+	display: block;
+	white-space: pre;
+}
+
+/* SGR 30-37 / 90-97 out of the xterm ramp above — terminal output only, never
+   chrome. `-b` is the bright half (8-15). */
+.zz-fg-red { color: var(--zz-ansi-1); }
+.zz-fg-green { color: var(--zz-ansi-2); }
+.zz-fg-yellow { color: var(--zz-ansi-3); }
+.zz-fg-blue { color: var(--zz-ansi-4); }
+.zz-fg-magenta { color: var(--zz-ansi-5); }
+.zz-fg-cyan { color: var(--zz-ansi-6); }
+.zz-fg-black-b { color: var(--zz-ansi-8); }
+.zz-fg-green-b { color: var(--zz-ansi-10); }
+.zz-fg-blue-b { color: var(--zz-ansi-12); }
+.zz-fg-magenta-b { color: var(--zz-ansi-13); }
+.zz-fg-cyan-b { color: var(--zz-ansi-14); }
+.zz-fg-white { color: var(--zz-ansi-15); }
+.zz-bold { font-weight: 700; }
+
+/* Block cursor on the terminal's own cursor colour (appearance.rs:664). One cell
+   wide — the container is monospace, so 1ch is exactly that. */
+.zz-cursor {
+	display: inline-block;
+	width: 1ch;
+	height: 13px;
+	vertical-align: -2px;
+	background: var(--zz-term-cursor);
+}
+.zz-cc-user {
+	display: block;
+	white-space: pre;
+	background: var(--zz-cc-bar);
+	color: var(--zz-cc-bright);
+}
+.zz-cc-bright { color: var(--zz-cc-bright); font-weight: 700; }
+.zz-cc-dim { color: var(--zz-cc-dim); }
+.zz-cc-link { color: var(--zz-cc-link); }
+.zz-cc-green { color: var(--zz-cc-green); }
+.zz-cc-red { color: var(--zz-cc-red); }
+.zz-cc-coral { color: var(--zz-cc-coral); }

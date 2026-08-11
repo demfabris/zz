@@ -1,0 +1,55 @@
+[package]
+name = "zz-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The zz daemon: session state, PTY workers, client connections"
+publish = false
+
+[features]
+default = ["daemon"]
+daemon = [
+    "dep:async-channel",
+    "dep:async-signal",
+    "dep:chrono",
+    "dep:crossbeam-channel",
+    "dep:futures-lite",
+    "dep:smallvec",
+    "dep:zz-mux",
+    "zz-terminal/session",
+]
+
+[dependencies]
+chrono = { workspace = true, optional = true }
+crossbeam-channel = { workspace = true, optional = true }
+interprocess.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+smallvec = { workspace = true, optional = true }
+sysinfo.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+zz-mux = { path = "../zz-mux", optional = true }
+zz-protocol = { path = "../zz-protocol" }
+zz-terminal = { path = "../zz-terminal", default-features = false }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+russh = { version = "0.54", default-features = false, features = ["ring", "flate2"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "time", "sync"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+core-foundation.workspace = true
+security-framework-sys = "2.17"
+
+[target.'cfg(windows)'.dependencies]
+getrandom.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+async-channel = { workspace = true, optional = true }
+async-signal = { workspace = true, optional = true }
+futures-lite = { workspace = true, optional = true }
+rustix.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The simulator bundle's entitlements. Device builds do not use this file:
+  Xcode signs those against the real team, and the signature is where a signed
+  app's entitlements live. Simulator binaries are never signed, so build.rs
+  links this plist into the executable's `__TEXT,__entitlements` section, which
+  is where the simulator reads them from.
+
+  Without the two keychain keys `securityd` answers every `SecItem` call with
+  errSecMissingEntitlement — "Client has neither application-identifier nor
+  keychain-access-groups entitlements" — and the ssh identity falls back to a
+  file, which would leave the Keychain path (zz-daemon/src/ios_keychain.rs)
+  first running for real on TestFlight. Unprefixed by a team, because the
+  simulator has no team to prefix with; a device build's group is
+  `<TEAM>.dev.zz.ios` and holds its own separate item.
+-->
+<plist version="1.0">
+<dict>
+  <key>application-identifier</key>
+  <string>dev.zz.ios</string>
+  <key>keychain-access-groups</key>
+  <array>
+    <string>dev.zz.ios</string>
+  </array>
+</dict>
+</plist>

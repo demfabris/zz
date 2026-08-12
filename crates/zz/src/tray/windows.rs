@@ -43,6 +43,7 @@ pub(super) struct NotifyIcon {
 
 // SAFETY: the handle is only ever turned back into an `HWND` for
 // `PostMessageW`, which is documented cross-thread.
+#[allow(unsafe_code, reason = "a Send assertion for a raw handle has no safe form")]
 unsafe impl Send for NotifyIcon {}
 
 impl Drop for NotifyIcon {

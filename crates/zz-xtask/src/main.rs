@@ -7,6 +7,8 @@ use std::{
     collections::{BTreeSet, HashMap},
     io,
     path::Path,
+    thread,
+    time::Duration,
 };
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use std::{
@@ -540,24 +542,40 @@ fn compile_macos_icon(app: &Path) -> Result<(), Box<dyn Error>> {
         .join("../..")
         .join(MACOS_ICON_SOURCE);
     let partial = env::temp_dir().join("zz-actool-partial.plist");
-    let status = Command::new("xcrun")
-        .arg("actool")
-        .arg(&source)
-        .arg("--compile")
-        .arg(bundle_root(app))
-        .args(["--platform", "macosx"])
-        .args(["--minimum-deployment-target", "15.0"])
-        .args(["--app-icon", MACOS_ICON_NAME])
-        .arg("--output-partial-info-plist")
-        .arg(&partial)
-        .stdout(Stdio::null())
-        .status()
-        .map_err(|error| format!("could not run xcrun actool (is Xcode installed?): {error}"))?;
-    let _ = fs::remove_file(&partial);
-    if !status.success() {
-        return Err(format!("actool failed to compile {MACOS_ICON_SOURCE} with {status}").into());
+    // actool's helper daemons (ibtoold, AssetCatalogAgent) sporadically crash
+    // or lose their temp renders on CI runners; a fresh invocation respawns
+    // them, so a failure retries before it fails the release.
+    const ACTOOL_ATTEMPTS: u32 = 3;
+    for attempt in 1..=ACTOOL_ATTEMPTS {
+        let status = Command::new("xcrun")
+            .arg("actool")
+            .arg(&source)
+            .arg("--compile")
+            .arg(bundle_root(app))
+            .args(["--platform", "macosx"])
+            .args(["--minimum-deployment-target", "15.0"])
+            .args(["--app-icon", MACOS_ICON_NAME])
+            .arg("--output-partial-info-plist")
+            .arg(&partial)
+            .stdout(Stdio::null())
+            .status()
+            .map_err(|error| {
+                format!("could not run xcrun actool (is Xcode installed?): {error}")
+            })?;
+        let _ = fs::remove_file(&partial);
+        if status.success() {
+            return Ok(());
+        }
+        if attempt == ACTOOL_ATTEMPTS {
+            return Err(format!(
+                "actool failed to compile {MACOS_ICON_SOURCE} with {status} after {ACTOOL_ATTEMPTS} attempts"
+            )
+            .into());
+        }
+        eprintln!("actool attempt {attempt} failed with {status}; retrying");
+        thread::sleep(Duration::from_secs(5));
     }
-    Ok(())
+    unreachable!("the actool retry loop returns on success and on the final attempt")
 }
 
 #[cfg(target_os = "macos")]

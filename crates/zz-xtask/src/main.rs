@@ -7,8 +7,6 @@ use std::{
     collections::{BTreeSet, HashMap},
     io,
     path::Path,
-    thread,
-    time::Duration,
 };
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use std::{
@@ -51,8 +49,6 @@ const MACOS_APP_DATA_USAGE_DESCRIPTION: &str = "Import cookies and browsing hist
 const MACOS_ICON_FILE: &str = "zz.icns";
 #[cfg(target_os = "macos")]
 const MACOS_ICON_KEY: &str = "CFBundleIconFile";
-#[cfg(target_os = "macos")]
-const MACOS_ICON_SOURCE: &str = "assets/zz.icon";
 #[cfg(target_os = "macos")]
 const MACOS_ICON_NAME_KEY: &str = "CFBundleIconName";
 #[cfg(target_os = "macos")]
@@ -532,50 +528,12 @@ fn configure_macos_main_app(app: &Path) -> Result<(), Box<dyn Error>> {
         plist::Value::String(MACOS_ICON_NAME.to_owned()),
     );
     info.to_file_xml(&info_path)?;
-    compile_macos_icon(app)?;
+    // Assets.car reaches Resources/ through the packaging/mac resource copy.
+    // It is compiled from assets/zz.icon by scripts/compile-macos-icon.sh and
+    // committed: actool renders the layered icon through the GPU and does so
+    // only unreliably on virtualized CI runners. The bundle validation below
+    // still requires it, so a missing artifact fails loudly.
     Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn compile_macos_icon(app: &Path) -> Result<(), Box<dyn Error>> {
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(MACOS_ICON_SOURCE);
-    let partial = env::temp_dir().join("zz-actool-partial.plist");
-    // actool's helper daemons (ibtoold, AssetCatalogAgent) sporadically crash
-    // or lose their temp renders on CI runners; a fresh invocation respawns
-    // them, so a failure retries before it fails the release.
-    const ACTOOL_ATTEMPTS: u32 = 3;
-    for attempt in 1..=ACTOOL_ATTEMPTS {
-        let status = Command::new("xcrun")
-            .arg("actool")
-            .arg(&source)
-            .arg("--compile")
-            .arg(bundle_root(app))
-            .args(["--platform", "macosx"])
-            .args(["--minimum-deployment-target", "15.0"])
-            .args(["--app-icon", MACOS_ICON_NAME])
-            .arg("--output-partial-info-plist")
-            .arg(&partial)
-            .stdout(Stdio::null())
-            .status()
-            .map_err(|error| {
-                format!("could not run xcrun actool (is Xcode installed?): {error}")
-            })?;
-        let _ = fs::remove_file(&partial);
-        if status.success() {
-            return Ok(());
-        }
-        if attempt == ACTOOL_ATTEMPTS {
-            return Err(format!(
-                "actool failed to compile {MACOS_ICON_SOURCE} with {status} after {ACTOOL_ATTEMPTS} attempts"
-            )
-            .into());
-        }
-        eprintln!("actool attempt {attempt} failed with {status}; retrying");
-        thread::sleep(Duration::from_secs(5));
-    }
-    unreachable!("the actool retry loop returns on success and on the final attempt")
 }
 
 #[cfg(target_os = "macos")]

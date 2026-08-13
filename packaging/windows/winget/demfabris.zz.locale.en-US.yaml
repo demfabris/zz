@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: demfabris.zz
+PackageVersion: 0.0.0
+PackageLocale: en-US
+Publisher: demfabris
+PublisherUrl: https://github.com/demfabris
+PublisherSupportUrl: https://github.com/demfabris/zz/issues
+PackageName: zz
+PackageUrl: https://github.com/demfabris/zz
+License: MIT OR Apache-2.0
+LicenseUrl: https://github.com/demfabris/zz/blob/main/LICENSE-MIT
+Moniker: zz
+ShortDescription: Terminal multiplexer with terminal, browser, and agent panes
+Description: >-
+  zz is a terminal multiplexer with three kinds of pane: a terminal, a Chromium
+  browser, and an AI agent. They share one split layout, one focus model, one
+  set of tmux keys, and one GPU surface. A background daemon keeps the sessions
+  alive after you close the window.
+Tags:
+  - terminal
+  - multiplexer
+  - tmux
+  - browser
+  - developer-tools
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

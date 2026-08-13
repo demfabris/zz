@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>zz UI showcase</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #09090b;
+      }
+
+      body > canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        outline: none;
+      }
+
+      [data-loading] {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: grid;
+        place-content: center;
+        gap: 10px;
+        padding: 24px;
+        color: #a1a1aa;
+        background: #09090b;
+        font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
+        text-align: center;
+      }
+
+      [data-loading]::before {
+        width: 28px;
+        height: 28px;
+        margin: 0 auto 6px;
+        content: "";
+        border: 2px solid #27272a;
+        border-top-color: #fafafa;
+        border-radius: 999px;
+        animation: spin 0.75s linear infinite;
+      }
+
+      [data-loading][data-failed="true"] {
+        color: #fca5a5;
+      }
+
+      [data-loading][data-failed="true"]::before {
+        display: none;
+      }
+
+      [data-loading] strong {
+        color: #fafafa;
+        font-size: 16px;
+      }
+
+      [data-loading] small {
+        color: #71717a;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div data-loading>Compiling the GPUI canvas…</div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

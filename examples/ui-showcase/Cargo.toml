@@ -1,0 +1,55 @@
+[workspace]
+resolver = "3"
+
+[package]
+name = "zz-ui-showcase"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.97"
+description = "Component gallery for zz-ui"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Unpinned here on purpose: the `[patch]` section below redirects every Zed
+# crate to the desktop workspace's fork revision, and Cargo.lock records that
+# one. Both trees compile the same `zz-ui` source.
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", default-features = false }
+rust-embed = { version = "8.12.0", features = ["debug-embed", "include-exclude"] }
+# The gallery showcases the agent and editor widgets, which the app gates
+# behind cargo features; the showcase always compiles them.
+zz-ui = { path = "../../crates/zz-ui", features = ["agent", "editor"] }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+zz-ui = { path = "../../crates/zz-ui", features = ["agent", "editor", "tree-sitter"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+wasm-bindgen = "=0.2.126"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -2 }
+pedantic = { level = "warn", priority = -1 }
+# Story functions are intentionally declarative component trees.
+too_many_lines = "allow"
+
+# The gallery renders the same carried gpui patches the desktop app does, so a
+# story can show a patched behavior (the squircle corner shape) instead of
+# faking it. Keep this rev in step with the desktop workspace's patch section.
+[patch."https://github.com/zed-industries/zed"]
+gpui = { git = "https://github.com/demfabris/zed", rev = "71bcbb21d5c1a14cf126b49ae1c8408da317b4ed", version = "=0.2.2" }
+gpui_platform = { git = "https://github.com/demfabris/zed", rev = "71bcbb21d5c1a14cf126b49ae1c8408da317b4ed" }
+
+[profile.dev]
+debug = 1
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

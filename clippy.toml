@@ -1,0 +1,10 @@
+# Vendor names that read as prose, not as code: `doc_markdown` flags their
+# internal capitals and backticking a company name is worse than the lint.
+# `..` keeps clippy's own default list.
+doc-valid-idents = ["OpenAI", "AppKit", "KWin", ".."]
+
+disallowed-methods = [
+    { path = "gpui::rgb", reason = "chrome colors must come from cx.theme(); see knowledge/configuration/ui-conventions doc" },
+    { path = "gpui::rgba", reason = "chrome colors must come from cx.theme(); see knowledge/configuration/ui-conventions doc" },
+    { path = "gpui::hsla", reason = "chrome colors must come from cx.theme(); see knowledge/configuration/ui-conventions doc" },
+]

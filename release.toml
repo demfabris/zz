@@ -1,0 +1,17 @@
+allow-branch = ["main"]
+consolidate-commits = true
+pre-release-commit-message = "release: zz {{version}}"
+publish = false
+push = true
+push-remote = "origin"
+shared-version = "workspace"
+tag = true
+tag-message = "zz {{version}}"
+tag-name = "v{{version}}"
+
+[[pre-release-replacements]]
+file = "../../examples/ui-showcase/Cargo.lock"
+search = '(?m)(name = "zz-ui"\nversion = ")[^"]+'
+replace = '${1}{{version}}'
+exactly = 1
+prerelease = true

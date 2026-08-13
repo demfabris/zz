@@ -1,0 +1,45 @@
+[package]
+name = "zz-chrome-import"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Google Chrome profile, cookie, and history import"
+publish = false
+
+[dependencies]
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+url.workspace = true
+zeroize.workspace = true
+zz-browser = { path = "../zz-browser", default-features = false }
+
+# Chrome derives its cookie key with PBKDF2-HMAC-SHA1 and seals values with
+# AES-128-CBC everywhere except Windows, which uses AES-256-GCM instead.
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+aes.workspace = true
+cbc = { workspace = true, features = ["alloc"] }
+pbkdf2.workspace = true
+sha1.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { workspace = true, features = ["NSPathUtilities", "NSString"] }
+security-framework.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+oo7 = { workspace = true, features = ["async-std", "native_crypto"] }
+smol.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Chrome on Windows seals cookies with AES-256-GCM under a master key DPAPI
+# protects, and stores that key base64-encoded in `Local State`.
+aes-gcm.workspace = true
+base64.workspace = true
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+
+[lints]
+workspace = true

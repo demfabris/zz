@@ -1,0 +1,90 @@
+---
+import './zz.css';
+
+// app_shell_surface (zz-ui/src/shell.rs:11) in ChromeMode::Sidebar. On macOS
+// AppShell mounts no control strip (app_shell.rs:92), so the panes reach the very
+// top of the window and only the sidebar carries a 34px header — the sidebar slot
+// owns that. The canvas inset is the "gap plane": chrome background showing
+// through a 6px border around the layout tree (view.rs:2240).
+//
+// Sizes are the window's *logical* px. The reference capture is 2232x1360 logical
+// (2720x1658 raw at 1.21875 px/px). Scale the whole shell for display by setting
+// --zz-scale on this element or an ancestor.
+interface Props {
+	width?: number;
+	height?: number;
+	/** 256 stock (navigation.rs:23); the capture was resized to 278. */
+	sidebarWidth?: number;
+	/** DEFAULT_PANE_MARGIN — 0 unless pane-gaps is on (config/mod.rs:55). */
+	margin?: number;
+	class?: string;
+}
+
+const { width = 2232, height = 1360, sidebarWidth = 278, margin = 6, class: cls } = Astro.props;
+---
+
+<div
+	class:list={['scaler', cls]}
+	style={`--w:${width}px;--h:${height}px;--sidebar-w:${sidebarWidth}px;--zz-pane-margin:${margin}px`}
+>
+	<div class="window zz-scope">
+		<div class="shell">
+			<slot name="sidebar" />
+			<div class="content">
+				<div class="canvas"><slot /></div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<style>
+	/* The transformed window doesn't take layout space, so this spacer reserves
+	   the scaled footprint. (CSS `zoom` would collapse the two, but Chrome still
+	   sizes a zoomed box at its unzoomed width for shrink-wrap parents.) Careful:
+	   consumers must not pass a class that collides with the inner names — the
+	   scoped rules for `.window`/`.shell`/`.content`/`.canvas` would apply to it.
+
+	   --zz-zoom shrinks the logical window and scales it back up by the same
+	   factor, so chrome/fonts read larger while layout still fits the frame
+	   (page footprint stays --w × --zz-scale). */
+	.scaler {
+		position: relative;
+		z-index: 1;
+		width: calc(var(--w) * var(--zz-scale, 1));
+		height: calc(var(--h) * var(--zz-scale, 1));
+		overflow: hidden;
+	}
+	.window {
+		width: calc(var(--w) / var(--zz-zoom, 1));
+		height: calc(var(--h) / var(--zz-zoom, 1));
+		overflow: hidden;
+		background: var(--zz-bg);
+		color: var(--zz-fg);
+		/* Invert the transform so the rim lands at --zz-frame-radius screen px. */
+		border-radius: calc(var(--zz-frame-radius, var(--zz-radius-window)) / (var(--zz-scale, 1) * var(--zz-zoom, 1)));
+		corner-shape: squircle;
+		transform: scale(calc(var(--zz-scale, 1) * var(--zz-zoom, 1)));
+		transform-origin: top left;
+	}
+	.shell {
+		position: relative;
+		display: flex;
+		width: 100%;
+		height: 100%;
+		overflow: hidden;
+	}
+	.content {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+	}
+	.canvas {
+		flex: 1;
+		min-width: 0;
+		min-height: 0;
+		padding: var(--zz-pane-margin);
+	}
+</style>

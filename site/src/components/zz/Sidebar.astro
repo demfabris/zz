@@ -1,0 +1,346 @@
+---
+import Button from './Button.astro';
+import Icon from './Icon.astro';
+
+// workspace_sidebar_surface (navigation.rs:122) as mounted by WorkspaceSidebar
+// (zz/src/workspace/sidebar.rs:945). Row primitive: workspace_tree_row
+// (navigation.rs:224); constants at navigation.rs:12-22.
+//
+// The tree is nested markup (row, then its subtree) rather than a flat list, so
+// an indent guide is one absolutely-positioned line *inside* the subtree it
+// belongs to. Collapsing a branch is then a single `hidden` on the subtree —
+// nothing has to be re-measured.
+
+export interface ZzNode {
+	kind: 'host' | 'session' | 'window' | 'pane';
+	label: string;
+	/** Pane rows pick their marker by kind (sidebar.rs:1563). */
+	pane?: 'terminal' | 'browser' | 'agent' | 'editor' | 'picker';
+	/** Attaching here shows this scene on the canvas. Windows own one; a session
+	    row carries its active window's (sidebar.rs:1206). */
+	scene?: string;
+	/** Pane rows: the id of the pane element this row attaches to. */
+	paneId?: string;
+	/** On the path to the attached pane: full-strength text, brighter indent guide. */
+	active?: boolean;
+	/** The attached pane / its window — adds font-weight 500 (navigation.rs:287). */
+	target?: boolean;
+	/** 5px warning dot on the marker (sidebar.rs:1593). */
+	bell?: boolean;
+	children?: ZzNode[];
+}
+
+interface Props {
+	tree: ZzNode[];
+	/** Overrides --sidebar-w. 256 is stock (navigation.rs:23), clamped 160..640. */
+	width?: number;
+	class?: string;
+	/** Set by this component's own recursion. Unset renders the sidebar shell. */
+	depth?: number;
+}
+
+const { tree, width, class: cls, depth } = Astro.props;
+const Self = Astro.self;
+
+const PANE_ICON = {
+	terminal: 'square-terminal',
+	browser: 'globe',
+	agent: 'bot',
+	editor: 'file',
+	picker: 'plus',
+} as const;
+
+// Delete is danger-tinted in the app; every action but the host's ⋯ is hover-only
+// (sidebar.rs:1474, 1652-1669).
+const ACTIONS = {
+	host: [{ icon: 'ellipsis', label: 'Host actions' }],
+	session: [
+		{ icon: 'plus', label: 'New window' },
+		{ icon: 'trash-2', label: 'Delete session' },
+	],
+	window: [
+		{ icon: 'plus', label: 'Add pane' },
+		{ icon: 'trash-2', label: 'Delete window' },
+	],
+	pane: [{ icon: 'trash-2', label: 'Delete pane' }],
+} as const;
+
+function marker(node: ZzNode): string {
+	if (node.kind === 'host') return 'zz-mark';
+	if (node.kind === 'session') return 'layers';
+	if (node.kind === 'window') return 'app-window';
+	return PANE_ICON[node.pane ?? 'terminal'];
+}
+---
+
+{
+	depth === undefined ? (
+		<aside class:list={['sidebar', cls]} style={width ? `--sidebar-w:${width}px` : undefined}>
+			<div class="strip">
+				<span class="lights" aria-hidden="true">
+					<i />
+					<i />
+					<i />
+				</span>
+				<div class="controls">
+					<Button icon="settings" label="Settings" />
+					<Button icon="panels-top-left" label="Workspace layout" />
+				</div>
+			</div>
+
+			<div class="body">
+				<div class="tree" role="tree" aria-label="Workspace">
+					<Self tree={tree} depth={0} />
+				</div>
+			</div>
+
+			{/* Runtime pane rows must inherit this component's Astro scope hash. */}
+			<template data-tpl="row-terminal">
+				<div
+					class="row"
+					role="treeitem"
+					aria-level={4}
+					data-kind="pane"
+					data-tone="muted"
+					data-pane-kind="terminal"
+					style="padding-left:68px"
+				>
+					<span class="row-fill" aria-hidden="true" />
+					<span class="marker"><Icon name="square-terminal" size={14} /></span>
+					<span class="label">bash</span>
+					<span class="trailing"><Button icon="trash-2" label="Delete pane" /></span>
+				</div>
+			</template>
+
+			<template data-tpl="row-browser">
+				<div
+					class="row"
+					role="treeitem"
+					aria-level={4}
+					data-kind="pane"
+					data-tone="muted"
+					data-pane-kind="browser"
+					style="padding-left:68px"
+				>
+					<span class="row-fill" aria-hidden="true" />
+					<span class="marker"><Icon name="globe" size={14} /></span>
+					<span class="label">New Tab</span>
+					<span class="trailing"><Button icon="trash-2" label="Delete pane" /></span>
+				</div>
+			</template>
+
+			<template data-tpl="row-picker">
+				<div
+					class="row"
+					role="treeitem"
+					aria-level={4}
+					data-kind="pane"
+					data-tone="muted"
+					data-pane-kind="picker"
+					style="padding-left:68px"
+				>
+					<span class="row-fill" aria-hidden="true" />
+					<span class="marker"><Icon name="plus" size={14} /></span>
+					<span class="label">new pane</span>
+					<span class="trailing"><Button icon="trash-2" label="Delete pane" /></span>
+				</div>
+			</template>
+		</aside>
+	) : (
+		tree.map((node) => (
+			<Fragment>
+				<div
+					class="row"
+					role="treeitem"
+					aria-level={depth + 1}
+					aria-expanded={node.children?.length ? 'true' : undefined}
+					data-kind={node.kind}
+					data-tone={node.kind === 'host' || node.active ? 'bright' : 'muted'}
+					data-target={node.target ? '' : undefined}
+					data-scene={node.scene}
+					data-pane={node.paneId}
+					data-pane-kind={node.kind === 'pane' ? (node.pane ?? 'terminal') : undefined}
+					style={`padding-left:${8 + depth * 20}px`}
+				>
+					<span class="row-fill" aria-hidden="true" />
+					<span class="marker">
+						<Icon name={marker(node)} size={14} />
+						{node.bell && <span class="bell" aria-label="unseen activity" />}
+					</span>
+					<span class="label">{node.label}</span>
+					<span class="trailing">
+						{ACTIONS[node.kind].map((a) => (
+							<Button icon={a.icon} label={a.label} />
+						))}
+					</span>
+				</div>
+
+				{node.children?.length ? (
+					<div
+						class="subtree"
+						role="group"
+						data-active={depth > 0 && node.active ? '' : undefined}
+					>
+						<span class="guide" style={`left:${17 + depth * 20}px`} aria-hidden="true" />
+						<Self tree={node.children} depth={depth + 1} />
+					</div>
+				) : null}
+			</Fragment>
+		))
+	)
+}
+
+<style>
+	.sidebar {
+		display: flex;
+		flex-direction: column;
+		flex: none;
+		width: calc(var(--sidebar-w, 256px) / var(--zz-zoom, 1));
+		height: 100%;
+		min-height: 0;
+		overflow: hidden;
+		background: var(--zz-bg);
+		color: var(--zz-fg);
+		font-family: var(--zz-font-ui);
+		/* The right divider is blanked in sidebar mode with pane-gaps on
+		   (sidebar.rs:985) — the visible line is the pane's own left border. Turning
+		   gaps off takes that border away, so the divider is what is left to draw it. */
+		box-shadow: inset -1px 0 0 var(--zz-sidebar-divider, transparent);
+		/* Same screen-space rim as AppShell's window frame. */
+		border-top-left-radius: calc(var(--zz-frame-radius, var(--zz-radius-content)) / (var(--zz-scale, 1) * var(--zz-zoom, 1)));
+		border-bottom-left-radius: calc(var(--zz-frame-radius, var(--zz-radius-content)) / (var(--zz-scale, 1) * var(--zz-zoom, 1)));
+		corner-shape: squircle;
+	}
+
+	/* Header strip clears the traffic lights: AppKit owns x = 9..69 (navigation.rs:32). */
+	.strip {
+		position: relative;
+		display: flex;
+		align-items: center;
+		flex: none;
+		width: 100%;
+		height: var(--zz-titlebar-h);
+		padding-left: var(--zz-traffic-inset);
+	}
+	.lights {
+		position: absolute;
+		top: 9px;
+		left: 9px;
+		display: flex;
+		gap: 11px;
+	}
+	.lights i {
+		width: 12px;
+		height: 12px;
+		border-radius: 50%;
+		corner-shape: round;
+	}
+	.lights i:nth-child(1) { background: #ff5f57; }
+	.lights i:nth-child(2) { background: #febc2e; }
+	.lights i:nth-child(3) { background: #28c840; }
+	.controls {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+	}
+
+	.body {
+		flex: 1;
+		min-height: 0;
+		overflow: hidden;
+		padding-bottom: 8px;
+	}
+	.tree {
+		position: relative;
+		width: 100%;
+	}
+
+	.subtree {
+		position: relative;
+	}
+	.subtree[hidden] {
+		display: none;
+	}
+
+	/* 1 device-px hairline, trimmed 4px at each end (tree.rs:74, 88). */
+	.guide {
+		position: absolute;
+		top: 4px;
+		bottom: 4px;
+		width: 1px;
+		background: var(--zz-guide);
+	}
+	.subtree[data-active] > .guide { background: var(--zz-guide-active); }
+
+	.row {
+		position: relative;
+		display: flex;
+		align-items: center;
+		flex: none;
+		width: 100%;
+		min-width: 0;
+		height: var(--zz-row-h);
+		padding-right: var(--zz-inset);
+		font-size: 14px;
+		color: var(--zz-fg-muted);
+		cursor: pointer;
+		user-select: none;
+	}
+	.row[data-tone='bright'] { color: var(--zz-fg); }
+	.row[data-target] { font-weight: 500; }
+	.row[data-selected] .row-fill { background: var(--zz-wash-2); }
+
+	/* The highlight is its own layer, inset 4px each side (navigation.rs:246). */
+	.row-fill {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 4px;
+		right: 4px;
+		border-radius: var(--zz-radius);
+		corner-shape: squircle;
+	}
+	.row:hover .row-fill { background: var(--zz-wash-2); }
+
+	.marker {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex: none;
+		width: var(--zz-marker-slot);
+		height: 100%;
+	}
+	.bell {
+		position: absolute;
+		/* Centred on the icon's top-right corner: the 14px glyph is centred in the
+		   slot, so its corner sits 7px out from centre, minus half the 5px dot. */
+		top: calc(50% - 9.5px);
+		right: calc(50% - 9.5px);
+		width: 5px;
+		height: 5px;
+		border-radius: 50%;
+		background: var(--zz-warning);
+	}
+
+	.label {
+		flex: 1;
+		min-width: 0;
+		margin-left: 6px;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+
+	.trailing {
+		display: flex;
+		align-items: center;
+		flex: none;
+		height: 100%;
+		padding-left: 6px;
+		padding-right: 4px;
+		visibility: hidden;
+	}
+	.row[data-kind='host'] .trailing,
+	.row:hover .trailing { visibility: visible; }
+</style>

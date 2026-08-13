@@ -1,0 +1,119 @@
+<!doctype html>
+<!--
+  Source for public/og.png — the social card. Lives outside src/ on purpose, so
+  Astro never routes it; it is only ever rendered to a PNG.
+
+  Regenerate after editing:
+
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+      --headless --disable-gpu --hide-scrollbars \
+      --window-size=1200,630 --force-device-scale-factor=2 \
+      --virtual-time-budget=6000 \
+      --screenshot=public/og.png \
+      "file://$PWD/og-card.html"
+
+  Palette and type are copied from the :root block in src/pages/index.astro —
+  keep them in sync if the landing page ever re-themes.
+-->
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+			rel="stylesheet"
+		/>
+		<style>
+			:root {
+				--bg: #0a0a0a;
+				--fg: #fafafa;
+				--dim: #a3a3a3;
+				--mute: #737373;
+				--hair: rgba(255, 255, 255, 0.09);
+				--sans: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+				--mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+			}
+			* { margin: 0; box-sizing: border-box; }
+			html, body { width: 1200px; height: 630px; }
+			body {
+				background: var(--bg);
+				color: var(--fg);
+				font-family: var(--sans);
+				-webkit-font-smoothing: antialiased;
+				position: relative;
+				overflow: hidden;
+			}
+			/* Same two-stop bloom the landing page hangs above its hero. */
+			.bloom {
+				position: absolute;
+				inset: -120px 0 auto;
+				height: 720px;
+				background:
+					radial-gradient(50% 45% at 50% 0%, rgba(255, 255, 255, 0.09), transparent 72%),
+					radial-gradient(36% 28% at 50% 8%, rgba(255, 255, 255, 0.04), transparent 70%);
+			}
+			.card {
+				position: relative;
+				height: 100%;
+				padding: 68px 72px 60px;
+				display: flex;
+				flex-direction: column;
+			}
+			.mark { width: 54px; height: 54px; display: block; }
+			h1 {
+				margin-top: auto;
+				font-size: 82px;
+				line-height: 1.04;
+				font-weight: 600;
+				letter-spacing: -0.045em;
+				max-width: 15ch;
+			}
+			.sub {
+				margin-top: 26px;
+				font-size: 27px;
+				line-height: 1.4;
+				font-weight: 400;
+				color: var(--dim);
+				letter-spacing: -0.011em;
+				max-width: 30ch;
+			}
+			.foot {
+				margin-top: auto;
+				padding-top: 30px;
+				border-top: 1px solid var(--hair);
+				display: flex;
+				align-items: baseline;
+				justify-content: space-between;
+				font-family: var(--mono);
+				font-size: 21px;
+			}
+			.domain { color: var(--fg); letter-spacing: -0.01em; }
+			.meta { color: var(--mute); font-size: 19px; letter-spacing: 0.02em; }
+		</style>
+	</head>
+	<body>
+		<div class="bloom"></div>
+		<div class="card">
+			<svg class="mark" viewBox="0 0 96 96" fill="none">
+				<polyline
+					points="0,36 62,36 34,60 96,60"
+					stroke="#faf9f7"
+					stroke-width="9"
+					stroke-linejoin="miter"
+				/>
+			</svg>
+
+			<h1>tmux, ghostty, and gpui walked into a mux.</h1>
+			<p class="sub">
+				Shell and Chromium panes under one tmux-compatible layout, one set of
+				keys, one GPU surface.
+			</p>
+
+			<div class="foot">
+				<span class="domain">zzmux.sh</span>
+				<span class="meta">macOS · Linux · MIT / Apache-2.0</span>
+			</div>
+		</div>
+	</body>
+</html>

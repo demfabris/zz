@@ -1,0 +1,508 @@
+/* Docs skin. Same palette, type ramp, and corner language as the landing page
+   in src/pages/index.astro, mapped onto Starlight's token surface. Keep the two
+   in sync: every value below has a twin in that file's :root block. */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@font-face {
+	font-family: 'Fantasque Sans Mono';
+	src: url('/fonts/FantasqueSansMono-Regular.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Fantasque Sans Mono';
+	src: url('/fonts/FantasqueSansMono-Bold.woff2') format('woff2');
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+:root {
+	--zz-bg: #0a0a0a;
+	--zz-fg: #fafafa;
+	--zz-dim: #a3a3a3;
+	--zz-mute: #737373;
+	--zz-panel: #141414;
+	--zz-hair: rgba(255, 255, 255, 0.09);
+	--zz-hair-soft: rgba(255, 255, 255, 0.05);
+	--zz-fill: rgba(255, 255, 255, 0.03);
+	--zz-fill-hi: rgba(255, 255, 255, 0.07);
+	--zz-ease: cubic-bezier(0.2, 0, 0, 1);
+	--zz-sans: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+	--zz-mono: 'Fantasque Sans Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+	/* Starlight: neutral ramp, no blue cast. */
+	--sl-color-white: #fafafa;
+	--sl-color-gray-1: #ededed;
+	--sl-color-gray-2: #a3a3a3;
+	--sl-color-gray-3: #737373;
+	--sl-color-gray-4: #525252;
+	--sl-color-gray-5: #2a2a2a;
+	/* gray-6 is the code-block surface Starlight hands Expressive Code. */
+	--sl-color-gray-6: #141414;
+	--sl-color-gray-7: #111111;
+	--sl-color-black: #0a0a0a;
+
+	--sl-color-bg: var(--zz-bg);
+	--sl-color-bg-nav: rgba(10, 10, 10, 0.72);
+	--sl-color-bg-sidebar: transparent;
+	--sl-color-bg-inline-code: rgba(255, 255, 255, 0.06);
+	--sl-color-hairline: var(--zz-hair-soft);
+	--sl-color-hairline-light: var(--zz-hair);
+	--sl-color-hairline-shade: var(--zz-hair-soft);
+
+	/* The landing page has no chroma accent left; links carry weight and an
+	   underline instead of a hue. */
+	--sl-color-accent-low: rgba(255, 255, 255, 0.1);
+	--sl-color-accent: #fafafa;
+	--sl-color-accent-high: #fafafa;
+	--sl-color-text-accent: #fafafa;
+	--sl-color-bg-accent: #fafafa;
+	--sl-color-text-invert: #0a0a0a;
+
+	--sl-font: var(--zz-sans);
+	--sl-font-mono: var(--zz-mono);
+	--sl-line-height: 1.65;
+	--sl-line-height-headings: 1.15;
+	--sl-content-width: 48rem;
+	--sl-nav-height: 4rem;
+	--sl-text-code: 0.8125rem;
+	--sl-text-code-sm: 0.75rem;
+}
+
+:root[data-theme='light'] {
+	--zz-bg: #fbfbfa;
+	--zz-fg: #0a0a0a;
+	--zz-dim: #52525b;
+	--zz-mute: #78787f;
+	--zz-panel: #ffffff;
+	--zz-hair: rgba(0, 0, 0, 0.12);
+	--zz-hair-soft: rgba(0, 0, 0, 0.08);
+	--zz-fill: rgba(0, 0, 0, 0.025);
+	--zz-fill-hi: rgba(0, 0, 0, 0.06);
+
+	--sl-color-white: #0a0a0a;
+	--sl-color-gray-1: #18181b;
+	--sl-color-gray-2: #52525b;
+	--sl-color-gray-3: #6b6b73;
+	--sl-color-gray-4: #9a9aa2;
+	--sl-color-gray-5: #d7d7d4;
+	--sl-color-gray-6: #eeeeeb;
+	--sl-color-gray-7: #f6f6f4;
+	--sl-color-black: #ffffff;
+
+	--sl-color-bg: var(--zz-bg);
+	--sl-color-bg-nav: rgba(251, 251, 250, 0.72);
+	--sl-color-bg-inline-code: rgba(0, 0, 0, 0.06);
+
+	--sl-color-accent-low: rgba(0, 0, 0, 0.08);
+	--sl-color-accent: #0a0a0a;
+	--sl-color-accent-high: #0a0a0a;
+	--sl-color-text-accent: #0a0a0a;
+	--sl-color-bg-accent: #0a0a0a;
+	--sl-color-text-invert: #fbfbfa;
+}
+
+/* Same rule the landing page opens with: every rounded quad is a superellipse
+   on Chrome 139+, plain border-radius everywhere else. */
+* {
+	corner-shape: squircle;
+}
+
+body {
+	-webkit-font-smoothing: antialiased;
+	letter-spacing: -0.006em;
+}
+
+/* The hero wash, reused. Fixed so it stays put while the content scrolls, and
+   short enough that it is gone by the second heading. */
+body::before {
+	content: '';
+	position: fixed;
+	inset: 0 0 auto;
+	height: 520px;
+	background:
+		radial-gradient(50% 45% at 50% 0%, rgba(255, 255, 255, 0.07), transparent 72%),
+		radial-gradient(36% 28% at 50% 6%, rgba(255, 255, 255, 0.035), transparent 70%);
+	pointer-events: none;
+	z-index: 0;
+}
+:root[data-theme='light'] body::before {
+	background: radial-gradient(50% 45% at 50% 0%, rgba(0, 0, 0, 0.035), transparent 72%);
+}
+
+/* ── top bar ─────────────────────────────────────────────────────────────── */
+
+header.header {
+	backdrop-filter: blur(14px);
+	border-bottom: 1px solid var(--zz-hair-soft);
+	box-shadow: none;
+}
+.site-title {
+	font-weight: 600;
+	letter-spacing: -0.03em;
+	color: var(--zz-fg);
+}
+.site-title img {
+	width: 22px;
+	height: 22px;
+}
+/* Search box and the icon buttons beside it, as the landing nav's pills. */
+site-search button[data-open-modal] {
+	border-radius: 999px;
+	border-color: var(--zz-hair);
+	background: var(--zz-fill);
+	color: var(--zz-mute);
+	transition: color 0.15s var(--zz-ease), background-color 0.15s var(--zz-ease);
+}
+site-search button[data-open-modal]:hover {
+	color: var(--zz-fg);
+	background: var(--zz-fill-hi);
+}
+.social-icons a {
+	border-radius: 999px;
+	color: var(--zz-mute);
+	transition: color 0.15s var(--zz-ease), background-color 0.15s var(--zz-ease);
+}
+.social-icons a:hover {
+	color: var(--zz-fg);
+	background: var(--zz-fill-hi);
+}
+starlight-theme-select select,
+starlight-lang-select select {
+	color: var(--zz-mute);
+}
+
+/* ── sidebars ────────────────────────────────────────────────────────────── */
+
+.sidebar-pane {
+	border-inline-end: 1px solid var(--zz-hair-soft);
+}
+.sidebar-content a {
+	border-radius: 10px;
+	padding-block: 0.35rem;
+	font-size: 0.875rem;
+	color: var(--zz-mute);
+	transition: color 0.15s var(--zz-ease), background-color 0.15s var(--zz-ease);
+}
+.sidebar-content a:hover {
+	color: var(--zz-fg);
+	background: var(--zz-fill-hi);
+}
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover {
+	color: var(--zz-fg);
+	font-weight: 500;
+	background: var(--zz-fill-hi);
+}
+/* Sidebar status badges ("Upcoming"), as the landing page's mono micro-label
+   rather than Starlight's outlined box. */
+.sidebar-content .sl-badge {
+	border: 0;
+	border-radius: 999px;
+	padding: 1px 7px;
+	background: var(--zz-fill-hi);
+	color: var(--zz-mute);
+	font-family: var(--zz-mono);
+	font-size: 9.5px;
+	font-weight: 500;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	line-height: 1.7;
+}
+.right-sidebar {
+	border-inline-start: 1px solid var(--zz-hair-soft);
+}
+starlight-toc a {
+	border-radius: 8px;
+	border-inline-start: 0;
+	font-size: 0.8125rem;
+	color: var(--zz-mute);
+	transition: color 0.15s var(--zz-ease);
+}
+starlight-toc a:hover {
+	color: var(--zz-dim);
+}
+starlight-toc a[aria-current='true'],
+starlight-toc a[aria-current='true']:hover {
+	color: var(--zz-fg);
+	font-weight: 500;
+	background: var(--zz-fill-hi);
+}
+
+/* ── page head ───────────────────────────────────────────────────────────── */
+
+.content-panel + .content-panel {
+	border-top: 0;
+}
+.content-panel:first-of-type {
+	padding-block-start: clamp(2rem, 6vw, 4rem);
+}
+.content-panel h1#_top {
+	font-size: clamp(34px, 5vw, 46px);
+	font-weight: 700;
+	letter-spacing: -0.045em;
+	line-height: 1.05;
+	text-wrap: balance;
+	color: var(--zz-fg);
+}
+
+/* ── prose ───────────────────────────────────────────────────────────────── */
+
+.sl-markdown-content {
+	color: var(--zz-dim);
+	text-wrap: pretty;
+}
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.sl-markdown-content h4 {
+	color: var(--zz-fg);
+	font-weight: 650;
+	letter-spacing: -0.035em;
+	text-wrap: balance;
+}
+.sl-markdown-content h2 {
+	font-size: clamp(24px, 3vw, 30px);
+}
+/* The rule belongs to the wrapper, not the heading: an h2 is only as wide as
+   its text, so a border on it stops mid-column. */
+.sl-markdown-content .sl-heading-wrapper.level-h2 {
+	margin-top: 3.25rem !important;
+	padding-top: 2rem;
+	border-top: 1px solid var(--zz-hair-soft);
+}
+.sl-markdown-content .sl-heading-wrapper.level-h2:first-child {
+	margin-top: 0 !important;
+	padding-top: 0;
+	border-top: 0;
+}
+.sl-markdown-content h3 {
+	font-size: 19px;
+	margin-top: 2.25rem !important;
+}
+.sl-markdown-content h4 {
+	font-size: 16px;
+	letter-spacing: -0.02em;
+}
+/* The lede: first paragraph under the title, sized like the landing sub. */
+.sl-markdown-content > p:first-child {
+	font-size: 18px;
+	color: var(--zz-dim);
+}
+.sl-markdown-content a:not(:where(.not-content *)) {
+	color: var(--zz-fg);
+	font-weight: 500;
+	text-decoration: underline;
+	text-decoration-color: color-mix(in srgb, var(--zz-fg) 26%, transparent);
+	text-underline-offset: 0.15em;
+	transition: text-decoration-color 0.15s var(--zz-ease);
+}
+.sl-markdown-content a:not(:where(.not-content *)):hover {
+	text-decoration-color: var(--zz-fg);
+}
+.sl-markdown-content strong {
+	color: var(--zz-fg);
+	font-weight: 600;
+}
+.sl-markdown-content li + li {
+	margin-top: 0.4rem;
+}
+.sl-markdown-content li::marker {
+	color: var(--zz-mute);
+}
+.sl-markdown-content blockquote:not(:where(.not-content *)) {
+	border-inline-start-color: var(--zz-hair);
+	color: var(--zz-mute);
+}
+.sl-markdown-content hr:not(:where(.not-content *)) {
+	border-color: var(--zz-hair-soft);
+}
+
+/* Inline code: a hairline chip, not a filled block. */
+.sl-markdown-content code:not(:where(.not-content *)) {
+	padding: 0.15em 0.4em;
+	border-radius: 6px;
+	background: var(--zz-fill);
+	box-shadow: inset 0 0 0 1px var(--zz-hair-soft);
+	font-family: var(--zz-mono);
+	font-size: 0.85em;
+	color: var(--zz-fg);
+}
+.sl-markdown-content :where(h1, h2, h3, h4, a) code:not(:where(.not-content *)) {
+	background: none;
+	box-shadow: none;
+	padding: 0;
+	color: inherit;
+}
+
+/* ── tables ──────────────────────────────────────────────────────────────── */
+
+/* Starlight ships tables as `display: block; overflow: auto`, which makes them
+   scroll on small screens but also shrinks them to their content on large ones.
+   Take the full column where there is room, keep the scroll box where there
+   isn't. */
+.sl-markdown-content table:not(:where(.not-content *)) {
+	border-collapse: collapse;
+	font-size: 14px;
+}
+@media (min-width: 50em) {
+	.sl-markdown-content table:not(:where(.not-content *)) {
+		display: table;
+		width: 100%;
+	}
+}
+.sl-markdown-content :where(th, td):not(:where(.not-content *)) {
+	padding: 10px 16px 10px 0;
+	border: 0;
+	border-bottom: 1px solid var(--zz-hair-soft);
+	vertical-align: baseline;
+	line-height: 1.45;
+}
+.sl-markdown-content th:not(:where(.not-content *)) {
+	font-family: var(--zz-mono);
+	font-size: 11px;
+	font-weight: 500;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--zz-mute);
+}
+.sl-markdown-content tbody tr:last-child :where(th, td) {
+	border-bottom: 0;
+}
+/* First column of a reference table is the name of the thing. */
+.sl-markdown-content tbody td:first-child code {
+	white-space: nowrap;
+}
+
+/* ── code blocks ─────────────────────────────────────────────────────────── */
+
+/* Corner and border come from expressiveCode.styleOverrides in astro.config;
+   only the affordances need nudging here. */
+.expressive-code .copy button {
+	border-radius: 8px;
+}
+.expressive-code .frame.is-terminal .header {
+	font-family: var(--zz-mono);
+	font-size: 11px;
+	letter-spacing: 0.02em;
+}
+
+/* ── asides ──────────────────────────────────────────────────────────────── */
+
+.starlight-aside {
+	border-radius: 14px;
+	border-inline-start-width: 1px;
+	border: 1px solid var(--zz-hair);
+	background: var(--zz-fill);
+	padding: 1rem 1.15rem;
+}
+.starlight-aside__title {
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	color: var(--zz-fg);
+}
+.starlight-aside__content {
+	font-size: 14.5px;
+	color: var(--zz-dim);
+}
+.starlight-aside--caution,
+.starlight-aside--danger {
+	border-color: color-mix(in srgb, #ef4444 34%, transparent);
+}
+
+/* ── prev/next ───────────────────────────────────────────────────────────── */
+
+.pagination-links a {
+	border-radius: 16px;
+	border-color: var(--zz-hair-soft);
+	background: var(--zz-fill);
+	box-shadow: none;
+	transition: background-color 0.15s var(--zz-ease), border-color 0.15s var(--zz-ease);
+}
+.pagination-links a:hover {
+	border-color: var(--zz-hair);
+	background: var(--zz-fill-hi);
+}
+.pagination-links a > span:first-child {
+	font-family: var(--zz-mono);
+	font-size: 11px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--zz-mute);
+}
+.pagination-links .link-title {
+	font-weight: 600;
+	letter-spacing: -0.02em;
+	color: var(--zz-fg);
+}
+
+/* ── page-local blocks (raw HTML in the markdown) ────────────────────────── */
+
+/* Card grid: the landing's hairline-on-fill card, two up. */
+.zz-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+	gap: 12px;
+	margin-top: 1.5rem;
+}
+.zz-card {
+	display: block;
+	padding: 18px 20px;
+	border-radius: 16px;
+	background: var(--zz-fill);
+	box-shadow: inset 0 0 0 1px var(--zz-hair-soft);
+	text-decoration: none !important;
+	transition: background-color 0.2s var(--zz-ease), box-shadow 0.2s var(--zz-ease);
+}
+.zz-card:hover {
+	background: var(--zz-fill-hi);
+	box-shadow: inset 0 0 0 1px var(--zz-hair);
+}
+.zz-card b {
+	display: block;
+	font-size: 15.5px;
+	font-weight: 600;
+	letter-spacing: -0.02em;
+	color: var(--zz-fg);
+}
+.zz-card span {
+	display: block;
+	margin-top: 5px;
+	font-size: 13.5px;
+	line-height: 1.5;
+	color: var(--zz-mute);
+}
+
+/* Key chips, borrowed from the app's own kbd pill. Deliberately `inline`, not
+   `inline-block`: an inline box takes padding without contributing height, so a
+   table row carrying two chips is exactly as tall as one carrying none. */
+.sl-markdown-content kbd {
+	padding: 3px 6px;
+	border-radius: 6px;
+	background: var(--zz-fill-hi);
+	box-shadow: inset 0 0 0 1px var(--zz-hair);
+	font-family: var(--zz-mono);
+	font-size: 11.5px;
+	white-space: nowrap;
+	color: var(--zz-fg);
+}
+
+/* A mono micro-label above a group, same size and tracking as the bench detail
+   line on the landing page. */
+.zz-eyebrow {
+	margin-top: 2.5rem !important;
+	font-family: var(--zz-mono);
+	font-size: 11px;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--zz-mute);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	* {
+		transition: none !important;
+	}
+}

@@ -1,0 +1,40 @@
+[package]
+name = "zz-browser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "CEF off-screen-rendering browser runtime"
+publish = false
+
+[features]
+default = ["cef-runtime"]
+cef-runtime = ["dep:cef"]
+
+[dependencies]
+async-channel.workspace = true
+base64.workspace = true
+cef = { workspace = true, optional = true }
+getrandom.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+pollster.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+url.workspace = true
+wgpu.workspace = true
+zz-protocol = { path = "../zz-protocol" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+gpui.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2.workspace = true
+objc2.workspace = true
+objc2-core-foundation = { workspace = true, features = ["CFDictionary", "CFNumber", "CFString"] }
+objc2-io-surface.workspace = true
+objc2-metal.workspace = true
+
+[lints]
+workspace = true

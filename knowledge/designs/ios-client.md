@@ -19,8 +19,8 @@ timestamp: 2026-08-07T18:00:00Z
 > keyboard/scroll/CADisplayLink/clipboard, M3 in-process russh tunnel
 > (TOFU + generated ed25519 + `zz proxy` over an exec channel), M4
 > lifecycle/appearance/key-strip and `cargo xtask ios-sim [--run]`.
-> Still owed before physical hardware: device signing, dynamic safe-area
-> insets, the UITextInput stub for the spacebar cursor, and an interactive
+> Still owed before physical hardware: device signing, the UITextInput stub
+> for the spacebar cursor, and an interactive
 > attach-through-tunnel pass. Keychain-backed key storage landed 2026-08-08
 > (see M3).
 
@@ -586,6 +586,36 @@ zero panics across the whole session. Known minors for the UI pass:
 page-leave commits an unchanged stepper as an explicit override (spurious
 provenance flip); accent-popup quirk under synthetic sim typing (not
 reproducible with real input paths).
+
+# v5 (2026-08-12): reachability and simulator packaging recovery
+
+The review found three regressions in the current tree. `AppShell` imported
+`ClosePane` on iOS while `workspace` hid the action's re-export, so
+`cargo check -p zz-ios --target aarch64-apple-ios-sim` stopped in the shared
+`zz` crate. Commit `ce41e3f` had also replaced the iOS-owned shell with the
+desktop shell and left `drawer.rs` plus `settings.rs` outside the module graph.
+The simulator bundler copied a linker-signed executable into `ZZ.app` after
+linking; `codesign --verify --deep --strict` rejected the completed bundle
+because the signature did not bind `Info.plist` or seal its resources.
+
+The recovery restored `chrome.rs` as the active iOS-owned shell and removed
+the parked copy. The backend reads UIKit's `safeAreaInsets` at launch and on
+each safe-area change, forces a GPUI frame, and applies all four edges around
+the shell. Keyboard avoidance reserves bottom space when the keyboard
+reaches the bottom edge and spans the view, so a floating or undocked iPad
+keyboard cannot collapse the workspace. Three geometry tests cover docked,
+floating, and invalid frames.
+
+`cargo xtask ios-sim` signs the completed bundle with the simulator
+Keychain entitlements and verifies the signature before install. The 2026-08-12
+pass completed the iOS cross-target check, the backend test build, all 11 xtask
+tests, bundle assembly, strict signature verification, and entitlement
+inspection. The macOS CI leg now builds the iOS test harness and signed
+simulator bundle, so target-only regressions fail before merge. The host's
+root-owned `simdiskimaged` process kept `simctl` requests open until timeout,
+including requests against a booted iPad Pro 11-inch (M5) simulator. That host
+failure prevented a fresh install and launch smoke during this pass; the source
+and bundle gates passed.
 
 # Validation
 

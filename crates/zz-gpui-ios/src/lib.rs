@@ -38,6 +38,7 @@ pub use system_traits::{reduce_motion, reduce_transparency};
 pub use window::keyboard_inset;
 /// The factor a pinch has accumulated since the app last looked. Taking it clears it.
 pub use window::take_pinch_scale;
+pub use window::{SafeAreaInsets, safe_area_insets};
 
 use objc::runtime::Object;
 
@@ -67,6 +68,15 @@ pub(crate) struct CGRect {
     pub size: CGSize,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct UIEdgeInsets {
+    pub top: f64,
+    pub left: f64,
+    pub bottom: f64,
+    pub right: f64,
+}
+
 unsafe impl objc::Encode for CGPoint {
     fn encode() -> objc::Encoding {
         unsafe { objc::Encoding::from_str("{CGPoint=dd}") }
@@ -82,6 +92,12 @@ unsafe impl objc::Encode for CGSize {
 unsafe impl objc::Encode for CGRect {
     fn encode() -> objc::Encoding {
         unsafe { objc::Encoding::from_str("{CGRect={CGPoint=dd}{CGSize=dd}}") }
+    }
+}
+
+unsafe impl objc::Encode for UIEdgeInsets {
+    fn encode() -> objc::Encoding {
+        unsafe { objc::Encoding::from_str("{UIEdgeInsets=dddd}") }
     }
 }
 

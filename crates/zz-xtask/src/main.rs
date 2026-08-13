@@ -225,6 +225,8 @@ fn ios_sim(args: &[String]) -> Result<(), Box<dyn Error>> {
         PathBuf::from("target").join(TARGET).join("debug/zz-ios"),
         bundle.join("ZZ"),
     )?;
+    sign_ios_sim_bundle(&bundle)?;
+    verify_ios_sim_bundle(&bundle)?;
     println!("bundled {}", bundle.display());
 
     if run {
@@ -241,6 +243,38 @@ fn ios_sim(args: &[String]) -> Result<(), Box<dyn Error>> {
         if !status.success() {
             return Err("simctl launch failed".into());
         }
+    }
+    Ok(())
+}
+
+fn sign_ios_sim_bundle(bundle: &Path) -> Result<(), Box<dyn Error>> {
+    let status = process::Command::new("/usr/bin/codesign")
+        .args(["--force", "--sign", "-", "--entitlements"])
+        .arg("crates/zz-ios/ios/sim.entitlements")
+        .arg("--generate-entitlement-der")
+        .arg(bundle)
+        .status()?;
+    if !status.success() {
+        return Err(format!(
+            "codesign failed for the iOS simulator bundle {} with {status}",
+            bundle.display()
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn verify_ios_sim_bundle(bundle: &Path) -> Result<(), Box<dyn Error>> {
+    let status = process::Command::new("/usr/bin/codesign")
+        .args(["--verify", "--deep", "--strict", "--verbose=2"])
+        .arg(bundle)
+        .status()?;
+    if !status.success() {
+        return Err(format!(
+            "iOS simulator bundle signature verification failed for {} with {status}",
+            bundle.display()
+        )
+        .into());
     }
     Ok(())
 }

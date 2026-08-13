@@ -100,15 +100,12 @@ pub(crate) fn run(profile: zz::AppProfile) {
                     zz::engine::workspace::AppView::new(
                         controller.clone(),
                         agent_controller.clone(),
-                        mux,
+                        mux.clone(),
                         window,
                         cx,
                     )
                 });
-                let shell = cx.new(|cx| {
-                    zz::engine::AppShell::new(view, controller, agent_controller, window, cx)
-                });
-                let chrome = cx.new(|_| crate::chrome::IosChrome::new(shell.into()));
+                let chrome = cx.new(|cx| crate::chrome::IosChrome::new(view, mux, window, cx));
                 cx.new(|cx| zz::engine::build_root(chrome, window, cx))
             })
             .expect("failed to open zz window");

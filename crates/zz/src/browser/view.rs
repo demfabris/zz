@@ -1,5 +1,11 @@
 use std::{
-    collections::HashSet, fs::File, io::Read as _, ops::Range, path::Path, sync::Arc, time::Instant,
+    collections::{HashMap, HashSet},
+    fs::File,
+    io::Read as _,
+    ops::Range,
+    path::Path,
+    sync::Arc,
+    time::Instant,
 };
 
 #[cfg(target_os = "macos")]
@@ -37,8 +43,8 @@ use zz_terminal::{
 use zz_ui::browser::{
     BrowserActionMenuState, BrowserEmptyHint, BrowserErrorPanel, BrowserMenuActions,
     BrowserMenuProfile, BrowserPickStatus, BrowserProfileDiscoveryState, BrowserTabInfo,
-    BrowserTabStrip, BrowserToolbar, browser_action_menu, browser_recent_row,
-    browser_toolbar_button,
+    BrowserTabStrip, BrowserToolbar, browser_action_menu, browser_omnibox_panel,
+    browser_omnibox_row, browser_recent_row, browser_toolbar_button,
 };
 use zz_ui::feedback::browser_clear_site_data_alert;
 use zz_ui::pane::frame_rate_badge;
@@ -54,7 +60,7 @@ use zz_ui::{
 use crate::browser::macos_surface::MacBrowserSurfaceCache;
 use zz_chrome_import as chrome_import;
 
-use super::recent_pages::{self, RecentPage};
+use super::recent_pages::{self, HistorySuggestion, RecentPage};
 use crate::{
     browser::controller::{
         BrowserController, BrowserPaneFrameContent, BrowserSessionRequest, ControllerEvent,
@@ -73,7 +79,9 @@ use crate::{
 const DEFAULT_URL: &str = "about:blank";
 const TAB_ID: TabId = TabId(0);
 const EMPTY_STATE_RECENT_LIMIT: usize = 8;
+const OMNIBOX_SUGGESTION_LIMIT: usize = 8;
 const BROWSER_KEY_CONTEXT: &str = "Browser";
+const OMNIBOX_INPUT_KEY_CONTEXT: &str = "BrowserOmnibox > ZzInput";
 #[cfg(target_os = "macos")]
 const FULL_DISK_ACCESS_SETTINGS_URL: &str =
     "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles";
@@ -92,7 +100,10 @@ gpui::actions!(
         GoBack,
         GoForward,
         Reload,
-        FocusAddress
+        FocusAddress,
+        OmniboxNext,
+        OmniboxPrevious,
+        OmniboxDelete
     ]
 );
 
@@ -206,6 +217,7 @@ fn browser_key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-]", GoForward, Some(BROWSER_KEY_CONTEXT)),
     ];
     bindings.extend(select_tab_bindings("cmd"));
+    bindings.extend(omnibox_key_bindings());
     bindings
 }
 
@@ -241,7 +253,20 @@ fn browser_key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("alt-right", GoForward, Some(BROWSER_KEY_CONTEXT)),
     ];
     bindings.extend(select_tab_bindings("ctrl"));
+    bindings.extend(omnibox_key_bindings());
     bindings
+}
+
+fn omnibox_key_bindings() -> [KeyBinding; 3] {
+    [
+        KeyBinding::new("down", OmniboxNext, Some(OMNIBOX_INPUT_KEY_CONTEXT)),
+        KeyBinding::new("up", OmniboxPrevious, Some(OMNIBOX_INPUT_KEY_CONTEXT)),
+        KeyBinding::new(
+            "shift-delete",
+            OmniboxDelete,
+            Some(OMNIBOX_INPUT_KEY_CONTEXT),
+        ),
+    ]
 }
 
 fn browser_edit_binding(keystroke: &str, command: EditCommand) -> KeyBinding {
@@ -266,6 +291,37 @@ fn is_blank_url(url: &str) -> bool {
     url == "about:blank"
 }
 
+fn differs_by_one_character_edit(previous: &str, next: &str) -> bool {
+    let previous = previous.chars().collect::<Vec<_>>();
+    let next = next.chars().collect::<Vec<_>>();
+    match previous.len().cmp(&next.len()) {
+        std::cmp::Ordering::Equal => {
+            previous
+                .iter()
+                .zip(&next)
+                .filter(|(left, right)| left != right)
+                .count()
+                == 1
+        }
+        std::cmp::Ordering::Less if previous.len() + 1 == next.len() => {
+            one_character_inserted(&previous, &next)
+        }
+        std::cmp::Ordering::Greater if next.len() + 1 == previous.len() => {
+            one_character_inserted(&next, &previous)
+        }
+        std::cmp::Ordering::Less | std::cmp::Ordering::Greater => false,
+    }
+}
+
+fn one_character_inserted(shorter: &[char], longer: &[char]) -> bool {
+    let mismatch = shorter
+        .iter()
+        .zip(longer)
+        .position(|(left, right)| left != right)
+        .unwrap_or(shorter.len());
+    shorter[mismatch..] == longer[mismatch + 1..]
+}
+
 fn tab_host_label(url: &str) -> SharedString {
     if url.is_empty() || is_blank_url(url) {
         return "New Tab".into();
@@ -277,6 +333,39 @@ fn tab_host_label(url: &str) -> SharedString {
         "New Tab".into()
     } else {
         host.to_owned().into()
+    }
+}
+
+#[derive(Clone)]
+struct PendingHistoryUse {
+    profile: String,
+    input: String,
+    selected: bool,
+    started: bool,
+}
+
+#[derive(Default)]
+struct OmniboxState {
+    query: String,
+    suggestions: Vec<HistorySuggestion>,
+    selected: Option<usize>,
+    previous_value: String,
+    incremental_input: bool,
+}
+
+impl OmniboxState {
+    fn begin(&mut self, value: &str) {
+        self.reset();
+        value.clone_into(&mut self.previous_value);
+        self.incremental_input = true;
+    }
+
+    fn reset(&mut self) {
+        self.query.clear();
+        self.suggestions.clear();
+        self.selected = None;
+        self.previous_value.clear();
+        self.incremental_input = false;
     }
 }
 
@@ -378,6 +467,7 @@ pub(crate) struct BrowserView {
     address: Entity<InputState>,
     chrome: Entity<BrowserChromeView>,
     address_editing: bool,
+    omnibox: OmniboxState,
     focus_handle: FocusHandle,
     window_corners: WindowCorners,
     content_bounds: Option<Bounds<Pixels>>,
@@ -412,6 +502,7 @@ pub(crate) struct BrowserView {
     tabs: Vec<BrowserTab>,
     active_tab: TabId,
     next_tab_id: u64,
+    pending_history_uses: HashMap<TabId, PendingHistoryUse>,
     error: Option<Arc<str>>,
     recoverable: bool,
     chrome_profiles: Vec<chrome_import::profiles::DetectedChromeProfile>,
@@ -588,12 +679,11 @@ impl BrowserView {
             window,
             |view, address, event: &InputEvent, window, cx| match event {
                 InputEvent::PressEnter { .. } => {
-                    let value = address.read(cx).value().to_string();
-                    view.submit_address(&value, cx);
-                    view.focus_page(window, cx);
+                    view.accept_omnibox(window, cx);
                 }
                 InputEvent::Focus => {
                     view.select_pane(cx);
+                    view.omnibox.begin(&address.read(cx).value());
                     view.set_address_editing(true, cx);
                     let address = address.clone();
                     cx.defer_in(window, move |_, _, cx| {
@@ -604,7 +694,26 @@ impl BrowserView {
                     });
                 }
                 InputEvent::Blur => view.set_address_editing(false, cx),
-                InputEvent::Change | InputEvent::PasteImages(_) => {}
+                InputEvent::Change => {
+                    let value = address.read(cx).value().to_string();
+                    if let Some(completion) = view.update_omnibox(&value, cx) {
+                        let query = view.omnibox.query.clone();
+                        let address = address.clone();
+                        cx.defer_in(window, move |view, window, cx| {
+                            if !view.address_editing
+                                || view.omnibox.query != query
+                                || view.omnibox.selected != Some(0)
+                            {
+                                return;
+                            }
+                            address.update(cx, |address, cx| {
+                                address.set_value(completion.clone(), window, cx);
+                                address.set_selected_range(query.len()..completion.len(), cx);
+                            });
+                        });
+                    }
+                }
+                InputEvent::PasteImages(_) => {}
             },
         );
         let controller_subscription = cx.subscribe_in(
@@ -686,6 +795,7 @@ impl BrowserView {
             address,
             chrome,
             address_editing: false,
+            omnibox: OmniboxState::default(),
             focus_handle,
             window_corners: WindowCorners::NONE,
             content_bounds: None,
@@ -720,6 +830,7 @@ impl BrowserView {
             tabs,
             active_tab,
             next_tab_id,
+            pending_history_uses: HashMap::new(),
             error,
             recoverable,
             chrome_profiles: Vec::new(),
@@ -757,8 +868,20 @@ impl BrowserView {
     }
 
     fn set_address_editing(&mut self, editing: bool, cx: &mut Context<Self>) {
+        let mut changed = false;
         if self.address_editing != editing {
             self.address_editing = editing;
+            changed = true;
+        }
+        if !editing
+            && (!self.omnibox.query.is_empty()
+                || !self.omnibox.suggestions.is_empty()
+                || self.omnibox.selected.is_some())
+        {
+            self.omnibox.reset();
+            changed = true;
+        }
+        if changed {
             cx.notify();
         }
     }
@@ -801,18 +924,21 @@ impl BrowserView {
             BrowserCommand::Navigate(url) => self.submit_address(&url, cx),
             BrowserCommand::Reload => {
                 self.cancel_element_pick(cx);
+                self.pending_history_uses.remove(&self.active_tab);
                 self.controller.update(cx, |controller, cx| {
                     controller.reload(self.pane, self.active_tab, cx);
                 });
             }
             BrowserCommand::Back => {
                 self.cancel_element_pick(cx);
+                self.pending_history_uses.remove(&self.active_tab);
                 self.controller.update(cx, |controller, cx| {
                     controller.go_back(self.pane, self.active_tab, cx);
                 });
             }
             BrowserCommand::Forward => {
                 self.cancel_element_pick(cx);
+                self.pending_history_uses.remove(&self.active_tab);
                 self.controller.update(cx, |controller, cx| {
                     controller.go_forward(self.pane, self.active_tab, cx);
                 });
@@ -920,15 +1046,84 @@ impl BrowserView {
         );
     }
 
+    fn update_omnibox(&mut self, value: &str, cx: &mut Context<Self>) -> Option<String> {
+        if !self.address_editing {
+            return None;
+        }
+        let previous = self.omnibox.query.clone();
+        let typed_one = value.starts_with(&previous)
+            && value.chars().count() == previous.chars().count().saturating_add(1);
+        self.omnibox.incremental_input &=
+            typed_one || differs_by_one_character_edit(&self.omnibox.previous_value, value);
+        value.clone_into(&mut self.omnibox.previous_value);
+        value.clone_into(&mut self.omnibox.query);
+        self.omnibox.suggestions =
+            recent_pages::suggestions(&self.profile, value, OMNIBOX_SUGGESTION_LIMIT, cx);
+        self.omnibox.selected = None;
+        let completion = typed_one
+            .then(|| {
+                self.omnibox
+                    .suggestions
+                    .first()
+                    .and_then(|suggestion| suggestion.inline_completion.clone())
+            })
+            .flatten();
+        if completion.is_some() {
+            self.omnibox.selected = Some(0);
+        }
+        cx.notify();
+        completion
+    }
+
+    fn accept_omnibox(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected = self
+            .omnibox
+            .selected
+            .and_then(|index| self.omnibox.suggestions.get(index))
+            .cloned();
+        let value = selected.as_ref().map_or_else(
+            || self.address.read(cx).value().to_string(),
+            |suggestion| suggestion.url.clone(),
+        );
+        let input = if self.omnibox.query.is_empty() {
+            value.clone()
+        } else {
+            self.omnibox.query.clone()
+        };
+        let selected = selected.is_some();
+        let history_use = (selected || self.omnibox.incremental_input).then(|| PendingHistoryUse {
+            profile: self.profile.clone(),
+            input,
+            selected,
+            started: false,
+        });
+        self.navigate_address(&value, history_use, cx);
+        self.focus_page(window, cx);
+    }
+
     fn submit_address(&mut self, value: &str, cx: &mut Context<Self>) {
+        self.navigate_address(value, None, cx);
+    }
+
+    fn navigate_address(
+        &mut self,
+        value: &str,
+        history_use: Option<PendingHistoryUse>,
+        cx: &mut Context<Self>,
+    ) {
         if value.trim().is_empty() {
             return;
         }
+        self.pending_history_uses.remove(&self.active_tab);
         match resolve_address(value, crate::config::browser_search_provider(cx)) {
             Ok(url) => {
                 self.cancel_element_pick(cx);
                 self.error = None;
                 self.current_url.clone_from(&url);
+                if let Some(history_use) = history_use {
+                    self.pending_history_uses
+                        .insert(self.active_tab, history_use);
+                }
                 self.controller.update(cx, |controller, cx| {
                     controller.navigate(self.pane, self.active_tab, &url, cx);
                 });
@@ -936,6 +1131,40 @@ impl BrowserView {
             Err(error) => self.error = Some(Arc::from(error.to_string())),
         }
         cx.notify();
+    }
+
+    fn complete_history_use(
+        &mut self,
+        tab: TabId,
+        url: &str,
+        succeeded: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !self
+            .pending_history_uses
+            .get(&tab)
+            .is_some_and(|history_use| history_use.started)
+        {
+            return;
+        }
+        let Some(history_use) = self.pending_history_uses.remove(&tab) else {
+            return;
+        };
+        if succeeded {
+            recent_pages::record_omnibox_use(
+                &history_use.profile,
+                &history_use.input,
+                url,
+                history_use.selected,
+                cx,
+            );
+        }
+    }
+
+    fn mark_history_use_started(&mut self, tab: TabId) {
+        if let Some(history_use) = self.pending_history_uses.get_mut(&tab) {
+            history_use.started = true;
+        }
     }
 
     fn focus_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -970,6 +1199,7 @@ impl BrowserView {
             }
             ControllerEvent::Failed(error) => {
                 self.element_pick_active = false;
+                self.pending_history_uses.clear();
                 self.error = Some(error.clone());
                 self.recoverable =
                     controller.read(cx).runtime_phase() == Some(RuntimePhase::Running);
@@ -999,12 +1229,12 @@ impl BrowserView {
                             address.set_value(display, window, cx);
                         });
                     }
-                    recent_pages::record_visit(url, cx);
+                    recent_pages::record_visit(&self.profile, url, cx);
                     self.publish_tabs(cx);
                 }
                 BrowserEvent::TitleChanged { title, .. } => {
                     self.title = title.to_string();
-                    recent_pages::record_title(&self.current_url, title, cx);
+                    recent_pages::record_title(&self.profile, &self.current_url, title, cx);
                 }
                 BrowserEvent::LoadingChanged {
                     loading,
@@ -1019,7 +1249,11 @@ impl BrowserView {
                         address.set_loading(*loading, window, cx);
                     });
                     if *loading {
+                        self.mark_history_use_started(self.active_tab);
                         self.error = None;
+                    } else {
+                        let url = self.current_url.clone();
+                        self.complete_history_use(self.active_tab, &url, self.error.is_none(), cx);
                     }
                 }
                 BrowserEvent::FrameReady { .. } if self.visible => {
@@ -1044,6 +1278,7 @@ impl BrowserView {
                     self.cursor = cursor_style(*cursor);
                 }
                 BrowserEvent::RenderProcessTerminated { status, .. } => {
+                    self.pending_history_uses.remove(&self.active_tab);
                     self.element_pick_active = false;
                     self.error = Some(Arc::from(format!("Renderer stopped: {status}")));
                     self.recoverable = true;
@@ -1089,7 +1324,11 @@ impl BrowserView {
                 } => {
                     self.open_tab(Some(url), *foreground, window, cx);
                 }
-                BrowserEvent::ElementPickCancelled { .. } | BrowserEvent::Closed { .. } => {
+                BrowserEvent::Closed { .. } => {
+                    self.pending_history_uses.remove(&self.active_tab);
+                    self.element_pick_active = false;
+                }
+                BrowserEvent::ElementPickCancelled { .. } => {
                     self.element_pick_active = false;
                 }
             },
@@ -1103,6 +1342,7 @@ impl BrowserView {
                 self.emit_notification(message.to_string(), ClientMessageKind::Error, cx);
             }
             ControllerEvent::BrowserFailed { pane, message } if *pane == self.pane => {
+                self.pending_history_uses.clear();
                 self.element_pick_active = false;
                 self.error = Some(message.clone());
                 self.recoverable = true;
@@ -1130,16 +1370,22 @@ impl BrowserView {
             self.open_tab(Some(url), *foreground, window, cx);
             return true;
         }
+        if matches!(event, BrowserEvent::Closed { .. }) {
+            self.pending_history_uses.remove(&tab);
+            return true;
+        }
         let Some(entry) = self.tabs.iter_mut().find(|entry| entry.id == tab) else {
             return false;
         };
+        let mut completed_load = None;
+        let mut started_load = false;
         match event {
             BrowserEvent::AddressChanged { url, .. } => {
                 entry.url = url.to_string();
-                recent_pages::record_visit(url, cx);
+                recent_pages::record_visit(&self.profile, url, cx);
             }
             BrowserEvent::TitleChanged { title, .. } => {
-                recent_pages::record_title(&entry.url, title, cx);
+                recent_pages::record_title(&self.profile, &entry.url, title, cx);
                 entry.title = title.to_string();
             }
             BrowserEvent::LoadingChanged {
@@ -1152,7 +1398,10 @@ impl BrowserView {
                 entry.can_go_back = *can_go_back;
                 entry.can_go_forward = *can_go_forward;
                 if *loading {
+                    started_load = true;
                     entry.error = None;
+                } else {
+                    completed_load = Some((entry.url.clone(), entry.error.is_none()));
                 }
             }
             BrowserEvent::LoadFailed {
@@ -1169,17 +1418,24 @@ impl BrowserView {
         if matches!(event, BrowserEvent::AddressChanged { .. }) {
             self.publish_tabs(cx);
         }
+        if started_load {
+            self.mark_history_use_started(tab);
+        }
+        if let Some((url, succeeded)) = completed_load {
+            self.complete_history_use(tab, &url, succeeded, cx);
+        }
         true
     }
 
     fn handle_cookie_import_result(
-        &self,
+        &mut self,
         controller: &Entity<BrowserController>,
         result: zz_browser::CookieImportResult,
         cx: &mut Context<Self>,
     ) {
         let ignored = result.skipped + result.rejected;
         if result.imported > 0 {
+            self.pending_history_uses.remove(&self.active_tab);
             controller.update(cx, |controller, cx| {
                 controller.reload(self.pane, self.active_tab, cx);
             });
@@ -1212,12 +1468,13 @@ impl BrowserView {
     }
 
     fn handle_site_data_clear_result(
-        &self,
+        &mut self,
         controller: &Entity<BrowserController>,
         result: zz_browser::SiteDataClearResult,
         cx: &mut Context<Self>,
     ) {
         if result.success {
+            self.pending_history_uses.remove(&self.active_tab);
             controller.update(cx, |controller, cx| {
                 controller.reload(self.pane, self.active_tab, cx);
             });
@@ -1363,6 +1620,7 @@ impl BrowserView {
     fn on_back(&mut self, cx: &mut Context<Self>) {
         if self.can_go_back {
             self.cancel_element_pick(cx);
+            self.pending_history_uses.remove(&self.active_tab);
             self.controller.update(cx, |controller, cx| {
                 controller.go_back(self.pane, self.active_tab, cx);
             });
@@ -1373,6 +1631,7 @@ impl BrowserView {
     fn on_forward(&mut self, cx: &mut Context<Self>) {
         if self.can_go_forward {
             self.cancel_element_pick(cx);
+            self.pending_history_uses.remove(&self.active_tab);
             self.controller.update(cx, |controller, cx| {
                 controller.go_forward(self.pane, self.active_tab, cx);
             });
@@ -1382,6 +1641,7 @@ impl BrowserView {
 
     fn on_reload(&mut self, cx: &mut Context<Self>) {
         self.cancel_element_pick(cx);
+        self.pending_history_uses.remove(&self.active_tab);
         self.error = None;
         self.controller.update(cx, |controller, cx| {
             controller.reload(self.pane, self.active_tab, cx);
@@ -1449,6 +1709,7 @@ impl BrowserView {
         };
         self.cancel_element_pick(cx);
         self.context_menu = None;
+        self.omnibox.reset();
         self.save_active_tab_state();
         self.active_tab = tab;
         let entry = &self.tabs[index];
@@ -1551,6 +1812,7 @@ impl BrowserView {
             }
         }
         self.tabs.retain(|entry| entry.id != tab);
+        self.pending_history_uses.remove(&tab);
         self.controller.update(cx, |controller, _| {
             controller.close_tab(self.pane, tab);
         });
@@ -1645,6 +1907,98 @@ impl BrowserView {
         cx.stop_propagation();
     }
 
+    fn on_omnibox_next(&mut self, _: &OmniboxNext, window: &mut Window, cx: &mut Context<Self>) {
+        self.select_omnibox_suggestion(1, window, cx);
+    }
+
+    fn on_omnibox_previous(
+        &mut self,
+        _: &OmniboxPrevious,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_omnibox_suggestion(-1, window, cx);
+    }
+
+    fn select_omnibox_suggestion(
+        &mut self,
+        direction: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.address_editing || self.omnibox.suggestions.is_empty() {
+            cx.propagate();
+            return;
+        }
+        let count = i64::try_from(self.omnibox.suggestions.len()).unwrap_or(i64::MAX);
+        let next = self.omnibox.selected.map_or_else(
+            || if direction < 0 { count - 1 } else { 0 },
+            |selected| (i64::try_from(selected).unwrap_or_default() + direction).rem_euclid(count),
+        );
+        self.omnibox.selected = usize::try_from(next).ok();
+        let preview = self
+            .omnibox
+            .selected
+            .and_then(|selected| self.omnibox.suggestions.get(selected))
+            .map_or_else(
+                || self.omnibox.query.clone(),
+                |suggestion| suggestion.url.clone(),
+            );
+        self.address.update(cx, |address, cx| {
+            if address.value().as_ref() != preview {
+                address.set_value(preview.clone(), window, cx);
+            }
+            address.set_selected_range(preview.len()..preview.len(), cx);
+        });
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    fn on_omnibox_delete(
+        &mut self,
+        _: &OmniboxDelete,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.omnibox.selected else {
+            cx.propagate();
+            return;
+        };
+        let Some(url) = self
+            .omnibox
+            .suggestions
+            .get(index)
+            .map(|suggestion| suggestion.url.clone())
+        else {
+            cx.propagate();
+            return;
+        };
+        recent_pages::remove(&self.profile, &url, cx);
+        let query = self.omnibox.query.clone();
+        self.omnibox.suggestions =
+            recent_pages::suggestions(&self.profile, &query, OMNIBOX_SUGGESTION_LIMIT, cx);
+        self.omnibox.selected = None;
+        self.address.update(cx, |address, cx| {
+            address.set_value(query.clone(), window, cx);
+            address.set_selected_range(query.len()..query.len(), cx);
+        });
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    fn accept_omnibox_suggestion(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if index >= self.omnibox.suggestions.len() {
+            return;
+        }
+        self.omnibox.selected = Some(index);
+        self.accept_omnibox(window, cx);
+    }
+
     fn on_browser_edit(&mut self, action: &BrowserEdit, _: &mut Window, cx: &mut Context<Self>) {
         self.edit(action.command, cx);
         cx.stop_propagation();
@@ -1652,6 +2006,7 @@ impl BrowserView {
 
     fn recreate_session(&mut self, cx: &mut Context<Self>) {
         self.cancel_element_pick(cx);
+        self.pending_history_uses.remove(&self.active_tab);
         self.error = None;
         self.reset_frame_state();
         let url = self.current_url.clone();
@@ -1720,6 +2075,7 @@ impl BrowserView {
             return;
         };
         let tab = entry.id;
+        self.pending_history_uses.remove(&tab);
         if tab == self.active_tab {
             if url == self.current_url {
                 return;
@@ -1786,6 +2142,8 @@ impl BrowserView {
         if self.profile == profile {
             return;
         }
+        self.pending_history_uses.clear();
+        self.omnibox.reset();
         self.profile = profile;
         let removed: Vec<TabId> = self
             .tabs
@@ -1907,6 +2265,22 @@ impl BrowserView {
             return;
         }
         if !self.address_editing {
+            return;
+        }
+        if self.omnibox.selected.take().is_some() {
+            let query = self.omnibox.query.clone();
+            self.address.update(cx, |address, cx| {
+                address.set_value(query.clone(), window, cx);
+                address.set_selected_range(query.len()..query.len(), cx);
+            });
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
+        if !self.omnibox.suggestions.is_empty() {
+            self.omnibox.suggestions.clear();
+            cx.stop_propagation();
+            cx.notify();
             return;
         }
         let current_url = if is_blank_url(&self.current_url) {
@@ -2113,6 +2487,7 @@ impl BrowserView {
     ) {
         let background = cx.background_executor().clone();
         let view = cx.entity();
+        let destination_profile = self.profile.clone();
         self.emit_notification(
             "Reading cookies and history from Chrome…",
             ClientMessageKind::Info,
@@ -2149,10 +2524,15 @@ impl BrowserView {
                                 let pages = imported
                                     .pages
                                     .into_iter()
-                                    .map(|page| RecentPage {
-                                        url: page.url,
-                                        title: page.title,
-                                        visited_at: page.visited_at,
+                                    .map(|page| {
+                                        RecentPage::imported(
+                                            destination_profile.clone(),
+                                            page.url,
+                                            page.title,
+                                            page.visited_at,
+                                            page.visit_count,
+                                            page.typed_count,
+                                        )
                                     })
                                     .collect();
                                 let changed = recent_pages::import_history(pages, cx);
@@ -2483,13 +2863,44 @@ impl BrowserView {
         })
     }
 
+    fn render_omnibox_results(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.address_editing || self.omnibox.suggestions.is_empty() {
+            return None;
+        }
+        let view = cx.entity();
+        let rows = self
+            .omnibox
+            .suggestions
+            .iter()
+            .enumerate()
+            .map(|(index, suggestion)| {
+                let view = view.clone();
+                browser_omnibox_row(
+                    index,
+                    suggestion.title.clone(),
+                    suggestion.display_url.clone(),
+                    self.omnibox.selected == Some(index),
+                    cx,
+                )
+                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                    view.update(cx, |view, cx| {
+                        view.accept_omnibox_suggestion(index, window, cx);
+                    });
+                    cx.stop_propagation();
+                })
+                .into_any_element()
+            })
+            .collect();
+        Some(browser_omnibox_panel(rows, cx).into_any_element())
+    }
+
     fn render_empty_state(
         &self,
         radii: Corners<Pixels>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let recents = dedupe_recents(
-            recent_pages::recent(cx, EMPTY_STATE_RECENT_LIMIT * 8),
+            recent_pages::recent(&self.profile, cx, EMPTY_STATE_RECENT_LIMIT * 8),
             EMPTY_STATE_RECENT_LIMIT,
         );
         let address_focus_handle = self.address.read(cx).focus_handle(cx);
@@ -3165,10 +3576,12 @@ impl Render for BrowserView {
         } else {
             cx.theme().background
         };
+        let omnibox_results = self.render_omnibox_results(cx);
         round_div_radii(
             div()
                 .id("browser-root")
                 .key_context(BROWSER_KEY_CONTEXT)
+                .relative()
                 .flex()
                 .flex_col()
                 .size_full()
@@ -3188,6 +3601,9 @@ impl Render for BrowserView {
                 .on_action(cx.listener(Self::on_go_forward))
                 .on_action(cx.listener(Self::on_reload_action))
                 .on_action(cx.listener(Self::on_focus_address))
+                .on_action(cx.listener(Self::on_omnibox_next))
+                .on_action(cx.listener(Self::on_omnibox_previous))
+                .on_action(cx.listener(Self::on_omnibox_delete))
                 .on_action(cx.listener(Self::on_browser_edit))
                 .on_key_down(cx.listener(Self::on_root_key_down))
                 .child(
@@ -3212,6 +3628,7 @@ impl Render for BrowserView {
                         ),
                 )
                 .child(content)
+                .children(omnibox_results)
                 .children(self.context_menu.as_ref().map(|context_menu| {
                     deferred(
                         anchored()
@@ -3548,11 +3965,27 @@ mod tests {
     }
 
     #[test]
+    fn recognizes_incremental_text_edits_without_treating_bulk_replacements_as_typing() {
+        assert!(differs_by_one_character_edit("exa", "exam"));
+        assert!(differs_by_one_character_edit("exam", "exa"));
+        assert!(differs_by_one_character_edit("exam", "exXm"));
+        assert!(differs_by_one_character_edit("café", "cafés"));
+        assert!(!differs_by_one_character_edit("", "example.com"));
+        assert!(!differs_by_one_character_edit("example", "github"));
+        assert!(!differs_by_one_character_edit("same", "same"));
+    }
+
+    #[test]
     fn dedupes_recent_pages_by_display_url_before_applying_the_limit() {
-        let recent = |url: &str, title: &str, visited_at| RecentPage {
-            url: url.to_owned(),
-            title: title.to_owned(),
-            visited_at,
+        let recent = |url: &str, title: &str, visited_at| {
+            RecentPage::imported(
+                zz_browser::DEFAULT_BROWSER_PROFILE,
+                url.to_owned(),
+                title.to_owned(),
+                visited_at,
+                1,
+                0,
+            )
         };
         let pages = vec![
             recent("http://localhost:3000/insights?a=1", "Newest insights", 4),
@@ -3628,6 +4061,9 @@ mod tests {
             (TypeId::of::<Reload>(), "reload"),
             (TypeId::of::<GoBack>(), "back"),
             (TypeId::of::<GoForward>(), "forward"),
+            (TypeId::of::<OmniboxNext>(), "omnibox-next"),
+            (TypeId::of::<OmniboxPrevious>(), "omnibox-previous"),
+            (TypeId::of::<OmniboxDelete>(), "omnibox-delete"),
         ] {
             if action.as_any().type_id() == type_id {
                 return name.to_owned();
@@ -3725,6 +4161,9 @@ mod tests {
             ("cmd-6", "tab:5"),
             ("cmd-7", "tab:6"),
             ("cmd-8", "tab:7"),
+            ("down", "omnibox-next"),
+            ("up", "omnibox-previous"),
+            ("shift-delete", "omnibox-delete"),
         ];
         #[cfg(not(any(target_os = "macos", target_os = "ios")))]
         let expected = [
@@ -3763,6 +4202,9 @@ mod tests {
             ("ctrl-6", "tab:5"),
             ("ctrl-7", "tab:6"),
             ("ctrl-8", "tab:7"),
+            ("down", "omnibox-next"),
+            ("up", "omnibox-previous"),
+            ("shift-delete", "omnibox-delete"),
         ];
         let bindings = browser_key_bindings();
         let actual = bindings
@@ -3878,6 +4320,36 @@ mod tests {
                     .downcast_ref::<BrowserEdit>()
                     .map(|action| action.command),
                 Some(command)
+            );
+        }
+    }
+
+    #[test]
+    fn focused_omnibox_outranks_single_line_input_navigation() {
+        let mut bindings = vec![
+            KeyBinding::new("down", InputEdit, Some("ZzInput")),
+            KeyBinding::new("up", InputEdit, Some("ZzInput")),
+            KeyBinding::new("shift-delete", InputEdit, Some("ZzInput")),
+        ];
+        bindings.extend(browser_key_bindings());
+        let keymap = Keymap::new(bindings);
+        let contexts = [
+            "Root",
+            BROWSER_KEY_CONTEXT,
+            zz_ui::browser::BROWSER_OMNIBOX_KEY_CONTEXT,
+            "ZzInput",
+        ];
+
+        for (source, action) in [
+            ("down", TypeId::of::<OmniboxNext>()),
+            ("up", TypeId::of::<OmniboxPrevious>()),
+            ("shift-delete", TypeId::of::<OmniboxDelete>()),
+        ] {
+            let resolved = bindings_for_contexts(&keymap, source, &contexts);
+            assert_eq!(resolved[0].action().as_any().type_id(), action);
+            assert_eq!(
+                resolved[1].action().as_any().type_id(),
+                TypeId::of::<InputEdit>()
             );
         }
     }

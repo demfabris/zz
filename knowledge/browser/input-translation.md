@@ -1,10 +1,10 @@
 ---
 type: Subsystem
 title: Input translation (GPUI → CEF)
-description: Browser-neutral pointer/wheel/keyboard/text/IME input, ordered GPUI-to-CEF dispatch, pane shortcuts, and address-field URL normalization plus omnibox search fallback.
+description: Browser-neutral pointer/wheel/keyboard/text/IME input, ordered GPUI-to-CEF dispatch, pane shortcuts, address resolution, and history-backed omnibox interaction.
 resource: crates/zz-browser/src/input.rs
-tags: [browser, input, ime, keyboard, url]
-timestamp: 2026-08-12T00:00:00Z
+tags: [browser, input, ime, keyboard, url, history, omnibox]
+timestamp: 2026-08-13T02:00:00Z
 ---
 
 # Overview
@@ -186,6 +186,30 @@ silently become a search.
 `"<invalid URL>"` for unparseable input. `UrlInputError` variants: `Empty`,
 `UnsupportedScheme`, `Invalid`.
 
+# History-backed omnibox
+
+The address field's GPUI input layer searches the current logical browser
+profile after each non-empty edit. Results match every whitespace-delimited term
+across URL and title, then rank address fit, learned selection, typed use, visit
+frequency, and recency. At most eight native title-and-URL rows appear below the
+toolbar. Empty focus does not open a generic history popup; blank tabs retain
+their separate recent-page surface.
+
+Up and Down wrap through the rows and temporarily preview the selected URL.
+Enter accepts that row or resolves the original text through `resolve_address`.
+Escape first restores an original query from a preview, then closes the popup,
+then restores the current page URL and returns focus to the page. Shift+Delete
+removes the selected URL and its learned mappings from the current profile.
+
+The top eligible URL-prefix result can complete a one-character append inline.
+The appended suffix stays selected so another keystroke replaces it. Root URLs
+need one successful typed use, while deeper URLs need two; deletes and
+multi-character replacements do not inline-complete. Typed and learned-selection
+credit is committed only after the submitted navigation starts and finishes
+successfully; bulk direct replacements remain ordinary visits.
+See [history and omnibox autocomplete](/browser/history-autocomplete.md) for the
+store, significance filter, scorer, Chrome import, and privacy boundary.
+
 # Examples
 
 ```rust
@@ -219,7 +243,8 @@ assert_eq!(
 | `src/url_input.rs` | `resolve_address`, `SearchProvider`, `normalize_url`, `diagnostic_url`, `UrlInputError`. |
 | `src/cef_runtime.rs` | `BrowserSession`, main-thread `BrowserCommandSink`, CEF input/edit helpers, `event_flags`, coordinate scaling. |
 | `crates/zz/src/browser/controller.rs` | Ordered foreground CEF command queue and the GPUI re-entrancy boundary. |
-| `crates/zz/src/browser/view.rs` | Platform keybindings, `Browser` key context, page edit actions, zoom actions, and menu controls. |
+| `crates/zz/src/browser/view.rs` | Platform keybindings, nested omnibox key context, input events, selection and Escape stages, page edit actions, zoom actions, and menu controls. |
+| `crates/zz/src/browser/recent_pages.rs` | Profile-scoped history queries, scoring, inline eligibility, learned selections, and deletion. |
 
 # Related
 
@@ -227,4 +252,6 @@ assert_eq!(
   [off-screen rendering](/browser/osr-rendering.md) DPI path.
 - Input records are built from GPUI events in [`crates/zz`](/crates/zz.md);
   focus/cursor state feeds the [lifecycle events](/browser/lifecycle.md).
+- Address-field results and successful-use learning are detailed in
+  [history and omnibox autocomplete](/browser/history-autocomplete.md).
 - Part of the [zz-browser crate](/crates/zz-browser.md).

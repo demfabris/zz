@@ -1,0 +1,252 @@
+use zz_protocol::{Axis, LayoutNode, PaneId};
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct Rect {
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+}
+
+impl Rect {
+    pub const fn contains(self, column: u16, row: u16) -> bool {
+        column >= self.x
+            && row >= self.y
+            && column < self.x.saturating_add(self.width)
+            && row < self.y.saturating_add(self.height)
+    }
+
+    pub const fn content(self) -> Self {
+        Self {
+            x: self.x,
+            y: self.y.saturating_add(1),
+            width: self.width,
+            height: self.height.saturating_sub(1),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct PaneRect {
+    pub pane: PaneId,
+    pub rect: Rect,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct Divider {
+    pub rect: Rect,
+    pub axis: Axis,
+    pub highlighted: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ResolvedLayout {
+    pub panes: Vec<PaneRect>,
+    pub dividers: Vec<Divider>,
+}
+
+pub(crate) fn resolve(node: &LayoutNode, rect: Rect, active_pane: PaneId) -> ResolvedLayout {
+    let mut resolved = ResolvedLayout::default();
+    collect(node, rect, active_pane, &mut resolved);
+    resolved
+}
+
+fn collect(node: &LayoutNode, rect: Rect, active: PaneId, output: &mut ResolvedLayout) {
+    match node {
+        LayoutNode::Pane(pane) => output.panes.push(PaneRect { pane: *pane, rect }),
+        LayoutNode::Split {
+            axis,
+            ratio,
+            first,
+            second,
+            ..
+        } => {
+            let ratio = resolved_ratio(*ratio);
+            let extent = match axis {
+                Axis::Horizontal => rect.width,
+                Axis::Vertical => rect.height,
+            };
+            let divider_extent = u16::from(extent > 0);
+            let available = extent.saturating_sub(divider_extent);
+            let first_extent = scaled_extent(available, ratio);
+            let second_extent = available.saturating_sub(first_extent);
+            let (first_rect, divider_rect, second_rect) = match axis {
+                Axis::Horizontal => (
+                    Rect {
+                        width: first_extent,
+                        ..rect
+                    },
+                    Rect {
+                        x: rect.x.saturating_add(first_extent),
+                        y: rect.y,
+                        width: divider_extent,
+                        height: rect.height,
+                    },
+                    Rect {
+                        x: rect
+                            .x
+                            .saturating_add(first_extent)
+                            .saturating_add(divider_extent),
+                        width: second_extent,
+                        ..rect
+                    },
+                ),
+                Axis::Vertical => (
+                    Rect {
+                        height: first_extent,
+                        ..rect
+                    },
+                    Rect {
+                        x: rect.x,
+                        y: rect.y.saturating_add(first_extent),
+                        width: rect.width,
+                        height: divider_extent,
+                    },
+                    Rect {
+                        y: rect
+                            .y
+                            .saturating_add(first_extent)
+                            .saturating_add(divider_extent),
+                        height: second_extent,
+                        ..rect
+                    },
+                ),
+            };
+            output.dividers.push(Divider {
+                rect: divider_rect,
+                axis: *axis,
+                highlighted: first.contains(active) || second.contains(active),
+            });
+            collect(first, first_rect, active, output);
+            collect(second, second_rect, active, output);
+        }
+    }
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the ratio is clamped and the product cannot exceed the u16 input extent"
+)]
+fn scaled_extent(available: u16, ratio: f32) -> u16 {
+    (f32::from(available) * ratio).floor() as u16
+}
+
+fn resolved_ratio(ratio: f32) -> f32 {
+    if ratio.is_finite() {
+        ratio.clamp(0.0, 1.0)
+    } else {
+        0.5
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zz_protocol::SplitId;
+
+    fn pane(id: u64) -> LayoutNode {
+        LayoutNode::Pane(PaneId(id))
+    }
+
+    fn split(axis: Axis, ratio: f32) -> LayoutNode {
+        LayoutNode::Split {
+            id: SplitId(1),
+            axis,
+            ratio,
+            first: Box::new(pane(1)),
+            second: Box::new(pane(2)),
+        }
+    }
+
+    #[test]
+    fn horizontal_split_floors_first_and_gives_remainder_to_second() {
+        let resolved = resolve(
+            &split(Axis::Horizontal, 0.5),
+            Rect {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 4,
+            },
+            PaneId(2),
+        );
+
+        assert_eq!(resolved.panes[0].rect.width, 4);
+        assert_eq!(resolved.dividers[0].rect.x, 4);
+        assert_eq!(resolved.dividers[0].rect.width, 1);
+        assert_eq!(resolved.panes[1].rect.x, 5);
+        assert_eq!(resolved.panes[1].rect.width, 5);
+        assert!(resolved.dividers[0].highlighted);
+    }
+
+    #[test]
+    fn non_finite_vertical_ratio_uses_half_and_tiles_deterministically() {
+        let resolved = resolve(
+            &split(Axis::Vertical, f32::NAN),
+            Rect {
+                x: 3,
+                y: 2,
+                width: 8,
+                height: 8,
+            },
+            PaneId(1),
+        );
+
+        assert_eq!(resolved.panes[0].rect.height, 3);
+        assert_eq!(resolved.dividers[0].rect.y, 5);
+        assert_eq!(resolved.panes[1].rect.y, 6);
+        assert_eq!(resolved.panes[1].rect.height, 4);
+    }
+
+    #[test]
+    fn out_of_range_ratios_clamp_after_reserving_the_divider() {
+        let positive = resolve(
+            &split(Axis::Horizontal, f32::INFINITY),
+            Rect {
+                width: 6,
+                height: 2,
+                ..Rect::default()
+            },
+            PaneId(1),
+        );
+        let negative = resolve(
+            &split(Axis::Horizontal, -2.0),
+            Rect {
+                width: 6,
+                height: 2,
+                ..Rect::default()
+            },
+            PaneId(1),
+        );
+
+        assert_eq!(
+            (positive.panes[0].rect.width, positive.panes[1].rect.width),
+            (2, 3)
+        );
+        assert_eq!(
+            (negative.panes[0].rect.width, negative.panes[1].rect.width),
+            (0, 5)
+        );
+        assert_eq!(positive.dividers[0].rect.width, 1);
+        assert_eq!(negative.dividers[0].rect.width, 1);
+    }
+
+    #[test]
+    fn zero_extent_does_not_move_children_outside_the_parent() {
+        let resolved = resolve(
+            &split(Axis::Horizontal, 0.5),
+            Rect {
+                x: 7,
+                width: 0,
+                height: 2,
+                ..Rect::default()
+            },
+            PaneId(1),
+        );
+
+        assert_eq!(resolved.dividers[0].rect.width, 0);
+        assert_eq!(resolved.panes[0].rect.x, 7);
+        assert_eq!(resolved.panes[1].rect.x, 7);
+    }
+}

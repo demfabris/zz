@@ -1,0 +1,83 @@
+---
+import Icon from './Icon.astro';
+import Kbd from './Kbd.astro';
+
+// PanePickerView (zz/src/pane/picker.rs:259). This is pane *content*, not an
+// overlay: a pane whose kind hasn't been chosen fills itself with the menu, so
+// there is no scrim and no modal. Editor and Agent rows are feature-gated
+// (picker.rs:30) and were off in the reference capture.
+interface Props {
+	/** `choice` is the pane kind the row commits to — the click/key hook. */
+	rows: { icon: string; label: string; key: string; choice?: string; selected?: boolean }[];
+	/** Selection follows the mouse, so hover == selection (picker.rs:205). */
+	maxWidth?: number;
+	class?: string;
+}
+
+const { rows, maxWidth = 360, class: cls } = Astro.props;
+---
+
+<div class:list={['picker', cls]}>
+	<div class="col" style={`max-width:${maxWidth}px`}>
+		{
+			rows.map((row) => (
+				<div
+					class="row"
+					data-choice={row.choice}
+					data-key={row.key}
+					data-selected={row.selected ? '' : undefined}
+				>
+					<Icon name={row.icon} size={16} class="row-icon" />
+					<span class="label">{row.label}</span>
+					<Kbd raised>{row.key}</Kbd>
+				</div>
+			))
+		}
+	</div>
+</div>
+
+<style>
+	.picker {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+		padding: 0 12px;
+		background: var(--zz-bg);
+		color: var(--zz-fg);
+		font-family: var(--zz-font-ui);
+	}
+	.col {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		gap: 4px;
+	}
+	.row {
+		display: flex;
+		align-items: center;
+		flex: none;
+		gap: 10px;
+		height: 40px;
+		padding: 0 12px;
+		border-radius: var(--zz-radius);
+		corner-shape: squircle;
+		background: var(--zz-wash-1);
+		cursor: pointer;
+	}
+	.row[data-selected],
+	.row:hover { background: var(--zz-wash-2); }
+	.row :global(.row-icon) { color: var(--zz-fg-muted); }
+	.label {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		font-size: 12px;
+		font-weight: 500;
+	}
+</style>

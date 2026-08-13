@@ -1,0 +1,598 @@
+---
+// Web pages for the demo's browser panes — donors only, nothing visible.
+//
+// Astro scope-stamps a component's markup at build time, template innards
+// included, so a page's styles have to live in the same component as its
+// markup: chrome built with createElement would silently miss every scoped
+// rule. The demo script clones `template[data-page="…"]` into a pane's mount on
+// navigation (and once at boot for `[data-boot-page]`).
+//
+// None of this is zz chrome. Each page is web content inside the browser pane,
+// so it brings its own type scale and its own palette, and never touches a
+// --zz-* token.
+
+// ── gpui.rs ───────────────────────────────────────────────────────────────
+// gpui's hello_world example as the page shows it. Long lines are not wrapped:
+// the block clips, same as the capture.
+const rust = `use gpui::{
+    div, prelude::*, px, rgb, size, App, Application, Bounds, Context, SharedString, Window,
+    WindowBounds, WindowOptions,
+};
+
+struct HelloWorld {
+    text: SharedString,
+}
+
+impl Render for HelloWorld {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .bg(rgb(0x505050))
+            .size(px(500.0))
+            .justify_center()
+            .items_center()
+            .shadow_lg()
+            .border_1()
+            .border_color(rgb(0x0000ff))
+            .text_xl()
+            .text_color(rgb(0xffffff))
+            .child(format!("Hello, {}!", &self.text))
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(div().size_8().bg(gpui::red()))
+                    .child(div().size_8().bg(gpui::green()))
+                    .child(div().size_8().bg(gpui::blue()))
+                    .child(div().size_8().bg(gpui::yellow()))
+                    .child(div().size_8().bg(gpui::black()))
+                    .child(div().size_8().bg(gpui::white())),
+            )
+    }
+}
+
+fn main() {
+    Application::new().run(|cx: &mut App| {
+        let bounds = Bounds::centered(None, size(px(500.), px(500.0)), cx);
+        cx.open_window(
+            WindowOptions {`;
+
+const KEYWORDS = new Set([
+	'use',
+	'struct',
+	'impl',
+	'fn',
+	'let',
+	'mut',
+	'for',
+	'in',
+	'self',
+	'pub',
+	'as',
+	'move',
+]);
+
+type Tok = { v: string; c: string | null };
+
+function highlight(src: string): Tok[][] {
+	const rx = /"(?:[^"\\]|\\.)*"|[A-Za-z_][A-Za-z0-9_]*!?|0x[0-9a-fA-F]+|\d+\.?\d*|\s+|./g;
+	return src.split('\n').map((line) => {
+		const raw = [...line.matchAll(rx)].map((m) => m[0]);
+		if (raw.length === 0) return [{ v: ' ', c: null }];
+		return raw.map((v, i) => {
+			const next = raw[i + 1] ?? '';
+			if (v[0] === '"') return { v, c: 'str' };
+			if (/^0x|^\d/.test(v)) return { v, c: 'num' };
+			if (/^\s|^[^A-Za-z_]/.test(v)) return { v, c: null };
+			if (KEYWORDS.has(v)) return { v, c: 'kw' };
+			if (v === 'gpui' || /^[A-Z]/.test(v)) return { v, c: 'type' };
+			if (v.endsWith('!') || next === '(') return { v, c: 'fnc' };
+			return { v, c: null };
+		});
+	});
+}
+
+const codeLines = highlight(rust);
+
+// 30 contributor tiles, greyscale placeholders for the avatar grid.
+const avatars = Array.from({ length: 30 }, (_, i) => 26 + ((i * 37) % 46));
+
+// ── ghostty.org ───────────────────────────────────────────────────────────
+const ghosttySession = [
+	'~ ❯ ghostty +version',
+	'Ghostty 1.2.2',
+	'',
+	'build config',
+	'  - Zig       : 0.14.0',
+	'  - renderer  : Metal',
+	'  - libadwaita: false',
+];
+---
+
+{/* gpui.rs — the reference capture's page. */}
+<template data-page="gpui">
+	<div class="page">
+		<nav class="page-nav">
+			<span class="here">gpui</span>
+			<span>examples</span>
+			<span>github <i>↗</i></span>
+			<span class="page-nav-end">zed <i>↗</i></span>
+		</nav>
+
+		<div class="page-grid">
+			<div class="page-main">
+				<h1>gpui</h1>
+				<p class="lede">
+					A fast, productive UI framework for Rust from the creators of <u>Zed</u>.
+				</p>
+				<p class="cta">Get Started →</p>
+				<h2>Hello, World 🌍</h2>
+				<pre class="code"><code>{codeLines.map((line) => (
+					<span class="code-line">{line.map((t) => (t.c ? <span class={`t-${t.c}`}>{t.v}</span> : t.v))}</span>
+				))}</code></pre>
+			</div>
+
+			<aside class="side">
+				<h3>gpui is made possible by</h3>
+				<div class="avatars">
+					{avatars.map((g) => <span style={`background:rgb(${g},${g},${g})`} />)}
+				</div>
+				<p class="cta small">How to contribute →</p>
+				<h3 class="spaced">Contributing to gpui</h3>
+				<p class="side-body">
+					gpui is an open source project. We welcome contributions, but for the near future
+					gpui is tied to <u>Zed</u>, so contributions will need to be made there and kept in
+					sync with it.
+				</p>
+			</aside>
+		</div>
+	</div>
+</template>
+
+{/* python3 -m http.server serving an index.html — browser defaults, no CSS. */}
+<template data-page="plain">
+	<div class="plain">
+		<h1>hello from desktop</h1>
+		<hr />
+		<p>Served by python3 -m http.server 8000 over the socks5 tunnel.</p>
+	</div>
+</template>
+
+{/* ghostty.org */}
+<template data-page="ghostty">
+	<div class="gt">
+		<nav class="gt-nav">
+			<span class="gt-mark">ghostty</span>
+			<span>docs</span>
+			<span>download</span>
+			<span class="gt-nav-end">github <i>↗</i></span>
+		</nav>
+
+		<h1>Ghostty</h1>
+		<p class="gt-lede">
+			Ghostty is a fast, feature-rich, and cross-platform terminal emulator that uses
+			platform-native UI and GPU acceleration.
+		</p>
+		<span class="gt-cta">Download 1.2.2</span>
+
+		<div class="gt-term">
+			<span class="gt-term-bar" aria-hidden="true"><i /><i /><i /></span>
+			<code class="gt-term-body">{ghosttySession.map((row) => <span>{row || ' '}</span>)}</code>
+		</div>
+	</div>
+</template>
+
+{/* github.com/tmux/tmux */}
+<template data-page="tmux">
+	<div class="gh">
+		<div class="gh-head">
+			<span class="gh-crumb">tmux / <b>tmux</b></span>
+			<span class="gh-badge">Public</span>
+			<span class="gh-counts">
+				<span class="gh-chip">Star <b>36.1k</b></span>
+				<span class="gh-chip">Fork <b>2.2k</b></span>
+			</span>
+		</div>
+
+		<div class="gh-tabs">
+			<span class="gh-tab-on">Code</span>
+			<span>Issues</span>
+			<span>Pull requests</span>
+			<span>Actions</span>
+			<span>Wiki</span>
+			<span>Security</span>
+		</div>
+
+		<div class="gh-grid">
+			<div class="gh-main">
+				<div class="gh-readme">
+					<h2>README</h2>
+					<p>
+						tmux is a terminal multiplexer: it enables a number of terminals to be created,
+						accessed, and controlled from a single screen.
+					</p>
+					<p>
+						tmux may be detached from a screen and continue running in the background, then
+						later reattached.
+					</p>
+					<h3>Installation</h3>
+					<p class="gh-mono">$ ./configure &amp;&amp; make</p>
+				</div>
+			</div>
+
+			<aside class="gh-side">
+				<h3>About</h3>
+				<p class="gh-about">tmux source code</p>
+				<p class="gh-meta">Readme · ISC license · 36.1k stars · 2.2k forks</p>
+			</aside>
+		</div>
+	</div>
+</template>
+
+{/* What CEF puts up when the host does not resolve. */}
+<template data-page="err">
+	<div class="err">
+		<div class="err-box">
+			<h1>This site can't be reached</h1>
+			<p class="err-body"><span data-err-host></span>'s server IP address could not be found.</p>
+			<p class="err-code">DNS_PROBE_FINISHED_NXDOMAIN</p>
+			<span class="err-btn">Reload</span>
+		</div>
+	</div>
+</template>
+
+<style>
+	/* ── gpui.rs ───────────────────────────────────────────────────────────── */
+	.page {
+		width: 100%;
+		height: 100%;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+		padding: 40px 44px 0;
+		background: #030303;
+		font-family: var(--zz-font-mono);
+		color: #c5c5c5;
+	}
+	.page-nav {
+		display: flex;
+		align-items: center;
+		gap: 32px;
+		font-size: 15px;
+		color: #7d7d7d;
+	}
+	.page-nav .here { color: #e8e8e8; }
+	.page-nav i { font-style: normal; font-size: 11px; vertical-align: 2px; }
+	.page-nav-end { margin-left: auto; }
+
+	.page-grid {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 168px;
+		gap: 74px;
+		margin-top: 56px;
+	}
+	.page-main { min-width: 0; }
+	.page h1 {
+		font-size: 34px;
+		font-weight: 700;
+		letter-spacing: -0.01em;
+		color: #e8e8e8;
+	}
+	.page .lede {
+		max-width: 58ch;
+		margin-top: 34px;
+		font-size: 16px;
+		line-height: 1.55;
+	}
+	.page u { text-decoration-thickness: 1px; text-underline-offset: 3px; }
+	.page .cta {
+		margin-top: 32px;
+		font-size: 16px;
+		font-style: italic;
+		color: #8a8a8a;
+	}
+	.page .cta.small { margin-top: 26px; font-size: 14px; font-style: normal; }
+	.page h2 {
+		margin-top: 92px;
+		font-size: 20px;
+		font-weight: 700;
+		color: #e8e8e8;
+	}
+	.page h3 {
+		font-size: 17px;
+		font-weight: 700;
+		line-height: 1.5;
+		color: #e8e8e8;
+	}
+	.page h3.spaced { margin-top: 60px; }
+	.page .side-body {
+		margin-top: 22px;
+		font-size: 15px;
+		line-height: 1.75;
+		color: #b8b8b8;
+	}
+	/* Rounded squares, not circles — that is what the capture shows. 34px tiles
+	   on a 43px pitch, measured off it. */
+	.avatars {
+		display: grid;
+		grid-template-columns: repeat(4, 34px);
+		gap: 9px;
+		margin-top: 26px;
+	}
+	.avatars span {
+		width: 34px;
+		height: 34px;
+		border-radius: 24px;
+	}
+
+	.code {
+		margin-top: 26px;
+		padding: 11px 10px;
+		border: 1px solid #1a1c20;
+		border-radius: 24px;
+		background: #0b0d12;
+		overflow: hidden;
+	}
+	.code code {
+		display: block;
+		font-family: inherit;
+		font-size: 14px;
+		line-height: 20px;
+	}
+	.code-line { display: block; white-space: pre; }
+	/* Sampled off the capture: keywords orange, types blue, calls amber,
+	   numbers purple, strings green. */
+	.t-kw { color: #c9743a; }
+	.t-type { color: #4a9fd0; }
+	.t-fnc { color: #cf9247; }
+	.t-num { color: #ab86cc; }
+	.t-str { color: #85a83e; }
+
+	/* ── the desktop host's index.html ─────────────────────────────────────── */
+	.plain {
+		width: 100%;
+		padding: 16px;
+		background: #fff;
+		color: #000;
+		font-family: 'Times New Roman', Times, serif;
+	}
+	.plain h1 { font-size: 32px; }
+	.plain hr { margin: 12px 0; border: 0; border-top: 1px solid #999; }
+	.plain p { font-size: 16px; }
+
+	/* ── ghostty.org ───────────────────────────────────────────────────────── */
+	.gt {
+		width: 100%;
+		height: 100%;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+		padding: 40px 56px 0;
+		background: #12100f;
+		font-family: var(--zz-font-ui);
+		color: #b6afa8;
+	}
+	.gt-nav {
+		display: flex;
+		align-items: center;
+		gap: 30px;
+		font-size: 15px;
+		color: #85807a;
+	}
+	.gt-mark {
+		font-family: var(--zz-font-mono);
+		font-size: 17px;
+		font-weight: 700;
+		letter-spacing: -0.02em;
+		color: #f2ede6;
+	}
+	.gt-nav i { font-style: normal; font-size: 11px; vertical-align: 2px; }
+	.gt-nav-end { margin-left: auto; }
+
+	.gt h1 {
+		margin-top: 72px;
+		font-size: 52px;
+		font-weight: 700;
+		letter-spacing: -0.03em;
+		color: #f2ede6;
+	}
+	.gt-lede {
+		max-width: 62ch;
+		margin-top: 22px;
+		font-size: 17px;
+		line-height: 1.6;
+	}
+	.gt-cta {
+		display: inline-block;
+		margin-top: 30px;
+		padding: 11px 22px;
+		border-radius: 10px;
+		background: #f2ede6;
+		color: #12100f;
+		font-size: 15px;
+		font-weight: 600;
+	}
+
+	/* A terminal, on a terminal's page, inside a terminal multiplexer. */
+	.gt-term {
+		max-width: 620px;
+		margin-top: 56px;
+		border: 1px solid #2a2622;
+		border-radius: 12px;
+		background: #0b0a09;
+		overflow: hidden;
+	}
+	.gt-term-bar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		height: 30px;
+		padding: 0 12px;
+		border-bottom: 1px solid #2a2622;
+	}
+	.gt-term-bar i {
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		corner-shape: round;
+		background: #2f2b27;
+	}
+	.gt-term-body {
+		display: block;
+		padding: 14px 16px;
+		font-family: var(--zz-font-mono);
+		font-size: 13px;
+		line-height: 20px;
+		color: #9c968f;
+	}
+	.gt-term-body span { display: block; white-space: pre; }
+	.gt-term-body span:first-child { color: #e6dfd6; }
+
+	/* ── github.com/tmux/tmux ──────────────────────────────────────────────── */
+	.gh {
+		width: 100%;
+		height: 100%;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+		padding: 22px 32px 0;
+		background: #0d1117;
+		font-family: var(--zz-font-ui);
+		font-size: 14px;
+		color: #c9d1d9;
+	}
+	.gh-head {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.gh-crumb { font-size: 20px; color: #58a6ff; }
+	.gh-crumb b { font-weight: 600; }
+	.gh-badge {
+		padding: 1px 8px;
+		border: 1px solid #30363d;
+		border-radius: 999px;
+		font-size: 12px;
+		color: #8b949e;
+	}
+	.gh-counts {
+		display: flex;
+		gap: 8px;
+		margin-left: auto;
+	}
+	.gh-chip {
+		padding: 4px 12px;
+		border: 1px solid #30363d;
+		border-radius: 6px;
+		background: #21262d;
+		font-size: 12px;
+	}
+	.gh-chip b { font-weight: 600; }
+
+	.gh-tabs {
+		display: flex;
+		gap: 22px;
+		margin-top: 20px;
+		padding-bottom: 10px;
+		border-bottom: 1px solid #21262d;
+		font-size: 14px;
+		color: #8b949e;
+	}
+	.gh-tab-on {
+		color: #e6edf3;
+		font-weight: 600;
+		box-shadow: 0 11px 0 -9px #f78166;
+	}
+
+	.gh-grid {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 296px;
+		gap: 32px;
+		margin-top: 26px;
+	}
+	.gh-readme {
+		padding: 20px 24px;
+		border: 1px solid #30363d;
+		border-radius: 6px;
+	}
+	.gh-readme h2 {
+		padding-bottom: 8px;
+		border-bottom: 1px solid #21262d;
+		font-size: 22px;
+		font-weight: 600;
+		color: #e6edf3;
+	}
+	.gh-readme h3 {
+		margin-top: 22px;
+		font-size: 17px;
+		font-weight: 600;
+		color: #e6edf3;
+	}
+	.gh-readme p { margin-top: 14px; line-height: 1.6; }
+	.gh-mono {
+		font-family: var(--zz-font-mono);
+		font-size: 13px;
+		color: #8b949e;
+	}
+	.gh-side h3 {
+		font-size: 16px;
+		font-weight: 600;
+		color: #e6edf3;
+	}
+	.gh-about {
+		margin-top: 10px;
+		line-height: 1.6;
+		color: #8b949e;
+	}
+	.gh-meta {
+		margin-top: 14px;
+		font-size: 12px;
+		color: #8b949e;
+	}
+
+	/* ── the DNS failure page ──────────────────────────────────────────────── */
+	.err {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		height: 100%;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+		padding: 32px;
+		background: #202124;
+		font-family: var(--zz-font-ui);
+	}
+	.err-box { width: 100%; max-width: 600px; }
+	.err h1 {
+		font-size: 24px;
+		font-weight: 400;
+		line-height: 1.35;
+		color: #e8eaed;
+	}
+	.err-body {
+		margin-top: 16px;
+		font-size: 15px;
+		line-height: 1.6;
+		color: #bdc1c6;
+	}
+	.err-code {
+		margin-top: 24px;
+		font-size: 12px;
+		letter-spacing: 0.02em;
+		color: #9aa0a6;
+	}
+	.err-btn {
+		display: inline-block;
+		margin-top: 28px;
+		padding: 9px 18px;
+		border-radius: 4px;
+		background: #8ab4f8;
+		color: #202124;
+		font-size: 14px;
+		font-weight: 500;
+	}
+</style>

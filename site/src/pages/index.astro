@@ -1,0 +1,1346 @@
+---
+// Landing page. The only script on it is the one the hero shell brings; every
+// other interactive thing here is a checked radio and a CSS selector.
+import WorkspaceDemo from '../components/zz/WorkspaceDemo.astro';
+import AgentPane from '../components/zz/AgentPane.astro';
+import BrowserPane from '../components/zz/BrowserPane.astro';
+import Kbd from '../components/zz/Kbd.astro';
+import Pane from '../components/zz/Pane.astro';
+import Sidebar from '../components/zz/Sidebar.astro';
+import TerminalPane from '../components/zz/TerminalPane.astro';
+import type { ZzNode } from '../components/zz/Sidebar.astro';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const gh = 'https://github.com/demfabris/zz';
+
+// Social card. Starlight emits og:* for the docs pages on its own; this page is
+// hand-rolled, so it carries the full set. Absolute URLs are required — a
+// scraper has no base to resolve against. og.png is rendered from og-card.html.
+const title = 'zz · terminal and browser. one mux.';
+const description =
+	'zz is a terminal multiplexer with shell and Chromium panes under one tmux-compatible layout, one set of keys, one GPU surface.';
+const canonical = new URL(base + '/', Astro.site).href;
+const ogImage = new URL(base + '/og.png', Astro.site).href;
+
+// Bench tables by host. `null` = crashed / timed out. Re-run summarize.sh to refresh.
+const benchMetrics = [
+	{ label: 'cat-ascii', unit: 'MB/s' },
+	{ label: 'cat-unicode', unit: 'MB/s' },
+	{ label: 'doom-fire', unit: 'fps' },
+];
+
+type BenchRow = { name: string; hi?: boolean; vals: (number | null)[] };
+type BenchHost = {
+	id: string;
+	label: string;
+	detail: string;
+	mock?: boolean;
+	rows: BenchRow[];
+};
+
+const benchHosts: BenchHost[] = [
+	{
+		id: 'm4',
+		label: 'macOS · Metal',
+		detail: 'Apple M4 Max · 180×50 · median of 5',
+		rows: [
+			{ name: 'zz', hi: true, vals: [328, 98, 668] },
+			{ name: 'ghostty-tip', vals: [294, 94, 650] },
+			{ name: 'cmux', vals: [285, 86, 627] },
+			{ name: 'kero', vals: [273, null, null] },
+			{ name: 'ghostty', vals: [94, 69, 630] },
+			{ name: 'iterm2', vals: [87, null, null] },
+			{ name: 'ghostty+tmux', vals: [44, 19, 194] },
+			{ name: 'rio', vals: [28, 30, 125] },
+		],
+	},
+	{
+		id: 'ryzen',
+		label: 'Linux · Vulkan',
+		detail: 'AMD Ryzen 7 7800X3D · 7900 XTX · Wayland · 180×50 · median of 5',
+		rows: [
+			{ name: 'zz', hi: true, vals: [645, 81, 1285] },
+			{ name: 'ghostty-tip', vals: [637, 61, 1216] },
+			{ name: 'rio', vals: [487, 124, 1191] },
+			{ name: 'alacritty', vals: [129, 91, 1255] },
+			{ name: 'ghostty', vals: [98, 45, 653] },
+			{ name: 'limux', vals: [94, 54, 618] },
+			{ name: 'ghostty+tmux', vals: [56, 17, 201] },
+		],
+	},
+];
+
+function benchWins(rows: BenchRow[]): (number | null)[] {
+	return benchMetrics.map((_, col) => {
+		const nums = rows.map((r) => r.vals[col]).filter((v): v is number => v != null);
+		return nums.length ? Math.max(...nums) : null;
+	});
+}
+
+// The fleet stage shows the real Sidebar component, so this is the same ZzNode
+// tree the hero demo feeds it — three hosts, the active path lit.
+const fleetTree: ZzNode[] = [
+	{
+		kind: 'host',
+		label: 'macbook',
+		active: true,
+		children: [
+			{
+				kind: 'session',
+				label: 'zz',
+				active: true,
+				children: [
+					{
+						kind: 'window',
+						label: 'hello-world',
+						active: true,
+						target: true,
+						children: [
+							{
+								kind: 'pane',
+								pane: 'agent',
+								label: '✳ Check if zz is built on macOS',
+								active: true,
+								target: true,
+							},
+							{ kind: 'pane', pane: 'browser', label: 'gpui' },
+						],
+					},
+				],
+			},
+		],
+	},
+	{
+		kind: 'host',
+		label: 'desktop',
+		children: [{ kind: 'session', label: 'socks5' }],
+	},
+	{
+		kind: 'host',
+		label: 'laptop',
+		bell: true,
+		children: [{ kind: 'session', label: 'all-the-hosts', bell: true }],
+	},
+];
+
+// Benefit-led; the mechanism lives in the stage visuals and the docs. The two
+// numbers here are checkable: knowledge/protocol/terminal-lanes.md (row patch
+// cost) and wire-protocol.md (the 15-byte ClientHello example).
+const featPoints = [
+	{
+		id: 'fleet',
+		title: 'Your fleet, one window',
+		body: 'Panes on the desktop open, split, and scroll like the ones on your laptop. After a day you stop tracking which machine a shell runs on.',
+	},
+	{
+		id: 'wire',
+		title: 'Fast on bad wifi',
+		body: 'The wire carries changed rows, and a changed row costs a few hundred bytes. Typing over ssh stops feeling like ssh.',
+	},
+	{
+		id: 'egress',
+		title: 'Their localhost, your browser',
+		body: "Open a browser pane on desktop and localhost:3000 is desktop's dev server. Your existing ssh session does the tunneling, nothing to set up.",
+	},
+	{
+		id: 'detach',
+		title: 'Detach survives',
+		body: 'Close the window mid-run and the daemon keeps every pane alive. Reattach and the agent has kept working, transcript and all.',
+	},
+];
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>{title}</title>
+		<meta name="description" content={description} />
+		<link rel="canonical" href={canonical} />
+		<link rel="icon" href={`${base}/favicon.svg`} type="image/svg+xml" />
+
+		<meta property="og:type" content="website" />
+		<meta property="og:site_name" content="zz" />
+		<meta property="og:url" content={canonical} />
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={description} />
+		<meta property="og:image" content={ogImage} />
+		<meta property="og:image:width" content="1200" />
+		<meta property="og:image:height" content="630" />
+		<meta property="og:image:alt" content="zz — tmux, ghostty, and gpui walked into a mux." />
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:title" content={title} />
+		<meta name="twitter:description" content={description} />
+		<meta name="twitter:image" content={ogImage} />
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+			rel="stylesheet"
+		/>
+		<style>
+			@font-face {
+				font-family: 'Fantasque Sans Mono';
+				src: url({`${base}/fonts/FantasqueSansMono-Regular.woff2`}) format('woff2');
+				font-weight: 400;
+				font-style: normal;
+				font-display: swap;
+			}
+			@font-face {
+				font-family: 'Fantasque Sans Mono';
+				src: url({`${base}/fonts/FantasqueSansMono-Bold.woff2`}) format('woff2');
+				font-weight: 700;
+				font-style: normal;
+				font-display: swap;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="bloom" aria-hidden="true"></div>
+
+		<nav class="nav">
+			<a class="mark" href={`${base}/`} aria-label="zz">
+				<img src={`${base}/zz.svg`} alt="" width="22" height="22" />
+			</a>
+			<div class="links">
+				<a href={`${base}/docs/getting-started/`}>Docs</a>
+				<a href={`${gh}/releases`}>Releases</a>
+				<a href={gh}>GitHub</a>
+			</div>
+		</nav>
+
+		<header class="hero">
+			<h1>
+				<a href="https://github.com/tmux/tmux">tmux</a>,&nbsp;<a
+					href="https://ghostty.org">ghostty</a>,&nbsp;and&nbsp;<a
+					href="https://www.gpui.rs">gpui</a>&nbsp;walked into a mux.
+			</h1>
+			<p class="sub">
+        zz is a superset of tmux, with libghostty, CEF panes, in a gpui surface.
+				Import your config and start muxing.
+			</p>
+			<a class="btn" href={`${gh}/releases`}>Download zz</a>
+			<p class="note">macOS and Linux · MIT / Apache-2.0</p>
+		</header>
+
+		{/* The hero is the workspace itself: HTML and CSS, not a capture of it.
+		    Click the tree, drag a gap, randomize the look. */}
+		<figure class="shot">
+			<WorkspaceDemo fit="hero" />
+		</figure>
+
+		<section class="bench" aria-label="Benchmarks">
+			<div class="bench-head">
+				<div>
+					<h2>Faster than the stack you already run</h2>
+					<p>Same 150&nbsp;MiB fixtures and DOOM-fire harness across hosts.</p>
+				</div>
+				<a class="bench-src" href={`${gh}/tree/main/bench`}>bench/ <span>→</span></a>
+			</div>
+
+			<div class="bench-hosts">
+				{
+					benchHosts.map((host, i) => (
+						<>
+							<input
+								type="radio"
+								name="bench-host"
+								id={`bench-${host.id}`}
+								class="bench-radio"
+								checked={i === 0}
+							/>
+							<label class="bench-tab" for={`bench-${host.id}`}>
+								<span class="bench-tab-label">{host.label}</span>
+								{host.mock && <span class="bench-tab-badge">mock</span>}
+							</label>
+						</>
+					))
+				}
+
+				{
+					benchHosts.map((host) => {
+						const wins = benchWins(host.rows);
+						return (
+							<div class="bench-panel" data-host={host.id}>
+								<p class="bench-detail">{host.detail}</p>
+								<table class="bench-table">
+									<thead>
+										<tr>
+											<th scope="col">terminal</th>
+											{benchMetrics.map((m) => (
+												<th scope="col">
+													{m.label} <span class="unit">{m.unit}</span>
+												</th>
+											))}
+										</tr>
+									</thead>
+									<tbody>
+										{host.rows.map((r) => (
+											<tr class={r.hi ? 'hi' : undefined}>
+												<th scope="row">{r.name}</th>
+												{r.vals.map((v, col) =>
+													v == null ? (
+														<td
+															class="miss"
+															title="Crashed or failed to run in a reasonable time"
+														>
+															<span aria-label="Crashed or failed to run in a reasonable time">
+																×
+															</span>
+														</td>
+													) : (
+														<td class={v === wins[col] ? 'win' : undefined}>{v}</td>
+													),
+												)}
+											</tr>
+										))}
+									</tbody>
+								</table>
+							</div>
+						);
+					})
+				}
+			</div>
+
+			<p class="bench-foot">
+				<span class="miss" aria-hidden="true">×</span>
+				Crashed or failed to run in a reasonable time
+			</p>
+		</section>
+
+		{/* ── Screen Studio split: list + media ── */}
+		<section class="sec sec-split">
+			<div class="sec-intro">
+				<h2>One surface. Many machines.</h2>
+				<p>
+					Add a host over ssh and its shells, agents, and browsers join your local ones in
+					the same window. Everything stays quick, even on a bad link.
+				</p>
+			</div>
+
+			<div class="split">
+				<div class="point-list" role="tablist" aria-label="Capabilities">
+					{
+						featPoints.map((p, i) => (
+							<>
+								<input
+									type="radio"
+									name="feat"
+									id={`feat-${p.id}`}
+									class="point-radio"
+									checked={i === 0}
+								/>
+								<label class="point" for={`feat-${p.id}`} role="tab">
+									<span class="point-title">{p.title}</span>
+									<span class="point-body">{p.body}</span>
+								</label>
+							</>
+						))
+					}
+				</div>
+
+				<div class="split-stage" aria-hidden="true">
+					<div class="stage-panel" data-for="fleet">
+						<div class="embed-wrap">
+							<div class="zz-embed sidebar-embed">
+								<Sidebar tree={fleetTree} />
+							</div>
+						</div>
+					</div>
+					<div class="stage-panel" data-for="wire">
+						<div class="embed-wrap">
+							<div class="zz-embed term-embed">
+								<TerminalPane lineHeight={1.5} padding={16}>
+									<span class="zz-line"
+										><span class="zz-fg-green">macbook</span><span class="zz-fg-black-b">:</span><span
+											class="zz-fg-blue-b">~/dev/zz</span
+										> $ cargo build</span
+									>
+									<span class="zz-line zz-fg-black-b">   Compiling zz-protocol v0.1.0</span>
+									<span class="zz-line zz-fg-black-b">   Compiling zz-terminal v0.1.0</span>
+									<span class="zz-line zz-fg-black-b">   Compiling zz-daemon v0.1.0</span>
+									<span class="zz-line row-hot"
+										>    <span class="zz-fg-cyan">Building</span> [=======>                ] 143/210<i
+											class="row-cost">~700 B</i
+										></span
+									>
+								</TerminalPane>
+							</div>
+						</div>
+					</div>
+					<div class="stage-panel" data-for="egress">
+						<div class="embed-wrap">
+							<div class="zz-embed browser-embed">
+								<BrowserPane url="http://localhost:3000/">
+									<div class="devpage">
+										<h1>hello from desktop</h1>
+										<p>dev server · listening on <code>desktop's 127.0.0.1</code></p>
+									</div>
+								</BrowserPane>
+							</div>
+						</div>
+					</div>
+					<div class="stage-panel" data-for="detach">
+						<div class="embed-wrap">
+							<div class="zz-embed agent-embed">
+								<AgentPane
+									version="v2.1.227"
+									subtitle="Sonnet 5 with xhigh effort · Claude Max"
+									cwd="~/dev/zz"
+								>
+									<span class="zz-cc-row"> </span>
+									<span class="zz-cc-user"
+										><span class="zz-cc-dim">›</span> run the full suite and fix whatever breaks</span
+									>
+									<span class="zz-cc-row"> </span>
+									<span class="zz-cc-row"
+										><span class="zz-cc-bright">●</span> Fixed the two flaky fixture teardowns and a
+										stale snapshot —</span
+									>
+									<span class="zz-cc-row">  212 passed, 0 failed.</span>
+									<span class="zz-cc-row"> </span>
+									<span class="zz-cc-row zz-cc-dim">✳ Churned for 34m</span>
+									<span class="zz-cc-row"> </span>
+								</AgentPane>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<a class="doc" href={`${base}/docs/getting-started/`}>docs <span>→</span></a>
+		</section>
+
+		{/* ── Chromium pane: the canvas, two real panes in it ── */}
+		<section class="sec sec-center">
+			<h2>Chromium is a pane</h2>
+			<p>
+				Split a real Chromium next to the shell you are working in. Open one with your prefix key
+				or from a script. It answers the same keys, resizes with the same drag, and reattaches on
+				the same URL.
+			</p>
+
+			{/* The canvas as the app lays it out: one margin of gap plane around two
+			    panes, each drawing its own border and radius. */}
+			<div class="zz-embed pair-embed" aria-hidden="true">
+				<div class="pair">
+					<Pane>
+						<TerminalPane fontSize={12} lineHeight={1.5} padding={16}>
+							<span class="zz-line"
+								><span class="zz-fg-green">macbook</span><span class="zz-fg-black-b">:</span><span
+									class="zz-fg-blue-b">~/dev/zz</span
+								> $ zz split-browser</span
+							>
+							<span class="zz-line zz-fg-black-b">opened %3</span>
+							<span class="zz-line"> </span>
+							<span class="zz-line"
+								><span class="zz-fg-green">macbook</span><span class="zz-fg-black-b">:</span><span
+									class="zz-fg-blue-b">~/dev/zz</span
+								> $ zz list-panes</span
+							>
+							<span class="zz-line zz-fg-black-b">%0: terminal* zsh</span>
+							<span class="zz-line zz-fg-black-b">%3: browser  Off-screen rendering</span>
+							<span class="zz-line"> </span>
+							<span class="zz-line"
+								><span class="zz-fg-green">macbook</span><span class="zz-fg-black-b">:</span><span
+									class="zz-fg-blue-b">~/dev/zz</span
+								> $ <span class="zz-cursor"></span></span
+							>
+						</TerminalPane>
+					</Pane>
+
+					<Pane focused>
+						{/* zz's own docs on the pane rendering them. Every line is from
+						    knowledge/browser/osr-rendering.md. */}
+						<BrowserPane url="https://zzmux.sh/docs/browser/">
+							<div class="docspage">
+								<div class="docs-head">
+									<span class="docs-crumb">zz docs</span>
+									<span class="docs-sep">/</span>
+									<span class="docs-crumb here">browser</span>
+								</div>
+								<h1>Off-screen rendering</h1>
+								<p>
+									Chromium paints off-screen. Every finished frame crosses a one-slot mailbox and
+									is sampled straight out of GPU memory.
+								</p>
+								<div class="docs-tiers">
+									<span class="docs-os">macOS</span>
+									<span class="docs-path">IOSurface → Metal blit → paint_surface</span>
+									<span class="docs-os">Linux</span>
+									<span class="docs-path">DMA-BUF → wgpu blit → external_texture</span>
+									<span class="docs-os">Windows</span>
+									<span class="docs-path">shared handle → D3D11 copy → external_texture</span>
+									<span class="docs-os dim">fallback</span>
+									<span class="docs-path dim">BGRA readback → RenderImage</span>
+								</div>
+								<ul class="docs-notes">
+									<li>The pixels never touch the CPU on a GPU tier.</li>
+									<li>Newest frame replaces the stale one, so a slow reader never queues.</li>
+									<li>Focused pane runs at display refresh, unfocused at 30, hidden at zero.</li>
+								</ul>
+							</div>
+						</BrowserPane>
+					</Pane>
+				</div>
+			</div>
+
+			<a class="doc" href={`${base}/docs/browser/`}>browser <span>→</span></a>
+		</section>
+
+		{/* ── Reverse split: the two donor configs ──
+		    tmux lands in zz/mux.conf verbatim; every appearance key the Ghostty
+		    file set (directly or through its theme) lands in zz/config as a
+		    concrete value (config/import.rs:133). */}
+		<section class="sec sec-reverse">
+			<div class="reverse-visual" aria-hidden="true">
+				<div class="donor">
+					<div class="donor-head">
+						<span class="donor-file">~/.tmux.conf</span>
+						<span class="donor-arrow">→</span>
+						<span class="donor-target">zz/mux.conf</span>
+					</div>
+					<div class="donor-keys">
+						<div class="donor-row"><Kbd>^a</Kbd><Kbd>%</Kbd><span>split-window -h</span></div>
+						<div class="donor-row"><Kbd>^a</Kbd><Kbd>"</Kbd><span>split-window -v</span></div>
+						<div class="donor-row"><Kbd>^a</Kbd><Kbd>[</Kbd><span>copy-mode</span></div>
+						<div class="donor-row"><Kbd>^a</Kbd><Kbd>z</Kbd><span>resize-pane -Z</span></div>
+					</div>
+				</div>
+
+				<div class="donor">
+					<div class="donor-head">
+						<span class="donor-file">~/.config/ghostty/config</span>
+						<span class="donor-arrow">→</span>
+						<span class="donor-target">zz/config</span>
+					</div>
+					<div class="donor-values">
+						<span class="donor-key">theme</span>
+						<span class="donor-val">catppuccin-mocha</span>
+						<span class="donor-key">font-family</span>
+						<span class="donor-val">Berkeley Mono</span>
+						<span class="donor-key">font-size</span>
+						<span class="donor-val">13</span>
+						<span class="donor-key">background-opacity</span>
+						<span class="donor-val">0.9</span>
+					</div>
+				</div>
+			</div>
+			<div class="reverse-copy">
+				<h2>Your config<br />comes with you.</h2>
+				<p>
+					First launch finds your tmux and Ghostty files and offers to bring them over. The prefix
+					table arrives verbatim, the theme and font as plain values. Neither original is touched.
+				</p>
+				<a class="doc" href={`${base}/docs/tmux/`}>compat <span>→</span></a>
+			</div>
+		</section>
+
+		<section class="sec sec-install">
+			<h2>Install from the cask</h2>
+			<p>App bundle plus <code>zz</code> on your PATH.</p>
+			<div class="cmd">
+				<span class="dollar" aria-hidden="true">$</span>
+				<code>brew install --cask demfabris/zz/zz</code>
+			</div>
+		</section>
+
+		<footer>
+			<a href={gh}>demfabris/zz</a>
+			<span>MIT / Apache-2.0</span>
+			<span class="right">macOS · Linux</span>
+		</footer>
+	</body>
+</html>
+
+<style is:global>
+	:root {
+		--bg: #0a0a0a;
+		--fg: #fafafa;
+		--dim: #a3a3a3;
+		--mute: #737373;
+		--panel: #141414;
+		--hair: rgba(255, 255, 255, 0.09);
+		--sans: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+		--mono: 'Fantasque Sans Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+		--ease: cubic-bezier(0.2, 0, 0, 1);
+		--wrap: min(1120px, calc(100% - 48px));
+	}
+	/* Same as zz.css: every rounded quad is a superellipse (Chrome 139+;
+	   plain border-radius remains the fallback elsewhere). */
+	* { margin: 0; box-sizing: border-box; corner-shape: squircle; }
+	html { background: var(--bg); }
+	body {
+		position: relative;
+		background: var(--bg);
+		color: var(--fg);
+		font-family: var(--sans);
+		font-size: 16px;
+		line-height: 1.55;
+		-webkit-font-smoothing: antialiased;
+		overflow-x: hidden;
+	}
+	a { color: inherit; text-decoration: none; }
+	a:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; border-radius: 10px; }
+
+	/* Soft top wash: white light, no chroma. Fades before the fold ends. */
+	.bloom {
+		position: absolute;
+		inset: -80px 0 auto;
+		height: 640px;
+		background:
+			radial-gradient(50% 45% at 50% 0%, rgba(255, 255, 255, 0.09), transparent 72%),
+			radial-gradient(36% 28% at 50% 8%, rgba(255, 255, 255, 0.04), transparent 70%);
+		pointer-events: none;
+		z-index: 0;
+	}
+
+	.nav {
+		position: relative;
+		z-index: 2;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		width: var(--wrap);
+		margin: 0 auto;
+		padding: 22px 0;
+	}
+	.mark {
+		display: flex;
+		align-items: center;
+		line-height: 0;
+	}
+	.mark img {
+		display: block;
+		width: 22px;
+		height: 22px;
+	}
+	.links { display: flex; gap: 4px; }
+	.links a {
+		display: flex;
+		align-items: center;
+		min-height: 40px;
+		padding: 0 12px;
+		border-radius: 999px;
+		font-size: 14px;
+		font-weight: 500;
+		color: var(--dim);
+		transition: color 0.15s var(--ease), background-color 0.15s var(--ease);
+	}
+	.links a:hover { color: var(--fg); background: rgba(255, 255, 255, 0.05); }
+
+	.hero {
+		position: relative;
+		z-index: 1;
+		text-align: center;
+		padding: 96px 24px 48px;
+		max-width: 820px;
+		margin: 0 auto;
+	}
+	/* Element-scoped, not bare: the hero shell renders zz's own chrome inside
+	   this page, and it has a `.url`, a `.split`, `kbd`s and `h1`s of its own
+	   that these rules would otherwise repaint. */
+	.hero h1 {
+		font-size: clamp(36px, 5.6vw, 56px);
+		font-weight: 700;
+		letter-spacing: -0.045em;
+		line-height: 1.1;
+		text-wrap: balance;
+	}
+	.hero h1 a {
+		color: inherit;
+		text-decoration: underline;
+		text-decoration-color: rgba(255, 255, 255, 0.18);
+		text-underline-offset: 0.12em;
+		transition: text-decoration-color 0.15s var(--ease);
+	}
+	.hero h1 a:hover {
+		text-decoration-color: rgba(255, 255, 255, 0.5);
+	}
+	.sub {
+		margin: 22px auto 0;
+		max-width: 52ch;
+		font-size: 18px;
+		color: var(--dim);
+		text-wrap: pretty;
+	}
+	.sub code, .sec-install code, .sec-intro code {
+		font-family: var(--mono);
+		font-size: 0.9em;
+		color: #d4d4d8;
+		white-space: nowrap;
+	}
+	.btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 48px;
+		margin-top: 34px;
+		padding: 0 28px;
+		border-radius: 14px;
+		font-size: 15px;
+		font-weight: 600;
+		color: #0a0a0a;
+		background: var(--fg);
+		box-shadow:
+			0 1px 0 rgba(255, 255, 255, 0.35) inset,
+			0 1px 2px rgba(0, 0, 0, 0.35),
+			0 14px 32px -14px rgba(255, 255, 255, 0.28);
+		transition: transform 0.14s var(--ease), background-color 0.15s var(--ease), box-shadow 0.2s var(--ease);
+	}
+	.btn:hover {
+		background: #fff;
+		box-shadow:
+			0 1px 0 rgba(255, 255, 255, 0.4) inset,
+			0 1px 2px rgba(0, 0, 0, 0.35),
+			0 18px 40px -14px rgba(255, 255, 255, 0.35);
+	}
+	.btn:active { transform: scale(0.96); }
+	.note { margin-top: 14px; font-size: 13px; color: var(--mute); }
+
+	/* Wider than --wrap on purpose. The shell inside sizes itself off its own
+	   scale ladder and carries its own corner and shadow, so this is only the
+	   band it is centred in. */
+	.shot {
+		position: relative;
+		z-index: 1;
+		display: flex;
+		justify-content: center;
+		width: 100%;
+		margin: 56px auto 0;
+		padding: 0 20px;
+	}
+
+	.bench {
+		position: relative;
+		z-index: 1;
+		width: var(--wrap);
+		margin: 160px auto 0;
+		padding: 0;
+	}
+	.bench-head {
+		display: flex;
+		align-items: flex-end;
+		justify-content: space-between;
+		gap: 24px;
+		margin-bottom: 28px;
+	}
+	.bench-head h2 {
+		font-size: clamp(32px, 4.5vw, 48px);
+		font-weight: 700;
+		letter-spacing: -0.045em;
+		line-height: 1.05;
+		text-wrap: balance;
+	}
+	.bench-head p {
+		margin-top: 12px;
+		max-width: 46ch;
+		font-size: 16px;
+		color: var(--dim);
+		text-wrap: pretty;
+	}
+	.bench-src {
+		flex-shrink: 0;
+		display: inline-flex;
+		align-items: center;
+		min-height: 40px;
+		font-family: var(--mono);
+		font-size: 13px;
+		color: var(--mute);
+		transition: color 0.15s var(--ease);
+	}
+	.bench-src span { display: inline-block; margin-left: 4px; transition: transform 0.2s var(--ease); }
+	.bench-src:hover { color: var(--fg); }
+	.bench-src:hover span { transform: translateX(3px); }
+
+	.bench-hosts {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px 8px;
+		align-items: center;
+	}
+	.bench-radio {
+		position: absolute;
+		opacity: 0;
+		pointer-events: none;
+	}
+	.bench-tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		min-height: 40px;
+		padding: 0 14px;
+		border-radius: 999px;
+		font-size: 14px;
+		font-weight: 500;
+		color: var(--mute);
+		cursor: pointer;
+		box-shadow: inset 0 0 0 1px var(--hair);
+		transition: color 0.15s var(--ease), background-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+	}
+	.bench-tab:hover { color: var(--dim); background: rgba(255, 255, 255, 0.03); }
+	.bench-tab-badge {
+		font-family: var(--mono);
+		font-size: 10px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--mute);
+	}
+	#bench-m4:checked + .bench-tab[for='bench-m4'],
+	#bench-ryzen:checked + .bench-tab[for='bench-ryzen'] {
+		color: var(--fg);
+		background: rgba(255, 255, 255, 0.08);
+		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+	}
+	.bench-panel {
+		display: none;
+		width: 100%;
+		margin-top: 8px;
+		order: 10;
+	}
+	.bench-hosts:has(#bench-m4:checked) .bench-panel[data-host='m4'],
+	.bench-hosts:has(#bench-ryzen:checked) .bench-panel[data-host='ryzen'] {
+		display: block;
+	}
+	.bench-detail {
+		margin: 2px 0 12px;
+		font-family: var(--mono);
+		font-size: 11px;
+		color: var(--mute);
+	}
+
+	.bench-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-variant-numeric: tabular-nums;
+	}
+	.bench-table th,
+	.bench-table td {
+		padding: 8px 0;
+		text-align: right;
+		border-bottom: 1px solid var(--hair);
+		font-size: 14px;
+		font-weight: 500;
+		color: var(--mute);
+		line-height: 1.3;
+	}
+	.bench-table thead th {
+		font-size: 11px;
+		font-weight: 500;
+		padding: 0 0 8px;
+		color: var(--mute);
+	}
+	.bench-table thead th:first-child,
+	.bench-table tbody th {
+		text-align: left;
+	}
+	.bench-table tbody th {
+		font-family: var(--mono);
+		font-size: 12.5px;
+		font-weight: 500;
+		color: var(--dim);
+	}
+	.bench-table .unit {
+		color: var(--mute);
+		font-weight: 400;
+	}
+	.bench-table tbody tr.hi th {
+		color: var(--fg);
+		font-weight: 600;
+	}
+	.bench-table td.win {
+		color: var(--fg);
+		font-weight: 700;
+	}
+	.bench-table td.miss,
+	.bench-foot .miss {
+		color: #ef4444;
+		font-weight: 600;
+		font-size: 14px;
+		line-height: 1;
+	}
+	.bench-table tbody tr:last-child th,
+	.bench-table tbody tr:last-child td { border-bottom: none; }
+	.bench-foot {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-top: 12px;
+		font-size: 12px;
+		color: var(--mute);
+	}
+	.bench-foot .miss { font-size: 13px; }
+
+	/* shared section chrome */
+	.sec {
+		position: relative;
+		z-index: 1;
+		width: var(--wrap);
+		margin: 0 auto;
+		padding: 160px 0 40px;
+	}
+	.sec h2 {
+		font-size: clamp(36px, 5.2vw, 56px);
+		font-weight: 700;
+		letter-spacing: -0.045em;
+		line-height: 1.05;
+		text-wrap: balance;
+	}
+	.doc {
+		display: inline-flex;
+		align-items: center;
+		min-height: 40px;
+		margin-top: 28px;
+		font-family: var(--mono);
+		font-size: 14px;
+		color: var(--mute);
+		transition: color 0.15s var(--ease);
+	}
+	.doc span { display: inline-block; margin-left: 4px; transition: transform 0.2s var(--ease); }
+	.doc:hover { color: var(--fg); }
+	.doc:hover span { transform: translateX(3px); }
+
+	/* ── split: list + stage ── */
+	.sec-intro { max-width: 720px; margin-bottom: 48px; }
+	.sec-intro p {
+		margin-top: 16px;
+		font-size: 18px;
+		color: var(--dim);
+		max-width: 48ch;
+		text-wrap: pretty;
+	}
+	.sec-split .split {
+		display: grid;
+		grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.15fr);
+		gap: 40px;
+		align-items: stretch;
+	}
+	.point-radio { position: absolute; opacity: 0; pointer-events: none; }
+	.point-list { display: flex; flex-direction: column; gap: 6px; }
+	.point {
+		display: block;
+		padding: 18px 20px;
+		border-radius: 16px;
+		cursor: pointer;
+		transition: background-color 0.2s var(--ease), color 0.2s var(--ease);
+	}
+	.point-title {
+		display: block;
+		font-size: 17px;
+		font-weight: 600;
+		letter-spacing: -0.02em;
+		color: var(--mute);
+		transition: color 0.2s var(--ease);
+	}
+	.point-body {
+		display: block;
+		margin-top: 6px;
+		font-size: 14.5px;
+		color: var(--mute);
+		opacity: 0.75;
+		text-wrap: pretty;
+		transition: color 0.2s var(--ease), opacity 0.2s var(--ease);
+	}
+	.point:hover .point-title { color: var(--dim); }
+	#feat-fleet:checked ~ label[for='feat-fleet'],
+	#feat-wire:checked ~ label[for='feat-wire'],
+	#feat-egress:checked ~ label[for='feat-egress'],
+	#feat-detach:checked ~ label[for='feat-detach'] {
+		background: rgba(255, 255, 255, 0.05);
+	}
+	#feat-fleet:checked ~ label[for='feat-fleet'] .point-title,
+	#feat-wire:checked ~ label[for='feat-wire'] .point-title,
+	#feat-egress:checked ~ label[for='feat-egress'] .point-title,
+	#feat-detach:checked ~ label[for='feat-detach'] .point-title {
+		color: var(--fg);
+	}
+	#feat-fleet:checked ~ label[for='feat-fleet'] .point-body,
+	#feat-wire:checked ~ label[for='feat-wire'] .point-body,
+	#feat-egress:checked ~ label[for='feat-egress'] .point-body,
+	#feat-detach:checked ~ label[for='feat-detach'] .point-body {
+		color: var(--dim);
+		opacity: 1;
+	}
+
+	.split-stage {
+		position: relative;
+		min-height: 340px;
+		border-radius: 22px;
+		overflow: hidden;
+		background:
+			radial-gradient(70% 60% at 30% 80%, rgba(255, 255, 255, 0.06), transparent 55%),
+			radial-gradient(60% 50% at 80% 20%, rgba(255, 255, 255, 0.04), transparent 50%),
+			#111;
+		box-shadow:
+			inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+			0 24px 60px -28px rgba(0, 0, 0, 0.8);
+		padding: 28px;
+		display: grid;
+	}
+	/* Pure fade carrier: the card look belongs to the component embed inside,
+	   so the stage backdrop plus one frame is all the chrome a preview gets. */
+	.stage-panel {
+		grid-area: 1 / 1;
+		align-self: center;
+		justify-self: stretch;
+		opacity: 0;
+		transform: scale(0.98);
+		pointer-events: none;
+		transition: opacity 0.25s var(--ease), transform 0.25s var(--ease);
+	}
+	.sec-split .split:has(#feat-fleet:checked) .stage-panel[data-for='fleet'],
+	.sec-split .split:has(#feat-wire:checked) .stage-panel[data-for='wire'],
+	.sec-split .split:has(#feat-egress:checked) .stage-panel[data-for='egress'],
+	.sec-split .split:has(#feat-detach:checked) .stage-panel[data-for='detach'] {
+		opacity: 1;
+		transform: none;
+		pointer-events: auto;
+	}
+
+	/* ── real components as stage previews ──────────────────────────────────
+	   The fleet/wire/egress panels mount the hero demo's own Sidebar,
+	   TerminalPane, and BrowserPane. Their tokens live on :root in zz.css, so
+	   the only context the frame supplies is the box-sizing and type reset the
+	   shell normally carries — deliberately not `.zz-scope`, whose focus rule
+	   would grey the traffic lights of an embed that is never focused. */
+	.embed-wrap {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		padding: 26px 24px;
+	}
+	.zz-embed {
+		display: flex;
+		overflow: hidden;
+		border-radius: 16px;
+		corner-shape: squircle;
+		box-shadow:
+			0 0 0 1px var(--hair, rgba(255, 255, 255, 0.09)),
+			0 18px 44px -24px rgba(0, 0, 0, 0.85);
+		font-family: var(--zz-font-ui);
+		font-size: 16px;
+		font-weight: 400;
+		line-height: normal;
+		letter-spacing: normal;
+		text-align: left;
+		/* The sidebar rounds its left edge to the window rim; the frame here owns
+		   the corners instead. */
+		--zz-frame-radius: 0px;
+	}
+	.zz-embed,
+	.zz-embed :global(*),
+	.zz-embed :global(*::before),
+	.zz-embed :global(*::after) {
+		box-sizing: border-box;
+	}
+	/* 34px strip + 9 tree rows at 32px, plus the empty run the real sidebar
+	   keeps below its tree. */
+	.sidebar-embed { height: 396px; }
+	.term-embed, .browser-embed, .agent-embed { width: 100%; height: 250px; }
+
+	/* The one terminal row the patch carried, with its price tag. */
+	.row-hot {
+		position: relative;
+		margin: 0 -8px;
+		padding: 0 8px;
+		border-radius: 6px;
+		background: rgba(255, 255, 255, 0.07);
+	}
+	.row-cost {
+		position: absolute;
+		top: 50%;
+		right: 8px;
+		transform: translateY(-50%);
+		padding: 3px 8px;
+		border-radius: 999px;
+		background: rgba(255, 255, 255, 0.1);
+		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+		color: var(--fg);
+		font-style: normal;
+		font-size: 10px;
+		letter-spacing: 0.05em;
+	}
+
+	/* What desktop's dev server serves, rendered inside the pane. */
+	.devpage {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 10px;
+		background: #0b0d10;
+	}
+	.devpage h1 {
+		font-size: 21px;
+		font-weight: 600;
+		letter-spacing: -0.02em;
+		color: #fafafa;
+	}
+	.devpage p {
+		font-family: var(--mono);
+		font-size: 11.5px;
+		color: var(--dim);
+	}
+	.devpage code { color: var(--fg); }
+
+	/* Two panes on the canvas. The gap and the surrounding inset are both one
+	   pane margin, which is how the app spaces a split (zz-ui/src/pane.rs:231). */
+	.pair-embed {
+		width: min(920px, calc(100% - 48px));
+		height: 412px;
+		margin: 48px auto 0;
+	}
+	.pair {
+		display: grid;
+		grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+		gap: var(--zz-pane-margin);
+		flex: 1;
+		min-width: 0;
+		padding: var(--zz-pane-margin);
+		background: var(--zz-bg);
+	}
+
+	/* The zz docs in the browser pane: web content, so it brings its own type
+	   and palette rather than any zz chrome token. */
+	.docspage {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		padding: 20px 24px;
+		background: #0f1116;
+		font-family: var(--sans);
+		color: #b6bac2;
+		text-align: left;
+	}
+	.docs-head {
+		display: flex;
+		align-items: baseline;
+		gap: 7px;
+		padding-bottom: 12px;
+		border-bottom: 1px solid #23262e;
+		font-family: var(--mono);
+		font-size: 11px;
+		color: #6f757f;
+	}
+	.docs-crumb.here { color: #cfd3da; }
+	.docspage h1 {
+		margin-top: 16px;
+		font-size: 19px;
+		font-weight: 600;
+		letter-spacing: -0.015em;
+		color: #e8eaee;
+	}
+	.docspage > p {
+		margin-top: 9px;
+		font-size: 12.5px;
+		line-height: 1.6;
+	}
+
+	/* The delivery table, one row per platform. */
+	.docs-tiers {
+		display: grid;
+		grid-template-columns: max-content minmax(0, 1fr);
+		gap: 7px 14px;
+		margin-top: 16px;
+		padding: 12px 13px;
+		border-radius: 10px;
+		background: #14161c;
+		font-family: var(--mono);
+		font-size: 10.5px;
+		line-height: 1.4;
+	}
+	.docs-os { color: #cfd3da; }
+	.docs-path { color: #7f96c4; }
+	.docs-os.dim, .docs-path.dim { color: #5c626d; }
+
+	.docs-notes {
+		margin-top: 14px;
+		font-size: 11.5px;
+		line-height: 1.5;
+		list-style: none;
+	}
+	.docs-notes li { position: relative; padding-left: 14px; }
+	.docs-notes li + li { margin-top: 6px; }
+	.docs-notes li::before {
+		content: '';
+		position: absolute;
+		top: 6px;
+		left: 2px;
+		width: 4px;
+		height: 4px;
+		border-radius: 50%;
+		background: #4a5262;
+	}
+
+	/* ── centered manifesto ── */
+	.sec-center {
+		text-align: center;
+		padding-top: 160px;
+		padding-bottom: 48px;
+		max-width: none;
+		width: 100%;
+	}
+	.sec-center h2,
+	.sec-center > p,
+	.sec-center .doc {
+		width: min(720px, calc(100% - 48px));
+		margin-left: auto;
+		margin-right: auto;
+	}
+	/* The link is a flex box the width of the copy column, so its own content
+	   needs centering too. */
+	.sec-center .doc { justify-content: center; }
+	.sec-center > p {
+		margin-top: 16px;
+		font-size: 18px;
+		color: var(--dim);
+		text-wrap: pretty;
+	}
+	/* ── reverse split ── */
+	.sec-reverse {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		gap: 56px;
+		align-items: center;
+		padding-top: 160px;
+	}
+	.reverse-copy h2 { margin-bottom: 0; }
+	.reverse-copy p {
+		margin-top: 18px;
+		font-size: 18px;
+		color: var(--dim);
+		max-width: 40ch;
+		text-wrap: pretty;
+	}
+	.reverse-copy code {
+		font-family: var(--mono);
+		font-size: 0.9em;
+		color: #d4d4d8;
+		white-space: nowrap;
+	}
+	/* One stage, no card inside it: the two donor listings sit straight on the
+	   backdrop, split by a hairline. */
+	.reverse-visual {
+		display: flex;
+		flex-direction: column;
+		gap: 22px;
+		border-radius: 22px;
+		padding: 30px 32px;
+		background:
+			radial-gradient(70% 70% at 30% 30%, rgba(255, 255, 255, 0.05), transparent 65%),
+			rgba(255, 255, 255, 0.02);
+		box-shadow: inset 0 0 0 1px var(--hair);
+		font-family: var(--mono);
+	}
+	.donor + .donor { padding-top: 22px; border-top: 1px solid var(--hair); }
+	.donor-head {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 12px;
+	}
+	.donor-file { color: var(--fg); }
+	.donor-arrow, .donor-target { color: var(--mute); }
+
+	.donor-keys { margin-top: 16px; font-size: 13px; }
+	.donor-row { display: flex; align-items: center; gap: 6px; }
+	.donor-row + .donor-row { margin-top: 10px; }
+	.donor-row span { margin-left: 6px; color: var(--dim); }
+	/* The app's own kbd pill, so the keys read as zz renders them. */
+	.donor-row :global(.zz-kbd) {
+		min-width: 24px;
+		padding: 4px 6px;
+		font-family: var(--mono);
+		font-size: 12px;
+		color: var(--fg);
+	}
+
+	.donor-values {
+		display: grid;
+		grid-template-columns: max-content minmax(0, 1fr);
+		gap: 10px 18px;
+		margin-top: 16px;
+		font-size: 13px;
+	}
+	.donor-key { color: var(--mute); }
+	.donor-val { color: var(--dim); }
+
+	/* install */
+	.sec-install {
+		text-align: center;
+		padding: 160px 0 48px;
+		width: min(820px, calc(100% - 48px));
+	}
+	.sec-install > p {
+		margin-top: 16px;
+		font-size: 18px;
+		color: var(--dim);
+	}
+	.cmd {
+		display: inline-flex;
+		align-items: center;
+		gap: 10px;
+		margin-top: 28px;
+		max-width: 100%;
+		padding: 14px 20px;
+		border-radius: 14px;
+		background: rgba(255, 255, 255, 0.03);
+		box-shadow: inset 0 0 0 1px var(--hair);
+		font-family: var(--mono);
+		font-size: 14px;
+		overflow-x: auto;
+	}
+	.cmd .dollar { color: var(--fg); user-select: none; }
+	.cmd code { color: var(--dim); white-space: nowrap; }
+
+	footer {
+		position: relative;
+		z-index: 1;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 16px;
+		width: var(--wrap);
+		margin: 96px auto 0;
+		padding: 32px 0 64px;
+		border-top: 1px solid var(--hair);
+		font-family: var(--mono);
+		font-size: 12.5px;
+		color: var(--mute);
+	}
+	footer a {
+		color: inherit;
+		transition: color 0.15s var(--ease);
+	}
+	footer a:hover { color: var(--fg); }
+	footer .right { margin-left: auto; }
+
+	@keyframes rise {
+		from { opacity: 0; transform: translateY(16px); }
+	}
+	.hero h1, .sub, .btn, .note, .shot {
+		animation: rise 0.7s var(--ease) backwards;
+	}
+	.hero h1 { animation-delay: 0.05s; }
+	.sub { animation-delay: 0.12s; }
+	.btn { animation-delay: 0.2s; }
+	.note { animation-delay: 0.24s; }
+	.shot { animation-delay: 0.3s; animation-duration: 0.85s; }
+
+	@media (max-width: 900px) {
+		.sec-split .split, .sec-reverse { grid-template-columns: 1fr; gap: 28px; }
+		.sec-reverse .reverse-visual { order: -1; }
+		.bench-head { flex-direction: column; align-items: flex-start; }
+		.hero { padding-top: 64px; }
+		.sec, .sec-center, .sec-reverse, .sec-install { padding-top: 96px; }
+		.bench { margin-top: 112px; }
+		.split-stage { min-height: 280px; }
+		footer .right { margin-left: 0; }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.btn, .links a, .bench-src, .bench-src span, .bench-tab, .doc, .doc span, .point, .stage-panel { transition: none; }
+		.hero h1, .sub, .btn, .note, .shot { animation: none; }
+	}
+</style>

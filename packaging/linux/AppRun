@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+if [ -z "${APPDIR:-}" ]; then
+    APPDIR="$(
+        CDPATH=
+        cd -- "$(dirname -- "$0")"
+        pwd
+    )"
+fi
+
+export LD_LIBRARY_PATH="$APPDIR/usr/lib/zz${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "$APPDIR/usr/bin/zz" "$@"

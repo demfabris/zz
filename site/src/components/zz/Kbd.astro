@@ -1,0 +1,13 @@
+---
+// kbd.rs:153. Glyphs are lowercased by the widget (kbd.rs:39).
+interface Props {
+	/** The pane picker raises the fill to raised(4) because it sits on a washed row. */
+	raised?: boolean;
+	class?: string;
+}
+
+const { raised = false, class: cls } = Astro.props;
+const classes = ['zz-kbd', raised && 'zz-kbd--raised', cls].filter(Boolean).join(' ');
+---
+
+<kbd class={classes}><slot /></kbd>

@@ -1,0 +1,596 @@
+use std::{
+    fmt,
+    io::{self, Read, Write},
+    path::Path,
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+use parking_lot::Mutex;
+use zz_protocol::{
+    ClientHello, ClientKind, CommandInvocation, CommandRequest, CommandResponse,
+    ConfigOverrideEntry, GuiResponse, InputMessage, MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION,
+    PaneId, PasteUploadPurpose, ProtocolMessage, ServerError, ServerHello,
+    encode_protocol_message_into, read_protocol_message_into,
+};
+use zz_terminal::TerminalColorScheme;
+
+// iOS cannot run ssh, so it tunnels in-process instead of forwarding a socket.
+#[cfg(all(any(unix, windows), not(target_os = "ios")))]
+use crate::endpoint::SshForward;
+#[cfg(target_os = "ios")]
+use crate::russh_client::{RusshForward, RusshStream};
+use crate::{
+    DaemonError, diagnostic_elapsed_us, diagnostic_timer,
+    endpoint::Endpoint,
+    transport::{LocalStream, LocalTransport, Transport, TransportStream},
+};
+
+pub(crate) enum ClientStream {
+    Local(LocalStream),
+    #[cfg(target_os = "ios")]
+    Ssh(RusshStream),
+}
+
+impl Read for ClientStream {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Local(stream) => stream.read(buffer),
+            #[cfg(target_os = "ios")]
+            Self::Ssh(stream) => stream.read(buffer),
+        }
+    }
+}
+
+impl Write for ClientStream {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Local(stream) => stream.write(buffer),
+            #[cfg(target_os = "ios")]
+            Self::Ssh(stream) => stream.write(buffer),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Local(stream) => stream.flush(),
+            #[cfg(target_os = "ios")]
+            Self::Ssh(stream) => stream.flush(),
+        }
+    }
+}
+
+impl TransportStream for ClientStream {
+    fn try_clone(&self) -> io::Result<Self> {
+        match self {
+            Self::Local(stream) => stream.try_clone().map(Self::Local),
+            #[cfg(target_os = "ios")]
+            Self::Ssh(stream) => stream.try_clone().map(Self::Ssh),
+        }
+    }
+}
+
+static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+
+pub struct CommandClient {
+    reader: ProtocolReceiver<LocalStream>,
+    writer: ProtocolSender<LocalStream>,
+    hello: ServerHello,
+    #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+    _ssh_forward: Option<SshForward>,
+}
+
+impl CommandClient {
+    pub fn connect(path: &Path) -> Result<Self, DaemonError> {
+        let connected =
+            connect::<LocalTransport>(path, path.display(), ClientKind::Command, None, None, true)?;
+        Ok(Self::from_connected(connected))
+    }
+
+    /// Connect a short-lived command client to a configured fleet endpoint.
+    pub fn connect_endpoint(endpoint: &Endpoint) -> Result<Self, DaemonError> {
+        match endpoint {
+            Endpoint::Local(path) => {
+                let stream = LocalTransport::connect(path)?;
+                let connected = connect_stream(
+                    stream,
+                    path.display(),
+                    ClientKind::Command,
+                    None,
+                    None,
+                    false,
+                )?;
+                Ok(Self::from_connected(connected))
+            }
+            Endpoint::Ssh(endpoint) => {
+                #[cfg(target_os = "ios")]
+                {
+                    let _ = endpoint;
+                    Err(crate::EndpointError::UnsupportedPlatform.into())
+                }
+                #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+                {
+                    let ssh_forward = SshForward::start(endpoint, None)?;
+                    let stream = LocalTransport::connect(ssh_forward.local_socket())?;
+                    let connected =
+                        connect_stream(stream, endpoint, ClientKind::Command, None, None, false)?;
+                    Ok(Self::from_connected_with_ssh(connected, ssh_forward))
+                }
+                #[cfg(not(any(unix, windows)))]
+                {
+                    let _ = endpoint;
+                    Err(crate::EndpointError::UnsupportedPlatform.into())
+                }
+            }
+        }
+    }
+
+    fn from_connected((reader, writer, hello): Connected<LocalStream>) -> Self {
+        Self {
+            reader,
+            writer,
+            hello,
+            #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+            _ssh_forward: None,
+        }
+    }
+
+    #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+    fn from_connected_with_ssh(connected: Connected<LocalStream>, ssh_forward: SshForward) -> Self {
+        let mut client = Self::from_connected(connected);
+        client._ssh_forward = Some(ssh_forward);
+        client
+    }
+
+    #[must_use]
+    pub fn server_hello(&self) -> &ServerHello {
+        &self.hello
+    }
+
+    pub fn execute(&mut self, command: CommandInvocation) -> Result<String, DaemonError> {
+        let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+        self.writer
+            .send(&ProtocolMessage::CommandRequest(CommandRequest {
+                request_id,
+                command,
+            }))?;
+        loop {
+            match self.reader.recv()? {
+                ProtocolMessage::CommandResponse(CommandResponse::Success {
+                    request_id: response_id,
+                    output,
+                }) if response_id == request_id => return Ok(output),
+                ProtocolMessage::CommandResponse(CommandResponse::Error {
+                    request_id: response_id,
+                    error,
+                }) if response_id == request_id => return Err(error.into()),
+                _ => {}
+            }
+        }
+    }
+}
+
+pub struct InteractiveClient {
+    reader: Mutex<ProtocolReceiver<ClientStream>>,
+    writer: Mutex<ProtocolSender<ClientStream>>,
+    hello: ServerHello,
+    #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+    ssh_forward: Option<SshForward>,
+    #[cfg(target_os = "ios")]
+    russh_forward: Option<RusshForward>,
+}
+
+impl InteractiveClient {
+    pub fn connect(path: &Path) -> Result<Self, DaemonError> {
+        Self::connect_endpoint(&Endpoint::Local(path.to_owned()), TerminalColorScheme::Dark)
+    }
+
+    pub fn connect_with_color_scheme(
+        path: &Path,
+        color_scheme: TerminalColorScheme,
+    ) -> Result<Self, DaemonError> {
+        Self::connect_endpoint(&Endpoint::Local(path.to_owned()), color_scheme)
+    }
+
+    pub fn connect_endpoint(
+        endpoint: &Endpoint,
+        color_scheme: TerminalColorScheme,
+    ) -> Result<Self, DaemonError> {
+        Self::connect_endpoint_with_prompts(endpoint, color_scheme, None)
+    }
+
+    /// Connect, letting `prompts` answer whatever ssh asks along the way.
+    ///
+    /// Only a windowed caller passes them; a CLI invocation has ssh's own terminal.
+    pub fn connect_endpoint_with_prompts(
+        endpoint: &Endpoint,
+        color_scheme: TerminalColorScheme,
+        prompts: Option<crate::askpass::SshPrompts>,
+    ) -> Result<Self, DaemonError> {
+        let device_name = short_device_name();
+        match endpoint {
+            Endpoint::Local(path) => {
+                let stream = LocalTransport::connect(path)?;
+                let connected = connect_stream(
+                    ClientStream::Local(stream),
+                    path.display(),
+                    ClientKind::Interactive,
+                    device_name.clone(),
+                    Some(color_scheme),
+                    false,
+                )?;
+                Ok(Self::from_connected(connected))
+            }
+            Endpoint::Ssh(endpoint) => {
+                #[cfg(target_os = "ios")]
+                {
+                    let (russh_forward, stream) = RusshForward::start(endpoint, prompts)?;
+                    let connected = connect_stream(
+                        ClientStream::Ssh(stream),
+                        endpoint,
+                        ClientKind::Interactive,
+                        device_name,
+                        Some(color_scheme),
+                        false,
+                    )?;
+                    let mut client = Self::from_connected(connected);
+                    client.russh_forward = Some(russh_forward);
+                    Ok(client)
+                }
+                #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+                {
+                    let ssh_forward = SshForward::start(endpoint, prompts)?;
+                    let stream = LocalTransport::connect(ssh_forward.local_socket())?;
+                    let connected = connect_stream(
+                        ClientStream::Local(stream),
+                        endpoint,
+                        ClientKind::Interactive,
+                        device_name,
+                        Some(color_scheme),
+                        false,
+                    )?;
+                    Ok(Self::from_connected_with_ssh(connected, ssh_forward))
+                }
+                #[cfg(not(any(unix, windows)))]
+                {
+                    let _ = (endpoint, prompts);
+                    Err(crate::EndpointError::UnsupportedPlatform.into())
+                }
+            }
+        }
+    }
+
+    fn from_connected((reader, writer, hello): Connected<ClientStream>) -> Self {
+        Self {
+            reader: Mutex::new(reader),
+            writer: Mutex::new(writer),
+            hello,
+            #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+            ssh_forward: None,
+            #[cfg(target_os = "ios")]
+            russh_forward: None,
+        }
+    }
+
+    #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+    fn from_connected_with_ssh(
+        connected: Connected<ClientStream>,
+        ssh_forward: SshForward,
+    ) -> Self {
+        let mut client = Self::from_connected(connected);
+        client.ssh_forward = Some(ssh_forward);
+        client
+    }
+
+    #[must_use]
+    pub fn server_hello(&self) -> &ServerHello {
+        &self.hello
+    }
+
+    /// The loopback SOCKS5 port this client's ssh forward opened, if it has one.
+    #[must_use]
+    pub fn socks_port(&self) -> Option<u16> {
+        #[cfg(target_os = "ios")]
+        {
+            self.russh_forward
+                .as_ref()
+                .and_then(RusshForward::socks_port)
+        }
+        #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+        {
+            self.ssh_forward.as_ref().and_then(SshForward::socks_port)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            None
+        }
+    }
+
+    pub fn attach(&self, session: impl Into<String>) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::Attach {
+            session: session.into(),
+        })
+    }
+
+    pub fn detach(&self) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::Detach)
+    }
+
+    pub fn send_input(&self, input: InputMessage) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::Input(input))
+    }
+
+    /// Stream one pasted image to the daemon, which writes it on its own host
+    /// and pastes the resulting path into `pane`.
+    pub fn send_paste_upload(
+        &self,
+        upload_id: u64,
+        pane: PaneId,
+        extension: String,
+        bytes: &[u8],
+    ) -> Result<(), DaemonError> {
+        self.send_paste_upload_with_purpose(
+            upload_id,
+            pane,
+            PasteUploadPurpose::PastePath,
+            extension,
+            bytes,
+        )
+    }
+
+    /// Stream one pasted image into the daemon-owned placeholder binding store.
+    pub fn record_pasted_image(
+        &self,
+        upload_id: u64,
+        pane: PaneId,
+        extension: String,
+        bytes: &[u8],
+    ) -> Result<(), DaemonError> {
+        self.send_paste_upload_with_purpose(
+            upload_id,
+            pane,
+            PasteUploadPurpose::RecordPastedImage,
+            extension,
+            bytes,
+        )
+    }
+
+    fn send_paste_upload_with_purpose(
+        &self,
+        upload_id: u64,
+        pane: PaneId,
+        purpose: PasteUploadPurpose,
+        extension: String,
+        bytes: &[u8],
+    ) -> Result<(), DaemonError> {
+        let total_bytes = u32::try_from(bytes.len()).map_err(|_| {
+            DaemonError::Server(ServerError::InvalidCommand(
+                "pasted image exceeds the upload limit".to_owned(),
+            ))
+        })?;
+        let mut writer = self.writer.lock();
+        writer.send(&ProtocolMessage::PasteUploadBegin {
+            upload_id,
+            pane,
+            purpose,
+            extension,
+            total_bytes,
+        })?;
+        for chunk in bytes.chunks(MAX_PASTE_UPLOAD_CHUNK_BYTES) {
+            writer.send(&ProtocolMessage::PasteUploadChunk {
+                upload_id,
+                bytes: chunk.to_vec(),
+            })?;
+        }
+        Ok(())
+    }
+
+    pub fn fetch_pasted_image(&self, pane: PaneId, number: u32) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::FetchPastedImage { pane, number })
+    }
+
+    pub fn execute(&self, command: CommandInvocation) -> Result<u64, DaemonError> {
+        let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+        self.send(&ProtocolMessage::CommandRequest(CommandRequest {
+            request_id,
+            command,
+        }))?;
+        Ok(request_id)
+    }
+
+    pub fn request_resync(&self) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::Resync)
+    }
+
+    pub fn request_full(&self, pane: PaneId) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::RequestFull { pane })
+    }
+
+    pub fn request_history(&self, pane: PaneId, start: u32, count: u32) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::HistoryRequest { pane, start, count })
+    }
+
+    /// Answer one daemon-issued request for GUI-owned work, success or failure.
+    pub fn send_gui_response(&self, response: GuiResponse) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::GuiResponse(response))
+    }
+
+    pub fn set_color_scheme(&self, color_scheme: TerminalColorScheme) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::SetColorScheme(color_scheme))
+    }
+
+    pub fn set_config_overrides(
+        &self,
+        entries: Vec<ConfigOverrideEntry>,
+    ) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::SetConfigOverrides { entries })
+    }
+
+    pub fn recv(&self) -> Result<ProtocolMessage, DaemonError> {
+        let started = diagnostic_timer();
+        let lock_started = diagnostic_timer();
+        let mut reader = self.reader.lock();
+        let lock_wait_us = diagnostic_elapsed_us(lock_started);
+        let result = reader.recv();
+        drop(reader);
+        log::trace!(
+            target: "zz_daemon::diagnostics::client",
+            "interactive_recv success={} lock_wait_us={} total_elapsed_us={}",
+            result.is_ok(),
+            lock_wait_us,
+            diagnostic_elapsed_us(started),
+        );
+        result
+    }
+
+    fn send(&self, message: &ProtocolMessage) -> Result<(), DaemonError> {
+        let started = diagnostic_timer();
+        let lock_started = diagnostic_timer();
+        let mut writer = self.writer.lock();
+        let lock_wait_us = diagnostic_elapsed_us(lock_started);
+        let result = writer.send(message);
+        log::trace!(
+            target: "zz_daemon::diagnostics::client",
+            "interactive_send success={} lock_wait_us={} total_elapsed_us={} message={message:#?}",
+            result.is_ok(),
+            lock_wait_us,
+            diagnostic_elapsed_us(started),
+        );
+        result
+    }
+}
+
+struct ProtocolSender<S> {
+    stream: S,
+    frame: Vec<u8>,
+}
+
+struct ProtocolReceiver<S> {
+    stream: S,
+    frame: Vec<u8>,
+}
+
+type Connected<S> = (ProtocolReceiver<S>, ProtocolSender<S>, ServerHello);
+
+impl<S: TransportStream> ProtocolReceiver<S> {
+    fn new(stream: S) -> Self {
+        Self {
+            stream,
+            frame: Vec::new(),
+        }
+    }
+
+    fn recv(&mut self) -> Result<ProtocolMessage, DaemonError> {
+        let started = diagnostic_timer();
+        let message = read_protocol_message_into(&mut self.stream, &mut self.frame)?;
+        log::trace!(
+            target: "zz_daemon::diagnostics::protocol",
+            "recv bytes={} frame_capacity={} elapsed_us={} message={message:#?}",
+            self.frame.len(),
+            self.frame.capacity(),
+            diagnostic_elapsed_us(started),
+        );
+        Ok(message)
+    }
+}
+
+impl<S: TransportStream> ProtocolSender<S> {
+    fn new(stream: S) -> Self {
+        Self {
+            stream,
+            frame: Vec::new(),
+        }
+    }
+
+    fn send(&mut self, message: &ProtocolMessage) -> Result<(), DaemonError> {
+        let started = diagnostic_timer();
+        let encode_started = diagnostic_timer();
+        encode_protocol_message_into(message, &mut self.frame)?;
+        let encode_us = diagnostic_elapsed_us(encode_started);
+        let write_started = diagnostic_timer();
+        self.stream.write_all(&self.frame)?;
+        let write_us = diagnostic_elapsed_us(write_started);
+        let flush_started = diagnostic_timer();
+        self.stream.flush()?;
+        let flush_us = diagnostic_elapsed_us(flush_started);
+        log::trace!(
+            target: "zz_daemon::diagnostics::protocol",
+            "send bytes={} frame_capacity={} encode_us={} write_us={} flush_us={} elapsed_us={} message={message:#?}",
+            self.frame.len(),
+            self.frame.capacity(),
+            encode_us,
+            write_us,
+            flush_us,
+            diagnostic_elapsed_us(started),
+        );
+        Ok(())
+    }
+}
+
+fn connect<T: Transport>(
+    endpoint: &T::Endpoint,
+    endpoint_display: impl fmt::Display,
+    kind: ClientKind,
+    device_name: Option<String>,
+    color_scheme: Option<TerminalColorScheme>,
+    send_origin: bool,
+) -> Result<Connected<T::Stream>, DaemonError> {
+    let stream = T::connect(endpoint)?;
+    connect_stream(
+        stream,
+        endpoint_display,
+        kind,
+        device_name,
+        color_scheme,
+        send_origin,
+    )
+}
+
+fn connect_stream<S: TransportStream>(
+    stream: S,
+    endpoint_display: impl fmt::Display,
+    kind: ClientKind,
+    device_name: Option<String>,
+    color_scheme: Option<TerminalColorScheme>,
+    send_origin: bool,
+) -> Result<Connected<S>, DaemonError> {
+    let started = diagnostic_timer();
+    let mut reader = ProtocolReceiver::new(stream.try_clone()?);
+    let mut writer = ProtocolSender::new(stream);
+    writer.send(&ProtocolMessage::ClientHello(ClientHello {
+        protocol_version: PROTOCOL_VERSION,
+        kind,
+        device_name,
+        capabilities: Vec::new(),
+        color_scheme,
+        origin: (send_origin && kind == ClientKind::Command)
+            .then(|| std::env::var("ZZ_PANE").ok())
+            .flatten()
+            .and_then(|pane| pane.parse().ok()),
+    }))?;
+    let hello = match reader.recv()? {
+        ProtocolMessage::ServerHello(hello) => hello,
+        ProtocolMessage::CommandResponse(CommandResponse::Error { error, .. }) => {
+            return Err(DaemonError::Server(error));
+        }
+        _ => {
+            return Err(DaemonError::Server(ServerError::Internal(
+                "daemon did not send ServerHello".to_owned(),
+            )));
+        }
+    };
+    log::debug!(
+        target: "zz_daemon::diagnostics::client",
+        "connected path={endpoint_display} kind={kind:?} server_hello={hello:#?} elapsed_us={}",
+        diagnostic_elapsed_us(started),
+    );
+    Ok((reader, writer, hello))
+}
+
+pub fn short_device_name() -> Option<String> {
+    let host = sysinfo::System::host_name()?;
+    host.trim()
+        .split('.')
+        .next()
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+}

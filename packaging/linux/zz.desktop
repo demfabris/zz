@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=zz
+Comment=Terminal and browser workspace
+Exec=zz
+Icon=zz
+StartupWMClass=zz
+Type=Application
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=terminal;multiplexer;browser;workspace;
+StartupNotify=true

@@ -1,0 +1,17 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	// Assets-only Worker: no `main`, so there is no server code — Cloudflare
+	// serves `dist/` straight from the edge. `404-page` hands back Astro's
+	// generated dist/404.html for unmatched paths (the default, `none`, would
+	// return a bare Cloudflare 404 instead).
+	"name": "zzmux",
+	"compatibility_date": "2026-08-12",
+	"assets": {
+		"directory": "./dist",
+		"not_found_handling": "404-page"
+	},
+	// `wrangler deploy` creates the DNS record and issues the cert for this
+	// domain itself — nothing to add by hand in the dashboard. www is NOT
+	// listed on purpose: it would serve a duplicate copy rather than redirect.
+	"routes": [{ "pattern": "zzmux.sh", "custom_domain": true }]
+}

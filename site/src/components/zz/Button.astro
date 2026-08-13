@@ -1,0 +1,54 @@
+---
+import Icon from './Icon.astro';
+
+// button.rs:630-908. Icon-only buttons collapse to a square of their size's
+// control height (styled.rs:276): xsmall 24, small 28, medium 36.
+interface Props {
+	variant?: 'ghost' | 'default';
+	size?: 'xsmall' | 'small' | 'medium';
+	/** Lucide name; an icon with no slot content makes the button a square. */
+	icon?: string;
+	label: string;
+	pressed?: boolean;
+	disabled?: boolean;
+	class?: string;
+	/** Anything else lands on the element — the demo hangs its data hooks there. */
+	[key: string]: unknown;
+}
+
+const {
+	variant = 'ghost',
+	size = 'xsmall',
+	icon,
+	label,
+	pressed,
+	disabled = false,
+	class: cls,
+	...rest
+} = Astro.props;
+
+const iconSize = { xsmall: 12, small: 14, medium: 16 }[size];
+const iconOnly = icon && !Astro.slots.has('default');
+const classes = [
+	'zz-btn',
+	`zz-btn--${variant}`,
+	`zz-btn--${size}`,
+	iconOnly && 'zz-btn--icon',
+	cls,
+]
+	.filter(Boolean)
+	.join(' ');
+---
+
+<button
+	type="button"
+	class={classes}
+	title={label}
+	aria-label={iconOnly ? label : undefined}
+	aria-pressed={pressed === undefined ? undefined : String(pressed)}
+	disabled={disabled}
+	{...rest}
+>
+	{icon && <Icon name={icon} size={iconSize} />}
+	<slot />
+</button>

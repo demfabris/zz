@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.6.0.schema.json
+# Template for the manifest published to microsoft/winget-pkgs. Version, URL,
+# and checksum are the placeholders below; fill them at release time with
+# `wingetcreate update demfabris.zz --version <version> --urls <setup.exe URL>`,
+# which rewrites all three files and computes the hash from the download. Edit
+# this template rather than the published copy.
+PackageIdentifier: demfabris.zz
+PackageVersion: 0.0.0
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0

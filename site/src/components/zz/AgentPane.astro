@@ -1,0 +1,130 @@
+---
+import TerminalPane from './TerminalPane.astro';
+
+// NOT zz's agent pane. The reference capture's top-middle pane is a *terminal*
+// running the Claude Code CLI, so everything here is terminal cells: 13px mono on
+// the terminal plane, 4px window padding, no zz chrome. (zz's own agent DOM lives
+// in zz-ui/src/agent.rs and has no ›-prompt, no ● bullet and no status lines.)
+//
+// Vertical metrics are measured off the 2720x1658 reference capture at 1.21875
+// raw px per logical px: rules at y=249.9 and y=281, so the composer box is
+// exactly two 15.6px rows tall.
+interface Props {
+	title?: string;
+	version?: string;
+	subtitle?: string;
+	cwd?: string;
+	/** Composer prompt glyph. */
+	prompt?: string;
+	fontSize?: number;
+	lineHeight?: number;
+	padding?: number;
+	class?: string;
+}
+
+const {
+	title = 'Claude Code',
+	version = '',
+	subtitle = '',
+	cwd = '',
+	prompt = '›',
+	fontSize = 13,
+	lineHeight = 1.2,
+	padding = 4,
+	class: cls,
+} = Astro.props;
+
+// 16x10 pixel grid at 3.9px per cell, traced off the capture: body 12 wide with
+// two 1x2 eye holes, a full-width arm band, then four legs.
+const CELL = 3.9;
+const BODY = [
+	{ x: 2, y: 0, w: 12, h: 4 },
+	{ x: 0, y: 4, w: 16, h: 2 },
+	{ x: 2, y: 6, w: 12, h: 2 },
+	{ x: 3, y: 8, w: 1, h: 2 },
+	{ x: 5, y: 8, w: 1, h: 2 },
+	{ x: 10, y: 8, w: 1, h: 2 },
+	{ x: 12, y: 8, w: 1, h: 2 },
+];
+---
+
+<TerminalPane
+	class={cls ? `cc ${cls}` : 'cc'}
+	background="var(--zz-cc-bg)"
+	foreground="var(--zz-cc-fg)"
+	fontSize={fontSize}
+	lineHeight={lineHeight}
+	padding={padding}
+>
+	<div class="head">
+		<svg
+			class="logo"
+			viewBox="0 0 16 10"
+			width={16 * CELL}
+			height={10 * CELL}
+			shape-rendering="crispEdges"
+			aria-hidden="true"
+		>
+			{BODY.map((r) => <rect x={r.x} y={r.y} width={r.w} height={r.h} fill="var(--zz-cc-coral)" />)}
+			<rect x="4" y="2" width="1" height="2" fill="var(--zz-cc-bg)" />
+			<rect x="11" y="2" width="1" height="2" fill="var(--zz-cc-bg)" />
+		</svg>
+		<div class="headlines">
+			<span class="zz-cc-row"><span class="zz-cc-bright">{title}</span> <span class="zz-cc-dim">{version}</span></span>
+			<span class="zz-cc-row zz-cc-dim">{subtitle}</span>
+			<span class="zz-cc-row zz-cc-dim">{cwd}</span>
+		</div>
+	</div>
+
+	<div class="transcript"><slot /></div>
+
+	<div class="composer">
+		<span class="zz-cc-row"><span class="zz-cc-dim">{prompt}</span> <span class="cursor"></span></span>
+	</div>
+
+	<div class="status"><slot name="status" /></div>
+</TerminalPane>
+
+<style>
+	/* The rows re-establish `pre`; the structural wrappers must not, or the
+	   template's own indentation would print as terminal cells. */
+	.head,
+	.headlines,
+	.transcript,
+	.composer,
+	.status {
+		white-space: normal;
+	}
+	.head {
+		display: flex;
+		align-items: flex-start;
+		gap: 6px;
+	}
+	.logo {
+		flex: none;
+		margin-top: 0.5px;
+	}
+	.headlines {
+		min-width: 0;
+	}
+	.transcript {
+		min-height: 0;
+	}
+	/* 1px rules top and bottom with the row centred: 7.3 + 15.6 + 7.8 = 30.7px. */
+	.composer {
+		margin-top: 4.6px;
+		padding: 7.3px 0 7.8px;
+		border-top: 1px solid var(--zz-cc-rule);
+		border-bottom: 1px solid var(--zz-cc-rule);
+	}
+	.cursor {
+		display: inline-block;
+		width: 7.8px;
+		height: 13px;
+		vertical-align: -2px;
+		border: 1px solid var(--zz-cc-dim);
+	}
+	.status {
+		padding-top: 7.5px;
+	}
+</style>

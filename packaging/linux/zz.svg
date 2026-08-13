@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <defs><clipPath id="c"><rect width="96" height="96" rx="22"></rect></clipPath></defs>
+  <rect width="96" height="96" rx="22" fill="#14161a"></rect>
+  <g clip-path="url(#c)"><polyline points="-2,36 62,36 34,60 98,60" fill="none" stroke="#faf9f7" stroke-width="9"></polyline></g>
+</svg>

@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+PackageIdentifier: demfabris.zz
+PackageVersion: 0.0.0
+InstallerType: inno
+# The installer defaults to a per-user install and never elevates.
+Scope: user
+InstallModes:
+  - interactive
+  - silent
+  - silentWithProgress
+UpgradeBehavior: install
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/demfabris/zz/releases/download/v0.0.0/zz-0.0.0-windows-x64-setup.exe
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    # Inno Setup registers its uninstall key as {AppId}_is1; keep this in sync
+    # with AppId in packaging/windows/zz.iss or winget loses track of upgrades.
+    ProductCode: "{4DAEF46A-646C-4AA3-9391-E31B4D32319D}_is1"
+ManifestType: installer
+ManifestVersion: 1.6.0

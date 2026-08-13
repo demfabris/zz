@@ -1,0 +1,50 @@
+[package]
+name = "zz-terminal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Terminal engine: PTY sessions, libghostty-vt state, frame snapshots"
+publish = false
+
+[lib]
+path = "src/terminal_core.rs"
+
+[features]
+default = ["session"]
+session = [
+    "dep:async-channel",
+    "dep:crossbeam-channel",
+    "dep:filedescriptor",
+    "dep:foldhash",
+    "dep:image",
+    "dep:libghostty-vt",
+    "dep:log",
+    "dep:parking_lot",
+    "dep:portable-pty",
+    "dep:regex",
+    "dep:rustix",
+]
+
+[dependencies]
+async-channel = { workspace = true, optional = true }
+crossbeam-channel = { workspace = true, optional = true }
+csscolorparser.workspace = true
+filedescriptor = { workspace = true, optional = true }
+foldhash = { workspace = true, optional = true }
+image = { version = "=0.25.10", optional = true, default-features = false, features = ["png"] }
+libghostty-vt = { workspace = true, optional = true, features = ["kitty-graphics"] }
+log = { workspace = true, optional = true }
+parking_lot = { workspace = true, optional = true }
+portable-pty = { workspace = true, optional = true }
+regex = { workspace = true, optional = true }
+rustix = { workspace = true, optional = true }
+serde.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

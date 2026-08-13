@@ -1,0 +1,1119 @@
+use std::collections::BTreeMap;
+
+use zz_protocol::CommandInvocation;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Binding {
+    pub commands: Vec<CommandInvocation>,
+    pub repeat: bool,
+    pub note: Option<String>,
+}
+
+impl Binding {
+    /// The default `<prefix> <prefix>` binding that delivers a literal prefix.
+    #[must_use]
+    pub fn send_prefix() -> Self {
+        Self {
+            commands: vec![CommandInvocation::new("send-prefix", [] as [&str; 0])],
+            repeat: false,
+            note: Some("Send the prefix key".to_owned()),
+        }
+    }
+
+    /// Whether this is exactly the stock `send-prefix` binding.
+    #[must_use]
+    pub fn is_send_prefix(&self) -> bool {
+        matches!(self.commands.as_slice(), [command]
+            if command.name == "send-prefix" && command.args.is_empty())
+    }
+}
+
+#[derive(Debug)]
+pub struct KeyTables {
+    prefix: String,
+    tables: BTreeMap<String, BTreeMap<String, Binding>>,
+}
+
+impl Default for KeyTables {
+    fn default() -> Self {
+        let mut tables = Self {
+            prefix: "C-b".to_owned(),
+            tables: BTreeMap::new(),
+        };
+        for (key, command) in [
+            ("c", "new-window"),
+            ("%", "split-window -h"),
+            ("\"", "split-window -v"),
+            ("!", "break-pane"),
+            ("x", "kill-pane"),
+            ("&", "kill-window"),
+            ("n", "next-window"),
+            ("p", "previous-window"),
+            ("l", "last-window"),
+            ("]", "paste-buffer"),
+            ("o", "select-pane -t:.+"),
+            ("C-o", "rotate-window"),
+            ("M-o", "rotate-window -D"),
+            ("Space", "next-layout"),
+            ("E", "select-layout -E"),
+            ("M-1", "select-layout even-horizontal"),
+            ("M-2", "select-layout even-vertical"),
+            ("M-3", "select-layout main-horizontal"),
+            ("M-4", "select-layout main-vertical"),
+            ("M-5", "select-layout tiled"),
+            ("M-6", "select-layout main-horizontal-mirrored"),
+            ("M-7", "select-layout main-vertical-mirrored"),
+            ("[", "copy-mode"),
+            ("?", "list-keys"),
+            ("=", "choose-buffer -Z"),
+            ("e", "send-last-output"),
+            ("s", "focus-sidebar"),
+            ("w", "focus-sidebar"),
+            ("q", "display-panes"),
+            ("r", "reload-config"),
+            ("z", "resize-pane -Z"),
+            (";", "last-pane"),
+            ("{", "swap-pane -U"),
+            ("}", "swap-pane -D"),
+            (":", "command-prompt"),
+        ] {
+            let mut parts = command.split_whitespace();
+            let name = parts.next().expect("default command has a name");
+            tables.bind(
+                "prefix",
+                key,
+                Binding {
+                    commands: vec![CommandInvocation::new(name, parts)],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
+        for (key, input, template, note) in [
+            (
+                "$",
+                "#S",
+                "rename-session -- '%%'",
+                "Rename current session",
+            ),
+            (",", "#W", "rename-window -- '%%'", "Rename current window"),
+        ] {
+            tables.bind(
+                "prefix",
+                key,
+                Binding {
+                    commands: vec![CommandInvocation::new(
+                        "command-prompt",
+                        ["-I", input, template],
+                    )],
+                    repeat: false,
+                    note: Some(note.to_owned()),
+                },
+            );
+        }
+        for digit in 0..=9_u32 {
+            tables.bind(
+                "prefix",
+                &digit.to_string(),
+                Binding {
+                    commands: vec![CommandInvocation::new(
+                        "select-window",
+                        ["-t".to_owned(), format!(":{digit}")],
+                    )],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
+        for (key, flag, note) in [
+            ("Up", "-U", "Select the pane above"),
+            ("Down", "-D", "Select the pane below"),
+            ("Left", "-L", "Select the pane to the left"),
+            ("Right", "-R", "Select the pane to the right"),
+        ] {
+            tables.bind(
+                "prefix",
+                key,
+                Binding {
+                    commands: vec![CommandInvocation::new("select-pane", [flag])],
+                    repeat: true,
+                    note: Some(note.to_owned()),
+                },
+            );
+        }
+        for (key, flag, cells, note) in [
+            ("M-Up", "-U", "5", "Resize the pane up by 5"),
+            ("M-Down", "-D", "5", "Resize the pane down by 5"),
+            ("M-Left", "-L", "5", "Resize the pane left by 5"),
+            ("M-Right", "-R", "5", "Resize the pane right by 5"),
+            ("C-Up", "-U", "1", "Resize the pane up"),
+            ("C-Down", "-D", "1", "Resize the pane down"),
+            ("C-Left", "-L", "1", "Resize the pane left"),
+            ("C-Right", "-R", "1", "Resize the pane right"),
+        ] {
+            tables.bind(
+                "prefix",
+                key,
+                Binding {
+                    commands: vec![CommandInvocation::new("resize-pane", [flag, cells])],
+                    repeat: true,
+                    note: Some(note.to_owned()),
+                },
+            );
+        }
+        for (table, key, action) in [
+            ("copy-mode-vi", "h", "cursor-left"),
+            ("copy-mode-vi", "Left", "cursor-left"),
+            ("copy-mode-vi", "C-h", "cursor-left"),
+            ("copy-mode-vi", "BSpace", "cursor-left"),
+            ("copy-mode-vi", "l", "cursor-right"),
+            ("copy-mode-vi", "Right", "cursor-right"),
+            ("copy-mode-vi", "k", "cursor-up"),
+            ("copy-mode-vi", "Up", "cursor-up"),
+            ("copy-mode-vi", "j", "cursor-down"),
+            ("copy-mode-vi", "Down", "cursor-down"),
+            ("copy-mode-vi", "0", "start-of-line"),
+            ("copy-mode-vi", "Home", "start-of-line"),
+            ("copy-mode-vi", "$", "end-of-line"),
+            ("copy-mode-vi", "End", "end-of-line"),
+            ("copy-mode-vi", "w", "next-word"),
+            ("copy-mode-vi", "b", "previous-word"),
+            ("copy-mode-vi", "e", "next-word-end"),
+            ("copy-mode-vi", "W", "next-space"),
+            ("copy-mode-vi", "B", "previous-space"),
+            ("copy-mode-vi", "E", "next-space-end"),
+            ("copy-mode-vi", "C-u", "halfpage-up"),
+            ("copy-mode-vi", "C-b", "page-up"),
+            ("copy-mode-vi", "PPage", "page-up"),
+            ("copy-mode-vi", "C-d", "halfpage-down"),
+            ("copy-mode-vi", "C-f", "page-down"),
+            ("copy-mode-vi", "NPage", "page-down"),
+            ("copy-mode-vi", "C-y", "scroll-up"),
+            ("copy-mode-vi", "K", "scroll-up"),
+            ("copy-mode-vi", "C-Up", "scroll-up"),
+            ("copy-mode-vi", "C-e", "scroll-down"),
+            ("copy-mode-vi", "J", "scroll-down"),
+            ("copy-mode-vi", "C-Down", "scroll-down"),
+            ("copy-mode-vi", "g", "history-top"),
+            ("copy-mode-vi", "G", "history-bottom"),
+            ("copy-mode-vi", "^", "back-to-indentation"),
+            ("copy-mode-vi", "H", "top-line"),
+            ("copy-mode-vi", "M", "middle-line"),
+            ("copy-mode-vi", "L", "bottom-line"),
+            ("copy-mode-vi", "z", "scroll-middle"),
+            ("copy-mode-vi", "{", "previous-paragraph"),
+            ("copy-mode-vi", "}", "next-paragraph"),
+            ("copy-mode-vi", "%", "next-matching-bracket"),
+            ("copy-mode-vi", "Space", "begin-selection"),
+            ("copy-mode-vi", "V", "select-line"),
+            ("copy-mode-vi", "o", "other-end"),
+            ("copy-mode-vi", "v", "rectangle-toggle"),
+            ("copy-mode-vi", "C-v", "rectangle-toggle"),
+            ("copy-mode-vi", "C-[", "clear-selection"),
+            ("copy-mode-vi", "X", "set-mark"),
+            ("copy-mode-vi", "M-x", "jump-to-mark"),
+            ("copy-mode-vi", "f", "jump-forward"),
+            ("copy-mode-vi", "F", "jump-backward"),
+            ("copy-mode-vi", "t", "jump-to-forward"),
+            ("copy-mode-vi", "T", "jump-to-backward"),
+            ("copy-mode-vi", ";", "jump-again"),
+            ("copy-mode-vi", ",", "jump-reverse"),
+            ("copy-mode-vi", "A", "append-selection-and-cancel"),
+            ("copy-mode-vi", "n", "search-again"),
+            ("copy-mode-vi", "N", "search-reverse"),
+            ("copy-mode-vi", "Enter", "copy-pipe-and-cancel"),
+            ("copy-mode-vi", "C-j", "copy-pipe-and-cancel"),
+            ("copy-mode-vi", "D", "copy-pipe-end-of-line-and-cancel"),
+            ("copy-mode-vi", "q", "cancel"),
+            ("copy-mode-vi", "C-c", "cancel"),
+            ("copy-mode-vi", "Escape", "clear-selection"),
+            ("copy-mode", "Left", "cursor-left"),
+            ("copy-mode", "C-b", "cursor-left"),
+            ("copy-mode", "Right", "cursor-right"),
+            ("copy-mode", "C-f", "cursor-right"),
+            ("copy-mode", "Up", "cursor-up"),
+            ("copy-mode", "C-p", "cursor-up"),
+            ("copy-mode", "Down", "cursor-down"),
+            ("copy-mode", "C-n", "cursor-down"),
+            ("copy-mode", "C-a", "start-of-line"),
+            ("copy-mode", "C-e", "end-of-line"),
+            ("copy-mode", "M-f", "next-word"),
+            ("copy-mode", "M-b", "previous-word"),
+            ("copy-mode", "M-v", "page-up"),
+            ("copy-mode", "PPage", "page-up"),
+            ("copy-mode", "C-v", "page-down"),
+            ("copy-mode", "NPage", "page-down"),
+            ("copy-mode", "C-Space", "begin-selection"),
+            ("copy-mode", "M-m", "back-to-indentation"),
+            ("copy-mode", "M-r", "middle-line"),
+            ("copy-mode", "M-{", "previous-paragraph"),
+            ("copy-mode", "M-}", "next-paragraph"),
+            ("copy-mode", "X", "set-mark"),
+            ("copy-mode", "M-x", "jump-to-mark"),
+            ("copy-mode", "f", "jump-forward"),
+            ("copy-mode", "F", "jump-backward"),
+            ("copy-mode", "t", "jump-to-forward"),
+            ("copy-mode", "T", "jump-to-backward"),
+            ("copy-mode", ";", "jump-again"),
+            ("copy-mode", ",", "jump-reverse"),
+            ("copy-mode", "Enter", "copy-pipe-and-cancel"),
+            ("copy-mode", "M-w", "copy-pipe-and-cancel"),
+            ("copy-mode", "q", "cancel"),
+            ("copy-mode", "C-g", "clear-selection"),
+            ("copy-mode", "C-c", "cancel"),
+            ("copy-mode", "Escape", "cancel"),
+        ] {
+            tables.bind(
+                table,
+                key,
+                Binding {
+                    commands: vec![CommandInvocation::new("send-keys", ["-X", action])],
+                    repeat: true,
+                    note: None,
+                },
+            );
+        }
+        for (key, action) in [
+            ("#", "search-backward-cursor-word"),
+            ("*", "search-forward-cursor-word"),
+        ] {
+            tables.bind(
+                "copy-mode-vi",
+                key,
+                Binding {
+                    commands: vec![CommandInvocation::new("send-keys", ["-X", action])],
+                    repeat: true,
+                    note: None,
+                },
+            );
+        }
+        for digit in '1'..='9' {
+            tables.bind(
+                "copy-mode-vi",
+                &digit.to_string(),
+                Binding {
+                    commands: vec![CommandInvocation::new(
+                        "copy-mode-repeat",
+                        [digit.to_string()],
+                    )],
+                    repeat: true,
+                    note: None,
+                },
+            );
+        }
+        tables.bind(
+            "copy-mode-vi",
+            ":",
+            Binding {
+                commands: vec![CommandInvocation::new(
+                    "command-prompt",
+                    ["-p", "(goto line)", "send-keys -X goto-line -- '%%'"],
+                )],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind_copy_mode_search_defaults();
+        // tmux's stock `bind C-b send-prefix`.
+        let prefix = tables.prefix.clone();
+        tables.bind("prefix", &prefix, Binding::send_prefix());
+        tables
+    }
+}
+
+impl KeyTables {
+    fn bind_copy_mode_search_defaults(&mut self) {
+        for (table, key, backward) in [
+            ("copy-mode-vi", "/", false),
+            ("copy-mode-vi", "?", true),
+            ("copy-mode", "C-s", false),
+            ("copy-mode", "C-r", true),
+        ] {
+            let arguments = backward.then_some("-b");
+            self.bind(
+                table,
+                key,
+                Binding {
+                    commands: vec![CommandInvocation::new("copy-mode-search-prompt", arguments)],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
+    }
+
+    #[must_use]
+    pub fn prefix(&self) -> &str {
+        &self.prefix
+    }
+
+    /// Change the effective prefix, carrying a stock `send-prefix` binding with
+    /// it. A binding the user customized stays on the old key.
+    pub fn set_prefix(&mut self, prefix: impl Into<String>) {
+        let next = canonical_key(&prefix.into());
+        let previous = std::mem::replace(&mut self.prefix, next);
+        if previous == self.prefix {
+            return;
+        }
+        if self
+            .get("prefix", &previous)
+            .is_some_and(Binding::is_send_prefix)
+        {
+            self.unbind("prefix", &previous);
+            let next = self.prefix.clone();
+            if self.get("prefix", &next).is_none() {
+                self.bind("prefix", &next, Binding::send_prefix());
+            }
+        }
+    }
+
+    pub fn bind(&mut self, table: &str, key: &str, binding: Binding) {
+        self.tables
+            .entry(table.to_owned())
+            .or_default()
+            .insert(canonical_key(key), binding);
+    }
+
+    pub fn unbind(&mut self, table: &str, key: &str) -> bool {
+        self.tables
+            .get_mut(table)
+            .and_then(|bindings| bindings.remove(&canonical_key(key)))
+            .is_some()
+    }
+
+    #[must_use]
+    pub fn get(&self, table: &str, key: &str) -> Option<&Binding> {
+        self.tables
+            .get(table)
+            .and_then(|bindings| bindings.get(&canonical_key(key)))
+    }
+
+    pub fn list(&self, table: Option<&str>) -> impl Iterator<Item = (&str, &str, &Binding)> {
+        self.tables.iter().flat_map(move |(name, bindings)| {
+            bindings
+                .iter()
+                .filter(move |_| table.is_none_or(|wanted| wanted == name))
+                .map(move |(key, binding)| (name.as_str(), key.as_str(), binding))
+        })
+    }
+
+    /// The prefix table flattened for the wire, with command names canonicalized
+    /// so a client matching on `split-window` also catches `splitw`.
+    #[must_use]
+    pub fn prefix_bindings(&self) -> Vec<zz_protocol::PrefixBinding> {
+        self.list(Some("prefix"))
+            .map(|(_, key, binding)| zz_protocol::PrefixBinding {
+                key: key.to_owned(),
+                commands: binding
+                    .commands
+                    .iter()
+                    .map(|command| {
+                        CommandInvocation::new(
+                            crate::catalog::canonical_command(&command.name),
+                            command.args.iter().cloned(),
+                        )
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum KeyDecision {
+    Pass,
+    Prefix,
+    Ignore,
+    Commands(Vec<CommandInvocation>),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct KeyEngine {
+    table: Option<String>,
+    pending: Option<Vec<CommandInvocation>>,
+    repeat_count: Option<u16>,
+}
+
+impl KeyEngine {
+    #[must_use]
+    pub fn active_table(&self) -> Option<&str> {
+        self.table.as_deref()
+    }
+
+    fn take_pending_jump_target(&mut self, key: &str) -> Option<KeyDecision> {
+        let mut commands = self.pending.take()?;
+        if key == "Escape" {
+            return Some(KeyDecision::Ignore);
+        }
+        for command in &mut commands {
+            if copy_jump_needs_target(command) {
+                command.args.push(key.to_owned());
+            }
+        }
+        Some(KeyDecision::Commands(commands))
+    }
+
+    fn decide(&mut self, commands: Vec<CommandInvocation>) -> KeyDecision {
+        if let Some(digit) = copy_mode_repeat_digit(&commands) {
+            self.repeat_count = Some(u16::from(digit));
+            return KeyDecision::Ignore;
+        }
+        let commands = match self.repeat_count.take() {
+            Some(count) if commands.iter().all(copy_mode_action_command) => {
+                let mut repeated =
+                    Vec::with_capacity(commands.len().saturating_mul(usize::from(count)));
+                for _ in 0..count {
+                    repeated.extend(commands.iter().cloned());
+                }
+                repeated
+            }
+            _ => commands,
+        };
+        if commands.iter().any(copy_jump_needs_target) {
+            self.pending = Some(commands);
+            KeyDecision::Ignore
+        } else {
+            KeyDecision::Commands(commands)
+        }
+    }
+
+    pub fn handle(&mut self, tables: &KeyTables, key: &str) -> KeyDecision {
+        let key = canonical_key(key);
+        if let Some(decision) = self.take_pending_jump_target(&key) {
+            return decision;
+        }
+        if self.repeat_count.is_some() && self.table.as_deref() == Some("copy-mode-vi") {
+            if key == "Escape" {
+                self.repeat_count = None;
+                return KeyDecision::Ignore;
+            }
+            if key.len() == 1
+                && let Some(digit) = key.as_bytes().first().copied().filter(u8::is_ascii_digit)
+            {
+                let count = self.repeat_count.unwrap_or_default();
+                self.repeat_count = Some(
+                    count
+                        .saturating_mul(10)
+                        .saturating_add(u16::from(digit - b'0'))
+                        .min(9_999),
+                );
+                return KeyDecision::Ignore;
+            }
+        }
+        if self.table.is_none() && key == tables.prefix {
+            self.table = Some("prefix".to_owned());
+            return KeyDecision::Prefix;
+        }
+        let table = self.table.as_deref().unwrap_or("root");
+        let binding = tables.get(table, &key).or_else(|| tables.get(table, "Any"));
+        let Some(binding) = binding else {
+            self.repeat_count = None;
+            if table == "prefix" {
+                // tmux discards an unbound key after the prefix rather than typing it.
+                self.table = None;
+                return KeyDecision::Ignore;
+            }
+            return if self.table.is_some() {
+                KeyDecision::Ignore
+            } else {
+                KeyDecision::Pass
+            };
+        };
+        if table == "prefix" && !binding.repeat {
+            self.table = None;
+        }
+        let commands = binding.commands.clone();
+        self.decide(commands)
+    }
+
+    pub fn switch_table(&mut self, table: Option<String>) {
+        self.table = table;
+        self.pending = None;
+        self.repeat_count = None;
+    }
+}
+
+fn copy_mode_repeat_digit(commands: &[CommandInvocation]) -> Option<u8> {
+    let [command] = commands else {
+        return None;
+    };
+    if command.name != "copy-mode-repeat" {
+        return None;
+    }
+    let [digit] = command.args.as_slice() else {
+        return None;
+    };
+    let [digit] = digit.as_bytes() else {
+        return None;
+    };
+    digit.is_ascii_digit().then_some(*digit - b'0')
+}
+
+fn copy_mode_action_command(command: &CommandInvocation) -> bool {
+    matches!(command.name.as_str(), "send" | "send-keys")
+        && command.args.iter().any(|argument| argument == "-X")
+}
+
+fn copy_jump_needs_target(command: &CommandInvocation) -> bool {
+    if !matches!(command.name.as_str(), "send" | "send-keys") {
+        return false;
+    }
+    let Some(mode_index) = command.args.iter().position(|argument| argument == "-X") else {
+        return false;
+    };
+    let Some(action) = command.args.get(mode_index + 1) else {
+        return false;
+    };
+    matches!(
+        action.as_str(),
+        "jump-forward" | "jump-backward" | "jump-to-forward" | "jump-to-backward"
+    ) && command.args[mode_index + 2..]
+        .iter()
+        .all(|argument| argument == "--")
+}
+
+fn canonical_key(value: &str) -> String {
+    let trimmed = value.trim();
+    if value == " " || trimmed == "Space" {
+        return " ".to_owned();
+    }
+    let mut modifiers = String::new();
+    let mut rest = trimmed;
+    loop {
+        if let Some(tail) = rest
+            .strip_prefix("Ctrl-")
+            .or_else(|| rest.strip_prefix("C-"))
+        {
+            modifiers.push_str("C-");
+            rest = tail;
+        } else if let Some(tail) = rest
+            .strip_prefix("Alt-")
+            .or_else(|| rest.strip_prefix("M-"))
+        {
+            modifiers.push_str("M-");
+            rest = tail;
+        } else {
+            break;
+        }
+    }
+    if modifiers.is_empty() {
+        return trimmed.to_owned();
+    }
+    if rest == "Space" {
+        rest = " ";
+    }
+    if rest.is_empty() && value.ends_with(' ') {
+        rest = " ";
+    }
+    format!("{modifiers}{rest}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn published_prefix_bindings_canonicalize_command_names() {
+        let mut tables = KeyTables::default();
+        tables.bind(
+            "prefix",
+            "|",
+            Binding {
+                commands: vec![CommandInvocation::new("splitw", ["-h"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        let published = tables.prefix_bindings();
+        let pipe = published
+            .iter()
+            .find(|binding| binding.key == "|")
+            .expect("the | binding is published");
+        assert_eq!(pipe.commands[0].name, "split-window");
+        assert_eq!(pipe.commands[0].args, vec!["-h".to_owned()]);
+        tables.bind(
+            "root",
+            "F1",
+            Binding {
+                commands: vec![CommandInvocation::new("new-window", [] as [&str; 0])],
+                repeat: false,
+                note: None,
+            },
+        );
+        assert!(
+            tables
+                .prefix_bindings()
+                .iter()
+                .all(|binding| binding.key != "F1")
+        );
+    }
+
+    #[test]
+    fn a_space_bearing_key_folds_inside_a_modifier_chord() {
+        assert_eq!(canonical_key("C-Space"), "C- ");
+        assert_eq!(canonical_key("Ctrl-Space"), "C- ");
+        assert_eq!(canonical_key("M-Space"), "M- ");
+        assert_eq!(canonical_key("Space"), " ");
+        assert_eq!(canonical_key(" "), " ");
+        assert_eq!(canonical_key("C- "), "C- ");
+        assert_eq!(canonical_key("Ctrl-a"), "C-a");
+        assert_eq!(canonical_key("C-b"), "C-b");
+        assert_eq!(canonical_key("M-Right"), "M-Right");
+        assert_eq!(canonical_key("F2"), "F2");
+    }
+
+    #[test]
+    fn a_space_bearing_prefix_can_still_send_a_literal_prefix() {
+        let mut tables = KeyTables::default();
+        tables.set_prefix("C-Space");
+
+        assert_eq!(tables.prefix(), "C- ");
+        assert!(
+            tables
+                .get("prefix", "C- ")
+                .is_some_and(Binding::is_send_prefix)
+        );
+        let mut engine = KeyEngine::default();
+        assert_eq!(engine.handle(&tables, "C- "), KeyDecision::Prefix);
+        assert_eq!(
+            engine.handle(&tables, "C- "),
+            KeyDecision::Commands(vec![CommandInvocation::new("send-prefix", [] as [&str; 0])])
+        );
+    }
+
+    #[test]
+    fn the_prefix_key_sends_a_literal_prefix_by_default() {
+        let tables = KeyTables::default();
+        let binding = tables.get("prefix", "C-b").expect("send-prefix binding");
+        assert!(binding.is_send_prefix());
+        assert_eq!(
+            binding.commands,
+            vec![CommandInvocation::new("send-prefix", [] as [&str; 0])]
+        );
+    }
+
+    #[test]
+    fn changing_the_prefix_carries_the_send_prefix_binding() {
+        let mut tables = KeyTables::default();
+        tables.set_prefix("C-a");
+
+        assert_eq!(tables.prefix(), "C-a");
+        assert!(
+            tables
+                .get("prefix", "C-a")
+                .is_some_and(Binding::is_send_prefix)
+        );
+        assert!(tables.get("prefix", "C-b").is_none());
+    }
+
+    #[test]
+    fn changing_the_prefix_never_overwrites_the_new_keys_binding() {
+        let mut tables = KeyTables::default();
+        let kill = Binding {
+            commands: vec![CommandInvocation::new("kill-pane", [] as [&str; 0])],
+            repeat: false,
+            note: None,
+        };
+        tables.bind("prefix", "C-a", kill.clone());
+        tables.set_prefix("C-a");
+
+        assert_eq!(
+            tables.get("prefix", "C-a").map(|b| b.commands.clone()),
+            Some(kill.commands)
+        );
+    }
+
+    #[test]
+    fn changing_the_prefix_leaves_a_customized_binding_alone() {
+        let mut tables = KeyTables::default();
+        tables.bind(
+            "prefix",
+            "C-b",
+            Binding {
+                commands: vec![CommandInvocation::new("new-window", [] as [&str; 0])],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.set_prefix("C-a");
+
+        assert_eq!(
+            tables.get("prefix", "C-b").map(|b| b.commands.clone()),
+            Some(vec![CommandInvocation::new("new-window", [] as [&str; 0])])
+        );
+        assert!(tables.get("prefix", "C-a").is_none());
+    }
+
+    #[test]
+    fn prefix_table_executes_then_resets() {
+        let tables = KeyTables::default();
+        let mut engine = KeyEngine::default();
+        assert_eq!(engine.handle(&tables, "C-b"), KeyDecision::Prefix);
+        assert!(matches!(
+            engine.handle(&tables, "c"),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(engine.handle(&tables, "c"), KeyDecision::Pass);
+        assert_eq!(
+            tables.get("prefix", ":").unwrap().commands,
+            vec![CommandInvocation::new("command-prompt", [] as [&str; 0])]
+        );
+        assert_eq!(
+            tables.get("prefix", "$").unwrap().commands,
+            vec![CommandInvocation::new(
+                "command-prompt",
+                ["-I", "#S", "rename-session -- '%%'"],
+            )]
+        );
+        assert_eq!(
+            tables.get("prefix", ",").unwrap().commands,
+            vec![CommandInvocation::new(
+                "command-prompt",
+                ["-I", "#W", "rename-window -- '%%'"],
+            )]
+        );
+        assert_eq!(
+            tables.get("prefix", "%").unwrap().commands,
+            vec![CommandInvocation::new("split-window", ["-h"])]
+        );
+        assert_eq!(
+            tables.get("prefix", "\"").unwrap().commands,
+            vec![CommandInvocation::new("split-window", ["-v"])]
+        );
+        assert_eq!(
+            tables.get("prefix", "?").unwrap().commands,
+            vec![CommandInvocation::new("list-keys", [] as [&str; 0])]
+        );
+        assert_eq!(
+            tables.get("prefix", "=").unwrap().commands,
+            vec![CommandInvocation::new("choose-buffer", ["-Z"])]
+        );
+        assert_eq!(
+            tables.get("prefix", "s").unwrap().commands,
+            vec![CommandInvocation::new("focus-sidebar", [] as [&str; 0])]
+        );
+        assert_eq!(
+            tables.get("prefix", "w").unwrap().commands,
+            vec![CommandInvocation::new("focus-sidebar", [] as [&str; 0])]
+        );
+        assert_eq!(
+            tables.get("prefix", "q").unwrap().commands,
+            vec![CommandInvocation::new("display-panes", [] as [&str; 0])]
+        );
+        assert_eq!(
+            tables.get("prefix", "r").unwrap().commands,
+            vec![CommandInvocation::new("reload-config", [] as [&str; 0])]
+        );
+        assert_eq!(
+            tables.get("prefix", "z").unwrap().commands,
+            vec![CommandInvocation::new("resize-pane", ["-Z"])]
+        );
+        assert_eq!(
+            tables.get("prefix", ";").unwrap().commands,
+            vec![CommandInvocation::new("last-pane", [] as [&str; 0])]
+        );
+        assert_eq!(
+            tables.get("prefix", "!").unwrap().commands,
+            vec![CommandInvocation::new("break-pane", [] as [&str; 0])]
+        );
+        assert_eq!(
+            tables.get("prefix", "Space").unwrap().commands,
+            vec![CommandInvocation::new("next-layout", [] as [&str; 0])]
+        );
+        assert_eq!(
+            tables.get("prefix", "C-o").unwrap().commands,
+            vec![CommandInvocation::new("rotate-window", [] as [&str; 0],)]
+        );
+        assert_eq!(
+            tables.get("prefix", "M-o").unwrap().commands,
+            vec![CommandInvocation::new("rotate-window", ["-D"])]
+        );
+        assert_eq!(
+            tables.get("prefix", "o").unwrap().commands,
+            vec![CommandInvocation::new("select-pane", ["-t:.+"])]
+        );
+        assert_eq!(
+            tables.get("prefix", "E").unwrap().commands,
+            vec![CommandInvocation::new("select-layout", ["-E"])]
+        );
+        assert_eq!(
+            tables.get("prefix", "M-1").unwrap().commands,
+            vec![CommandInvocation::new("select-layout", ["even-horizontal"],)]
+        );
+        assert_eq!(
+            tables.get("prefix", "M-7").unwrap().commands,
+            vec![CommandInvocation::new(
+                "select-layout",
+                ["main-vertical-mirrored"],
+            )]
+        );
+        assert_eq!(
+            tables.get("prefix", "{").unwrap().commands,
+            vec![CommandInvocation::new("swap-pane", ["-U"])]
+        );
+        assert_eq!(
+            tables.get("prefix", "}").unwrap().commands,
+            vec![CommandInvocation::new("swap-pane", ["-D"])]
+        );
+        let left = tables.get("prefix", "Left").unwrap();
+        assert!(left.repeat);
+        assert_eq!(
+            left.commands,
+            vec![CommandInvocation::new("select-pane", ["-L"])]
+        );
+        assert_eq!(
+            tables.get("prefix", "M-Right").unwrap().commands,
+            vec![CommandInvocation::new("resize-pane", ["-R", "5"])]
+        );
+        assert_eq!(
+            tables.get("prefix", "C-Up").unwrap().commands,
+            vec![CommandInvocation::new("resize-pane", ["-U", "1"])]
+        );
+
+        assert_eq!(engine.handle(&tables, "C-b"), KeyDecision::Prefix);
+        assert!(matches!(
+            engine.handle(&tables, "Left"),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(engine.active_table(), Some("prefix"));
+        assert!(matches!(
+            engine.handle(&tables, "Right"),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(engine.active_table(), Some("prefix"));
+    }
+
+    #[test]
+    fn root_and_custom_bindings_work() {
+        let mut tables = KeyTables::default();
+        tables.bind(
+            "root",
+            "F2",
+            Binding {
+                commands: vec![CommandInvocation::new("new-window", [] as [&str; 0])],
+                repeat: false,
+                note: None,
+            },
+        );
+        let mut engine = KeyEngine::default();
+        assert!(matches!(
+            engine.handle(&tables, "F2"),
+            KeyDecision::Commands(_)
+        ));
+    }
+
+    #[test]
+    fn native_copy_mode_search_bindings_match_tmux_tables() {
+        let tables = KeyTables::default();
+        assert_eq!(
+            tables.get("copy-mode-vi", "/").unwrap().commands,
+            vec![CommandInvocation::new(
+                "copy-mode-search-prompt",
+                [] as [&str; 0],
+            )]
+        );
+        assert_eq!(
+            tables.get("copy-mode-vi", "?").unwrap().commands,
+            vec![CommandInvocation::new("copy-mode-search-prompt", ["-b"])]
+        );
+        assert_eq!(
+            tables.get("copy-mode-vi", "n").unwrap().commands,
+            vec![CommandInvocation::new("send-keys", ["-X", "search-again"],)]
+        );
+        assert_eq!(
+            tables.get("copy-mode-vi", "N").unwrap().commands,
+            vec![CommandInvocation::new(
+                "send-keys",
+                ["-X", "search-reverse"],
+            )]
+        );
+    }
+
+    #[test]
+    fn copy_table_exit_keys_match_tmux_semantics() {
+        let tables = KeyTables::default();
+        let action = |table, key| {
+            tables
+                .get(table, key)
+                .unwrap_or_else(|| panic!("{table} {key} is bound"))
+                .commands
+                .clone()
+        };
+        let sends = |name: &str| vec![CommandInvocation::new("send-keys", ["-X", name])];
+
+        assert_eq!(action("copy-mode-vi", "Escape"), sends("clear-selection"));
+        for key in ["q", "C-c"] {
+            assert_eq!(action("copy-mode-vi", key), sends("cancel"));
+        }
+        for key in ["Escape", "q", "C-c"] {
+            assert_eq!(action("copy-mode", key), sends("cancel"));
+        }
+    }
+
+    #[test]
+    fn native_copy_mode_vi_bindings_cover_pinned_tmux_motions_and_aliases() {
+        let tables = KeyTables::default();
+        let sends = |name: &str| vec![CommandInvocation::new("send-keys", ["-X", name])];
+        for (key, action) in [
+            ("C-h", "cursor-left"),
+            ("BSpace", "cursor-left"),
+            ("C-v", "rectangle-toggle"),
+            ("C-[", "clear-selection"),
+            ("Home", "start-of-line"),
+            ("End", "end-of-line"),
+            ("B", "previous-space"),
+            ("E", "next-space-end"),
+            ("W", "next-space"),
+            ("C-y", "scroll-up"),
+            ("K", "scroll-up"),
+            ("C-Up", "scroll-up"),
+            ("C-e", "scroll-down"),
+            ("J", "scroll-down"),
+            ("C-Down", "scroll-down"),
+            ("z", "scroll-middle"),
+            ("%", "next-matching-bracket"),
+            ("D", "copy-pipe-end-of-line-and-cancel"),
+            ("#", "search-backward-cursor-word"),
+            ("*", "search-forward-cursor-word"),
+        ] {
+            assert_eq!(
+                tables
+                    .get("copy-mode-vi", key)
+                    .unwrap_or_else(|| panic!("copy-mode-vi {key} is bound"))
+                    .commands,
+                sends(action),
+                "copy-mode-vi {key}",
+            );
+        }
+        assert_eq!(
+            tables.get("copy-mode-vi", ":").expect(": binding").commands,
+            vec![CommandInvocation::new(
+                "command-prompt",
+                ["-p", "(goto line)", "send-keys -X goto-line -- '%%'",],
+            )]
+        );
+        for digit in '1'..='9' {
+            assert!(
+                tables.get("copy-mode-vi", &digit.to_string()).is_some(),
+                "copy-mode-vi {digit}"
+            );
+        }
+    }
+
+    #[test]
+    fn native_copy_mode_vi_keyboard_table_matches_the_audited_key_set() {
+        let tables = KeyTables::default();
+        let expected = [
+            "#", "*", "C-c", "C-d", "C-e", "C-b", "C-f", "C-h", "C-j", "Enter", "C-u", "C-v",
+            "C-y", "Escape", "C-[", " ", "$", ",", "/", "0", "1", "2", "3", "4", "5", "6", "7",
+            "8", "9", ":", ";", "?", "A", "B", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N",
+            "T", "V", "W", "X", "^", "b", "e", "f", "g", "h", "j", "k", "z", "l", "n", "o", "q",
+            "t", "v", "w", "{", "}", "%", "Home", "End", "BSpace", "NPage", "PPage", "Up", "Down",
+            "Left", "Right", "M-x", "C-Up", "C-Down",
+        ]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+        let actual = tables.tables["copy-mode-vi"]
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.len(), 79);
+    }
+
+    #[test]
+    fn configured_v_motion_y_sequences_remain_composable() {
+        let mut tables = KeyTables::default();
+        for (key, action) in [("v", "begin-selection"), ("y", "copy-selection-and-cancel")] {
+            tables.bind(
+                "copy-mode-vi",
+                key,
+                Binding {
+                    commands: vec![CommandInvocation::new("send-keys", ["-X", action])],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode-vi".to_owned()));
+        for (key, action) in [
+            ("v", "begin-selection"),
+            ("E", "next-space-end"),
+            ("y", "copy-selection-and-cancel"),
+        ] {
+            assert_eq!(
+                engine.handle(&tables, key),
+                KeyDecision::Commands(vec![CommandInvocation::new("send-keys", ["-X", action]),])
+            );
+        }
+    }
+
+    #[test]
+    fn copy_mode_vi_numeric_prefix_repeats_the_next_motion() {
+        let tables = KeyTables::default();
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode-vi".to_owned()));
+
+        assert_eq!(engine.handle(&tables, "1"), KeyDecision::Ignore);
+        assert_eq!(engine.handle(&tables, "0"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "E"),
+            KeyDecision::Commands(
+                (0..10)
+                    .map(|_| CommandInvocation::new("send-keys", ["-X", "next-space-end"]))
+                    .collect(),
+            )
+        );
+
+        assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
+        assert_eq!(engine.handle(&tables, "f"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "x"),
+            KeyDecision::Commands(
+                (0..3)
+                    .map(|_| { CommandInvocation::new("send-keys", ["-X", "jump-forward", "x"]) })
+                    .collect(),
+            )
+        );
+    }
+
+    #[test]
+    fn persistent_copy_tables_consume_unbound_keys_without_exiting() {
+        let tables = KeyTables::default();
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode-vi".to_owned()));
+        assert_eq!(engine.handle(&tables, "Unbound"), KeyDecision::Ignore);
+        assert!(matches!(
+            engine.handle(&tables, "h"),
+            KeyDecision::Commands(_)
+        ));
+    }
+
+    #[test]
+    fn copy_jump_bindings_capture_exactly_one_following_key() {
+        let tables = KeyTables::default();
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode-vi".to_owned()));
+        assert_eq!(engine.handle(&tables, "f"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "é"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-X", "jump-forward", "é"],
+            )])
+        );
+        assert!(matches!(
+            engine.handle(&tables, "h"),
+            KeyDecision::Commands(_)
+        ));
+
+        assert_eq!(engine.handle(&tables, "t"), KeyDecision::Ignore);
+        assert_eq!(engine.handle(&tables, "Escape"), KeyDecision::Ignore);
+        assert!(matches!(
+            engine.handle(&tables, "l"),
+            KeyDecision::Commands(_)
+        ));
+    }
+}

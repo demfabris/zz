@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    env:
+      CEF_PATH: ${{ github.workspace }}/.cef-cache
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes cmake curl desktop-file-utils ninja-build libfontconfig-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Cache matching CEF distribution
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.cef-cache
+          key: cef-151.3.14-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Check formatting
+        if: runner.os == 'Linux'
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        if: runner.os == 'Linux'
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Check UI showcase
+        if: runner.os == 'Linux'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          cargo check --manifest-path examples/ui-showcase/Cargo.toml --all-targets --locked
+          rustup toolchain install nightly --profile minimal --target wasm32-unknown-unknown
+          rustup run nightly cargo check --manifest-path examples/ui-showcase/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
+
+      - name: Test workspace
+        run: cargo test --workspace --all-features
+
+      - name: Build and validate CEF bundle
+        run: cargo xtask bundle-cef --release --output target/cef-bundle
+
+      - name: Download verified AppImage tools
+        if: runner.os == 'Linux'
+        run: scripts/fetch-appimage-tools.sh
+
+      - name: Package Linux release outputs
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          binary_artifact="target/zz-linux-${RUNNER_ARCH}-binary.tar.gz"
+          package_artifact="target/zz-linux-${RUNNER_ARCH}.AppImage"
+
+          test -x target/release/zz
+          tar -C target/release -czf "$binary_artifact" zz
+          scripts/package-appimage.sh target/cef-bundle "$package_artifact"
+
+          echo "ZZ_BINARY_ARTIFACT_PATH=$binary_artifact" >> "$GITHUB_ENV"
+          echo "ZZ_PACKAGE_ARTIFACT_PATH=$package_artifact" >> "$GITHUB_ENV"
+
+      - name: Package macOS release outputs
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          binary_artifact="target/zz-macos-${RUNNER_ARCH}-binaries.tar.gz"
+          package_artifact="target/zz-macos-${RUNNER_ARCH}.dmg"
+
+          test -x target/release/zz
+          test -x target/release/zz_helper
+          test -x target/release/zz_cli
+          tar -C target/release -czf "$binary_artifact" zz zz_helper zz_cli
+          scripts/package-dmg.sh target/cef-bundle/zz.app "$package_artifact"
+
+          echo "ZZ_BINARY_ARTIFACT_PATH=$binary_artifact" >> "$GITHUB_ENV"
+          echo "ZZ_PACKAGE_ARTIFACT_PATH=$package_artifact" >> "$GITHUB_ENV"
+
+      - name: Package Windows release outputs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $artifact = "target/zz-windows-$env:RUNNER_ARCH.zip"
+          ./scripts/package-windows.ps1 target/cef-bundle $artifact
+          "ZZ_PACKAGE_ARTIFACT_PATH=$artifact" >> $env:GITHUB_ENV
+
+      - name: Upload release binaries
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: zz-${{ runner.os }}-${{ runner.arch }}-binaries
+          path: ${{ env.ZZ_BINARY_ARTIFACT_PATH }}
+          if-no-files-found: error
+          archive: false
+
+      # Every leg packages now; only the loose binaries above stay Unix-only,
+      # since the Windows bundle is unusable without its DLLs beside it.
+      - name: Upload distribution package
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: zz-${{ runner.os }}-${{ runner.arch }}-package
+          path: ${{ env.ZZ_PACKAGE_ARTIFACT_PATH }}
+          if-no-files-found: error
+          archive: false

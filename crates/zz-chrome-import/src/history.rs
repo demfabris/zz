@@ -21,6 +21,8 @@ pub struct ImportedPage {
     pub url: String,
     pub title: String,
     pub visited_at: u64,
+    pub visit_count: u32,
+    pub typed_count: u32,
 }
 
 /// Byte/entry caps the caller wants enforced during extraction.
@@ -91,7 +93,7 @@ fn import_history_database(
     )?;
     let max_count = limits.max_count;
     let sql = format!(
-        "SELECT url, title, visit_count, last_visit_time \
+        "SELECT url, title, visit_count, typed_count, last_visit_time \
          FROM urls WHERE url LIKE 'http%' \
          ORDER BY last_visit_time DESC LIMIT {max_count}"
     );
@@ -103,6 +105,7 @@ fn import_history_database(
                 row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)?,
                 row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -110,7 +113,7 @@ fn import_history_database(
     let mut pages = Vec::with_capacity(rows.len());
     let mut seen = HashSet::new();
     let mut skipped = 0usize;
-    for (url, title, visit_count, last_visit_time) in rows {
+    for (url, title, visit_count, typed_count, last_visit_time) in rows {
         let Some(visited_at) = chromium_time_to_unix_seconds(last_visit_time) else {
             skipped = skipped.saturating_add(1);
             continue;
@@ -127,6 +130,8 @@ fn import_history_database(
             url,
             title: truncate_utf8(&title, limits.max_title_bytes),
             visited_at,
+            visit_count: u32::try_from(visit_count).unwrap_or(u32::MAX),
+            typed_count: u32::try_from(typed_count.max(0)).unwrap_or(u32::MAX),
         });
     }
     if pages.is_empty() {
@@ -225,7 +230,7 @@ mod tests {
             .execute_batch(
                 "CREATE TABLE urls ( \
                     url LONGVARCHAR, title LONGVARCHAR, visit_count INTEGER, \
-                    last_visit_time INTEGER \
+                    typed_count INTEGER, last_visit_time INTEGER \
                  );",
             )
             .expect("create history schema");
@@ -233,31 +238,31 @@ mod tests {
         let later = CHROMIUM_EPOCH_OFFSET_MICROS + 20_000_000;
         connection
             .execute(
-                "INSERT INTO urls VALUES ('https://one.example', 'One', 1, ?1)",
+                "INSERT INTO urls VALUES ('https://one.example', 'One', 1, 0, ?1)",
                 params![earlier],
             )
             .expect("insert earlier page");
         connection
             .execute(
-                "INSERT INTO urls VALUES ('https://two.example', 'Two', 2, ?1)",
+                "INSERT INTO urls VALUES ('https://two.example', 'Two', 2, 1, ?1)",
                 params![later],
             )
             .expect("insert later page");
         connection
             .execute(
-                "INSERT INTO urls VALUES ('https://two.example', 'Duplicate', 1, ?1)",
+                "INSERT INTO urls VALUES ('https://two.example', 'Duplicate', 1, 0, ?1)",
                 params![earlier],
             )
             .expect("insert duplicate page");
         connection
             .execute(
-                "INSERT INTO urls VALUES ('http-not-a-url', 'Invalid', 1, ?1)",
+                "INSERT INTO urls VALUES ('http-not-a-url', 'Invalid', 1, 0, ?1)",
                 params![later],
             )
             .expect("insert malformed page");
         connection
             .execute(
-                "INSERT INTO urls VALUES ('file:///tmp/private', 'File', 1, ?1)",
+                "INSERT INTO urls VALUES ('file:///tmp/private', 'File', 1, 0, ?1)",
                 params![later],
             )
             .expect("insert non-web page");
@@ -268,6 +273,8 @@ mod tests {
         assert_eq!(imported.skipped, 2);
         assert_eq!(imported.pages[0].url, "https://two.example");
         assert_eq!(imported.pages[0].visited_at, 20);
+        assert_eq!(imported.pages[0].visit_count, 2);
+        assert_eq!(imported.pages[0].typed_count, 1);
         assert_eq!(imported.pages[1].url, "https://one.example");
         assert_eq!(imported.pages[1].visited_at, 10);
     }
@@ -286,13 +293,13 @@ mod tests {
                 "PRAGMA wal_autocheckpoint=0; \
                  CREATE TABLE urls ( \
                     url LONGVARCHAR, title LONGVARCHAR, visit_count INTEGER, \
-                    last_visit_time INTEGER \
+                    typed_count INTEGER, last_visit_time INTEGER \
                  );",
             )
             .expect("create history schema");
         connection
             .execute(
-                "INSERT INTO urls VALUES ('https://live.example', 'Live', 1, ?1)",
+                "INSERT INTO urls VALUES ('https://live.example', 'Live', 1, 0, ?1)",
                 params![CHROMIUM_EPOCH_OFFSET_MICROS + 30_000_000],
             )
             .expect("insert live page");

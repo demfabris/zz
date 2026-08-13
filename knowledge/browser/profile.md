@@ -1,16 +1,19 @@
 ---
 type: Concept
 title: Named zz profiles & persistent request contexts
-description: Named zz-owned CEF profiles isolate browser state on the client's disk, and explicit Chrome cookie and history import uses bounded read-only snapshots.
+description: Named zz-owned CEF profiles isolate browser state on the client's disk, remote egress uses host-keyed composite contexts, and explicit Chrome import uses bounded read-only snapshots.
 resource: crates/zz-browser/src/profile.rs
 tags: [browser, profile, cef, request-context, cookies, security]
-timestamp: 2026-08-01T00:00:00Z
+timestamp: 2026-08-13T02:00:00Z
 ---
 
 # Overview
 
 Every zz browser session runs against one **named, private, persistent CEF
-profile** owned by zz, never a Chrome, Chromium, or Edge live profile.
+profile** owned by zz, never a Chrome, Chromium, or Edge live profile. A browser
+pane in an attached SSH session derives a client-local composite request profile
+from the logical profile and egress host, keeping that host's proxy preference
+and cookie jar separate.
 `profile.rs` resolves and locks the on-disk paths (`BrowserProfilePaths`), while
 `cef_runtime.rs` keeps one `RequestContext` per profile name. Sessions with the
 same name share cookies, cache, local storage, and other site data; sessions with
@@ -76,20 +79,20 @@ the controller retains the pending pane and pumps CEF until its tagged callback
 arrives. `BrowserRuntime` holds every context in `profile_contexts`, and each
 `BrowserSession` clones and retains its selected context (`_request_context`).
 
-# One jar per profile, always local
+# Logical profiles and remote-egress jars
 
-Every browser pane renders in the client's CEF, so a pane in a remote session
-resolves `localhost:3000` on the **GUI machine**, not the daemon host. That is a
-documented consequence of renderer-is-always-local, not a bug: reach a remote
-host's internal services with an ordinary `ssh -D` SOCKS forward.
+Every browser pane still renders in the client's CEF. For a pane in an attached
+SSH session, zz derives `<profile>@egress-<hash8>` and creates a distinct local
+CEF request context. Its proxy preference points to the existing `ssh -D`
+SOCKS5 listener, including Chromium's loopback-bypass override, so hostnames and
+`localhost` resolve and connect from the attached host. The composite cache path
+is the per-(logical profile, egress host) cookie jar; local panes keep the plain
+profile jar. The composite name never crosses the wire.
 
-zz used to paper over it with a **composite egress profile**
-(`<profile>@egress-<hash8>`) whose CEF request context carried a proxy preference
-and whose cache path was a per-(profile, egress-host) cookie jar. That, the
-`egress_profile_name`/`ensure_egress_profile` pair, and the tunnel behind them
-were deleted on 2026-08-01 with the QUIC transport (see
-[remote browser egress](/designs/remote-browser-egress.md)). A profile name now
-means exactly one directory and one jar, wherever the pane's session lives.
+This split applies only to CEF network and site storage. User-facing history and
+Chrome history imports remain keyed by the logical descriptor profile, so moving
+between local and remote panes does not create opaque egress-named history
+profiles. See [remote browser egress](/designs/remote-browser-egress.md).
 
 # Selecting a profile
 
@@ -151,13 +154,15 @@ discovery after the user changes permission.
 - Persisted in the selected profile: ordinary cookies (including session
   cookies), HTTP cache, and local storage, proven by the local fixture's persistent
   cookie/local-storage counters.
-- Persisted beside the root (never read by CEF): `recent-pages`, the app-owned
-  plain-text browser history list (`crates/zz/src/browser/recent_pages.rs`, one
-  `unix-seconds\turl\ttitle` line per entry, newest first, capped at 5,000) that
-  backs the browser pane's blank-page empty state as up to eight inline, washed URL
-  rows without an enclosing card. Only `http(s)` URLs are recorded. Chrome history
-  imports merge by URL and keep the newer visit; Chrome's database is read through
-  a snapshot and never written.
+- Persisted beside the root (never read by CEF): `recent-pages`, the app-owned,
+  profile-scoped browser history and learned-omnibox store. Version 2 page rows
+  retain URL, title, last visit, visit count, typed count, and last typed use;
+  shortcut rows retain normalized input, destination, selection count, and last
+  selection. Page and shortcut collections are each capped at 5,000 across
+  profiles, the file is capped at 64 MiB, writes are atomic and user-only, and
+  legacy three-column rows migrate into `default`. Only HTTP(S) URLs are recorded.
+  The store backs the eight-row blank-page surface and non-empty address-bar
+  autocomplete. See [history and omnibox autocomplete](/browser/history-autocomplete.md).
 - Persisted beside the root (never read by CEF): the bounded, user-only Chrome
   profile-label cache described above. It contains no Chrome browsing state or
   credential material.
@@ -169,7 +174,8 @@ discovery after the user changes permission.
   current zz profile. Encrypted values are unlocked through macOS Keychain or Linux
   Secret Service; those services may show their own consent prompt.
 - The same explicit action snapshots Chrome's `History` database read-only and
-  merges the newest 5,000 HTTP(S) URLs into `recent-pages`, deduplicated by URL.
+  merges the newest 5,000 HTTP(S) URLs, titles, visit counts, typed counts, and
+  visit times into the current logical zz profile, deduplicated by URL.
   Cookie and history snapshots, decrypted values, and derived keys are discarded
   after the operation; no raw rows or values enter diagnostics.
 - Explicit cookie-file import accepts Cookie-Editor JSON and Netscape
@@ -202,9 +208,10 @@ selected profile's persisted cookies/cache/local storage are already present. Se
 [session persistence](/concepts/session-persistence.md) for how panes and their URLs
 survive detach in the daemon.
 
-The daemon stores the profile name and nothing else, so a pane lands in the same
-jar on the client's disk however it was reattached and from wherever its session
-is hosted.
+The daemon stores the logical profile name and nothing else. On reattach, a
+local pane returns to that profile's local jar; an SSH-attached pane
+deterministically returns to the composite jar for that logical profile and
+egress host.
 
 # Key files
 
@@ -216,7 +223,7 @@ is hosted.
 | `crates/zz-chrome-import/src/profiles.rs` | Background Chrome profile discovery, safe platform paths, and the bounded sanitized label cache. |
 | `crates/zz-chrome-import/src/cookie.rs` | Site-scoped and profile-wide queries, cookie-identity deduplication, bounded SQLite snapshot, platform key lookup, Chrome decryption, and chunked CEF-neutral normalization. |
 | `crates/zz-chrome-import/src/history.rs` | Bounded read-only Chrome history snapshot, Chromium timestamp conversion, and newest-5,000 HTTP(S) extraction. |
-| `crates/zz/src/browser/recent_pages.rs` | Bounded app-owned history persistence and newest-visit URL merge used by the blank browser state. |
+| `crates/zz/src/browser/recent_pages.rs` | Bounded profile-scoped history, legacy migration, Chrome merge, recent-page queries, and omnibox scoring. |
 
 # Related
 
@@ -225,6 +232,6 @@ is hosted.
   [CEF runtime](/browser/cef-runtime.md) startup sequence.
 - Address input that seeds a restored session is normalized by
   [input translation](/browser/input-translation.md).
-- The retired tunnel that once gave remote panes a second jar:
+- Host-keyed composite contexts and their SSH SOCKS route are detailed in
   [remote browser egress](/designs/remote-browser-egress.md).
 - Part of the [zz-browser crate](/crates/zz-browser.md).

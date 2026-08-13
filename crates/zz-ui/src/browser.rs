@@ -11,9 +11,11 @@ use crate::{
 };
 use gpui::{
     AnyElement, App, BoxShadow, Context, Entity, Focusable as _, IntoElement, MouseButton,
-    ParentElement as _, Pixels, RenderOnce, SharedString, Styled as _, Window, div, point,
-    prelude::*, px,
+    ParentElement as _, Pixels, RenderOnce, SharedString, Styled as _, Window, deferred, div,
+    point, prelude::*, px,
 };
+
+pub const BROWSER_OMNIBOX_KEY_CONTEXT: &str = "BrowserOmnibox";
 
 /// The 40px browser toolbar. Behavior comes through the child slots.
 #[derive(IntoElement)]
@@ -96,6 +98,7 @@ pub fn browser_address(address: &Entity<InputState>, cx: &App) -> gpui::Div {
         .content_type(InputContentType::Url);
 
     div()
+        .key_context(BROWSER_OMNIBOX_KEY_CONTEXT)
         .h_full()
         .flex()
         .flex_1()
@@ -256,6 +259,7 @@ fn browser_active_tab(
         .appearance(false)
         .content_type(InputContentType::Url);
     let content = div()
+        .key_context(BROWSER_OMNIBOX_KEY_CONTEXT)
         .h_full()
         .flex()
         .flex_1()
@@ -454,6 +458,81 @@ pub fn browser_recent_row(
                 .text_ellipsis()
                 .overflow_hidden()
                 .child(url),
+        )
+}
+
+pub fn browser_omnibox_panel(rows: Vec<AnyElement>, cx: &App) -> impl IntoElement {
+    deferred(
+        div()
+            .id("browser-omnibox-results")
+            .debug_selector(|| "browser-omnibox-results".to_owned())
+            .absolute()
+            .top(BrowserToolbar::HEIGHT + px(4.0))
+            .left(px(8.0))
+            .right(px(8.0))
+            .occlude()
+            .overflow_hidden()
+            .popover_style(cx)
+            .py(px(4.0))
+            .children(rows),
+    )
+    .with_priority(2)
+}
+
+pub fn browser_omnibox_row(
+    index: usize,
+    title: impl Into<SharedString>,
+    url: impl Into<SharedString>,
+    selected: bool,
+    cx: &App,
+) -> gpui::Stateful<gpui::Div> {
+    let title = title.into();
+    let url = url.into();
+    let highlight = crate::navigation::workspace_row_highlight(cx);
+    div()
+        .id(("browser-omnibox-suggestion", index))
+        .debug_selector(move || format!("browser-omnibox-suggestion-{index}"))
+        .h(px(44.0))
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(10.0))
+        .px(px(12.0))
+        .cursor_pointer()
+        .when(selected, |this| this.bg(highlight))
+        .hover(move |style| style.bg(highlight))
+        .child(
+            Icon::new(IconName::Globe)
+                .xsmall()
+                .flex_none()
+                .text_color(cx.theme().foreground.muted()),
+        )
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .when(!title.is_empty(), |this| {
+                    this.child(
+                        div()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .overflow_hidden()
+                            .text_size(crate::rems_from_px(12.0))
+                            .font_medium()
+                            .child(title),
+                    )
+                })
+                .child(
+                    div()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .overflow_hidden()
+                        .text_size(crate::rems_from_px(11.0))
+                        .text_color(cx.theme().foreground.muted())
+                        .child(url),
+                ),
         )
 }
 
@@ -952,6 +1031,35 @@ mod tests {
         closed: Arc<Mutex<Vec<u64>>>,
     }
 
+    struct BrowserOmniboxTest {
+        accepted: Arc<Mutex<Vec<usize>>>,
+    }
+
+    impl Render for BrowserOmniboxTest {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let rows = [
+                ("GitHub", "github.com", true),
+                ("Rust", "github.com/rust-lang/rust", false),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (title, url, selected))| {
+                let accepted = Arc::clone(&self.accepted);
+                browser_omnibox_row(index, title, url, selected, cx)
+                    .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                        accepted.lock().unwrap().push(index);
+                        cx.stop_propagation();
+                    })
+                    .into_any_element()
+            })
+            .collect();
+            div()
+                .relative()
+                .size_full()
+                .child(browser_omnibox_panel(rows, cx))
+        }
+    }
+
     impl Render for BrowserTabStripTest {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             let activated = Arc::clone(&self.activated);
@@ -1069,5 +1177,35 @@ mod tests {
         assert_eq!(first_after.size.width, second_after.size.width);
         assert_eq!(first_before.size.width, first_after.size.width);
         assert_eq!(second_before.size.width, second_after.size.width);
+    }
+
+    #[gpui::test]
+    fn omnibox_results_render_above_the_toolbar_and_accept_pointer_input(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let accepted = Arc::new(Mutex::new(Vec::new()));
+        let accepted_for_view = Arc::clone(&accepted);
+        let (_, cx) = cx.add_window_view(move |_, _| BrowserOmniboxTest {
+            accepted: accepted_for_view,
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        let panel = cx
+            .debug_bounds("browser-omnibox-results")
+            .expect("the omnibox panel renders");
+        let first = cx
+            .debug_bounds("browser-omnibox-suggestion-0")
+            .expect("the first suggestion renders");
+        let second = cx
+            .debug_bounds("browser-omnibox-suggestion-1")
+            .expect("the second suggestion renders");
+        assert!(panel.origin.y >= BrowserToolbar::HEIGHT);
+        assert!(first.bottom() <= second.origin.y);
+
+        cx.simulate_click(second.center(), Modifiers::none());
+        assert_eq!(*accepted.lock().unwrap(), [1]);
     }
 }

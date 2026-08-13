@@ -1048,7 +1048,13 @@ impl BrowserView {
 
     fn update_omnibox(&mut self, value: &str, cx: &mut Context<Self>) -> Option<String> {
         if !self.address_editing {
-            return None;
+            let previous_value = if is_blank_url(&self.current_url) {
+                ""
+            } else {
+                &self.current_url
+            };
+            self.omnibox.begin(previous_value);
+            self.address_editing = true;
         }
         let previous = self.omnibox.query.clone();
         let typed_one = value.starts_with(&previous)
@@ -3912,18 +3918,15 @@ fn cursor_style(cursor: BrowserCursor) -> CursorStyle {
 
 #[cfg(test)]
 mod tests {
-    use std::{any::TypeId, collections::HashSet};
-    #[cfg(not(target_os = "macos"))]
-    use std::{cell::RefCell, rc::Rc};
+    use std::{any::TypeId, cell::RefCell, collections::HashSet, rc::Rc};
 
-    use gpui::{AsKeystroke, KeyContext, Keymap, Keystroke};
     #[cfg(not(target_os = "macos"))]
-    use gpui::{TestAppContext, VisualTestContext};
+    use gpui::VisualTestContext;
+    use gpui::{AsKeystroke, KeyContext, Keymap, Keystroke, TestAppContext};
+    use zz_browser::BrowserError;
     #[cfg(not(target_os = "macos"))]
-    use zz_browser::{BrowserError, SessionId};
-    #[cfg(not(target_os = "macos"))]
+    use zz_browser::SessionId;
     use zz_daemon::DaemonError;
-    #[cfg(not(target_os = "macos"))]
     use zz_ui::Root;
 
     use super::*;
@@ -4485,6 +4488,64 @@ mod tests {
                 Some(&SelectTab { index }),
             );
         }
+    }
+
+    #[gpui::test]
+    fn first_blank_pane_edit_updates_omnibox_before_focus_event(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            zz_ui::init(cx);
+            cx.set_global(recent_pages::RecentPages::default());
+            recent_pages::record_visit(
+                zz_browser::DEFAULT_BROWSER_PROFILE,
+                "https://example.com",
+                cx,
+            );
+        });
+        let view_slot = Rc::new(RefCell::new(None));
+        let captured_view = Rc::clone(&view_slot);
+        let pane = PaneId(7);
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let controller =
+                cx.new(|cx| BrowserController::new(Err(BrowserError::AlreadyShutdown), cx));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let view = cx.new(|cx| {
+                BrowserView::new(
+                    pane,
+                    &BrowserDescriptor::single(
+                        DEFAULT_URL.to_owned(),
+                        zz_browser::DEFAULT_BROWSER_PROFILE.to_owned(),
+                    ),
+                    controller,
+                    mux,
+                    window,
+                    cx,
+                )
+            });
+            captured_view.replace(Some(view.clone()));
+            Root::new(view, window, cx)
+        });
+        let view = view_slot.borrow().clone().expect("captured browser view");
+        let address = cx.update(|_, cx| view.read(cx).address.clone());
+
+        cx.update(|window, cx| {
+            assert!(!view.read(cx).address_editing);
+            address.update(cx, |address, cx| {
+                address.insert("exa", window, cx);
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let view = view.read(cx);
+            assert!(view.address_editing);
+            assert_eq!(view.omnibox.suggestions.len(), 1);
+            assert_eq!(view.omnibox.suggestions[0].url, "https://example.com");
+        });
     }
 
     #[cfg(not(target_os = "macos"))]

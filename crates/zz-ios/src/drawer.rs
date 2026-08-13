@@ -1,4 +1,3 @@
-//! PARKED (not compiled): touch-first drawer — see touch_chrome.rs header.
 use gpui::{
     AnyElement, App, Context, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement,
     MouseButton, ParentElement as _, SharedString, Stateful, StatefulInteractiveElement as _,
@@ -77,7 +76,7 @@ impl IosChrome {
         let (model, attached_host, attached_session) = {
             let mux = self.mux.read(cx);
             (
-                MuxTreeModel::from_mux(&mux),
+                MuxTreeModel::from_mux(mux),
                 mux.attached_host(),
                 mux.attached_session(),
             )

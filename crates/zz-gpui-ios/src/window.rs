@@ -1,5 +1,6 @@
 use crate::{
-    CGPoint, CGRect, CGSize, IosDisplay, id, nil, ns_string, nsstring_to_string, renderer,
+    CGPoint, CGRect, CGSize, IosDisplay, UIEdgeInsets, id, nil, ns_string, nsstring_to_string,
+    renderer,
 };
 use block::ConcreteBlock;
 use futures::channel::oneshot;
@@ -282,6 +283,7 @@ impl IosWindow {
 
             let _: () = msg_send![native_window, makeKeyAndVisible];
             let _: () = msg_send![native_view, becomeFirstResponder];
+            set_safe_area_insets(msg_send![native_view, safeAreaInsets]);
 
             observe_keyboard(native_view);
             crate::system_traits::refresh();
@@ -609,6 +611,10 @@ fn register_view_class() {
             layout_subviews as extern "C" fn(&Object, Sel),
         );
         decl.add_method(
+            sel!(safeAreaInsetsDidChange),
+            safe_area_insets_did_change as extern "C" fn(&Object, Sel),
+        );
+        decl.add_method(
             sel!(touchesBegan:withEvent:),
             touches_began as extern "C" fn(&Object, Sel, id, id),
         );
@@ -891,6 +897,7 @@ fn pump_frame(this: &Object) {
             require_presentation: false,
             // `|` rather than `||` so every flag is cleared, whichever one is set.
             force_render: KEYBOARD_INSET_CHANGED.swap(false, Ordering::Relaxed)
+                | SAFE_AREA_INSETS_CHANGED.swap(false, Ordering::Relaxed)
                 | PINCH_CHANGED.swap(false, Ordering::Relaxed)
                 | crate::system_traits::take_changed(),
         });
@@ -945,6 +952,13 @@ extern "C" fn layout_subviews(this: &Object, _: Sel) {
             callback(logical, scale as f32);
             state.lock().resize_callback = Some(callback);
         }
+    }
+}
+
+extern "C" fn safe_area_insets_did_change(this: &Object, _: Sel) {
+    unsafe {
+        let _: () = msg_send![super(this, class!(UIView)), safeAreaInsetsDidChange];
+        set_safe_area_insets(msg_send![this, safeAreaInsets]);
     }
 }
 
@@ -2036,6 +2050,50 @@ extern "C" fn end_floating_cursor(_this: &Object, _: Sel) {}
 static KEYBOARD_INSET: AtomicU32 = AtomicU32::new(0);
 static KEYBOARD_INSET_CHANGED: AtomicBool = AtomicBool::new(false);
 
+static SAFE_AREA_TOP: AtomicU32 = AtomicU32::new(0);
+static SAFE_AREA_RIGHT: AtomicU32 = AtomicU32::new(0);
+static SAFE_AREA_BOTTOM: AtomicU32 = AtomicU32::new(0);
+static SAFE_AREA_LEFT: AtomicU32 = AtomicU32::new(0);
+static SAFE_AREA_INSETS_CHANGED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SafeAreaInsets {
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+    pub left: f32,
+}
+
+pub fn safe_area_insets() -> SafeAreaInsets {
+    SafeAreaInsets {
+        top: f32::from_bits(SAFE_AREA_TOP.load(Ordering::Relaxed)),
+        right: f32::from_bits(SAFE_AREA_RIGHT.load(Ordering::Relaxed)),
+        bottom: f32::from_bits(SAFE_AREA_BOTTOM.load(Ordering::Relaxed)),
+        left: f32::from_bits(SAFE_AREA_LEFT.load(Ordering::Relaxed)),
+    }
+}
+
+fn set_safe_area_insets(insets: UIEdgeInsets) {
+    let mut changed = false;
+    for (value, slot) in [
+        (insets.top, &SAFE_AREA_TOP),
+        (insets.right, &SAFE_AREA_RIGHT),
+        (insets.bottom, &SAFE_AREA_BOTTOM),
+        (insets.left, &SAFE_AREA_LEFT),
+    ] {
+        let value = value as f32;
+        let value = if value.is_finite() {
+            value.max(0.0)
+        } else {
+            0.0
+        };
+        changed |= slot.swap(value.to_bits(), Ordering::Relaxed) != value.to_bits();
+    }
+    if changed {
+        SAFE_AREA_INSETS_CHANGED.store(true, Ordering::Relaxed);
+    }
+}
+
 /// Points at the bottom of the window the software keyboard covers, zero when
 /// it is down. A change forces the next frame, so there is nothing to subscribe to.
 pub fn keyboard_inset() -> f32 {
@@ -2092,8 +2150,42 @@ unsafe fn keyboard_overlap(this: &Object, notification: id) -> f32 {
     let in_window: CGRect = msg_send![window, convertRect: frame fromWindow: nil];
     let in_view: CGRect = msg_send![view, convertRect: in_window fromView: nil];
     let bounds: CGRect = msg_send![view, bounds];
-    let overlap = bounds.origin.y + bounds.size.height - in_view.origin.y;
-    overlap.clamp(0.0, bounds.size.height) as f32
+    bottom_occlusion(bounds, in_view)
+}
+
+fn bottom_occlusion(bounds: CGRect, occluder: CGRect) -> f32 {
+    let values = [
+        bounds.origin.x,
+        bounds.origin.y,
+        bounds.size.width,
+        bounds.size.height,
+        occluder.origin.x,
+        occluder.origin.y,
+        occluder.size.width,
+        occluder.size.height,
+    ];
+    if values.iter().any(|value| !value.is_finite())
+        || bounds.size.width <= 0.0
+        || bounds.size.height <= 0.0
+        || occluder.size.width <= 0.0
+        || occluder.size.height <= 0.0
+    {
+        return 0.0;
+    }
+
+    let bounds_right = bounds.origin.x + bounds.size.width;
+    let bounds_bottom = bounds.origin.y + bounds.size.height;
+    let occluder_right = occluder.origin.x + occluder.size.width;
+    let occluder_bottom = occluder.origin.y + occluder.size.height;
+    let edge_slop = 1.0;
+    if occluder.origin.x > bounds.origin.x + edge_slop
+        || occluder_right < bounds_right - edge_slop
+        || occluder_bottom < bounds_bottom - edge_slop
+    {
+        return 0.0;
+    }
+
+    (bounds_bottom - occluder.origin.y).clamp(0.0, bounds.size.height) as f32
 }
 
 extern "C" fn scroll_view_will_begin_dragging(this: &Object, _: Sel, scroll_view: id) {
@@ -2556,4 +2648,57 @@ extern "C" fn pinch(this: &Object, _: Sel, recognizer: id) {
         return;
     }
     set_pan_enabled(scroll_view, gesture_state != UI_GESTURE_STATE_BEGAN);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(x: f64, y: f64, width: f64, height: f64) -> CGRect {
+        CGRect {
+            origin: CGPoint { x, y },
+            size: CGSize { width, height },
+        }
+    }
+
+    #[test]
+    fn docked_keyboard_returns_bottom_overlap() {
+        assert_eq!(
+            bottom_occlusion(
+                rect(0.0, 0.0, 1024.0, 768.0),
+                rect(0.0, 468.0, 1024.0, 300.0)
+            ),
+            300.0
+        );
+        assert_eq!(
+            bottom_occlusion(
+                rect(100.0, 50.0, 824.0, 600.0),
+                rect(0.0, 500.0, 1024.0, 300.0)
+            ),
+            150.0
+        );
+    }
+
+    #[test]
+    fn floating_keyboard_does_not_inset_the_whole_window() {
+        let bounds = rect(0.0, 0.0, 1024.0, 768.0);
+        assert_eq!(
+            bottom_occlusion(bounds, rect(620.0, 480.0, 360.0, 260.0)),
+            0.0
+        );
+        assert_eq!(
+            bottom_occlusion(bounds, rect(0.0, 300.0, 1024.0, 300.0)),
+            0.0
+        );
+    }
+
+    #[test]
+    fn invalid_keyboard_geometry_is_ignored() {
+        let bounds = rect(0.0, 0.0, 1024.0, 768.0);
+        assert_eq!(
+            bottom_occlusion(bounds, rect(0.0, f64::NAN, 1024.0, 300.0)),
+            0.0
+        );
+        assert_eq!(bottom_occlusion(bounds, rect(0.0, 768.0, 1024.0, 0.0)), 0.0);
+    }
 }

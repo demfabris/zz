@@ -57,6 +57,13 @@ jobs:
       - name: Test workspace
         run: cargo test --workspace --all-features
 
+      - name: Check iOS client
+        if: runner.os == 'macOS'
+        run: |
+          rustup target add aarch64-apple-ios-sim
+          cargo test -p zz-gpui-ios --target aarch64-apple-ios-sim --no-run
+          cargo xtask ios-sim
+
       - name: Build and validate CEF bundle
         run: cargo xtask bundle-cef --release --output target/cef-bundle
 

@@ -5,8 +5,8 @@
 mod app;
 #[cfg(target_os = "ios")]
 mod chrome;
-// The touch-first shell (src/drawer.rs, src/settings.rs) is parked un-compiled;
-// re-add the module declarations to revive it.
+#[cfg(target_os = "ios")]
+mod settings;
 
 #[cfg(target_os = "ios")]
 fn main() {

@@ -1,5 +1,3 @@
-//! PARKED (not compiled): the iPad-owned, full-screen Settings presentation.
-
 use std::{
     collections::BTreeMap,
     io::{self, ErrorKind},
@@ -701,7 +699,7 @@ impl IosSettings {
         groups.push(Self::list_group(
             "Details",
             None,
-            vec![self.geometry_row(
+            vec![Self::geometry_row(
                 ConfigKey::WidgetCornerRadius,
                 "Widget corner radius",
                 "Rounds buttons, inputs, menus, tags, and dialogs.",
@@ -910,7 +908,7 @@ impl IosSettings {
                 "Frame",
                 Some("These values apply while pane gaps are enabled."),
                 vec![
-                    self.geometry_row(
+                    Self::geometry_row(
                         ConfigKey::PaneMargin,
                         "Pane margin",
                         "Space around each pane, in logical pixels.",
@@ -919,7 +917,7 @@ impl IosSettings {
                         !gaps,
                         cx,
                     ),
-                    self.geometry_row(
+                    Self::geometry_row(
                         ConfigKey::PaneCornerRadius,
                         "Pane corner radius",
                         "Rounds each pane corner, in logical pixels.",
@@ -928,7 +926,7 @@ impl IosSettings {
                         !gaps,
                         cx,
                     ),
-                    self.geometry_row(
+                    Self::geometry_row(
                         ConfigKey::PaneBorderWidth,
                         "Pane border width",
                         "Set the border width to 0 to disable it.",
@@ -1157,7 +1155,6 @@ impl IosSettings {
     }
 
     fn geometry_row(
-        &self,
         key: ConfigKey,
         title: &'static str,
         description: &'static str,

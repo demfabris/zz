@@ -54,7 +54,10 @@ use crate::{
         },
     },
     window::{corners::WindowCorners, drag::window_drag_handle},
-    workspace::tree::{IndentGuideColors, WorkspaceIndentGuides},
+    workspace::{
+        overview::{ToggleWindowOverview, overview_available},
+        tree::{IndentGuideColors, WorkspaceIndentGuides},
+    },
 };
 
 #[cfg(test)]
@@ -735,17 +738,26 @@ impl WorkspaceSidebar {
             });
         let mode_sidebar = sidebar.clone();
         let split_mux = self.mux.clone();
-        let active_pane = {
+        let (active_pane, overview_enabled) = {
             let mux = self.mux.read(cx);
-            mux.is_connected()
-                .then(|| active_pane_for_split(&mux.snapshot(), mux.attached_session()))
-                .flatten()
+            (
+                mux.is_connected()
+                    .then(|| active_pane_for_split(&mux.snapshot(), mux.attached_session()))
+                    .flatten(),
+                overview_available(mux, self.route),
+            )
         };
         let layout = workspace_layout_button(layout_id).dropdown_menu(move |menu, _, _| {
             let mode_sidebar = mode_sidebar.clone();
             let right_mux = split_mux.clone();
             let bottom_mux = split_mux.clone();
             menu.item(
+                PopupMenuItem::new("Window overview")
+                    .icon(IconName::LayoutDashboard)
+                    .disabled(!overview_enabled)
+                    .action(Box::new(ToggleWindowOverview)),
+            )
+            .item(
                 PopupMenuItem::new("Toggle sidebar")
                     .icon(IconName::PanelLeft)
                     .on_click(move |_, _, cx| {

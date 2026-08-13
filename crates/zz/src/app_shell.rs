@@ -21,7 +21,8 @@ use crate::{
     request_window_close,
     window::{corners::WindowCorners, drag::window_drag_handle},
     workspace::{
-        AppView, ClosePane,
+        AppView, ClosePane, WindowOverviewChanged,
+        overview::ToggleWindowOverview,
         sidebar::{
             ChromeMode, SidebarModeChanged, SidebarResizeDrag, SidebarRouteChanged, WorkspaceRoute,
             WorkspaceSidebar,
@@ -52,6 +53,10 @@ impl AppShell {
             .detach();
         cx.subscribe(&sidebar, |_, _, _: &SidebarRouteChanged, cx| cx.notify())
             .detach();
+        cx.subscribe(&workspace, |_, _, _: &WindowOverviewChanged, cx| {
+            cx.notify();
+        })
+        .detach();
         let app_fps_meter = cx.new(|cx| AppFpsMeter::new(window, cx));
         Self {
             workspace,
@@ -191,10 +196,15 @@ impl Render for AppShell {
 
         let slideover = (route == WorkspaceRoute::App && self.sidebar.read(cx).slideover_open())
             .then(|| self.render_slideover(cx));
+        let overview = (route == WorkspaceRoute::App)
+            .then(|| self.workspace.read(cx).window_overview())
+            .flatten()
+            .map(IntoElement::into_any_element);
         let overlays = show_fps
             .then(|| app_fps_overlay(self.app_fps_meter.clone()).into_any_element())
             .into_iter()
             .chain(slideover)
+            .chain(overview)
             .chain(dialog_layer.into_iter().map(IntoElement::into_any_element))
             .chain(
                 notification_layer
@@ -215,6 +225,15 @@ impl Render for AppShell {
                 workspace.on_claim_key_up(event, window, cx);
             });
         }));
+
+        let overview_workspace = self.workspace.clone();
+        let shell = shell.on_action(move |_: &ToggleWindowOverview, window, cx| {
+            if !overview_workspace.update(cx, |workspace, cx| {
+                workspace.toggle_window_overview(window, cx)
+            }) {
+                cx.propagate();
+            }
+        });
 
         let settings_sidebar = self.sidebar.clone();
         let shell = shell.on_action(move |_: &OpenSettings, window, cx| {

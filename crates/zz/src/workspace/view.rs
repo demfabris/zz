@@ -10,9 +10,9 @@ use std::{
 
 use gpui::{
     Animation, AnimationExt as _, AnyElement, AnyView, AnyWindowHandle, App, Bounds, Context,
-    CursorStyle, DragMoveEvent, Entity, EntityId, FocusHandle, IntoElement, KeyUpEvent, Keystroke,
-    MouseButton, MouseExitEvent, MouseUpEvent, Pixels, Point, Render, Size, StyleRefinement,
-    Window, div, ease_out_quint, prelude::*, px,
+    CursorStyle, DragMoveEvent, Entity, EntityId, EventEmitter, FocusHandle, IntoElement,
+    KeyUpEvent, Keystroke, MouseButton, MouseExitEvent, MouseUpEvent, Pixels, Point, Render, Size,
+    StyleRefinement, Window, div, ease_out_quint, prelude::*, px,
 };
 use zz_mux::{joined_layout, swapped_layout};
 use zz_protocol::{
@@ -39,6 +39,7 @@ use zz_ui::{
 
 use super::{
     new_session::NewSessionView,
+    overview::{DismissWindowOverview, WindowOverview, overview_available},
     sidebar::{
         ChromeMode, SidebarModeChanged, SidebarReleaseFocus, SidebarRouteChanged, WorkspaceRoute,
         WorkspaceSidebar,
@@ -79,6 +80,8 @@ const DRAG_CHIP_OFFSET: f32 = 12.0;
 const OPTIMISTIC_SPLIT: SplitId = SplitId(u64::MAX);
 
 gpui::actions!(zz, [ClosePane]);
+
+pub(crate) struct WindowOverviewChanged;
 
 const DIAGNOSTIC_TARGET: &str = "zz::diagnostics::app_render";
 
@@ -514,6 +517,7 @@ impl AppRevision {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OverlayKind {
+    WindowOverview,
     CommandPalette,
     ChooseBuffer,
     ChooseTree,
@@ -527,6 +531,7 @@ struct SynchronizeSignature {
     agent_config: Option<AgentConfig>,
     sidebar_focused: bool,
     route: WorkspaceRoute,
+    window_overview_open: bool,
 }
 
 // Each focus debt is owed by a different thing, so folding them into one enum
@@ -548,6 +553,7 @@ pub struct AppView {
     choose_buffer: Option<Entity<ChooseBufferView>>,
     display_panes: Option<Entity<DisplayPanesView>>,
     command_palette: Option<Entity<CommandPaletteView>>,
+    window_overview: Option<Entity<WindowOverview>>,
     pane_indicators: BTreeMap<PaneId, PaneIndicator>,
     focused_pane: Option<(PaneId, EntityId)>,
     focused_overlay: Option<OverlayKind>,
@@ -690,8 +696,11 @@ impl AppView {
         .detach();
         cx.subscribe(&sidebar, |_, _, _: &SidebarModeChanged, cx| cx.notify())
             .detach();
-        cx.subscribe(&sidebar, |view, _, _: &SidebarRouteChanged, cx| {
+        cx.subscribe(&sidebar, |view, sidebar, _: &SidebarRouteChanged, cx| {
             view.prefix_claim.clear();
+            if sidebar.read(cx).route() != WorkspaceRoute::App {
+                view.close_window_overview(cx);
+            }
             cx.notify();
         })
         .detach();
@@ -721,6 +730,7 @@ impl AppView {
             choose_buffer: None,
             display_panes: None,
             command_palette: None,
+            window_overview: None,
             pane_indicators: BTreeMap::new(),
             focused_pane: None,
             focused_overlay: None,
@@ -856,6 +866,48 @@ impl AppView {
         self.sidebar.clone()
     }
 
+    pub(crate) fn window_overview(&self) -> Option<Entity<WindowOverview>> {
+        self.window_overview.clone()
+    }
+
+    pub(crate) fn toggle_window_overview(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if let Some(overview) = &self.window_overview {
+            overview.update(cx, |overview, cx| overview.dismiss(window, cx));
+            return true;
+        }
+        if self.visible_overlay(cx).is_some() {
+            return false;
+        }
+        let route = self.sidebar.read(cx).route();
+        if !overview_available(self.mux.read(cx), route) {
+            return false;
+        }
+        let overview = cx.new(|cx| WindowOverview::new(self.mux.clone(), cx));
+        cx.subscribe(&overview, |view, _, _: &DismissWindowOverview, cx| {
+            if view.window_overview.take().is_some() {
+                cx.emit(WindowOverviewChanged);
+                cx.notify();
+            }
+        })
+        .detach();
+        self.window_overview = Some(overview);
+        self.prefix_claim.clear();
+        cx.emit(WindowOverviewChanged);
+        cx.notify();
+        true
+    }
+
+    fn close_window_overview(&mut self, cx: &mut Context<Self>) {
+        if self.window_overview.take().is_some() {
+            cx.emit(WindowOverviewChanged);
+            cx.notify();
+        }
+    }
+
     fn pane_focus_target(&self, pane: PaneId, cx: &App) -> Option<(EntityId, FocusHandle)> {
         if let Some(picker) = self.pickers.get(&pane) {
             Some((picker.entity_id(), picker.read(cx).focus().clone()))
@@ -945,7 +997,12 @@ impl AppView {
     }
 
     fn visible_overlay(&self, cx: &App) -> Option<(OverlayKind, FocusHandle)> {
-        if let Some(palette) = &self.command_palette {
+        if let Some(overview) = &self.window_overview {
+            Some((
+                OverlayKind::WindowOverview,
+                overview.read(cx).focus().clone(),
+            ))
+        } else if let Some(palette) = &self.command_palette {
             Some((OverlayKind::CommandPalette, palette.read(cx).focus(cx)))
         } else if let Some(chooser) = &self.choose_buffer {
             Some((OverlayKind::ChooseBuffer, chooser.read(cx).focus().clone()))
@@ -970,6 +1027,7 @@ impl AppView {
             && last.revision == revision
             && last.sidebar_focused == sidebar_focused
             && last.route == route
+            && last.window_overview_open == self.window_overview.is_some()
             && last.agent_config.as_ref() == cx.try_global::<AgentConfig>()
         {
             return;
@@ -1259,6 +1317,17 @@ impl AppView {
             }
         }
 
+        if self.window_overview.is_some()
+            && (route != WorkspaceRoute::App
+                || self.command_output.is_some()
+                || self.command_palette.is_some()
+                || self.choose_tree.is_some()
+                || self.choose_buffer.is_some()
+                || self.display_panes.is_some())
+        {
+            self.close_window_overview(cx);
+        }
+
         for pane in &wanted_terminals {
             let commands = self
                 .mux
@@ -1458,6 +1527,7 @@ impl AppView {
             agent_config: cx.try_global::<AgentConfig>().cloned(),
             sidebar_focused: self.sidebar.read(cx).is_focused(window),
             route,
+            window_overview_open: self.window_overview.is_some(),
         });
     }
 
@@ -2336,6 +2406,8 @@ impl Render for AppView {
         )
     }
 }
+
+impl EventEmitter<WindowOverviewChanged> for AppView {}
 
 fn pane_select_command(pane: PaneId) -> CommandInvocation {
     CommandInvocation::new("select-pane", ["-t", &pane.to_string()])

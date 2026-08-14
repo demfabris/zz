@@ -6,11 +6,11 @@ use gpui::{
 use zz_ui::ActiveTheme as _;
 use zz_ui::kbd::Kbd;
 use zz_ui::pane::{
-    PaneChrome, PaneDragOverlayState, PaneOverlayCorner, PaneSplitAxis, pane_drag_chip,
-    pane_drag_overlay, pane_drop_preview, pane_indicator_card, pane_indicator_overlay,
-    pane_overlay_stack, pane_split_hit_target, pane_split_surface, pane_surface, pane_sync_badge,
-    pane_unzoom_control, pane_waiting_state, terminal_link_popup, terminal_mode_indicator,
-    terminal_search_prompt, terminal_status_popup,
+    PaneChrome, PaneDragOverlayState, PaneOverlayCorner, PaneSplitAxis, PaneSplitMode,
+    pane_drag_chip, pane_drag_overlay, pane_drop_preview, pane_indicator_card,
+    pane_indicator_overlay, pane_overlay_stack, pane_split_hit_target, pane_split_surface,
+    pane_surface, pane_sync_badge, pane_unzoom_control, pane_waiting_state, terminal_link_popup,
+    terminal_mode_indicator, terminal_search_prompt, terminal_status_popup,
 };
 use zz_ui::shell::app_connection_state;
 
@@ -348,7 +348,7 @@ fn pane_chrome_fixture(
         .w(px(240.0))
         .h(px(150.0))
         .p(px(margin))
-        .child(pane_leaf(id, radius, border_width, active, cx))
+        .child(pane_leaf(id, radius, border_width, margin, active, cx))
 }
 
 fn pane_split_fixture(gaps: bool, cx: &App) -> gpui::Div {
@@ -370,8 +370,13 @@ fn pane_split_fixture(gaps: bool, cx: &App) -> gpui::Div {
     let margin = if gaps { 8.0 } else { 0.0 };
     let radius = if gaps { 6.0 } else { 0.0 };
     let border_width = if gaps { 1.0 } else { 0.0 };
-    let first = pane_leaf(first_id, radius, border_width, true, cx);
-    let second = pane_leaf(second_id, radius, border_width, false, cx);
+    let first = pane_leaf(first_id, radius, border_width, margin, true, cx);
+    let second = pane_leaf(second_id, radius, border_width, margin, false, cx);
+    let split_mode = if gaps {
+        PaneSplitMode::Gaps
+    } else {
+        PaneSplitMode::Separators
+    };
 
     div()
         .w(px(480.0))
@@ -382,11 +387,20 @@ fn pane_split_fixture(gaps: bool, cx: &App) -> gpui::Div {
             PaneSplitAxis::Horizontal,
             0.5,
             false,
-            gaps,
+            split_mode,
             px(margin),
+            1.0,
+            None,
             first,
             second,
-            pane_split_hit_target(hit_id, PaneSplitAxis::Horizontal, 0.5, px(margin)),
+            pane_split_hit_target(
+                hit_id,
+                PaneSplitAxis::Horizontal,
+                0.5,
+                split_mode,
+                px(margin),
+                1.0,
+            ),
             cx.theme().background,
             cx,
         ))
@@ -396,6 +410,7 @@ fn pane_leaf(
     id: &'static str,
     radius: f32,
     border_width: f32,
+    shadow_extent: f32,
     active: bool,
     cx: &App,
 ) -> gpui::Div {
@@ -408,6 +423,7 @@ fn pane_leaf(
             px(border_width),
             cx.theme().border,
             cx.theme().background,
+            px(shadow_extent),
         )
         .dimmed(!active),
         cx,

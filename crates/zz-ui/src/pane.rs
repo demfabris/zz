@@ -18,6 +18,7 @@ pub struct PaneChrome {
     pub border_width: Pixels,
     pub border_color: Hsla,
     pub gap_background: Hsla,
+    pub shadow_extent: Pixels,
     pub dimmed: bool,
 }
 
@@ -28,12 +29,14 @@ impl PaneChrome {
         border_width: Pixels,
         border_color: Hsla,
         gap_background: Hsla,
+        shadow_extent: Pixels,
     ) -> Self {
         Self {
             radii,
             border_width,
             border_color,
             gap_background,
+            shadow_extent,
             dimmed: false,
         }
     }
@@ -72,42 +75,35 @@ pub fn pane_surface(
                 .rounded_tr(chrome.radii.top_right)
                 .rounded_bl(chrome.radii.bottom_left)
                 .rounded_br(chrome.radii.bottom_right)
+                .bg(cx.theme().background.opaque())
                 .border(chrome.border_width)
                 .border_color(chrome.border_color)
+                .when(cx.theme().shadow, |surface| {
+                    surface.shadow(pane_surface_shadow_style(
+                        chrome.shadow_extent,
+                        cx.theme().scrim,
+                    ))
+                })
                 .child(content)
                 .when(chrome.dimmed, |surface| {
                     surface.child(pane_inactive_scrim(chrome.radii, cx))
                 })
                 .children(overlays),
         )
-        .children(pane_border_shadow(chrome, cx))
 }
 
-fn pane_border_shadow(chrome: PaneChrome, cx: &App) -> Option<gpui::Div> {
-    let width = chrome.border_width.max(Pixels::ZERO);
-    if width <= Pixels::ZERO || !cx.theme().shadow {
-        return None;
+fn pane_surface_shadow_style(gap: Pixels, scrim: Hsla) -> Vec<BoxShadow> {
+    let gap = gap.max(Pixels::ZERO);
+    if gap <= Pixels::ZERO {
+        return Vec::new();
     }
-    let scrim = cx.theme().scrim;
-    Some(
-        div()
-            .absolute()
-            .inset_0()
-            .rounded_tl(chrome.radii.top_left)
-            .rounded_tr(chrome.radii.top_right)
-            .rounded_bl(chrome.radii.bottom_left)
-            .rounded_br(chrome.radii.bottom_right)
-            .shadow(pane_border_shadow_style(width, scrim)),
-    )
-}
-
-fn pane_border_shadow_style(width: Pixels, scrim: Hsla) -> Vec<BoxShadow> {
+    let depth = gap * 0.25;
     vec![BoxShadow {
-        color: scrim.divide(0.12),
-        offset: point(Pixels::ZERO, Pixels::ZERO),
-        blur_radius: Pixels::ZERO,
-        spread_radius: width,
-        inset: true,
+        color: scrim,
+        offset: point(Pixels::ZERO, depth),
+        blur_radius: depth,
+        spread_radius: Pixels::ZERO,
+        inset: false,
     }]
 }
 
@@ -259,6 +255,13 @@ pub enum PaneSplitSide {
     Second,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaneSplitMode {
+    Separators,
+    Gaps,
+    Frames,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PaneSplitHighlight {
     pub start: f32,
@@ -287,17 +290,26 @@ pub fn pane_split_slot(gap: Pixels, scale: f32) -> Pixels {
     px(f32::from(gap).max(PANE_SPLIT_DIVIDER_THICKNESS * scale.max(0.1)))
 }
 
+fn pane_split_slot_for_mode(mode: PaneSplitMode, gap: Pixels, scale: f32) -> Pixels {
+    if mode == PaneSplitMode::Frames {
+        Pixels::ZERO
+    } else {
+        pane_split_slot(gap, scale)
+    }
+}
+
 /// Draggable hit target for a pane split. The caller attaches the drag
 /// callbacks to the returned element.
 pub fn pane_split_hit_target(
     id: impl Into<ElementId>,
     axis: PaneSplitAxis,
     ratio: f32,
+    mode: PaneSplitMode,
     gap: Pixels,
     scale: f32,
 ) -> Stateful<gpui::Div> {
     let scale = scale.max(0.1);
-    let slot = f32::from(pane_split_slot(gap, scale));
+    let slot = f32::from(pane_split_slot_for_mode(mode, gap, scale));
     let hit_thickness = PANE_SPLIT_HIT_THICKNESS * scale;
     let offset = -(hit_thickness - slot) / 2.0;
     div()
@@ -324,15 +336,12 @@ pub fn pane_split_hit_target(
         })
 }
 
-/// Split composition. The slot between the children is the single inter-pane
-/// gap: `gap` wide when a pane margin is configured, a 1px hairline otherwise.
-/// The hit target centers on the slot.
 pub fn pane_split_surface(
     id: impl Into<ElementId>,
     axis: PaneSplitAxis,
     ratio: f32,
     resizing: bool,
-    gaps: bool,
+    mode: PaneSplitMode,
     gap: Pixels,
     scale: f32,
     highlight: Option<PaneSplitHighlight>,
@@ -344,11 +353,14 @@ pub fn pane_split_surface(
 ) -> Stateful<gpui::Div> {
     let scale = scale.max(0.1);
     let divider_thickness = PANE_SPLIT_DIVIDER_THICKNESS * scale;
-    let slot = f32::from(pane_split_slot(gap, scale));
+    let slot = f32::from(pane_split_slot_for_mode(mode, gap, scale));
     let first = div()
         .flex()
         .flex_none()
-        .when(!gaps, gpui::Styled::overflow_hidden)
+        .when(
+            mode == PaneSplitMode::Separators,
+            gpui::Styled::overflow_hidden,
+        )
         .when(axis == PaneSplitAxis::Horizontal, |element| {
             element.w(relative(ratio)).h_full()
         })
@@ -365,7 +377,7 @@ pub fn pane_split_surface(
         .when(axis == PaneSplitAxis::Vertical, |element| {
             element.h(px(slot)).w_full()
         })
-        .when(!gaps, |divider| {
+        .when(mode == PaneSplitMode::Separators, |divider| {
             let hairline = div()
                 .absolute()
                 .bg(if resizing {
@@ -427,11 +439,14 @@ pub fn pane_split_surface(
         .relative()
         .flex()
         .size_full()
-        .when(!gaps, gpui::Styled::overflow_hidden)
+        .when(
+            mode == PaneSplitMode::Separators,
+            gpui::Styled::overflow_hidden,
+        )
         .when(axis == PaneSplitAxis::Vertical, |element| {
             element.flex_col()
         })
-        .when(gaps, |element| {
+        .when(mode == PaneSplitMode::Gaps, |element| {
             element.child(
                 div()
                     .absolute()
@@ -450,7 +465,10 @@ pub fn pane_split_surface(
             div()
                 .flex()
                 .flex_1()
-                .when(!gaps, gpui::Styled::overflow_hidden)
+                .when(
+                    mode == PaneSplitMode::Separators,
+                    gpui::Styled::overflow_hidden,
+                )
                 .child(second_content),
         )
         .child(hit_target)
@@ -658,15 +676,47 @@ pub fn terminal_link_popup(uri: impl IntoElement, cx: &App) -> Tag {
 mod tests {
     use super::*;
 
-    #[test]
-    fn pane_border_shadow_is_an_unblurred_inset() {
-        let shadow = pane_border_shadow_style(px(3.0), gpui::hsla(0.0, 0.0, 0.0, 0.2));
-        let shadow = &shadow[0];
+    #[gpui::test]
+    fn pane_surface_shadow_is_a_bounded_drop_shadow(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        cx.update(|cx| {
+            let scrim = cx.theme().scrim;
+            assert!(pane_surface_shadow_style(Pixels::ZERO, scrim).is_empty());
 
-        assert!(shadow.inset);
-        assert_eq!(shadow.spread_radius, px(3.0));
-        assert_eq!(shadow.blur_radius, Pixels::ZERO);
-        assert_eq!(shadow.offset, point(Pixels::ZERO, Pixels::ZERO));
-        assert_eq!(shadow.color.a, 0.12);
+            let shadow = pane_surface_shadow_style(px(8.0), scrim);
+            let shadow = &shadow[0];
+
+            assert!(!shadow.inset);
+            assert_eq!(shadow.color, scrim);
+            assert_eq!(shadow.offset, point(Pixels::ZERO, px(2.0)));
+            assert_eq!(shadow.blur_radius, px(2.0));
+            assert_eq!(shadow.spread_radius, Pixels::ZERO);
+            assert!(
+                f32::from(shadow.blur_radius) * 3.0
+                    + f32::from(shadow.offset.y)
+                    + f32::from(shadow.spread_radius)
+                    <= 8.0
+            );
+
+            let scaled = pane_surface_shadow_style(px(4.0), scrim);
+            assert_eq!(scaled[0].offset.y, shadow.offset.y * 0.5);
+            assert_eq!(scaled[0].blur_radius, shadow.blur_radius * 0.5);
+        });
+    }
+
+    #[test]
+    fn framed_pane_splits_are_glued_together() {
+        assert_eq!(
+            pane_split_slot_for_mode(PaneSplitMode::Frames, px(8.0), 1.0),
+            Pixels::ZERO
+        );
+        assert_eq!(
+            pane_split_slot_for_mode(PaneSplitMode::Separators, Pixels::ZERO, 1.0),
+            px(1.0)
+        );
+        assert_eq!(
+            pane_split_slot_for_mode(PaneSplitMode::Gaps, px(8.0), 1.0),
+            px(8.0)
+        );
     }
 }

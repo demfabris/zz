@@ -1576,6 +1576,11 @@ impl BrowserSession {
         self.apply_viewport(next, false);
     }
 
+    pub fn refresh_viewport(&mut self) {
+        let viewport = self.viewport();
+        self.apply_viewport(viewport, true);
+    }
+
     fn apply_viewport(&mut self, next: Viewport, force: bool) {
         let started = diagnostic_timer();
         let next = next.sanitized();

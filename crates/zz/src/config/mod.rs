@@ -700,6 +700,10 @@ pub(crate) fn pane_border_width(cx: &App) -> Pixels {
     ))
 }
 
+pub(crate) fn configured_pane_border_width(cx: &App) -> Pixels {
+    px(resolved_config(cx).pane_border_width.value)
+}
+
 /// The corner every widget turns. `zz::theme` pushes it onto the zz-ui theme.
 pub(crate) fn widget_corner_radius(cx: &App) -> Pixels {
     px(resolved_config(cx).widget_corner_radius.value)

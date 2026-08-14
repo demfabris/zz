@@ -24,8 +24,7 @@ use zz_terminal::KeyAction as TerminalKeyAction;
 use zz_ui::attachment::open_attachment_preview;
 use zz_ui::dialog::DialogButtonProps;
 use zz_ui::{
-    ActiveTheme as _, ElementExt as _, Icon, IconName, Sizable as _, StyledExt as _, UiZoom,
-    WindowExt as _,
+    ActiveTheme as _, ElementExt as _, Icon, IconName, Sizable as _, UiZoom, WindowExt as _,
     button::{Button, ButtonVariants as _},
     draws_window_controls,
     kbd::Kbd,
@@ -34,9 +33,10 @@ use zz_ui::{
 use zz_ui::{
     pane::{
         PaneChrome, PaneDragOverlayState, PaneOverlayCorner, PaneSplitAxis, PaneSplitHighlight,
-        PaneSplitSide, pane_drag_chip, pane_drag_overlay, pane_drop_preview, pane_indicator_card,
-        pane_indicator_overlay, pane_overlay_stack, pane_split_hit_target, pane_split_slot,
-        pane_split_surface, pane_surface, pane_sync_badge, pane_unzoom_control, pane_waiting_state,
+        PaneSplitMode, PaneSplitSide, pane_drag_chip, pane_drag_overlay, pane_drop_preview,
+        pane_indicator_card, pane_indicator_overlay, pane_overlay_stack, pane_split_hit_target,
+        pane_split_slot, pane_split_surface, pane_surface, pane_sync_badge, pane_unzoom_control,
+        pane_waiting_state,
     },
     shell::{app_connection_state, app_workspace_surface},
 };
@@ -87,6 +87,11 @@ const DROP_PREVIEW_MORPH: Duration = Duration::from_millis(180);
 const DROP_PREVIEW_FADE: Duration = Duration::from_millis(140);
 const DRAG_CHIP_OFFSET: f32 = 12.0;
 const OPTIMISTIC_SPLIT: SplitId = SplitId(u64::MAX);
+const OVERVIEW_CLOSE_TARGET_SIZE: f32 = 40.0;
+const OVERVIEW_CLOSE_VISUAL_SIZE: f32 = 22.0;
+const OVERVIEW_CLOSE_ICON_SIZE: f32 = 10.0;
+const OVERVIEW_OVERLAY_INSET: f32 = 8.0;
+const OVERVIEW_FLUSH_SHADOW_EXTENT: f32 = 8.0;
 
 gpui::actions!(zz, [ClosePane]);
 
@@ -642,6 +647,12 @@ fn scaled_pane_radii(radii: Corners<Pixels>, scale: f32) -> Corners<Pixels> {
         bottom_right: radii.bottom_right * scale,
         bottom_left: radii.bottom_left * scale,
     }
+}
+
+fn overview_close_radius(widget_radius: Pixels, scale: f32) -> Pixels {
+    (widget_radius * scale)
+        .max(Pixels::ZERO)
+        .min(px(OVERVIEW_CLOSE_VISUAL_SIZE * scale / 2.0))
 }
 
 // Each focus debt is owed by a different thing, so folding them into one enum
@@ -1215,11 +1226,12 @@ impl AppView {
                 overview.rendered_progress.set(1.0);
             }
             self.set_pane_geometry_frozen(true, window, cx);
+            self.refresh_browser_viewports_after_layout(window);
         } else {
             self.set_pane_geometry_frozen(true, window, cx);
             cx.spawn_in(window, async move |view, cx| {
                 cx.background_executor().timer(duration).await;
-                let _ = view.update_in(cx, |view, _window, cx| {
+                let _ = view.update_in(cx, |view, window, cx| {
                     let settled = view.window_overview.as_mut().is_some_and(|overview| {
                         if overview.revision == revision && overview.target >= 1.0 {
                             overview.rendered_progress.set(1.0);
@@ -1230,6 +1242,7 @@ impl AppView {
                         }
                     });
                     if settled {
+                        view.refresh_browser_viewports_after_layout(window);
                         cx.notify();
                     }
                 });
@@ -1305,6 +1318,7 @@ impl AppView {
                     mux.set_terminal_preview(false);
                 });
                 window.set_zoom(UiZoom::get(cx));
+                view.refresh_browser_viewports_after_layout(window);
                 view.focused_pane = None;
                 view.pane_focus_owed = true;
                 cx.emit(WindowOverviewChanged);
@@ -1338,6 +1352,17 @@ impl AppView {
             viewport.height * window.zoom(),
         );
         window.set_zoom(overview_zoom(UiZoom::get(cx), physical_viewport, count));
+    }
+
+    fn refresh_browser_viewports_after_layout(&self, window: &Window) {
+        let controller = self.controller.clone();
+        window.on_next_frame(move |window, _| {
+            window.on_next_frame(move |_, cx| {
+                controller.update(cx, |controller, cx| {
+                    controller.refresh_visible_viewports(cx);
+                });
+            });
+        });
     }
 
     fn focused_window_id(&self, cx: &App) -> Option<WindowId> {
@@ -2450,7 +2475,6 @@ impl AppView {
     fn render_window_overview(
         &self,
         windows: &[WindowSnapshot],
-        session_name: &str,
         focused_window: Option<WindowId>,
         window: &Window,
         cx: &mut Context<Self>,
@@ -2525,75 +2549,11 @@ impl AppView {
                                 .top(frame.origin.y)
                                 .w(frame.size.width)
                                 .h(frame.size.height)
-                                .opacity(if home { 1.0 } else { progress })
                         },
                     )
                     .into_any_element()
             })
             .collect::<Vec<_>>();
-        let count = windows
-            .iter()
-            .map(|window| window.panes.len())
-            .sum::<usize>();
-        let header_motion = overview.clone();
-        let header = div()
-            .absolute()
-            .left(px(20.0 * metric_scale))
-            .right(px(20.0 * metric_scale))
-            .flex()
-            .items_end()
-            .justify_between()
-            .child(
-                div()
-                    .text_size(zz_ui::rems_from_px(16.0 * metric_scale))
-                    .font_semibold()
-                    .child("Panes"),
-            )
-            .child(
-                div()
-                    .text_size(zz_ui::rems_from_px(11.0 * metric_scale))
-                    .text_color(cx.theme().foreground.muted())
-                    .child(format!(
-                        "{session_name} · {count} {}",
-                        if count == 1 { "pane" } else { "panes" }
-                    )),
-            )
-            .with_animation(
-                format!("window-overview-header-{}", overview.revision),
-                overview.animation(),
-                move |header, delta| {
-                    let progress = header_motion.progress(delta);
-                    header
-                        .top(px((10.0 + 8.0 * progress) * metric_scale))
-                        .opacity(progress)
-                },
-            );
-        let footer_motion = overview.clone();
-        let footer = div()
-            .absolute()
-            .left(px(20.0 * metric_scale))
-            .right(px(20.0 * metric_scale))
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_size(zz_ui::rems_from_px(11.0 * metric_scale))
-            .text_color(cx.theme().foreground.muted())
-            .child(match overview.mode {
-                OverviewInputMode::Normal => {
-                    "NORMAL · h j k l move · a / i insert · Enter open · Esc close"
-                }
-                OverviewInputMode::Insert => "INSERT · typing in selected pane · Esc normal",
-            })
-            .with_animation(
-                format!("window-overview-footer-{}", overview.revision),
-                overview.animation(),
-                move |footer, delta| {
-                    let progress = footer_motion.progress(delta);
-                    footer
-                        .bottom(px((8.0 + 6.0 * progress) * metric_scale))
-                        .opacity(progress)
-                },
-            );
         let progress_motion = overview.clone();
         let rendered_progress = overview.rendered_progress.clone();
         div()
@@ -2607,11 +2567,8 @@ impl AppView {
             })
             .size_full()
             .overflow_hidden()
-            .bg(crate::theme::chrome_background(cx))
             .text_color(cx.theme().foreground)
-            .child(header)
             .children(groups)
-            .child(footer)
             .with_animation(
                 format!("window-overview-motion-{}", overview.revision),
                 overview.animation(),
@@ -2718,13 +2675,44 @@ impl AppView {
                 let mut status_tags: Vec<AnyElement> = Vec::new();
                 if panorama {
                     let mux = self.mux.clone();
+                    let close_group: gpui::SharedString =
+                        format!("window-overview-pane-close-{}", pane_id.0).into();
+                    let close_fill = cx.theme().background.opaque().raised(1);
+                    let close_radius =
+                        overview_close_radius(config::widget_corner_radius(cx), geometry_scale);
                     status_tags.push(
                         Button::new(("window-overview-pane-close", pane_id.0))
-                            .ghost()
-                            .compact()
-                            .with_size(px(40.0) * geometry_scale)
-                            .child(Icon::new(IconName::Close).with_size(px(12.0) * geometry_scale))
-                            .text_color(cx.theme().foreground.muted())
+                            .text()
+                            .size(px(OVERVIEW_CLOSE_TARGET_SIZE * geometry_scale))
+                            .group(close_group.clone())
+                            .cursor_pointer()
+                            .child(
+                                div().size_full().flex().items_start().justify_end().child(
+                                    div()
+                                        .id(("window-overview-pane-close-visual", pane_id.0))
+                                        .debug_selector(move || {
+                                            format!(
+                                                "window-overview-pane-close-visual-{}",
+                                                pane_id.0
+                                            )
+                                        })
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .size(px(OVERVIEW_CLOSE_VISUAL_SIZE * geometry_scale))
+                                        .rounded(close_radius)
+                                        .border(px(1.0) * geometry_scale)
+                                        .border_color(cx.theme().border.subtle())
+                                        .bg(close_fill)
+                                        .group_hover(close_group, move |surface| {
+                                            surface.bg(close_fill.hover())
+                                        })
+                                        .text_color(cx.theme().foreground.muted())
+                                        .child(Icon::new(IconName::Close).with_size(px(
+                                            OVERVIEW_CLOSE_ICON_SIZE * geometry_scale,
+                                        ))),
+                                ),
+                            )
                             .tooltip("Close pane")
                             .tab_stop(false)
                             .occlude()
@@ -2753,6 +2741,11 @@ impl AppView {
                 if !status_tags.is_empty() {
                     overlays.push(
                         pane_overlay_stack(PaneOverlayCorner::TopRight, status_tags)
+                            .when(panorama, |stack| {
+                                stack
+                                    .top(px(OVERVIEW_OVERLAY_INSET * geometry_scale))
+                                    .right(px(OVERVIEW_OVERLAY_INSET * geometry_scale))
+                            })
                             .into_any_element(),
                     );
                 }
@@ -2781,7 +2774,17 @@ impl AppView {
                     && pane_content
                         .as_ref()
                         .is_none_or(|content| content.inactive_style == PaneInactiveStyle::Surface);
-                let border_width = config::pane_border_width(cx) * geometry_scale;
+                let border_width = if panorama {
+                    config::configured_pane_border_width(cx)
+                } else {
+                    config::pane_border_width(cx)
+                } * geometry_scale;
+                let pane_gap = config::pane_margin(cx) * geometry_scale;
+                let shadow_extent = if panorama && !config::pane_gaps(cx) {
+                    px(OVERVIEW_FLUSH_SHADOW_EXTENT * geometry_scale)
+                } else {
+                    pane_gap
+                };
                 let surface = pane_surface(
                     ("mux-pane", pane_id.0),
                     content,
@@ -2795,6 +2798,7 @@ impl AppView {
                             cx.theme().border
                         },
                         gap_background,
+                        shadow_extent,
                     )
                     .dimmed(surface_dimmed),
                     cx,
@@ -2819,6 +2823,7 @@ impl AppView {
                 second,
             } => {
                 let geometry_scale = overview_geometry_scale.unwrap_or(1.0);
+                let panorama = overview_geometry_scale.is_some();
                 let snapshot_ratio = *ratio;
                 let ratio = self
                     .split_drag
@@ -2879,6 +2884,13 @@ impl AppView {
                     axis: *axis,
                 };
                 let pane_gap = config::pane_margin(cx) * geometry_scale;
+                let split_mode = if config::pane_gaps(cx) {
+                    PaneSplitMode::Gaps
+                } else if panorama {
+                    PaneSplitMode::Frames
+                } else {
+                    PaneSplitMode::Separators
+                };
                 let hit_target: AnyElement = if matches!(drag_layer, PaneDragLayer::Dragging(_)) {
                     div().absolute().into_any_element()
                 } else {
@@ -2886,6 +2898,7 @@ impl AppView {
                         ("split-divider", id.0),
                         split_axis,
                         ratio,
+                        split_mode,
                         pane_gap,
                         geometry_scale,
                     )
@@ -2898,7 +2911,7 @@ impl AppView {
                     split_axis,
                     ratio,
                     resizing,
-                    config::pane_gaps(cx),
+                    split_mode,
                     pane_gap,
                     geometry_scale,
                     highlight,
@@ -3135,7 +3148,6 @@ impl Render for AppView {
                 |session| {
                     self.render_window_overview(
                         &session.windows,
-                        &session.name,
                         active_window.map(|window| window.id),
                         window,
                         cx,
@@ -3605,6 +3617,15 @@ mod tests {
         assert!((overview.progress(0.0) - 0.25).abs() < f32::EPSILON);
         assert_eq!(overview.progress(1.0), 1.0);
         assert!((open_duration.as_secs_f32() - 0.315).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn overview_close_control_uses_the_widget_radius() {
+        assert_eq!(overview_close_radius(px(0.0), 1.0), px(0.0));
+        assert_eq!(overview_close_radius(px(6.0), 1.0), px(6.0));
+        assert_eq!(overview_close_radius(px(13.5), 1.0), px(11.0));
+        assert_eq!(overview_close_radius(px(40.0), 1.0), px(11.0));
+        assert_eq!(overview_close_radius(px(27.0), 2.0), px(22.0));
     }
 
     #[derive(Debug, PartialEq)]
@@ -4356,6 +4377,22 @@ mod tests {
         let offscreen_end_x = f32::from(offscreen_end.origin.x * overview_zoom);
         assert!(offscreen_end_x < offscreen_start_x);
         assert!(close(active_end.right(), offscreen_end.origin.x));
+        let flush_second_terminal = cx
+            .debug_bounds("mux-pane-2")
+            .expect("flush second terminal");
+        let flush_browser = cx.debug_bounds("mux-pane-3").expect("flush browser");
+        let flush_group_gap = (offscreen_end.origin.x - active_end.right()) * overview_zoom;
+        let flush_pane_gap =
+            (flush_browser.origin.x - flush_second_terminal.right()) * overview_zoom;
+        assert!(f32::from(flush_group_gap).abs() < 0.1);
+        assert!(f32::from(flush_pane_gap).abs() < 0.1);
+        assert!(cx.debug_bounds("window-overview-separator-0").is_none());
+        let flush_close_visual = cx
+            .debug_bounds("window-overview-pane-close-visual-3")
+            .expect("flush browser close visual");
+        let flush_close_inset =
+            f32::from((flush_close_visual.origin.y - flush_browser.origin.y) * overview_zoom);
+        assert!((flush_close_inset - OVERVIEW_OVERLAY_INSET - 1.0).abs() < 0.1);
 
         sent.borrow_mut().clear();
         assert!(cx.debug_bounds("window-overview").is_some());
@@ -4432,9 +4469,49 @@ mod tests {
         let close_browser = cx
             .debug_bounds("window-overview-pane-close-3")
             .expect("browser close control");
+        let close_browser_visual = cx
+            .debug_bounds("window-overview-pane-close-visual-3")
+            .expect("browser close visual");
+        assert!(
+            (f32::from(close_browser.size.width * physical_zoom) - OVERVIEW_CLOSE_TARGET_SIZE)
+                .abs()
+                < 0.1
+        );
+        assert!(
+            (f32::from(close_browser.size.height * physical_zoom) - OVERVIEW_CLOSE_TARGET_SIZE)
+                .abs()
+                < 0.1
+        );
+        assert!(
+            (f32::from(close_browser_visual.size.width * physical_zoom)
+                - OVERVIEW_CLOSE_VISUAL_SIZE)
+                .abs()
+                < 0.1
+        );
+        assert!(
+            (f32::from(close_browser_visual.size.height * physical_zoom)
+                - OVERVIEW_CLOSE_VISUAL_SIZE)
+                .abs()
+                < 0.1
+        );
+        let close_right_inset =
+            f32::from((browser_bounds.right() - close_browser_visual.right()) * physical_zoom);
+        let close_top_inset =
+            f32::from((close_browser_visual.origin.y - browser_bounds.origin.y) * physical_zoom);
+        let expected_close_inset = cx.update(|_, cx| {
+            OVERVIEW_OVERLAY_INSET + f32::from(config::pane_border_width(cx) * UiZoom::get(cx))
+        });
+        assert!(
+            (close_right_inset - expected_close_inset).abs() < 0.1,
+            "close right inset was {close_right_inset}"
+        );
+        assert!(
+            (close_top_inset - expected_close_inset).abs() < 0.1,
+            "close top inset was {close_top_inset}"
+        );
         let close_browser = point(
-            close_browser.center().x * physical_zoom,
-            close_browser.center().y * physical_zoom,
+            (close_browser.origin.x + px(1.0)) * physical_zoom,
+            (close_browser.bottom() - px(1.0)) * physical_zoom,
         );
         cx.simulate_mouse_move(close_browser, None::<MouseButton>, Modifiers::default());
         cx.simulate_mouse_down(close_browser, MouseButton::Left, Modifiers::default());

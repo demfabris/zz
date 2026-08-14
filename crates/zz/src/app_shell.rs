@@ -221,6 +221,9 @@ impl Render for AppShell {
             self.workspace.clone(),
             overlays,
         )
+        .when(overview_open, |shell| {
+            shell.bg(crate::theme::chrome_background(cx))
+        })
         .on_drag_move::<SidebarResizeDrag>(cx.listener(Self::on_sidebar_resize_drag_move))
         .capture_key_up(cx.listener(|shell, event: &KeyUpEvent, window, cx| {
             shell.workspace.update(cx, |workspace, cx| {

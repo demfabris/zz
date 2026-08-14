@@ -1328,7 +1328,10 @@ impl SettingsView {
             )))
             .child(
                 SettingsStack::titled("Frame")
-                    .description("Applies only while pane gaps are enabled.")
+                    .description(
+                        "Margin and corner radius apply with pane gaps. Panorama also uses the \
+                         border width when panes are flush.",
+                    )
                     .child(
                         Self::geometry_setting(
                             ConfigKey::PaneMargin,
@@ -1351,18 +1354,15 @@ impl SettingsView {
                         )
                         .disabled(!gaps),
                     )
-                    .child(
-                        Self::geometry_setting(
-                            ConfigKey::PaneBorderWidth,
-                            "Pane border width",
-                            "Border width for gapped panes, in logical pixels (0–8). Set to 0 to \
-                             disable.",
-                            resolved.pane_border_width,
-                            &self.pane_border_width,
-                            cx,
-                        )
-                        .disabled(!gaps),
-                    ),
+                    .child(Self::geometry_setting(
+                        ConfigKey::PaneBorderWidth,
+                        "Pane border width",
+                        "Border width for gapped panes and flush panorama, in logical pixels \
+                             (0–8). Set to 0 to disable.",
+                        resolved.pane_border_width,
+                        &self.pane_border_width,
+                        cx,
+                    )),
             )
             .into_any_element()
     }

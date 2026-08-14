@@ -4,7 +4,7 @@ title: Terminal appearance and color model
 description: The renderer-neutral appearance model, the native zz/config override resolver, per-key provenance, the client-side Ghostty import loader, and embedded Ghostty/X11 colors.
 resource: crates/zz-terminal/src/appearance.rs
 tags: [appearance, color, ghostty, palette, x11-rgb, config]
-timestamp: 2026-07-25T00:00:00Z
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
@@ -25,9 +25,9 @@ complete per-key provenance map beside the appearance.
 This is a **terminal-only** system. Application chrome has its own light/dark palette in
 [zz-ui](/configuration/ui-conventions.md) and does not derive from these colors; only
 `mono_font_family` still crosses the boundary, and it is not chroma. `background-opacity` remains
-pane-local too: the renderer applies its resolved value directly, so `1` keeps the terminal opaque
-and any lower value reveals the surface beneath it. zz's window blur supplies that blurred surface
-when enabled; it never changes the terminal's configured alpha.
+pane-local too. The renderer paints the terminal color at that alpha over an opaque app-pane base,
+so `1` shows the configured terminal background and lower values mix toward the app surface. Window
+blur does not enter terminal pixels.
 
 # Model
 
@@ -77,9 +77,9 @@ marks the load `fatal`.
 | Ghostty (supported) | `theme`, `font-family` plus `-bold` / `-italic` / `-bold-italic` stacks, `font-size`, `font-feature`, `font-synthetic-style`, `font-thicken`, `font-thicken-strength`, `adjust-cell-height`, `window-padding-x/y`, `foreground`, `background`, `cursor-color`, `selection-foreground`, `selection-background`, `palette`, `minimum-contrast`, `cursor-style`, `cursor-style-blink`, `background-opacity`, `config-file` |
 | zz/config-native extensions (Ghostty compatibility accepted) | `zz-font-weight`, `zz-cursor-blink-interval-ms`, `zz-search-match-color`, `zz-search-current-color`, `zz-link-color`, `zz-copy-cursor-color`, `zz-rounded-selection` |
 
-Ghostty's `background-blur` is deliberately unsupported and ignored. The compositor blur belongs to
-zz's separate `window-background-blur` setting; Ghostty contributes only the terminal background's
-color and opacity.
+Ghostty's `background-blur` is unsupported and ignored. zz's separate `window-background-blur`
+setting applies to application chrome. Ghostty contributes the terminal background color and its
+tint strength inside the opaque pane.
 
 Each entry produces an `AppearanceConfigDiagnostic` with a disposition (`Applied`, `Included`,
 `Unsupported`, `Invalid`, `NoOp`). Unsupported keys never fail startup; invalid values for supported

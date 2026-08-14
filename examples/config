@@ -30,11 +30,10 @@
 pane-gaps = false
 
 # Pane geometry renders app-side on every platform, in logical pixels, and
-# applies only while pane-gaps is on: pane-corner-radius (0..=32) rounds all
-# four corners of each pane, pane-margin (0..=32) is the single gap between
-# neighbors and at the window edge, and pane-border-width (0..=8) outlines each
-# pane (0 disables it). Gapped panes carry a crisp outer edge ring in the gap,
-# without the soft falloff used by floating surfaces.
+# With pane-gaps on, pane-corner-radius (0..=32) rounds all four corners and
+# pane-margin (0..=32) is the single gap between neighbors and at the window
+# edge. pane-border-width (0..=8) outlines gapped panes and flush panorama panes
+# (0 disables it). Gapped panes carry a drop shadow bounded by the gap.
 pane-corner-radius = 13.5
 pane-margin = 6
 pane-border-width = 1

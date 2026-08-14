@@ -7,9 +7,7 @@ use crate::mux::client::MuxClient;
 
 use super::sidebar::WorkspaceRoute;
 
-const SIDE_PADDING: f32 = 20.0;
-const TOP_PADDING: f32 = 48.0;
-const BOTTOM_PADDING: f32 = 34.0;
+const OVERVIEW_PADDING: f32 = 20.0;
 const CONTENT_ZOOM_BOOST: f32 = 1.2;
 
 pub(crate) const OVERVIEW_OPEN_DURATION: Duration = Duration::from_millis(420);
@@ -79,9 +77,9 @@ impl OverviewGrid {
         let viewport_width = f32::from(viewport.width).max(1.0);
         let viewport_height = f32::from(viewport.height).max(1.0);
         let metric_scale = metric_scale.max(0.1);
-        let side_padding = (SIDE_PADDING * metric_scale).min(viewport_width * 0.08);
-        let top_padding = (TOP_PADDING * metric_scale).min(viewport_height * 0.18);
-        let bottom_padding = (BOTTOM_PADDING * metric_scale).min(viewport_height * 0.14);
+        let side_padding = (OVERVIEW_PADDING * metric_scale).min(viewport_width * 0.08);
+        let top_padding = (OVERVIEW_PADDING * metric_scale).min(viewport_height * 0.14);
+        let bottom_padding = (OVERVIEW_PADDING * metric_scale).min(viewport_height * 0.14);
         let content_width = (viewport_width - side_padding * 2.0).max(1.0);
         let content_height = (viewport_height - top_padding - bottom_padding).max(1.0);
         let gap = f32::from(group_gap)

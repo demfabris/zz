@@ -3120,7 +3120,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_surface_uses_the_live_viewport_background_and_configured_opacity() {
+    fn terminal_surface_uses_the_live_viewport_background_as_a_tint() {
         let live = zz_terminal::Color::rgb(0x12, 0x34, 0x56);
         assert_eq!(
             terminal_background(live, 1.0),

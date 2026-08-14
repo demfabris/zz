@@ -4,7 +4,7 @@ title: zz crate (the GPUI client)
 description: The long-lived GPUI desktop client. Reconciles recursive pane layouts and hosts stable terminal, Chromium browser, and native Agent pane entities.
 resource: crates/zz/src/lib.rs
 tags: [gpui, crate, client, terminal, browser, agent, ui]
-timestamp: 2026-08-13T00:00:00Z
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
@@ -96,7 +96,7 @@ Browser, Terminal, Hosts, System, About:
 |---------|----------|
 | Interface | Theme (`theme-mode`, transient UI zoom, and macOS app-icon pickers), Chroma Colors (presets and `chrome-*` colors), Tweaks (`widget-corner-radius`, window blur, and Linux `use-system-titlebar`) |
 | Editor | Editor-pane typography and display controls, when compiled in |
-| Panes | Layout (`pane-gaps`, `pane-margin`, `pane-corner-radius`), Frame (`pane-border-width`); gapped panes carry a border-confined inset shadow |
+| Panes | Layout (`pane-gaps`, `pane-margin`, `pane-corner-radius`), Frame (`pane-border-width`); gapped panes and panorama carry bounded drop shadows |
 | Multiplexer | Full-file `zz/mux.conf` editor without line numbers, 12px text, Save, and tmux import |
 | Browser | Browser-local shortcuts, beginning with the element-selector hotkey |
 | Terminal | Structured terminal appearance controls with effective values, provenance, palette swatches, and Reset |
@@ -133,11 +133,12 @@ Windows uses DWM's system backdrop; Wayland uses GPUI's standard `ext-background
 when advertised and retains the legacy KDE protocol as a fallback. X11 publishes KDE's rounded
 blur-behind region and refreshes it as window bounds change. The request is capability-gated:
 unsupported compositors retain opaque app paint instead of exposing an unblurred desktop.
-`background-opacity` remains terminal-local and is applied exactly: `1` stays opaque, while a lower
-value reveals zz's blurred surface beneath the terminal. Ghostty's `background-blur` is ignored; the
-app-level switch above is the only native blur request. App-owned pane roots use one opaque theme
-surface, including the pane picker, Agent, Editor, Browser shell, and waiting state. Browser blank,
-loading, error, and toolbar states share that surface; Chromium page frames retain their own pixels.
+`background-opacity` remains terminal-local: the client paints the terminal color at that alpha over
+an opaque app-pane base. `1` shows the terminal background, while lower values mix toward the app
+surface without exposing compositor blur. Ghostty's `background-blur` is ignored; the app-level
+switch above is the only native blur request. The pane picker, Agent, Editor, Browser shell, waiting
+state, and terminal cover the native backdrop. Browser blank, loading, error, and toolbar states
+share that surface; Chromium page frames retain their own pixels.
 
 The Linux-only system-titlebar switch requests GPUI server-side decorations for new and open
 workspace/Settings windows. KDE can honor it on Wayland and X11; unsupported Wayland compositors
@@ -287,9 +288,10 @@ built:
 `div()` tree. Flush layouts use draggable 1px split-owned separators; the active pane colors only
 its half of each adjacent segment with a washed foreground accent, including the projected edge at
 nested T-junctions. Gapped layouts use the configured border width around each pane, replacing the
-active pane's neutral border color with the same wash. Their inset shadow remains inside that border
-footprint, so it cannot cover the blurred gutter or add a plane beneath translucent content. `PaneChrome::dimmed` still fades
-inactive panes behind a scrim (`INACTIVE_PANE_FADE` = 0.3 toward the opaque window background).
+active pane's neutral border color with the same wash. Their single drop shadow paints before the
+pane background and uses one quarter of the configured gap for both offset and blur, so its tail
+stays inside the gutter. `PaneChrome::dimmed` still fades inactive panes behind a scrim
+(`INACTIVE_PANE_FADE` = 0.3 toward the opaque window background).
 The scrim sits above pane content and below overlays, so `SYNC`, the waiting placeholder, and the
 `display-panes` card keep full contrast. Divider drags preview the ratio locally and commit
 `InputMessage::ResizeSplit` only on mouse-up.
@@ -320,19 +322,21 @@ zoom scales content while pointer coordinates are inverse-mapped for live intera
 composes that zoom with the configured UI scale and gives the pane content a small readability
 boost. Reduced-motion mode settles both transitions immediately.
 
-The overview uses the configured pane surface rules. With pane gaps disabled, neighboring window
-groups touch as one continuous bento. With gaps enabled, group spacing follows `pane-margin`, while
-pane borders, radii, and border shadows keep their normal settings. The overview paints one
-`chrome_background` tint across the window while its gap and corner layers stay transparent, so
-terminal `background-opacity` composites once against the tinted blurred backdrop. The
-titlebar strip and workspace sidebar stay out of the scaled content tree.
+The overview uses the configured pane surface rules. With pane gaps disabled, window groups and
+their panes touch with no reserved slot. Each pane stays square, paints the full configured border,
+and keeps a bounded drop shadow. With gaps enabled, group spacing follows `pane-margin`, while pane
+borders, radii, and shadows keep their normal settings. `AppShell` paints one
+`chrome_background` tint across the full drawable while overview gap and corner helpers stay
+transparent. Pane content remains opaque during the slide animation. The titlebar, sidebar,
+overview title, pane count, and key legend stay out of the content tree. Each close control keeps a
+40px hit target around a 22px surface and uses `widget-corner-radius`.
 
-Terminal and browser geometry stays frozen for the full overview lifetime, not only during its
-animation. That preserves each terminal's PTY rows and columns and keeps CEF's native viewport from
-chasing the scaled card bounds. `MuxClient` asks the daemon for best-effort live terminal previews
-only while the overview is mounted. Background preview panes do not trigger history backfill or
-Kitty image hydration; foreground selection keeps the normal reliable stream. Browser panes remain
-client-local and live, with their CEF screen coordinates corrected for the window zoom.
+Terminal geometry stays frozen for the full overview lifetime, preserving each PTY's rows and
+columns. `MuxClient` asks the daemon for best-effort live terminal previews only while the overview
+is mounted. Background preview panes do not trigger history backfill or Kitty image hydration;
+foreground selection keeps the normal reliable stream. Browser panes remain client-local and live,
+with their CEF screen coordinates corrected for window zoom. The client reasserts each visible CEF
+viewport and forces one repaint after the settled open or close layout.
 
 # The daemon connection (`mux/client.rs`)
 

@@ -9,7 +9,7 @@ tags:
 - window
 - appearance
 - mux
-timestamp: 2026-08-13T00:00:00Z
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
@@ -89,10 +89,10 @@ engine), one browser-local hotkey, and six chrome colors.**
 | `auto-restart-stale-daemon` | `false` | `true` or `false` | Whether a protocol-mismatched local daemon is terminated and replaced on connect. Off by default because it ends every running session |
 | `experimental-agent-pane` | `false` | `true` or `false` | Whether new Agent panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind agent` |
 | `experimental-editor-pane` | `false` | `true` or `false` | Whether new Editor panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind editor` |
-| `pane-gaps` | `false` | `true` or `false` | Whether panes use the gapped border, radius, border-confined inset shadow, and divider treatment |
+| `pane-gaps` | `false` | `true` or `false` | Whether panes use the gapped border, radius, drop shadow, and divider treatment |
 | `pane-margin` | `6` | `0..=32` | Inset around each pane, on every platform; applies only with `pane-gaps` |
 | `pane-corner-radius` | `13.5` | `0..=32` | All four corners of every pane, on every platform; applies only with `pane-gaps` |
-| `pane-border-width` | `1` | `0..=8` | Border width while pane gaps are enabled; `0` disables the border |
+| `pane-border-width` | `1` | `0..=8` | Border width for gapped panes and flush panorama panes; `0` disables the border |
 | `widget-corner-radius` | `6` | `0..=24` | The corner every zz-ui widget turns . buttons, inputs, tags, menus, dialogs |
 | `editor-font-size` | `13` | `8..=32` | Buffer text size in editor panes, in pixels |
 | `editor-line-numbers` | `true` | `true` or `false` | Whether editor panes draw the line-number rail |
@@ -226,29 +226,24 @@ chrome, `Opaque`/`Transparent` native request . logged at startup. picom ignores
 property entirely (open upstream feature request), so picom setups stay in the opaque fallback by
 design.
 
-**The blur reads through window chrome and explicit terminal transparency.** All platform requests
-are window-wide because app paint controls where a backdrop blur appears. While blur is active,
-chrome uses `BLURRED_CHROME_ALPHA` through `theme::chrome_background`. App-owned pane roots use
-`theme::app_pane_background`, which forces the theme base opaque. The pane picker, Agent, Editor,
-Browser shell, and waiting state therefore keep one surface across regular and panorama layouts.
-Browser blank, loading, error, and toolbar states share the same pane opacity; Chromium pages keep
-their own pixels above the base.
+**Only window chrome reveals the compositor blur.** All platform requests remain window-wide, and
+app paint decides where the backdrop appears. While blur is active, chrome uses
+`BLURRED_CHROME_ALPHA` through `theme::chrome_background`. Pane roots force an opaque theme base in
+regular and panorama layouts. The pane picker, Agent, Editor, Browser shell, waiting state, and
+terminal cover the native backdrop. Browser blank, loading, error, and toolbar states share the
+same pane base; Chromium pages keep their own pixels above it.
 
-A terminal applies its resolved Ghostty `background-opacity` directly. The default `1` stays
-opaque, while a lower value reveals zz's blurred window surface in the terminal palette color.
-Ghostty's `background-blur` is ignored; only zz's `window-background-blur` owns the native
-compositor request.
+A terminal paints its resolved Ghostty background color as a tint over that opaque pane base.
+`background-opacity = 1` shows the terminal color, and lower values mix it toward the app pane
+color. The setting no longer exposes the desktop or chrome blur. Ghostty's `background-blur` stays
+ignored; `window-background-blur` owns the native compositor request.
 
-Each visible region paints that tint exactly once; 0.9 over 0.9 would become effectively 0.99 and
-hide the backdrop. During active blur the workspace root is therefore unpainted underneath pane
-rectangles. An empty sibling's pane-margin border owns only the outer gap, split gap layers own
-inter-pane gaps, rounded corner bands own the wedges outside each pane arc, and pane content owns
-the interior. The pane overview instead owns one window-wide chrome tint while all of its gap and
-corner layers stay transparent. Opaque app panes cover that tint; terminal `background-opacity`
-blends with it. When blur is off or compositor support is unavailable, the opaque workspace root
-returns so a configured terminal `background-opacity` still blends toward the theme base rather
-than the native window's black surface. The Settings window has no workspace chrome plane and stays
-opaque throughout.
+Each chrome region paints its tint once; 0.9 over 0.9 becomes 0.99 and hides the
+backdrop. During active blur the workspace root leaves pane rectangles unpainted. The outer margin,
+split gaps, and rounded corner wedges paint chrome around opaque pane interiors. While panorama is
+open, `AppShell` paints one chrome tint across the full drawable and the scaled overview keeps its
+gap and corner helpers transparent. Pane entry and exit motion keeps pane content opaque. The
+Settings window has no workspace chrome plane and stays opaque.
 
 Linux window geometry starts from `window-corner-radius` (default 13.5px, targeting the macOS 27
 window radius . ~13.5pt tangent-circle equivalent, measured from a macOS 27 screenshot against the
@@ -267,20 +262,23 @@ the effect region. KWin changes pixels even where the client surface is transpar
 does not extend into the client-side shadow inset. Transparent shadow and corner pixels retain the
 compositor's unmodified background; tiled and square corners remain square.
 
-`pane-gaps = false` is the flush treatment and the only switch that reaches it: margin,
-corner radius and border width all resolve to `0` whatever the file says, because each describes
-the space *between* panes and there is none. Split nodes retain their neutral 1px hairline. The
-active pane colors only its half of each adjacent separator with a washed foreground accent; nested
-T-junctions limit the segment to the edge the pane touches. With
+`pane-gaps = false` keeps the regular workspace flush: margin, corner radius, and border width
+resolve to `0`, and split nodes retain their neutral 1px hairline. The active pane colors only its
+half of each adjacent separator with a washed foreground accent; nested T-junctions limit the
+segment to the edge the pane touches. Panorama uses a separate flush presentation. It reads the
+configured `pane-border-width`, squares every pane, removes the split slot, and paints each pane's
+full frame. The active frame uses the same washed accent. Panorama also keeps a bounded pane shadow
+in this mode. With
 `pane-gaps = true` every value applies exactly as configured, defaults included . a 6px margin and a
 13.5px radius, the window's own corner, so a maximized grid reads as one rounded surface. There is
 no second tier of gapped defaults: the number Settings shows is the number the panes use, which is
-what lets the disabled Frame rows stay honest. The border uses `pane-border-width` and the theme
+why the disabled margin and radius rows stay honest. The border uses `pane-border-width` and the theme
 border color; the active pane keeps that exact width and replaces the color with a washed foreground
-accent. A theme-derived inset shadow stays inside that border footprint; it paints no quad beneath
-the pane and no ink into the gutter, so the compositor blur remains unobstructed. The pane surface
-still clips terminal, browser, Agent, and Editor content. This treatment is inherent rather than configurable; the retired
-`pane-shadow` key produces the normal unsupported-key diagnostic.
+accent. A theme-derived drop shadow paints before the pane background. Its offset and blur each use
+one quarter of the configured gap, which keeps the tail inside that gap and leaves the chrome tint
+visible beneath it. Borderless gapped panes keep the shadow. The pane surface still clips terminal,
+browser, Agent, and Editor content. This treatment is built in; the retired `pane-shadow` key
+produces the normal unsupported-key diagnostic.
 Split divider visuals disappear in this mode because the gap is the separator, but the unchanged
 16px drag target still resizes the split.
 
@@ -292,11 +290,10 @@ margin and each split's slot *is* the one inter-pane gap, so `pane-margin = 2` y
 between panes and 2px at the frame; gaps never sum to double between neighbors. The gap paints the
 window's base plane (`chrome-background`) from three places: the frame inset is a border band on the
 layout root rather than padding, the split slot is the divider's own fill, and each rounded pane
-fills the four wedges its arc leaves bare inside its own box with a band clipped to that box. None
-of the three paints under a pane, because a fill there would composite a second time with a
-translucent terminal background and cancel `background-opacity`. In browser panes
-the toolbar owns the pane's top arc: the Chromium surface and the overlays that replace it (error
-panel, empty state) keep square top corners and only follow the pane curve at the bottom.
+fills the four wedges its arc leaves bare inside its own box with a band clipped to that box. Pane
+roots cover the native backdrop inside those bounds. In browser panes the toolbar owns the pane's
+top arc: the Chromium surface and the overlays that replace it (error panel, empty state) keep
+square top corners and only follow the pane curve at the bottom.
 
 ## App-owned Agent keys
 
@@ -467,17 +464,15 @@ fleet hosts live in `zz/config` and can be managed from the sidebar or **Setting
 
 Each page is a column of `SettingsGroup`s (a titled run of cards) rather than a flat card list.
 The group is also where a *dependency* is expressed: `SettingCard::disabled` dims a card and lays an
-occluding sheet over it, which is how the Frame group shows that `pane-margin`,
-`pane-corner-radius`, and `pane-border-width` are all inert while `pane-gaps` is off
-(`config` forces them to `0` there). Layout holds the `pane-gaps` switch alone, because it
-is the only row on the page that is always live.
+occluding sheet over it. The Frame group disables `pane-margin` and `pane-corner-radius` while gaps
+are off. `pane-border-width` remains editable because flush panorama panes use it.
 
 | Page | Groups |
 | --- | --- |
 | Appearance | **Theme** (`theme-mode` as three drawn window previews, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the six `chrome-*` pickers) · **Tweaks** (`widget-corner-radius`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
 | Browser | **Search** (`browser-search-provider`) · **Shortcuts** (`browser-element-selector-hotkey`) |
 | Editor | **Typography** (`editor-font-size`) · **Display** (`editor-line-numbers`, `editor-relative-line-numbers`, `editor-soft-wrap`, `editor-vim-mode`) |
-| Panes | **Layout** (`pane-gaps`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
+| Panes | **Layout** (`pane-gaps`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width`; margin and radius disable without gaps) |
 | Hosts | **Machines** (configured hosts, live connection state, Remove) · **Add host** (an inline ssh destination field) |
 | System | **Daemon** (`quit-daemon-on-exit`) · **Diagnostics** (`show-fps`) · **Experimental** (`experimental-editor-pane`, `experimental-agent-pane`). `auto-restart-stale-daemon` is a file key with no Settings row |
 | Multiplexer | Full-file editor for `zz/mux.conf`, with Save and donor-specific **Import tmux…** |
@@ -551,11 +546,13 @@ provenance, and refreshes the open dialog.
 # Let KDE (or another capable Linux desktop) own the titlebar and window border.
 use-system-titlebar = true
 
-# Ask GPUI and the platform compositor for a blurred window backdrop.
+# Blend the terminal color over its opaque pane base.
 background-opacity = 0.85
+
+# Ask GPUI and the platform compositor to blur app chrome.
 window-background-blur = true
 
-# The toggle alone uses a 6px margin, 13.5px radius, 1px border, and outer edge ring.
+# The toggle uses a 6px margin, 13.5px radius, 1px border, and drop shadow.
 pane-gaps = true
 
 # Optional explicit chrome overrides

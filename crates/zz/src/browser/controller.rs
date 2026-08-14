@@ -1392,6 +1392,29 @@ impl BrowserController {
         );
     }
 
+    pub(crate) fn refresh_visible_viewports(&mut self, cx: &mut Context<Self>) {
+        let keys = self
+            .active_tabs
+            .iter()
+            .map(|(pane, tab)| (*pane, *tab))
+            .collect::<Vec<_>>();
+        for key in keys {
+            let refreshed = self.sessions.get_mut(&key).is_some_and(|session| {
+                if !session.viewport().visible {
+                    return false;
+                }
+                session.refresh_viewport();
+                true
+            });
+            if refreshed {
+                self.mark_browser_activity(key);
+            }
+        }
+        if self.pump_is_hot() {
+            self.schedule_pump(0, cx);
+        }
+    }
+
     pub(crate) fn set_focus(&mut self, pane: PaneId, focused: bool) {
         log::trace!(target: "zz::diagnostics::browser", "set_focus pane={pane} focused={focused}");
         if focused {

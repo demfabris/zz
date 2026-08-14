@@ -318,15 +318,15 @@ mkdir -p ~/.config/zz && cp examples/config ~/.config/zz/config
 | `theme-mode` | `system` | `system`, `light`, or `dark` |
 | `chrome-preset` | unset | One of eleven paired palettes: `tokyo-night`, `catppuccin`, `gruvbox`, `nord`, `breeze`, `adwaita`, `ubuntu`, `rose-pine`, `ayu`, `solarized`, `macos-classic` |
 | `chrome-background` … `chrome-danger` | unset | Six palette roots. Everything else derives from them |
-| `pane-gaps` | `false` | The card treatment. Off pins the next three to zero |
+| `pane-gaps` | `false` | The card treatment. Off keeps the regular workspace flush |
 | `pane-margin` | `6` | Gap between panes and at the window edge, 0–32 |
 | `pane-corner-radius` | `13.5` | 0–32 |
-| `pane-border-width` | `1` | 0–8, zero disables |
+| `pane-border-width` | `1` | Gapped panes and flush panorama panes, 0–8; zero disables |
 | `widget-corner-radius` | `6` | Every button, input, menu, and dialog, 0–24 |
 | `theme` | unset | A Ghostty theme file by name, or `light:a,dark:b` |
 | `font-family` | platform default | Terminal font stack. `font-size` is `13` |
-| `background-opacity` | `1.0` | Per-pane terminal opacity |
-| `window-background-blur` | `false` | Blurred backdrop, where the compositor does it |
+| `background-opacity` | `1.0` | Terminal background tint over an opaque pane |
+| `window-background-blur` | `false` | Blurred app chrome, where the compositor supports it |
 | `prefix` | `C-b` | The mux prefix |
 | `mode-keys` | `emacs` | `vi` or `emacs` in copy mode |
 | `history-limit` | `10000` | Scrollback lines, 0–1000000 |

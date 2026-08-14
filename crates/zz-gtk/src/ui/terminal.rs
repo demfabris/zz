@@ -478,7 +478,7 @@ impl TerminalView {
             self.scroll_to_pointer(y);
             return;
         }
-        let force = self.force_selection(modifiers);
+        let force = self.local_selection(modifiers);
         if button == MIDDLE_BUTTON && force {
             self.paste_from(&self.primary_clipboard());
             return;
@@ -499,7 +499,6 @@ impl TerminalView {
             x,
             y,
             modifiers,
-            force,
         );
         self.view_action(TerminalViewAction::Mouse(input));
     }
@@ -528,7 +527,6 @@ impl TerminalView {
             x,
             y,
             modifiers,
-            self.force_selection(modifiers),
         );
         self.view_action(TerminalViewAction::Mouse(input));
     }
@@ -553,7 +551,6 @@ impl TerminalView {
             x,
             y,
             modifiers,
-            self.force_selection(modifiers),
         );
         self.view_action(TerminalViewAction::Mouse(input));
         self.imp().dragging.set(false);
@@ -592,7 +589,6 @@ impl TerminalView {
             x,
             y,
             modifiers,
-            self.force_selection(modifiers),
         );
         self.view_action(TerminalViewAction::ScrollWheel {
             lines: lines as i32,
@@ -601,9 +597,10 @@ impl TerminalView {
         glib::Propagation::Stop
     }
 
-    /// True when the press means "select text" rather than "tell the program":
-    /// Shift always forces selection, and so does a pane nobody is tracking.
-    fn force_selection(&self, modifiers: gdk::ModifierType) -> bool {
+    /// True when this press selects text here rather than reaching the program:
+    /// Shift always does, and so does a pane nobody is tracking. Local only —
+    /// the wire's `force_selection` means something narrower.
+    fn local_selection(&self, modifiers: gdk::ModifierType) -> bool {
         modifiers.contains(gdk::ModifierType::SHIFT_MASK) || !self.mouse_tracking()
     }
 
@@ -649,7 +646,6 @@ impl TerminalView {
         x: f64,
         y: f64,
         modifiers: gdk::ModifierType,
-        force_selection: bool,
     ) -> TerminalMouseInput {
         let metrics = self.imp().metrics.get();
         let scale = self.scale_factor().max(1) as f32;
@@ -664,7 +660,7 @@ impl TerminalView {
             (metrics.width * scale).round() as u32,
             (metrics.height * scale).round() as u32,
             keys::modifiers(modifiers),
-            force_selection,
+            forced_selection(modifiers, cell.click_count),
         )
     }
 
@@ -1140,15 +1136,7 @@ impl TerminalView {
         }
         let (x, y) = self.imp().pointer.get();
         let cell = self.cell_at(x, y, 1, modifiers);
-        let input = self.mouse_input(
-            TerminalMousePhase::Motion,
-            None,
-            cell,
-            x,
-            y,
-            modifiers,
-            self.force_selection(modifiers),
-        );
+        let input = self.mouse_input(TerminalMousePhase::Motion, None, cell, x, y, modifiers);
         self.view_action(TerminalViewAction::Mouse(input));
     }
 }
@@ -1160,6 +1148,15 @@ fn truncate_uri(uri: &str) -> String {
         presented.push('…');
     }
     presented
+}
+
+/// The wire's `force_selection` is not "this pane is not tracking the mouse" —
+/// it is the narrow "the user is overriding what the program asked for". The
+/// daemon reads it to route a wheel notch past alternate-scroll and to refuse
+/// to open a link, so widening it would quietly cost both.
+fn forced_selection(modifiers: gdk::ModifierType, click_count: u8) -> bool {
+    modifiers.contains(gdk::ModifierType::SHIFT_MASK)
+        || (click_count >= 3 && TerminalView::link_modifier(modifiers))
 }
 
 fn pointer_button(button: u32) -> Option<TerminalMouseButton> {
@@ -1614,7 +1611,7 @@ mod tests {
     use zz_client::{ChromeAction, ChromeKeymap, ChromeProfile};
     use zz_terminal::KeyAction;
 
-    use super::resolve_chrome;
+    use super::{forced_selection, resolve_chrome, truncate_uri};
     use crate::ui::keys;
 
     fn press(keyval: gdk::Key, state: gdk::ModifierType) -> zz_terminal::KeyInput {
@@ -1634,6 +1631,36 @@ mod tests {
             resolve_chrome(&chrome, &copy),
             Some(ChromeAction::TerminalCopy)
         );
+    }
+
+    /// The daemon refuses to open a link while this bit is set, and routes a
+    /// wheel notch past alternate-scroll on it — so "this pane is not tracking
+    /// the mouse" must never reach the wire as a forced selection.
+    #[test]
+    fn only_a_real_override_forces_selection_on_the_wire() {
+        const NONE: gdk::ModifierType = gdk::ModifierType::empty();
+        const SHIFT: gdk::ModifierType = gdk::ModifierType::SHIFT_MASK;
+        const CONTROL: gdk::ModifierType = gdk::ModifierType::CONTROL_MASK;
+        const SUPER: gdk::ModifierType = gdk::ModifierType::SUPER_MASK;
+
+        assert!(!forced_selection(NONE, 1));
+        assert!(!forced_selection(CONTROL, 1), "Ctrl-click opens a link");
+        assert!(!forced_selection(CONTROL, 2));
+        assert!(forced_selection(SHIFT, 1));
+        assert!(forced_selection(CONTROL, 3), "Ctrl triple-click selects");
+        assert!(forced_selection(SUPER, 3));
+    }
+
+    #[test]
+    fn a_long_link_is_shown_with_its_tail_marked() {
+        let short = "https://zzmux.sh";
+        assert_eq!(truncate_uri(short), short);
+
+        let long = format!("https://zzmux.sh/{}", "z".repeat(400));
+        let shown = truncate_uri(&long);
+
+        assert!(shown.ends_with('…'));
+        assert_eq!(shown.chars().count(), 97);
     }
 
     #[test]

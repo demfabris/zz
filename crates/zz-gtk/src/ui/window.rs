@@ -468,13 +468,19 @@ impl Shell {
     /// Closing the window detaches, unless `quit-daemon-on-exit` says the
     /// daemon should go with it. The value is read from the file at this
     /// moment, so a hand edit a second ago already counts.
+    /// It is the local daemon that key is about — a host's daemon belongs to
+    /// the machine it runs on, and quitting a client here has no business
+    /// stopping it — so the leave is aimed rather than sent to whichever host
+    /// the workspace happens to be showing.
     fn leave(&self) {
         if !self.detaching.get() && self.settings.quit_daemon_on_exit() {
-            self.engine
-                .execute(CommandInvocation::new("kill-server", [] as [&str; 0]));
+            self.engine.execute_on(
+                HostId::LOCAL,
+                CommandInvocation::new("kill-server", [] as [&str; 0]),
+            );
             return;
         }
-        self.engine.detach();
+        self.engine.detach_all();
     }
 
     /// The daemon owns window lifetime, so the tab's close button asks it to

@@ -28,7 +28,7 @@ pub fn run(launch: Launch) -> glib::ExitCode {
         .flags(gio::ApplicationFlags::NON_UNIQUE)
         .build();
     glib::set_application_name("zz");
-    gtk::Window::set_default_icon_name(APP_ID);
+    app.connect_startup(|_| gtk::Window::set_default_icon_name(APP_ID));
     app.connect_activate(move |app| activate(app, &launch));
     app.run_with_args::<&str>(&[])
 }

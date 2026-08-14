@@ -67,17 +67,6 @@ impl TurnFileStatus {
             _ => Self::Modified,
         }
     }
-
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Added => "added",
-            Self::Modified => "modified",
-            Self::Deleted => "deleted",
-            Self::Renamed => "renamed",
-            Self::Copied => "copied",
-            Self::Unmerged => "unmerged",
-        }
-    }
 }
 
 /// Record the worktree containing `cwd`, to diff against once the turn ends.

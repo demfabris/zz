@@ -8,7 +8,6 @@
 //! crash mid-write leaves a torn trailing line that readers skip and the next
 //! append isolates behind a fresh newline.
 
-
 use std::{
     collections::{HashMap, hash_map::Entry},
     ffi::OsStr,
@@ -153,6 +152,7 @@ impl AgentJournal {
     }
 
     /// Seq of the last recorded update, 0 when nothing is journalled.
+    #[cfg(test)]
     pub(crate) fn last_seq(&self, session_id: &str) -> Result<u64, JournalError> {
         if let Some(journal) = self.handles.lock().get(session_id) {
             return Ok(journal.next_seq.saturating_sub(1));

@@ -2130,47 +2130,15 @@ impl MuxEngine {
     }
 
     fn bind_key(&mut self, args: &[String]) -> Result<Execution, ServerError> {
-        let mut table = "prefix".to_owned();
-        let mut repeat = false;
-        let mut note = None;
-        let mut index = 0;
-        while let Some(argument) = args.get(index) {
-            match argument.as_str() {
-                "-n" => {
-                    "root".clone_into(&mut table);
-                    index += 1;
-                }
-                "-r" => {
-                    repeat = true;
-                    index += 1;
-                }
-                "-T" => {
-                    required_arg(args, index + 1, "-T")?.clone_into(&mut table);
-                    index += 2;
-                }
-                "-N" => {
-                    note = Some(required_arg(args, index + 1, "-N")?.to_owned());
-                    index += 2;
-                }
-                _ => break,
-            }
-        }
-        let key = required_arg(args, index, "key")?;
-        required_arg(args, index + 1, "command")?;
-        let mut commands = Vec::new();
-        for segment in args[index + 1..].split(|argument| argument == ";") {
-            let Some((command, command_args)) = segment.split_first() else {
-                return Err(ServerError::InvalidCommand(
-                    "bind-key command chain contains an empty command".to_owned(),
-                ));
-            };
-            commands.push(CommandInvocation::new(
-                command,
-                command_args.iter().cloned(),
-            ));
-        }
+        let (options, positional) = parse_command_options("bind-key", args)?;
+        let table = key_table(&options);
+        let repeat = options.has("-r");
+        let note = options.value("-N").map(str::to_owned);
+        let key = required_arg(&positional, 0, "key")?;
+        required_arg(&positional, 1, "command")?;
+        let commands = bound_commands(&positional[1..])?;
         self.keys.bind(
-            &table,
+            table,
             key,
             Binding {
                 commands,
@@ -2182,19 +2150,12 @@ impl MuxEngine {
     }
 
     fn unbind_key(&mut self, args: &[String]) -> Result<Execution, ServerError> {
-        let mut table = "prefix";
-        let mut index = 0;
-        if args.get(index).is_some_and(|arg| arg == "-n") {
-            table = "root";
-            index += 1;
-        } else if args.get(index).is_some_and(|arg| arg == "-T") {
-            table = required_arg(args, index + 1, "-T")?;
-            index += 2;
-        }
-        if args.get(index).is_some_and(|arg| arg == "-a") {
+        let (options, positional) = parse_command_options("unbind-key", args)?;
+        if options.has("-a") {
             return Err(ServerError::UnsupportedCommand("unbind-key -a".to_owned()));
         }
-        let key = required_arg(args, index, "key")?;
+        let table = key_table(&options);
+        let key = required_arg(&positional, 0, "key")?;
         self.keys.unbind(table, key);
         Ok(Execution::default())
     }
@@ -2984,6 +2945,12 @@ impl Options {
     }
 }
 
+fn key_table(options: &Options) -> &str {
+    options
+        .value("-T")
+        .unwrap_or(if options.has("-n") { "root" } else { "prefix" })
+}
+
 fn parse_command_options(
     command: &str,
     args: &[String],
@@ -3002,41 +2969,35 @@ fn parse_options(
     value_options: &[&str],
 ) -> Result<(Options, Vec<String>), ServerError> {
     let mut options = Options::default();
-    let mut positional = Vec::new();
     let mut index = 0;
     while let Some(argument) = args.get(index) {
-        if argument == "--" {
-            positional.extend(args[index + 1..].iter().cloned());
+        if !argument.starts_with('-') || argument == "-" {
             break;
         }
-        if let Some(option) = value_options.iter().find(|option| argument == **option) {
-            let value = required_arg(args, index + 1, option)?;
-            options
-                .values
-                .push(((*option).to_owned(), value.to_owned()));
-            index += 2;
-            continue;
-        }
-        if let Some(option) = value_options
-            .iter()
-            .find(|option| argument.starts_with(**option) && argument.len() > option.len())
-        {
-            options
-                .values
-                .push(((*option).to_owned(), argument[option.len()..].to_owned()));
-            index += 1;
-            continue;
-        }
-        if argument.starts_with('-') && argument != "-" {
-            for character in argument[1..].chars() {
-                options.flags.push(format!("-{character}"));
-            }
-        } else {
-            positional.push(argument.clone());
-        }
         index += 1;
+        if argument == "--" {
+            break;
+        }
+        let mut cluster = argument[1..].chars();
+        while let Some(character) = cluster.next() {
+            let name = format!("-{character}");
+            if !value_options.contains(&name.as_str()) {
+                options.flags.push(name);
+                continue;
+            }
+            let attached = cluster.as_str();
+            let value = if attached.is_empty() {
+                let value = required_arg(args, index, &name)?.to_owned();
+                index += 1;
+                value
+            } else {
+                attached.to_owned()
+            };
+            options.values.push((name, value));
+            break;
+        }
     }
-    Ok((options, positional))
+    Ok((options, args[index..].to_vec()))
 }
 
 fn required_arg<'a>(
@@ -3431,6 +3392,37 @@ fn copy_selection_action(
         clear_selection,
         cancel,
     }))
+}
+
+fn bound_commands(tail: &[String]) -> Result<Vec<CommandInvocation>, ServerError> {
+    if let [argument] = tail
+        && let Some(body) = crate::parser::command_block_body(argument)
+    {
+        let commands: Vec<CommandInvocation> = crate::parse_config("<bind-key>", body)
+            .commands
+            .into_iter()
+            .map(|command| CommandInvocation::new(command.name, command.args))
+            .collect();
+        if commands.is_empty() {
+            return Err(ServerError::InvalidCommand(
+                "bind-key command block is empty".to_owned(),
+            ));
+        }
+        return Ok(commands);
+    }
+    tail.split(|argument| argument == ";")
+        .map(|segment| {
+            let Some((command, command_args)) = segment.split_first() else {
+                return Err(ServerError::InvalidCommand(
+                    "bind-key command chain contains an empty command".to_owned(),
+                ));
+            };
+            Ok(CommandInvocation::new(
+                command,
+                command_args.iter().cloned(),
+            ))
+        })
+        .collect()
 }
 
 fn format_command(command: &CommandInvocation) -> String {
@@ -4896,6 +4888,104 @@ mod tests {
             engine.keys.get("root", "F2").unwrap().commands[0].name,
             "new-window"
         );
+    }
+
+    #[test]
+    fn option_parsing_follows_getopt_word_semantics() {
+        let parse = |args: &[&str], value_options: &[&str]| {
+            let args = args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
+            parse_options(&args, value_options).expect("parsed options")
+        };
+
+        let (options, positional) = parse(&["-As", "main", "htop"], &["-s", "-c", "-n"]);
+        assert!(options.has("-A"));
+        assert_eq!(options.value("-s"), Some("main"));
+        assert_eq!(positional, ["htop"]);
+
+        let (options, positional) = parse(&["-dc", "#{pane_path}"], &["-s", "-c", "-n"]);
+        assert!(options.has("-d"));
+        assert_eq!(options.value("-c"), Some("#{pane_path}"));
+        assert!(positional.is_empty());
+
+        let (options, positional) = parse(&["-n1", "date"], &["-n"]);
+        assert_eq!(options.value("-n"), Some("1"));
+        assert_eq!(positional, ["date"]);
+
+        let (options, positional) = parse(&["-c", "-foo", "-g"], &["-c"]);
+        assert_eq!(options.value("-c"), Some("-foo"));
+        assert!(options.has("-g"));
+        assert!(positional.is_empty());
+
+        let (options, positional) = parse(&["-g", "--", "-s", "value"], &["-s"]);
+        assert!(options.has("-g"));
+        assert_eq!(options.value("-s"), None);
+        assert_eq!(positional, ["-s", "value"]);
+
+        let (options, positional) = parse(&["ls", "-la", "Enter"], &["-t"]);
+        assert!(options.flags.is_empty());
+        assert_eq!(positional, ["ls", "-la", "Enter"]);
+
+        let (options, positional) = parse(&["-", "-t", "1"], &["-t"]);
+        assert!(options.flags.is_empty());
+        assert_eq!(positional, ["-", "-t", "1"]);
+
+        assert!(matches!(
+            parse_options(&["-t".to_owned()], &["-t"]),
+            Err(ServerError::InvalidCommand(message)) if message == "-t requires an argument"
+        ));
+    }
+
+    #[test]
+    fn commands_keep_dash_arguments_after_their_first_positional() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let created = engine
+            .execute(
+                &mut context,
+                &command("new-window", &["echo", "-n", "hello"]),
+            )
+            .unwrap();
+        assert!(matches!(
+            created.effects.first(),
+            Some(MuxEffect::PaneCreated {
+                command: Some(command),
+                ..
+            }) if command == "echo -n hello"
+        ));
+        let window = &engine.state.windows[&context.window.unwrap()];
+        assert_eq!(window.name, window.index.to_string());
+
+        let sent = engine
+            .execute(&mut context, &command("send-keys", &["ls", "-la", "Enter"]))
+            .unwrap();
+        assert!(matches!(
+            sent.effects.first(),
+            Some(MuxEffect::SendKeys { keys, .. })
+                if keys == &vec![
+                    KeyToken::Literal("ls".to_owned()),
+                    KeyToken::Literal("-la".to_owned()),
+                    KeyToken::Named("Enter".to_owned())
+                ]
+        ));
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "--", "prefix", "C-z"]),
+            )
+            .unwrap();
+        assert_eq!(engine.keys.prefix(), "C-z");
+
+        engine
+            .execute(
+                &mut context,
+                &command("set", &["-g", "status-left", "-foo"]),
+            )
+            .unwrap();
+        assert_eq!(engine.status.format(StatusOption::Left), Some("-foo"));
     }
 
     #[test]

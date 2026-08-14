@@ -133,7 +133,7 @@ fn kill_pane_dash_a_kills_only_the_target() {
 }
 
 #[test]
-fn bind_clustered_nr_flags_are_treated_as_the_key() {
+fn bind_clustered_nr_flags_bind_a_repeatable_root_table_key() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
@@ -142,19 +142,69 @@ fn bind_clustered_nr_flags_are_treated_as_the_key() {
             &command("bind-key", &["-nr", "F2", "split-window", "-h"]),
         )
         .unwrap();
-    assert!(engine.keys.get("prefix", "-nr").is_some());
-    assert!(engine.keys.get("root", "F2").is_none());
+    assert!(engine.keys.get("prefix", "-nr").is_none());
     assert!(engine.keys.get("prefix", "F2").is_none());
+    let binding = engine.keys.get("root", "F2").expect("root F2 is bound");
+    assert!(binding.repeat);
+    assert_eq!(binding.commands.len(), 1);
+    assert_eq!(binding.commands[0].name, "split-window");
+    assert_eq!(binding.commands[0].args, ["-h"]);
 }
 
 #[test]
-fn brace_command_lists_split_on_semicolon() {
+fn brace_command_lists_bind_as_a_single_command_sequence() {
     let parsed = parse_config("test.conf", "bind c { new-window ; split-window }");
-    assert_eq!(parsed.commands.len(), 2);
+    assert!(parsed.diagnostics.is_empty());
+    assert_eq!(parsed.commands.len(), 1);
     assert_eq!(parsed.commands[0].name, "bind");
-    assert_eq!(parsed.commands[0].args, ["c", "{", "new-window"]);
-    assert_eq!(parsed.commands[1].name, "split-window");
-    assert_eq!(parsed.commands[1].args, ["}"]);
+    assert_eq!(
+        parsed.commands[0].args,
+        ["c", "{ new-window ; split-window }"]
+    );
+
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    engine.execute(&mut context, &parsed.commands[0]).unwrap();
+    let binding = engine.keys.get("prefix", "c").expect("bound block").clone();
+    assert_eq!(
+        binding
+            .commands
+            .iter()
+            .map(|command| command.name.as_str())
+            .collect::<Vec<_>>(),
+        ["new-window", "split-window"]
+    );
+    for bound in &binding.commands {
+        engine.execute(&mut context, bound).unwrap();
+    }
+    assert_eq!(window_count(&engine, "work"), 2);
+    let window = context.window.expect("active window");
+    assert_eq!(engine.state.windows[&window].panes.len(), 2);
+
+    let flagged = parse_config(
+        "test.conf",
+        "bind -n F2 {\n  send-keys 'a ; b'\n  new-window\n}\n",
+    );
+    assert_eq!(flagged.commands.len(), 1);
+    engine.execute(&mut context, &flagged.commands[0]).unwrap();
+    let binding = engine.keys.get("root", "F2").expect("root block").clone();
+    assert_eq!(binding.commands.len(), 2);
+    assert_eq!(binding.commands[0].name, "send-keys");
+    assert_eq!(binding.commands[0].args, ["a ; b"]);
+    assert_eq!(binding.commands[1].name, "new-window");
+    let listed = engine
+        .execute(&mut context, &command("list-keys", &["-T", "root"]))
+        .unwrap()
+        .output;
+    assert!(
+        listed
+            .lines()
+            .any(|line| line == "bind-key -T root F2 send-keys 'a ; b' \\; new-window"),
+        "{listed}"
+    );
 }
 
 #[test]

@@ -56,7 +56,7 @@ impl Render for EditorView {
             .flex()
             .items_center()
             .justify_center()
-            .bg(cx.theme().background)
+            .bg(crate::theme::app_pane_background(cx))
             .text_color(cx.theme().foreground.muted())
             .child("Editor panes are not included in this build")
     }

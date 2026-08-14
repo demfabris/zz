@@ -29,10 +29,10 @@ use zz_ui::{
 };
 use zz_ui::{
     pane::{
-        PaneChrome, PaneDragOverlayState, PaneOverlayCorner, PaneSplitAxis, pane_drag_chip,
-        pane_drag_overlay, pane_drop_preview, pane_indicator_card, pane_indicator_overlay,
-        pane_overlay_stack, pane_split_hit_target, pane_split_slot, pane_split_surface,
-        pane_surface, pane_sync_badge, pane_unzoom_control, pane_waiting_state,
+        PaneChrome, PaneDragOverlayState, PaneOverlayCorner, PaneSplitAxis, PaneSplitHighlight,
+        PaneSplitSide, pane_drag_chip, pane_drag_overlay, pane_drop_preview, pane_indicator_card,
+        pane_indicator_overlay, pane_overlay_stack, pane_split_hit_target, pane_split_slot,
+        pane_split_surface, pane_surface, pane_sync_badge, pane_unzoom_control, pane_waiting_state,
     },
     shell::{app_connection_state, app_workspace_surface},
 };
@@ -58,10 +58,11 @@ use crate::{
     mux::{
         client::{AttachmentPreviewRequest, ClientNotification, MuxClient, SshPromptRequest},
         hosts::HostId,
+        nav::{TreeTarget, kill_target_command},
         prefix::{PrefixClaim, PressDisposition, keystroke_is, terminal_key_input},
     },
     pane::display::DisplayPanesView,
-    pane::layout::{NormalizedPaneRect, pane_rects},
+    pane::layout::{NormalizedPaneRect, SeparatorSide, pane_rects, pane_separator},
     pane::picker::PanePickerView,
     terminal::view::{TERMINAL_FONT, TerminalView},
     window::corners::WindowCorners,
@@ -845,10 +846,9 @@ impl AppView {
         let Some(pane) = self.active_pane(cx) else {
             return false;
         };
-        self.mux.read(cx).execute(CommandInvocation::new(
-            "kill-pane",
-            ["-t".to_owned(), pane.to_string()],
-        ));
+        self.mux
+            .read(cx)
+            .execute(kill_target_command(TreeTarget::Pane(pane)));
         true
     }
 
@@ -1833,7 +1833,8 @@ impl AppView {
             LayoutNode::Pane(pane) => {
                 let radii = config::pane_content_radii(cx, corners);
                 let gap_background = crate::theme::chrome_background(cx);
-                let inactive = *pane != window.active_pane;
+                let active = *pane == window.active_pane;
+                let inactive = !active;
                 let synchronized = window
                     .panes
                     .get(pane)
@@ -1889,7 +1890,7 @@ impl AppView {
                 let content = pane_content.as_ref().map_or_else(
                     || {
                         crate::window::corners::round_div_radii(
-                            div().size_full().bg(gap_background),
+                            div().size_full().bg(crate::theme::app_pane_background(cx)),
                             radii,
                         )
                         .into_any_element()
@@ -1946,8 +1947,13 @@ impl AppView {
                     PaneChrome::new(
                         radii,
                         config::pane_border_width(cx),
-                        cx.theme().border,
+                        if active {
+                            cx.theme().foreground.wash()
+                        } else {
+                            cx.theme().border
+                        },
                         gap_background,
+                        config::pane_gaps(cx),
                     )
                     .dimmed(surface_dimmed),
                     cx,
@@ -1975,6 +1981,23 @@ impl AppView {
                 let resizing = self
                     .split_drag
                     .is_some_and(|drag| drag.drag.window == window.id && drag.drag.split == *id);
+                let ratio_override = self
+                    .split_drag
+                    .filter(|drag| drag.drag.window == window.id)
+                    .map(|drag| (drag.drag.split, drag.ratio));
+                let highlight =
+                    pane_separator(node, window.active_pane, ratio_override).map(|separator| {
+                        let span = separator.span();
+                        PaneSplitHighlight::new(
+                            span.start(),
+                            span.length(),
+                            match separator.side() {
+                                SeparatorSide::First => PaneSplitSide::First,
+                                SeparatorSide::Second => PaneSplitSide::Second,
+                            },
+                            cx.theme().foreground.wash(),
+                        )
+                    });
                 let split_axis = match axis {
                     Axis::Horizontal => PaneSplitAxis::Horizontal,
                     Axis::Vertical => PaneSplitAxis::Vertical,
@@ -2005,6 +2028,7 @@ impl AppView {
                     resizing,
                     config::pane_gaps(cx),
                     config::pane_margin(cx),
+                    highlight,
                     first_element,
                     second_element,
                     hit_target,

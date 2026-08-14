@@ -1,4 +1,4 @@
-use crate::{ActiveTheme as _, Colorize as _, tag::Tag};
+use crate::{ActiveTheme as _, Colorize as _, surface_ring, tag::Tag};
 use gpui::{
     AnyElement, App, BoxShadow, Corners, CursorStyle, ElementId, FontWeight, Hsla, IntoElement,
     ParentElement as _, Pixels, SharedString, Stateful, Styled as _, div, point, prelude::*, px,
@@ -18,6 +18,7 @@ pub struct PaneChrome {
     pub border_width: Pixels,
     pub border_color: Hsla,
     pub gap_background: Hsla,
+    pub shadow: bool,
     pub dimmed: bool,
 }
 
@@ -28,12 +29,14 @@ impl PaneChrome {
         border_width: Pixels,
         border_color: Hsla,
         gap_background: Hsla,
+        shadow: bool,
     ) -> Self {
         Self {
             radii,
             border_width,
             border_color,
             gap_background,
+            shadow,
             dimmed: false,
         }
     }
@@ -72,6 +75,7 @@ pub fn pane_surface(
                 .rounded_tr(chrome.radii.top_right)
                 .rounded_bl(chrome.radii.bottom_left)
                 .rounded_br(chrome.radii.bottom_right)
+                .bg(cx.theme().background.opaque())
                 .border(chrome.border_width)
                 .border_color(chrome.border_color)
                 .child(content)
@@ -80,6 +84,28 @@ pub fn pane_surface(
                 })
                 .children(overlays),
         )
+        .children(pane_surface_shadow(chrome, cx))
+}
+
+fn pane_surface_shadow(chrome: PaneChrome, cx: &App) -> Option<gpui::Div> {
+    let shadows = pane_surface_shadow_style(chrome.shadow, cx);
+    if !cx.theme().shadow || shadows.is_empty() {
+        return None;
+    }
+    Some(
+        div()
+            .absolute()
+            .inset_0()
+            .rounded_tl(chrome.radii.top_left)
+            .rounded_tr(chrome.radii.top_right)
+            .rounded_bl(chrome.radii.bottom_left)
+            .rounded_br(chrome.radii.bottom_right)
+            .shadow(shadows),
+    )
+}
+
+fn pane_surface_shadow_style(shadow: bool, cx: &App) -> Vec<BoxShadow> {
+    if shadow { surface_ring(cx) } else { Vec::new() }
 }
 
 fn pane_corner_notches(chrome: PaneChrome) -> Option<gpui::Div> {
@@ -224,6 +250,32 @@ pub enum PaneSplitAxis {
     Vertical,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaneSplitSide {
+    First,
+    Second,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PaneSplitHighlight {
+    pub start: f32,
+    pub length: f32,
+    pub side: PaneSplitSide,
+    pub color: Hsla,
+}
+
+impl PaneSplitHighlight {
+    #[must_use]
+    pub const fn new(start: f32, length: f32, side: PaneSplitSide, color: Hsla) -> Self {
+        Self {
+            start,
+            length,
+            side,
+            color,
+        }
+    }
+}
+
 /// The space a split keeps between its two children: the configured gap, or a
 /// 1px hairline slot when there is none. Anything reconstructing pane boxes
 /// from slot geometry must use this too.
@@ -276,6 +328,7 @@ pub fn pane_split_surface(
     resizing: bool,
     gaps: bool,
     gap: Pixels,
+    highlight: Option<PaneSplitHighlight>,
     first_content: impl IntoElement,
     second_content: impl IntoElement,
     hit_target: impl IntoElement,
@@ -307,7 +360,7 @@ pub fn pane_split_surface(
             let hairline = div()
                 .absolute()
                 .bg(if resizing {
-                    cx.theme().foreground
+                    cx.theme().foreground.wash()
                 } else {
                     cx.theme().border
                 })
@@ -323,7 +376,41 @@ pub fn pane_split_surface(
                         .h(px(PANE_SPLIT_DIVIDER_THICKNESS))
                         .w_full()
                 });
-            divider.child(hairline)
+            divider.child(hairline).when_some(
+                highlight.filter(|_| !resizing),
+                |divider, highlight| {
+                    let half = PANE_SPLIT_DIVIDER_THICKNESS / 2.0;
+                    divider.child(
+                        div()
+                            .absolute()
+                            .bg(highlight.color)
+                            .when(axis == PaneSplitAxis::Horizontal, |segment| {
+                                segment
+                                    .top(relative(highlight.start))
+                                    .h(relative(highlight.length))
+                                    .w(px(half))
+                                    .when(highlight.side == PaneSplitSide::First, |segment| {
+                                        segment.left(relative(0.5)).ml(px(-half))
+                                    })
+                                    .when(highlight.side == PaneSplitSide::Second, |segment| {
+                                        segment.left(relative(0.5))
+                                    })
+                            })
+                            .when(axis == PaneSplitAxis::Vertical, |segment| {
+                                segment
+                                    .left(relative(highlight.start))
+                                    .w(relative(highlight.length))
+                                    .h(px(half))
+                                    .when(highlight.side == PaneSplitSide::First, |segment| {
+                                        segment.top(relative(0.5)).mt(px(-half))
+                                    })
+                                    .when(highlight.side == PaneSplitSide::Second, |segment| {
+                                        segment.top(relative(0.5))
+                                    })
+                            }),
+                    )
+                },
+            )
         });
 
     div()
@@ -556,4 +643,21 @@ pub fn terminal_link_popup(uri: impl IntoElement, cx: &App) -> Tag {
         .text_color(cx.theme().foreground)
         .text_size(crate::rems_from_px(11.0))
         .child(uri)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[gpui::test]
+    fn pane_surface_shadow_stays_inside_the_pane_curve(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        cx.update(|cx| {
+            assert!(pane_surface_shadow_style(false, cx).is_empty());
+
+            let expected = surface_ring(cx);
+            assert_eq!(pane_surface_shadow_style(true, cx), expected);
+            assert!(expected[0].inset);
+        });
+    }
 }

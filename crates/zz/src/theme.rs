@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use gpui::{App, Global, Hsla, Window};
 use zz_terminal::TerminalAppearance;
-use zz_ui::{Theme, ThemeColor, ThemeMode};
+use zz_ui::{Colorize as _, Theme, ThemeColor, ThemeMode};
 
 use crate::config;
 
@@ -374,6 +374,10 @@ pub fn chrome_background(cx: &App) -> Hsla {
     }
 }
 
+pub fn app_pane_background(cx: &App) -> Hsla {
+    Theme::global(cx).background.opaque()
+}
+
 pub(crate) fn refresh_current_theme(cx: &mut App) {
     if !cx.has_global::<Theme>() {
         return;
@@ -586,7 +590,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn terminal_opacity_never_reaches_chrome(cx: &mut gpui::TestAppContext) {
+    fn terminal_opacity_never_reaches_chrome_or_app_panes(cx: &mut gpui::TestAppContext) {
         cx.update(zz_ui::init);
         cx.update(|cx| {
             set_terminal_appearance(
@@ -602,6 +606,7 @@ mod tests {
             assert!(!chrome_blur(cx));
             assert_alpha(Theme::global(cx).background, 1.0);
             assert_alpha(chrome_background(cx), 1.0);
+            assert_alpha(app_pane_background(cx), 1.0);
         });
 
         cx.update(|cx| {
@@ -615,6 +620,19 @@ mod tests {
             assert!(chrome_blur(cx));
             assert_alpha(Theme::global(cx).background, 1.0);
             assert_alpha(chrome_background(cx), BLURRED_CHROME_ALPHA);
+            assert_alpha(app_pane_background(cx), 1.0);
+        });
+    }
+
+    #[gpui::test]
+    fn app_panes_ignore_translucent_chrome_overrides(cx: &mut gpui::TestAppContext) {
+        cx.update(zz_ui::init);
+        cx.update(|cx| {
+            Theme::global_mut(cx).colors.background =
+                zz_ui::parse_hex("#10203066").expect("test background parses");
+
+            assert_alpha(Theme::global(cx).background, 0.4);
+            assert_alpha(app_pane_background(cx), 1.0);
         });
     }
 

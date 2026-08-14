@@ -2311,7 +2311,7 @@ impl Render for AgentView {
             .flex_col()
             .size_full()
             .overflow_hidden()
-            .bg(cx.theme().background)
+            .bg(crate::theme::app_pane_background(cx))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .capture_action(cx.listener(Self::move_completion_up))
             .capture_action(cx.listener(Self::move_completion_down))

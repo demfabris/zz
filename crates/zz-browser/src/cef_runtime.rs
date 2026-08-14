@@ -178,6 +178,15 @@ fn scaled_osr_coordinate(value: i32, scale_factor: f32) -> i32 {
         .clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32
 }
 
+fn screen_point_coordinate(viewport: Viewport, origin: i32, view: i32, physical_osr: bool) -> i32 {
+    if physical_osr {
+        scaled_osr_coordinate(origin, viewport.scale_factor / viewport.window_zoom)
+            .saturating_add(view)
+    } else {
+        origin.saturating_add(scaled_osr_coordinate(view, viewport.window_zoom))
+    }
+}
+
 const ELEMENT_SCREENSHOT_MARGIN: f64 = 64.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -3800,20 +3809,20 @@ cef::wrap_render_handler! {
         ) -> i32 {
             let viewport = self.bridge.viewport.lock();
             if let Some(screen_x) = screen_x {
-                *screen_x = if uses_wayland_physical_osr() {
-                    scaled_osr_coordinate(viewport.screen_x, viewport.scale_factor)
-                        .saturating_add(view_x)
-                } else {
-                    viewport.screen_x.saturating_add(view_x)
-                };
+                *screen_x = screen_point_coordinate(
+                    *viewport,
+                    viewport.screen_x,
+                    view_x,
+                    uses_wayland_physical_osr(),
+                );
             }
             if let Some(screen_y) = screen_y {
-                *screen_y = if uses_wayland_physical_osr() {
-                    scaled_osr_coordinate(viewport.screen_y, viewport.scale_factor)
-                        .saturating_add(view_y)
-                } else {
-                    viewport.screen_y.saturating_add(view_y)
-                };
+                *screen_y = screen_point_coordinate(
+                    *viewport,
+                    viewport.screen_y,
+                    view_y,
+                    uses_wayland_physical_osr(),
+                );
             }
             1
         }
@@ -4915,6 +4924,18 @@ mod tests {
         let effective_factor =
             CHROMIUM_ZOOM_STEP.powf(effective_chromium_zoom_level(viewport, 1.5));
         assert!((effective_factor - expected_factor).abs() < 1e-12);
+    }
+
+    #[test]
+    fn screen_points_apply_window_zoom_without_scaling_the_window_origin() {
+        let viewport = Viewport {
+            scale_factor: 1.0,
+            window_zoom: 0.5,
+            ..Viewport::default()
+        };
+
+        assert_eq!(screen_point_coordinate(viewport, 100, 300, false), 250);
+        assert_eq!(screen_point_coordinate(viewport, 100, 300, true), 500);
     }
 
     #[cfg(any(target_os = "macos", target_os = "windows"))]

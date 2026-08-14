@@ -1,11 +1,26 @@
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Viewport {
     pub width: u32,
     pub height: u32,
     pub scale_factor: f32,
+    pub window_zoom: f32,
     pub screen_x: i32,
     pub screen_y: i32,
     pub visible: bool,
+}
+
+impl Default for Viewport {
+    fn default() -> Self {
+        Self {
+            width: 0,
+            height: 0,
+            scale_factor: 0.0,
+            window_zoom: 1.0,
+            screen_x: 0,
+            screen_y: 0,
+            visible: false,
+        }
+    }
 }
 
 impl Viewport {
@@ -14,6 +29,11 @@ impl Viewport {
         Self {
             scale_factor: if self.scale_factor.is_finite() {
                 self.scale_factor.clamp(0.5, 8.0)
+            } else {
+                1.0
+            },
+            window_zoom: if self.window_zoom.is_finite() && self.window_zoom > 0.0 {
+                self.window_zoom.clamp(0.25, 4.0)
             } else {
                 1.0
             },

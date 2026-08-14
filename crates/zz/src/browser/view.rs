@@ -744,6 +744,7 @@ impl BrowserView {
             width: 800,
             height: 500,
             scale_factor: window.scale_factor(),
+            window_zoom: window.zoom(),
             visible: false,
             ..Viewport::default()
         };
@@ -1026,8 +1027,9 @@ impl BrowserView {
             width: rounded_dimension(bounds.size.width),
             height: rounded_dimension(bounds.size.height),
             scale_factor: window.scale_factor(),
-            screen_x: rounded_coordinate(window_bounds.origin.x + bounds.origin.x),
-            screen_y: rounded_coordinate(window_bounds.origin.y + bounds.origin.y),
+            window_zoom: window.zoom(),
+            screen_x: rounded_coordinate(window_bounds.origin.x + bounds.origin.x * window.zoom()),
+            screen_y: rounded_coordinate(window_bounds.origin.y + bounds.origin.y * window.zoom()),
             visible: self.visible,
         }
         .sanitized();
@@ -3577,11 +3579,6 @@ impl Render for BrowserView {
             );
         }
 
-        let pane_background = if shows_native_state {
-            crate::theme::chrome_background(cx)
-        } else {
-            cx.theme().background
-        };
         let omnibox_results = self.render_omnibox_results(cx);
         round_div_radii(
             div()
@@ -3591,7 +3588,7 @@ impl Render for BrowserView {
                 .flex()
                 .flex_col()
                 .size_full()
-                .bg(pane_background)
+                .bg(crate::theme::app_pane_background(cx))
                 .on_action(cx.listener(Self::on_zoom_in))
                 .on_action(cx.listener(Self::on_zoom_out))
                 .on_action(cx.listener(Self::on_reset_zoom))

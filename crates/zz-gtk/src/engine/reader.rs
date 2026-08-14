@@ -7,9 +7,9 @@ use std::{
 use async_channel::Sender;
 use zz_client::{ClientCore, CoreEvent, Outbound};
 use zz_daemon::InteractiveClient;
-use zz_protocol::{BrowserCommand, CommandResponse, GuiResponse, ServerError};
+use zz_protocol::{BrowserCommand, CommandResponse, GuiResponse, ServerError, TerminalUiCommand};
 
-use super::{EngineEvent, Link};
+use super::{EngineEvent, HistoryChunk, Link};
 
 /// The first retry fires almost immediately — a daemon that was restarted under
 /// the client is usually back before a human notices — and the ladder doubles up
@@ -147,12 +147,49 @@ fn reduce(
         CoreEvent::Attached { session } => {
             link.remembered_reattach.store(false, Ordering::Relaxed);
             link.frames.clear();
+            link.clear_history();
             forwarded.push(EngineEvent::Attached(session));
         }
         CoreEvent::PaneRemoved { pane } => {
             link.frames.forget(pane);
+            link.forget_history(pane);
             forwarded.push(EngineEvent::SnapshotChanged);
         }
+        CoreEvent::HistoryChunk {
+            pane,
+            start,
+            total,
+            offset,
+            columns,
+            rows,
+            dictionary,
+        } => {
+            let chunk = HistoryChunk {
+                start,
+                total,
+                offset,
+                columns,
+                rows,
+                dictionary,
+            };
+            let absorbed = core
+                .viewport(pane)
+                .is_some_and(|viewport| link.absorb_history(pane, chunk, viewport));
+            if let Some((start, count)) = link.next_history_request(pane)
+                && let Err(error) = client.request_history(pane, start, count)
+            {
+                log::warn!("zz-gtk failed to continue the scrollback walk for {pane}: {error}");
+            }
+            if absorbed {
+                forwarded.push(EngineEvent::HistoryChanged(pane));
+            }
+        }
+        CoreEvent::CommandOutputChanged => forwarded.push(EngineEvent::CommandOutputChanged),
+        CoreEvent::TerminalUiCommand {
+            pane,
+            command: TerminalUiCommand::BeginSearch { direction },
+        } => forwarded.push(EngineEvent::BeginSearch { pane, direction }),
+        CoreEvent::OpenUri { pane, uri } => forwarded.push(EngineEvent::OpenUri { pane, uri }),
         CoreEvent::SnapshotChanged => forwarded.push(EngineEvent::SnapshotChanged),
         CoreEvent::StatusChanged => forwarded.push(EngineEvent::StatusChanged),
         CoreEvent::AppearanceChanged => forwarded.push(EngineEvent::AppearanceChanged),

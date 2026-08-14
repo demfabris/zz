@@ -144,12 +144,14 @@ fn default_number(row: &Row) -> f64 {
 fn subtitle(setting: &Setting) -> String {
     match setting.support {
         Support::Honored => setting.description.to_owned(),
-        Support::Unwired(note) => format!(
-            "{}  Written, not yet rendered here: {note}",
-            setting.description
-        ),
+        Support::Unwired(note) => {
+            format!(
+                "{}  ·  Written, not rendered here — {note}",
+                setting.description
+            )
+        }
         Support::Inapplicable(note) => {
-            format!("{}  Not used by zz-gtk: {note}", setting.description)
+            format!("{}  ·  Not used here — {note}", setting.description)
         }
     }
 }

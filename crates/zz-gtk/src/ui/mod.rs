@@ -5,6 +5,7 @@ mod overlay;
 mod palette;
 mod pane;
 mod panes;
+mod prefix;
 mod terminal;
 mod window;
 

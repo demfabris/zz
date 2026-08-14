@@ -44,6 +44,10 @@ pane-border-width = 1
 # larger values round it (a control never exceeds half its own height).
 widget-corner-radius = 6
 
+# Animate interface transitions, loading indicators, scrollbars, and image
+# frames. Turning this off settles each interface state immediately.
+animations = true
+
 # Follow the desktop's light/dark setting, or pin one: system, light, or dark.
 theme-mode = system
 

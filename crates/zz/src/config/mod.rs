@@ -58,6 +58,7 @@ const DEFAULT_PANE_BORDER_WIDTH: f32 = 1.0;
 const DEFAULT_WIDGET_CORNER_RADIUS: f32 = 6.0;
 const DEFAULT_USE_SYSTEM_TITLEBAR: bool = false;
 const DEFAULT_WINDOW_BACKGROUND_BLUR: bool = false;
+const DEFAULT_ANIMATIONS: bool = true;
 const DEFAULT_TRAY: bool = true;
 const DEFAULT_SHOW_FPS: bool = false;
 const DEFAULT_QUIT_DAEMON_ON_EXIT: bool = false;
@@ -149,6 +150,7 @@ pub enum ConfigKey {
     UseSystemTitlebar,
     WindowCornerRadius,
     WindowBackgroundBlur,
+    Animations,
     Tray,
     ShowFps,
     QuitDaemonOnExit,
@@ -180,6 +182,7 @@ impl ConfigKey {
             Self::UseSystemTitlebar => "use-system-titlebar",
             Self::WindowCornerRadius => "window-corner-radius",
             Self::WindowBackgroundBlur => "window-background-blur",
+            Self::Animations => "animations",
             Self::Tray => "tray",
             Self::ShowFps => "show-fps",
             Self::QuitDaemonOnExit => "quit-daemon-on-exit",
@@ -211,6 +214,7 @@ impl ConfigKey {
             "use-system-titlebar" => Some(Self::UseSystemTitlebar),
             "window-corner-radius" => Some(Self::WindowCornerRadius),
             "window-background-blur" => Some(Self::WindowBackgroundBlur),
+            "animations" => Some(Self::Animations),
             "tray" => Some(Self::Tray),
             "show-fps" => Some(Self::ShowFps),
             "quit-daemon-on-exit" => Some(Self::QuitDaemonOnExit),
@@ -249,6 +253,7 @@ impl ConfigKey {
             Self::EditorFontSize => Some((MIN_EDITOR_FONT_SIZE, MAX_EDITOR_FONT_SIZE)),
             Self::UseSystemTitlebar
             | Self::WindowBackgroundBlur
+            | Self::Animations
             | Self::Tray
             | Self::ShowFps
             | Self::QuitDaemonOnExit
@@ -317,6 +322,7 @@ pub struct AppConfig {
     pub use_system_titlebar: ConfigValue<bool>,
     pub window_corner_radius: ConfigValue<f32>,
     pub window_background_blur: ConfigValue<bool>,
+    pub animations: ConfigValue<bool>,
     pub tray: ConfigValue<bool>,
     pub show_fps: ConfigValue<bool>,
     pub quit_daemon_on_exit: ConfigValue<bool>,
@@ -350,6 +356,7 @@ impl Default for AppConfig {
             use_system_titlebar: ConfigValue::from_default(DEFAULT_USE_SYSTEM_TITLEBAR),
             window_corner_radius: ConfigValue::from_default(DEFAULT_WINDOW_CORNER_RADIUS),
             window_background_blur: ConfigValue::from_default(DEFAULT_WINDOW_BACKGROUND_BLUR),
+            animations: ConfigValue::from_default(DEFAULT_ANIMATIONS),
             tray: ConfigValue::from_default(DEFAULT_TRAY),
             show_fps: ConfigValue::from_default(DEFAULT_SHOW_FPS),
             quit_daemon_on_exit: ConfigValue::from_default(DEFAULT_QUIT_DAEMON_ON_EXIT),
@@ -382,6 +389,7 @@ impl AppConfig {
         match key {
             ConfigKey::UseSystemTitlebar => Some(&mut self.use_system_titlebar),
             ConfigKey::WindowBackgroundBlur => Some(&mut self.window_background_blur),
+            ConfigKey::Animations => Some(&mut self.animations),
             ConfigKey::Tray => Some(&mut self.tray),
             ConfigKey::ShowFps => Some(&mut self.show_fps),
             ConfigKey::QuitDaemonOnExit => Some(&mut self.quit_daemon_on_exit),
@@ -423,6 +431,11 @@ fn chrome_index(color: ChromeColor) -> usize {
 }
 
 impl Global for AppConfig {}
+
+#[derive(Clone, Copy)]
+struct PlatformReduceMotion(bool);
+
+impl Global for PlatformReduceMotion {}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct DaemonConfigOverrides {
@@ -486,6 +499,7 @@ impl fmt::Display for ImportError {
 impl std::error::Error for ImportError {}
 
 pub fn init(cx: &mut App) {
+    cx.set_global(PlatformReduceMotion(cx.reduce_motion()));
     cx.set_global(ConfigOverrideTransport::default());
     cx.set_global(AgentConfig::default());
     let candidates = config_candidates();
@@ -529,6 +543,7 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
         log::debug!(target: "zz::config", "configuration not found; using built-in defaults");
         cx.set_global(AppConfig::default());
         cx.set_global(BrowserConfig::default());
+        apply_animations(cx);
         apply_window_background_appearance(cx);
         apply_window_decorations(cx);
         crate::app_icon::apply(cx);
@@ -562,7 +577,7 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
 
     log::info!(
         target: "zz::config",
-        "application configuration path={} pane_gaps={} pane_corner_radius={} pane_margin={} pane_border_width={} widget_corner_radius={} window_corner_radius={} editor_font_size={} editor_line_numbers={} editor_relative_line_numbers={} editor_soft_wrap={} editor_vim_mode={} browser_element_selector_hotkey={} browser_search_provider={} browser_egress={} use_system_titlebar={} window_background_blur={} tray={} show_fps={} quit_daemon_on_exit={} auto_restart_stale_daemon={} agent_command_overridden={} claude_code_agent_command_overridden={} agent_working_directory={:?} daemon_override_entries={}",
+        "application configuration path={} pane_gaps={} pane_corner_radius={} pane_margin={} pane_border_width={} widget_corner_radius={} window_corner_radius={} editor_font_size={} editor_line_numbers={} editor_relative_line_numbers={} editor_soft_wrap={} editor_vim_mode={} browser_element_selector_hotkey={} browser_search_provider={} browser_egress={} use_system_titlebar={} window_background_blur={} animations={} tray={} show_fps={} quit_daemon_on_exit={} auto_restart_stale_daemon={} agent_command_overridden={} claude_code_agent_command_overridden={} agent_working_directory={:?} daemon_override_entries={}",
         path.display(),
         parsed.config.pane_gaps.value,
         parsed.config.pane_corner_radius.value,
@@ -580,6 +595,7 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
         parsed.config.browser_egress.value,
         parsed.config.use_system_titlebar.value,
         parsed.config.window_background_blur.value,
+        parsed.config.animations.value,
         parsed.config.tray.value,
         parsed.config.show_fps.value,
         parsed.config.quit_daemon_on_exit.value,
@@ -595,6 +611,7 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
     log_fleet_hosts(cx);
     cx.set_global(parsed.config);
     cx.set_global(parsed.browser);
+    apply_animations(cx);
     apply_window_background_appearance(cx);
     apply_window_decorations(cx);
     crate::app_icon::apply(cx);
@@ -787,6 +804,13 @@ pub(crate) fn window_decorations(cx: &App) -> WindowDecorations {
     } else {
         WindowDecorations::Client
     }
+}
+
+fn apply_animations(cx: &mut App) {
+    let platform_reduce_motion = cx
+        .try_global::<PlatformReduceMotion>()
+        .is_some_and(|preference| preference.0);
+    cx.set_reduce_motion(platform_reduce_motion || !resolved_config(cx).animations.value);
 }
 
 /// The titlebar every zz window opens with: a transparent strip, nothing else.
@@ -1363,6 +1387,7 @@ fn parse_config(source: &str) -> ParsedConfig {
             ConfigKey::EditorFontSize => &mut parsed.config.editor_font_size,
             ConfigKey::UseSystemTitlebar
             | ConfigKey::WindowBackgroundBlur
+            | ConfigKey::Animations
             | ConfigKey::Tray
             | ConfigKey::ShowFps
             | ConfigKey::QuitDaemonOnExit
@@ -2386,6 +2411,7 @@ mod tests {
              window-corner-radius = 10\n\
              use-system-titlebar = true\n\
              window-background-blur = true\n\
+             animations = false\n\
              show-fps = true\n\
              quit-daemon-on-exit = true\n\
              auto-restart-stale-daemon = true\n\
@@ -2459,6 +2485,11 @@ mod tests {
         assert!(parsed.config.window_background_blur.value);
         assert_eq!(
             parsed.config.window_background_blur.provenance,
+            ConfigProvenance::Override
+        );
+        assert!(!parsed.config.animations.value);
+        assert_eq!(
+            parsed.config.animations.provenance,
             ConfigProvenance::Override
         );
         assert!(parsed.config.show_fps.value);
@@ -3589,6 +3620,34 @@ mod tests {
 
         cx.update(|cx| install_config(None, None, cx));
         assert_eq!(cx.update(|cx| browser_config(cx)), BrowserConfig::default());
+    }
+
+    #[gpui::test]
+    fn install_config_applies_and_resets_the_animation_setting(cx: &mut gpui::TestAppContext) {
+        let parsed = parse_config("animations = false\n");
+
+        cx.update(|cx| {
+            install_config(Some(Path::new("/tmp/zz/config")), Some(Ok(parsed)), cx);
+        });
+        assert!(cx.update(|cx| cx.reduce_motion()));
+
+        cx.update(|cx| install_config(None, None, cx));
+        assert!(!cx.update(|cx| cx.reduce_motion()));
+    }
+
+    #[gpui::test]
+    fn animation_setting_preserves_platform_reduced_motion(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            cx.set_global(PlatformReduceMotion(true));
+            install_config(None, None, cx);
+        });
+        assert!(cx.update(|cx| cx.reduce_motion()));
+
+        let parsed = parse_config("animations = true\n");
+        cx.update(|cx| {
+            install_config(Some(Path::new("/tmp/zz/config")), Some(Ok(parsed)), cx);
+        });
+        assert!(cx.update(|cx| cx.reduce_motion()));
     }
 
     #[gpui::test]

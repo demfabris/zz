@@ -1,6 +1,8 @@
 mod colors;
+mod completion;
 mod keys;
 mod overlay;
+mod palette;
 mod pane;
 mod panes;
 mod terminal;

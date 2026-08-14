@@ -24,6 +24,7 @@ gtk = { package = "gtk4", version = "0.11.4", features = ["v4_22"] }
 log = "0.4.29"
 zz-client = { path = "../zz-client" }
 zz-daemon = { path = "../zz-daemon", default-features = false }
+zz-mux = { path = "../zz-mux" }
 zz-protocol = { path = "../zz-protocol" }
 zz-terminal = { path = "../zz-terminal", default-features = false }
 

@@ -19,8 +19,11 @@ use crate::{
     ui::{
         keys,
         overlay::Overlays,
+        // ── gtk-termux: terminal UX surfaces ──
+        pager::OutputPager,
         pane::TerminalPane,
         panes::{PaneGrid, layout_panes},
+        picker::PanePicker,
         settings::SettingsRoute,
         sidebar::{Hooks, NewSessionPanel, Sidebar},
         terminal::TerminalView,
@@ -34,7 +37,7 @@ const STYLE: &str = "
 .zz-placeholder { padding: 24px; }
 .zz-prompt { padding: 4px 8px; }
 .zz-chooser { padding: 12px; }
-.zz-badge { margin: 8px; padding: 2px 8px; border-radius: 6px; }
+.zz-badge { padding: 2px 8px; border-radius: 6px; }
 .zz-number { font-size: 2.4em; font-weight: bold; padding: 8px 20px; border-radius: 12px; }
 .zz-prefix {
     background-color: @accent_bg_color;
@@ -57,6 +60,11 @@ const STYLE: &str = "
     border-radius: 6px;
     background-color: alpha(currentColor, 0.1);
 }
+.zz-search { padding: 4px 6px; }
+.zz-search entry.error { color: @error_color; }
+.zz-marks { margin: 8px; }
+.zz-picker { padding: 24px; }
+.zz-link label { padding: 2px 6px; font-size: 0.85em; }
 ";
 
 const WORKSPACE_PAGE: &str = "workspace";
@@ -66,7 +74,10 @@ const MIN_FONT_POINTS: f32 = 1.0;
 const MAX_FONT_POINTS: f32 = 256.0;
 
 enum PaneWidget {
-    Terminal(TerminalPane),
+    Terminal(Rc<TerminalPane>),
+    // ── gtk-termux: an unclaimed split shows the kind chooser ──
+    Picker(Rc<PanePicker>),
+    // ── end gtk-termux ──
     Other {
         widget: gtk::Widget,
         kind: &'static str,
@@ -77,6 +88,7 @@ impl PaneWidget {
     fn widget(&self) -> gtk::Widget {
         match self {
             Self::Terminal(pane) => pane.widget(),
+            Self::Picker(picker) => picker.widget(),
             Self::Other { widget, .. } => widget.clone(),
         }
     }
@@ -84,6 +96,7 @@ impl PaneWidget {
     fn matches(&self, kind: &'static str) -> bool {
         match self {
             Self::Terminal(_) => kind == "terminal",
+            Self::Picker(_) => kind == "picker",
             Self::Other { kind: current, .. } => *current == kind,
         }
     }
@@ -114,6 +127,7 @@ pub struct Shell {
     numbering: Cell<bool>,
     syncing: Cell<bool>,
     detaching: Cell<bool>,
+    pager: RefCell<Option<OutputPager>>,
 }
 
 impl Shell {
@@ -200,7 +214,9 @@ impl Shell {
             numbering: Cell::new(false),
             syncing: Cell::new(false),
             detaching: Cell::new(false),
+            pager: RefCell::new(None),
         });
+        shell.grid.set_engine(Arc::clone(&shell.engine));
         let target = Rc::downgrade(&shell);
         shell.settings.attach_chrome(Rc::new(move |action| {
             if let Some(shell) = target.upgrade() {
@@ -487,6 +503,18 @@ impl Shell {
             }
             EngineEvent::MuxOptionsChanged => self.settings.refresh_daemon_values(),
             EngineEvent::Clipboard { target, text } => self.write_clipboard(target, &text),
+            // ── gtk-termux: terminal UX surfaces ──
+            EngineEvent::CommandOutputChanged => self.sync_pager(),
+            EngineEvent::BeginSearch { pane, direction } => {
+                if let Some(PaneWidget::Terminal(surface)) = self.widgets.borrow().get(&pane) {
+                    surface.open_search(direction, true);
+                }
+            }
+            // The ring grew under a scroll that is already on screen; the next
+            // notch will reach further back, so nothing has to repaint now.
+            EngineEvent::HistoryChanged(_) => {}
+            EngineEvent::OpenUri { uri, .. } => self.open_uri(&uri),
+            // ── end gtk-termux ──
             EngineEvent::Notice(text) => self.toasts.add_toast(adw::Toast::new(&text)),
             EngineEvent::Reconnecting { attempt } => {
                 self.overlays.dismiss();
@@ -669,19 +697,31 @@ impl Shell {
 
         let mut children = Vec::with_capacity(placed.len());
         for pane in &placed {
-            let kind = view
-                .panes
-                .get(pane)
-                .map_or("terminal", |snapshot| kind_label(&snapshot.kind));
+            let snapshot = view.panes.get(pane);
+            let kind = snapshot.map_or("terminal", |snapshot| kind_label(&snapshot.kind));
             if !widgets.get(pane).is_some_and(|widget| widget.matches(kind)) {
                 widgets.insert(*pane, self.make_widget(*pane, kind, &appearance));
             }
             if let Some(widget) = widgets.get(pane) {
+                // ── gtk-termux: focus, zoom and synchronize-panes marks ──
+                if let PaneWidget::Terminal(surface) = widget {
+                    surface.set_marks(
+                        *pane == view.active_pane,
+                        view.zoomed_pane == Some(*pane),
+                        snapshot.is_some_and(|snapshot| snapshot.synchronized_input),
+                    );
+                }
+                // ── end gtk-termux ──
                 children.push((*pane, widget.widget()));
             }
         }
         drop(widgets);
-        self.grid.set_panes(layout, children);
+        self.grid.set_panes(
+            view.focused_window,
+            layout,
+            view.zoomed_pane.is_some(),
+            children,
+        );
     }
 
     fn make_widget(
@@ -691,20 +731,17 @@ impl Shell {
         appearance: &TerminalAppearance,
     ) -> PaneWidget {
         if kind == "terminal" {
-            let target = Rc::downgrade(self);
-            let chrome: Rc<dyn Fn(ChromeAction)> = Rc::new(move |action| {
-                if let Some(shell) = target.upgrade() {
-                    shell.perform(action);
-                }
-            });
-            let view =
-                TerminalView::new(Arc::clone(&self.engine), pane, appearance.clone(), chrome);
-            let surface = TerminalPane::new(view);
+            let surface = TerminalPane::new(self.terminal_view(pane, appearance));
             if let Some(viewport) = self.engine.viewport(pane) {
                 surface.apply_frame(viewport, &ViewportDamage::All);
             }
             return PaneWidget::Terminal(surface);
         }
+        // ── gtk-termux: an unclaimed split chooses what it becomes ──
+        if kind == "picker" {
+            return PaneWidget::Picker(PanePicker::new(Arc::clone(&self.engine), pane));
+        }
+        // ── end gtk-termux ──
         let label = gtk::Label::new(Some(&format!("{kind} panes need the zz app")));
         label.add_css_class("dim-label");
         label.add_css_class("zz-placeholder");
@@ -712,6 +749,20 @@ impl Shell {
             widget: label.upcast(),
             kind,
         }
+    }
+
+    fn terminal_view(
+        self: &Rc<Self>,
+        pane: PaneId,
+        appearance: &TerminalAppearance,
+    ) -> TerminalView {
+        let target = Rc::downgrade(self);
+        let chrome: Rc<dyn Fn(ChromeAction)> = Rc::new(move |action| {
+            if let Some(shell) = target.upgrade() {
+                shell.perform(action);
+            }
+        });
+        TerminalView::new(Arc::clone(&self.engine), pane, appearance.clone(), chrome)
     }
 
     /// The chrome a terminal surface hands up: everything that belongs to the
@@ -765,6 +816,9 @@ impl Shell {
                 pane.view().set_appearance(appearance.clone());
             }
         }
+        if let Some(pager) = self.pager.borrow().as_ref() {
+            pager.set_appearance(appearance);
+        }
     }
 
     /// Focus only sticks once the widget is realized, so the record is kept
@@ -773,9 +827,18 @@ impl Shell {
         if self.focused_pane.get() == Some(pane) {
             return;
         }
-        if let Some(PaneWidget::Terminal(surface)) = self.widgets.borrow().get(&pane)
-            && surface.view().grab_focus()
-        {
+        // ── gtk-termux: the pager and an open find bar own the keyboard ──
+        if self.pager.borrow().is_some() {
+            return;
+        }
+        let took = match self.widgets.borrow().get(&pane) {
+            Some(PaneWidget::Terminal(surface)) if surface.search_is_open() => true,
+            Some(PaneWidget::Terminal(surface)) => surface.view().grab_focus(),
+            Some(PaneWidget::Picker(picker)) => picker.grab_focus(),
+            // ── end gtk-termux ──
+            _ => false,
+        };
+        if took {
             self.focused_pane.set(Some(pane));
         }
     }
@@ -789,6 +852,53 @@ impl Shell {
         }
     }
 }
+
+// ── gtk-termux: the command-output pager and link activation ──
+impl Shell {
+    /// Bring the pager in line with the core. The daemon owns its lifetime
+    /// entirely — it opens it, feeds it, and closes it — so this only mirrors.
+    fn sync_pager(self: &Rc<Self>) {
+        let Some((pane, viewport)) = self.engine.command_output() else {
+            if let Some(pager) = self.pager.borrow_mut().take() {
+                pager.close();
+            }
+            self.refocus();
+            return;
+        };
+        let stale = self
+            .pager
+            .borrow()
+            .as_ref()
+            .is_some_and(|pager| pager.pane() != pane);
+        if stale && let Some(pager) = self.pager.borrow_mut().take() {
+            pager.close();
+        }
+        let opened = self.pager.borrow().is_none();
+        if opened {
+            let pager = OutputPager::present(&self.engine, &self.window, pane, self.appearance());
+            self.pager.replace(Some(pager));
+            self.focused_pane.set(None);
+        }
+        if let Some(pager) = self.pager.borrow().as_ref() {
+            pager.apply(viewport);
+        }
+    }
+
+    /// The daemon resolved a modified click into a URI. This client has no
+    /// browser panes to route into, so everything goes to the desktop's opener.
+    fn open_uri(&self, uri: &str) {
+        gtk::UriLauncher::new(uri).launch(
+            Some(&self.window),
+            gtk::gio::Cancellable::NONE,
+            |result| {
+                if let Err(error) = result {
+                    log::warn!("zz-gtk could not open the link: {error}");
+                }
+            },
+        );
+    }
+}
+// ── end gtk-termux ──
 
 fn primary_menu() -> gio::Menu {
     let windows = gio::Menu::new();

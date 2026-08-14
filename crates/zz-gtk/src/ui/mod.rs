@@ -1,8 +1,11 @@
 mod colors;
 mod keys;
 mod overlay;
+mod pager;
 mod pane;
 mod panes;
+mod picker;
+mod search;
 mod settings;
 mod sidebar;
 mod terminal;

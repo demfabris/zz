@@ -80,16 +80,18 @@ pub enum Page {
     Panes,
     Terminal,
     Multiplexer,
+    Hosts,
     System,
     About,
 }
 
 impl Page {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Interface,
         Self::Panes,
         Self::Terminal,
         Self::Multiplexer,
+        Self::Hosts,
         Self::System,
         Self::About,
     ];
@@ -100,6 +102,7 @@ impl Page {
             Self::Panes => "Panes",
             Self::Terminal => "Terminal",
             Self::Multiplexer => "Multiplexer",
+            Self::Hosts => "Hosts",
             Self::System => "System",
             Self::About => "About",
         }
@@ -111,6 +114,7 @@ impl Page {
             Self::Panes => "view-grid-symbolic",
             Self::Terminal => "utilities-terminal-symbolic",
             Self::Multiplexer => "view-list-symbolic",
+            Self::Hosts => "network-server-symbolic",
             Self::System => "emblem-system-symbolic",
             Self::About => "help-about-symbolic",
         }
@@ -122,6 +126,7 @@ impl Page {
             Self::Panes => "panes",
             Self::Terminal => "terminal",
             Self::Multiplexer => "multiplexer",
+            Self::Hosts => "hosts",
             Self::System => "system",
             Self::About => "about",
         }

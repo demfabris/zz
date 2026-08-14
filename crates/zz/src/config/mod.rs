@@ -1624,9 +1624,9 @@ fn parse_geometry_value(value: &str, (min, max): (f32, f32)) -> Result<f32, Stri
 
 fn parse_boolean(value: &str) -> Result<bool, String> {
     match value {
-        "true" => Ok(true),
-        "false" => Ok(false),
-        _ => Err("expected `true` or `false`".to_owned()),
+        "on" | "yes" | "1" | "true" => Ok(true),
+        "off" | "no" | "0" | "false" => Ok(false),
+        _ => Err("expected a boolean (`true`/`on`/`yes`/`1` or `false`/`off`/`no`/`0`)".to_owned()),
     }
 }
 
@@ -3318,17 +3318,17 @@ mod tests {
         assert!(parsed.diagnostics[0].message.contains("between 0 and 32"));
         assert!(parsed.diagnostics[1].message.contains("finite"));
         assert!(parsed.diagnostics[2].message.contains("between 0 and 32"));
-        assert!(parsed.diagnostics[3].message.contains("true` or `false"));
-        assert!(parsed.diagnostics[4].message.contains("true` or `false"));
+        assert!(parsed.diagnostics[3].message.contains("expected a boolean"));
+        assert!(parsed.diagnostics[4].message.contains("expected a boolean"));
         assert!(parsed.diagnostics[5].message.contains("unsupported key"));
         assert_eq!(parsed.diagnostics[6].message, "expected `key = value`");
     }
 
     #[test]
-    fn parser_validates_pane_chrome_switch_and_geometry() {
+    fn parser_accepts_a_tmux_spelled_switch_and_validates_geometry() {
         let parsed = parse_config("pane-gaps = yes\npane-border-width = 9\n");
 
-        assert!(!parsed.config.pane_gaps.value);
+        assert!(parsed.config.pane_gaps.value);
         assert_f32_eq(parsed.config.pane_border_width.value, 1.0);
         assert_eq!(
             parsed.config.pane_gaps.provenance,
@@ -3338,9 +3338,8 @@ mod tests {
             parsed.config.pane_border_width.provenance,
             ConfigProvenance::Override
         );
-        assert_eq!(parsed.diagnostics.len(), 2);
-        assert!(parsed.diagnostics[0].message.contains("true` or `false"));
-        assert!(parsed.diagnostics[1].message.contains("between 0 and 8"));
+        assert_eq!(parsed.diagnostics.len(), 1);
+        assert!(parsed.diagnostics[0].message.contains("between 0 and 8"));
     }
 
     #[test]
@@ -4054,32 +4053,25 @@ mod tests {
     }
 
     #[test]
-    fn parse_boolean_rejects_tmux_on_yes_one() {
-        assert_eq!(parse_boolean("true"), Ok(true));
-        assert_eq!(parse_boolean("false"), Ok(false));
-        for value in ["on", "yes", "1", "off", "no", "0"] {
-            assert_eq!(
-                parse_boolean(value),
-                Err("expected `true` or `false`".to_owned()),
-                "{value}"
-            );
+    fn parse_boolean_accepts_the_tmux_flag_spellings() {
+        for value in ["on", "yes", "1", "true"] {
+            assert_eq!(parse_boolean(value), Ok(true), "{value}");
         }
+        for value in ["off", "no", "0", "false"] {
+            assert_eq!(parse_boolean(value), Ok(false), "{value}");
+        }
+        assert!(parse_boolean("sometimes").is_err());
     }
 
     #[test]
-    fn experimental_agent_pane_on_forwards_to_the_daemon_and_leaves_the_gui_off() {
+    fn experimental_agent_pane_on_forwards_to_the_daemon_and_enables_the_gui() {
         let parsed = parse_config("experimental-agent-pane = on\n");
         assert_eq!(
             parsed.daemon_entries,
             [("experimental-agent-pane".to_owned(), "on".to_owned())]
         );
-        assert!(!parsed.config.experimental_agent_pane.value);
-        assert!(
-            parsed
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.message.contains("true` or `false"))
-        );
+        assert!(parsed.config.experimental_agent_pane.value);
+        assert!(parsed.diagnostics.is_empty());
     }
 
     #[test]

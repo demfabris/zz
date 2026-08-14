@@ -110,5 +110,10 @@ which rows. Only intercept `TerminalViewport`/`TerminalPatch` *before* the core
 ## Before you write code
 
 Read `references/pitfalls.md` in this skill. Every entry there was a real bug
-or dead-end hit while building the first three consumers of this stack
-(desktop, TUI, C smoke client); each one costs an afternoon to rediscover.
+or dead-end hit while building the consumers of this stack (desktop, TUI, C
+smoke client, and the full GTK client); each one costs an afternoon to
+rediscover. Building a GTK/GNOME shell, also read `references/gtk.md` — the
+toolkit-specific traps live there. `crates/zz-gtk` is now the most complete
+worked example of a native client on the core: engine/ui split, reconnect
+supervisor, overlays, sidebar, settings, palette, and a real-daemon
+integration harness (`crates/zz-gtk/tests/engine.rs`) are all copyable.

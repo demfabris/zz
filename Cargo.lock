@@ -10805,6 +10805,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "zz-client"
+version = "0.2.0-beta.1"
+dependencies = [
+ "log",
+ "tempfile",
+ "zz-daemon",
+ "zz-protocol",
+ "zz-terminal",
+]
+
+[[package]]
 name = "zz-daemon"
 version = "0.2.0-beta.1"
 dependencies = [

@@ -1,0 +1,20 @@
+[package]
+name = "zz-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Renderer-free client core: sans-IO protocol reduction shared by every zz client"
+publish = false
+
+[dependencies]
+zz-protocol = { path = "../zz-protocol" }
+zz-terminal = { path = "../zz-terminal", default-features = false }
+
+[dev-dependencies]
+zz-daemon = { path = "../zz-daemon" }
+log = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

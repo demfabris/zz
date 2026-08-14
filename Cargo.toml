@@ -3,6 +3,7 @@ members = [
     "crates/zz",
     "crates/zz-browser",
     "crates/zz-chrome-import",
+    "crates/zz-client",
     "crates/zz-daemon",
     "crates/zz-gpui-ios",
     "crates/zz-ios",

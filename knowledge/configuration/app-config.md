@@ -16,7 +16,7 @@ timestamp: 2026-08-14T00:00:00Z
 
 The GUI process loads the first existing `zz/config` file from the user's platform configuration
 roots. `crates/zz/src/config/mod.rs` resolves the candidates when `run_app` enters the GPUI application
-closure, parses thirty-one client-local behavior/layout/diagnostic/theme/browser knobs into typed
+closure, parses thirty-two client-local behavior/layout/diagnostic/theme/browser knobs into typed
 `AppConfig` and `BrowserConfig` values, parses three app-owned ACP launch keys into `AgentConfig`,
 and collects the supported
 daemon-owned appearance and mux entries as ordered raw `(key, value)` pairs. Client-reserved
@@ -31,7 +31,7 @@ preserving every other byte, comments included; the GUI fields reject a duplicat
 call it. `zz fleet list` prints name and endpoint; `zz fleet remove <name>` deletes every matching
 host line, as does a remote row's **Close host** . which additionally republishes `FleetHosts`
 (`config::remove_fleet_host_live`) so the running fleet drops the machine immediately. There is no bootstrap step, no key pinning, and no daemon-side setup . ssh already owns
-identity. The thirty-one local
+identity. The thirty-two local
 knobs retain `Default`/`Override` provenance. Daemon-owned value grammar deliberately stays in the zz-terminal appearance loader or
 mux `set-option` engine.
 
@@ -74,7 +74,7 @@ candidate exists, edits continue to target the first existing file selected by n
 
 ## Client-local keys
 
-The client-local schema is **thirty-one keys: fourteen switches, six logical-pixel geometry
+The client-local schema is **thirty-two keys: fifteen switches, six logical-pixel geometry
 controls, four enumerated selectors (theme mode, app icon, chrome preset, and browser search
 engine), one browser-local hotkey, and six chrome colors.**
 
@@ -83,6 +83,7 @@ engine), one browser-local hotkey, and six chrome colors.**
 | `use-system-titlebar` | `false` | `true` or `false` | On Linux, request a desktop-owned titlebar and window border instead of client-side window decorations |
 | `window-corner-radius` | `13.5` | `0..=32` | The app-drawn window frame's corner, visible only under Linux client-side decorations |
 | `window-background-blur` | `false` | `true` or `false` | Whether the desktop shows through the window chrome, blurred |
+| `animations` | `true` | `true` or `false` | Whether interface transitions, loading indicators, scrollbar fades, and animated UI images move |
 | `tray` | `true` | `true` or `false` | Whether zz puts an icon in the system tray (macOS status item, Windows notification icon, Linux StatusNotifierItem), toggling the window on click with a menu carrying Show/Hide and Quit. A live tray turns the close button into hide-to-tray on every platform (macOS hides the app); without a tray host (bare GNOME) close quits as before. Surfaced in Settings under Advanced; read once at startup |
 | `show-fps` | `false` | `true` or `false` | Whether the titlebar GPUI meter **and** each browser pane's CEF meter are shown |
 | `quit-daemon-on-exit` | `false` | `true` or `false` | Whether quitting the app stops the daemon even while sessions are live |
@@ -140,6 +141,13 @@ pane, so an edit reaches every open Browser pane on the next Enter. The engine s
 `zz_browser::SearchProvider`, which owns the query endpoints; the address bar's decision between
 navigating and searching is `zz_browser::resolve_address` (see
 [input translation](/browser/input-translation.md)).
+
+`animations = false` sets GPUI's reduced-motion state. GPUI transitions, spinners, switches,
+dialogs, notifications, and animated UI images settle on a static frame; the custom scrollbar holds
+at full opacity and then disappears without a fade. iOS also honors UIKit Reduce Motion, even when
+the file enables animations. Cursor blinking and Chromium page animation are content behavior and
+keep their own controls. Desktop GPUI does not currently publish the operating system's motion
+preference, so macOS, Linux, and Windows follow this key directly.
 
 ## Chrome theming
 
@@ -469,7 +477,7 @@ are off. `pane-border-width` remains editable because flush panorama panes use i
 
 | Page | Groups |
 | --- | --- |
-| Appearance | **Theme** (`theme-mode` as three drawn window previews, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the six `chrome-*` pickers) · **Tweaks** (`widget-corner-radius`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
+| Appearance | **Theme** (`theme-mode` as three drawn window previews, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the six `chrome-*` pickers) · **Tweaks** (`animations`, `widget-corner-radius`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
 | Browser | **Search** (`browser-search-provider`) · **Shortcuts** (`browser-element-selector-hotkey`) |
 | Editor | **Typography** (`editor-font-size`) · **Display** (`editor-line-numbers`, `editor-relative-line-numbers`, `editor-soft-wrap`, `editor-vim-mode`) |
 | Panes | **Layout** (`pane-gaps`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width`; margin and radius disable without gaps) |
@@ -551,6 +559,9 @@ background-opacity = 0.85
 
 # Ask GPUI and the platform compositor to blur app chrome.
 window-background-blur = true
+
+# Set every interface transition to its static state.
+animations = false
 
 # The toggle uses a 6px margin, 13.5px radius, 1px border, and drop shadow.
 pane-gaps = true

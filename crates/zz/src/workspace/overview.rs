@@ -1,17 +1,18 @@
 use std::time::Duration;
 
-use gpui::{App, Bounds, KeyBinding, MIN_WINDOW_ZOOM, Pixels, Size, point, px, size};
+use gpui::{App, Bounds, KeyBinding, MIN_WINDOW_ZOOM, Pixels, Size, Window, point, px, size};
 use zz_protocol::PaneId;
+use zz_ui::{TITLE_BAR_HEIGHT, draws_window_controls};
 
 use crate::mux::client::MuxClient;
 
-use super::sidebar::WorkspaceRoute;
+use super::sidebar::{ChromeMode, WorkspaceRoute};
 
-const OVERVIEW_PADDING: f32 = 20.0;
+const OVERVIEW_PADDING: f32 = 32.0;
 const CONTENT_ZOOM_BOOST: f32 = 1.2;
 
-pub(crate) const OVERVIEW_OPEN_DURATION: Duration = Duration::from_millis(420);
-pub(crate) const OVERVIEW_CLOSE_DURATION: Duration = Duration::from_millis(300);
+pub(crate) const OVERVIEW_OPEN_DURATION: Duration = Duration::from_millis(360);
+pub(crate) const OVERVIEW_CLOSE_DURATION: Duration = Duration::from_millis(240);
 pub(crate) const OVERVIEW_NORMAL_KEY_CONTEXT: &str = "WindowOverviewNormal";
 pub(crate) const OVERVIEW_INSERT_KEY_CONTEXT: &str = "WindowOverviewInsert";
 
@@ -70,6 +71,24 @@ impl OverviewGrid {
         metric_scale: f32,
         group_gap: Pixels,
     ) -> Self {
+        Self::with_columns_scaled_and_top_inset(
+            viewport,
+            count,
+            columns,
+            metric_scale,
+            group_gap,
+            Pixels::ZERO,
+        )
+    }
+
+    pub(crate) fn with_columns_scaled_and_top_inset(
+        viewport: Size<Pixels>,
+        count: usize,
+        columns: usize,
+        metric_scale: f32,
+        group_gap: Pixels,
+        top_inset: Pixels,
+    ) -> Self {
         let requested_count = count;
         let count = count.max(1);
         let columns = columns.clamp(1, count);
@@ -78,8 +97,10 @@ impl OverviewGrid {
         let viewport_height = f32::from(viewport.height).max(1.0);
         let metric_scale = metric_scale.max(0.1);
         let side_padding = (OVERVIEW_PADDING * metric_scale).min(viewport_width * 0.08);
-        let top_padding = (OVERVIEW_PADDING * metric_scale).min(viewport_height * 0.14);
         let bottom_padding = (OVERVIEW_PADDING * metric_scale).min(viewport_height * 0.14);
+        let top_padding = ((OVERVIEW_PADDING * metric_scale).min(viewport_height * 0.14)
+            + f32::from(top_inset).max(0.0))
+        .min((viewport_height - bottom_padding - 1.0).max(0.0));
         let content_width = (viewport_width - side_padding * 2.0).max(1.0);
         let content_height = (viewport_height - top_padding - bottom_padding).max(1.0);
         let gap = f32::from(group_gap)
@@ -115,6 +136,28 @@ impl OverviewGrid {
             .collect();
         Self { columns, groups }
     }
+}
+
+pub(crate) fn overview_titlebar_height(mode: ChromeMode, window: &Window) -> Pixels {
+    if overview_titlebar_visible_for(
+        mode,
+        draws_window_controls(window),
+        cfg!(target_os = "macos"),
+        window.is_fullscreen(),
+    ) {
+        TITLE_BAR_HEIGHT
+    } else {
+        Pixels::ZERO
+    }
+}
+
+fn overview_titlebar_visible_for(
+    mode: ChromeMode,
+    draws_controls: bool,
+    macos: bool,
+    fullscreen: bool,
+) -> bool {
+    matches!(mode, ChromeMode::Titlebar) || draws_controls || macos && !fullscreen
 }
 
 fn best_columns(viewport: Size<Pixels>, count: usize) -> usize {
@@ -332,6 +375,60 @@ mod tests {
             spaced.groups[1].origin.x - spaced.groups[0].right(),
             px(9.0)
         );
+    }
+
+    #[test]
+    fn grid_reserves_titlebar_and_panorama_padding() {
+        let viewport = size(px(1_200.0), px(800.0));
+        let grid = OverviewGrid::with_columns_scaled_and_top_inset(
+            viewport,
+            2,
+            2,
+            1.0,
+            Pixels::ZERO,
+            px(34.0),
+        );
+
+        assert!(grid.groups.iter().all(|group| {
+            group.origin.x >= px(32.0)
+                && group.origin.y >= px(66.0)
+                && group.right() <= viewport.width - px(32.0)
+                && group.bottom() <= viewport.height - px(32.0)
+        }));
+    }
+
+    #[test]
+    fn panorama_titlebar_policy_covers_each_platform_chrome() {
+        assert!(overview_titlebar_visible_for(
+            ChromeMode::Titlebar,
+            false,
+            false,
+            false,
+        ));
+        assert!(overview_titlebar_visible_for(
+            ChromeMode::Sidebar,
+            true,
+            false,
+            false,
+        ));
+        assert!(overview_titlebar_visible_for(
+            ChromeMode::Sidebar,
+            false,
+            true,
+            false,
+        ));
+        assert!(!overview_titlebar_visible_for(
+            ChromeMode::Sidebar,
+            false,
+            true,
+            true,
+        ));
+        assert!(!overview_titlebar_visible_for(
+            ChromeMode::Sidebar,
+            false,
+            false,
+            false,
+        ));
     }
 
     #[test]

@@ -323,6 +323,7 @@ mkdir -p ~/.config/zz && cp examples/config ~/.config/zz/config
 | `pane-corner-radius` | `13.5` | 0–32 |
 | `pane-border-width` | `1` | Gapped panes and flush panorama panes, 0–8; zero disables |
 | `widget-corner-radius` | `6` | Every button, input, menu, and dialog, 0–24 |
+| `animations` | `true` | Interface transitions, loading indicators, scrollbars, and animated UI images |
 | `theme` | unset | A Ghostty theme file by name, or `light:a,dark:b` |
 | `font-family` | platform default | Terminal font stack. `font-size` is `13` |
 | `background-opacity` | `1.0` | Terminal background tint over an opaque pane |

@@ -76,8 +76,8 @@ askpass . and only refuses to open the GUI, pointing at the bundle instead.
 # Application configuration (`config/mod.rs`)
 
 On GUI startup, the app loads the first bounded [`zz/config`](/configuration/app-config.md) file from
-the platform's user configuration roots into GPUI globals. `ConfigKey` enumerates thirty-one
-client-local knobs: fourteen switches (including `auto-restart-stale-daemon`), six lengths, four
+the platform's user configuration roots into GPUI globals. `ConfigKey` enumerates thirty-two
+client-local knobs: fifteen switches (including `auto-restart-stale-daemon`), six lengths, four
 enumerated selectors, the browser element-selector hotkey, and six `chrome-*` palette overrides.
 `AppConfig` stays `Copy`;
 the string-valued browser shortcut is published through a separate `BrowserConfig` global. Three
@@ -94,7 +94,7 @@ Browser, Terminal, Hosts, System, About:
 
 | Section | Contents |
 |---------|----------|
-| Interface | Theme (`theme-mode`, transient UI zoom, and macOS app-icon pickers), Chroma Colors (presets and `chrome-*` colors), Tweaks (`widget-corner-radius`, window blur, and Linux `use-system-titlebar`) |
+| Interface | Theme (`theme-mode`, transient UI zoom, and macOS app-icon pickers), Chroma Colors (presets and `chrome-*` colors), Tweaks (`animations`, `widget-corner-radius`, window blur, and Linux `use-system-titlebar`) |
 | Editor | Editor-pane typography and display controls, when compiled in |
 | Panes | Layout (`pane-gaps`, `pane-margin`, `pane-corner-radius`), Frame (`pane-border-width`); gapped panes and panorama carry bounded drop shadows |
 | Multiplexer | Full-file `zz/mux.conf` editor without line numbers, 12px text, Save, and tmux import |
@@ -316,20 +316,22 @@ Normal; a second Escape closes the overview, restores its return pane, and rever
 Each pane has a top-right close control that targets that pane directly. The overview shortcut
 closes from either mode.
 
-The focused window animates from its workspace bounds into its grid slot over 420 ms. Other windows
-enter from their nearest viewport edge, and close reverses the motion over 300 ms. GPUI's window
-zoom scales content while pointer coordinates are inverse-mapped for live interaction. The grid
-composes that zoom with the configured UI scale and gives the pane content a small readability
-boost. Reduced-motion mode settles both transitions immediately.
+The focused window follows a 360 ms critically damped spring from its workspace bounds into its grid
+slot. Other windows enter from their nearest viewport edge, and close reverses the spring over 240
+ms. GPUI's window zoom scales content while pointer coordinates are inverse-mapped for live
+interaction. The grid composes that zoom with the configured UI scale and gives the pane content a
+small readability boost. `animations = false` settles both transitions immediately; the same switch
+gates the rest of GPUI's interface motion and the custom scrollbar fade.
 
 The overview uses the configured pane surface rules. With pane gaps disabled, window groups and
 their panes touch with no reserved slot. Each pane stays square, paints the full configured border,
 and keeps a bounded drop shadow. With gaps enabled, group spacing follows `pane-margin`, while pane
 borders, radii, and shadows keep their normal settings. `AppShell` paints one
 `chrome_background` tint across the full drawable while overview gap and corner helpers stay
-transparent. Pane content remains opaque during the slide animation. The titlebar, sidebar,
-overview title, pane count, and key legend stay out of the content tree. Each close control keeps a
-40px hit target around a 22px surface and uses `widget-corner-radius`.
+transparent. Pane content remains opaque during the slide animation. The platform's active titlebar
+or native-control clearance stays mounted above a 32px panorama inset; the sidebar, overview title,
+pane count, and key legend stay out of the content tree. Each close control appears only while its
+pane is hovered, keeps a 40px hit target around a 22px surface, and uses `widget-corner-radius`.
 
 Terminal geometry stays frozen for the full overview lifetime, preserving each PTY's rows and
 columns. `MuxClient` asks the daemon for best-effort live terminal previews only while the overview

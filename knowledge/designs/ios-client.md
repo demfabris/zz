@@ -354,8 +354,9 @@ value-per-effort within each tier.
    existing `traitCollectionDidChange:` (atomics only — that callback must not
    re-enter gpui). Accessibility text sizes reach ~3.1x and clip against
    `MAX_UI_ZOOM` (300%). `reduce_motion`/`reduce_transparency` are exported as
-   live reads of the two `UIAccessibilityIs*Enabled` functions; **nothing in
-   the shell consumes them yet**, and a live flip forces no redraw.
+   live reads of the two `UIAccessibilityIs*Enabled` functions. Startup folds
+   `reduce_motion` into the global interface-animation preference; a live flip still forces no
+   redraw. `reduce_transparency` remains unconsumed.
 
 **Tier 3 — platform citizenship:**
 

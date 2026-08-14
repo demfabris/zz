@@ -12,7 +12,7 @@ use gpui::{
     Animation, AnimationExt as _, AnyElement, AnyView, AnyWindowHandle, App, Bounds, Context,
     Corners, CursorStyle, DragMoveEvent, Entity, EntityId, EventEmitter, FocusHandle, IntoElement,
     KeyUpEvent, Keystroke, MouseButton, MouseExitEvent, MouseUpEvent, Pixels, Point, Render, Size,
-    StyleRefinement, Window, div, ease_in_out, ease_out_quint, prelude::*, px, size,
+    StyleRefinement, Window, div, ease_out_quint, prelude::*, px, size,
 };
 use zz_mux::{joined_layout, swapped_layout};
 use zz_protocol::{
@@ -46,7 +46,8 @@ use super::{
     overview::{
         OVERVIEW_CLOSE_DURATION, OVERVIEW_INSERT_KEY_CONTEXT, OVERVIEW_NORMAL_KEY_CONTEXT,
         OVERVIEW_OPEN_DURATION, OverviewDirection, OverviewGrid, interpolate_bounds,
-        next_overview_pane, overview_available, overview_edge_bounds, overview_zoom,
+        next_overview_pane, overview_available, overview_edge_bounds, overview_titlebar_height,
+        overview_zoom,
     },
     sidebar::{
         ChromeMode, SidebarModeChanged, SidebarReleaseFocus, SidebarRouteChanged, WorkspaceRoute,
@@ -92,6 +93,7 @@ const OVERVIEW_CLOSE_VISUAL_SIZE: f32 = 22.0;
 const OVERVIEW_CLOSE_ICON_SIZE: f32 = 10.0;
 const OVERVIEW_OVERLAY_INSET: f32 = 8.0;
 const OVERVIEW_FLUSH_SHADOW_EXTENT: f32 = 8.0;
+const OVERVIEW_SPRING_SETTLING: f32 = 8.0;
 
 gpui::actions!(zz, [ClosePane]);
 
@@ -608,7 +610,7 @@ impl WindowOverviewState {
     }
 
     fn animation(&self) -> Animation {
-        Animation::new(self.duration.max(Duration::from_millis(1))).with_easing(ease_in_out)
+        Animation::new(self.duration.max(Duration::from_millis(1))).with_easing(overview_spring)
     }
 
     fn retarget(
@@ -630,6 +632,14 @@ impl WindowOverviewState {
         };
         self.duration
     }
+}
+
+fn overview_spring(delta: f32) -> f32 {
+    let delta = delta.clamp(0.0, 1.0);
+    let response =
+        1.0 - (1.0 + OVERVIEW_SPRING_SETTLING * delta) * (-OVERVIEW_SPRING_SETTLING * delta).exp();
+    let settled = 1.0 - (1.0 + OVERVIEW_SPRING_SETTLING) * (-OVERVIEW_SPRING_SETTLING).exp();
+    (response / settled).clamp(0.0, 1.0)
 }
 
 fn overview_group_progress(progress: f32, index: usize, home: bool) -> f32 {
@@ -1346,7 +1356,10 @@ impl AppView {
                     .map(|session| session.windows.len())
             })
             .unwrap_or_default();
-        let viewport = window.viewport_size();
+        let mut viewport = window.viewport_size();
+        viewport.height = (viewport.height
+            - overview_titlebar_height(self.sidebar.read(cx).mode(), window))
+        .max(px(1.0));
         let physical_viewport = size(
             viewport.width * window.zoom(),
             viewport.height * window.zoom(),
@@ -1420,7 +1433,8 @@ impl AppView {
             return Vec::new();
         };
         let focused = snapshot.focused_window_for(session);
-        let (grid, _, _) = window_overview_grid(&session.windows, window, cx);
+        let titlebar_height = overview_titlebar_height(self.sidebar.read(cx).mode(), window);
+        let (grid, _, _) = window_overview_grid(&session.windows, window, titlebar_height, cx);
         session
             .windows
             .iter()
@@ -2485,7 +2499,9 @@ impl AppView {
             .expect("overview state exists while rendering")
             .clone();
         let viewport = window.viewport_size();
-        let (grid, metric_scale, group_gap) = window_overview_grid(windows, window, cx);
+        let titlebar_height = overview_titlebar_height(self.sidebar.read(cx).mode(), window);
+        let (grid, metric_scale, group_gap) =
+            window_overview_grid(windows, window, titlebar_height, cx);
         let source = Bounds::new(
             Point::new(
                 overview.source.origin.x / window.zoom(),
@@ -2662,6 +2678,8 @@ impl AppView {
                     })
                 };
                 let waiting = pane_content.is_none();
+                let pane_hover_group: gpui::SharedString =
+                    format!("window-overview-pane-hover-{}", pane_id.0).into();
                 let content = pane_content.as_ref().map_or_else(
                     || {
                         crate::window::corners::round_div_radii(
@@ -2685,6 +2703,8 @@ impl AppView {
                             .text()
                             .size(px(OVERVIEW_CLOSE_TARGET_SIZE * geometry_scale))
                             .group(close_group.clone())
+                            .invisible()
+                            .group_hover(pane_hover_group.clone(), gpui::Styled::visible)
                             .cursor_pointer()
                             .child(
                                 div().size_full().flex().items_start().justify_end().child(
@@ -2803,6 +2823,7 @@ impl AppView {
                     .dimmed(surface_dimmed),
                     cx,
                 )
+                .when(panorama, |surface| surface.group(pane_hover_group))
                 .key_context(pane_key_context(pane_id))
                 .debug_selector(|| format!("mux-pane-{}", pane_id.0));
                 if overview_geometry_scale.is_some() {
@@ -3238,7 +3259,11 @@ impl Render for AppView {
         } else {
             workspace_background
         };
-        let pane_margin = config::pane_margin(cx);
+        let pane_margin = if self.window_overview.is_some() {
+            Pixels::ZERO
+        } else {
+            config::pane_margin(cx)
+        };
         let canvas_top = if strip_above_panes {
             px(0.)
         } else {
@@ -3469,6 +3494,7 @@ fn pane_bounds(rect: NormalizedPaneRect, canvas_size: Size<Pixels>) -> Bounds<Pi
 fn window_overview_grid(
     windows: &[WindowSnapshot],
     window: &Window,
+    top_inset: Pixels,
     cx: &App,
 ) -> (OverviewGrid, f32, Pixels) {
     let viewport = window.viewport_size();
@@ -3485,12 +3511,13 @@ fn window_overview_grid(
     };
     let columns = OverviewGrid::new(physical_viewport, windows.len()).columns;
     (
-        OverviewGrid::with_columns_scaled(
+        OverviewGrid::with_columns_scaled_and_top_inset(
             viewport,
             windows.len(),
             columns,
             metric_scale,
             group_gap,
+            top_inset,
         ),
         metric_scale,
         group_gap,
@@ -3609,14 +3636,34 @@ mod tests {
         assert!((overview.progress(0.0) - 0.4).abs() < f32::EPSILON);
         assert_eq!(overview.progress(1.0), 0.0);
         assert_eq!(overview.home, WindowId(1));
-        assert!((close_duration.as_secs_f32() - 0.12).abs() < 0.000_001);
+        assert!(
+            (close_duration.as_secs_f32() - OVERVIEW_CLOSE_DURATION.as_secs_f32() * 0.4).abs()
+                < 0.000_001
+        );
 
         overview.rendered_progress.set(0.25);
         let open_duration = overview.retarget(1.0, WindowId(0), OVERVIEW_OPEN_DURATION, false);
 
         assert!((overview.progress(0.0) - 0.25).abs() < f32::EPSILON);
         assert_eq!(overview.progress(1.0), 1.0);
-        assert!((open_duration.as_secs_f32() - 0.315).abs() < 0.000_001);
+        assert!(
+            (open_duration.as_secs_f32() - OVERVIEW_OPEN_DURATION.as_secs_f32() * 0.75).abs()
+                < 0.000_001
+        );
+    }
+
+    #[test]
+    fn window_overview_spring_moves_early_and_settles_cleanly() {
+        assert_eq!(overview_spring(0.0), 0.0);
+        assert_eq!(overview_spring(1.0), 1.0);
+        assert!(overview_spring(0.2) > 0.45);
+        assert!(overview_spring(0.5) > 0.9);
+
+        let samples = (0..=100)
+            .map(|step| overview_spring(step as f32 / 100.0))
+            .collect::<Vec<_>>();
+        assert!(samples.iter().all(|sample| (0.0..=1.0).contains(sample)));
+        assert!(samples.windows(2).all(|pair| pair[0] <= pair[1]));
     }
 
     #[test]

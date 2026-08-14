@@ -27,6 +27,7 @@ pub(crate) fn run(profile: zz::AppProfile) {
     application.run(move |cx: &mut App| {
         cx.set_global(profile);
         zz::engine::diagnostics::start_main_thread_watchdog(cx);
+        cx.set_reduce_motion(zz_gpui_ios::reduce_motion());
         zz::engine::config::init(cx);
         zz::engine::window::background::detect_compositor_support(cx);
         zz::engine::browser::recent_pages::init(cx);

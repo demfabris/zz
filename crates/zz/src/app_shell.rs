@@ -22,7 +22,7 @@ use crate::{
     window::{corners::WindowCorners, drag::window_drag_handle},
     workspace::{
         AppView, ClosePane, WindowOverviewChanged,
-        overview::ToggleWindowOverview,
+        overview::{ToggleWindowOverview, overview_titlebar_height},
         sidebar::{
             ChromeMode, SidebarModeChanged, SidebarResizeDrag, SidebarRouteChanged, WorkspaceRoute,
             WorkspaceSidebar,
@@ -91,11 +91,25 @@ impl AppShell {
         })
     }
 
-    fn render_control_strip(&self, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
-        draws_window_controls(window).then(|| {
+    fn render_control_strip(
+        &self,
+        window: &mut Window,
+        cx: &mut App,
+        force: bool,
+        paint_background: bool,
+    ) -> Option<AnyElement> {
+        let draws_controls = draws_window_controls(window);
+        (draws_controls || force).then(|| {
             let title_corners = WindowCorners::for_window(window).top();
-            let strip = app_titlebar_strip("app-titlebar", self.window_controls())
-                .bg(crate::theme::chrome_background(cx))
+            let controls = if draws_controls {
+                self.window_controls().into_any_element()
+            } else {
+                div().into_any_element()
+            };
+            let strip = app_titlebar_strip("app-titlebar", controls)
+                .when(paint_background, |strip| {
+                    strip.bg(crate::theme::chrome_background(cx))
+                })
                 .when(title_corners.top_right(), |strip| {
                     strip.rounded_tr(frame_content_corner_radius(cx))
                 });
@@ -107,7 +121,12 @@ impl AppShell {
         })
     }
 
-    fn render_workspace_strip(&self, window: &mut Window, cx: &mut App) -> AnyElement {
+    fn render_workspace_strip(
+        &self,
+        window: &mut Window,
+        cx: &mut App,
+        paint_background: bool,
+    ) -> AnyElement {
         let leading = self
             .sidebar
             .read(cx)
@@ -131,7 +150,9 @@ impl AppShell {
             });
         let strip = WindowCorners::for_window(window).top().round_div(
             workspace_titlebar_strip("workspace-strip", leading, content, trailing, cx)
-                .bg(crate::theme::chrome_background(cx)),
+                .when(paint_background, |strip| {
+                    strip.bg(crate::theme::chrome_background(cx))
+                }),
             frame_content_corner_radius(cx),
         );
         if crate::profile::profile(cx).fixed_window {
@@ -176,22 +197,29 @@ impl Render for AppShell {
             (sidebar.route(), sidebar.mode())
         };
         let overview_open = self.workspace.read(cx).window_overview_open();
+        let overview_titlebar = (overview_open && overview_titlebar_height(mode, window) > px(0.0))
+            .then(|| match mode {
+                ChromeMode::Sidebar => self
+                    .render_control_strip(window, cx, true, false)
+                    .expect("overview titlebar policy requested a control strip"),
+                ChromeMode::Titlebar => self.render_workspace_strip(window, cx, false),
+            });
         let (sidebar, titlebar) = if overview_open {
             (div().into_any_element(), None)
         } else {
             match route {
                 WorkspaceRoute::Settings => (
                     self.sidebar.clone().into_any_element(),
-                    self.render_control_strip(window, cx),
+                    self.render_control_strip(window, cx, false, true),
                 ),
                 WorkspaceRoute::App => match mode {
                     ChromeMode::Sidebar => (
                         self.sidebar.clone().into_any_element(),
-                        self.render_control_strip(window, cx),
+                        self.render_control_strip(window, cx, false, true),
                     ),
                     ChromeMode::Titlebar => (
                         div().into_any_element(),
-                        Some(self.render_workspace_strip(window, cx)),
+                        Some(self.render_workspace_strip(window, cx, true)),
                     ),
                 },
             }
@@ -203,9 +231,22 @@ impl Render for AppShell {
             && !overview_open
             && self.sidebar.read(cx).slideover_open())
         .then(|| self.render_slideover(cx));
-        let overlays = show_fps
-            .then(|| app_fps_overlay(self.app_fps_meter.clone()).into_any_element())
+        let overview_titlebar = overview_titlebar.map(|titlebar| {
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .child(titlebar)
+                .into_any_element()
+        });
+        let overlays = overview_titlebar
             .into_iter()
+            .chain(
+                show_fps
+                    .then(|| app_fps_overlay(self.app_fps_meter.clone()).into_any_element())
+                    .into_iter(),
+            )
             .chain(slideover)
             .chain(dialog_layer.into_iter().map(IntoElement::into_any_element))
             .chain(

@@ -125,6 +125,7 @@ enum AppearancePageItem {
     AppIcon,
     Preset,
     ChromeColor(ChromeColor),
+    Animations,
     WidgetCornerRadius,
     WindowBackgroundBlur,
     #[cfg(target_os = "linux")]
@@ -172,6 +173,7 @@ fn appearance_page_items(has_window_blur: bool) -> Vec<AppearancePageItem> {
             title: "Tweaks",
             description: None,
         },
+        AppearancePageItem::Animations,
         AppearancePageItem::WidgetCornerRadius,
     ]);
     if has_window_blur {
@@ -715,6 +717,13 @@ impl SettingsView {
             AppearancePageItem::ChromeColor(color) => {
                 self.chrome_color_setting(color, resolved, inherited)
             }
+            AppearancePageItem::Animations => Self::boolean_setting(
+                ConfigKey::Animations,
+                "Animations",
+                "Animate interface transitions, loading indicators, and image frames.",
+                resolved.animations,
+                cx,
+            ),
             AppearancePageItem::WidgetCornerRadius => Self::geometry_setting(
                 ConfigKey::WidgetCornerRadius,
                 "Widget corner radius",
@@ -2044,6 +2053,7 @@ fn geometry_config_value(config: AppConfig, key: ConfigKey) -> f32 {
         ConfigKey::EditorFontSize => config.editor_font_size.value,
         ConfigKey::UseSystemTitlebar
         | ConfigKey::WindowBackgroundBlur
+        | ConfigKey::Animations
         | ConfigKey::Tray
         | ConfigKey::ShowFps
         | ConfigKey::QuitDaemonOnExit
@@ -2458,6 +2468,28 @@ fn report_write_error(operation: &str, key: &str, error: &std::io::Error, cx: &m
 mod tests {
     use super::*;
     use zz_daemon::{DaemonError, Endpoint};
+
+    #[test]
+    fn animations_are_the_first_interface_tweak() {
+        let items = appearance_page_items(true);
+        let tweaks = items
+            .iter()
+            .position(|item| {
+                matches!(
+                    item,
+                    AppearancePageItem::Group {
+                        title: "Tweaks",
+                        ..
+                    }
+                )
+            })
+            .expect("Tweaks group");
+
+        assert!(matches!(
+            items.get(tweaks + 1),
+            Some(AppearancePageItem::Animations)
+        ));
+    }
 
     #[gpui::test]
     fn heavy_section_state_is_initialized_on_first_visit(cx: &mut gpui::TestAppContext) {

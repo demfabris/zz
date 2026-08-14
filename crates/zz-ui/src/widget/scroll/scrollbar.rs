@@ -52,6 +52,18 @@ fn is_always_mode(show: ScrollbarShow) -> bool {
     matches!(show, ScrollbarShow::Always)
 }
 
+fn fade_frame(elapsed: f32, reduce_motion: bool) -> Option<(f32, Duration)> {
+    if elapsed >= FADE_OUT_DURATION {
+        None
+    } else if elapsed < FADE_OUT_DELAY {
+        Some((1.0, Duration::from_secs_f32(FADE_OUT_DELAY - elapsed)))
+    } else if reduce_motion {
+        Some((1.0, Duration::from_secs_f32(FADE_OUT_DURATION - elapsed)))
+    } else {
+        Some((1.0 - (elapsed - FADE_OUT_DELAY).powi(10), FADE_TICK))
+    }
+}
+
 /// A scroll position source a [`Scrollbar`] can read and drive.
 pub trait ScrollbarHandle: 'static {
     /// The current scroll offset. Offsets run negative as content scrolls away
@@ -586,21 +598,11 @@ impl Element for Scrollbar {
                         } else {
                             Self::style_for_hovered_bar(cx)
                         };
-                    } else if elapsed < FADE_OUT_DELAY {
-                        idle.thumb_bg = cx.theme().foreground.wash().into();
-
-                        schedule_fade_wake(
-                            &state,
-                            Duration::from_secs_f32(FADE_OUT_DELAY - elapsed),
-                            window.current_view(),
-                            window,
-                            cx,
-                        );
-                    } else if elapsed < FADE_OUT_DURATION {
-                        let opacity = 1.0 - (elapsed - FADE_OUT_DELAY).powi(10);
+                    } else if let Some((opacity, next_wake)) =
+                        fade_frame(elapsed, cx.reduce_motion())
+                    {
                         idle.thumb_bg = cx.theme().foreground.wash().opacity(opacity);
-
-                        schedule_fade_wake(&state, FADE_TICK, window.current_view(), window, cx);
+                        schedule_fade_wake(&state, next_wake, window.current_view(), window, cx);
                     }
                 }
 
@@ -883,7 +885,7 @@ impl Element for Scrollbar {
 
 #[cfg(test)]
 mod tests {
-    use super::{Axis, ScrollbarState};
+    use super::{Axis, Duration, FADE_TICK, ScrollbarState, fade_frame};
 
     #[test]
     fn hovered_axis_only_changes_on_track_transition() {
@@ -894,5 +896,24 @@ mod tests {
         assert!(state.set_hovered(Some(Axis::Horizontal)));
         assert!(state.set_hovered(None));
         assert!(!state.set_hovered(None));
+    }
+
+    #[test]
+    fn reduced_motion_holds_then_hides_the_scrollbar_without_fading() {
+        assert_eq!(fade_frame(1.0, true), Some((1.0, Duration::from_secs(1))));
+        assert_eq!(
+            fade_frame(2.5, true),
+            Some((1.0, Duration::from_millis(500)))
+        );
+        assert_eq!(fade_frame(3.0, true), None);
+    }
+
+    #[test]
+    fn scrollbar_fades_when_motion_is_enabled() {
+        let (opacity, wake) = fade_frame(2.5, false).expect("active fade frame");
+        assert!(opacity < 1.0);
+        assert!(opacity > 0.0);
+        assert_eq!(wake, FADE_TICK);
+        assert_eq!(fade_frame(3.0, false), None);
     }
 }

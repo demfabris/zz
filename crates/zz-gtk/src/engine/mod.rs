@@ -17,8 +17,9 @@ use zz_client::{ChromeKeymap, ChromeProfile, ClientCore};
 use zz_daemon::{Endpoint, InteractiveClient};
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, CommandInvocation, CommandPromptState, DisplayPanesState,
-    InputMessage, LayoutNode, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, ProtocolMessage,
-    SessionId, StatusLine, WindowId,
+    InputMessage, KeyBindingSnapshot, LayoutNode, MuxOptionKey, MuxSnapshot,
+    NEW_SESSION_ATTACH_CAPABILITY, PaneId, PaneKindSnapshot, PaneSnapshot, ProtocolMessage,
+    SessionId, StatusLine, WindowId, canonical_key,
 };
 use zz_terminal::{
     ClipboardTarget, KeyInput, TerminalAppearance, TerminalColorScheme, TerminalViewport,
@@ -37,6 +38,9 @@ pub enum EngineEvent {
     /// A daemon-owned overlay moved: prefix arming, the command prompt, either
     /// chooser, or display-panes. Which one is read back through the accessors.
     OverlaysChanged,
+    /// The daemon asked for the session tree, the way `focus-sidebar` and
+    /// `choose-tree -s|-w` do.
+    FocusSidebar,
     /// The daemon answered a copy request; the payload is not retained.
     Clipboard {
         target: ClipboardTarget,
@@ -167,6 +171,22 @@ impl Engine {
         self.link.core().prefix_armed()
     }
 
+    /// The daemon's prefix chord in tmux grammar, or `None` until it publishes
+    /// the option.
+    pub fn prefix_key(&self) -> Option<String> {
+        self.link
+            .core()
+            .mux_options()
+            .get(MuxOptionKey::Prefix)
+            .map(|option| canonical_key(&option.value))
+    }
+
+    /// The daemon-published `prefix` table, or empty before the hello. Keys are
+    /// tmux-grammar strings; commands carry canonical names.
+    pub fn prefix_bindings(&self) -> Vec<KeyBindingSnapshot> {
+        self.link.core().prefix_bindings().to_vec()
+    }
+
     pub fn command_prompt(&self) -> Option<CommandPromptState> {
         self.link.core().command_prompt().cloned()
     }
@@ -232,6 +252,31 @@ impl Engine {
             return;
         }
         self.link.send(InputMessage::Text { pane, text });
+    }
+
+    /// Move this client to another session. The daemon answers with a fresh
+    /// snapshot and an [`EngineEvent::Attached`]; nothing is assumed here.
+    pub fn attach_session(&self, session: SessionId) {
+        if let Err(error) = self.link.client().attach(session.to_string()) {
+            log::warn!("zz-gtk failed to attach to {session}: {error}");
+        }
+    }
+
+    /// Create a session and land in it. A daemon that advertises
+    /// `new-session-attach-v1` attaches the client itself; an older one needs
+    /// the follow-up attach, which is why the capability is consulted rather
+    /// than assumed.
+    pub fn new_session(&self) {
+        self.execute(CommandInvocation::new("new-session", [] as [&str; 0]));
+        let attaches = self
+            .link
+            .core()
+            .capabilities()
+            .iter()
+            .any(|capability| capability == NEW_SESSION_ATTACH_CAPABILITY);
+        if !attaches {
+            self.execute(CommandInvocation::new("attach-session", [] as [&str; 0]));
+        }
     }
 
     pub fn select_window(&self, window: WindowId) {

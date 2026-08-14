@@ -38,6 +38,7 @@ flags (`-Zs`) split into `-Z -s`. Target resolution lives in `MuxState`:
 | `-t @N` / `:index` / name | `resolve_window` | `@id`, `:index`, window name (unique within session), or current window. |
 | `-t %N` | `resolve_pane` | `%id` only (validated live), or the window's active pane. |
 | `-t:.+` / `-t:.-` | `select-pane` | canonical next/previous pane in `pane_order`. |
+| `-t` on `new-window` / `new-browser` / `break-pane` | `window_destination` | tmux's target-window-with-index form: the destination index need not exist yet. `$id`, `@id`, and a bare session name pick a session (lowest free index); `[session]:index` and a bare index that names no session pick an exact index, and a taken index fails with `index in use: N` unless `-k` replaces it. |
 
 # Schema: commands (name | aliases | purpose)
 
@@ -47,24 +48,24 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 
 | Command | Aliases | Purpose |
 | --- | --- | --- |
-| `new-session` | `new` | Create a session (with its first window + terminal pane) and request attachment for an interactive caller; command-only callers remain detached. |
+| `new-session` | `new` | Create a session (with its first window + terminal pane) and request attachment for an interactive caller; command-only callers remain detached. `-A` attaches to the `-s` session when it already exists instead of failing on the duplicate name (`-d` keeps that attach silent); `-t` (session groups) is a cataloged but rejected option. |
 | `list-sessions` | `ls` | List sessions. |
 | `rename-session` | `rename` | Rename a session (rejects duplicate names). |
-| `kill-session` | . | Remove a session and its windows/panes. |
+| `kill-session` | . | Remove a session and its windows/panes. `-a` keeps the target and kills every other session; a bare positional name is the target. |
 | `attach-session` | `attach` | Attach the client to a session (`Attach` effect). |
 | `detach-client` | `detach` | Detach (`Detach` effect). |
-| `new-window` | `neww` | Create a terminal window. |
-| `new-browser` | . | *zz-native:* create a browser window (`-p` profile, URL positional). |
+| `new-window` | `neww` | Create a terminal window at the `-t` destination. `-d` creates without selecting, `-a` inserts after the target and shifts the run of windows above it up, `-k` replaces whatever holds the index, `-S` selects an existing window with the `-n` name instead of creating one. |
+| `new-browser` | . | *zz-native:* create a browser window (`-p` profile, URL positional); shares `new-window`'s destination options. |
 | `list-windows` | `lsw` | List a session's windows. |
 | `rename-window` | `renamew` | Rename a window (duplicates allowed). |
 | `select-window` | `selectw` | Activate a window. |
 | `next-window` / `previous-window` | `next` / `previous` | Step windows (wraps). |
-| `kill-window` | `killw` | Remove a window. |
+| `kill-window` | `killw` | Remove a window; `-a` keeps the target and kills every other window in its session. |
 | `new-pane` | . | *zz-native/internal:* split into a runtime-free picker (`-h` horizontal, else vertical); accepts the `split-window` target/size/cwd options so configured bindings retain their arguments. |
-| `split-window` | `splitw` | Split a terminal pane and inherit the target pane's live cwd when invoked directly; key-bound invocations are routed by the daemon to `new-pane` so `.tmux.conf` owns the picker keys. |
+| `split-window` | `splitw` | Split a terminal pane and inherit the target pane's live cwd when invoked directly; key-bound invocations are routed by the daemon to `new-pane` so `.tmux.conf` owns the picker keys. The new pane's share comes from `-l` (cells, or `N%`) or legacy `-p N`; `-b` puts it left/above, `-f` spans the whole window, `-d` leaves focus on the target. |
 | `split-browser` | . | *zz-native:* split into a browser pane (`-p` profile, URL positional). |
 | `select-pane-kind` | . | *zz-native/internal:* materialize a pending picker as `terminal`, `browser`, `agent`, or `editor` (`-t` target; `-c` supplies an Agent cwd). |
-| `break-pane` | `breakp` | Reparent a pane into a new one-pane window (`-n`,`-s`,`-t`,`-d`). |
+| `break-pane` | `breakp` | Reparent a pane into a new one-pane window (`-n`,`-s`,`-t`,`-d`); `-t` names the destination index, not an existing window. |
 | `join-pane` / `move-pane` | `joinp` / `movep` | Insert a pane beside another (`-b`,`-f`,`-h/-v`,`-p`,`-s`,`-t`,`-d`). |
 | `set-browser-url` | . | *zz-native:* update a browser pane's URL. |
 | `set-browser-profile` | . | *zz-native:* validate and switch a browser pane's persistent zz profile (`-t`, one profile name). |
@@ -75,11 +76,11 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `last-pane` | `lastp` | Return to the previously active pane (`-Z`). |
 | `swap-pane` | `swapp` | Exchange two layout leaves (`-U/-D/-s/-t`, `-d` keep slot, `-Z`). |
 | `list-panes` | `lsp` | List a window's panes. |
-| `resize-pane` | `resizep` | Resize (`-L/-R/-U/-D` by cells) or `-Z` toggle zoom. |
+| `resize-pane` | `resizep` | Resize relatively (`-L/-R/-U/-D` by cells, default `1`) or absolutely (`-x`/`-y` in cells or `N%`) or `-Z` toggle zoom. Sizes in cells need the geometry the daemon reports per pane; without it the command errors instead of guessing. |
 | `select-layout` | `selectl` | Apply a named preset / `-o` restore / `-E` spread / `-n`/`-p` cycle. |
 | `next-layout` / `previous-layout` | `nextl` / `prevl` | Cycle the seven presets. |
 | `rotate-window` | `rotatew` | Rotate surfaces through layout slots (`-D`,`-U`,`-Z`). |
-| `kill-pane` | `killp` | Remove a pane (removes the window if it was the last). |
+| `kill-pane` | `killp` | Remove a pane (removes the window if it was the last); `-a` keeps the target and kills every other pane in its window. |
 | `send-keys` | `send` | Send keys/text (`-l` literal) or `-X` copy-mode actions. |
 | `copy-mode` | . | Enter copy mode (`-u` page up). |
 | `copy-mode-search-prompt` | . | *zz-native:* open the native copy-mode search prompt (`-b` backward). |

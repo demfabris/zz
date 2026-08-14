@@ -10,8 +10,8 @@ pub use command::{
     MuxEffect, MuxEngine,
 };
 pub use model::{
-    LayoutPreset, MuxState, Pane, PaneDirection, PaneKind, Session, Window, joined_layout,
-    swapped_layout,
+    LayoutPreset, MuxState, Pane, PaneDirection, PaneKind, Session, SplitPlacement, Window,
+    joined_layout, swapped_layout,
 };
 pub use parser::{ConfigDiagnostic, ParsedConfig, parse_config};
 pub use status::{

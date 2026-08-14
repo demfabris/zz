@@ -1,5 +1,5 @@
 use zz_mux::{COMMAND_SPECS, ExecutionContext, MuxEffect, MuxEngine, parse_config};
-use zz_protocol::{CommandInvocation, LayoutNode, ServerError};
+use zz_protocol::{Axis, CommandInvocation, LayoutNode, ServerError};
 
 fn command(name: &str, args: &[&str]) -> CommandInvocation {
     CommandInvocation::new(name, args.iter().copied())
@@ -26,6 +26,20 @@ fn window_count(engine: &MuxEngine, session_name: &str) -> usize {
     session.windows.len()
 }
 
+fn window_indexes(engine: &MuxEngine, session_name: &str) -> Vec<u32> {
+    let session = engine
+        .state
+        .sessions
+        .values()
+        .find(|session| session.name == session_name)
+        .expect("session exists");
+    session
+        .windows
+        .iter()
+        .map(|window| engine.state.windows[window].index)
+        .collect()
+}
+
 fn split_ratio(engine: &MuxEngine) -> f32 {
     let window = engine.state.windows.values().next().expect("window");
     match &window.layout {
@@ -35,7 +49,7 @@ fn split_ratio(engine: &MuxEngine) -> f32 {
 }
 
 #[test]
-fn catalog_has_fifty_eight_commands_and_kill_has_no_dash_a() {
+fn catalog_covers_the_options_the_handlers_read() {
     assert_eq!(COMMAND_SPECS.len(), 58);
     for name in ["kill-session", "kill-window", "kill-pane"] {
         let spec = COMMAND_SPECS
@@ -43,8 +57,8 @@ fn catalog_has_fifty_eight_commands_and_kill_has_no_dash_a() {
             .find(|spec| spec.name == name)
             .expect(name);
         assert!(
-            spec.options.iter().all(|option| option.name != "-a"),
-            "{name} catalog grew a -a option"
+            spec.options.iter().any(|option| option.name == "-a"),
+            "{name} catalog is missing -a"
         );
     }
     let split = COMMAND_SPECS
@@ -52,16 +66,26 @@ fn catalog_has_fifty_eight_commands_and_kill_has_no_dash_a() {
         .find(|spec| spec.name == "split-window")
         .expect("split-window");
     assert!(split.options.iter().any(|option| option.name == "-p"));
-    assert!(split.options.iter().all(|option| option.name != "-l"));
+    assert!(
+        split
+            .option("-l")
+            .expect("split-window catalogs -l so its size cannot leak into the pane command")
+            .value
+            .is_some()
+    );
     let new_session = COMMAND_SPECS
         .iter()
         .find(|spec| spec.name == "new-session")
         .expect("new-session");
-    assert!(new_session.options.iter().all(|option| option.name != "-t"));
+    let group = new_session
+        .option("-t")
+        .expect("new-session catalogs -t so its value cannot leak into the pane command");
+    assert!(!group.completable);
+    assert!(new_session.options.iter().any(|option| option.name == "-A"));
 }
 
 #[test]
-fn kill_session_dash_a_kills_the_named_target_not_everyone_else() {
+fn kill_session_dash_a_keeps_only_the_target() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
@@ -76,11 +100,11 @@ fn kill_session_dash_a_kills_the_named_target_not_everyone_else() {
             &command("kill-session", &["-a", "-t", "keep"]),
         )
         .unwrap();
-    assert_eq!(session_names(&engine), ["other"]);
+    assert_eq!(session_names(&engine), ["keep"]);
 }
 
 #[test]
-fn kill_window_dash_a_kills_only_the_target() {
+fn kill_window_dash_a_keeps_only_the_target() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
@@ -91,17 +115,20 @@ fn kill_window_dash_a_kills_only_the_target() {
         .execute(&mut context, &command("new-window", &["-n", "second"]))
         .unwrap();
     engine
+        .execute(&mut context, &command("new-window", &["-n", "third"]))
+        .unwrap();
+    engine
         .execute(
             &mut context,
             &command("kill-window", &["-a", "-t", &first.to_string()]),
         )
         .unwrap();
     assert_eq!(window_count(&engine, "work"), 1);
-    assert_eq!(engine.state.windows.values().next().unwrap().name, "second");
+    assert_eq!(engine.state.windows.values().next().unwrap().id, first);
 }
 
 #[test]
-fn kill_pane_dash_a_kills_only_the_target() {
+fn kill_pane_dash_a_keeps_only_the_target() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
@@ -111,6 +138,11 @@ fn kill_pane_dash_a_kills_only_the_target() {
     engine
         .execute(&mut context, &command("split-window", &["-h"]))
         .unwrap();
+    let second = context.pane.unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-v"]))
+        .unwrap();
+    let third = context.pane.unwrap();
     let removed = engine
         .execute(
             &mut context,
@@ -119,16 +151,16 @@ fn kill_pane_dash_a_kills_only_the_target() {
         .unwrap();
     assert!(matches!(
         removed.effects.first(),
-        Some(MuxEffect::PanesRemoved(panes)) if panes == &vec![first]
+        Some(MuxEffect::PanesRemoved(panes)) if panes == &vec![second, third]
     ));
     assert_eq!(
         engine
             .state
             .windows
             .values()
-            .map(|window| window.panes.len())
-            .sum::<usize>(),
-        1
+            .flat_map(|window| window.panes.keys().copied())
+            .collect::<Vec<_>>(),
+        [first]
     );
 }
 
@@ -208,7 +240,7 @@ fn brace_command_lists_bind_as_a_single_command_sequence() {
 }
 
 #[test]
-fn new_window_dash_t_resolves_a_session_name_not_a_window_index() {
+fn new_window_dash_t_prefers_a_session_name_then_a_window_index() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
@@ -226,33 +258,71 @@ fn new_window_dash_t_resolves_a_session_name_not_a_window_index() {
     assert_eq!(window_count(&engine, "work"), 1);
     assert_eq!(window_count(&engine, "1"), 2);
 
+    engine
+        .execute(&mut context, &command("attach-session", &["-t", "work"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("new-window", &["-t", "2"]))
+        .unwrap();
+    assert_eq!(window_indexes(&engine, "work"), [0, 2]);
+
     let error = engine
         .execute(&mut context, &command("new-window", &["-t", "2"]))
         .unwrap_err();
-    assert!(matches!(error, ServerError::MissingTarget(target) if target == "2"));
+    assert!(matches!(error, ServerError::InvalidCommand(message) if message == "index in use: 2"));
+
+    let error = engine
+        .execute(&mut context, &command("new-window", &["-t", "work:nope"]))
+        .unwrap_err();
+    assert!(matches!(error, ServerError::MissingTarget(target) if target == "work:nope"));
 }
 
 #[test]
-fn split_window_dash_l_becomes_the_pane_command() {
+fn split_window_dash_l_sizes_the_new_pane_in_cells() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
+    engine.set_pane_geometry(context.pane.unwrap(), 80, 24);
     let created = engine
-        .execute(&mut context, &command("split-window", &["-l", "40"]))
+        .execute(&mut context, &command("split-window", &["-h", "-l", "20"]))
         .unwrap();
     assert!(matches!(
         created.effects.first(),
-        Some(MuxEffect::PaneCreated {
-            command: Some(command),
-            ..
-        }) if command == "40"
+        Some(MuxEffect::PaneCreated { command: None, .. })
     ));
+    assert!((split_ratio(&engine) - 0.75).abs() < 1e-5);
 }
 
 #[test]
-fn split_window_dash_p_is_ignored() {
+fn split_window_dash_l_takes_a_percentage_and_names_the_missing_geometry() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-h", "-l", "25%"]))
+        .unwrap();
+    assert!((split_ratio(&engine) - 0.75).abs() < 1e-5);
+
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let error = engine
+        .execute(&mut context, &command("split-window", &["-h", "-l", "20"]))
+        .unwrap_err();
+    assert!(
+        matches!(error, ServerError::InvalidCommand(message) if message.contains("pane geometry"))
+    );
+    assert_eq!(engine.state.windows.values().next().unwrap().panes.len(), 1);
+}
+
+#[test]
+fn split_window_dash_p_gives_the_new_pane_that_share() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
@@ -265,28 +335,122 @@ fn split_window_dash_p_is_ignored() {
         created.effects.first(),
         Some(MuxEffect::PaneCreated { command: None, .. })
     ));
-    assert!((split_ratio(&engine) - 0.5).abs() < f32::EPSILON);
+    assert!((split_ratio(&engine) - 0.75).abs() < 1e-5);
 }
 
 #[test]
-fn new_session_dash_t_becomes_the_pane_command() {
+fn new_pane_dash_p_gives_the_new_pane_that_share() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
-    let created = engine
-        .execute(&mut context, &command("new-session", &["-t", "name"]))
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
-    assert_eq!(session_names(&engine), ["0"]);
-    assert!(matches!(
-        created.effects.first(),
-        Some(MuxEffect::PaneCreated {
-            command: Some(command),
-            ..
-        }) if command == "name"
-    ));
+    engine
+        .execute(&mut context, &command("new-pane", &["-h", "-p", "25"]))
+        .unwrap();
+    assert!((split_ratio(&engine) - 0.75).abs() < 1e-5);
 }
 
 #[test]
-fn kill_session_positional_name_is_ignored() {
+fn split_window_dash_b_lands_the_new_pane_first() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let target = context.pane.unwrap();
+    engine
+        .execute(
+            &mut context,
+            &command("split-window", &["-h", "-b", "-p", "25"]),
+        )
+        .unwrap();
+    let created = context.pane.unwrap();
+    assert!((split_ratio(&engine) - 0.25).abs() < 1e-5);
+    let window = engine.state.windows.values().next().expect("window");
+    let LayoutNode::Split { first, second, .. } = &window.layout else {
+        panic!("expected a split");
+    };
+    assert_eq!(**first, LayoutNode::Pane(created));
+    assert_eq!(**second, LayoutNode::Pane(target));
+    assert_eq!(window.pane_order(), [created, target]);
+}
+
+#[test]
+fn split_window_dash_d_keeps_the_focus_on_the_current_pane() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let target = context.pane.unwrap();
+    let created = engine
+        .execute(&mut context, &command("split-window", &["-d"]))
+        .unwrap();
+    let Some(MuxEffect::PaneCreated { pane, .. }) = created.effects.first() else {
+        panic!("expected a created pane");
+    };
+    assert_ne!(*pane, target);
+    assert_eq!(context.pane, Some(target));
+    assert_eq!(
+        engine
+            .state
+            .windows
+            .values()
+            .next()
+            .expect("window")
+            .active_pane,
+        target
+    );
+}
+
+#[test]
+fn split_window_dash_f_spans_the_whole_window() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-h"]))
+        .unwrap();
+    engine
+        .execute(
+            &mut context,
+            &command("split-window", &["-f", "-v", "-p", "25"]),
+        )
+        .unwrap();
+    let created = context.pane.unwrap();
+    let window = engine.state.windows.values().next().expect("window");
+    let LayoutNode::Split {
+        axis,
+        ratio,
+        second,
+        ..
+    } = &window.layout
+    else {
+        panic!("expected a split");
+    };
+    assert_eq!(*axis, Axis::Vertical);
+    assert!((*ratio - 0.75).abs() < 1e-5);
+    assert_eq!(**second, LayoutNode::Pane(created));
+}
+
+#[test]
+fn new_session_dash_t_is_rejected_instead_of_leaking_into_the_pane_command() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    let error = engine
+        .execute(&mut context, &command("new-session", &["-t", "name"]))
+        .unwrap_err();
+    assert!(
+        matches!(error, ServerError::UnsupportedCommand(message) if message == "new-session -t (session groups)")
+    );
+    assert!(session_names(&engine).is_empty());
+}
+
+#[test]
+fn kill_session_positional_name_is_the_target() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
@@ -301,7 +465,7 @@ fn kill_session_positional_name_is_ignored() {
     engine
         .execute(&mut context, &command("kill-session", &["other"]))
         .unwrap();
-    assert_eq!(session_names(&engine), ["other"]);
+    assert_eq!(session_names(&engine), ["keep"]);
 }
 
 #[test]
@@ -321,7 +485,115 @@ fn resize_pane_dash_r_on_the_right_pane_grows_the_left_share() {
         .unwrap();
     let ratio = split_ratio(&engine);
     assert!(
-        ratio > 0.5,
-        "right-pane -R grew the first child's share: {ratio}"
+        (ratio - 0.55).abs() < 1e-5,
+        "tmux moves the boundary right, and the right pane has no boundary of its own: {ratio}"
     );
+}
+
+#[test]
+fn resize_pane_dash_r_grows_a_nested_pane_toward_its_right_neighbor() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let left = context.pane.unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-h"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("select-pane", &["-L"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-h"]))
+        .unwrap();
+    engine.set_pane_geometry(left, 25, 50);
+    engine
+        .execute(&mut context, &command("resize-pane", &["-R", "10"]))
+        .unwrap();
+    let window = engine.state.windows.values().next().expect("window");
+    let LayoutNode::Split { ratio, first, .. } = &window.layout else {
+        panic!("expected a split");
+    };
+    assert!(
+        (*ratio - 0.6).abs() < 1e-5,
+        "the boundary right of the nested pane moved: {ratio}"
+    );
+    let LayoutNode::Split { ratio, .. } = &**first else {
+        panic!("expected a nested split");
+    };
+    assert!(
+        (*ratio - 0.5).abs() < f32::EPSILON,
+        "the boundary left of the nested pane stayed put: {ratio}"
+    );
+}
+
+#[test]
+fn resize_pane_dash_x_sets_an_absolute_width_from_either_side() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let left = context.pane.unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-h"]))
+        .unwrap();
+    engine.set_pane_geometry(left, 50, 50);
+    engine
+        .execute(&mut context, &command("resize-pane", &["-x", "25"]))
+        .unwrap();
+    assert!((split_ratio(&engine) - 0.75).abs() < 1e-5);
+
+    engine.set_pane_geometry(left, 75, 50);
+    engine
+        .execute(&mut context, &command("select-pane", &["-L"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("resize-pane", &["-x", "25"]))
+        .unwrap();
+    assert!((split_ratio(&engine) - 0.25).abs() < 1e-5);
+}
+
+#[test]
+fn resize_pane_dash_x_takes_a_percentage_and_names_the_missing_geometry() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-h"]))
+        .unwrap();
+    let error = engine
+        .execute(&mut context, &command("resize-pane", &["-x", "25"]))
+        .unwrap_err();
+    assert!(
+        matches!(error, ServerError::InvalidCommand(message) if message.contains("pane geometry"))
+    );
+    assert!((split_ratio(&engine) - 0.5).abs() < f32::EPSILON);
+
+    engine
+        .execute(&mut context, &command("resize-pane", &["-x", "25%"]))
+        .unwrap();
+    assert!((split_ratio(&engine) - 0.75).abs() < 1e-5);
+}
+
+#[test]
+fn resize_pane_rejects_an_unparseable_adjustment() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-h"]))
+        .unwrap();
+    let error = engine
+        .execute(&mut context, &command("resize-pane", &["-R", "wide"]))
+        .unwrap_err();
+    assert!(
+        matches!(error, ServerError::InvalidCommand(message) if message == "invalid resize adjustment: wide")
+    );
+    assert!((split_ratio(&engine) - 0.5).abs() < f32::EPSILON);
 }

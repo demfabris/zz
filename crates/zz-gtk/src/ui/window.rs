@@ -8,12 +8,16 @@ use std::{
 use adw::prelude::*;
 use gtk::{gio, glib};
 use zz_client::{ChromeAction, ViewportDamage};
-use zz_protocol::{CommandInvocation, LayoutNode, PaneId, PaneKindSnapshot, SessionId, WindowId};
-use zz_terminal::{ClipboardTarget, TerminalAppearance};
+use zz_protocol::{
+    CommandInvocation, DisplayPanesAction, InputMessage, LayoutNode, PaneId, PaneKindSnapshot,
+    SessionId, WindowId,
+};
+use zz_terminal::{ClipboardTarget, KeyAction, TerminalAppearance};
 
 use crate::{
     engine::{Engine, EngineEvent, SessionView},
     ui::{
+        keys,
         overlay::Overlays,
         pane::TerminalPane,
         panes::{PaneGrid, layout_panes},
@@ -29,6 +33,7 @@ const STYLE: &str = "
 .zz-prompt { padding: 4px 8px; }
 .zz-chooser { padding: 12px; }
 .zz-badge { margin: 8px; padding: 2px 8px; border-radius: 6px; }
+.zz-number { font-size: 2.4em; font-weight: bold; padding: 8px 20px; border-radius: 12px; }
 .zz-prefix {
     background-color: @accent_bg_color;
     color: @accent_fg_color;
@@ -85,6 +90,7 @@ pub struct Shell {
     grid_host: Cell<Option<WindowId>>,
     focused_pane: Cell<Option<PaneId>>,
     font_offset: Cell<f32>,
+    numbering: Cell<bool>,
     syncing: Cell<bool>,
 }
 
@@ -171,6 +177,7 @@ impl Shell {
             grid_host: Cell::new(None),
             focused_pane: Cell::new(None),
             font_offset: Cell::new(0.0),
+            numbering: Cell::new(false),
             syncing: Cell::new(false),
         });
         shell.install_actions();
@@ -333,6 +340,28 @@ impl Shell {
             glib::Propagation::Stop
         });
 
+        let keyboard = gtk::EventControllerKey::new();
+        keyboard.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let target = Rc::downgrade(self);
+        keyboard.connect_key_pressed(move |_, keyval, _, modifiers| {
+            let Some(shell) = target.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            if !shell.numbering.get() || keys::is_modifier(keyval) {
+                return glib::Propagation::Proceed;
+            }
+            shell.engine.send(InputMessage::DisplayPanes {
+                action: DisplayPanesAction::Key(keys::key_input(
+                    KeyAction::Press,
+                    keyval,
+                    modifiers,
+                    None,
+                )),
+            });
+            glib::Propagation::Stop
+        });
+        self.window.add_controller(keyboard);
+
         let target = Rc::downgrade(self);
         self.window.connect_close_request(move |_| {
             if let Some(shell) = target.upgrade() {
@@ -411,9 +440,28 @@ impl Shell {
 
     fn refresh_overlays(self: &Rc<Self>) {
         self.prefix.set_visible(self.engine.prefix_armed());
+        self.refresh_pane_numbers();
         self.overlays.sync();
         if !self.overlays.is_open() {
             self.refocus();
+        }
+    }
+
+    /// `display-panes` is timed by the daemon, so the numbers appear and vanish
+    /// with the state it publishes rather than a timer of the client's own.
+    fn refresh_pane_numbers(&self) {
+        let state = self.engine.display_panes();
+        self.numbering.set(state.is_some());
+        for (pane, widget) in self.widgets.borrow().iter() {
+            if let PaneWidget::Terminal(surface) = widget {
+                surface.set_number(state.as_ref().and_then(|state| {
+                    state
+                        .indicators
+                        .iter()
+                        .find(|indicator| indicator.pane == *pane)
+                        .copied()
+                }));
+            }
         }
     }
 

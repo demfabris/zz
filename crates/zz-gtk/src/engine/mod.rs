@@ -13,8 +13,8 @@ use zz_client::{ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, Outbound};
 use zz_daemon::{Endpoint, InteractiveClient};
 use zz_protocol::{
     BrowserCommand, ChooseBufferState, ChooseTreeState, CommandInvocation, CommandPromptState,
-    CommandResponse, GuiResponse, InputMessage, LayoutNode, MuxSnapshot, PaneId, PaneKindSnapshot,
-    PaneSnapshot, ProtocolMessage, SessionId, StatusLine, WindowId,
+    CommandResponse, DisplayPanesState, GuiResponse, InputMessage, LayoutNode, MuxSnapshot, PaneId,
+    PaneKindSnapshot, PaneSnapshot, ProtocolMessage, SessionId, StatusLine, WindowId,
 };
 use zz_terminal::{
     ClipboardTarget, KeyInput, TerminalAppearance, TerminalColorScheme, TerminalViewport,
@@ -165,6 +165,10 @@ impl Engine {
 
     pub fn choose_buffer(&self) -> Option<ChooseBufferState> {
         self.core().choose_buffer().cloned()
+    }
+
+    pub fn display_panes(&self) -> Option<DisplayPanesState> {
+        self.core().display_panes().cloned()
     }
 
     /// Republish the desktop's light/dark preference; the daemon answers with a
@@ -397,7 +401,8 @@ fn reduce(
         CoreEvent::PrefixArmed { .. }
         | CoreEvent::CommandPromptChanged
         | CoreEvent::ChooseTreeChanged
-        | CoreEvent::ChooseBufferChanged => forwarded.push(EngineEvent::OverlaysChanged),
+        | CoreEvent::ChooseBufferChanged
+        | CoreEvent::DisplayPanesChanged => forwarded.push(EngineEvent::OverlaysChanged),
         CoreEvent::Clipboard { target, text, .. } => {
             forwarded.push(EngineEvent::Clipboard { target, text });
         }

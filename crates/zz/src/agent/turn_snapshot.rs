@@ -6,9 +6,6 @@
 //! tree-to-tree comparison: a file that was already untracked when the turn
 //! started diffs correctly instead of reading as brand new.
 
-// Consumed once the controller wires turn capture into prompt dispatch.
-#![allow(dead_code)]
-
 use std::{
     io::Read,
     path::{Path, PathBuf},

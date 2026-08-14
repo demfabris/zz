@@ -8,9 +8,6 @@
 //! crash mid-write leaves a torn trailing line that readers skip and the next
 //! append isolates behind a fresh newline.
 
-// Nothing reads or writes a journal yet; the controller wiring lands with the
-// pane restore path.
-#![allow(dead_code)]
 
 use std::{
     collections::{HashMap, hash_map::Entry},

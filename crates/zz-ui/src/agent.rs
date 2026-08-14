@@ -14,6 +14,7 @@ use crate::{
     attachment::open_attachment_preview,
     button::{Button, ButtonVariants as _},
     control_shadow, h_flex,
+    mend::{PENDING_LINK_URL, mend},
     pulse::pulse_phase,
     scroll::ScrollableElement as _,
     text::{
@@ -42,6 +43,9 @@ const TOOL_CONTENT_ROW_HEIGHT: f32 = 20.0;
 const MERMAID_CACHE_CAPACITY: usize = 16;
 /// One rotation of the in-flight tool indicator.
 const TOOL_SPINNER_PERIOD: Duration = Duration::from_millis(800);
+/// Where a link whose URL is still streaming is pointed. The renderer refuses
+/// to open `data:` URLs, which is what keeps the mend sentinel inert.
+const INERT_LINK_URL: &str = "data:,";
 pub const AGENT_CONTENT_MAX_WIDTH: f32 = 680.0;
 /// Side of a square attachment tile in a sent message.
 pub const TRANSCRIPT_ATTACHMENT: Pixels = px(140.0);
@@ -100,7 +104,12 @@ enum ToolContentSlot {
 }
 
 struct MarkdownState {
+    /// The raw text as the thread holds it. Streaming appends are diffed
+    /// against this, never against a mended display copy.
     source: SharedString,
+    /// The state currently renders a mended copy, so the next update has to
+    /// replace the whole text instead of appending to it.
+    mended: bool,
     state: Entity<TextViewState>,
 }
 
@@ -148,6 +157,8 @@ pub struct AgentTimelineStore {
     tool_scrolls: HashMap<u64, UniformListScrollHandle>,
     cwd: Option<PathBuf>,
     markdown_extensions: HashMap<bool, MarkdownExtensions>,
+    /// The entry still receiving deltas, whose display copy is mended.
+    streaming: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -173,14 +184,56 @@ impl AgentTimelineStore {
         source: SharedString,
         cx: &mut Context<Self>,
     ) -> Entity<TextViewState> {
+        let streaming = self.streaming == Some(id);
         self.markdown
             .entry((id, slot))
-            .or_insert_with(|| MarkdownState {
-                state: cx.new(|cx| TextViewState::markdown(source.as_str(), cx)),
-                source,
+            .or_insert_with(|| {
+                let repair = streaming.then(|| mend(source.as_str())).flatten();
+                MarkdownState {
+                    state: cx.new(|cx| {
+                        TextViewState::markdown(
+                            repair.as_deref().unwrap_or_else(|| source.as_str()),
+                            cx,
+                        )
+                    }),
+                    mended: repair.is_some(),
+                    source,
+                }
             })
             .state
             .clone()
+    }
+
+    /// Name the entry that is still streaming, so its display copy is mended
+    /// while markers hang. The entry that leaves the slot settles back to its
+    /// raw text: a completed entry always renders exactly what it holds.
+    pub fn set_streaming(&mut self, id: Option<u64>, cx: &mut Context<Self>) {
+        if self.streaming == id {
+            return;
+        }
+        let settled = self.streaming;
+        self.streaming = id;
+        if let Some(settled) = settled {
+            self.settle_markdown(settled, cx);
+        }
+    }
+
+    fn settle_markdown(&mut self, id: u64, cx: &mut Context<Self>) {
+        let mut settled = false;
+        for ((entry, _), markdown) in &mut self.markdown {
+            if *entry != id || !markdown.mended {
+                continue;
+            }
+            markdown.mended = false;
+            let raw = markdown.source.clone();
+            markdown
+                .state
+                .update(cx, |state, cx| state.set_text(raw.as_str(), cx));
+            settled = true;
+        }
+        if settled {
+            cx.notify();
+        }
     }
 
     pub fn synchronize_markdown(
@@ -200,24 +253,45 @@ impl AgentTimelineStore {
         source: SharedString,
         cx: &mut Context<Self>,
     ) -> MarkdownUpdate {
+        let streaming = self.streaming == Some(id);
         let Some(markdown) = self.markdown.get_mut(&(id, slot)) else {
             return MarkdownUpdate::Missing;
         };
-        if markdown.source == source {
+        let same_source = markdown.source == source;
+        if same_source && !markdown.mended {
+            return MarkdownUpdate::Unchanged;
+        }
+        let repair = streaming.then(|| mend(source.as_str())).flatten();
+        if same_source && repair.is_some() {
             return MarkdownUpdate::Unchanged;
         }
 
-        let update = if let Some(delta) = source.as_str().strip_prefix(markdown.source.as_str()) {
-            markdown
-                .state
-                .update(cx, |state, cx| state.push_str(delta, cx));
-            MarkdownUpdate::Appended
-        } else {
-            markdown
-                .state
-                .update(cx, |state, cx| state.set_text(source.as_str(), cx));
-            MarkdownUpdate::Replaced
+        // A mended state holds a display copy, so an appended delta would land
+        // behind synthetic closers: only a raw state can take the fast path.
+        let mended = repair.is_some();
+        let update = match repair {
+            Some(display) => {
+                markdown
+                    .state
+                    .update(cx, |state, cx| state.set_text(&display, cx));
+                MarkdownUpdate::Replaced
+            }
+            None => match source.as_str().strip_prefix(markdown.source.as_str()) {
+                Some(delta) if !markdown.mended => {
+                    markdown
+                        .state
+                        .update(cx, |state, cx| state.push_str(delta, cx));
+                    MarkdownUpdate::Appended
+                }
+                _ => {
+                    markdown
+                        .state
+                        .update(cx, |state, cx| state.set_text(source.as_str(), cx));
+                    MarkdownUpdate::Replaced
+                }
+            },
         };
+        markdown.mended = mended;
         markdown.source = source;
         cx.notify();
         update
@@ -244,10 +318,7 @@ impl AgentTimelineStore {
                 } else {
                     standard_markdown_extensions()
                 };
-                match cwd {
-                    Some(cwd) => base.link_rewriter(move |url| resolve_workspace_link(&cwd, url)),
-                    None => base,
-                }
+                base.link_rewriter(move |url| resolve_workspace_link(cwd.as_deref(), url))
             })
             .clone()
     }
@@ -339,6 +410,7 @@ impl AgentTimelineStore {
     }
 
     pub fn clear(&mut self, cx: &mut Context<Self>) -> bool {
+        self.streaming = None;
         if self.markdown.is_empty()
             && self.tool_content.is_empty()
             && self.expanded.is_empty()
@@ -1630,6 +1702,81 @@ fn materialize_tool_payload(payload: &AgentToolPayload) -> MaterializedToolPaylo
     }
 }
 
+/// Classify the lines of a unified patch into the timeline's diff rows. git has
+/// already decided which lines changed, so nothing is re-diffed here.
+fn materialize_patch(patch: &str) -> Vec<ToolContentRow> {
+    let mut rows = Vec::new();
+    let mut total_lines = 0;
+    for line in patch.trim_end_matches('\n').split('\n') {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        total_lines += 1;
+        if total_lines > TOOL_CONTENT_MAX_LINES {
+            continue;
+        }
+        rows.push(match line.as_bytes().first() {
+            // "\ No newline at end of file" and the hunk headers are notes
+            // about the patch rather than lines of either side.
+            Some(b'@' | b'\\') => ToolContentRow::Footer(line.to_owned().into()),
+            Some(b'+') => ToolContentRow::Diff {
+                kind: DiffLineKind::Added,
+                text: line[1..].to_owned().into(),
+            },
+            Some(b'-') => ToolContentRow::Diff {
+                kind: DiffLineKind::Removed,
+                text: line[1..].to_owned().into(),
+            },
+            _ => ToolContentRow::Diff {
+                kind: DiffLineKind::Equal,
+                text: line.strip_prefix(' ').unwrap_or(line).to_owned().into(),
+            },
+        });
+    }
+    append_line_truncation_footer(&mut rows, total_lines);
+    rows
+}
+
+/// A unified patch drawn as the monospace, gutter-marked block the timeline
+/// uses for tool diffs. `key` namespaces the element ids.
+pub fn agent_patch_block(
+    key: u64,
+    patch: &str,
+    scroll: &UniformListScrollHandle,
+    cx: &App,
+) -> impl IntoElement {
+    let rows: Arc<[ToolContentRow]> = materialize_patch(patch).into();
+    let scrollbar_handle = scroll.0.borrow().base_handle.clone();
+    let lines = uniform_list(
+        ("agent-patch-lines", key),
+        rows.len(),
+        move |range, _, cx| {
+            range
+                .filter_map(|index| {
+                    rows.get(index)
+                        .cloned()
+                        .map(|row| render_tool_content_row(key, index, row, cx))
+                })
+                .collect::<Vec<_>>()
+        },
+    )
+    .w_full()
+    .max_h(px(TOOL_CONTENT_MAX_HEIGHT))
+    .overflow_hidden()
+    .with_sizing_behavior(ListSizingBehavior::Infer)
+    .track_scroll(scroll);
+
+    div()
+        .id(("agent-patch-block", key))
+        .relative()
+        .w_full()
+        .min_h_0()
+        .max_h(px(TOOL_CONTENT_MAX_HEIGHT))
+        .overflow_hidden()
+        .border_t_1()
+        .border_color(cx.theme().border)
+        .child(lines)
+        .vertical_scrollbar(&scrollbar_handle)
+}
+
 fn append_line_truncation_footer(rows: &mut Vec<ToolContentRow>, total_lines: usize) {
     if total_lines > TOOL_CONTENT_MAX_LINES {
         rows.push(ToolContentRow::Footer(
@@ -1966,7 +2113,10 @@ fn markdown_view_with_extensions(
     }
 }
 
-fn resolve_workspace_link(cwd: &Path, url: &str) -> Option<String> {
+fn resolve_workspace_link(cwd: Option<&Path>, url: &str) -> Option<String> {
+    if url == PENDING_LINK_URL {
+        return Some(INERT_LINK_URL.to_owned());
+    }
     if url.is_empty() || url.starts_with('#') || url.starts_with("//") {
         return None;
     }
@@ -1986,7 +2136,7 @@ fn resolve_workspace_link(cwd: &Path, url: &str) -> Option<String> {
         if scheme_like {
             return None;
         }
-        cwd.join(link)
+        cwd?.join(link)
     };
     if !path.exists() {
         return None;
@@ -3018,7 +3168,7 @@ pub fn agent_pane_header(
 
 #[cfg(test)]
 mod workspace_link_tests {
-    use super::{file_url, resolve_workspace_link};
+    use super::{INERT_LINK_URL, PENDING_LINK_URL, file_url, resolve_workspace_link};
     use std::path::Path;
     use url::Url;
 
@@ -3026,12 +3176,30 @@ mod workspace_link_tests {
 
     #[test]
     fn urls_with_a_scheme_or_anchor_are_left_alone() {
-        let cwd = Path::new(CRATE_DIR);
+        let cwd = Some(Path::new(CRATE_DIR));
         assert_eq!(resolve_workspace_link(cwd, "https://zed.dev"), None);
         assert_eq!(resolve_workspace_link(cwd, "mailto:a@b.c"), None);
         assert_eq!(resolve_workspace_link(cwd, "#section"), None);
         assert_eq!(resolve_workspace_link(cwd, "//host/share"), None);
         assert_eq!(resolve_workspace_link(cwd, ""), None);
+    }
+
+    /// The half-streamed link a mend rewrites must never open anything, with or
+    /// without a working directory to resolve against.
+    #[test]
+    fn the_pending_link_sentinel_is_made_inert() {
+        for cwd in [Some(Path::new(CRATE_DIR)), None] {
+            assert_eq!(
+                resolve_workspace_link(cwd, PENDING_LINK_URL).as_deref(),
+                Some(INERT_LINK_URL)
+            );
+        }
+        assert!(INERT_LINK_URL.starts_with("data:"));
+    }
+
+    #[test]
+    fn a_relative_link_without_a_working_directory_is_left_alone() {
+        assert_eq!(resolve_workspace_link(None, "Cargo.toml"), None);
     }
 
     #[test]
@@ -3040,7 +3208,8 @@ mod workspace_link_tests {
         let expected = cwd.join("Cargo.toml");
         let absolute = expected.to_string_lossy();
         for link in ["Cargo.toml", absolute.as_ref()] {
-            let resolved = resolve_workspace_link(cwd, link).expect("existing workspace link");
+            let resolved =
+                resolve_workspace_link(Some(cwd), link).expect("existing workspace link");
             let url = Url::parse(&resolved).expect("file URL");
             assert_eq!(url.scheme(), "file");
             assert_eq!(url.to_file_path().expect("absolute file URL"), expected);
@@ -3050,7 +3219,10 @@ mod workspace_link_tests {
     #[test]
     fn a_missing_path_is_left_alone() {
         let cwd = Path::new(CRATE_DIR);
-        assert_eq!(resolve_workspace_link(cwd, "definitely-not-here.md"), None);
+        assert_eq!(
+            resolve_workspace_link(Some(cwd), "definitely-not-here.md"),
+            None
+        );
     }
 
     #[test]
@@ -3701,6 +3873,132 @@ mod tests {
                 markdown
             );
         });
+    }
+
+    /// A hanging marker is closed for the reader while the entry streams, and
+    /// the settle hands back exactly the bytes the thread holds.
+    #[gpui::test]
+    fn a_streaming_entry_renders_mended_and_settles_raw(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let store = cx.new(|_| AgentTimelineStore::default());
+        store.update(cx, |store, cx| store.set_streaming(Some(3), cx));
+        let state = store.update(cx, |store, cx| {
+            store.markdown(3, MarkdownSlot::Body, "a **partly".into(), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            state.read_with(cx, |state, _| state.source()),
+            "a **partly**"
+        );
+
+        let appended = store.update(cx, |store, cx| {
+            store.update_markdown(3, MarkdownSlot::Body, "a **partly bold".into(), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(appended, MarkdownUpdate::Replaced);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.source()),
+            "a **partly bold**"
+        );
+
+        let closed = store.update(cx, |store, cx| {
+            store.update_markdown(3, MarkdownSlot::Body, "a **partly bold** run".into(), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(closed, MarkdownUpdate::Replaced);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.source()),
+            "a **partly bold** run"
+        );
+        assert!(!store.read_with(cx, |store, _| {
+            store.markdown[&(3, MarkdownSlot::Body)].mended
+        }));
+
+        let raw = "a **partly bold** run, then *more";
+        store.update(cx, |store, cx| {
+            store.update_markdown(3, MarkdownSlot::Body, raw.into(), cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            state.read_with(cx, |state, _| state.source()),
+            "a **partly bold** run, then *more*"
+        );
+
+        store.update(cx, |store, cx| store.set_streaming(None, cx));
+        cx.run_until_parked();
+        assert_eq!(state.read_with(cx, |state, _| state.source()), raw);
+    }
+
+    /// The prefix fast path survives the mend: appends are diffed against the
+    /// raw text, so an entry that never hangs a marker never reparses.
+    #[gpui::test]
+    fn streaming_appends_without_hanging_markers_stay_incremental(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let store = cx.new(|_| AgentTimelineStore::default());
+        store.update(cx, |store, cx| store.set_streaming(Some(4), cx));
+        store.update(cx, |store, cx| {
+            store.markdown(4, MarkdownSlot::Body, "plain".into(), cx)
+        });
+
+        let appended = store.update(cx, |store, cx| {
+            store.update_markdown(4, MarkdownSlot::Body, "plain text".into(), cx)
+        });
+
+        assert_eq!(appended, MarkdownUpdate::Appended);
+        assert!(!store.read_with(cx, |store, _| {
+            store.markdown[&(4, MarkdownSlot::Body)].mended
+        }));
+    }
+
+    #[gpui::test]
+    fn a_settled_entry_is_never_mended(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let store = cx.new(|_| AgentTimelineStore::default());
+        let state = store.update(cx, |store, cx| {
+            store.markdown(5, MarkdownSlot::Body, "a **partly".into(), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(state.read_with(cx, |state, _| state.source()), "a **partly");
+
+        let update = store.update(cx, |store, cx| {
+            store.update_markdown(5, MarkdownSlot::Body, "a **partly bold".into(), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(update, MarkdownUpdate::Appended);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.source()),
+            "a **partly bold"
+        );
+    }
+
+    #[test]
+    fn a_patch_keeps_the_side_git_assigned_each_line() {
+        let rows = materialize_patch("@@ -1,2 +1,2 @@\n one\n-two\n+three\n\\ No newline\n");
+
+        assert!(matches!(rows[0], ToolContentRow::Footer(_)));
+        assert!(matches!(
+            &rows[1],
+            ToolContentRow::Diff {
+                kind: DiffLineKind::Equal,
+                text
+            } if text == "one"
+        ));
+        assert!(matches!(
+            &rows[2],
+            ToolContentRow::Diff {
+                kind: DiffLineKind::Removed,
+                text
+            } if text == "two"
+        ));
+        assert!(matches!(
+            &rows[3],
+            ToolContentRow::Diff {
+                kind: DiffLineKind::Added,
+                text
+            } if text == "three"
+        ));
+        assert!(matches!(rows[4], ToolContentRow::Footer(_)));
+        assert_eq!(rows.len(), 5);
     }
 
     #[gpui::test]

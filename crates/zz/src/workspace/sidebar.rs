@@ -259,7 +259,7 @@ impl WorkspaceSidebar {
             .flat_map(|session| &session.windows)
             .flat_map(|window| &window.panes)
             .filter(|pane| pane.kind == MuxTreePaneKind::Agent)
-            .filter_map(|pane| Some((pane.id, agent_pane_status(controller, pane.id)?)))
+            .filter_map(|pane| Some((pane.id, controller.pane_status(pane.id)?)))
             .collect()
     }
 
@@ -982,33 +982,6 @@ fn active_pane_for_split(snapshot: &MuxSnapshot, attached: Option<SessionId>) ->
         Some(TreeTarget::Pane(pane)) => Some(pane),
         Some(TreeTarget::Session(_) | TreeTarget::Window(_)) | None => None,
     }
-}
-
-/// Same bucket order as the controller's fleet rollup, one pane at a time.
-#[cfg(feature = "agent-pane")]
-fn agent_pane_status(controller: &AgentController, pane: PaneId) -> Option<AgentPaneStatus> {
-    use crate::agent::controller::AgentConnectionState;
-
-    let state = controller.pane_state(pane)?;
-    Some(if state.pending_permissions.is_empty() {
-        if state.connection == AgentConnectionState::Failed {
-            AgentPaneStatus::Failed
-        } else if state.connection.has_active_turn() {
-            AgentPaneStatus::Working
-        } else {
-            AgentPaneStatus::Idle
-        }
-    } else {
-        AgentPaneStatus::NeedsInput
-    })
-}
-
-#[cfg(not(feature = "agent-pane"))]
-const fn agent_pane_status(
-    _controller: &AgentController,
-    _pane: PaneId,
-) -> Option<AgentPaneStatus> {
-    None
 }
 
 /// Bubbled like [`MuxTreeModel::has_pending_bell`]: a collapsed host, session,

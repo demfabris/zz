@@ -48,6 +48,7 @@ use crate::{
         codex_tool_subagent, format_codex_collaboration, is_sdk_message_method,
         parse_sdk_task_event, scan_text, session_meta,
     },
+    agent::sound::AgentPaneStatus,
     agent::turn_snapshot::{self, TurnDiff, TurnTree},
     config::AgentConfig,
     user_data::platform_data_dir,
@@ -2396,6 +2397,9 @@ pub struct AgentController {
     workspace: AgentWorkspaceEnvironment,
     panes: BTreeMap<PaneId, AgentThread>,
     pending_composer: BTreeMap<PaneId, String>,
+    /// Images reclaimed from queued prompts, waiting for the pane's view to
+    /// re-attach them beside the reclaimed text.
+    pending_images: BTreeMap<PaneId, Vec<Arc<Image>>>,
     queued_prompts: BTreeMap<PaneId, VecDeque<QueuedPrompt>>,
     retained_panes: BTreeSet<PaneId>,
     runtimes: BTreeMap<PaneId, PaneRuntime>,
@@ -2438,6 +2442,7 @@ impl AgentController {
             },
             panes: BTreeMap::new(),
             pending_composer: BTreeMap::new(),
+            pending_images: BTreeMap::new(),
             queued_prompts: BTreeMap::new(),
             retained_panes: BTreeSet::new(),
             runtimes: BTreeMap::new(),
@@ -2475,9 +2480,6 @@ impl AgentController {
 
     /// Diff the pane's worktree against the base its turn started from. Git
     /// runs on the background executor; the task carries the diff back.
-    // The turn-diff surface in the pane view is the only caller, and it lands
-    // with the view phase.
-    #[allow(dead_code)]
     pub(crate) fn capture_turn_diff(
         &self,
         pane: PaneId,
@@ -2489,6 +2491,21 @@ impl AgentController {
             cx.background_executor()
                 .spawn(async move { turn_snapshot::capture_turn_diff(&cwd, &base) }),
         )
+    }
+
+    /// Which bucket one pane lands in, in the same order the fleet rollup uses.
+    /// The sidebar reads this per agent pane instead of cloning whole states.
+    pub(crate) fn pane_status(&self, pane: PaneId) -> Option<AgentPaneStatus> {
+        let thread = self.panes.get(&pane)?;
+        Some(if !thread.pending_permissions.is_empty() {
+            AgentPaneStatus::NeedsInput
+        } else if thread.connection == AgentConnectionState::Failed {
+            AgentPaneStatus::Failed
+        } else if thread.connection.has_active_turn() {
+            AgentPaneStatus::Working
+        } else {
+            AgentPaneStatus::Idle
+        })
     }
 
     /// Fold every pane's thread into the sidebar's [`AgentAttention`] rollup.
@@ -2580,6 +2597,8 @@ impl AgentController {
             self.panes.remove(&pane);
         }
         self.pending_composer
+            .retain(|pane, _| retained.contains(pane));
+        self.pending_images
             .retain(|pane, _| retained.contains(pane));
         self.queued_prompts
             .retain(|pane, _| retained.contains(pane));
@@ -2976,7 +2995,7 @@ impl AgentController {
 
     /// Hand every queued prompt back to the composer. The at-least-once rule:
     /// a prompt the user typed is either sent or visible in the draft again,
-    /// never silently dropped.
+    /// never silently dropped — images included.
     fn reclaim_queued_prompts(&mut self, pane: PaneId) -> bool {
         let Some(queue) = self.queued_prompts.remove(&pane) else {
             return false;
@@ -2984,8 +3003,24 @@ impl AgentController {
         let mut reclaimed = false;
         for prompt in queue {
             reclaimed |= self.queue_composer_text(pane, &prompt.text);
+            if !prompt.images.is_empty() {
+                self.pending_images
+                    .entry(pane)
+                    .or_default()
+                    .extend(prompt.images);
+                reclaimed = true;
+            }
         }
         reclaimed
+    }
+
+    /// Empty the pane's queue back into its composer draft on the user's ask.
+    pub(crate) fn unqueue_prompts(&mut self, pane: PaneId, cx: &mut Context<Self>) {
+        if !self.reclaim_queued_prompts(pane) {
+            return;
+        }
+        cx.emit(AgentControllerEvent::Pane { pane });
+        cx.notify();
     }
 
     /// Watch the turn for silence and park it when the agent goes quiet with
@@ -3069,6 +3104,12 @@ impl AgentController {
         self.pending_composer
             .remove(&pane)
             .filter(|text| !text.is_empty())
+    }
+
+    /// Hand back the images a reclaimed prompt carried, for the view to put in
+    /// its attachment strip again.
+    pub(crate) fn take_pending_images(&mut self, pane: PaneId) -> Vec<Arc<Image>> {
+        self.pending_images.remove(&pane).unwrap_or_default()
     }
 
     pub(crate) fn cancel(&mut self, pane: PaneId, cx: &mut Context<Self>) {
@@ -8230,6 +8271,37 @@ mod tests {
                     None,
                     "a turn the user stopped never starts the queue"
                 );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn unqueueing_returns_the_queue_with_its_attachments(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let pane = PaneId(11);
+            let controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            controller.update(cx, |controller, cx| {
+                let commands = queued_pane(controller, pane);
+                if let Some(thread) = controller.panes.get_mut(&pane) {
+                    thread.session_capabilities.images = true;
+                }
+                controller
+                    .prompt(pane, "first", Vec::new(), cx)
+                    .expect("live prompt");
+                assert_eq!(next_prompt_text(&commands).as_deref(), Some("first"));
+                controller
+                    .prompt(pane, "second", vec![attachment()], cx)
+                    .expect("queued prompt");
+
+                controller.unqueue_prompts(pane, cx);
+
+                assert_eq!(controller.queued_count(pane), 0);
+                assert_eq!(
+                    controller.take_pending_composer(pane).as_deref(),
+                    Some("second")
+                );
+                assert_eq!(controller.take_pending_images(pane).len(), 1);
+                assert!(controller.take_pending_images(pane).is_empty());
             });
         });
     }

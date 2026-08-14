@@ -158,6 +158,13 @@ release-execute target:
 run platform *args:
     @ZZ_ZIG_VERSION="{{ zig_version }}" scripts/run.sh {{ platform }} {{ args }}
 
+# The crate is its own workspace, so the build shares this checkout's target
+# directory unless CARGO_TARGET_DIR already says otherwise. `ZZ_SOCKET` picks
+# the daemon, and extra args pass through to zz-gtk, whose --help lists them.
+# Build and run the GTK4/libadwaita client against a running zz daemon.
+gtk *args:
+    @CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-{{ justfile_directory() }}/target}" cargo run --manifest-path crates/zz-gtk/Cargo.toml -- {{ args }}
+
 # Rebuild and relaunch the development app whenever workspace sources change.
 # Extra args after `--` pass through to the Cargo build.
 watch platform *args:

@@ -1,0 +1,18 @@
+# Install by hand until packaging picks this up:
+#   install -Dm644 data/sh.zzmux.zz.Gtk.desktop ~/.local/share/applications/
+#   cp -r data/icons/hicolor ~/.local/share/icons/
+#   gtk4-update-icon-cache -f -t ~/.local/share/icons/hicolor
+# The Wayland app id GTK reports comes from the application id, so this file
+# has to keep its name for the shell to match window to launcher.
+[Desktop Entry]
+Type=Application
+Name=zz
+GenericName=Terminal Multiplexer
+Comment=Attach to zz daemon sessions
+Exec=zz-gtk
+Icon=sh.zzmux.zz.Gtk
+Terminal=false
+StartupNotify=true
+StartupWMClass=sh.zzmux.zz.Gtk
+Categories=System;TerminalEmulator;
+Keywords=terminal;multiplexer;tmux;session;shell;

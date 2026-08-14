@@ -3,7 +3,10 @@
 use std::collections::HashSet;
 
 use gpui::Keystroke;
+use zz_client::ChromeKey;
 use zz_terminal::{KeyAction, KeyCode, KeyInput, Modifiers as TerminalModifiers};
+
+use crate::keymap::gpui_key_name;
 
 /// Whether a GPUI keystroke spells the given canonical tmux key.
 pub(crate) fn keystroke_is(keystroke: &Keystroke, canonical: &str) -> bool {
@@ -48,65 +51,8 @@ pub(crate) fn keystroke_is(keystroke: &Keystroke, canonical: &str) -> bool {
 /// The canonical prefix as a GPUI keystroke, so a hint can print it in the
 /// platform's own glyphs (`⌃B`, `Ctrl+B`) rather than tmux's `C-b` spelling.
 pub(crate) fn display_keystroke(canonical: &str) -> Option<Keystroke> {
-    let mut spelling = String::new();
-    let mut rest = canonical;
-    loop {
-        if let Some(tail) = rest.strip_prefix("C-") {
-            spelling.push_str("ctrl-");
-            rest = tail;
-        } else if let Some(tail) = rest.strip_prefix("M-") {
-            spelling.push_str("alt-");
-            rest = tail;
-        } else {
-            break;
-        }
-    }
-    let key = match rest {
-        " " => "space",
-        named => gpui_key_name(named).unwrap_or(named),
-    };
-    let mut characters = key.chars();
-    match (characters.next(), characters.next()) {
-        (Some(character), None) if character.is_ascii_uppercase() => {
-            spelling.push_str("shift-");
-            spelling.extend(character.to_lowercase());
-        }
-        (Some(_), _) => spelling.push_str(key),
-        (None, _) => return None,
-    }
-    Keystroke::parse(&spelling).ok()
-}
-
-fn gpui_key_name(name: &str) -> Option<&'static str> {
-    Some(match name {
-        "Enter" => "enter",
-        "Escape" => "escape",
-        "Tab" => "tab",
-        "BSpace" => "backspace",
-        "Up" => "up",
-        "Down" => "down",
-        "Left" => "left",
-        "Right" => "right",
-        "Home" => "home",
-        "End" => "end",
-        "PPage" => "pageup",
-        "NPage" => "pagedown",
-        "DC" => "delete",
-        "IC" => "insert",
-        "F1" => "f1",
-        "F2" => "f2",
-        "F3" => "f3",
-        "F4" => "f4",
-        "F5" => "f5",
-        "F6" => "f6",
-        "F7" => "f7",
-        "F8" => "f8",
-        "F9" => "f9",
-        "F10" => "f10",
-        "F11" => "f11",
-        "F12" => "f12",
-        _ => return None,
-    })
+    let key = ChromeKey::parse(canonical)?;
+    Keystroke::parse(&crate::keymap::gpui_source(&key)?).ok()
 }
 
 /// What to do with a claimed key press.

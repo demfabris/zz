@@ -33,6 +33,7 @@ use crate::{
         remove_config_key, set_chrome_preset, set_config_key,
     },
     diagnostics,
+    keymap::ChromeChord,
     mux::{
         client::MuxClient,
         hosts::{HostId, HostState},
@@ -45,6 +46,7 @@ use crate::{
     workspace::add_host,
 };
 use zz_browser::SearchProvider;
+use zz_client::{ChromeAction, UI_TABLE};
 use zz_protocol::ConfigOverrideEntry;
 use zz_terminal::{TerminalColorScheme, discover_ghostty_config};
 use zz_ui::feedback::import_configuration_file_alert;
@@ -57,7 +59,8 @@ use zz_ui::settings::{
 
 gpui::actions!(zz, [OpenSettings]);
 
-/// The chord that opens Settings.
+/// What the Settings hint prints when the chrome keymap names no chord for
+/// `open-settings`. The binding itself is data; see `zz_client::ChromeKeymap`.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) const KEYBIND: &str = "cmd-,";
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
@@ -75,7 +78,17 @@ const RELEASES_URL: &str = "https://github.com/demfabris/zz/releases";
 const ISSUES_URL: &str = "https://github.com/demfabris/zz/issues/new";
 
 pub fn init(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new(KEYBIND, OpenSettings, None)]);
+    crate::keymap::bind(cx, UI_TABLE, key_bindings);
+}
+
+fn key_bindings(chords: &[ChromeChord]) -> Vec<KeyBinding> {
+    chords
+        .iter()
+        .filter_map(|chord| match chord.action() {
+            ChromeAction::OpenSettings => Some(chord.binding(OpenSettings, None)),
+            _ => None,
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

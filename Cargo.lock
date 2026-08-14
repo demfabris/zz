@@ -10744,6 +10744,7 @@ dependencies = [
  "x11rb",
  "zz-browser",
  "zz-chrome-import",
+ "zz-client",
  "zz-daemon",
  "zz-gpui-ios",
  "zz-mux",

@@ -10,6 +10,7 @@ use gpui::{
     Styled as _, UniformListScrollHandle, Window, WindowControlArea, div, img,
     prelude::FluentBuilder as _, px, uniform_list,
 };
+use zz_client::{ChromeAction, SIDEBAR_TABLE};
 use zz_protocol::{
     Axis, CommandInvocation, MuxSnapshot, PaneId, SessionId, StatusLine, WindowId, WindowSnapshot,
 };
@@ -43,6 +44,7 @@ use zz_ui::{
 use crate::{
     agent::{AgentAttention, AgentController, AgentControllerEvent},
     config::{frame_content_corner_radius, pane_gaps, settings::SettingsView},
+    keymap::ChromeChord,
     mux::{
         client::MuxClient,
         hosts::{HostId, HostState},
@@ -86,29 +88,29 @@ gpui::actions!(
 );
 
 pub(crate) fn init(cx: &mut App) {
-    cx.bind_keys(workspace_tree_key_bindings());
+    crate::keymap::bind(cx, SIDEBAR_TABLE, workspace_tree_key_bindings);
 }
 
-fn workspace_tree_key_bindings() -> Vec<KeyBinding> {
-    vec![
-        KeyBinding::new("escape", TreeCancel, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("q", TreeCancel, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("enter", TreeConfirm, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("r", TreeRename, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new(":", TreeCommandPalette, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("down", TreeSelectDown, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("j", TreeSelectDown, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("g", TreeSelectFirst, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("home", TreeSelectFirst, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("shift-g", TreeSelectLast, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("end", TreeSelectLast, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("left", TreeSelectLeft, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("h", TreeSelectLeft, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("right", TreeSelectRight, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("l", TreeSelectRight, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("up", TreeSelectUp, Some(TREE_KEY_CONTEXT)),
-        KeyBinding::new("k", TreeSelectUp, Some(TREE_KEY_CONTEXT)),
-    ]
+fn workspace_tree_key_bindings(chords: &[ChromeChord]) -> Vec<KeyBinding> {
+    let context = Some(TREE_KEY_CONTEXT);
+    chords
+        .iter()
+        .filter_map(|chord| {
+            Some(match chord.action() {
+                ChromeAction::SidebarCancel => chord.binding(TreeCancel, context),
+                ChromeAction::SidebarConfirm => chord.binding(TreeConfirm, context),
+                ChromeAction::SidebarRename => chord.binding(TreeRename, context),
+                ChromeAction::SidebarCommandPalette => chord.binding(TreeCommandPalette, context),
+                ChromeAction::SidebarSelectUp => chord.binding(TreeSelectUp, context),
+                ChromeAction::SidebarSelectDown => chord.binding(TreeSelectDown, context),
+                ChromeAction::SidebarSelectLeft => chord.binding(TreeSelectLeft, context),
+                ChromeAction::SidebarSelectRight => chord.binding(TreeSelectRight, context),
+                ChromeAction::SidebarSelectFirst => chord.binding(TreeSelectFirst, context),
+                ChromeAction::SidebarSelectLast => chord.binding(TreeSelectLast, context),
+                _ => return None,
+            })
+        })
+        .collect()
 }
 
 pub(crate) struct SidebarReleaseFocus;
@@ -2046,7 +2048,9 @@ mod tests {
 
     #[test]
     fn plain_keys_bind_only_inside_the_focused_workspace_tree() {
-        let keymap = gpui::Keymap::new(workspace_tree_key_bindings());
+        let keymap = gpui::Keymap::new(workspace_tree_key_bindings(&crate::keymap::test_chords(
+            SIDEBAR_TABLE,
+        )));
         let tree_context =
             gpui::KeyContext::parse(TREE_KEY_CONTEXT).expect("valid workspace tree context");
         let root_context = gpui::KeyContext::parse("Root").expect("valid root context");

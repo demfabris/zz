@@ -7,6 +7,7 @@ use gpui::{
     App, Context, Div, FocusHandle, Focusable, KeyDownEvent, Keystroke, MouseButton,
     ParentElement as _, Render, Styled as _, Window, div, prelude::*, px,
 };
+use zz_client::{ChromeAction, UI_TABLE};
 use zz_protocol::{CommandInvocation, KeyBindingSnapshot};
 use zz_ui::{
     ActiveTheme as _, Colorize as _, Sizable as _,
@@ -268,6 +269,7 @@ impl Render for NewSessionView {
         let mut actions = ACTIONS.iter();
         let new_session = actions.next().expect("the new-session hint");
         let settings = actions.next().expect("the settings hint");
+        let settings_key = crate::keymap::chord_for(cx, UI_TABLE, ChromeAction::OpenSettings);
         div()
             .id("new-session-empty-state")
             .track_focus(&self.focus_handle)
@@ -316,7 +318,7 @@ impl Render for NewSessionView {
                         hint_row(
                             settings,
                             prefix.as_ref(),
-                            Keystroke::parse(settings.key).ok(),
+                            Keystroke::parse(settings_key.as_deref().unwrap_or(settings.key)).ok(),
                             false,
                             cx,
                         )

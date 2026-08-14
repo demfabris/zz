@@ -115,8 +115,8 @@ const CONTROL_ICON_WIDTH: Pixels = TITLE_BAR_HEIGHT;
 #[cfg(target_os = "windows")]
 const CONTROL_ICON_WIDTH: Pixels = px(46.);
 
-#[derive(IntoElement, Clone)]
-enum ControlIcon {
+#[derive(Clone)]
+enum ControlIconKind {
     Minimize,
     Restore,
     Maximize,
@@ -125,51 +125,74 @@ enum ControlIcon {
     },
 }
 
+#[derive(IntoElement, Clone)]
+struct ControlIcon {
+    kind: ControlIconKind,
+    scale: f32,
+}
+
 impl ControlIcon {
     fn minimize() -> Self {
-        Self::Minimize
+        Self {
+            kind: ControlIconKind::Minimize,
+            scale: 1.0,
+        }
     }
 
     fn restore() -> Self {
-        Self::Restore
+        Self {
+            kind: ControlIconKind::Restore,
+            scale: 1.0,
+        }
     }
 
     fn maximize() -> Self {
-        Self::Maximize
+        Self {
+            kind: ControlIconKind::Maximize,
+            scale: 1.0,
+        }
     }
 
     fn close(on_close_window: Option<CloseHandler>) -> Self {
-        Self::Close { on_close_window }
+        Self {
+            kind: ControlIconKind::Close { on_close_window },
+            scale: 1.0,
+        }
+    }
+
+    fn scaled(mut self, scale: f32) -> Self {
+        self.scale = scale;
+        self
     }
 
     fn id(&self) -> &'static str {
-        match self {
-            Self::Minimize => "minimize",
-            Self::Restore => "restore",
-            Self::Maximize => "maximize",
-            Self::Close { .. } => "close",
+        match &self.kind {
+            ControlIconKind::Minimize => "minimize",
+            ControlIconKind::Restore => "restore",
+            ControlIconKind::Maximize => "maximize",
+            ControlIconKind::Close { .. } => "close",
         }
     }
 
     fn icon(&self) -> IconName {
-        match self {
-            Self::Minimize => IconName::WindowMinimize,
-            Self::Restore => IconName::WindowRestore,
-            Self::Maximize => IconName::WindowMaximize,
-            Self::Close { .. } => IconName::WindowClose,
+        match &self.kind {
+            ControlIconKind::Minimize => IconName::WindowMinimize,
+            ControlIconKind::Restore => IconName::WindowRestore,
+            ControlIconKind::Maximize => IconName::WindowMaximize,
+            ControlIconKind::Close { .. } => IconName::WindowClose,
         }
     }
 
     fn window_control_area(&self) -> WindowControlArea {
-        match self {
-            Self::Minimize => WindowControlArea::Min,
-            Self::Restore | Self::Maximize => WindowControlArea::Max,
-            Self::Close { .. } => WindowControlArea::Close,
+        match &self.kind {
+            ControlIconKind::Minimize => WindowControlArea::Min,
+            ControlIconKind::Restore | ControlIconKind::Maximize => WindowControlArea::Max,
+            ControlIconKind::Close { .. } => WindowControlArea::Close,
         }
     }
 
     fn is_close(&self) -> bool {
-        matches!(self, Self::Close { .. })
+        matches!(&self.kind, ControlIconKind::Close { .. })
     }
 
     fn hover_fg(&self, cx: &App) -> Hsla {
@@ -209,15 +232,15 @@ impl RenderOnce for ControlIcon {
         let hover_bg = self.hover_bg(cx);
         let active_bg = self.active_bg(cx);
         let icon = self.clone();
-        let on_close_window = match &self {
-            Self::Close { on_close_window } => on_close_window.clone(),
+        let on_close_window = match &self.kind {
+            ControlIconKind::Close { on_close_window } => on_close_window.clone(),
             _ => None,
         };
 
         div()
             .id(self.id())
             .flex()
-            .w(CONTROL_ICON_WIDTH)
+            .w(CONTROL_ICON_WIDTH * self.scale)
             .h_full()
             .flex_shrink_0()
             .justify_center()
@@ -236,10 +259,12 @@ impl RenderOnce for ControlIcon {
                 })
                 .on_click(move |_, window, cx| {
                     cx.stop_propagation();
-                    match icon {
-                        Self::Minimize => window.minimize_window(),
-                        Self::Restore | Self::Maximize => window.zoom_window(),
-                        Self::Close { .. } => {
+                    match icon.kind {
+                        ControlIconKind::Minimize => window.minimize_window(),
+                        ControlIconKind::Restore | ControlIconKind::Maximize => {
+                            window.zoom_window();
+                        }
+                        ControlIconKind::Close { .. } => {
                             if let Some(f) = on_close_window.clone() {
                                 f(&ClickEvent::default(), window, cx);
                             } else {
@@ -249,16 +274,26 @@ impl RenderOnce for ControlIcon {
                     }
                 })
             })
-            .child(Icon::new(self.icon()).small())
+            .child(Icon::new(self.icon()).with_size(px(14.0) * self.scale))
     }
 }
 
 /// The trailing minimize / maximize / close cluster. Empty wherever
 /// [`draws_window_controls`] is false. Mountable on its own, without a
 /// [`TitleBar`].
-#[derive(IntoElement, Default)]
+#[derive(IntoElement)]
 pub struct WindowControls {
     on_close_window: Option<CloseHandler>,
+    scale: f32,
+}
+
+impl Default for WindowControls {
+    fn default() -> Self {
+        Self {
+            on_close_window: None,
+            scale: 1.0,
+        }
+    }
 }
 
 impl WindowControls {
@@ -280,6 +315,12 @@ impl WindowControls {
         }
         self
     }
+
+    #[must_use]
+    pub fn scale(mut self, scale: f32) -> Self {
+        self.scale = scale.max(0.1);
+        self
+    }
 }
 
 impl RenderOnce for WindowControls {
@@ -293,13 +334,13 @@ impl RenderOnce for WindowControls {
             .items_center()
             .flex_shrink_0()
             .h_full()
-            .child(ControlIcon::minimize())
+            .child(ControlIcon::minimize().scaled(self.scale))
             .child(if window.is_maximized() {
-                ControlIcon::restore()
+                ControlIcon::restore().scaled(self.scale)
             } else {
-                ControlIcon::maximize()
+                ControlIcon::maximize().scaled(self.scale)
             })
-            .child(ControlIcon::close(self.on_close_window))
+            .child(ControlIcon::close(self.on_close_window).scaled(self.scale))
     }
 }
 
@@ -394,6 +435,7 @@ impl RenderOnce for TitleBar {
                 )
                 .child(WindowControls {
                     on_close_window: self.on_close_window,
+                    scale: 1.0,
                 }),
         )
     }

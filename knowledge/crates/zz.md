@@ -96,7 +96,7 @@ Browser, Terminal, Hosts, System, About:
 |---------|----------|
 | Interface | Theme (`theme-mode`, transient UI zoom, and macOS app-icon pickers), Chroma Colors (presets and `chrome-*` colors), Tweaks (`animations`, `widget-corner-radius`, window blur, and Linux `use-system-titlebar`) |
 | Editor | Editor-pane typography and display controls, when compiled in |
-| Panes | Layout (`pane-gaps`, `pane-margin`, `pane-corner-radius`), Frame (`pane-border-width`); gapped panes and panorama carry bounded drop shadows |
+| Panes | Layout (`pane-gaps`, `pane-margin`, `pane-corner-radius`), Frame (`pane-border-width`); gapped panes and panorama carry subtle inset surface rings |
 | Multiplexer | Full-file `zz/mux.conf` editor without line numbers, 12px text, Save, and tmux import |
 | Browser | Browser-local shortcuts, beginning with the element-selector hotkey |
 | Terminal | Structured terminal appearance controls with effective values, provenance, palette swatches, and Reset |
@@ -288,9 +288,9 @@ built:
 `div()` tree. Flush layouts use draggable 1px split-owned separators; the active pane colors only
 its half of each adjacent segment with a washed foreground accent, including the projected edge at
 nested T-junctions. Gapped layouts use the configured border width around each pane, replacing the
-active pane's neutral border color with the same wash. Their single drop shadow paints before the
-pane background and uses one quarter of the configured gap for both offset and blur, so its tail
-stays inside the gutter. `PaneChrome::dimmed` still fades inactive panes behind a scrim
+active pane's neutral border color with the same wash. Their half-pixel surface ring matches the
+Settings stack and paints before the pane background without a directional tail.
+`PaneChrome::dimmed` still fades inactive panes behind a scrim
 (`INACTIVE_PANE_FADE` = 0.3 toward the opaque window background).
 The scrim sits above pane content and below overlays, so `SYNC`, the waiting placeholder, and the
 `display-panes` card keep full contrast. Divider drags preview the ratio locally and commit
@@ -325,13 +325,14 @@ gates the rest of GPUI's interface motion and the custom scrollbar fade.
 
 The overview uses the configured pane surface rules. With pane gaps disabled, window groups and
 their panes touch with no reserved slot. Each pane stays square, paints the full configured border,
-and keeps a bounded drop shadow. With gaps enabled, group spacing follows `pane-margin`, while pane
-borders, radii, and shadows keep their normal settings. `AppShell` paints one
+and keeps the same subtle surface ring. With gaps enabled, group spacing follows `pane-margin`,
+while pane borders, radii, and shadows keep their normal settings. `AppShell` paints one
 `chrome_background` tint across the full drawable while overview gap and corner helpers stay
 transparent. Pane content remains opaque during the slide animation. The platform's active titlebar
-or native-control clearance stays mounted above a 32px panorama inset; the sidebar, overview title,
-pane count, and key legend stay out of the content tree. Each close control appears only while its
-pane is hovered, keeps a 40px hit target around a 22px surface, and uses `widget-corner-radius`.
+or native-control clearance stays mounted at the configured physical UI scale above a 32px
+panorama inset; only the pane canvas follows the overview zoom. The sidebar, overview title, pane
+count, and key legend stay out of the content tree. Each close control appears only while its pane
+is hovered, keeps a 40px hit target around a 22px surface, and uses `widget-corner-radius`.
 
 Terminal geometry stays frozen for the full overview lifetime, preserving each PTY's rows and
 columns. `MuxClient` asks the daemon for best-effort live terminal previews only while the overview

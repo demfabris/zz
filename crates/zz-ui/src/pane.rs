@@ -1,4 +1,4 @@
-use crate::{ActiveTheme as _, Colorize as _, tag::Tag};
+use crate::{ActiveTheme as _, Colorize as _, surface_ring, tag::Tag};
 use gpui::{
     AnyElement, App, BoxShadow, Corners, CursorStyle, ElementId, FontWeight, Hsla, IntoElement,
     ParentElement as _, Pixels, SharedString, Stateful, Styled as _, div, point, prelude::*, px,
@@ -18,7 +18,7 @@ pub struct PaneChrome {
     pub border_width: Pixels,
     pub border_color: Hsla,
     pub gap_background: Hsla,
-    pub shadow_extent: Pixels,
+    pub shadow_scale: Option<f32>,
     pub dimmed: bool,
 }
 
@@ -29,14 +29,14 @@ impl PaneChrome {
         border_width: Pixels,
         border_color: Hsla,
         gap_background: Hsla,
-        shadow_extent: Pixels,
+        shadow_scale: Option<f32>,
     ) -> Self {
         Self {
             radii,
             border_width,
             border_color,
             gap_background,
-            shadow_extent,
+            shadow_scale,
             dimmed: false,
         }
     }
@@ -63,6 +63,8 @@ pub fn pane_surface(
         .relative()
         .flex()
         .size_full()
+        .min_w_0()
+        .min_h_0()
         .children(pane_corner_notches(chrome))
         .child(
             div()
@@ -70,6 +72,8 @@ pub fn pane_surface(
                 .relative()
                 .flex()
                 .size_full()
+                .min_w_0()
+                .min_h_0()
                 .overflow_hidden()
                 .rounded_tl(chrome.radii.top_left)
                 .rounded_tr(chrome.radii.top_right)
@@ -78,33 +82,44 @@ pub fn pane_surface(
                 .bg(cx.theme().background.opaque())
                 .border(chrome.border_width)
                 .border_color(chrome.border_color)
-                .when(cx.theme().shadow, |surface| {
-                    surface.shadow(pane_surface_shadow_style(
-                        chrome.shadow_extent,
-                        cx.theme().scrim,
-                    ))
-                })
                 .child(content)
                 .when(chrome.dimmed, |surface| {
                     surface.child(pane_inactive_scrim(chrome.radii, cx))
                 })
                 .children(overlays),
         )
+        .children(pane_surface_shadow(chrome, cx))
 }
 
-fn pane_surface_shadow_style(gap: Pixels, scrim: Hsla) -> Vec<BoxShadow> {
-    let gap = gap.max(Pixels::ZERO);
-    if gap <= Pixels::ZERO {
-        return Vec::new();
+fn pane_surface_shadow(chrome: PaneChrome, cx: &App) -> Option<gpui::Div> {
+    let shadows = pane_surface_shadow_style(chrome.shadow_scale, cx);
+    if !cx.theme().shadow || shadows.is_empty() {
+        return None;
     }
-    let depth = gap * 0.25;
-    vec![BoxShadow {
-        color: scrim,
-        offset: point(Pixels::ZERO, depth),
-        blur_radius: depth,
-        spread_radius: Pixels::ZERO,
-        inset: false,
-    }]
+    Some(
+        div()
+            .absolute()
+            .inset_0()
+            .rounded_tl(chrome.radii.top_left)
+            .rounded_tr(chrome.radii.top_right)
+            .rounded_bl(chrome.radii.bottom_left)
+            .rounded_br(chrome.radii.bottom_right)
+            .shadow(shadows),
+    )
+}
+
+fn pane_surface_shadow_style(scale: Option<f32>, cx: &App) -> Vec<BoxShadow> {
+    let Some(scale) = scale.filter(|scale| *scale > 0.0) else {
+        return Vec::new();
+    };
+    let mut shadows = surface_ring(cx);
+    for shadow in &mut shadows {
+        shadow.offset.x *= scale;
+        shadow.offset.y *= scale;
+        shadow.blur_radius *= scale;
+        shadow.spread_radius *= scale;
+    }
+    shadows
 }
 
 fn pane_corner_notches(chrome: PaneChrome) -> Option<gpui::Div> {
@@ -357,6 +372,8 @@ pub fn pane_split_surface(
     let first = div()
         .flex()
         .flex_none()
+        .min_w_0()
+        .min_h_0()
         .when(
             mode == PaneSplitMode::Separators,
             gpui::Styled::overflow_hidden,
@@ -439,6 +456,8 @@ pub fn pane_split_surface(
         .relative()
         .flex()
         .size_full()
+        .min_w_0()
+        .min_h_0()
         .when(
             mode == PaneSplitMode::Separators,
             gpui::Styled::overflow_hidden,
@@ -465,6 +484,8 @@ pub fn pane_split_surface(
             div()
                 .flex()
                 .flex_1()
+                .min_w_0()
+                .min_h_0()
                 .when(
                     mode == PaneSplitMode::Separators,
                     gpui::Styled::overflow_hidden,
@@ -677,30 +698,21 @@ mod tests {
     use super::*;
 
     #[gpui::test]
-    fn pane_surface_shadow_is_a_bounded_drop_shadow(cx: &mut gpui::TestAppContext) {
+    fn pane_surface_shadow_stays_inside_the_pane_curve(cx: &mut gpui::TestAppContext) {
         cx.update(crate::init);
         cx.update(|cx| {
-            let scrim = cx.theme().scrim;
-            assert!(pane_surface_shadow_style(Pixels::ZERO, scrim).is_empty());
+            assert!(pane_surface_shadow_style(None, cx).is_empty());
+            assert!(pane_surface_shadow_style(Some(0.0), cx).is_empty());
 
-            let shadow = pane_surface_shadow_style(px(8.0), scrim);
-            let shadow = &shadow[0];
+            let expected = surface_ring(cx);
+            assert_eq!(pane_surface_shadow_style(Some(1.0), cx), expected);
+            assert!(expected[0].inset);
 
-            assert!(!shadow.inset);
-            assert_eq!(shadow.color, scrim);
-            assert_eq!(shadow.offset, point(Pixels::ZERO, px(2.0)));
-            assert_eq!(shadow.blur_radius, px(2.0));
-            assert_eq!(shadow.spread_radius, Pixels::ZERO);
-            assert!(
-                f32::from(shadow.blur_radius) * 3.0
-                    + f32::from(shadow.offset.y)
-                    + f32::from(shadow.spread_radius)
-                    <= 8.0
-            );
-
-            let scaled = pane_surface_shadow_style(px(4.0), scrim);
-            assert_eq!(scaled[0].offset.y, shadow.offset.y * 0.5);
-            assert_eq!(scaled[0].blur_radius, shadow.blur_radius * 0.5);
+            let scaled = pane_surface_shadow_style(Some(2.0), cx);
+            assert_eq!(scaled[0].offset.x, expected[0].offset.x * 2.0);
+            assert_eq!(scaled[0].offset.y, expected[0].offset.y * 2.0);
+            assert_eq!(scaled[0].blur_radius, expected[0].blur_radius * 2.0);
+            assert_eq!(scaled[0].spread_radius, expected[0].spread_radius * 2.0);
         });
     }
 

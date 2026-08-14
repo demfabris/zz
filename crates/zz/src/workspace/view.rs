@@ -10,7 +10,7 @@ use std::{
 
 use gpui::{
     Animation, AnimationExt as _, AnyElement, AnyView, AnyWindowHandle, App, Bounds, Context,
-    Corners, CursorStyle, DragMoveEvent, Entity, EntityId, EventEmitter, FocusHandle, IntoElement,
+    CursorStyle, DragMoveEvent, Entity, EntityId, EventEmitter, FocusHandle, IntoElement,
     KeyUpEvent, Keystroke, MouseButton, MouseExitEvent, MouseUpEvent, Pixels, Point, Render, Size,
     StyleRefinement, Window, div, ease_out_quint, prelude::*, px, size,
 };
@@ -46,8 +46,8 @@ use super::{
     overview::{
         OVERVIEW_CLOSE_DURATION, OVERVIEW_INSERT_KEY_CONTEXT, OVERVIEW_NORMAL_KEY_CONTEXT,
         OVERVIEW_OPEN_DURATION, OverviewDirection, OverviewGrid, interpolate_bounds,
-        next_overview_pane, overview_available, overview_edge_bounds, overview_titlebar_height,
-        overview_zoom,
+        next_overview_pane, overview_available, overview_edge_bounds, overview_metric_scale,
+        overview_titlebar_height, overview_zoom,
     },
     sidebar::{
         ChromeMode, SidebarModeChanged, SidebarReleaseFocus, SidebarRouteChanged, WorkspaceRoute,
@@ -92,7 +92,6 @@ const OVERVIEW_CLOSE_TARGET_SIZE: f32 = 40.0;
 const OVERVIEW_CLOSE_VISUAL_SIZE: f32 = 22.0;
 const OVERVIEW_CLOSE_ICON_SIZE: f32 = 10.0;
 const OVERVIEW_OVERLAY_INSET: f32 = 8.0;
-const OVERVIEW_FLUSH_SHADOW_EXTENT: f32 = 8.0;
 const OVERVIEW_SPRING_SETTLING: f32 = 8.0;
 
 gpui::actions!(zz, [ClosePane]);
@@ -648,15 +647,6 @@ fn overview_group_progress(progress: f32, index: usize, home: bool) -> f32 {
     }
     let delay = (index as f32 * 0.025).min(0.125);
     ((progress - delay) / (1.0 - delay)).clamp(0.0, 1.0)
-}
-
-fn scaled_pane_radii(radii: Corners<Pixels>, scale: f32) -> Corners<Pixels> {
-    Corners {
-        top_left: radii.top_left * scale,
-        top_right: radii.top_right * scale,
-        bottom_right: radii.bottom_right * scale,
-        bottom_left: radii.bottom_left * scale,
-    }
 }
 
 fn overview_close_radius(widget_radius: Pixels, scale: f32) -> Pixels {
@@ -1358,7 +1348,7 @@ impl AppView {
             .unwrap_or_default();
         let mut viewport = window.viewport_size();
         viewport.height = (viewport.height
-            - overview_titlebar_height(self.sidebar.read(cx).mode(), window))
+            - overview_titlebar_height(self.sidebar.read(cx).mode(), window, cx))
         .max(px(1.0));
         let physical_viewport = size(
             viewport.width * window.zoom(),
@@ -1433,7 +1423,7 @@ impl AppView {
             return Vec::new();
         };
         let focused = snapshot.focused_window_for(session);
-        let titlebar_height = overview_titlebar_height(self.sidebar.read(cx).mode(), window);
+        let titlebar_height = overview_titlebar_height(self.sidebar.read(cx).mode(), window, cx);
         let (grid, _, _) = window_overview_grid(&session.windows, window, titlebar_height, cx);
         session
             .windows
@@ -2499,7 +2489,7 @@ impl AppView {
             .expect("overview state exists while rendering")
             .clone();
         let viewport = window.viewport_size();
-        let titlebar_height = overview_titlebar_height(self.sidebar.read(cx).mode(), window);
+        let titlebar_height = overview_titlebar_height(self.sidebar.read(cx).mode(), window, cx);
         let (grid, metric_scale, group_gap) =
             window_overview_grid(windows, window, titlebar_height, cx);
         let source = Bounds::new(
@@ -2614,8 +2604,7 @@ impl AppView {
                         .as_ref()
                         .map(|overview| overview.selected)
                 });
-                let radii =
-                    scaled_pane_radii(config::pane_content_radii(cx, corners), geometry_scale);
+                let radii = config::pane_content_radii(cx, corners);
                 let gap_background = if panorama {
                     cx.theme().transparent
                 } else {
@@ -2699,51 +2688,63 @@ impl AppView {
                     let close_radius =
                         overview_close_radius(config::widget_corner_radius(cx), geometry_scale);
                     status_tags.push(
-                        Button::new(("window-overview-pane-close", pane_id.0))
-                            .text()
+                        div()
+                            .id(("window-overview-pane-close-target", pane_id.0))
                             .size(px(OVERVIEW_CLOSE_TARGET_SIZE * geometry_scale))
-                            .group(close_group.clone())
                             .invisible()
                             .group_hover(pane_hover_group.clone(), gpui::Styled::visible)
-                            .cursor_pointer()
-                            .child(
-                                div().size_full().flex().items_start().justify_end().child(
-                                    div()
-                                        .id(("window-overview-pane-close-visual", pane_id.0))
-                                        .debug_selector(move || {
-                                            format!(
-                                                "window-overview-pane-close-visual-{}",
-                                                pane_id.0
-                                            )
-                                        })
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .size(px(OVERVIEW_CLOSE_VISUAL_SIZE * geometry_scale))
-                                        .rounded(close_radius)
-                                        .border(px(1.0) * geometry_scale)
-                                        .border_color(cx.theme().border.subtle())
-                                        .bg(close_fill)
-                                        .group_hover(close_group, move |surface| {
-                                            surface.bg(close_fill.hover())
-                                        })
-                                        .text_color(cx.theme().foreground.muted())
-                                        .child(Icon::new(IconName::Close).with_size(px(
-                                            OVERVIEW_CLOSE_ICON_SIZE * geometry_scale,
-                                        ))),
-                                ),
-                            )
-                            .tooltip("Close pane")
-                            .tab_stop(false)
+                            .hover(gpui::Styled::visible)
                             .occlude()
                             .debug_selector(move || {
                                 format!("window-overview-pane-close-{}", pane_id.0)
                             })
-                            .on_click(move |_, _, cx| {
-                                cx.stop_propagation();
-                                mux.read(cx)
-                                    .execute(kill_target_command(TreeTarget::Pane(pane_id)));
-                            })
+                            .child(
+                                Button::new(("window-overview-pane-close", pane_id.0))
+                                    .text()
+                                    .size_full()
+                                    .group(close_group.clone())
+                                    .cursor_pointer()
+                                    .child(
+                                        div().size_full().flex().items_start().justify_end().child(
+                                            div()
+                                                .id((
+                                                    "window-overview-pane-close-visual",
+                                                    pane_id.0,
+                                                ))
+                                                .debug_selector(move || {
+                                                    format!(
+                                                        "window-overview-pane-close-visual-{}",
+                                                        pane_id.0
+                                                    )
+                                                })
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .size(px(
+                                                    OVERVIEW_CLOSE_VISUAL_SIZE * geometry_scale
+                                                ))
+                                                .rounded(close_radius)
+                                                .border(px(1.0) * geometry_scale)
+                                                .border_color(cx.theme().border.subtle())
+                                                .bg(close_fill)
+                                                .group_hover(close_group, move |surface| {
+                                                    surface.bg(close_fill.hover())
+                                                })
+                                                .text_color(cx.theme().foreground.muted())
+                                                .child(Icon::new(IconName::Close).with_size(px(
+                                                    OVERVIEW_CLOSE_ICON_SIZE * geometry_scale,
+                                                ))),
+                                        ),
+                                    )
+                                    .tooltip("Close pane")
+                                    .tab_stop(false)
+                                    .on_click(move |_, _, cx| {
+                                        cx.stop_propagation();
+                                        mux.read(cx).execute(kill_target_command(
+                                            TreeTarget::Pane(pane_id),
+                                        ));
+                                    }),
+                            )
                             .into_any_element(),
                     );
                 }
@@ -2799,12 +2800,7 @@ impl AppView {
                 } else {
                     config::pane_border_width(cx)
                 } * geometry_scale;
-                let pane_gap = config::pane_margin(cx) * geometry_scale;
-                let shadow_extent = if panorama && !config::pane_gaps(cx) {
-                    px(OVERVIEW_FLUSH_SHADOW_EXTENT * geometry_scale)
-                } else {
-                    pane_gap
-                };
+                let shadow_scale = (panorama || config::pane_gaps(cx)).then_some(geometry_scale);
                 let surface = pane_surface(
                     ("mux-pane", pane_id.0),
                     content,
@@ -2818,7 +2814,7 @@ impl AppView {
                             cx.theme().border
                         },
                         gap_background,
-                        shadow_extent,
+                        shadow_scale,
                     )
                     .dimmed(surface_dimmed),
                     cx,
@@ -3502,7 +3498,7 @@ fn window_overview_grid(
         viewport.width * window.zoom(),
         viewport.height * window.zoom(),
     );
-    let metric_scale = UiZoom::get(cx) / window.zoom();
+    let metric_scale = overview_metric_scale(UiZoom::get(cx), window.zoom());
     let pane_gap = config::pane_margin(cx) * metric_scale;
     let group_gap = if config::pane_gaps(cx) {
         pane_split_slot(pane_gap, metric_scale)
@@ -4434,6 +4430,18 @@ mod tests {
         assert!(f32::from(flush_group_gap).abs() < 0.1);
         assert!(f32::from(flush_pane_gap).abs() < 0.1);
         assert!(cx.debug_bounds("window-overview-separator-0").is_none());
+        let flush_browser_hover = point(
+            (flush_browser.origin.x + flush_browser.size.width / 2.0) * overview_zoom,
+            (flush_browser.origin.y + flush_browser.size.height / 2.0) * overview_zoom,
+        );
+        cx.simulate_mouse_move(
+            flush_browser_hover,
+            None::<MouseButton>,
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
         let flush_close_visual = cx
             .debug_bounds("window-overview-pane-close-visual-3")
             .expect("flush browser close visual");
@@ -4474,6 +4482,14 @@ mod tests {
             .expect("spaced second terminal");
         let browser_bounds = cx.debug_bounds("mux-pane-3").expect("spaced browser");
         let physical_zoom = cx.update(|window, _| window.zoom());
+        let browser_hover = point(
+            (browser_bounds.origin.x + browser_bounds.size.width / 2.0) * physical_zoom,
+            (browser_bounds.origin.y + browser_bounds.size.height / 2.0) * physical_zoom,
+        );
+        cx.simulate_mouse_move(browser_hover, None::<MouseButton>, Modifiers::default());
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
         assert!(close(
             (other_spaced.origin.x - active_spaced.right()) * physical_zoom,
             px(9.0),
@@ -4506,13 +4522,6 @@ mod tests {
             }),
             (OverviewInputMode::Normal, terminal)
         );
-        for selector in [
-            "window-overview-pane-close-0",
-            "window-overview-pane-close-2",
-            "window-overview-pane-close-3",
-        ] {
-            assert!(cx.debug_bounds(selector).is_some());
-        }
         let close_browser = cx
             .debug_bounds("window-overview-pane-close-3")
             .expect("browser close control");
@@ -4561,6 +4570,13 @@ mod tests {
             (close_browser.bottom() - px(1.0)) * physical_zoom,
         );
         cx.simulate_mouse_move(close_browser, None::<MouseButton>, Modifiers::default());
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert!(
+            cx.debug_bounds("window-overview-pane-close-3").is_some(),
+            "close control must keep its own hover alive"
+        );
         cx.simulate_mouse_down(close_browser, MouseButton::Left, Modifiers::default());
         cx.simulate_mouse_up(close_browser, MouseButton::Left, Modifiers::default());
         assert_eq!(

@@ -90,7 +90,7 @@ engine), one browser-local hotkey, and six chrome colors.**
 | `auto-restart-stale-daemon` | `false` | `true` or `false` | Whether a protocol-mismatched local daemon is terminated and replaced on connect. Off by default because it ends every running session |
 | `experimental-agent-pane` | `false` | `true` or `false` | Whether new Agent panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind agent` |
 | `experimental-editor-pane` | `false` | `true` or `false` | Whether new Editor panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind editor` |
-| `pane-gaps` | `false` | `true` or `false` | Whether panes use the gapped border, radius, drop shadow, and divider treatment |
+| `pane-gaps` | `false` | `true` or `false` | Whether panes use the gapped border, radius, surface ring, and divider treatment |
 | `pane-margin` | `6` | `0..=32` | Inset around each pane, on every platform; applies only with `pane-gaps` |
 | `pane-corner-radius` | `13.5` | `0..=32` | All four corners of every pane, on every platform; applies only with `pane-gaps` |
 | `pane-border-width` | `1` | `0..=8` | Border width for gapped panes and flush panorama panes; `0` disables the border |
@@ -275,17 +275,17 @@ resolve to `0`, and split nodes retain their neutral 1px hairline. The active pa
 half of each adjacent separator with a washed foreground accent; nested T-junctions limit the
 segment to the edge the pane touches. Panorama uses a separate flush presentation. It reads the
 configured `pane-border-width`, squares every pane, removes the split slot, and paints each pane's
-full frame. The active frame uses the same washed accent. Panorama also keeps a bounded pane shadow
-in this mode. With
+full frame. The active frame uses the same washed accent. Panorama also keeps the pane's subtle
+surface ring in this mode. With
 `pane-gaps = true` every value applies exactly as configured, defaults included . a 6px margin and a
 13.5px radius, the window's own corner, so a maximized grid reads as one rounded surface. There is
 no second tier of gapped defaults: the number Settings shows is the number the panes use, which is
 why the disabled margin and radius rows stay honest. The border uses `pane-border-width` and the theme
 border color; the active pane keeps that exact width and replaces the color with a washed foreground
-accent. A theme-derived drop shadow paints before the pane background. Its offset and blur each use
-one quarter of the configured gap, which keeps the tail inside that gap and leaves the chrome tint
-visible beneath it. Borderless gapped panes keep the shadow. The pane surface still clips terminal,
-browser, Agent, and Editor content. This treatment is built in; the retired `pane-shadow` key
+accent. A theme-derived half-pixel inset ring follows the pane's exact curve, matching the Settings
+stack edge without painting outside the pane. Borderless gapped panes keep the ring. Panorama leaves
+the configured radius in pane space so the frame and terminal, browser, Agent, or Editor content
+shrink through the same curve. This treatment is built in; the retired `pane-shadow` key
 produces the normal unsupported-key diagnostic.
 Split divider visuals disappear in this mode because the gap is the separator, but the unchanged
 16px drag target still resizes the split.
@@ -563,7 +563,7 @@ window-background-blur = true
 # Set every interface transition to its static state.
 animations = false
 
-# The toggle uses a 6px margin, 13.5px radius, 1px border, and drop shadow.
+# The toggle uses a 6px margin, 13.5px radius, 1px border, and surface ring.
 pane-gaps = true
 
 # Optional explicit chrome overrides

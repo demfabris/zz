@@ -7,7 +7,7 @@ use zz_ui::navigation::{
     workspace_titlebar_strip,
 };
 use zz_ui::shell::{app_shell_surface, app_titlebar_strip};
-use zz_ui::{ActiveTheme as _, Root, WindowControls, draws_window_controls};
+use zz_ui::{ActiveTheme as _, Root, TITLE_BAR_HEIGHT, WindowControls, draws_window_controls};
 
 #[cfg(target_os = "macos")]
 use crate::macos_app::{CloseWindow, Minimize, Zoom};
@@ -81,14 +81,16 @@ impl AppShell {
         cx.stop_propagation();
     }
 
-    fn window_controls(&self) -> WindowControls {
+    fn window_controls(&self, scale: f32) -> WindowControls {
         let close_controller = self.controller.clone();
         let close_agent_controller = self.agent_controller.clone();
-        WindowControls::new().on_close_window(move |_, window, cx| {
-            if request_window_close(&close_controller, &close_agent_controller, window, cx) {
-                window.remove_window();
-            }
-        })
+        WindowControls::new()
+            .scale(scale)
+            .on_close_window(move |_, window, cx| {
+                if request_window_close(&close_controller, &close_agent_controller, window, cx) {
+                    window.remove_window();
+                }
+            })
     }
 
     fn render_control_strip(
@@ -97,21 +99,23 @@ impl AppShell {
         cx: &mut App,
         force: bool,
         paint_background: bool,
+        scale: f32,
     ) -> Option<AnyElement> {
         let draws_controls = draws_window_controls(window);
         (draws_controls || force).then(|| {
             let title_corners = WindowCorners::for_window(window).top();
             let controls = if draws_controls {
-                self.window_controls().into_any_element()
+                self.window_controls(scale).into_any_element()
             } else {
                 div().into_any_element()
             };
             let strip = app_titlebar_strip("app-titlebar", controls)
+                .h(TITLE_BAR_HEIGHT * scale)
                 .when(paint_background, |strip| {
                     strip.bg(crate::theme::chrome_background(cx))
                 })
                 .when(title_corners.top_right(), |strip| {
-                    strip.rounded_tr(frame_content_corner_radius(cx))
+                    strip.rounded_tr(frame_content_corner_radius(cx) * scale)
                 });
             if crate::profile::profile(cx).fixed_window {
                 strip.into_any_element()
@@ -141,7 +145,7 @@ impl AppShell {
             .child(status)
             .map(|cluster| {
                 if draws_window_controls(window) {
-                    cluster.child(self.window_controls())
+                    cluster.child(self.window_controls(1.0))
                 } else {
                     cluster.pr(px(
                         WORKSPACE_TREE_CONTENT_INSET + WORKSPACE_TREE_ACTION_INSET
@@ -197,25 +201,24 @@ impl Render for AppShell {
             (sidebar.route(), sidebar.mode())
         };
         let overview_open = self.workspace.read(cx).window_overview_open();
-        let overview_titlebar = (overview_open && overview_titlebar_height(mode, window) > px(0.0))
-            .then(|| match mode {
-                ChromeMode::Sidebar => self
-                    .render_control_strip(window, cx, true, false)
-                    .expect("overview titlebar policy requested a control strip"),
-                ChromeMode::Titlebar => self.render_workspace_strip(window, cx, false),
-            });
+        let overview_titlebar_height = overview_titlebar_height(mode, window, cx);
+        let overview_titlebar = (overview_open && overview_titlebar_height > px(0.0)).then(|| {
+            let scale = f32::from(overview_titlebar_height) / f32::from(TITLE_BAR_HEIGHT);
+            self.render_control_strip(window, cx, true, false, scale)
+                .expect("overview titlebar policy requested a control strip")
+        });
         let (sidebar, titlebar) = if overview_open {
             (div().into_any_element(), None)
         } else {
             match route {
                 WorkspaceRoute::Settings => (
                     self.sidebar.clone().into_any_element(),
-                    self.render_control_strip(window, cx, false, true),
+                    self.render_control_strip(window, cx, false, true, 1.0),
                 ),
                 WorkspaceRoute::App => match mode {
                     ChromeMode::Sidebar => (
                         self.sidebar.clone().into_any_element(),
-                        self.render_control_strip(window, cx, false, true),
+                        self.render_control_strip(window, cx, false, true, 1.0),
                     ),
                     ChromeMode::Titlebar => (
                         div().into_any_element(),
@@ -242,11 +245,7 @@ impl Render for AppShell {
         });
         let overlays = overview_titlebar
             .into_iter()
-            .chain(
-                show_fps
-                    .then(|| app_fps_overlay(self.app_fps_meter.clone()).into_any_element())
-                    .into_iter(),
-            )
+            .chain(show_fps.then(|| app_fps_overlay(self.app_fps_meter.clone()).into_any_element()))
             .chain(slideover)
             .chain(dialog_layer.into_iter().map(IntoElement::into_any_element))
             .chain(

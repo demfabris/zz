@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use gpui::{App, Bounds, KeyBinding, MIN_WINDOW_ZOOM, Pixels, Size, Window, point, px, size};
 use zz_protocol::PaneId;
-use zz_ui::{TITLE_BAR_HEIGHT, draws_window_controls};
+use zz_ui::{TITLE_BAR_HEIGHT, UiZoom, draws_window_controls};
 
 use crate::mux::client::MuxClient;
 
@@ -138,17 +138,21 @@ impl OverviewGrid {
     }
 }
 
-pub(crate) fn overview_titlebar_height(mode: ChromeMode, window: &Window) -> Pixels {
+pub(crate) fn overview_titlebar_height(mode: ChromeMode, window: &Window, cx: &App) -> Pixels {
     if overview_titlebar_visible_for(
         mode,
         draws_window_controls(window),
         cfg!(target_os = "macos"),
         window.is_fullscreen(),
     ) {
-        TITLE_BAR_HEIGHT
+        TITLE_BAR_HEIGHT * overview_metric_scale(UiZoom::get(cx), window.zoom())
     } else {
         Pixels::ZERO
     }
+}
+
+pub(crate) fn overview_metric_scale(ui_zoom: f32, window_zoom: f32) -> f32 {
+    ui_zoom / window_zoom.max(0.1)
 }
 
 fn overview_titlebar_visible_for(
@@ -429,6 +433,13 @@ mod tests {
             false,
             false,
         ));
+
+        let scale = overview_metric_scale(1.3, 0.65);
+        assert!((scale - 2.0).abs() < f32::EPSILON);
+        assert!(
+            (f32::from(TITLE_BAR_HEIGHT * scale * 0.65) - f32::from(TITLE_BAR_HEIGHT * 1.3)).abs()
+                < f32::EPSILON
+        );
     }
 
     #[test]

@@ -348,7 +348,14 @@ fn pane_chrome_fixture(
         .w(px(240.0))
         .h(px(150.0))
         .p(px(margin))
-        .child(pane_leaf(id, radius, border_width, margin, active, cx))
+        .child(pane_leaf(
+            id,
+            radius,
+            border_width,
+            margin > 0.0,
+            active,
+            cx,
+        ))
 }
 
 fn pane_split_fixture(gaps: bool, cx: &App) -> gpui::Div {
@@ -370,8 +377,8 @@ fn pane_split_fixture(gaps: bool, cx: &App) -> gpui::Div {
     let margin = if gaps { 8.0 } else { 0.0 };
     let radius = if gaps { 6.0 } else { 0.0 };
     let border_width = if gaps { 1.0 } else { 0.0 };
-    let first = pane_leaf(first_id, radius, border_width, margin, true, cx);
-    let second = pane_leaf(second_id, radius, border_width, margin, false, cx);
+    let first = pane_leaf(first_id, radius, border_width, margin > 0.0, true, cx);
+    let second = pane_leaf(second_id, radius, border_width, margin > 0.0, false, cx);
     let split_mode = if gaps {
         PaneSplitMode::Gaps
     } else {
@@ -410,7 +417,7 @@ fn pane_leaf(
     id: &'static str,
     radius: f32,
     border_width: f32,
-    shadow_extent: f32,
+    shadow: bool,
     active: bool,
     cx: &App,
 ) -> gpui::Div {
@@ -423,7 +430,7 @@ fn pane_leaf(
             px(border_width),
             cx.theme().border,
             cx.theme().background,
-            px(shadow_extent),
+            shadow.then_some(1.0),
         )
         .dimmed(!active),
         cx,

@@ -8,7 +8,7 @@ use std::{
 use adw::prelude::*;
 use gtk::glib;
 use zz_client::ViewportDamage;
-use zz_protocol::{LayoutNode, PaneId, PaneKindSnapshot, WindowId};
+use zz_protocol::{CommandInvocation, LayoutNode, PaneId, PaneKindSnapshot, WindowId};
 use zz_terminal::TerminalAppearance;
 
 use crate::{
@@ -58,6 +58,7 @@ pub struct Shell {
     title: adw::WindowTitle,
     toasts: adw::ToastOverlay,
     tabs: adw::TabView,
+    status_bar: gtk::CenterBox,
     status_left: gtk::Label,
     status_right: gtk::Label,
     grid: PaneGrid,
@@ -81,17 +82,17 @@ impl Shell {
 
         let status_left = gtk::Label::builder().xalign(0.0).build();
         let status_right = gtk::Label::builder().xalign(1.0).build();
-        let status = gtk::CenterBox::builder().build();
-        status.add_css_class("toolbar");
-        status.add_css_class("zz-status");
-        status.set_start_widget(Some(&status_left));
-        status.set_end_widget(Some(&status_right));
+        let status_bar = gtk::CenterBox::builder().visible(false).build();
+        status_bar.add_css_class("toolbar");
+        status_bar.add_css_class("zz-status");
+        status_bar.set_start_widget(Some(&status_left));
+        status_bar.set_end_widget(Some(&status_right));
 
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.add_top_bar(&tab_bar);
         toolbar.set_content(Some(&tabs));
-        toolbar.add_bottom_bar(&status);
+        toolbar.add_bottom_bar(&status_bar);
 
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(&toolbar));
@@ -110,6 +111,7 @@ impl Shell {
             title,
             toasts,
             tabs,
+            status_bar,
             status_left,
             status_right,
             grid: PaneGrid::new(),
@@ -157,6 +159,16 @@ impl Shell {
         });
 
         let target = Rc::downgrade(self);
+        self.tabs.connect_close_page(move |tabs, page| {
+            let Some(shell) = target.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            shell.request_close(page);
+            tabs.close_page_finish(page, false);
+            glib::Propagation::Stop
+        });
+
+        let target = Rc::downgrade(self);
         self.window.connect_close_request(move |_| {
             if let Some(shell) = target.upgrade() {
                 shell.engine.detach();
@@ -164,6 +176,24 @@ impl Shell {
             }
             glib::Propagation::Proceed
         });
+    }
+
+    /// The daemon owns window lifetime, so the tab's close button asks it to
+    /// kill the window and lets the snapshot that comes back remove the tab.
+    /// Closing the page locally would leave the strip disagreeing with the mux.
+    fn request_close(&self, page: &adw::TabPage) {
+        let closing = self
+            .pages
+            .borrow()
+            .iter()
+            .find(|(_, candidate)| candidate == page)
+            .map(|(window, _)| *window);
+        if let Some(window) = closing {
+            self.engine.execute(CommandInvocation::new(
+                "kill-window",
+                ["-t", &window.to_string()],
+            ));
+        }
     }
 
     /// Engine events reach the main context through the channel the reader
@@ -210,6 +240,7 @@ impl Shell {
     /// it may never reach the grid.
     fn refresh_status(&self) {
         let status = self.engine.status();
+        self.status_bar.set_visible(!status.is_empty());
         self.status_left.set_text(&status.left);
         self.status_right.set_text(&status.right);
     }

@@ -172,4 +172,31 @@ mod tests {
         assert!(is_modifier(gdk::Key::Control_L));
         assert!(!is_modifier(gdk::Key::a));
     }
+
+    #[test]
+    fn every_modifier_bit_survives_the_translation() {
+        let input = key_input(
+            KeyAction::Press,
+            gdk::Key::a,
+            gdk::ModifierType::SHIFT_MASK
+                | gdk::ModifierType::CONTROL_MASK
+                | gdk::ModifierType::ALT_MASK
+                | gdk::ModifierType::SUPER_MASK,
+            None,
+        );
+
+        assert!(input.modifiers.shift());
+        assert!(input.modifiers.control());
+        assert!(input.modifiers.alt());
+        assert!(input.modifiers.platform());
+    }
+
+    #[test]
+    fn control_keyvals_carry_no_typed_text() {
+        for keyval in [gdk::Key::Escape, gdk::Key::BackSpace, gdk::Key::Return] {
+            let input = key_input(KeyAction::Press, keyval, gdk::ModifierType::empty(), None);
+            assert_eq!(input.text, None, "{keyval:?} produced typed text");
+            assert_eq!(input.unshifted_codepoint, None);
+        }
+    }
 }

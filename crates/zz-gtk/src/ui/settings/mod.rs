@@ -309,9 +309,12 @@ impl SettingsRoute {
                     content.add(self.mux.group());
                     content.upcast()
                 }
-                Page::About => {
-                    pages::about(&self.engine.endpoint(), &self.engine.capabilities()).upcast()
-                }
+                Page::About => pages::about(
+                    &self.engine.endpoint(),
+                    &self.engine.capabilities(),
+                    self.store.borrow().path(),
+                )
+                .upcast(),
                 _ => content.upcast(),
             };
             self.stack.add_named(&child, Some(page.name()));
@@ -580,7 +583,12 @@ impl SettingsRoute {
                 }
                 self.store.borrow_mut().invalidate();
                 self.tick();
-                self.banner.set_revealed(false);
+                self.banner.set_title(if report.imported_anything() {
+                    "Imported. Your Ghostty and tmux originals were not touched."
+                } else {
+                    "Nothing to import."
+                });
+                self.banner.set_revealed(true);
             }
             Err(error) => {
                 self.banner.set_title(&format!("Import failed: {error}"));

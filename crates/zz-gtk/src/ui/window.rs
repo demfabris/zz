@@ -176,7 +176,7 @@ impl Shell {
         toolbar.set_content(Some(&workspace));
 
         let settings = SettingsRoute::new(Arc::clone(&engine));
-        settings.install(&toolbar, &tab_bar, &tabs);
+        settings.install(&toolbar, &tab_bar, &workspace);
 
         let floating = gtk::Overlay::new();
         floating.set_child(Some(&toolbar));

@@ -30,8 +30,8 @@ pub enum EngineEvent {
     FramesReady,
     StatusChanged,
     AppearanceChanged,
-    /// A daemon-owned overlay moved: prefix arming, the command prompt, or
-    /// either chooser. Which one is read back through the accessors.
+    /// A daemon-owned overlay moved: prefix arming, the command prompt, either
+    /// chooser, or display-panes. Which one is read back through the accessors.
     OverlaysChanged,
     /// The daemon answered a copy request; the payload is not retained.
     Clipboard {

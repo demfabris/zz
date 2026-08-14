@@ -4,7 +4,7 @@ title: Native Agent pane
 description: The daemon-addressable Agent pane, pane-local Codex/Claude Code ACP runtime, provider artifact profiles, nested subagent and terminal streams, sticky controls, approvals, and restore metadata.
 resource: crates/zz/src/agent/controller.rs
 tags: [agent, gpui, markdown, mermaid, acp, pane, sessions, persistence, keyboard, subagent, terminal]
-timestamp: 2026-07-27T00:00:00Z
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
@@ -35,9 +35,13 @@ in the new `AgentDescriptor`.
 
 Materialization is gated on the `experimental-agent-pane` flag: while it is off (the default), the
 mux engine rejects `select-pane-kind … agent` from every route . picker, palette, CLI, and
-`mux.conf` bindings. The implementation itself is also compiled out of default builds behind the
-`agent-pane` cargo feature . `crates/zz/src/agent/mod.rs` is the facade whose stub replaces the
-controller and view with inert stand-ins. See the flag contract in
+`mux.conf` bindings. The runtime flag is now the only gate a normal build has: `crates/zz/Cargo.toml`
+sets `default = ["desktop", "agent-pane"]`, so a stock `cargo build` and every packaged release ship
+the implementation. The `agent-pane` cargo feature survives as a build-size lever rather than a
+release gate; dropping it still compiles, because `crates/zz/src/agent/mod.rs` is the facade whose
+stub replaces the controller and view with inert stand-ins, and `config::agent_pane_enabled`
+(`crates/zz/src/config/mod.rs:699`) folds `cfg!(feature = "agent-pane")` into the flag so the key
+reads false whatever the file says. See the flag contract in
 [app configuration](/configuration/app-config.md).
 
 Only a terminal has a live working directory, so `MuxState::cwd_donor` decides which pane that
@@ -67,12 +71,11 @@ passes back has no Agent sink and is dropped; everything else never crosses the 
 
 1. Read the descriptor's built-in provider and parse `agent-command` (Codex) or
    `agent-claude-code-command` (Claude Code) as either a shell-style executable/argument string or an
-   ACP stdio JSON configuration, then spawn that pane's child. On macOS,
-   `agent/environment.rs` `with_platform_environment` captures the login-shell executable path once
-   and supplies it to the ACP child when the command did not configure `PATH` explicitly; a bounded
-   capture failure falls back to the system `path_helper` path. This keeps Finder/LaunchServices
-   launches able to resolve Homebrew, user-local, and version-manager executables without replacing
-   an explicit command environment. Only stderr is sent to zz logs; stdout remains ACP JSON-RPC.
+   ACP stdio JSON configuration, then spawn that pane's child. `agent/environment.rs`
+   `with_platform_environment` (`:22`) supplies a repaired `PATH` to the ACP child when the command
+   did not configure one explicitly, so a Finder/LaunchServices or `.desktop` launch can still
+   resolve Homebrew, user-local, and version-manager executables without replacing an explicit
+   command environment. Only stderr is sent to zz logs; stdout remains ACP JSON-RPC.
 2. Send `initialize` with zz client information and generic session-config-option support. Both
    provider profiles advertise the de-facto `_meta.terminal_output = true` stream convention, and
    Claude Code additionally advertises `_meta["subagent-transcript"] = true`. zz still advertises
@@ -98,21 +101,22 @@ local session while the metadata command is still making its round trip.
 The default provider processes are pinned to exact adapter versions . `@latest` would resolve the
 dist-tag against the npm registry on every pane spawn, while an exact version spawns from the npx
 cache and works offline. When the agent pane is enabled, app launch fires a background
-`npx --package <spec> npm --version` per pinned package to pre-populate that cache (and, on macOS,
-the login-shell PATH capture) without executing the adapters; version bumps are deliberate edits to
-the defaults in `config/mod.rs`:
+`npx --package <spec> npm --version` per pinned package to pre-populate that cache without executing
+the adapters, and takes the PATH snapshot on that same thread (`environment.rs:29`) so no pane spawn
+pays for it; version bumps are deliberate edits to the defaults in `config/mod.rs`:
 
 ```text
 npx -y @agentclientprotocol/codex-acp@1.1.7
 npx -y @agentclientprotocol/claude-agent-acp@0.63.0
 ```
 
-`zz/config` can override it and the default cwd:
+`zz/config` can override it, the default cwd, and whether approvals are automatic:
 
 ```text
 agent-command = my-agent --stdio
 agent-claude-code-command = my-claude-agent --stdio
 agent-working-directory = /absolute/project/path
+agent-auto-approve = false
 ```
 
 Raw ACP stdio JSON is also accepted for explicit arguments and environment variables. A configured
@@ -162,10 +166,39 @@ window. Both verbs are daemon-side commands like `capture-pane`; see
 
 Every ACP child is additively given `ZZ_PANE` (its `%id`), `ZZ_SESSION` (the attached session name),
 and `ZZ_SOCKET` (the daemon endpoint, passed explicitly because a `--socket` launch leaves it out of
-zz's own environment). Injection follows the shape `with_macos_executable_path` established: match
+zz's own environment). Injection and the PATH repair share one shape
+(`with_workspace_environment` at `environment.rs:103`, `with_executable_path` at `:119`): match
 `McpServer::Stdio`, skip any name the user already configured through `agent-command`, push the
 rest. A configured value always wins. So an agent inside a pane can run
 `zz tools` and then `zz agent-send -t %5 …` with no MCP server; the CLI is the tool surface.
+
+## The repaired PATH
+
+A GUI launch never runs the user's shell init, so zz's own `PATH` misses everything the shell shapes
+and the agent CLIs live exactly there. The repair is all-Unix: `executable_path` resolves through
+the `login_shell` module on macOS and Linux (`environment.rs:138`), while Windows returns nothing
+because a GUI launch there inherits the user's `PATH` already (`:143`). It is composed from three
+sources, in this order and deduplicated (`compose_executable_path`, `:368`):
+
+1. The login shell's own `$PATH`, captured by running the user's `$SHELL` (falling back to
+   `/bin/zsh`, `/bin/bash`, `/bin/sh`) with `-l -i -c`, then `-l -c` if that yields nothing . rc
+   files that hang or `exec` a multiplexer when interactive still answer a non-interactive login
+   shell. The probe carries `ZZ_RESOLVING_ENVIRONMENT=1`, writes into a temp file rather than a
+   pipe, and brackets the value in `0x1e`/`0x1f` so startup noise is skipped and a torn capture is
+   refused. It is killed at a 3 s deadline (`LOGIN_SHELL_TIMEOUT`, `:164`), but returns the moment
+   the markers land, so init that blocks *after* printing costs nothing. `ZZ_AGENT_LOGIN_SHELL=0`
+   skips this step entirely; on macOS the fallback is then the system `path_helper` path.
+2. zz's own inherited `PATH`.
+3. Node version-manager bin directories that exist on disk (`node_version_manager_bins`, `:330`):
+   fnm's stable `aliases/default/bin` under `$FNM_DIR` and the three well-known roots, then
+   `~/.volta/bin`, `~/.bun/bin`, `~/Library/pnpm`, `~/.local/share/pnpm`,
+   `~/.local/share/mise/shims`, then every `~/.nvm/versions/node/*/bin` newest first. These land
+   last on purpose: they are a fallback for what the shell never told us about, never a shadow over
+   what it did. fnm's PATH entries are per-shell and nvm is a shell function, so a GUI launch sees
+   neither.
+
+The whole result is a process-wide `OnceLock`, negative results included (`:178`), so a broken or
+slow shell is probed once rather than on every pane spawn.
 
 # Session history
 
@@ -218,6 +251,23 @@ as JSON containing full escaped files. Text content blocks remain text, while ra
 and unsupported content become pretty JSON without Markdown fences. Structured content has priority
 over `raw_output`, including when a later raw-output update arrives; raw output is displayed only
 while the structured content collection is empty.
+
+A tool payload lives as long as its pane, and agents happily emit megabytes, so the reducer caps what
+it retains: `MAX_TOOL_PAYLOAD_BYTES` (512 KiB, `controller.rs:66`) on text, JSON, and accumulated
+terminal output, and `MAX_DIFF_SIDE_BYTES` (1 MiB, `:67`) on each side of a diff independently.
+`truncate_payload` (`:5706`) backs up to a char boundary and appends `TRUNCATION_MARKER`
+(`"… [truncated]"`), so the cut is visible in the payload rather than silent. These caps are in-memory
+only; the journal writes the update as it arrived.
+
+Only some updates may re-type a tool. `update_carries_tool_shape` (`controller.rs:5507`) accepts a
+title, raw input, locations, or diff content as shape; `reclassifies_tool` (`:5522`) then allows a
+kind change only when the update carries shape, when the current kind is already `Other`, or when the
+new kind is something better than `Other`. Without that gate a completion update repeating ACP's
+default `other` kind would downgrade an already-typed tool into a generic one, and an empty title
+would blank a good label. A second denylist, `PLACEHOLDER_TOOL_TITLES` (`:5460`, sixteen entries such
+as `terminal`, `read file`, `subagent task`), keeps a generic adapter title from being rendered as
+the `$ <command>` line of a terminal payload: `command_from_title` (`:5487`) prefers a backtick-quoted
+span and returns nothing for a placeholder, so the payload falls back to `[terminal <id>]`.
 
 `agent/profile.rs` is the only provider-artifact recognition seam. Its streaming scanner carries
 partial opening markers across ACP chunk boundaries and recognizes the explicit table:
@@ -296,9 +346,7 @@ Markdown state.
 
 The transcript is a variable-height GPUI `ListState`, so only visible rows plus 1200 px of overdraw
 are measured and rendered. Every row uses a centered 680 px content column with responsive side
-padding; the composer extends one pixel beyond that column on each side. Its native tail-follow mode
-keeps new output in view while the reader is at the bottom, stops following when the reader scrolls
-upward, and resumes when they return to the tail or submit a new prompt. The composer floats over the
+padding; the composer extends one pixel beyond that column on each side. The composer floats over the
 bottom of the full-height transcript without a section divider; internal timeline tail clearance
 lets content travel beneath it during scrolling while allowing the final row to clear the default
 composer when scrolled fully to the end, with 50% extra runway beyond that default footprint. Its
@@ -370,12 +418,83 @@ Inline backtick spans use mixed font runs so surrounding prose stays in the UI f
 uses the primary terminal family resolved from Ghostty. Their fill uses the neutral muted surface
 instead of the accent color, while nested bold, italic, strikethrough, and link styling is retained.
 
+## Following the tail
+
+gpui's own `FollowMode::Tail` is deliberately *not* how the transcript follows output. It snaps on
+every layout and re-engages itself from scroll position, which makes a deliberate scroll-up
+impossible to hold while the agent is still writing. `TimelineStick` (`zz-ui/src/agent.rs:734`) owns
+the pin instead, leaving the list in `FollowMode::Normal` and driving a critically-shaped
+`StickSpring` toward the end. Tail mode survives only as the reduced-motion fallback: `engage_now`
+(`:818`) sets it when `cx.reduce_motion()` is on, and the whole spring driver is skipped.
+
+The pin breaks on wheel input alone. `on_user_scroll` (`:859`) is the only path that can release it,
+and the list calls its scroll handler from its input path only, so content growth never reaches
+there . a burst of output cannot scroll the reader away from where they parked. Re-sticking is
+direction-aware: `agent_should_restick` (`:628`) requires both being inside a 70 px band of the end
+*and* moving toward it, because a small wheel-up notch from the bottom is still inside the band and
+would otherwise make the pin impossible to break. Once unpinned and more than 320 px from the end, a
+jump pill appears; clicking it re-engages the spring. The spring chases a lead point above the
+target, scaled by an EMA of how fast the target is growing, and teleports whatever remains beyond
+2.5 viewports, so a long replay lands rather than scrolling through the whole history.
+
+Spinners share one clock. A mounted repeating `gpui::Animation` pins the entire window to display
+refresh rate, because any notify repaints the whole window; `pulse.rs` instead runs a single ~30 fps
+tick and notifies only its leaseholders. A lease is taken by reading `pulse_phase` and lapses 300 ms
+later . there is no release call . and the loop parks itself once the lease set empties. Only
+pending, running, and awaiting-approval tools lease it; settled ones render a static icon, so a
+finished transcript ticks nothing. Reduced motion returns phase `0.0` and schedules nothing at all.
+
+While an entry is still streaming, its *display* copy is repaired by `zz-ui/src/mend.rs`. Markdown
+arriving a token at a time is briefly ill-formed . a half-written `**bold`, an inline span with one
+backtick, a link whose URL is still landing . and each reflows the paragraph when it completes. `mend`
+closes hanging emphasis, strong, strikethrough, and code spans innermost-first, and only in the last
+top-level block. A half-streamed link is the interesting case: rather than closing it with a literal
+`)`, the URL is replaced with the `PENDING_LINK_URL` sentinel `zz:pending-link`, so the label styles
+immediately and the settling URL cannot reflow the line; `resolve_workspace_link` maps that sentinel
+to an inert `data:,` href, so the link is never navigable. The repair is display-only: the store
+keeps the raw `source` beside the rendered `TextViewState`, exactly one entry is mended at a time,
+and `settle_markdown` snaps the display copy back to the raw text when the entry stops streaming . a
+completed entry always renders exactly what it holds.
+
 # Composer, permissions, and failure states
 
 The native composer is a centered, bordered input card that auto-grows from two to eight lines.
-Enter sends when the session is ready; Shift+Enter inserts a newline. During a turn the icon action
-becomes Cancel, which emits `session/cancel`. The controller returns to ready on ACP completion and
-marks in-flight tools cancelled when the stop reason is `cancelled`.
+Enter sends when the session is ready; Shift+Enter inserts a newline. The controller returns to ready
+on ACP completion and marks in-flight tools cancelled when the stop reason is `cancelled`.
+
+One button carries three actions, chosen by `composer_action(active_turn, has_content)`
+(`view.rs:236`): **Send** while the pane is idle, **Queue** when a turn is running and the composer
+has content, **Stop** when a turn is running and it does not. Send and Queue are the same click .
+both call `submit()` . because `AgentController::prompt` (`controller.rs:2865`) already branches:
+with an active turn it pushes a `QueuedPrompt { text, images }` onto the pane's FIFO instead of
+dispatching. Only Stop is different: it moves the connection to `Cancelling` and emits
+`session/cancel`. It is also deliberately unreachable from the keyboard . Enter over an *empty*
+composer confirms the highlighted permission option rather than killing the turn it just started.
+
+The queue's invariant is at-least-once: a prompt the user typed is either sent or visible in the
+draft again, never silently dropped, images included. `dispatch_next_queued_prompt` (`:2980`) pops
+the front prompt when a turn settles . on normal completion and after a quiesce park . while
+`reclaim_queued_prompts` (`:2999`) folds the whole queue back into the composer draft and attachment
+strip on cancel, on runtime shutdown, and on an unexpected child death. A failed dispatch reclaims
+the remainder too. While anything is queued the composer shows an "N queued" chip whose click calls
+`unqueue_prompts` (`:3018`) and hands it all back.
+
+The first prompt of a session names its pane. `derive_pane_title` (`controller.rs:3858`) takes the
+first line, strips quote/heading/emphasis dressing, keeps 7 words and 48 *characters* (never bytes,
+so CJK survives), and `name_pane_after_prompt` (`:2957`) applies it only when the pane has no title
+at all . anything already named, by the agent, by an earlier prompt, or by the user, keeps its name.
+The title travels the existing route: an `AgentControllerEvent::Title` becomes
+`select-pane -t %N -T <title>`, so the daemon owns the name like any other pane title.
+
+Pending permissions render as a wizard, one request per page in arrival order (`PermissionWizard`,
+`view.rs:261`). Keys 1-9 answer option indices 0-8 directly, Enter confirms the highlighted option,
+and Escape cancels the page; the footer reads `1-9 picks · enter confirms · esc cancels`, and the
+`n/m` counter appears only when more than one request is pending. Options past the ninth render
+without a digit chip and are click-only. Digits are left to the composer while the user is
+mid-sentence and focused, and the whole key path sits behind the Changes overlay, the History picker,
+and the completion menu, so a wizard never steals a key one of those owns. Because auto-approve
+answers kinded requests before they reach `pending_permissions`, the wizard is what a user sees with
+`agent-auto-approve = false`, or when an agent advertises no allow option at all.
 
 A view-local sticky strip occupies the absolute composer overlay immediately above the card. It is
 derived from durable transcript state: running Claude subagent Task tools remain until their tool
@@ -441,7 +560,8 @@ the directory it was created in, so choosing another one is `session/new` there 
 in-place move (the same boundary the History picker's **New** crosses), gated the same way on an
 idle pane with no unresolved permission request. The pane's `cwd` is left alone until the agent
 answers, so a failed switch keeps the pane where it was. The header carries no connection badge:
-liveness reads off the composer, whose action is Cancel during a turn, and off the error cards.
+liveness reads off the composer, whose action morphs to Stop or Queue during a turn, and off the
+error cards.
 
 ACP `AvailableCommandsUpdate` notifications drive the command-completion popover. Codex uses `$`
 as its completion sigil while Claude Code uses `/`; either opens only at the start of a line or after
@@ -478,20 +598,125 @@ turn, or shutting down responds `cancelled` to every outstanding permission befo
 connection. Authentication methods advertised during initialization appear beside retry when a
 session fails, and send ACP `authenticate` requests.
 
+`agent-auto-approve` (default `true`, `config/mod.rs:86`) answers a *kinded* request without waiting
+for the user. `preferred_allow_option` (`controller.rs:5236`) takes `AllowAlways` and falls back to
+`AllowOnce`, never a reject kind and never an empty option ID; a request that advertises no allow
+option falls through to the interactive UI rather than being silently denied. The tool call is still
+published as a `ToolCallUpdate` before the response goes back (`controller.rs:4335`), so an
+auto-approved action appears in the transcript exactly like one the user waved through. Turning the
+key off, or an agent that supplies no allow option, routes every request through the wizard.
+
+The one shape auto-approve refuses is a *question*: `is_user_question` (`controller.rs:5221`) treats
+any option kind outside `{AllowOnce, AllowAlways, RejectOnce, RejectAlways}` as a prompt for the user
+rather than a tool approval. Repeated allow kinds are deliberately not that signal . codex-acp sends
+two `allow_always` options on every exec approval. This branch is forward-compat only and currently
+unreachable: ACP v1 types `PermissionOptionKind` as a closed enum, so a question-shaped kind is
+rejected at JSON-RPC deserialization before it can reach the check, pinned by
+`acp_v1_rejects_permission_options_with_an_unknown_kind` (`controller.rs:7798`).
+
 Launch, initialize, new/load session, prompt, and authentication failures become pane-local error
 cards with retry. Unexpected process exit does not spin in an automatic restart loop; the user can
-retry after fixing credentials or configuration. Application shutdown closes every session when
+retry after fixing credentials or configuration. What the card *says* comes from the child's own
+stderr: `StderrTail` (`controller.rs:4004`) keeps the last 6 non-empty lines, each capped at 700
+bytes and the join capped again, and `runtime_failure_message` (`:4032`) folds that tail and the
+parsed exit status into `"<adapter> exited unexpectedly (<status>): <tail>"`. A missing adapter or a
+node version that cannot run it therefore reads as the shell's own complaint instead of a bare exit
+code. Application shutdown closes every session when
 the adapter supports `session/close`, otherwise it sends cancellation; in either case it resolves
 approvals, waits for the runtime task, and then allows the ACP child guard to reap the process.
+
+An adapter that stops talking mid-turn is parked, not killed. `quiesce_window` (`controller.rs:3833`)
+reads `ZZ_AGENT_QUIESCE_MS` once per process, defaulting to 120 s, and `0` disables the watchdog
+entirely. `should_park_turn` (`:3849`) trips only when the pane has been silent that long *and*
+nothing is outstanding . `turn_in_flight` (`:2040`) counts unanswered permissions, live subagent
+tasks, and any tool the agent has not resolved, so a long-running Bash call or a background agent
+never trips it. Parking (`park_turn`, `:2050`) settles the in-flight tools to completed and returns
+the connection to Ready. It does not signal, cancel, or reap the child: the process keeps running,
+and output that arrives afterwards opens a fresh segment rather than reviving the settled one. The
+point is that a wedged turn costs a pane its spinner, not its session.
+
+## What this turn changed
+
+The header offers a **Changes** action once the pane has recorded a turn base, opening a modal
+summary of what the agent did to the worktree. The base is a bare git *tree object*, not a commit or
+a stash: `snapshot_tree` (`agent/turn_snapshot.rs:73`) points `GIT_INDEX_FILE` at a throwaway index
+in a temp directory, runs `git add -A` against it, and keeps the `write-tree` SHA. The real
+`.git/index` is never touched, and staging untracked files is deliberate . a file that was already
+untracked when the turn started then diffs correctly instead of reading as brand new. The snapshot is
+taken at every prompt dispatch, on the background executor, and a pane outside a worktree simply
+keeps no base and shows no button; the failure is logged, never surfaced.
+
+Opening the overlay takes a fresh tree and runs three `git diff-tree` invocations between the two
+trees . name-status, numstat, and the unified patch . all with rename detection. `capture_git`
+(`:253`) streams stdout and kills the child the moment it would exceed its ceiling (3 MiB for the
+patch, 2 MiB for the summaries), so an enormous diff costs bounded memory rather than the pane. Any
+of the three overflowing sets `TurnDiff::truncated`, which the overlay shows as a **PARTIAL** pill
+beside the `N files · +A −D` summary; the patch text itself is cut back to the last whole line and
+marked `[diff truncated]`. Rows carry status glyph, path, `was <old path>` for a rename, and line
+counts or a `binary` marker; one file expands at a time into its hunks. A working directory that
+moved since the snapshot is refused outright rather than diffed against the wrong root.
+
+# Attention outside the pane
+
+An agent pane is usually not the pane you are looking at, so its state has to be legible from the
+chrome. `AgentController::pane_status` (`controller.rs:2498`) buckets one pane into `NeedsInput`,
+`Failed`, `Working`, or `Idle` in that precedence . the sidebar reads it per pane rather than cloning
+whole thread states, and `attention()` folds the same classification fleet-wide.
+
+`agent/sound.rs` turns those buckets into edges. `AgentAttentionTracker::observe` is the single pass
+that computes both the chime and the badge, so they cannot disagree: a chime fires on any transition
+*into* `NeedsInput` (Request) and on the exact `Working → Idle` edge (Done), at most one per batch
+with Request outranking Done, and never for the pane the user is currently watching. A pane's first
+observation only seeds the baseline. `AgentBadge` adds a fourth state the status enum has no room
+for . `Finished`, an idle pane whose completion has not been looked at yet . cleared the moment that
+pane becomes the watched one.
+
+The badge is a 5 px dot on the node's icon in the sidebar tree (bottom-right, so it coexists with the
+pending-bell dot at top-right) and on the leading corner of the fixed-size strip chips. It bubbles
+like the bell does: a collapsed host, session, or window carries the most urgent badge hidden beneath
+it, merged by rank (`NeedsInput` < `Failed` < `Working` < `Finished`). Colors come from the theme:
+warning, danger, muted foreground, success.
+
+The chimes are synthesized rather than shipped . a two-note WAV built in code, materialized once per
+process into the temp directory and handed to `afplay` on macOS or the first of `paplay`, `pw-play`,
+`aplay` that spawns on Linux. Other platforms play nothing. `ZZ_AGENT_SOUND=0` disables them, and
+only that exact value does. `agent/sound.rs` is compiled unconditionally, even without the
+`agent-pane` feature, because the workspace chrome renders badges in every build . without the
+feature the status map is simply always empty.
 
 # Persistence boundary
 
 The daemon persists only `AgentDescriptor { provider, cwd, session_id }`, not messages, tool
-payloads, credentials, or provider state. Conversation durability therefore depends on the selected agent's
-`session/load` implementation. If it can load, its replay notifications reconstruct the native
-timeline; otherwise zz creates a fresh session and replaces the descriptor's session ID. This is
-deliberately different from terminal persistence: the daemon never owns or keeps the ACP child alive
-after all GUI windows close.
+payloads, credentials, or provider state. It is still deliberately different from terminal
+persistence: the daemon never owns or keeps the ACP child alive after all GUI windows close.
+
+`session/load` is preferred where it exists, but it is no longer the only durability. `AgentJournal`
+(`agent/journal.rs`) appends every inbound `session/update` verbatim to a per-session JSONL file
+under `<data dir>/zz/agent-journal`, beside `agent-preferences.json`, with the same user-only
+directory and file modes. Adapters own the session-ID string, so it is jailed into a file stem before
+it reaches the filesystem: everything outside `[A-Za-z0-9_-]` becomes `_`, and an id that was altered,
+empty, or longer than 96 bytes is truncated and tagged with an FNV-1a digest of the original so two
+hostile ids cannot land on one file. Lines are `{"seq": n, "update": …}` with `seq` counting from 1
+and flushed before the append returns; a crash mid-write leaves a torn trailing line that readers
+skip and the next append isolates behind a fresh newline. A session is capped at 32 MiB, past which
+appends are *refused* rather than rotated . a truncated head would replay a conversation that never
+happened . and at most 16 descriptors are held open. Journals untouched for 30 days are pruned once,
+at startup (`controller.rs:80`, `:4102`).
+
+Restore runs when the agent advertises no `session/load`, and again when a load request fails
+(`controller.rs:4457`, `:4494`). Both routes go through the same staged replay path the History
+picker uses, so the pane shows RESTORING rather than flashing STARTING at a transcript that is about
+to appear. `restore_journaled_session` (`:4185`) stages the new live session ID before copying, so an
+update arriving mid-copy queues behind the restored entries instead of racing them into the pane;
+the restored updates are then re-journalled under the new ID and the superseded file removed, so a
+chain of restarts leaves exactly one journal per conversation.
+
+What is journalled is what the agent said. Prompts are not written as requests (only whatever the
+agent echoes back as a `UserMessageChunk`), permission exchanges never reach the journal, and neither
+does authentication material. The reducer's own `MAX_TOOL_PAYLOAD_BYTES` / `MAX_DIFF_SIDE_BYTES` caps
+are in-memory only: the journal stores the update as it arrived, subject solely to its own file
+ceiling. A journal that cannot be opened is not fatal . the controller simply runs without one, and
+the pane falls back to whatever the provider can replay.
 
 Sticky selector preferences are a separate GUI-owned store because they are user intent rather than
 conversation data. They contain only opaque advertised option IDs/values and their scope, never
@@ -529,7 +754,30 @@ messages, prompts, credentials, approval decisions, or a copy of provider sessio
   payload bounds and control-character rejection, context-header fencing, the stdin decision the CLI
   shares with the daemon parser, the full round trip through an attached client mailbox, and failure
   when that client disconnects. Environment tests assert `ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET`
-  injection and that a user-configured value survives.
+  injection and that a user-configured value survives, that the login PATH keeps precedence over the
+  inherited one with the version-manager bins last, that a failed login shell still yields those
+  bins, that the capture command follows the shell family, and that the probe is opt-out.
+- Permission tests cover the allow-always-then-allow-once preference, repeated allow kinds *not*
+  reading as a question, and `acp_v1_rejects_permission_options_with_an_unknown_kind` . which pins
+  the reason the question branch is unreachable rather than merely untested. Wizard tests cover
+  page advance, an answered page latching until the controller drops it, page stability when another
+  request resolves elsewhere, out-of-range and composer-engaged digits, and confirm/cancel.
+- Watchdog tests cover the park itself and each thing that blocks it (an unresolved tool call, a
+  pending permission, a reporting subagent), the window's default/zero/whitespace parsing, that a
+  parked tool settles completed rather than failed, and that output after a park opens a new segment.
+- Journal tests cover ordered round trips with `0o600`/`0o700` modes, hostile session IDs staying
+  inside the directory, refusal past the size cap, and retention pruning; a controller test restores
+  the same transcript with `load` both advertised and absent and asserts the superseded journal is
+  not left behind to be restored twice.
+- Turn-snapshot tests cover snapshot stability, the real index staying untouched, an untracked file
+  from *before* the turn not being reported, rename detection, binary flagging, a retargeted working
+  directory being refused, and patch truncation leaving the file summaries intact.
+- Reducer tests also pin that status-only updates never re-type a typed tool, that placeholder titles
+  never become terminal commands, and that oversized payloads cap on char boundaries. Title tests
+  pin the dressing strip, the 7-word/48-character limits counted in characters, and the once-per-pane
+  guard. Sound tests pin the chime edges, the first-observation baseline, Request outranking Done,
+  badge rollup, and the `ZZ_AGENT_SOUND` switch answering only to `0`; a sidebar test pins badges
+  bubbling to every collapsed ancestor.
 
 # Related
 

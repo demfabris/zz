@@ -4,7 +4,7 @@ title: Session persistence & daemon lifecycle
 description: Why mux state and terminals outlive GPUI windows, which GUI state is disk-backed, which browser/Agent descriptors can restore, and how attach, detach, eviction, per-client state, and local transport work when several devices share one session.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [daemon, persistence, attach, detach, transport, lifecycle, multi-client]
-timestamp: 2026-08-01T00:00:00Z
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
@@ -156,7 +156,8 @@ devices attached to that session never notice.
 | Main-window bounds and mode | **Yes** | **Yes** | Client-side, not daemon state: bounded `<data dir>/zz/window-state.json` remembers size, position, display, and windowed/maximized/full-screen mode; restore clamps to a usable current display |
 | Chromium renderer runtime (JS heap, scroll, unsubmitted forms, media) | **No** | No | Not kept alive with no GUI attached; on reattach the GUI builds a fresh CEF instance from the descriptor |
 | Agent provider + cwd + opaque ACP session ID | Yes | No | Stored as `AgentDescriptor` in mux state; the replacement GUI launches that provider and passes the metadata to `session/load` when supported |
-| ACP processes and reduced conversation state | **No** | No | GUI-owned per pane; children stop on GUI shutdown and each provider is responsible for history replay from its session ID |
+| ACP child processes and reduced conversation state | **No** | No | GUI-owned per pane; children stop on GUI shutdown and the replacement GUI reduces the conversation again from replay |
+| Journalled ACP transcript | Yes | **Yes** | Client-side, not daemon state: every `session/update` is appended as JSONL under `<data dir>/zz/agent-journal`, one file per ACP session ID, pruned at 30 days. It is the fallback replay when the provider cannot `session/load`, and it is only reachable while the descriptor still names that session ID |
 | Terminal frames in flight | No | No | Coalesced per-pane in each client's `OutboundMailbox`; newest replaces stale |
 
 Browser panes are the key asymmetry: the daemon persists only the **restorable descriptor**, not the
@@ -166,8 +167,11 @@ replay. See [browser lifecycle](/browser/lifecycle.md) and [browser profile](/br
 Agent panes follow the same descriptor/runtime split. The daemon retains the selected provider,
 absolute working directory, and opaque ACP session ID, while `AgentController`, streamed entries,
 pending approvals, and the pane-local child process are GUI-owned. Reattach reconstructs the
-timeline only if that provider supports `session/load` and replays it; otherwise zz creates a fresh
-session and updates the descriptor. See [Native Agent pane](/concepts/agent-pane.md).
+timeline from the provider when it supports `session/load`; when it does not, or when the load
+fails, zz creates a fresh session and seeds it from its own journal, so the conversation survives an
+app restart even against an adapter with no replay of its own. Either way the pane is only as
+durable as the descriptor: a daemon exit takes the mux state with it, and the journal is left with
+no pane to replay into. See [Native Agent pane](/concepts/agent-pane.md).
 
 # Transport per platform
 

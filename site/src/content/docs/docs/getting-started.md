@@ -206,23 +206,24 @@ surface as your terminals. It takes the browser chords you already know:
 a terminal opens it in the nearest browser pane of the same window. See
 [Browser panes](/docs/browser/).
 
-### Two more pane types, off by default
+### Two more pane types, experimental
 
 **Agent panes** run Claude Code or Codex over the Agent Client Protocol, with
 the conversation drawn natively. **Editor panes** are a built-in text editor
-with vim mode. Both are compiled out of default and release builds, and
-neither appears in the picker until you turn them on yourself.
+with vim mode. Neither appears in the picker until you turn it on under
+Settings → Advanced → System → Experimental, or set
+`experimental-agent-pane = true` / `experimental-editor-pane = true` in
+`zz/config`.
 
-Following along means building with the cargo feature:
+Agent panes ship in every build. The editor pane is still compiled out by
+default, so following that one along means building it in:
 
 ```sh
-cargo build --features agent-pane,editor-pane
+cargo build --features editor-pane
 ```
 
-then setting `experimental-agent-pane = true` in `zz/config`, or using the
-toggles under Settings → Advanced → System → Experimental. Without the cargo
-feature the config key reads false whatever the file says. Expect rough edges;
-see [Agent panes](/docs/agents/).
+Without the cargo feature the matching config key reads false whatever the file
+says. Expect rough edges; see [Agent panes](/docs/agents/).
 
 ## Driving it from a shell
 
@@ -482,11 +483,12 @@ costs roughly 600 MB on macOS and more on Linux. By default that lands in
 export CEF_PATH="$HOME/.cache/cef"
 ```
 
-The two extra pane types are behind cargo features and compiled out by
-default. To build with them anyway:
+Agent panes are compiled in by default and gated at runtime by
+`experimental-agent-pane`. The editor pane is still behind a cargo feature and
+compiled out:
 
 ```sh
-just run linux --features agent-pane,editor-pane
+just run linux --features editor-pane
 ```
 
 ## Where to go next
@@ -494,7 +496,7 @@ just run linux --features agent-pane,editor-pane
 <div class="zz-cards">
   <a class="zz-card" href="/docs/tmux/"><b>tmux compatibility</b><span>Which commands, key tables, and layouts are in, and what gets rejected.</span></a>
   <a class="zz-card" href="/docs/browser/"><b>Browser panes</b><span>Profiles, cookie import, the element picker, and what Chromium will not do.</span></a>
-  <a class="zz-card" href="/docs/agents/"><b>Agent panes</b><span>Upcoming work: where ACP panes are heading, and how to build one early.</span></a>
+  <a class="zz-card" href="/docs/agents/"><b>Agent panes</b><span>Claude Code and Codex over ACP, drawn natively, behind an experimental toggle.</span></a>
   <a class="zz-card" href="/docs/cli/"><b>CLI</b><span>Every command, target syntax, and format strings.</span></a>
   <a class="zz-card" href="/docs/configuration/"><b>Configuration</b><span>Both files in full, import behavior, and provenance.</span></a>
 </div>

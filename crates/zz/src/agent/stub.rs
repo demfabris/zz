@@ -9,7 +9,7 @@ use gpui::{App, Context, EventEmitter, Task, Window, div, prelude::*};
 use zz_protocol::{AgentDescriptor, AgentProvider, PaneId};
 use zz_ui::{ActiveTheme as _, Colorize as _};
 
-use crate::{config::AgentConfig, mux::client::MuxClient};
+use crate::{agent::sound::AgentPaneStatus, config::AgentConfig, mux::client::MuxClient};
 
 /// Mirrors the real event enum so the workspace subscription match compiles.
 /// Never constructed: the stub controller emits nothing.
@@ -93,6 +93,10 @@ impl AgentController {
 
     pub(crate) fn attention(&self) -> AgentAttention {
         AgentAttention::default()
+    }
+
+    pub(crate) const fn pane_status(&self, _pane: PaneId) -> Option<AgentPaneStatus> {
+        None
     }
 
     pub(crate) fn append_composer(&mut self, _pane: PaneId, _text: &str, _cx: &mut Context<Self>) {}

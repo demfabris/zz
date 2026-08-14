@@ -29,8 +29,8 @@ pane's lifetime, visible in `choose-tree` and `display-panes`.
 | `zz tools` | the command catalog written for agents |
 
 Two more verbs, `zz agent-send` and `zz send-last-output`, talk to an Agent
-pane. They need a build with `--features agent-pane` and
-`experimental-agent-pane` on; see [agent panes](/docs/agents/).
+pane. They need `experimental-agent-pane` on and a pane to aim at; see
+[agent panes](/docs/agents/).
 
 ## Sessions
 

@@ -42,15 +42,18 @@ use zz_ui::{
 };
 
 use crate::{
-    agent::{AgentAttention, AgentController, AgentControllerEvent},
+    agent::{
+        AgentAttention, AgentController, AgentControllerEvent,
+        sound::{AgentAttentionTracker, AgentBadge, AgentPaneStatus},
+    },
     config::{frame_content_corner_radius, pane_gaps, settings::SettingsView},
     keymap::ChromeChord,
     mux::{
         client::MuxClient,
         hosts::{HostId, HostState},
         nav::{
-            HostIndicator, MuxTreeHost, MuxTreeModel, MuxTreePaneKind, TreeNode, TreeNodeKind,
-            TreeTarget, activate_nav as activate_sidebar, activation_for_target,
+            HostIndicator, MuxTreeHost, MuxTreeModel, MuxTreePaneKind, MuxTreeWindow, TreeNode,
+            TreeNodeKind, TreeTarget, activate_nav as activate_sidebar, activation_for_target,
             active_tree_target, expand_path_to, kill_target_command, new_pane_command,
             new_window_command, pane_label, select_window_command, session_initial, session_label,
         },
@@ -167,6 +170,8 @@ pub struct WorkspaceSidebar {
     width: f32,
     local_hostname: SharedString,
     attention: AgentAttention,
+    badges: Rc<BTreeMap<PaneId, AgentBadge>>,
+    tracker: AgentAttentionTracker,
 }
 
 impl WorkspaceSidebar {
@@ -176,10 +181,12 @@ impl WorkspaceSidebar {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut observed_revision = SidebarRevision::for_mux(mux.read(cx));
-        cx.observe(&mux, move |_, mux, cx| {
+        let observed_agents = agents.clone();
+        cx.observe(&mux, move |sidebar, mux, cx| {
             let revision = SidebarRevision::for_mux(mux.read(cx));
             if revision != observed_revision {
                 observed_revision = revision;
+                sidebar.reconcile_attention(&observed_agents, cx);
                 cx.notify();
             }
         })
@@ -212,15 +219,55 @@ impl WorkspaceSidebar {
             slideover: false,
             width: SIDEBAR_DEFAULT_WIDTH,
             local_hostname: sidebar_hostname(sysinfo::System::host_name().as_deref()),
+            badges: Rc::new(BTreeMap::new()),
+            tracker: AgentAttentionTracker::default(),
         }
     }
 
+    /// The fleet rollup and the per-pane badges land here together: one pass
+    /// over the agent panes feeds the same transition detector that chimes.
     fn reconcile_attention(&mut self, agents: &Entity<AgentController>, cx: &mut Context<Self>) {
         let attention = agents.read(cx).attention();
-        if attention != self.attention {
+        let statuses = self.agent_pane_statuses(agents, cx);
+        if let Some(chime) = self.tracker.observe(&statuses, self.watched_pane(cx)) {
+            crate::agent::sound::play(chime);
+        }
+        let badges = statuses
+            .iter()
+            .filter_map(|(&pane, &status)| Some((pane, self.tracker.badge(pane, status)?)))
+            .collect::<BTreeMap<_, _>>();
+        if attention != self.attention || badges != *self.badges {
             self.attention = attention;
+            self.badges = Rc::new(badges);
             cx.notify();
         }
+    }
+
+    /// Agent panes come from the tree model, which render refreshes; a pane
+    /// created this frame is picked up by the controller's own event a moment
+    /// later, and a first observation never chimes.
+    fn agent_pane_statuses(
+        &self,
+        agents: &Entity<AgentController>,
+        cx: &App,
+    ) -> BTreeMap<PaneId, AgentPaneStatus> {
+        let controller = agents.read(cx);
+        self.tree_model
+            .hosts
+            .iter()
+            .flat_map(|host| &host.sessions)
+            .flat_map(|session| &session.windows)
+            .flat_map(|window| &window.panes)
+            .filter(|pane| pane.kind == MuxTreePaneKind::Agent)
+            .filter_map(|pane| Some((pane.id, controller.pane_status(pane.id)?)))
+            .collect()
+    }
+
+    /// The pane the user is demonstrably watching: focused in an active window.
+    fn watched_pane(&self, cx: &App) -> Option<PaneId> {
+        cx.active_window()?;
+        let mux = self.mux.read(cx);
+        active_pane_for_split(&mux.snapshot(), mux.attached_session())
     }
 
     fn render_attention(
@@ -662,6 +709,7 @@ impl WorkspaceSidebar {
                 selected: self.selected.filter(|_| !self.selection_from_pointer),
                 focused: self.focus_handle.is_focused(window),
                 local_hostname: self.local_hostname.clone(),
+                badges: Rc::clone(&self.badges),
             },
             window,
             cx,
@@ -835,7 +883,12 @@ impl WorkspaceSidebar {
                 let label = SharedString::from(session_label(&session.name, session.id));
                 let id = session.id;
                 let attach_mux = self.mux.clone();
-                workspace_strip_session_badge(
+                let badge = node_agent_badge(
+                    &self.tree_model,
+                    &self.badges,
+                    TreeNode::Target(attached_host, TreeTarget::Session(id)),
+                );
+                let chip = workspace_strip_session_badge(
                     ("workspace-strip-session", id.0),
                     session_initial(&label),
                     label,
@@ -857,7 +910,8 @@ impl WorkspaceSidebar {
                         activate_sidebar(&attach_mux, activation, cx);
                     }
                 })
-                .into_any_element()
+                .into_any_element();
+                with_strip_agent_badge(chip, badge, cx)
             })
             .collect::<Vec<_>>();
 
@@ -871,23 +925,27 @@ impl WorkspaceSidebar {
             for window in &session.windows {
                 let id = window.id;
                 let select_mux = self.mux.clone();
-                pills.push(
-                    workspace_strip_window_pill(
-                        ("workspace-strip-window", id.0),
-                        format!("workspace-strip-window-{}", id.0).into(),
-                        strip_window_label(window).into(),
-                        id == focused_window,
-                        connected,
-                        self.render_strip_window_delete(id, connected, cx),
-                        cx,
-                    )
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(move |_, _, cx| {
-                        cx.stop_propagation();
-                        select_mux.read(cx).execute(select_window_command(id));
-                    })
-                    .into_any_element(),
+                let badge = node_agent_badge(
+                    &self.tree_model,
+                    &self.badges,
+                    TreeNode::Target(attached_host, TreeTarget::Window(id)),
                 );
+                let chip = workspace_strip_window_pill(
+                    ("workspace-strip-window", id.0),
+                    format!("workspace-strip-window-{}", id.0).into(),
+                    strip_window_label(window).into(),
+                    id == focused_window,
+                    connected,
+                    self.render_strip_window_delete(id, connected, cx),
+                    cx,
+                )
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    select_mux.read(cx).execute(select_window_command(id));
+                })
+                .into_any_element();
+                pills.push(with_strip_agent_badge(chip, badge, cx));
             }
         }
 
@@ -924,6 +982,90 @@ fn active_pane_for_split(snapshot: &MuxSnapshot, attached: Option<SessionId>) ->
         Some(TreeTarget::Pane(pane)) => Some(pane),
         Some(TreeTarget::Session(_) | TreeTarget::Window(_)) | None => None,
     }
+}
+
+/// Bubbled like [`MuxTreeModel::has_pending_bell`]: a collapsed host, session,
+/// or window still carries the most urgent badge hidden below it.
+fn node_agent_badge(
+    tree_model: &MuxTreeModel,
+    badges: &BTreeMap<PaneId, AgentBadge>,
+    node: TreeNode,
+) -> Option<AgentBadge> {
+    if badges.is_empty() {
+        return None;
+    }
+    let host = tree_model.host(node.host())?;
+    match node {
+        TreeNode::Host(_) => windows_agent_badge(
+            host.sessions.iter().flat_map(|session| &session.windows),
+            badges,
+        ),
+        TreeNode::Target(_, TreeTarget::Session(id)) => windows_agent_badge(
+            host.sessions
+                .iter()
+                .filter(|session| session.id == id)
+                .flat_map(|session| &session.windows),
+            badges,
+        ),
+        TreeNode::Target(_, TreeTarget::Window(id)) => windows_agent_badge(
+            host.sessions
+                .iter()
+                .flat_map(|session| &session.windows)
+                .filter(|window| window.id == id),
+            badges,
+        ),
+        TreeNode::Target(_, TreeTarget::Pane(id)) => badges.get(&id).copied(),
+    }
+}
+
+fn windows_agent_badge<'a>(
+    windows: impl Iterator<Item = &'a MuxTreeWindow>,
+    badges: &BTreeMap<PaneId, AgentBadge>,
+) -> Option<AgentBadge> {
+    let mut rollup = None;
+    for pane in windows.flat_map(|window| &window.panes) {
+        if let Some(&badge) = badges.get(&pane.id) {
+            AgentBadge::merge_into(&mut rollup, badge);
+        }
+    }
+    rollup
+}
+
+fn agent_badge_color(badge: AgentBadge, cx: &App) -> Hsla {
+    match badge {
+        AgentBadge::NeedsInput => cx.theme().warning,
+        AgentBadge::Failed => cx.theme().danger,
+        AgentBadge::Working => cx.theme().foreground.muted(),
+        AgentBadge::Finished => cx.theme().success,
+    }
+}
+
+fn agent_badge_dot(badge: AgentBadge, cx: &App) -> gpui::Div {
+    div()
+        .flex_none()
+        .size(px(5.0))
+        .rounded_full()
+        .bg(agent_badge_color(badge, cx))
+}
+
+/// The strip chips are fixed-size, so the flag rides the leading corner rather
+/// than the trailing one the hover-revealed delete button owns.
+fn with_strip_agent_badge(chip: AnyElement, badge: Option<AgentBadge>, cx: &App) -> AnyElement {
+    let Some(badge) = badge else {
+        return chip;
+    };
+    div()
+        .relative()
+        .flex()
+        .flex_none()
+        .child(chip)
+        .child(
+            agent_badge_dot(badge, cx)
+                .absolute()
+                .top(px(3.0))
+                .left(px(3.0)),
+        )
+        .into_any_element()
 }
 
 fn expand_new_hosts(
@@ -1254,6 +1396,7 @@ struct TreeRowRuntime {
     selected: Option<TreeNode>,
     focused: bool,
     local_hostname: SharedString,
+    badges: Rc<BTreeMap<PaneId, AgentBadge>>,
 }
 
 fn render_status_section(
@@ -1457,6 +1600,7 @@ fn render_tree_row(
         entry,
         connected && entry.on_active_path,
         runtime.tree_model.has_pending_bell(node),
+        node_agent_badge(&runtime.tree_model, &runtime.badges, node),
         cx,
     );
     let marker = if expandable {
@@ -1576,6 +1720,7 @@ fn render_node_marker(
     entry: &VisibleTreeEntry,
     on_active_path: bool,
     belled: bool,
+    badge: Option<AgentBadge>,
     cx: &mut App,
 ) -> AnyElement {
     let icon = match &entry.kind {
@@ -1597,6 +1742,14 @@ fn render_node_marker(
                                 .size(px(5.0))
                                 .rounded_full()
                                 .bg(cx.theme().warning),
+                        )
+                    })
+                    .when_some(badge, |this, badge| {
+                        this.child(
+                            agent_badge_dot(badge, cx)
+                                .absolute()
+                                .bottom(px(-1.0))
+                                .right(px(-1.0)),
                         )
                     }),
             )
@@ -1628,6 +1781,14 @@ fn render_node_marker(
                         .size(px(5.0))
                         .rounded_full()
                         .bg(cx.theme().warning),
+                )
+            })
+            .when_some(badge, |this, badge| {
+                this.child(
+                    agent_badge_dot(badge, cx)
+                        .absolute()
+                        .bottom(px(-1.0))
+                        .right(px(-1.0)),
                 )
             }),
     )
@@ -2193,6 +2354,36 @@ mod tests {
             Some(SessionId(1))
         );
         assert_eq!(session_owning_pane(&snapshot, PaneId(999)), None);
+    }
+
+    #[test]
+    fn agent_badges_bubble_to_every_collapsed_ancestor() {
+        let snapshot = snapshot_with_two_panes();
+        let model = local_model(&snapshot, Some(SessionId(1)));
+        let badges = BTreeMap::from([
+            (PaneId(101), AgentBadge::Finished),
+            (PaneId(202), AgentBadge::NeedsInput),
+        ]);
+        let badge = |node| node_agent_badge(&model, &badges, node);
+
+        assert_eq!(
+            badge(TreeNode::Target(
+                HostId::LOCAL,
+                TreeTarget::Pane(PaneId(101))
+            )),
+            Some(AgentBadge::Finished)
+        );
+        for node in [
+            TreeNode::Host(HostId::LOCAL),
+            TreeNode::Target(HostId::LOCAL, TreeTarget::Session(SessionId(1))),
+            TreeNode::Target(HostId::LOCAL, TreeTarget::Window(WindowId(11))),
+        ] {
+            assert_eq!(badge(node), Some(AgentBadge::NeedsInput));
+        }
+        assert_eq!(
+            node_agent_badge(&model, &BTreeMap::new(), TreeNode::Host(HostId::LOCAL)),
+            None
+        );
     }
 
     #[test]

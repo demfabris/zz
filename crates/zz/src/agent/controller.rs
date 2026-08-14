@@ -1,12 +1,14 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
+    ffi::OsStr,
+    io,
     path::PathBuf,
     str::FromStr as _,
     sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
+        Arc, OnceLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -27,17 +29,18 @@ use agent_client_protocol::{
             SessionConfigOptionValue, SessionConfigOptionsCapabilities, SessionId as AcpSessionId,
             SessionModeState, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest,
             StopReason, TextContent, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
-            ToolKind,
+            ToolCallUpdateFields, ToolKind,
         },
     },
 };
 use async_channel::{Receiver, Sender};
-use gpui::{Context, EventEmitter, Image, ImageFormat, Task};
+use gpui::{App, Context, EventEmitter, Image, ImageFormat, Task};
 use parking_lot::Mutex;
 use zz_protocol::{AgentDescriptor, AgentProvider, PaneId};
 
 use crate::{
     agent::environment::AgentWorkspaceEnvironment,
+    agent::journal::AgentJournal,
     agent::preferences::{AgentPreferenceKind, AgentPreferences},
     agent::profile::{
         CodexCollaboration, MemoryCitation, SdkTaskEvent, Segment, TaskNotification,
@@ -45,7 +48,10 @@ use crate::{
         codex_tool_subagent, format_codex_collaboration, is_sdk_message_method,
         parse_sdk_task_event, scan_text, session_meta,
     },
+    agent::sound::AgentPaneStatus,
+    agent::turn_snapshot::{self, TurnDiff, TurnTree},
     config::AgentConfig,
+    user_data::platform_data_dir,
 };
 
 const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -55,6 +61,23 @@ const MAX_SESSION_ID_BYTES: usize = 16 * 1024;
 const MAX_SESSION_TITLE_BYTES: usize = 4 * 1024;
 const MAX_SESSION_TIMESTAMP_BYTES: usize = 256;
 const MAX_SESSION_CURSOR_BYTES: usize = 16 * 1024;
+/// Tool payloads live in the thread for as long as the pane does, so the
+/// reducer caps what it keeps: agents happily emit multi-megabyte outputs.
+const MAX_TOOL_PAYLOAD_BYTES: usize = 512 * 1024;
+const MAX_DIFF_SIDE_BYTES: usize = 1024 * 1024;
+const MAX_RUNTIME_ERROR_BYTES: usize = 300;
+const TRUNCATION_MARKER: &str = "… [truncated]";
+/// How long a turn may go silent before the watchdog parks it. Agents think
+/// for minutes on end, so this is deliberately generous and parking never
+/// touches the child; `ZZ_AGENT_QUIESCE_MS=0` disables the watchdog.
+const DEFAULT_QUIESCE_MS: u64 = 120_000;
+/// A derived pane title is the opening words of the first prompt: enough to
+/// tell agent panes apart in the tree without wrapping the pane header.
+const MAX_TITLE_WORDS: usize = 7;
+const MAX_TITLE_CHARS: usize = 48;
+/// Journals live beside `agent-preferences.json`, one directory of them.
+const JOURNAL_DIRECTORY_NAME: &str = "agent-journal";
+const JOURNAL_RETENTION_DAYS: u64 = 30;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AgentConnectionState {
@@ -323,6 +346,8 @@ pub(crate) struct AgentPaneState {
     /// Text `agent-send` routed here, waiting for the pane's view to fold it
     /// into the composer draft.
     pub(crate) pending_composer: Option<Arc<str>>,
+    /// Prompts typed during the live turn, waiting for it to settle.
+    pub(crate) queued_prompts: usize,
 }
 
 /// The fleet rollup the workspace sidebar renders: how many agents are blocked
@@ -390,6 +415,12 @@ struct AgentThread {
     live_task_tools: HashMap<String, String>,
     task_labels: HashMap<String, String>,
     suppress_user_echo: bool,
+    /// Set once the session's first prompt named the pane. A title is derived
+    /// exactly once per session, so a later rename is never overwritten.
+    auto_titled: bool,
+    /// When the pane last heard from the agent. Stamped by the reducer, which
+    /// sees every runtime event, so the quiesce watchdog only ever reads it.
+    last_activity: Instant,
     opened_generation: Option<u64>,
 }
 
@@ -438,6 +469,8 @@ impl AgentThread {
             live_task_tools: HashMap::new(),
             task_labels: HashMap::new(),
             suppress_user_echo: false,
+            auto_titled: false,
+            last_activity: Instant::now(),
             opened_generation: None,
         }
     }
@@ -461,6 +494,7 @@ impl AgentThread {
             available_commands: self.available_commands.clone(),
             usage: self.usage,
             pending_composer: None,
+            queued_prompts: 0,
         }
     }
 
@@ -502,6 +536,8 @@ impl AgentThread {
         self.live_task_tools.clear();
         self.task_labels.clear();
         self.suppress_user_echo = false;
+        self.auto_titled = false;
+        self.last_activity = Instant::now();
     }
 
     fn set_session_configuration(
@@ -568,10 +604,14 @@ impl AgentThread {
                 self.connection.label().to_ascii_lowercase()
             )));
         }
-        if has_images && !self.session_capabilities.images {
-            return Some(Arc::from("this agent does not accept images"));
-        }
-        None
+        self.image_refusal(has_images)
+    }
+
+    /// Checked before a prompt is queued as well as before it is sent: an agent
+    /// that takes no images will not take them a turn later either.
+    fn image_refusal(&self, has_images: bool) -> Option<Arc<str>> {
+        (has_images && !self.session_capabilities.images)
+            .then(|| Arc::<str>::from("this agent does not accept images"))
     }
 
     fn begin_prompt(&mut self, prompt: String, images: Vec<Arc<Image>>) {
@@ -585,6 +625,7 @@ impl AgentThread {
         self.connection = AgentConnectionState::Running;
         self.error = None;
         self.suppress_user_echo = true;
+        self.last_activity = Instant::now();
     }
 
     fn apply_update(&mut self, update: SessionUpdate) {
@@ -1216,6 +1257,7 @@ impl AgentThread {
             Some(&self.cwd),
         );
         let has_terminal_frame = !terminal_frame.is_empty();
+        let carries_shape = update_carries_tool_shape(&update.fields);
         let Some(entry_id) = self.tool_entries.get(&protocol_id).copied() else {
             if let Ok(tool) = ToolCall::try_from(update) {
                 self.upsert_tool(tool);
@@ -1241,7 +1283,9 @@ impl AgentThread {
             return;
         };
         let mut changed = false;
-        if let Some(next) = update.fields.kind {
+        if let Some(next) = update.fields.kind
+            && reclassifies_tool(*kind, next, carries_shape)
+        {
             *kind = map_tool_kind(next);
             changed = true;
         }
@@ -1253,7 +1297,7 @@ impl AgentThread {
             };
             changed = true;
         }
-        if let Some(next) = update.fields.title {
+        if let Some(next) = update.fields.title.filter(|title| !title.trim().is_empty()) {
             *label = collaboration
                 .as_ref()
                 .and_then(codex_collab_label)
@@ -1268,8 +1312,8 @@ impl AgentThread {
             *input = collaboration
                 .as_ref()
                 .and_then(format_codex_collaboration)
-                .map(ToolPayload::Text)
-                .or_else(|| pretty_json(&raw_input).map(ToolPayload::Json));
+                .map(|text| ToolPayload::Text(capped_payload(text)))
+                .or_else(|| json_payload(&raw_input));
             changed = true;
         }
         if let Some(locations) = update.fields.locations {
@@ -1284,8 +1328,7 @@ impl AgentThread {
         let raw_output = update
             .fields
             .raw_output
-            .and_then(|raw_output| pretty_json(&raw_output))
-            .map(ToolPayload::Json);
+            .and_then(|raw_output| json_payload(&raw_output));
         if let Some(content) = update.fields.content {
             let terminal_content = content
                 .iter()
@@ -1759,6 +1802,7 @@ impl AgentThread {
             Some(&self.cwd),
         );
         let has_terminal_frame = !terminal_frame.is_empty();
+        let carries_shape = update_carries_tool_shape(&update.fields);
         let Some(entry_id) = self.child_tool_entries.get(&protocol_id).copied() else {
             if let Ok(tool) = ToolCall::try_from(update) {
                 self.upsert_child_tool(root_tool_id, tool);
@@ -1787,7 +1831,9 @@ impl AgentThread {
             return;
         };
         let mut changed = false;
-        if let Some(next) = update.fields.kind {
+        if let Some(next) = update.fields.kind
+            && reclassifies_tool(*kind, next, carries_shape)
+        {
             *kind = map_tool_kind(next);
             changed = true;
         }
@@ -1795,7 +1841,7 @@ impl AgentThread {
             *status = map_tool_status(next);
             changed = true;
         }
-        if let Some(next) = update.fields.title {
+        if let Some(next) = update.fields.title.filter(|title| !title.trim().is_empty()) {
             *label = next;
             changed = true;
         }
@@ -1804,7 +1850,7 @@ impl AgentThread {
             changed = true;
         }
         if let Some(raw_input) = update.fields.raw_input {
-            *input = pretty_json(&raw_input).map(ToolPayload::Json);
+            *input = json_payload(&raw_input);
             changed = true;
         }
         if let Some(locations) = update.fields.locations {
@@ -1819,8 +1865,7 @@ impl AgentThread {
         let raw_output = update
             .fields
             .raw_output
-            .and_then(|raw_output| pretty_json(&raw_output))
-            .map(ToolPayload::Json);
+            .and_then(|raw_output| json_payload(&raw_output));
         if let Some(content) = update.fields.content {
             let terminal_content = content
                 .iter()
@@ -1990,6 +2035,23 @@ impl AgentThread {
 
     fn cancel_inflight(&mut self) {
         self.settle_inflight(AgentToolStatusModel::Canceled);
+    }
+
+    /// What the quiesce watchdog refuses to park through: a permission the user
+    /// still owes an answer to (a question is one), a subagent task still
+    /// reporting, or any tool call the agent has not resolved.
+    fn turn_in_flight(&self) -> bool {
+        !self.pending_permissions.is_empty()
+            || !self.live_task_tools.is_empty()
+            || self.entries.iter().any(entry_awaits_agent)
+    }
+
+    /// Finalize a turn the agent went quiet on without touching the child: the
+    /// streaming entries settle, the pane accepts prompts again, and any later
+    /// output opens a fresh segment because `active_stream` is cleared.
+    fn park_turn(&mut self) {
+        self.settle_inflight(AgentToolStatusModel::Completed);
+        self.connection = AgentConnectionState::Ready;
     }
 
     fn settle_inflight(&mut self, settled_status: AgentToolStatusModel) {
@@ -2306,6 +2368,17 @@ struct RuntimeRouting {
     session_to_pane: HashMap<String, PaneId>,
     staged_updates: HashMap<String, Vec<SessionUpdate>>,
     permissions: HashMap<u64, PendingPermissionResponder>,
+    /// Sessions whose updates are recorded. A session only enters once its
+    /// transcript has settled in the pane, so the burst an agent replays out of
+    /// `session/load` is never journalled on top of what it already replays.
+    journaled: BTreeSet<String>,
+}
+
+/// A prompt typed while the pane's turn was still running, waiting its turn.
+#[derive(Debug)]
+struct QueuedPrompt {
+    text: String,
+    images: Vec<Arc<Image>>,
 }
 
 struct PaneRuntime {
@@ -2320,19 +2393,29 @@ struct PaneRuntime {
 pub struct AgentController {
     config: AgentConfig,
     preferences: AgentPreferences,
+    journal: Option<Arc<AgentJournal>>,
     workspace: AgentWorkspaceEnvironment,
     panes: BTreeMap<PaneId, AgentThread>,
     pending_composer: BTreeMap<PaneId, String>,
+    /// Images reclaimed from queued prompts, waiting for the pane's view to
+    /// re-attach them beside the reclaimed text.
+    pending_images: BTreeMap<PaneId, Vec<Arc<Image>>>,
+    queued_prompts: BTreeMap<PaneId, VecDeque<QueuedPrompt>>,
     retained_panes: BTreeSet<PaneId>,
     runtimes: BTreeMap<PaneId, PaneRuntime>,
+    quiesce_watchdogs: BTreeMap<PaneId, Task<()>>,
+    turn_bases: BTreeMap<PaneId, TurnTree>,
+    turn_snapshots: BTreeMap<PaneId, Task<()>>,
     next_runtime_generation: u64,
     shutting_down: bool,
 }
 
 impl AgentController {
+    /// A controller with no journal: tests must never reach the user's data
+    /// directory.
     #[cfg(test)]
     pub(crate) fn new(config: AgentConfig) -> Self {
-        Self::with_preferences(config, AgentPreferences::default(), None)
+        Self::build(config, AgentPreferences::default(), None, None)
     }
 
     pub fn with_preferences(
@@ -2340,17 +2423,32 @@ impl AgentController {
         preferences: AgentPreferences,
         socket: Option<String>,
     ) -> Self {
+        Self::build(config, preferences, socket, load_persistent_journal())
+    }
+
+    fn build(
+        config: AgentConfig,
+        preferences: AgentPreferences,
+        socket: Option<String>,
+        journal: Option<Arc<AgentJournal>>,
+    ) -> Self {
         Self {
             config,
             preferences,
+            journal,
             workspace: AgentWorkspaceEnvironment {
                 socket,
                 ..AgentWorkspaceEnvironment::default()
             },
             panes: BTreeMap::new(),
             pending_composer: BTreeMap::new(),
+            pending_images: BTreeMap::new(),
+            queued_prompts: BTreeMap::new(),
             retained_panes: BTreeSet::new(),
             runtimes: BTreeMap::new(),
+            quiesce_watchdogs: BTreeMap::new(),
+            turn_bases: BTreeMap::new(),
+            turn_snapshots: BTreeMap::new(),
             next_runtime_generation: 0,
             shutting_down: false,
         }
@@ -2363,7 +2461,50 @@ impl AgentController {
                 .pending_composer
                 .get(&pane)
                 .map(|text| Arc::from(text.as_str()));
+            state.queued_prompts = self.queued_count(pane);
             state
+        })
+    }
+
+    /// How many prompts are waiting behind the pane's live turn.
+    pub(crate) fn queued_count(&self, pane: PaneId) -> usize {
+        self.queued_prompts.get(&pane).map_or(0, VecDeque::len)
+    }
+
+    /// The worktree the pane's turn started from, once the snapshot has landed.
+    /// Absent while it is still being taken, and for a pane that is not inside
+    /// a git worktree.
+    pub(crate) fn turn_base(&self, pane: PaneId) -> Option<&TurnTree> {
+        self.turn_bases.get(&pane)
+    }
+
+    /// Diff the pane's worktree against the base its turn started from. Git
+    /// runs on the background executor; the task carries the diff back.
+    pub(crate) fn capture_turn_diff(
+        &self,
+        pane: PaneId,
+        cx: &App,
+    ) -> Option<Task<Result<TurnDiff, String>>> {
+        let cwd = self.panes.get(&pane)?.cwd.clone();
+        let base = self.turn_base(pane)?.clone();
+        Some(
+            cx.background_executor()
+                .spawn(async move { turn_snapshot::capture_turn_diff(&cwd, &base) }),
+        )
+    }
+
+    /// Which bucket one pane lands in, in the same order the fleet rollup uses.
+    /// The sidebar reads this per agent pane instead of cloning whole states.
+    pub(crate) fn pane_status(&self, pane: PaneId) -> Option<AgentPaneStatus> {
+        let thread = self.panes.get(&pane)?;
+        Some(if !thread.pending_permissions.is_empty() {
+            AgentPaneStatus::NeedsInput
+        } else if thread.connection == AgentConnectionState::Failed {
+            AgentPaneStatus::Failed
+        } else if thread.connection.has_active_turn() {
+            AgentPaneStatus::Working
+        } else {
+            AgentPaneStatus::Idle
         })
     }
 
@@ -2456,6 +2597,15 @@ impl AgentController {
             self.panes.remove(&pane);
         }
         self.pending_composer
+            .retain(|pane, _| retained.contains(pane));
+        self.pending_images
+            .retain(|pane, _| retained.contains(pane));
+        self.queued_prompts
+            .retain(|pane, _| retained.contains(pane));
+        self.quiesce_watchdogs
+            .retain(|pane, _| retained.contains(pane));
+        self.turn_bases.retain(|pane, _| retained.contains(pane));
+        self.turn_snapshots
             .retain(|pane, _| retained.contains(pane));
         self.retained_panes.clone_from(retained);
     }
@@ -2709,6 +2859,9 @@ impl AgentController {
         Ok(())
     }
 
+    /// Send the prompt, or queue it behind the turn already running. A queued
+    /// prompt is dispatched when that turn settles on its own; a turn the user
+    /// stops, or one the runtime loses, hands the queue back to the composer.
     pub(crate) fn prompt(
         &mut self,
         pane: PaneId,
@@ -2720,6 +2873,32 @@ impl AgentController {
         if text.is_empty() && images.is_empty() {
             return Ok(());
         }
+        let Some(thread) = self.panes.get(&pane) else {
+            return Err(Arc::from("agent pane is not registered"));
+        };
+        if let Some(refusal) = thread.image_refusal(!images.is_empty()) {
+            return Err(refusal);
+        }
+        if thread.connection.has_active_turn() {
+            self.queued_prompts
+                .entry(pane)
+                .or_default()
+                .push_back(QueuedPrompt { text, images });
+            cx.notify();
+            return Ok(());
+        }
+        let result = self.dispatch_prompt(pane, QueuedPrompt { text, images }, cx);
+        cx.notify();
+        result
+    }
+
+    fn dispatch_prompt(
+        &mut self,
+        pane: PaneId,
+        prompt: QueuedPrompt,
+        cx: &mut Context<Self>,
+    ) -> Result<(), Arc<str>> {
+        let QueuedPrompt { text, images } = prompt;
         {
             let Some(thread) = self.panes.get_mut(&pane) else {
                 return Err(Arc::from("agent pane is not registered"));
@@ -2729,6 +2908,7 @@ impl AgentController {
             }
             thread.begin_prompt(text.clone(), images.clone());
         }
+        let title = derive_pane_title(&text);
         if !self.send(pane, RuntimeCommand::Prompt { pane, text, images }) {
             if let Some(thread) = self.panes.get_mut(&pane) {
                 thread.connection = AgentConnectionState::Failed;
@@ -2736,8 +2916,165 @@ impl AgentController {
             }
             return Err(Arc::from("agent runtime is not connected"));
         }
-        cx.notify();
+        self.name_pane_after_prompt(pane, title, cx);
+        self.arm_quiesce_watchdog(pane, cx);
+        self.snapshot_turn_base(pane, cx);
         Ok(())
+    }
+
+    /// Record the worktree this turn starts from, so the pane can show what the
+    /// agent changed. Git is shelled out to, so the snapshot never runs on the
+    /// UI thread, and a pane whose working directory is not a worktree simply
+    /// keeps no base.
+    fn snapshot_turn_base(&mut self, pane: PaneId, cx: &mut Context<Self>) {
+        let Some(cwd) = self.panes.get(&pane).map(|thread| thread.cwd.clone()) else {
+            return;
+        };
+        self.turn_bases.remove(&pane);
+        let task = cx.spawn(async move |this, cx| {
+            let snapshot = cx
+                .background_executor()
+                .spawn(async move { turn_snapshot::snapshot_tree(&cwd) })
+                .await;
+            match snapshot {
+                Ok(base) => {
+                    let _ = this.update(cx, |controller, _| {
+                        controller.turn_bases.insert(pane, base);
+                    });
+                }
+                Err(error) => log::debug!(
+                    target: "zz::agent",
+                    "no turn snapshot for pane {pane}: {error}"
+                ),
+            }
+        });
+        self.turn_snapshots.insert(pane, task);
+    }
+
+    /// Name the pane after the session's opening prompt. The mux owns pane
+    /// titles, so this only asks for the rename; anything already named — by
+    /// the agent, by an earlier prompt, or by the user — keeps its name.
+    fn name_pane_after_prompt(
+        &mut self,
+        pane: PaneId,
+        title: Option<Arc<str>>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(title) = title else {
+            return;
+        };
+        let Some(thread) = self.panes.get_mut(&pane) else {
+            return;
+        };
+        if thread.auto_titled || thread.title.is_some() {
+            return;
+        }
+        thread.auto_titled = true;
+        thread.title = Some(title.clone());
+        cx.emit(AgentControllerEvent::Title { pane, title });
+    }
+
+    /// Start the next queued prompt now that the pane accepts prompts again.
+    /// A dispatch that cannot reach the runtime returns the whole queue to the
+    /// composer rather than dropping what the user typed.
+    fn dispatch_next_queued_prompt(&mut self, pane: PaneId, cx: &mut Context<Self>) {
+        let Some(prompt) = self
+            .queued_prompts
+            .get_mut(&pane)
+            .and_then(VecDeque::pop_front)
+        else {
+            return;
+        };
+        let text = prompt.text.clone();
+        if self.dispatch_prompt(pane, prompt, cx).is_err() {
+            self.queue_composer_text(pane, &text);
+            self.reclaim_queued_prompts(pane);
+        }
+        cx.notify();
+    }
+
+    /// Hand every queued prompt back to the composer. The at-least-once rule:
+    /// a prompt the user typed is either sent or visible in the draft again,
+    /// never silently dropped — images included.
+    fn reclaim_queued_prompts(&mut self, pane: PaneId) -> bool {
+        let Some(queue) = self.queued_prompts.remove(&pane) else {
+            return false;
+        };
+        let mut reclaimed = false;
+        for prompt in queue {
+            reclaimed |= self.queue_composer_text(pane, &prompt.text);
+            if !prompt.images.is_empty() {
+                self.pending_images
+                    .entry(pane)
+                    .or_default()
+                    .extend(prompt.images);
+                reclaimed = true;
+            }
+        }
+        reclaimed
+    }
+
+    /// Empty the pane's queue back into its composer draft on the user's ask.
+    pub(crate) fn unqueue_prompts(&mut self, pane: PaneId, cx: &mut Context<Self>) {
+        if !self.reclaim_queued_prompts(pane) {
+            return;
+        }
+        cx.emit(AgentControllerEvent::Pane { pane });
+        cx.notify();
+    }
+
+    /// Watch the turn for silence and park it when the agent goes quiet with
+    /// nothing outstanding. The child is never signalled: parking only settles
+    /// what the transcript shows and hands the composer back.
+    fn arm_quiesce_watchdog(&mut self, pane: PaneId, cx: &mut Context<Self>) {
+        let Some(window) = quiesce_window() else {
+            return;
+        };
+        let watchdog = cx.spawn(async move |this, cx| {
+            let mut delay = window;
+            loop {
+                cx.background_executor().timer(delay).await;
+                let Ok(Some(next)) = this.update(cx, |controller, cx| {
+                    controller.poll_quiesce(pane, window, cx)
+                }) else {
+                    return;
+                };
+                delay = next;
+            }
+        });
+        self.quiesce_watchdogs.insert(pane, watchdog);
+    }
+
+    /// `None` retires the watchdog, `Some(delay)` asks for another look later.
+    fn poll_quiesce(
+        &mut self,
+        pane: PaneId,
+        window: Duration,
+        cx: &mut Context<Self>,
+    ) -> Option<Duration> {
+        let thread = self.panes.get(&pane)?;
+        if thread.connection != AgentConnectionState::Running {
+            return None;
+        }
+        let silence = thread.last_activity.elapsed();
+        let in_flight = thread.turn_in_flight();
+        if !should_park_turn(Some(window), silence, in_flight) {
+            return Some(if in_flight {
+                window
+            } else {
+                window.saturating_sub(silence)
+            });
+        }
+        log::info!(
+            target: "zz::agent",
+            "parking quiet turn for pane {pane} after {}ms of silence; agent process left alone",
+            silence.as_millis()
+        );
+        self.panes.get_mut(&pane)?.park_turn();
+        self.dispatch_next_queued_prompt(pane, cx);
+        cx.emit(AgentControllerEvent::Pane { pane });
+        cx.notify();
+        None
     }
 
     /// Queue `agent-send` text for the pane's composer draft. The view folds it
@@ -2769,6 +3106,12 @@ impl AgentController {
             .filter(|text| !text.is_empty())
     }
 
+    /// Hand back the images a reclaimed prompt carried, for the view to put in
+    /// its attachment strip again.
+    pub(crate) fn take_pending_images(&mut self, pane: PaneId) -> Vec<Arc<Image>> {
+        self.pending_images.remove(&pane).unwrap_or_default()
+    }
+
     pub(crate) fn cancel(&mut self, pane: PaneId, cx: &mut Context<Self>) {
         let Some(thread) = self.panes.get_mut(&pane) else {
             return;
@@ -2778,6 +3121,7 @@ impl AgentController {
         }
         thread.connection = AgentConnectionState::Cancelling;
         self.send(pane, RuntimeCommand::Cancel { pane });
+        self.reclaim_queued_prompts(pane);
         cx.notify();
     }
 
@@ -2975,8 +3319,9 @@ impl AgentController {
             pane: Some(pane.to_string()),
             ..self.workspace.clone()
         };
+        let journal = self.journal.clone();
         let background = cx.background_executor().spawn(async move {
-            run_agent_runtime(config, provider, workspace, command_rx, event_tx).await
+            run_agent_runtime(config, provider, workspace, journal, command_rx, event_tx).await
         });
         let runtime_task = cx.spawn(async move |this, cx| {
             let result = background.await;
@@ -3074,6 +3419,7 @@ impl AgentController {
         }
         runtime.stopping = true;
         let _ = runtime.command_tx.try_send(RuntimeCommand::Shutdown);
+        self.reclaim_queued_prompts(pane);
     }
 
     fn runtime_finished(
@@ -3107,6 +3453,9 @@ impl AgentController {
             thread.cancel_inflight();
             thread.error = Some(error);
         }
+        if self.reclaim_queued_prompts(pane) {
+            cx.emit(AgentControllerEvent::Pane { pane });
+        }
         if restart {
             self.ensure_runtime(pane, cx);
             self.open_pane_if_needed(pane);
@@ -3122,6 +3471,7 @@ impl AgentController {
     ) -> bool {
         let mut changed_pane = None;
         let mut reconcile_pane = None;
+        let mut drain_pane = None;
         let mut remembered_preference = None;
         match event {
             RuntimeEvent::Ready {
@@ -3323,6 +3673,7 @@ impl AgentController {
                         Ok(_) => {
                             thread.connection = AgentConnectionState::Ready;
                             thread.settle_inflight(AgentToolStatusModel::Completed);
+                            drain_pane = Some(pane);
                         }
                         Err(error) => {
                             thread.connection = AgentConnectionState::Failed;
@@ -3333,6 +3684,9 @@ impl AgentController {
                     changed_pane = Some(pane);
                     if thread.connection.accepts_prompt() {
                         reconcile_pane = Some(pane);
+                    }
+                    if drain_pane.is_none() {
+                        self.reclaim_queued_prompts(pane);
                     }
                 }
             }
@@ -3464,8 +3818,78 @@ impl AgentController {
         if let Some(pane) = reconcile_pane {
             self.reconcile_preferences(pane);
         }
+        if let Some(thread) = changed_pane.and_then(|pane| self.panes.get_mut(&pane)) {
+            thread.last_activity = Instant::now();
+        }
+        if let Some(pane) = drain_pane {
+            self.dispatch_next_queued_prompt(pane, cx);
+        }
         changed_pane.is_some()
     }
+}
+
+/// The quiesce window, read once per process. Absent or unparseable falls back
+/// to the default; `0` disables the watchdog.
+fn quiesce_window() -> Option<Duration> {
+    static WINDOW: OnceLock<Option<Duration>> = OnceLock::new();
+
+    *WINDOW.get_or_init(|| parse_quiesce_window(std::env::var_os("ZZ_AGENT_QUIESCE_MS").as_deref()))
+}
+
+fn parse_quiesce_window(value: Option<&OsStr>) -> Option<Duration> {
+    let millis = value
+        .and_then(OsStr::to_str)
+        .map(str::trim)
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_QUIESCE_MS);
+    (millis > 0).then(|| Duration::from_millis(millis))
+}
+
+/// Silence alone never ends a run: a live child is the working signal, so the
+/// watchdog parks only once the turn has been quiet past `window` with nothing
+/// outstanding. A false trip costs a status dip, never data.
+fn should_park_turn(window: Option<Duration>, silence: Duration, in_flight: bool) -> bool {
+    window.is_some_and(|window| !in_flight && silence >= window)
+}
+
+/// Name a pane after the prompt that opened its session: the first line, with
+/// quote and heading dressing stripped, trimmed to a handful of words. Agents
+/// that title their own sessions overrule this the moment they say so.
+fn derive_pane_title(prompt: &str) -> Option<Arc<str>> {
+    let first_line = prompt.trim().lines().next().unwrap_or_default();
+    let cleaned = first_line
+        .trim_start_matches(['"', '\'', '#', '>', '`', '*', ' ', '\t'])
+        .trim_end_matches(['"', '\'', '`', '*', ' ', '\t']);
+    let words = cleaned
+        .split_whitespace()
+        .take(MAX_TITLE_WORDS)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let title = words.chars().take(MAX_TITLE_CHARS).collect::<String>();
+    let title = title.trim_end();
+    (!title.is_empty()).then(|| Arc::from(title))
+}
+
+fn entry_awaits_agent(entry: &AgentThreadEntry) -> bool {
+    let AgentThreadEntry::Tool {
+        status, children, ..
+    } = entry
+    else {
+        return false;
+    };
+    unresolved_tool_status(*status)
+        || children.iter().any(|child| {
+            matches!(child, AgentThreadEntry::Tool { status, .. } if unresolved_tool_status(*status))
+        })
+}
+
+const fn unresolved_tool_status(status: AgentToolStatusModel) -> bool {
+    matches!(
+        status,
+        AgentToolStatusModel::Pending
+            | AgentToolStatusModel::Running
+            | AgentToolStatusModel::NeedsApproval
+    )
 }
 
 fn preferred_setting_command(
@@ -3544,20 +3968,93 @@ async fn run_agent_runtime(
     config: AgentConfig,
     provider: AgentProvider,
     workspace: AgentWorkspaceEnvironment,
+    journal: Option<Arc<AgentJournal>>,
     command_rx: Receiver<RuntimeCommand>,
     event_tx: Sender<RuntimeEvent>,
 ) -> Result<(), String> {
     let agent = AcpAgent::from_str(config.command_for(provider))
         .map_err(|error| format!("invalid {}: {error}", AgentConfig::key_for(provider)))?;
     let agent = crate::agent::environment::with_platform_environment(agent);
+    let stderr = StderrTail::default();
+    let debug_stderr = stderr.clone();
     let agent = crate::agent::environment::with_workspace_environment(agent, &workspace)
-        .with_debug(|line, direction| {
+        .with_debug(move |line, direction| {
             if matches!(direction, LineDirection::Stderr) {
                 log::warn!(target: "zz::agent::stderr", "{line}");
+                debug_stderr.push(line);
             }
         });
 
-    run_agent_connection(provider, agent, command_rx, event_tx).await
+    run_agent_connection(
+        provider,
+        config.auto_approve,
+        agent,
+        journal,
+        command_rx,
+        event_tx,
+    )
+    .await
+    .map_err(|error| runtime_failure_message(provider.label(), &error, stderr.snapshot()))
+}
+
+/// Rolling tail of the adapter's stderr, kept so an unexpected exit can say
+/// what the child complained about instead of shrugging.
+#[derive(Clone, Default)]
+struct StderrTail(Arc<Mutex<VecDeque<String>>>);
+
+impl StderrTail {
+    const KEEP_LINES: usize = 6;
+    const KEEP_BYTES: usize = 700;
+
+    fn push(&self, line: &str) {
+        let line = line.trim();
+        if line.is_empty() {
+            return;
+        }
+        let mut tail = self.0.lock();
+        tail.push_back(capped(line.to_owned(), Self::KEEP_BYTES));
+        while tail.len() > Self::KEEP_LINES {
+            tail.pop_front();
+        }
+    }
+
+    fn snapshot(&self) -> Option<String> {
+        let tail = self.0.lock();
+        (!tail.is_empty()).then(|| {
+            capped(
+                tail.iter().cloned().collect::<Vec<_>>().join("\n"),
+                Self::KEEP_BYTES,
+            )
+        })
+    }
+}
+
+fn runtime_failure_message(adapter: &str, error: &str, tail: Option<String>) -> String {
+    let status = exit_status_detail(error).unwrap_or_else(|| {
+        capped(
+            error.lines().next().unwrap_or(error).trim().to_owned(),
+            MAX_RUNTIME_ERROR_BYTES,
+        )
+    });
+    match tail {
+        Some(tail) => format!("{adapter} exited unexpectedly ({status}): {tail}"),
+        None => format!("{adapter} exited unexpectedly ({status})"),
+    }
+}
+
+/// Recover the child's exit status from the ACP crate's process error, which
+/// reads `Process exited with <status>[: <stderr>]`. The crate owns the child,
+/// so this string is the only handle on the status we get.
+fn exit_status_detail(error: &str) -> Option<String> {
+    let status = error.split_once("exited with ")?.1;
+    let status = status
+        .split(": ")
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(": ")
+        .trim()
+        .to_owned();
+    (!status.is_empty()).then_some(status)
 }
 
 fn new_session_request(provider: AgentProvider, cwd: PathBuf) -> NewSessionRequest {
@@ -3576,15 +4073,162 @@ fn load_session_request(
     request
 }
 
+/// Journals sit beside `agent-preferences.json`, in the same per-user
+/// application-data directory.
+fn journal_directory() -> io::Result<PathBuf> {
+    let data = platform_data_dir().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "could not resolve the current user's application-data directory",
+        )
+    })?;
+    Ok(data.join("zz").join(JOURNAL_DIRECTORY_NAME))
+}
+
+fn load_persistent_journal() -> Option<Arc<AgentJournal>> {
+    let journal = journal_directory().and_then(|directory| {
+        AgentJournal::open(&directory).map_err(|error| io::Error::other(error.to_string()))
+    });
+    let journal = match journal {
+        Ok(journal) => journal,
+        Err(error) => {
+            log::warn!(
+                target: "zz::agent::journal",
+                "agent transcripts are not journalled: {error}"
+            );
+            return None;
+        }
+    };
+    match journal.prune(JOURNAL_RETENTION_DAYS) {
+        Ok(0) => {}
+        Ok(removed) => log::info!(
+            target: "zz::agent::journal",
+            "pruned {removed} agent journals older than {JOURNAL_RETENTION_DAYS} days"
+        ),
+        Err(error) => log::warn!(
+            target: "zz::agent::journal",
+            "could not prune agent journals: {error}"
+        ),
+    }
+    Some(Arc::new(journal))
+}
+
+/// A journal failure never interrupts a turn: the transcript keeps streaming,
+/// it just stops being replayable. The first one is loud, the rest are not.
+fn report_journal_error(session_id: &str, error: &str) {
+    static REPORTED: AtomicBool = AtomicBool::new(false);
+
+    if REPORTED.swap(true, Ordering::Relaxed) {
+        log::debug!(target: "zz::agent::journal", "session {session_id}: {error}");
+    } else {
+        log::warn!(
+            target: "zz::agent::journal",
+            "agent transcripts are no longer journalled for session {session_id}: {error}"
+        );
+    }
+}
+
+fn record_update(journal: Option<&AgentJournal>, session_id: &str, update: &SessionUpdate) {
+    let Some(journal) = journal else {
+        return;
+    };
+    let value = match serde_json::to_value(update) {
+        Ok(value) => value,
+        Err(error) => {
+            report_journal_error(session_id, &error.to_string());
+            return;
+        }
+    };
+    if let Err(error) = journal.append(session_id, &value) {
+        report_journal_error(session_id, &error.to_string());
+    }
+}
+
+fn record_updates(journal: Option<&AgentJournal>, session_id: &str, updates: &[SessionUpdate]) {
+    for update in updates {
+        record_update(journal, session_id, update);
+    }
+}
+
+/// The journalled transcript of `session_id`, as updates the reducer replays
+/// exactly like the ones an agent sends out of `session/load`.
+fn journal_replay(journal: Option<&AgentJournal>, session_id: Option<&str>) -> Vec<SessionUpdate> {
+    let (Some(journal), Some(session_id)) = (journal, session_id) else {
+        return Vec::new();
+    };
+    let records = match journal.replay(session_id) {
+        Ok(records) => records,
+        Err(error) => {
+            report_journal_error(session_id, &error.to_string());
+            return Vec::new();
+        }
+    };
+    records
+        .into_iter()
+        .filter_map(
+            |(seq, update)| match serde_json::from_value::<SessionUpdate>(update) {
+                Ok(update) => Some(update),
+                Err(error) => {
+                    log::warn!(
+                        target: "zz::agent::journal",
+                        "skipping journalled update {seq} of session {session_id}: {error}"
+                    );
+                    None
+                }
+            },
+        )
+        .collect()
+}
+
+/// Seed a freshly created session with a journalled transcript, and take over
+/// journalling under its id. Staging the live session before the copy is what
+/// makes the restore atomic: an update that arrives mid-copy queues behind the
+/// restored entries instead of racing them into the pane.
+fn restore_journaled_session(
+    routing: &Mutex<RuntimeRouting>,
+    journal: Option<&AgentJournal>,
+    pane: PaneId,
+    session_id: &str,
+    restored_from: Option<&str>,
+    restored: Vec<SessionUpdate>,
+) -> Vec<SessionUpdate> {
+    {
+        let mut routes = routing.lock();
+        routes
+            .staged_updates
+            .insert(session_id.to_owned(), Vec::new());
+        routes.session_to_pane.insert(session_id.to_owned(), pane);
+    }
+    record_updates(journal, session_id, &restored);
+    if let (Some(journal), Some(previous)) = (journal, restored_from)
+        && previous != session_id
+        && let Err(error) = journal.remove(previous)
+    {
+        report_journal_error(previous, &error.to_string());
+    }
+    let staged = {
+        let mut routes = routing.lock();
+        routes.journaled.insert(session_id.to_owned());
+        routes.staged_updates.remove(session_id).unwrap_or_default()
+    };
+    record_updates(journal, session_id, &staged);
+    let mut replay = restored;
+    replay.extend(staged);
+    replay
+}
+
 async fn run_agent_connection(
     provider: AgentProvider,
+    auto_approve: bool,
     agent: impl ConnectTo<AcpClientRole>,
+    journal: Option<Arc<AgentJournal>>,
     command_rx: Receiver<RuntimeCommand>,
     event_tx: Sender<RuntimeEvent>,
 ) -> Result<(), String> {
     let routing = Arc::new(Mutex::new(RuntimeRouting::default()));
     let next_permission_id = Arc::new(AtomicU64::new(1));
 
+    let notification_journal = journal.clone();
     let notification_routing = Arc::clone(&routing);
     let notification_events = event_tx.clone();
     let ext_routing = Arc::clone(&routing);
@@ -3606,7 +4250,15 @@ async fn run_agent_connection(
                             return Ok(());
                         }
                         let pane = routing.session_to_pane.get(&session_id).copied();
+                        let journaled = routing.journaled.contains(&session_id);
                         drop(routing);
+                        if journaled {
+                            record_update(
+                                notification_journal.as_deref(),
+                                &session_id,
+                                &notification.update,
+                            );
+                        }
                         if let Some(pane) = pane {
                             permission_safe_send(
                                 &notification_events,
@@ -3675,6 +4327,32 @@ async fn run_agent_connection(
                         RequestPermissionOutcome::Cancelled,
                     ));
                 };
+                if auto_approve
+                    && !is_user_question(&request.options)
+                    && let Some(option_id) = preferred_allow_option(&request.options)
+                {
+                    log::debug!(
+                        target: "zz::agent",
+                        "auto-approving tool permission for pane {pane} with option {option_id}"
+                    );
+                    if let Err(error) = permission_safe_send(
+                        &permission_events,
+                        RuntimeEvent::SessionUpdate {
+                            pane,
+                            update: SessionUpdate::ToolCallUpdate(request.tool_call),
+                        },
+                    ) {
+                        responder.respond(RequestPermissionResponse::new(
+                            RequestPermissionOutcome::Cancelled,
+                        ))?;
+                        return Err(error);
+                    }
+                    return responder.respond(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                            option_id,
+                        )),
+                    ));
+                }
                 let request_id = permission_ids.fetch_add(1, Ordering::Relaxed);
                 permission_routing.lock().permissions.insert(
                     request_id,
@@ -3774,13 +4452,23 @@ async fn run_agent_connection(
                         cwd,
                         resume_session,
                     } => {
-                        let restoring = session_capabilities.load && resume_session.is_some();
+                        // An agent that cannot load the session itself is
+                        // restored from the journal instead, so the pane says
+                        // RESTORING on both routes rather than flashing
+                        // STARTING at a transcript that is about to appear.
+                        let mut restored = if session_capabilities.load {
+                            Vec::new()
+                        } else {
+                            journal_replay(journal.as_deref(), resume_session.as_deref())
+                        };
+                        let restoring = (session_capabilities.load && resume_session.is_some())
+                            || !restored.is_empty();
                         permission_safe_send(
                             &event_tx,
                             RuntimeEvent::SessionReset { pane, restoring },
                         )?;
                         let session_result = if let Some(resume) =
-                            resume_session.filter(|_| session_capabilities.load)
+                            resume_session.clone().filter(|_| session_capabilities.load)
                         {
                             let session_id = AcpSessionId::new(resume);
                             routing
@@ -3810,8 +4498,12 @@ async fn run_agent_connection(
                                         target: "zz::agent",
                                         "could not restore ACP session for pane {pane}: {error}; creating a new session"
                                     );
+                                    restored = journal_replay(
+                                        journal.as_deref(),
+                                        resume_session.as_deref(),
+                                    );
                                     connection
-                                        .send_request(new_session_request(provider, cwd))
+                                        .send_request(new_session_request(provider, cwd.clone()))
                                         .block_task()
                                         .await
                                         .map(|response| {
@@ -3825,7 +4517,7 @@ async fn run_agent_connection(
                             }
                         } else {
                             connection
-                                .send_request(new_session_request(provider, cwd))
+                                .send_request(new_session_request(provider, cwd.clone()))
                                 .block_task()
                                 .await
                                 .map(|response| {
@@ -3853,20 +4545,43 @@ async fn run_agent_connection(
                                     )?;
                                     continue;
                                 }
-                                routing
-                                    .lock()
-                                    .session_to_pane
-                                    .insert(session_id.0.to_string(), pane);
-                                sessions.insert(pane, session_id.clone());
-                                permission_safe_send(
-                                    &event_tx,
-                                    RuntimeEvent::SessionReady {
+                                let live = session_id.0.to_string();
+                                sessions.insert(pane, session_id);
+                                if restored.is_empty() {
+                                    let mut routes = routing.lock();
+                                    routes.session_to_pane.insert(live.clone(), pane);
+                                    routes.journaled.insert(live.clone());
+                                    drop(routes);
+                                    permission_safe_send(
+                                        &event_tx,
+                                        RuntimeEvent::SessionReady {
+                                            pane,
+                                            session_id: live,
+                                            modes,
+                                            config_options,
+                                        },
+                                    )?;
+                                } else {
+                                    let replay = restore_journaled_session(
+                                        &routing,
+                                        journal.as_deref(),
                                         pane,
-                                        session_id: session_id.0.to_string(),
-                                        modes,
-                                        config_options,
-                                    },
-                                )?;
+                                        &live,
+                                        resume_session.as_deref(),
+                                        restored,
+                                    );
+                                    permission_safe_send(
+                                        &event_tx,
+                                        RuntimeEvent::SessionSwitched {
+                                            pane,
+                                            session_id: live,
+                                            cwd,
+                                            modes,
+                                            config_options,
+                                            replay,
+                                        },
+                                    )?;
+                                }
                             }
                             Err(error) => {
                                 permission_safe_send(
@@ -3984,8 +4699,10 @@ async fn run_agent_connection(
                                         .staged_updates
                                         .remove(&session.session_id)
                                         .unwrap_or_default();
+                                    routes.journaled.insert(session.session_id.clone());
                                     if let Some(previous) = &previous {
                                         routes.session_to_pane.remove(previous.0.as_ref());
+                                        routes.journaled.remove(previous.0.as_ref());
                                     }
                                     permission_safe_send(
                                         &event_tx,
@@ -4049,8 +4766,10 @@ async fn run_agent_connection(
                                     routes
                                         .session_to_pane
                                         .insert(session_id.0.to_string(), pane);
+                                    routes.journaled.insert(session_id.0.to_string());
                                     if let Some(previous) = &previous {
                                         routes.session_to_pane.remove(previous.0.as_ref());
+                                        routes.journaled.remove(previous.0.as_ref());
                                     }
                                     permission_safe_send(
                                         &event_tx,
@@ -4106,10 +4825,18 @@ async fn run_agent_connection(
                             .block_task()
                             .await
                         {
-                            Ok(_) => permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::SessionDeleted { pane, session_id },
-                            )?,
+                            Ok(_) => {
+                                routing.lock().journaled.remove(&session_id);
+                                if let Some(journal) = journal.as_deref()
+                                    && let Err(error) = journal.remove(&session_id)
+                                {
+                                    report_journal_error(&session_id, &error.to_string());
+                                }
+                                permission_safe_send(
+                                    &event_tx,
+                                    RuntimeEvent::SessionDeleted { pane, session_id },
+                                )?;
+                            }
                             Err(error) => permission_safe_send(
                                 &event_tx,
                                 RuntimeEvent::SessionDeleteFailed {
@@ -4487,6 +5214,37 @@ fn auth_method_model(method: &AuthMethod) -> AgentAuthMethod {
     }
 }
 
+/// A permission request is a QUESTION rather than a tool approval when any
+/// option carries a kind outside the allow/reject set — that is how agents
+/// relay user-facing choices. Repeated kinds are not a question signal:
+/// codex-acp sends two `allow_always` options on every exec approval.
+fn is_user_question(options: &[PermissionOption]) -> bool {
+    options.iter().any(|option| {
+        !matches!(
+            option.kind,
+            PermissionOptionKind::AllowOnce
+                | PermissionOptionKind::AllowAlways
+                | PermissionOptionKind::RejectOnce
+                | PermissionOptionKind::RejectAlways
+        )
+    })
+}
+
+/// The option an unattended approval picks: `allow_always` over `allow_once`,
+/// and never a reject — a request with no allow option falls through to the
+/// permission UI rather than being silently denied.
+fn preferred_allow_option(options: &[PermissionOption]) -> Option<String> {
+    let by_kind = |kind: PermissionOptionKind| {
+        options
+            .iter()
+            .find(|option| option.kind == kind)
+            .map(|option| option.option_id.0.to_string())
+    };
+    by_kind(PermissionOptionKind::AllowAlways)
+        .or_else(|| by_kind(PermissionOptionKind::AllowOnce))
+        .filter(|option_id| !option_id.is_empty())
+}
+
 fn map_permission_kind(kind: PermissionOptionKind) -> AgentPermissionKind {
     match kind {
         PermissionOptionKind::AllowOnce => AgentPermissionKind::AllowOnce,
@@ -4656,12 +5414,13 @@ fn apply_terminal_frame(
     if let Some(info) = frame.info {
         let command = info
             .command
-            .filter(|command| !command.trim().is_empty())
-            .unwrap_or_else(|| fallback_label.to_owned());
+            .as_deref()
+            .and_then(command_from_title)
+            .or_else(|| command_from_title(fallback_label));
         terminal.clear();
-        if !command.trim().is_empty() {
+        if let Some(command) = command {
             terminal.push_str("$ ");
-            terminal.push_str(command.trim());
+            terminal.push_str(&command);
             terminal.push('\n');
         }
         if let Some(cwd) = info.cwd.filter(|cwd| !cwd.trim().is_empty()) {
@@ -4691,7 +5450,80 @@ fn apply_terminal_frame(
         }
         terminal.push(']');
     }
+    truncate_payload(terminal, MAX_TOOL_PAYLOAD_BYTES);
     true
+}
+
+/// Generic display titles agents attach before (or instead of) real arguments.
+/// They are labels, not commands: rendering one as `$ Terminal` puts a lie in
+/// the transcript.
+const PLACEHOLDER_TOOL_TITLES: [&str; 16] = [
+    "grep",
+    "find",
+    "terminal",
+    "shell",
+    "read file",
+    "edit file",
+    "delete file",
+    "write file",
+    "web search",
+    "web fetch",
+    "codebase search",
+    "read todos",
+    "update todos",
+    "read lints",
+    "subagent task",
+    "task: subagent task",
+];
+
+fn is_placeholder_title(title: &str) -> bool {
+    PLACEHOLDER_TOOL_TITLES
+        .iter()
+        .any(|placeholder| title.trim().eq_ignore_ascii_case(placeholder))
+}
+
+/// A title usable as a shell command: unwrapped from its markdown code span
+/// when it wears one, and never a generic placeholder label.
+fn command_from_title(title: &str) -> Option<String> {
+    let command = unwrap_command_span(title).unwrap_or_else(|| title.trim().to_owned());
+    (!command.is_empty() && !is_placeholder_title(&command)).then_some(command)
+}
+
+fn unwrap_command_span(title: &str) -> Option<String> {
+    let inner = title.trim().strip_prefix('`')?.strip_suffix('`')?;
+    let mut command = String::with_capacity(inner.len());
+    let mut characters = inner.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\\' && characters.peek() == Some(&'`') {
+            characters.next();
+            command.push('`');
+        } else {
+            command.push(character);
+        }
+    }
+    Some(command.trim().to_owned())
+}
+
+/// Does this update carry tool *shape* (what the call is) rather than only its
+/// result? Status-and-output updates arrive after the shape is settled, so they
+/// must not re-type the call.
+fn update_carries_tool_shape(fields: &ToolCallUpdateFields) -> bool {
+    fields.title.is_some()
+        || fields.raw_input.is_some()
+        || fields.locations.is_some()
+        || fields.content.as_ref().is_some_and(|content| {
+            content
+                .iter()
+                .any(|content| matches!(content, ToolCallContent::Diff(_)))
+        })
+}
+
+/// A completion update that repeats the default `other` kind would otherwise
+/// downgrade an already-typed tool into a generic one.
+fn reclassifies_tool(current: AgentToolKindModel, next: ToolKind, carries_shape: bool) -> bool {
+    carries_shape
+        || current == AgentToolKindModel::Other
+        || map_tool_kind(next) != AgentToolKindModel::Other
 }
 
 fn map_tool_kind(kind: ToolKind) -> AgentToolKindModel {
@@ -4811,10 +5643,7 @@ fn tool_location(tool: &ToolCall) -> Option<String> {
 }
 
 fn tool_input(tool: &ToolCall) -> Option<ToolPayload> {
-    tool.raw_input
-        .as_ref()
-        .and_then(pretty_json)
-        .map(ToolPayload::Json)
+    tool.raw_input.as_ref().and_then(json_payload)
 }
 
 fn tool_output(tool: &ToolCall) -> Vec<ToolPayload> {
@@ -4822,8 +5651,7 @@ fn tool_output(tool: &ToolCall) -> Vec<ToolPayload> {
     if structured.is_empty() {
         tool.raw_output
             .as_ref()
-            .and_then(pretty_json)
-            .map(ToolPayload::Json)
+            .and_then(json_payload)
             .into_iter()
             .collect()
     } else {
@@ -4839,22 +5667,52 @@ fn tool_content_payload(content: &ToolCallContent) -> ToolPayload {
     match content {
         ToolCallContent::Diff(diff) => ToolPayload::Diff {
             path: diff.path.display().to_string(),
-            old: diff.old_text.clone(),
-            new: diff.new_text.clone(),
+            old: diff
+                .old_text
+                .clone()
+                .map(|old| capped(old, MAX_DIFF_SIDE_BYTES)),
+            new: capped(diff.new_text.clone(), MAX_DIFF_SIDE_BYTES),
         },
         ToolCallContent::Content(content) => match &content.content {
-            ContentBlock::Text(text) => ToolPayload::Text(text.text.clone()),
-            _ => ToolPayload::Json(pretty_json(content).unwrap_or_default()),
+            ContentBlock::Text(text) => ToolPayload::Text(capped_payload(text.text.clone())),
+            _ => ToolPayload::Json(capped_payload(pretty_json(content).unwrap_or_default())),
         },
         ToolCallContent::Terminal(terminal) => {
             ToolPayload::Terminal(format!("[terminal {}]", terminal.terminal_id.0))
         }
-        _ => ToolPayload::Json(pretty_json(content).unwrap_or_default()),
+        _ => ToolPayload::Json(capped_payload(pretty_json(content).unwrap_or_default())),
     }
 }
 
 fn pretty_json(value: &impl serde::Serialize) -> Option<String> {
     serde_json::to_string_pretty(value).ok()
+}
+
+fn json_payload(value: &impl serde::Serialize) -> Option<ToolPayload> {
+    pretty_json(value).map(|json| ToolPayload::Json(capped_payload(json)))
+}
+
+fn capped_payload(text: String) -> String {
+    capped(text, MAX_TOOL_PAYLOAD_BYTES)
+}
+
+fn capped(mut text: String, max_bytes: usize) -> String {
+    truncate_payload(&mut text, max_bytes);
+    text
+}
+
+/// Cut `text` to `max_bytes` on a char boundary, leaving a visible marker. The
+/// marker is budgeted inside the cap, so the result never exceeds it.
+fn truncate_payload(text: &mut String, max_bytes: usize) {
+    if text.len() <= max_bytes {
+        return;
+    }
+    let mut end = max_bytes.saturating_sub(TRUNCATION_MARKER.len());
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
+    text.push_str(TRUNCATION_MARKER);
 }
 
 fn pretty_json_markdown(value: &impl serde::Serialize) -> String {
@@ -4876,6 +5734,7 @@ mod tests {
 
     use super::*;
     use agent_client_protocol::schema::v1::SessionNotification;
+    use gpui::{AppContext as _, TestAppContext};
 
     fn thread() -> AgentThread {
         AgentThread::new(AgentProvider::Codex, PathBuf::from("/workspace"), None)
@@ -6225,7 +7084,9 @@ mod tests {
         let runtime = std::thread::spawn(move || {
             pollster::block_on(run_agent_connection(
                 AgentProvider::ClaudeCode,
+                false,
                 agent,
+                None,
                 command_rx,
                 event_tx,
             ))
@@ -6610,7 +7471,9 @@ mod tests {
         let runtime = std::thread::spawn(move || {
             pollster::block_on(run_agent_connection(
                 AgentProvider::Codex,
+                false,
                 agent,
+                None,
                 command_rx,
                 event_tx,
             ))
@@ -6907,5 +7770,892 @@ mod tests {
             runtime.join().expect("runtime thread did not panic"),
             Ok(())
         );
+    }
+    fn permission_option(id: &'static str, kind: PermissionOptionKind) -> PermissionOption {
+        PermissionOption::new(id, id, kind)
+    }
+
+    #[test]
+    fn repeated_allow_kinds_are_not_a_question_signal() {
+        let codex_exec_approval = [
+            permission_option("allow-session", PermissionOptionKind::AllowAlways),
+            permission_option("allow-prefix", PermissionOptionKind::AllowAlways),
+            permission_option("allow-once", PermissionOptionKind::AllowOnce),
+            permission_option("reject-once", PermissionOptionKind::RejectOnce),
+        ];
+        assert!(!is_user_question(&codex_exec_approval));
+        assert!(!is_user_question(&[
+            permission_option("yes", PermissionOptionKind::AllowOnce),
+            permission_option("no", PermissionOptionKind::RejectAlways),
+        ]));
+        assert!(!is_user_question(&[]));
+    }
+
+    /// The question branch is unreachable while zz speaks ACP v1: the schema
+    /// types an option kind as a closed enum, so a question-shaped kind never
+    /// survives deserialization to reach [`is_user_question`].
+    #[test]
+    fn acp_v1_rejects_permission_options_with_an_unknown_kind() {
+        assert!(
+            serde_json::from_value::<PermissionOption>(serde_json::json!({
+                "optionId": "pick-a",
+                "name": "Option A",
+                "kind": "answer"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn auto_approval_prefers_allow_always_then_allow_once() {
+        assert_eq!(
+            preferred_allow_option(&[
+                permission_option("once", PermissionOptionKind::AllowOnce),
+                permission_option("always", PermissionOptionKind::AllowAlways),
+                permission_option("always-prefix", PermissionOptionKind::AllowAlways),
+            ]),
+            Some("always".to_owned())
+        );
+        assert_eq!(
+            preferred_allow_option(&[
+                permission_option("reject", PermissionOptionKind::RejectOnce),
+                permission_option("once", PermissionOptionKind::AllowOnce),
+            ]),
+            Some("once".to_owned())
+        );
+        assert_eq!(
+            preferred_allow_option(&[
+                permission_option("reject", PermissionOptionKind::RejectOnce),
+                permission_option("reject-always", PermissionOptionKind::RejectAlways),
+            ]),
+            None
+        );
+        assert_eq!(preferred_allow_option(&[]), None);
+    }
+
+    #[test]
+    fn stderr_tail_keeps_the_last_lines_for_the_crash_message() {
+        let tail = StderrTail::default();
+        assert_eq!(tail.snapshot(), None);
+        for line in 0..8 {
+            tail.push(&format!("line {line}"));
+            tail.push("   ");
+        }
+        assert_eq!(
+            tail.snapshot(),
+            Some("line 2\nline 3\nline 4\nline 5\nline 6\nline 7".to_owned())
+        );
+        assert_eq!(
+            runtime_failure_message(
+                "Codex",
+                "Process exited with exit status: 1: boom",
+                tail.snapshot()
+            ),
+            "Codex exited unexpectedly (exit status: 1): line 2\nline 3\nline 4\nline 5\nline 6\nline 7"
+        );
+        assert_eq!(
+            runtime_failure_message("Codex", "Process exited with signal: 9 (SIGKILL)", None),
+            "Codex exited unexpectedly (signal: 9 (SIGKILL))"
+        );
+        assert_eq!(
+            runtime_failure_message("Claude Code", "connection closed\ndetails", None),
+            "Claude Code exited unexpectedly (connection closed)"
+        );
+    }
+
+    #[test]
+    fn status_only_updates_never_retype_a_typed_tool() {
+        let mut thread = thread();
+        thread.apply_update(SessionUpdate::ToolCall(
+            ToolCall::new("tool-1", "cargo test")
+                .kind(ToolKind::Execute)
+                .status(ToolCallStatus::InProgress),
+        ));
+        thread.apply_update(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "tool-1",
+            ToolCallUpdateFields::new()
+                .kind(ToolKind::Other)
+                .status(ToolCallStatus::Completed)
+                .raw_output(serde_json::json!({"ok": true})),
+        )));
+        assert!(matches!(
+            &thread.entries[0],
+            AgentThreadEntry::Tool {
+                kind: AgentToolKindModel::Execute,
+                status: AgentToolStatusModel::Completed,
+                label,
+                ..
+            } if label == "cargo test"
+        ));
+
+        thread.apply_update(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "tool-1",
+            ToolCallUpdateFields::new().title(String::new()),
+        )));
+        assert!(matches!(
+            &thread.entries[0],
+            AgentThreadEntry::Tool { label, .. } if label == "cargo test"
+        ));
+
+        thread.apply_update(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "tool-1",
+            ToolCallUpdateFields::new()
+                .kind(ToolKind::Other)
+                .title("Something else".to_owned()),
+        )));
+        assert!(matches!(
+            &thread.entries[0],
+            AgentThreadEntry::Tool {
+                kind: AgentToolKindModel::Other,
+                label,
+                ..
+            } if label == "Something else"
+        ));
+    }
+
+    #[test]
+    fn placeholder_titles_never_become_terminal_commands() {
+        let frame = || {
+            TerminalFrame::from_meta(
+                Some(&claude_meta(&serde_json::json!({
+                    "terminal_info": { "terminal_id": "term-1" }
+                }))),
+                None,
+                None,
+            )
+        };
+        let terminal = |label: &str| {
+            let mut output = Vec::new();
+            assert!(apply_terminal_frame(&mut output, frame(), label));
+            match output.as_slice() {
+                [ToolPayload::Terminal(terminal)] => terminal.clone(),
+                other => panic!("expected a terminal payload, got {other:?}"),
+            }
+        };
+        assert_eq!(terminal("Terminal"), "[terminal term-1]\n\n");
+        assert_eq!(terminal("Read File"), "[terminal term-1]\n\n");
+        assert_eq!(terminal("`ls -la`"), "$ ls -la\n\n");
+        assert_eq!(terminal("cargo test"), "$ cargo test\n\n");
+        assert_eq!(command_from_title("`grep`"), None);
+        assert_eq!(
+            command_from_title("`printf '\\`'`"),
+            Some("printf '`'".to_owned())
+        );
+    }
+
+    #[test]
+    fn oversized_tool_payloads_are_capped_on_char_boundaries() {
+        let mut text = "é".repeat(16);
+        truncate_payload(&mut text, TRUNCATION_MARKER.len() + 5);
+        assert_eq!(text, "éé".to_owned() + TRUNCATION_MARKER);
+
+        let mut thread = thread();
+        thread.apply_update(SessionUpdate::ToolCall(
+            ToolCall::new("tool-big", "Read file").content(vec![ToolCallContent::from(
+                ContentBlock::Text(TextContent::new("é".repeat(MAX_TOOL_PAYLOAD_BYTES))),
+            )]),
+        ));
+        assert!(matches!(
+            &thread.entries[0],
+            AgentThreadEntry::Tool { output, .. }
+                if matches!(
+                    output.as_slice(),
+                    [ToolPayload::Text(text)]
+                        if text.len() <= MAX_TOOL_PAYLOAD_BYTES
+                            && text.ends_with(TRUNCATION_MARKER)
+                )
+        ));
+    }
+
+    fn quiet_turn() -> AgentThread {
+        let mut thread = thread();
+        thread.connection = AgentConnectionState::Ready;
+        thread.begin_prompt("do the thing".to_owned(), Vec::new());
+        thread.apply_update(SessionUpdate::AgentMessageChunk(ContentChunk::new(
+            ContentBlock::Text(TextContent::new("working on it")),
+        )));
+        thread
+    }
+
+    const WINDOW: Duration = Duration::from_millis(DEFAULT_QUIESCE_MS);
+
+    #[test]
+    fn a_silent_turn_with_nothing_outstanding_parks() {
+        let thread = quiet_turn();
+
+        assert!(!thread.turn_in_flight());
+        assert!(should_park_turn(
+            Some(WINDOW),
+            WINDOW,
+            thread.turn_in_flight()
+        ));
+        assert!(
+            !should_park_turn(
+                Some(WINDOW),
+                WINDOW.saturating_sub(Duration::from_millis(1)),
+                false
+            ),
+            "a turn that has not gone quiet long enough keeps running"
+        );
+    }
+
+    #[test]
+    fn an_unresolved_tool_call_blocks_the_park() {
+        let mut thread = quiet_turn();
+        thread.apply_update(SessionUpdate::ToolCall(
+            ToolCall::new("tool-1", "Run tests")
+                .kind(ToolKind::Execute)
+                .status(ToolCallStatus::InProgress),
+        ));
+
+        assert!(thread.turn_in_flight());
+        assert!(!should_park_turn(
+            Some(WINDOW),
+            WINDOW * 10,
+            thread.turn_in_flight()
+        ));
+
+        thread.apply_update(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "tool-1",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+        )));
+
+        assert!(!thread.turn_in_flight());
+    }
+
+    #[test]
+    fn a_pending_permission_blocks_the_park() {
+        let mut thread = quiet_turn();
+        thread.apply_update(SessionUpdate::ToolCall(
+            ToolCall::new("tool-1", "Edit file").status(ToolCallStatus::Completed),
+        ));
+        thread.request_permission(
+            11,
+            ToolCallUpdate::new("tool-1", ToolCallUpdateFields::new()),
+            vec![PermissionOption::new(
+                "allow-once",
+                "Allow once",
+                PermissionOptionKind::AllowOnce,
+            )],
+        );
+
+        assert!(thread.turn_in_flight());
+        assert!(!should_park_turn(
+            Some(WINDOW),
+            WINDOW * 10,
+            thread.turn_in_flight()
+        ));
+    }
+
+    #[test]
+    fn a_subagent_task_still_reporting_blocks_the_park() {
+        let mut thread = quiet_turn();
+        thread
+            .live_task_tools
+            .insert("task-1".to_owned(), "tool-1".to_owned());
+
+        assert!(thread.turn_in_flight());
+    }
+
+    #[test]
+    fn the_quiesce_window_falls_back_to_the_default_and_zero_disables_it() {
+        assert_eq!(parse_quiesce_window(None), Some(WINDOW));
+        assert_eq!(
+            parse_quiesce_window(Some(OsStr::new("not a number"))),
+            Some(WINDOW)
+        );
+        assert_eq!(
+            parse_quiesce_window(Some(OsStr::new(" 500 "))),
+            Some(Duration::from_millis(500))
+        );
+        assert_eq!(parse_quiesce_window(Some(OsStr::new("0"))), None);
+        assert!(
+            !should_park_turn(
+                parse_quiesce_window(Some(OsStr::new("0"))),
+                WINDOW * 10,
+                false
+            ),
+            "the watchdog never fires once it is disabled"
+        );
+    }
+
+    #[test]
+    fn parking_settles_the_streaming_turn_without_an_error() {
+        let mut thread = quiet_turn();
+        let streaming = thread.entries.last().expect("streamed answer").id();
+        let revision = thread.entry_revisions.last().copied().expect("revision");
+        assert!(thread.active_stream.is_some());
+
+        thread.park_turn();
+
+        assert_eq!(thread.connection, AgentConnectionState::Ready);
+        assert!(thread.connection.accepts_prompt());
+        assert!(thread.error.is_none(), "a park is not a failure");
+        assert!(thread.active_stream.is_none());
+        assert!(!thread.suppress_user_echo);
+        assert!(matches!(
+            thread.entries.last(),
+            Some(AgentThreadEntry::Assistant { id, markdown, .. })
+                if *id == streaming && markdown == "working on it"
+        ));
+        assert!(thread.entry_revisions.last().copied() >= Some(revision));
+    }
+
+    #[test]
+    fn a_parked_tool_call_settles_completed_rather_than_failed() {
+        let mut thread = quiet_turn();
+        thread.apply_update(SessionUpdate::ToolCall(
+            ToolCall::new("tool-1", "Run tests").status(ToolCallStatus::Completed),
+        ));
+        thread.apply_update(SessionUpdate::ToolCall(
+            ToolCall::new("tool-2", "Read file").status(ToolCallStatus::Pending),
+        ));
+
+        thread.park_turn();
+
+        assert!(
+            thread
+                .entries
+                .iter()
+                .all(|entry| !entry_awaits_agent(entry)),
+            "parking leaves nothing half-open in the transcript"
+        );
+        assert!(matches!(
+            thread.entries.last(),
+            Some(AgentThreadEntry::Tool {
+                status: AgentToolStatusModel::Completed,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn output_after_a_park_opens_a_new_segment() {
+        let mut thread = quiet_turn();
+        thread.park_turn();
+        let parked = thread.entries.len();
+
+        thread.apply_runtime_update(SessionUpdate::AgentMessageChunk(ContentChunk::new(
+            ContentBlock::Text(TextContent::new("actually, one more thing")),
+        )));
+
+        assert_eq!(
+            thread.entries.len(),
+            parked + 1,
+            "a late answer starts its own segment instead of reopening the parked one"
+        );
+        assert!(matches!(
+            thread.entries.last(),
+            Some(AgentThreadEntry::Assistant { markdown, .. })
+                if markdown == "actually, one more thing"
+        ));
+        assert!(matches!(
+            &thread.entries[parked - 1],
+            AgentThreadEntry::Assistant { markdown, .. } if markdown == "working on it"
+        ));
+    }
+
+    /// A pane holding a ready thread and a runtime whose commands the test reads
+    /// back, standing in for the ACP child.
+    fn queued_pane(controller: &mut AgentController, pane: PaneId) -> Receiver<RuntimeCommand> {
+        let (command_tx, command_rx) = async_channel::unbounded();
+        let mut thread = thread();
+        thread.connection = AgentConnectionState::Ready;
+        controller.panes.insert(pane, thread);
+        controller.runtimes.insert(
+            pane,
+            PaneRuntime {
+                command_tx,
+                _runtime_task: Task::ready(()),
+                _event_task: Task::ready(()),
+                generation: 1,
+                stopping: false,
+                restart_after_stop: false,
+            },
+        );
+        command_rx
+    }
+
+    fn next_prompt_text(commands: &Receiver<RuntimeCommand>) -> Option<String> {
+        loop {
+            match commands.try_recv() {
+                Ok(RuntimeCommand::Prompt { text, .. }) => return Some(text),
+                Ok(_) => {}
+                Err(_) => return None,
+            }
+        }
+    }
+
+    fn turn_finished(pane: PaneId, reason: StopReason) -> RuntimeEvent {
+        RuntimeEvent::PromptFinished {
+            pane,
+            result: Ok(reason),
+        }
+    }
+
+    #[gpui::test]
+    fn prompts_typed_mid_turn_run_in_order_once_the_turn_settles(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let pane = PaneId(4);
+            let controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            controller.update(cx, |controller, cx| {
+                let commands = queued_pane(controller, pane);
+
+                controller
+                    .prompt(pane, "first", Vec::new(), cx)
+                    .expect("live prompt");
+                assert_eq!(next_prompt_text(&commands).as_deref(), Some("first"));
+                assert_eq!(controller.queued_count(pane), 0);
+
+                controller
+                    .prompt(pane, "second", Vec::new(), cx)
+                    .expect("queued prompt");
+                controller
+                    .prompt(pane, "third", Vec::new(), cx)
+                    .expect("queued prompt");
+                assert_eq!(controller.queued_count(pane), 2);
+                assert_eq!(
+                    controller.pane_state(pane).expect("state").queued_prompts,
+                    2
+                );
+                assert_eq!(
+                    next_prompt_text(&commands),
+                    None,
+                    "a queued prompt never reaches the agent mid-turn"
+                );
+
+                controller.handle_runtime_event(pane, turn_finished(pane, StopReason::EndTurn), cx);
+                assert_eq!(next_prompt_text(&commands).as_deref(), Some("second"));
+                assert_eq!(controller.queued_count(pane), 1);
+
+                controller.handle_runtime_event(pane, turn_finished(pane, StopReason::EndTurn), cx);
+                assert_eq!(next_prompt_text(&commands).as_deref(), Some("third"));
+                assert_eq!(controller.queued_count(pane), 0);
+                assert!(
+                    controller.take_pending_composer(pane).is_none(),
+                    "a queue that ran never lands back in the composer"
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn stopping_a_turn_hands_the_queue_back_to_the_composer(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let pane = PaneId(5);
+            let controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            controller.update(cx, |controller, cx| {
+                let commands = queued_pane(controller, pane);
+                for text in ["first", "second", "third"] {
+                    controller
+                        .prompt(pane, text, Vec::new(), cx)
+                        .expect("prompt");
+                }
+                assert_eq!(next_prompt_text(&commands).as_deref(), Some("first"));
+
+                controller.cancel(pane, cx);
+
+                assert_eq!(controller.queued_count(pane), 0);
+                assert_eq!(
+                    controller.take_pending_composer(pane).as_deref(),
+                    Some("second\nthird")
+                );
+
+                controller.handle_runtime_event(
+                    pane,
+                    turn_finished(pane, StopReason::Cancelled),
+                    cx,
+                );
+                assert_eq!(
+                    next_prompt_text(&commands),
+                    None,
+                    "a turn the user stopped never starts the queue"
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn unqueueing_returns_the_queue_with_its_attachments(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let pane = PaneId(11);
+            let controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            controller.update(cx, |controller, cx| {
+                let commands = queued_pane(controller, pane);
+                if let Some(thread) = controller.panes.get_mut(&pane) {
+                    thread.session_capabilities.images = true;
+                }
+                controller
+                    .prompt(pane, "first", Vec::new(), cx)
+                    .expect("live prompt");
+                assert_eq!(next_prompt_text(&commands).as_deref(), Some("first"));
+                controller
+                    .prompt(pane, "second", vec![attachment()], cx)
+                    .expect("queued prompt");
+
+                controller.unqueue_prompts(pane, cx);
+
+                assert_eq!(controller.queued_count(pane), 0);
+                assert_eq!(
+                    controller.take_pending_composer(pane).as_deref(),
+                    Some("second")
+                );
+                assert_eq!(controller.take_pending_images(pane).len(), 1);
+                assert!(controller.take_pending_images(pane).is_empty());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn a_lost_runtime_returns_queued_prompts_to_the_composer(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let pane = PaneId(6);
+            let controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            controller.update(cx, |controller, cx| {
+                let commands = queued_pane(controller, pane);
+                controller
+                    .prompt(pane, "first", Vec::new(), cx)
+                    .expect("live prompt");
+                controller
+                    .prompt(pane, "second", Vec::new(), cx)
+                    .expect("queued prompt");
+                assert_eq!(next_prompt_text(&commands).as_deref(), Some("first"));
+
+                controller.runtime_finished(pane, 1, Err("agent exited".to_owned()), cx);
+
+                assert_eq!(
+                    controller.pane_state(pane).expect("state").connection,
+                    AgentConnectionState::Failed
+                );
+                assert_eq!(controller.queued_count(pane), 0);
+                assert_eq!(
+                    controller.take_pending_composer(pane).as_deref(),
+                    Some("second")
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn the_first_prompt_of_a_session_names_the_pane_once(cx: &mut TestAppContext) {
+        let pane = PaneId(8);
+        let titles = Arc::new(Mutex::new(Vec::new()));
+        let controller = cx.update(|cx| {
+            let controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let sink = titles.clone();
+            cx.subscribe(&controller, move |_, event: &AgentControllerEvent, _| {
+                if let AgentControllerEvent::Title { title, .. } = event {
+                    sink.lock().push(title.to_string());
+                }
+            })
+            .detach();
+            controller
+        });
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                let commands = queued_pane(controller, pane);
+
+                controller
+                    .prompt(pane, "  \"Fix the flaky daemon test\"  ", Vec::new(), cx)
+                    .expect("first prompt");
+                assert_eq!(
+                    next_prompt_text(&commands).as_deref(),
+                    Some("\"Fix the flaky daemon test\""),
+                    "the agent still sees the prompt verbatim"
+                );
+
+                controller.handle_runtime_event(pane, turn_finished(pane, StopReason::EndTurn), cx);
+                controller
+                    .prompt(pane, "now do the other thing", Vec::new(), cx)
+                    .expect("second prompt");
+            });
+        });
+        cx.run_until_parked();
+
+        assert_eq!(
+            &*titles.lock(),
+            &["Fix the flaky daemon test".to_owned()],
+            "only the prompt that opened the session names the pane"
+        );
+    }
+
+    #[test]
+    fn derived_titles_drop_dressing_and_stay_short() {
+        let title = |prompt: &str| derive_pane_title(prompt).map(|title| title.to_string());
+
+        assert_eq!(
+            title("fix the flaky daemon test"),
+            Some("fix the flaky daemon test".to_owned())
+        );
+        assert_eq!(
+            title("\"quoted request\""),
+            Some("quoted request".to_owned())
+        );
+        assert_eq!(
+            title("## Heading style prompt"),
+            Some("Heading style prompt".to_owned())
+        );
+        assert_eq!(
+            title("> quoted line\nand the rest of the message"),
+            Some("quoted line".to_owned())
+        );
+        assert_eq!(
+            title("one two three four five six seven eight nine"),
+            Some("one two three four five six seven".to_owned())
+        );
+        assert_eq!(
+            title("修复终端里的宽字符换行问题 and then some"),
+            Some("修复终端里的宽字符换行问题 and then some".to_owned())
+        );
+        assert_eq!(
+            title(&"の".repeat(80)).map(|title| title.chars().count()),
+            Some(MAX_TITLE_CHARS),
+            "the cap counts characters, never bytes"
+        );
+        assert_eq!(title("   \n   "), None);
+        assert_eq!(title(""), None);
+    }
+
+    #[test]
+    fn journals_sit_beside_the_agent_preferences_file() {
+        let Some(data) = platform_data_dir() else {
+            return;
+        };
+        let directory = journal_directory().expect("journal directory");
+
+        assert_eq!(
+            directory.parent(),
+            Some(data.join("zz").as_path()),
+            "journals share the directory that holds agent-preferences.json"
+        );
+        assert_eq!(
+            directory.file_name().and_then(OsStr::to_str),
+            Some(JOURNAL_DIRECTORY_NAME)
+        );
+    }
+
+    fn journalled_chunk(text: &str) -> SessionUpdate {
+        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
+            text,
+        ))))
+    }
+
+    fn chunk_text(update: &SessionUpdate) -> Option<&str> {
+        match update {
+            SessionUpdate::AgentMessageChunk(chunk) => match &chunk.content {
+                ContentBlock::Text(text) => Some(text.text.as_str()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn journal_fixture_agent(load: bool) -> impl ConnectTo<AcpClientRole> {
+        Agent
+            .builder()
+            .on_receive_request(
+                async move |initialize: InitializeRequest, responder, _| {
+                    responder.respond(
+                        InitializeResponse::new(initialize.protocol_version)
+                            .agent_capabilities(AgentCapabilities::new().load_session(load)),
+                    )
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_: LoadSessionRequest, responder, _| {
+                    responder.respond_with_error(
+                        agent_client_protocol::Error::invalid_params()
+                            .data("fixture session cannot be loaded"),
+                    )
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_: NewSessionRequest, responder, _| {
+                    responder.respond(NewSessionResponse::new("fresh-session"))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+    }
+
+    /// Open a pane against a fixture agent that cannot restore `stale-session`,
+    /// with two updates already journalled under it.
+    fn restore_from_journal(
+        load: bool,
+    ) -> (
+        tempfile::TempDir,
+        Arc<AgentJournal>,
+        String,
+        Vec<SessionUpdate>,
+    ) {
+        let directory = tempfile::tempdir().expect("journal directory");
+        let journal = Arc::new(AgentJournal::open(directory.path()).expect("open journal"));
+        for text in ["first restored", "second restored"] {
+            let update = serde_json::to_value(journalled_chunk(text)).expect("encode update");
+            journal.append("stale-session", &update).expect("append");
+        }
+
+        let (command_tx, command_rx) = async_channel::unbounded();
+        let (event_tx, event_rx) = async_channel::unbounded();
+        let runtime = {
+            let journal = Arc::clone(&journal);
+            std::thread::spawn(move || {
+                pollster::block_on(run_agent_connection(
+                    AgentProvider::Codex,
+                    false,
+                    journal_fixture_agent(load),
+                    Some(journal),
+                    command_rx,
+                    event_tx,
+                ))
+            })
+        };
+        let pane = PaneId(71);
+        assert!(matches!(
+            next_runtime_event(&event_rx),
+            RuntimeEvent::Ready { .. }
+        ));
+        command_tx
+            .send_blocking(RuntimeCommand::Open {
+                pane,
+                cwd: absolute_test_path("journal"),
+                resume_session: Some("stale-session".to_owned()),
+            })
+            .expect("open session");
+        assert!(
+            matches!(
+                next_runtime_event(&event_rx),
+                RuntimeEvent::SessionReset {
+                    pane: event_pane,
+                    restoring: true,
+                } if event_pane == pane
+            ),
+            "a journalled restore reads as RESTORING, never as a fresh pane"
+        );
+        let event = next_runtime_event(&event_rx);
+        let RuntimeEvent::SessionSwitched {
+            pane: event_pane,
+            session_id,
+            replay,
+            ..
+        } = event
+        else {
+            panic!("a journalled restore reports what a session switch reports: {event:?}");
+        };
+        assert_eq!(event_pane, pane);
+
+        command_tx
+            .send_blocking(RuntimeCommand::Shutdown)
+            .expect("shutdown command");
+        assert!(runtime.join().expect("runtime thread").is_ok());
+        (directory, journal, session_id, replay)
+    }
+
+    #[test]
+    fn a_session_the_agent_cannot_load_is_restored_from_the_journal() {
+        for load in [true, false] {
+            let (_directory, journal, session_id, replay) = restore_from_journal(load);
+
+            assert_eq!(session_id, "fresh-session");
+            assert_eq!(
+                replay.iter().filter_map(chunk_text).collect::<Vec<_>>(),
+                ["first restored", "second restored"],
+                "load capability {load} should not change what is restored"
+            );
+            assert_eq!(
+                journal
+                    .replay("fresh-session")
+                    .expect("replay")
+                    .into_iter()
+                    .filter_map(|(_, update)| serde_json::from_value::<SessionUpdate>(update).ok())
+                    .filter_map(|update| chunk_text(&update).map(ToOwned::to_owned))
+                    .collect::<Vec<_>>(),
+                ["first restored", "second restored"],
+                "the live session adopts the restored transcript"
+            );
+            assert!(
+                journal.replay("stale-session").expect("replay").is_empty(),
+                "the superseded journal is not left behind to be restored twice"
+            );
+        }
+    }
+
+    /// A throwaway git worktree, or `None` when git is unavailable.
+    fn seeded_worktree() -> Option<(tempfile::TempDir, PathBuf)> {
+        let scratch = tempfile::tempdir().expect("temporary directory");
+        // git reports the resolved path, and the temp root is a symlink on macOS.
+        let root = scratch.path().canonicalize().expect("resolved temp path");
+        for args in [
+            ["init", "--quiet"].as_slice(),
+            &["config", "user.email", "turn@zz.test"],
+            &["config", "user.name", "zz turn snapshot"],
+        ] {
+            let ran = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .status()
+                .is_ok_and(|status| status.success());
+            if !ran {
+                return None;
+            }
+        }
+        std::fs::write(root.join("tracked.txt"), "one\n").expect("seed file");
+        Some((scratch, root))
+    }
+
+    #[gpui::test]
+    async fn a_prompt_snapshots_a_worktree_and_skips_anything_else(cx: &mut TestAppContext) {
+        let Some((_scratch, root)) = seeded_worktree() else {
+            return;
+        };
+        let inside = PaneId(12);
+        let outside = PaneId(13);
+        let controller = cx.update(|cx| cx.new(|_| AgentController::new(AgentConfig::default())));
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                for (pane, cwd) in [
+                    (inside, root.clone()),
+                    (outside, PathBuf::from("/workspace")),
+                ] {
+                    let commands = queued_pane(controller, pane);
+                    controller.panes.get_mut(&pane).expect("pane").cwd = cwd;
+                    controller
+                        .prompt(pane, "go", Vec::new(), cx)
+                        .expect("prompt");
+                    assert_eq!(next_prompt_text(&commands).as_deref(), Some("go"));
+                }
+            });
+        });
+        cx.run_until_parked();
+        std::fs::write(root.join("tracked.txt"), "one\ntwo\n").expect("edit during the turn");
+
+        let diff = cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                assert!(
+                    controller.turn_base(outside).is_none(),
+                    "a pane outside a worktree keeps no base"
+                );
+                assert!(controller.capture_turn_diff(outside, cx).is_none());
+                assert_eq!(
+                    controller.turn_base(inside).map(|base| base.root.clone()),
+                    Some(root.clone())
+                );
+                controller
+                    .capture_turn_diff(inside, cx)
+                    .expect("the pane should diff its turn")
+            })
+        });
+
+        let diff = diff.await.expect("the turn should diff");
+        assert_eq!(
+            diff.files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            ["tracked.txt"]
+        );
+        assert_eq!((diff.additions, diff.deletions), (1, 0));
     }
 }

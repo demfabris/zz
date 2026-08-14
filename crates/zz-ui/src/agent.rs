@@ -6,14 +6,17 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     sync::{Arc, OnceLock},
+    time::{Duration, Instant},
 };
 
 use crate::{
     ActiveTheme as _, CHROME_GAP, Colorize as _, Icon, IconName, Sizable as _, WindowExt as _,
     attachment::open_attachment_preview,
-    h_flex,
+    button::{Button, ButtonVariants as _},
+    control_shadow, h_flex,
+    mend::{PENDING_LINK_URL, mend},
+    pulse::pulse_phase,
     scroll::ScrollableElement as _,
-    spinner::Spinner,
     text::{
         MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, TextView,
         TextViewState, TextViewStyle, markdown_ast,
@@ -21,11 +24,12 @@ use crate::{
     v_flex,
 };
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, DispatchPhase, Div, ElementId, Entity, FontStyle,
-    FontWeight, Global, HighlightStyle, Hsla, Image, ImageSource, InteractiveText, IntoElement,
-    ListSizingBehavior, ListState, ObjectFit, Pixels, RenderImage, Rgba, ScrollStrategy,
-    ScrollWheelEvent, SharedString, Stateful, StyledText, Task, UniformListScrollHandle, Window,
-    canvas, div, img, list, prelude::*, px, relative, uniform_list,
+    AnyElement, App, ClipboardItem, Context, DispatchPhase, Div, ElementId, Entity, EntityId,
+    FollowMode, FontStyle, FontWeight, Global, HighlightStyle, Hsla, Image, ImageSource,
+    InteractiveText, IntoElement, ListSizingBehavior, ListState, ObjectFit, Pixels, RenderImage,
+    Rgba, ScrollStrategy, ScrollWheelEvent, SharedString, Stateful, StyledText, Task,
+    Transformation, UniformListScrollHandle, Window, canvas, div, ease_in_out, img, list,
+    percentage, prelude::*, px, relative, uniform_list,
 };
 use similar::{ChangeTag, TextDiff};
 
@@ -37,6 +41,11 @@ const TOOL_CONTENT_MAX_HEIGHT: f32 = 360.0;
 const TOOL_CONTENT_MAX_LINES: usize = 10_000;
 const TOOL_CONTENT_ROW_HEIGHT: f32 = 20.0;
 const MERMAID_CACHE_CAPACITY: usize = 16;
+/// One rotation of the in-flight tool indicator.
+const TOOL_SPINNER_PERIOD: Duration = Duration::from_millis(800);
+/// Where a link whose URL is still streaming is pointed. The renderer refuses
+/// to open `data:` URLs, which is what keeps the mend sentinel inert.
+const INERT_LINK_URL: &str = "data:,";
 pub const AGENT_CONTENT_MAX_WIDTH: f32 = 680.0;
 /// Side of a square attachment tile in a sent message.
 pub const TRANSCRIPT_ATTACHMENT: Pixels = px(140.0);
@@ -95,7 +104,12 @@ enum ToolContentSlot {
 }
 
 struct MarkdownState {
+    /// The raw text as the thread holds it. Streaming appends are diffed
+    /// against this, never against a mended display copy.
     source: SharedString,
+    /// The state currently renders a mended copy, so the next update has to
+    /// replace the whole text instead of appending to it.
+    mended: bool,
     state: Entity<TextViewState>,
 }
 
@@ -143,6 +157,8 @@ pub struct AgentTimelineStore {
     tool_scrolls: HashMap<u64, UniformListScrollHandle>,
     cwd: Option<PathBuf>,
     markdown_extensions: HashMap<bool, MarkdownExtensions>,
+    /// The entry still receiving deltas, whose display copy is mended.
+    streaming: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -168,14 +184,56 @@ impl AgentTimelineStore {
         source: SharedString,
         cx: &mut Context<Self>,
     ) -> Entity<TextViewState> {
+        let streaming = self.streaming == Some(id);
         self.markdown
             .entry((id, slot))
-            .or_insert_with(|| MarkdownState {
-                state: cx.new(|cx| TextViewState::markdown(source.as_str(), cx)),
-                source,
+            .or_insert_with(|| {
+                let repair = streaming.then(|| mend(source.as_str())).flatten();
+                MarkdownState {
+                    state: cx.new(|cx| {
+                        TextViewState::markdown(
+                            repair.as_deref().unwrap_or_else(|| source.as_str()),
+                            cx,
+                        )
+                    }),
+                    mended: repair.is_some(),
+                    source,
+                }
             })
             .state
             .clone()
+    }
+
+    /// Name the entry that is still streaming, so its display copy is mended
+    /// while markers hang. The entry that leaves the slot settles back to its
+    /// raw text: a completed entry always renders exactly what it holds.
+    pub fn set_streaming(&mut self, id: Option<u64>, cx: &mut Context<Self>) {
+        if self.streaming == id {
+            return;
+        }
+        let settled = self.streaming;
+        self.streaming = id;
+        if let Some(settled) = settled {
+            self.settle_markdown(settled, cx);
+        }
+    }
+
+    fn settle_markdown(&mut self, id: u64, cx: &mut Context<Self>) {
+        let mut settled = false;
+        for ((entry, _), markdown) in &mut self.markdown {
+            if *entry != id || !markdown.mended {
+                continue;
+            }
+            markdown.mended = false;
+            let raw = markdown.source.clone();
+            markdown
+                .state
+                .update(cx, |state, cx| state.set_text(raw.as_str(), cx));
+            settled = true;
+        }
+        if settled {
+            cx.notify();
+        }
     }
 
     pub fn synchronize_markdown(
@@ -195,24 +253,45 @@ impl AgentTimelineStore {
         source: SharedString,
         cx: &mut Context<Self>,
     ) -> MarkdownUpdate {
+        let streaming = self.streaming == Some(id);
         let Some(markdown) = self.markdown.get_mut(&(id, slot)) else {
             return MarkdownUpdate::Missing;
         };
-        if markdown.source == source {
+        let same_source = markdown.source == source;
+        if same_source && !markdown.mended {
+            return MarkdownUpdate::Unchanged;
+        }
+        let repair = streaming.then(|| mend(source.as_str())).flatten();
+        if same_source && repair.is_some() {
             return MarkdownUpdate::Unchanged;
         }
 
-        let update = if let Some(delta) = source.as_str().strip_prefix(markdown.source.as_str()) {
-            markdown
-                .state
-                .update(cx, |state, cx| state.push_str(delta, cx));
-            MarkdownUpdate::Appended
-        } else {
-            markdown
-                .state
-                .update(cx, |state, cx| state.set_text(source.as_str(), cx));
-            MarkdownUpdate::Replaced
+        // A mended state holds a display copy, so an appended delta would land
+        // behind synthetic closers: only a raw state can take the fast path.
+        let mended = repair.is_some();
+        let update = match repair {
+            Some(display) => {
+                markdown
+                    .state
+                    .update(cx, |state, cx| state.set_text(&display, cx));
+                MarkdownUpdate::Replaced
+            }
+            None => match source.as_str().strip_prefix(markdown.source.as_str()) {
+                Some(delta) if !markdown.mended => {
+                    markdown
+                        .state
+                        .update(cx, |state, cx| state.push_str(delta, cx));
+                    MarkdownUpdate::Appended
+                }
+                _ => {
+                    markdown
+                        .state
+                        .update(cx, |state, cx| state.set_text(source.as_str(), cx));
+                    MarkdownUpdate::Replaced
+                }
+            },
         };
+        markdown.mended = mended;
         markdown.source = source;
         cx.notify();
         update
@@ -239,10 +318,7 @@ impl AgentTimelineStore {
                 } else {
                     standard_markdown_extensions()
                 };
-                match cwd {
-                    Some(cwd) => base.link_rewriter(move |url| resolve_workspace_link(&cwd, url)),
-                    None => base,
-                }
+                base.link_rewriter(move |url| resolve_workspace_link(cwd.as_deref(), url))
             })
             .clone()
     }
@@ -334,6 +410,7 @@ impl AgentTimelineStore {
     }
 
     pub fn clear(&mut self, cx: &mut Context<Self>) -> bool {
+        self.streaming = None;
         if self.markdown.is_empty()
             && self.tool_content.is_empty()
             && self.expanded.is_empty()
@@ -519,6 +596,343 @@ pub fn append_timeline_row(rows: &mut Vec<TimelineRow>, entry: AgentEntry) -> (u
     (row_index, true)
 }
 
+/// Padding above the first timeline row. It lives inside the scrolled content,
+/// so a caller measuring the distance to the end has to account for it.
+pub const AGENT_TIMELINE_TOP_PADDING: f32 = 16.0;
+/// Treat the timeline as exactly pinned within this distance of the end.
+pub const AGENT_AT_BOTTOM_PX: f32 = 2.0;
+/// Offer the jump-to-bottom pill beyond this distance from the end.
+pub const AGENT_JUMP_TO_BOTTOM_PX: f32 = 320.0;
+/// Teleport when farther than this many viewports from the end, then glide the
+/// rest — a full-history jump would otherwise spend seconds scrolling.
+pub const AGENT_GLIDE_MAX_VIEWPORTS: f32 = 2.5;
+/// Keep the spring loop warm this long after landing, so a pause between
+/// streamed chunks resumes at cruise instead of re-accelerating from zero.
+pub const AGENT_SPRING_SETTLE_GRACE: Duration = Duration::from_millis(500);
+/// Re-engage the pin when a user scroll returns within this many px of the end.
+const AGENT_STICK_THRESHOLD_PX: f32 = 70.0;
+
+const SPRING_DAMPING: f32 = 0.7;
+const SPRING_STIFFNESS: f32 = 0.05;
+const SPRING_MASS: f32 = 1.25;
+const SPRING_FRAME_MS: f32 = 1000.0 / 60.0;
+const SPRING_MAX_CATCHUP_FRAMES: f32 = 8.0;
+const SPRING_GROWTH_EMA: f32 = 0.12;
+const SPRING_CHASE_MAX_LEAD: f32 = 32.0;
+const SPRING_CHASE_LEAD_FRAMES: f32 = 9.0;
+
+/// Whether a user scroll should re-engage the bottom pin: inside the stick band
+/// *and* moving toward the end. Direction matters — a small wheel-up notch from
+/// the pinned bottom stays inside the band, and resticking on it would snap the
+/// view straight back, making the pin impossible to break.
+pub fn agent_should_restick(distance: f32, previous: f32) -> bool {
+    distance <= AGENT_STICK_THRESHOLD_PX && distance < previous
+}
+
+/// Pure stick-to-bottom spring stepper. Velocity relaxes toward
+/// `(damping·v + stiffness·diff)/mass` per 60fps sub-frame, position advances
+/// by `v + target_vel` where `target_vel` is a feed-forward EMA of target
+/// growth in px per frame, and the chase point sits up to
+/// [`SPRING_CHASE_MAX_LEAD`] px above the true end in proportion to that
+/// growth — so a streaming tail is followed at its own speed instead of being
+/// hauled after a target that has already moved again.
+#[derive(Debug, Clone, Copy)]
+pub struct StickSpring {
+    velocity: f32,
+    target_vel: f32,
+    last_target: Option<f32>,
+}
+
+impl Default for StickSpring {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StickSpring {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            velocity: 0.0,
+            target_vel: 0.0,
+            last_target: None,
+        }
+    }
+
+    /// Park the spring; the next step starts cold.
+    pub fn reset(&mut self) {
+        *self = Self::new();
+    }
+
+    /// Whether the residual motion is below the settle threshold.
+    #[must_use]
+    pub fn is_idle(&self) -> bool {
+        self.velocity < 0.05 && self.target_vel < 0.05
+    }
+
+    /// `elapsed` in 60fps frames, capped so a hitch catches up over a few
+    /// sub-steps rather than teleporting a frame's worth of stalled time.
+    #[must_use]
+    pub fn frames(elapsed: Duration) -> f32 {
+        (elapsed.as_secs_f32() * 1000.0 / SPRING_FRAME_MS).min(SPRING_MAX_CATCHUP_FRAMES)
+    }
+
+    /// Advance one tick. `pos` and `target` are scroll offsets in px, larger
+    /// meaning closer to the end. Never overshoots `target`, is monotone while
+    /// approaching, and snaps exactly once within half a pixel.
+    #[must_use]
+    pub fn step(&mut self, mut pos: f32, target: f32, mut frames: f32) -> f32 {
+        let grew = self.last_target.map_or(0.0, |last| target - last);
+        self.last_target = Some(target);
+        if grew < -1.0 {
+            self.target_vel = 0.0;
+        } else {
+            let observed = grew.max(0.0) / frames.max(0.25);
+            self.target_vel += SPRING_GROWTH_EMA * (observed - self.target_vel);
+        }
+        let chase =
+            target - (self.target_vel * SPRING_CHASE_LEAD_FRAMES).min(SPRING_CHASE_MAX_LEAD);
+        let mut velocity = self.velocity;
+        while frames > 0.0 {
+            let step = frames.min(1.0);
+            frames -= step;
+            let diff = (chase - pos).max(0.0);
+            velocity += step
+                * ((SPRING_DAMPING * velocity + SPRING_STIFFNESS * diff) / SPRING_MASS - velocity);
+            pos = (pos + (velocity + self.target_vel) * step).min(target);
+        }
+        self.velocity = velocity;
+        if target - pos <= 0.5 { target } else { pos }
+    }
+
+    #[cfg(test)]
+    fn target_vel(&self) -> f32 {
+        self.target_vel
+    }
+}
+
+/// The jump-to-bottom pill. Paint it as an overlay: it must not take part in
+/// the timeline's layout, or appearing would resize the scroll viewport and
+/// move the very content it is offering to reveal.
+pub fn agent_jump_to_bottom_button(id: impl Into<ElementId>, cx: &App) -> Button {
+    let pill = Button::new(id)
+        .secondary()
+        .xsmall()
+        .rounded(px(999.0))
+        .icon(IconName::ChevronDown)
+        .label("Jump to latest");
+    if cx.theme().shadow {
+        pill.shadow(control_shadow(cx))
+    } else {
+        pill
+    }
+}
+
+/// The timeline's tail pin: a spring that chases the end of the transcript
+/// instead of teleporting to it on every streamed token.
+///
+/// The pin belongs to the caller, not to the list, so [`FollowMode::Tail`]
+/// stays off unless reduced motion is on — gpui's tail mode both snaps on every
+/// layout and re-engages itself from scroll *position*, which would make a
+/// deliberate scroll-up impossible to hold while the agent is still writing.
+pub struct TimelineStick {
+    pinned: bool,
+    spring: StickSpring,
+    last_tick: Option<Instant>,
+    settled_at: Option<Instant>,
+    scheduled: bool,
+    kick: bool,
+    last_distance: f32,
+    show_jump: bool,
+    bottom_padding: f32,
+}
+
+impl TimelineStick {
+    pub fn new(list: &ListState, reduce_motion: bool) -> Self {
+        let mut stick = Self {
+            pinned: true,
+            spring: StickSpring::new(),
+            last_tick: None,
+            settled_at: None,
+            scheduled: false,
+            kick: false,
+            last_distance: 0.0,
+            show_jump: false,
+            bottom_padding: 0.0,
+        };
+        stick.engage_now(list, reduce_motion);
+        stick
+    }
+
+    pub fn is_pinned(&self) -> bool {
+        self.pinned
+    }
+
+    pub fn shows_jump_button(&self) -> bool {
+        self.show_jump
+    }
+
+    /// The list's own bottom padding, which the caller recomputes from whatever
+    /// chrome overlaps the end of the transcript.
+    pub fn set_bottom_padding(&mut self, padding: f32) {
+        self.bottom_padding = padding;
+    }
+
+    /// The end of the scrollable range and the current distance to it, or
+    /// `None` while the content is shorter than the viewport.
+    ///
+    /// `max_offset_for_scrollbar` measures the items alone, but the list also
+    /// scrolls through its own padding, so the true end sits that much lower.
+    fn bottom(&self, list: &ListState) -> Option<(f32, f32)> {
+        let measured = f32::from(list.max_offset_for_scrollbar().y);
+        if measured <= 0.0 {
+            return None;
+        }
+        let target = measured + AGENT_TIMELINE_TOP_PADDING + self.bottom_padding;
+        let position = -f32::from(list.scroll_px_offset_for_scrollbar().y);
+        Some((target, (target - position).max(0.0)))
+    }
+
+    pub fn distance_from_bottom(&self, list: &ListState) -> f32 {
+        self.bottom(list).map_or(0.0, |(_, distance)| distance)
+    }
+
+    /// Re-arm the driver without disturbing the position: content grew, or the
+    /// pin was just taken.
+    pub fn wake(&mut self) {
+        self.settled_at = None;
+        self.kick = true;
+    }
+
+    fn release(&mut self, list: &ListState) {
+        self.pinned = false;
+        self.spring.reset();
+        self.last_tick = None;
+        self.settled_at = None;
+        self.kick = false;
+        list.set_follow_mode(FollowMode::Normal);
+    }
+
+    /// Take the pin and land on the end immediately — for a transcript that is
+    /// being replaced wholesale, where there is no motion to show.
+    pub fn engage_now(&mut self, list: &ListState, reduce_motion: bool) {
+        self.pinned = true;
+        self.show_jump = false;
+        self.spring.reset();
+        self.last_tick = None;
+        self.settled_at = None;
+        self.kick = false;
+        self.last_distance = 0.0;
+        if reduce_motion {
+            list.set_follow_mode(FollowMode::Tail);
+        } else {
+            list.set_follow_mode(FollowMode::Normal);
+            list.scroll_to_end();
+        }
+    }
+
+    /// Take the pin and glide to the end. A jump longer than
+    /// [`AGENT_GLIDE_MAX_VIEWPORTS`] teleports most of the way first, so a
+    /// whole-history return still lands in one gesture's worth of motion.
+    pub fn engage(&mut self, list: &ListState, reduce_motion: bool) {
+        if reduce_motion {
+            self.engage_now(list, reduce_motion);
+            return;
+        }
+        self.pinned = true;
+        self.show_jump = false;
+        list.set_follow_mode(FollowMode::Normal);
+        let viewport = f32::from(list.viewport_bounds().size.height);
+        let distance = self.distance_from_bottom(list);
+        let glide_max = AGENT_GLIDE_MAX_VIEWPORTS * viewport;
+        if viewport > 0.0 && distance > glide_max {
+            list.scroll_by(px(distance - glide_max));
+        }
+        self.last_distance = self.distance_from_bottom(list);
+        self.wake();
+    }
+
+    /// Wheel or drag input. This is the *only* path that can break the pin: the
+    /// list calls its scroll handler from its input path alone, so content
+    /// growth — which moves the distance to the end just as far — never reaches
+    /// here. Reports whether the jump-button state changed.
+    pub fn on_user_scroll(&mut self, list: &ListState, reduce_motion: bool) -> bool {
+        let distance = self.distance_from_bottom(list);
+        let previous = std::mem::replace(&mut self.last_distance, distance);
+        if distance > previous + 1.0 && distance > AGENT_AT_BOTTOM_PX {
+            self.release(list);
+        } else if !self.pinned
+            && (distance <= AGENT_AT_BOTTOM_PX || agent_should_restick(distance, previous))
+        {
+            self.engage(list, reduce_motion);
+        }
+        let show = distance > AGENT_JUMP_TO_BOTTOM_PX && !self.pinned;
+        let changed = show != self.show_jump;
+        self.show_jump = show;
+        changed
+    }
+
+    /// Whether the driver should schedule a frame. False while one is already
+    /// in flight, so the loop can never run more than one callback at a time.
+    pub fn wants_frame(&self, list: &ListState) -> bool {
+        self.pinned
+            && !self.scheduled
+            && (self.kick
+                || self.settled_at.is_some()
+                || !self.spring.is_idle()
+                || self.distance_from_bottom(list) > 0.5)
+    }
+
+    /// Claim the one frame slot; pair with [`Self::step`], which releases it.
+    pub fn arm(&mut self) {
+        self.scheduled = true;
+    }
+
+    /// One spring frame, reporting whether the view needs another. Call it
+    /// after layout, so the measurements it reads are the current frame's.
+    pub fn step(&mut self, list: &ListState) -> bool {
+        self.scheduled = false;
+        self.kick = false;
+        if !self.pinned {
+            self.last_tick = None;
+            return false;
+        }
+        let now = Instant::now();
+        let frames = self
+            .last_tick
+            .map_or(1.0, |last| StickSpring::frames(now.duration_since(last)));
+        self.last_tick = Some(now);
+        let Some((target, mut distance)) = self.bottom(list) else {
+            self.last_distance = 0.0;
+            return false;
+        };
+        let viewport = f32::from(list.viewport_bounds().size.height);
+        let glide_max = AGENT_GLIDE_MAX_VIEWPORTS * viewport;
+        if viewport > 0.0 && distance > glide_max {
+            list.scroll_by(px(distance - glide_max));
+            distance = glide_max;
+        }
+        let position = target - distance;
+        let next = self.spring.step(position, target, frames);
+        if next > position {
+            list.scroll_by(px(next - position));
+        }
+        self.last_distance = (target - next).max(0.0);
+        if target - next <= 0.5 {
+            let settled = *self.settled_at.get_or_insert(now);
+            if now.duration_since(settled) >= AGENT_SPRING_SETTLE_GRACE && self.spring.is_idle() {
+                self.spring.reset();
+                self.last_tick = None;
+                self.settled_at = None;
+                return false;
+            }
+        } else {
+            self.settled_at = None;
+        }
+        true
+    }
+}
+
 #[derive(Clone, IntoElement)]
 pub struct AgentTimeline {
     rows: Arc<Vec<TimelineRow>>,
@@ -575,7 +989,7 @@ impl gpui::RenderOnce for AgentTimeline {
         })
         .with_sizing_behavior(ListSizingBehavior::Auto)
         .size_full()
-        .pt(px(16.0))
+        .pt(px(AGENT_TIMELINE_TOP_PADDING))
         .pb(px(bottom_padding))
     }
 }
@@ -602,6 +1016,7 @@ fn render_group(
     members: &[AgentEntry],
     cx: &mut App,
 ) -> AnyElement {
+    let view = store.entity_id();
     let expanded = store.update(cx, |store, _| {
         store.expanded(id, DisclosureKind::Group, false)
     });
@@ -667,7 +1082,9 @@ fn render_group(
                     h_flex()
                         .flex_none()
                         .gap_1()
-                        .when_some(status, |this, status| this.child(tool_status(status, cx)))
+                        .when_some(status, |this, status| {
+                            this.child(tool_status(status, view, cx))
+                        })
                         .child(
                             Icon::new(if expanded {
                                 IconName::ChevronUp
@@ -956,6 +1373,7 @@ fn render_entry(
             summary,
             result_markdown,
         } => {
+            let view = store.entity_id();
             let expandable = !result_markdown.as_str().trim().is_empty();
             let expanded = expandable
                 && store.update(cx, |store, _| {
@@ -987,7 +1405,7 @@ fn render_entry(
                                 .flex_1()
                                 .gap_2()
                                 .overflow_hidden()
-                                .child(tool_status(notification_status(&status), cx))
+                                .child(tool_status(notification_status(&status), view, cx))
                                 .child(
                                     div()
                                         .min_w_0()
@@ -1060,6 +1478,7 @@ fn render_tool_entry(
         subagent: _,
         children,
     } = tool;
+    let view = store.entity_id();
     let expandable =
         location.is_some() || input.is_some() || !output.is_empty() || !children.is_empty();
     let content = store.update(cx, |store, _| {
@@ -1133,7 +1552,7 @@ fn render_tool_entry(
                     h_flex()
                         .flex_none()
                         .gap_1()
-                        .child(tool_status(status, cx))
+                        .child(tool_status(status, view, cx))
                         .when(expandable, |this| {
                             this.child(
                                 Icon::new(if expanded {
@@ -1281,6 +1700,81 @@ fn materialize_tool_payload(payload: &AgentToolPayload) -> MaterializedToolPaylo
             MaterializedToolPayload { rows }
         }
     }
+}
+
+/// Classify the lines of a unified patch into the timeline's diff rows. git has
+/// already decided which lines changed, so nothing is re-diffed here.
+fn materialize_patch(patch: &str) -> Vec<ToolContentRow> {
+    let mut rows = Vec::new();
+    let mut total_lines = 0;
+    for line in patch.trim_end_matches('\n').split('\n') {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        total_lines += 1;
+        if total_lines > TOOL_CONTENT_MAX_LINES {
+            continue;
+        }
+        rows.push(match line.as_bytes().first() {
+            // "\ No newline at end of file" and the hunk headers are notes
+            // about the patch rather than lines of either side.
+            Some(b'@' | b'\\') => ToolContentRow::Footer(line.to_owned().into()),
+            Some(b'+') => ToolContentRow::Diff {
+                kind: DiffLineKind::Added,
+                text: line[1..].to_owned().into(),
+            },
+            Some(b'-') => ToolContentRow::Diff {
+                kind: DiffLineKind::Removed,
+                text: line[1..].to_owned().into(),
+            },
+            _ => ToolContentRow::Diff {
+                kind: DiffLineKind::Equal,
+                text: line.strip_prefix(' ').unwrap_or(line).to_owned().into(),
+            },
+        });
+    }
+    append_line_truncation_footer(&mut rows, total_lines);
+    rows
+}
+
+/// A unified patch drawn as the monospace, gutter-marked block the timeline
+/// uses for tool diffs. `key` namespaces the element ids.
+pub fn agent_patch_block(
+    key: u64,
+    patch: &str,
+    scroll: &UniformListScrollHandle,
+    cx: &App,
+) -> impl IntoElement {
+    let rows: Arc<[ToolContentRow]> = materialize_patch(patch).into();
+    let scrollbar_handle = scroll.0.borrow().base_handle.clone();
+    let lines = uniform_list(
+        ("agent-patch-lines", key),
+        rows.len(),
+        move |range, _, cx| {
+            range
+                .filter_map(|index| {
+                    rows.get(index)
+                        .cloned()
+                        .map(|row| render_tool_content_row(key, index, row, cx))
+                })
+                .collect::<Vec<_>>()
+        },
+    )
+    .w_full()
+    .max_h(px(TOOL_CONTENT_MAX_HEIGHT))
+    .overflow_hidden()
+    .with_sizing_behavior(ListSizingBehavior::Infer)
+    .track_scroll(scroll);
+
+    div()
+        .id(("agent-patch-block", key))
+        .relative()
+        .w_full()
+        .min_h_0()
+        .max_h(px(TOOL_CONTENT_MAX_HEIGHT))
+        .overflow_hidden()
+        .border_t_1()
+        .border_color(cx.theme().border)
+        .child(lines)
+        .vertical_scrollbar(&scrollbar_handle)
 }
 
 fn append_line_truncation_footer(rows: &mut Vec<ToolContentRow>, total_lines: usize) {
@@ -1531,20 +2025,23 @@ fn tool_icon(kind: AgentToolKind) -> IconName {
     }
 }
 
-fn tool_status(status: AgentToolStatus, cx: &App) -> AnyElement {
+/// The rotating in-flight indicator, driven by the shared pulse clock rather
+/// than a repeating animation: one mounted `Spinner` would redraw the window on
+/// every display frame for as long as a tool runs.
+fn tool_spinner(color: Hsla, view: EntityId, cx: &mut App) -> AnyElement {
+    let phase = ease_in_out(pulse_phase(TOOL_SPINNER_PERIOD, view, cx));
+    Icon::new(IconName::Loader)
+        .xsmall()
+        .text_color(color)
+        .transform(Transformation::rotate(percentage(phase)))
+        .into_any_element()
+}
+
+fn tool_status(status: AgentToolStatus, view: EntityId, cx: &mut App) -> AnyElement {
     match status {
-        AgentToolStatus::Pending => Spinner::new()
-            .xsmall()
-            .color(cx.theme().foreground.muted())
-            .into_any_element(),
-        AgentToolStatus::Running => Spinner::new()
-            .xsmall()
-            .color(cx.theme().foreground)
-            .into_any_element(),
-        AgentToolStatus::NeedsApproval => Spinner::new()
-            .xsmall()
-            .color(cx.theme().warning)
-            .into_any_element(),
+        AgentToolStatus::Pending => tool_spinner(cx.theme().foreground.muted(), view, cx),
+        AgentToolStatus::Running => tool_spinner(cx.theme().foreground, view, cx),
+        AgentToolStatus::NeedsApproval => tool_spinner(cx.theme().warning, view, cx),
         AgentToolStatus::Completed => Icon::new(IconName::Check)
             .xsmall()
             .text_color(cx.theme().foreground.muted())
@@ -1616,7 +2113,10 @@ fn markdown_view_with_extensions(
     }
 }
 
-fn resolve_workspace_link(cwd: &Path, url: &str) -> Option<String> {
+fn resolve_workspace_link(cwd: Option<&Path>, url: &str) -> Option<String> {
+    if url == PENDING_LINK_URL {
+        return Some(INERT_LINK_URL.to_owned());
+    }
     if url.is_empty() || url.starts_with('#') || url.starts_with("//") {
         return None;
     }
@@ -1636,7 +2136,7 @@ fn resolve_workspace_link(cwd: &Path, url: &str) -> Option<String> {
         if scheme_like {
             return None;
         }
-        cwd.join(link)
+        cwd?.join(link)
     };
     if !path.exists() {
         return None;
@@ -2668,7 +3168,7 @@ pub fn agent_pane_header(
 
 #[cfg(test)]
 mod workspace_link_tests {
-    use super::{file_url, resolve_workspace_link};
+    use super::{INERT_LINK_URL, PENDING_LINK_URL, file_url, resolve_workspace_link};
     use std::path::Path;
     use url::Url;
 
@@ -2676,12 +3176,30 @@ mod workspace_link_tests {
 
     #[test]
     fn urls_with_a_scheme_or_anchor_are_left_alone() {
-        let cwd = Path::new(CRATE_DIR);
+        let cwd = Some(Path::new(CRATE_DIR));
         assert_eq!(resolve_workspace_link(cwd, "https://zed.dev"), None);
         assert_eq!(resolve_workspace_link(cwd, "mailto:a@b.c"), None);
         assert_eq!(resolve_workspace_link(cwd, "#section"), None);
         assert_eq!(resolve_workspace_link(cwd, "//host/share"), None);
         assert_eq!(resolve_workspace_link(cwd, ""), None);
+    }
+
+    /// The half-streamed link a mend rewrites must never open anything, with or
+    /// without a working directory to resolve against.
+    #[test]
+    fn the_pending_link_sentinel_is_made_inert() {
+        for cwd in [Some(Path::new(CRATE_DIR)), None] {
+            assert_eq!(
+                resolve_workspace_link(cwd, PENDING_LINK_URL).as_deref(),
+                Some(INERT_LINK_URL)
+            );
+        }
+        assert!(INERT_LINK_URL.starts_with("data:"));
+    }
+
+    #[test]
+    fn a_relative_link_without_a_working_directory_is_left_alone() {
+        assert_eq!(resolve_workspace_link(None, "Cargo.toml"), None);
     }
 
     #[test]
@@ -2690,7 +3208,8 @@ mod workspace_link_tests {
         let expected = cwd.join("Cargo.toml");
         let absolute = expected.to_string_lossy();
         for link in ["Cargo.toml", absolute.as_ref()] {
-            let resolved = resolve_workspace_link(cwd, link).expect("existing workspace link");
+            let resolved =
+                resolve_workspace_link(Some(cwd), link).expect("existing workspace link");
             let url = Url::parse(&resolved).expect("file URL");
             assert_eq!(url.scheme(), "file");
             assert_eq!(url.to_file_path().expect("absolute file URL"), expected);
@@ -2700,7 +3219,10 @@ mod workspace_link_tests {
     #[test]
     fn a_missing_path_is_left_alone() {
         let cwd = Path::new(CRATE_DIR);
-        assert_eq!(resolve_workspace_link(cwd, "definitely-not-here.md"), None);
+        assert_eq!(
+            resolve_workspace_link(Some(cwd), "definitely-not-here.md"),
+            None
+        );
     }
 
     #[test]
@@ -2730,6 +3252,31 @@ mod tests {
 
     struct EmptyAgentTimelineTest {
         store: Entity<AgentTimelineStore>,
+    }
+
+    const TAIL_PIN_ROW_HEIGHT: f32 = 50.0;
+    const TAIL_PIN_BOTTOM_PADDING: f32 = 120.0;
+
+    struct TailPinTest {
+        state: ListState,
+    }
+
+    impl Render for TailPinTest {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(400.0)).h(px(300.0)).child(
+                list(self.state.clone(), |_, _, _| {
+                    div().w_full().h(px(TAIL_PIN_ROW_HEIGHT)).into_any_element()
+                })
+                .with_sizing_behavior(ListSizingBehavior::Auto)
+                .size_full()
+                .pt(px(AGENT_TIMELINE_TOP_PADDING))
+                .pb(px(TAIL_PIN_BOTTOM_PADDING)),
+            )
+        }
+    }
+
+    fn scroll_position(state: &ListState) -> f32 {
+        -f32::from(state.scroll_px_offset_for_scrollbar().y)
     }
 
     struct UserEntryTest {
@@ -3328,6 +3875,132 @@ mod tests {
         });
     }
 
+    /// A hanging marker is closed for the reader while the entry streams, and
+    /// the settle hands back exactly the bytes the thread holds.
+    #[gpui::test]
+    fn a_streaming_entry_renders_mended_and_settles_raw(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let store = cx.new(|_| AgentTimelineStore::default());
+        store.update(cx, |store, cx| store.set_streaming(Some(3), cx));
+        let state = store.update(cx, |store, cx| {
+            store.markdown(3, MarkdownSlot::Body, "a **partly".into(), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            state.read_with(cx, |state, _| state.source()),
+            "a **partly**"
+        );
+
+        let appended = store.update(cx, |store, cx| {
+            store.update_markdown(3, MarkdownSlot::Body, "a **partly bold".into(), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(appended, MarkdownUpdate::Replaced);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.source()),
+            "a **partly bold**"
+        );
+
+        let closed = store.update(cx, |store, cx| {
+            store.update_markdown(3, MarkdownSlot::Body, "a **partly bold** run".into(), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(closed, MarkdownUpdate::Replaced);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.source()),
+            "a **partly bold** run"
+        );
+        assert!(!store.read_with(cx, |store, _| {
+            store.markdown[&(3, MarkdownSlot::Body)].mended
+        }));
+
+        let raw = "a **partly bold** run, then *more";
+        store.update(cx, |store, cx| {
+            store.update_markdown(3, MarkdownSlot::Body, raw.into(), cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            state.read_with(cx, |state, _| state.source()),
+            "a **partly bold** run, then *more*"
+        );
+
+        store.update(cx, |store, cx| store.set_streaming(None, cx));
+        cx.run_until_parked();
+        assert_eq!(state.read_with(cx, |state, _| state.source()), raw);
+    }
+
+    /// The prefix fast path survives the mend: appends are diffed against the
+    /// raw text, so an entry that never hangs a marker never reparses.
+    #[gpui::test]
+    fn streaming_appends_without_hanging_markers_stay_incremental(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let store = cx.new(|_| AgentTimelineStore::default());
+        store.update(cx, |store, cx| store.set_streaming(Some(4), cx));
+        store.update(cx, |store, cx| {
+            store.markdown(4, MarkdownSlot::Body, "plain".into(), cx)
+        });
+
+        let appended = store.update(cx, |store, cx| {
+            store.update_markdown(4, MarkdownSlot::Body, "plain text".into(), cx)
+        });
+
+        assert_eq!(appended, MarkdownUpdate::Appended);
+        assert!(!store.read_with(cx, |store, _| {
+            store.markdown[&(4, MarkdownSlot::Body)].mended
+        }));
+    }
+
+    #[gpui::test]
+    fn a_settled_entry_is_never_mended(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let store = cx.new(|_| AgentTimelineStore::default());
+        let state = store.update(cx, |store, cx| {
+            store.markdown(5, MarkdownSlot::Body, "a **partly".into(), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(state.read_with(cx, |state, _| state.source()), "a **partly");
+
+        let update = store.update(cx, |store, cx| {
+            store.update_markdown(5, MarkdownSlot::Body, "a **partly bold".into(), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(update, MarkdownUpdate::Appended);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.source()),
+            "a **partly bold"
+        );
+    }
+
+    #[test]
+    fn a_patch_keeps_the_side_git_assigned_each_line() {
+        let rows = materialize_patch("@@ -1,2 +1,2 @@\n one\n-two\n+three\n\\ No newline\n");
+
+        assert!(matches!(rows[0], ToolContentRow::Footer(_)));
+        assert!(matches!(
+            &rows[1],
+            ToolContentRow::Diff {
+                kind: DiffLineKind::Equal,
+                text
+            } if text == "one"
+        ));
+        assert!(matches!(
+            &rows[2],
+            ToolContentRow::Diff {
+                kind: DiffLineKind::Removed,
+                text
+            } if text == "two"
+        ));
+        assert!(matches!(
+            &rows[3],
+            ToolContentRow::Diff {
+                kind: DiffLineKind::Added,
+                text
+            } if text == "three"
+        ));
+        assert!(matches!(rows[4], ToolContentRow::Footer(_)));
+        assert_eq!(rows.len(), 5);
+    }
+
     #[gpui::test]
     fn equal_tool_payload_sync_does_not_rematerialize(cx: &mut TestAppContext) {
         cx.update(crate::init);
@@ -3533,5 +4206,251 @@ mod tests {
             timeline_scroll.scroll_px_offset_for_scrollbar(),
             outer_offset
         );
+    }
+    fn tail_pin_window(
+        cx: &mut TestAppContext,
+        rows: usize,
+    ) -> (ListState, &mut VisualTestContext) {
+        cx.update(crate::init);
+        let state = ListState::new(0, gpui::ListAlignment::Top, px(200.0));
+        state.splice(0..0, rows);
+        let (_, cx) = cx.add_window_view({
+            let state = state.clone();
+            move |_, _| TailPinTest {
+                state: state.clone(),
+            }
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        (state, cx)
+    }
+
+    #[gpui::test]
+    fn the_pin_measures_the_end_through_the_lists_own_padding(cx: &mut TestAppContext) {
+        let (state, cx) = tail_pin_window(cx, 40);
+        let mut stick = TimelineStick::new(&state, false);
+        stick.set_bottom_padding(TAIL_PIN_BOTTOM_PADDING);
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(stick.distance_from_bottom(&state) <= AGENT_AT_BOTTOM_PX);
+
+        // Whatever the list's padding is, the distance to the end has to equal
+        // the travel the list itself just performed; measuring the items alone
+        // would report the padding short.
+        let landed = scroll_position(&state);
+        state.scroll_by(px(-500.0));
+        let moved = landed - scroll_position(&state);
+        assert!(moved > 0.0);
+        assert!(
+            (stick.distance_from_bottom(&state) - moved).abs() < 1.0,
+            "distance {} should equal the {moved}px just scrolled away",
+            stick.distance_from_bottom(&state)
+        );
+    }
+
+    #[gpui::test]
+    fn growing_the_transcript_cannot_break_the_pin(cx: &mut TestAppContext) {
+        let (state, cx) = tail_pin_window(cx, 40);
+        let mut stick = TimelineStick::new(&state, false);
+        stick.set_bottom_padding(TAIL_PIN_BOTTOM_PADDING);
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        let count = state.item_count();
+        state.splice(count..count, 20);
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        // The end ran away from the viewport — the same position change a
+        // wheel notch would make — and the pin is untouched, with a frame
+        // asked for to chase it.
+        assert!(stick.distance_from_bottom(&state) > AGENT_AT_BOTTOM_PX);
+        assert!(stick.is_pinned());
+        assert!(!stick.shows_jump_button());
+        assert!(stick.wants_frame(&state));
+    }
+
+    #[gpui::test]
+    fn a_wheel_scroll_away_breaks_the_pin_and_returning_restores_it(cx: &mut TestAppContext) {
+        let (state, cx) = tail_pin_window(cx, 40);
+        let mut stick = TimelineStick::new(&state, false);
+        stick.set_bottom_padding(TAIL_PIN_BOTTOM_PADDING);
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        let landed = scroll_position(&state);
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(10.0), px(10.0)),
+            delta: ScrollDelta::Pixels(point(px(0.0), px(400.0))),
+            ..Default::default()
+        });
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(landed - scroll_position(&state) > AGENT_JUMP_TO_BOTTOM_PX);
+        stick.on_user_scroll(&state, false);
+        assert!(!stick.is_pinned());
+        assert!(stick.shows_jump_button());
+
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(10.0), px(10.0)),
+            delta: ScrollDelta::Pixels(point(px(0.0), px(-4_000.0))),
+            ..Default::default()
+        });
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        stick.on_user_scroll(&state, false);
+        assert!(stick.is_pinned());
+        assert!(!stick.shows_jump_button());
+    }
+
+    #[gpui::test]
+    fn reduced_motion_keeps_the_lists_own_tail_follow(cx: &mut TestAppContext) {
+        let (state, cx) = tail_pin_window(cx, 40);
+        let mut stick = TimelineStick::new(&state, true);
+        stick.set_bottom_padding(TAIL_PIN_BOTTOM_PADDING);
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(state.is_following_tail());
+
+        let count = state.item_count();
+        state.splice(count..count, 20);
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(state.is_following_tail());
+        assert!(stick.distance_from_bottom(&state) <= AGENT_AT_BOTTOM_PX);
+    }
+}
+
+#[cfg(test)]
+mod stick_spring_tests {
+    use super::{
+        AGENT_STICK_THRESHOLD_PX, SPRING_CHASE_MAX_LEAD, StickSpring, agent_should_restick,
+    };
+    use std::time::Duration;
+
+    #[test]
+    fn the_spring_lands_exactly_on_a_fixed_target() {
+        let mut spring = StickSpring::new();
+        let target = 400.0;
+        let mut pos = 0.0;
+        let mut frames = 0;
+        while pos < target && frames < 600 {
+            pos = spring.step(pos, target, 1.0);
+            frames += 1;
+        }
+        assert_eq!(pos, target, "the spring must land exactly on the target");
+        assert!(
+            frames < 300,
+            "400px should converge in under 5s, took {frames}"
+        );
+        for _ in 0..120 {
+            pos = spring.step(pos, target, 1.0);
+            assert_eq!(pos, target);
+        }
+        assert!(spring.is_idle(), "no residual motion at rest");
+    }
+
+    #[test]
+    fn the_spring_never_overshoots_or_oscillates() {
+        let mut spring = StickSpring::new();
+        let target = 250.0;
+        let mut pos = 0.0;
+        let mut last = pos;
+        for _ in 0..600 {
+            pos = spring.step(pos, target, 1.0);
+            assert!(pos <= target, "overshoot: {pos} > {target}");
+            assert!(
+                pos >= last - 1e-3,
+                "oscillation: position moved backwards {last} -> {pos}"
+            );
+            last = pos;
+        }
+        assert_eq!(pos, target);
+    }
+
+    #[test]
+    fn the_feed_forward_tracks_constant_growth() {
+        let growth = 2.0;
+        let mut spring = StickSpring::new();
+        let mut target = 600.0;
+        let mut pos = 600.0;
+        let mut deltas: Vec<f32> = Vec::new();
+        for frame in 0..400 {
+            target += growth;
+            let next = spring.step(pos, target, 1.0);
+            if frame >= 200 {
+                deltas.push(next - pos);
+            }
+            pos = next;
+        }
+        let mean = deltas.iter().sum::<f32>() / deltas.len() as f32;
+        assert!(
+            (mean - growth).abs() < 0.2,
+            "steady-state speed {mean} should track growth {growth}"
+        );
+        for delta in &deltas {
+            assert!(*delta > 0.0, "the viewport stalled mid-stream");
+            assert!(
+                *delta < growth * 3.0,
+                "the viewport jumped {delta}px in one frame"
+            );
+        }
+        assert!((spring.target_vel() - growth).abs() < 0.3);
+        assert!(target - pos <= SPRING_CHASE_MAX_LEAD + growth);
+    }
+
+    #[test]
+    fn the_feed_forward_resets_when_the_target_shrinks() {
+        let mut spring = StickSpring::new();
+        let mut pos = 0.0;
+        for i in 1..=50u8 {
+            pos = spring.step(pos, 100.0 + f32::from(i) * 4.0, 1.0);
+        }
+        assert!(spring.target_vel() > 1.0);
+        let _ = spring.step(pos.min(120.0), 120.0, 1.0);
+        assert_eq!(spring.target_vel(), 0.0);
+    }
+
+    #[test]
+    fn a_hitch_catches_up_instead_of_teleporting() {
+        let target = 300.0;
+        let mut stepped = StickSpring::new();
+        let mut pos_stepped = 0.0;
+        for _ in 0..5 {
+            pos_stepped = stepped.step(pos_stepped, target, 1.0);
+        }
+        let mut hitched = StickSpring::new();
+        let pos_hitched = hitched.step(0.0, target, 5.0);
+        assert!(
+            (pos_stepped - pos_hitched).abs() < 1.0,
+            "{pos_stepped} vs {pos_hitched}"
+        );
+        assert!(pos_hitched <= target);
+    }
+
+    #[test]
+    fn a_long_stall_is_capped_at_the_catchup_budget() {
+        assert!((StickSpring::frames(Duration::from_millis(16)) - 0.96).abs() < 1e-4);
+        assert_eq!(StickSpring::frames(Duration::from_secs(2)), 8.0);
+    }
+
+    #[test]
+    fn resticking_is_direction_aware() {
+        assert!(!agent_should_restick(20.0, 0.0));
+        assert!(!agent_should_restick(69.0, 30.0));
+        assert!(agent_should_restick(30.0, 69.0));
+        assert!(agent_should_restick(AGENT_STICK_THRESHOLD_PX, 400.0));
+        assert!(!agent_should_restick(AGENT_STICK_THRESHOLD_PX + 1.0, 400.0));
     }
 }

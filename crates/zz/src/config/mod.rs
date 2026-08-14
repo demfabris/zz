@@ -83,6 +83,7 @@ const DEFAULT_EDITOR_SOFT_WRAP: bool = true;
 const DEFAULT_EDITOR_VIM_MODE: bool = true;
 const DEFAULT_EXPERIMENTAL_AGENT_PANE: bool = false;
 const DEFAULT_EXPERIMENTAL_EDITOR_PANE: bool = false;
+const DEFAULT_AGENT_AUTO_APPROVE: bool = true;
 #[cfg(target_os = "linux")]
 const UNBLURRED_WINDOW_BACKGROUND: WindowBackgroundAppearance =
     WindowBackgroundAppearance::Transparent;
@@ -100,6 +101,7 @@ enum AgentConfigKey {
     Command,
     ClaudeCodeCommand,
     WorkingDirectory,
+    AutoApprove,
 }
 
 impl AgentConfigKey {
@@ -108,6 +110,7 @@ impl AgentConfigKey {
             "agent-command" => Some(Self::Command),
             "agent-claude-code-command" => Some(Self::ClaudeCodeCommand),
             "agent-working-directory" => Some(Self::WorkingDirectory),
+            "agent-auto-approve" => Some(Self::AutoApprove),
             _ => None,
         }
     }
@@ -118,6 +121,7 @@ pub struct AgentConfig {
     pub(crate) command: String,
     pub(crate) claude_code_command: String,
     pub(crate) working_directory: Option<PathBuf>,
+    pub(crate) auto_approve: bool,
 }
 
 impl Default for AgentConfig {
@@ -126,6 +130,7 @@ impl Default for AgentConfig {
             command: DEFAULT_AGENT_COMMAND.to_owned(),
             claude_code_command: DEFAULT_CLAUDE_CODE_AGENT_COMMAND.to_owned(),
             working_directory: None,
+            auto_approve: DEFAULT_AGENT_AUTO_APPROVE,
         }
     }
 }
@@ -1513,29 +1518,36 @@ fn apply_agent_key(
     value: &str,
     line_number: usize,
 ) -> Option<ConfigDiagnostic> {
-    let value = match parse_config_string(value) {
-        Ok(value) => value,
-        Err(message) => {
-            return Some(ConfigDiagnostic {
-                line: line_number,
-                message: format!("invalid `{key}`: {message}"),
-            });
-        }
+    let invalid = |message: &str| {
+        Some(ConfigDiagnostic {
+            line: line_number,
+            message: format!("invalid `{key}`: {message}"),
+        })
     };
+    let string_value = || parse_config_string(value);
     match agent_key {
-        AgentConfigKey::Command => agent.command = value,
-        AgentConfigKey::ClaudeCodeCommand => agent.claude_code_command = value,
-        AgentConfigKey::WorkingDirectory => {
-            let path = PathBuf::from(value);
-            if !path.is_absolute() {
-                return Some(ConfigDiagnostic {
-                    line: line_number,
-                    message: "invalid `agent-working-directory`: expected an absolute path"
-                        .to_owned(),
-                });
+        AgentConfigKey::AutoApprove => match parse_boolean(value) {
+            Ok(parsed) => agent.auto_approve = parsed,
+            Err(message) => return invalid(&message),
+        },
+        AgentConfigKey::Command => match string_value() {
+            Ok(value) => agent.command = value,
+            Err(message) => return invalid(&message),
+        },
+        AgentConfigKey::ClaudeCodeCommand => match string_value() {
+            Ok(value) => agent.claude_code_command = value,
+            Err(message) => return invalid(&message),
+        },
+        AgentConfigKey::WorkingDirectory => match string_value() {
+            Ok(value) => {
+                let path = PathBuf::from(value);
+                if !path.is_absolute() {
+                    return invalid("expected an absolute path");
+                }
+                agent.working_directory = Some(path);
             }
-            agent.working_directory = Some(path);
-        }
+            Err(message) => return invalid(&message),
+        },
     }
     None
 }
@@ -2756,6 +2768,26 @@ mod tests {
         );
         assert_eq!(parsed.agent.claude_code_command, "claude-agent-acp --stdio");
         assert_eq!(parsed.agent.working_directory, Some(working_directory));
+        assert!(parsed.agent.auto_approve);
+    }
+
+    #[test]
+    fn agent_auto_approve_defaults_on_and_rejects_non_boolean_values() {
+        assert!(parse_config("").agent.auto_approve);
+        assert!(
+            !parse_config("agent-auto-approve = false\n")
+                .agent
+                .auto_approve
+        );
+
+        let parsed = parse_config("agent-auto-approve = false\nagent-auto-approve = maybe\n");
+        assert!(!parsed.agent.auto_approve);
+        assert_eq!(parsed.diagnostics.len(), 1);
+        assert!(
+            parsed.diagnostics[0]
+                .message
+                .contains("invalid `agent-auto-approve`: expected `true` or `false`")
+        );
     }
 
     #[test]

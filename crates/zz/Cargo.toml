@@ -9,7 +9,7 @@ publish = false
 default-run = "zz"
 
 [features]
-default = ["desktop"]
+default = ["desktop", "agent-pane"]
 desktop = []
 agent-pane = ["dep:agent-client-protocol", "dep:ignore", "dep:nucleo-matcher", "zz-ui/agent"]
 editor-pane = ["dep:ignore", "dep:nucleo-matcher", "zz-ui/editor"]

@@ -7,10 +7,10 @@ use std::{
 
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, Timelike as _};
 use gpui::{
-    Anchor, AnyElement, Context, ElementId, Entity, FocusHandle, Focusable, FollowMode, Image,
-    IntoElement, KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, Render,
-    ScrollStrategy, SharedString, Subscription, UniformListScrollHandle, Window, div, prelude::*,
-    px, relative, uniform_list,
+    Anchor, AnyElement, Context, ElementId, Entity, FocusHandle, Focusable, Image, IntoElement,
+    KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, Render, ScrollStrategy,
+    SharedString, Subscription, Task, UniformListScrollHandle, Window, div, prelude::*, px,
+    relative, uniform_list,
 };
 use zz_protocol::{AgentDescriptor, AgentProvider, CommandInvocation, PaneId};
 #[cfg(all(test, not(target_os = "macos")))]
@@ -18,8 +18,9 @@ use zz_ui::agent::DisclosureKind;
 use zz_ui::agent::{
     AGENT_CHROME_CONTROL_HEIGHT, AGENT_CONTENT_MAX_WIDTH, AgentEntry, AgentTimeline,
     AgentTimelineStore, AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus,
-    COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot, TimelineRow, agent_attachment_thumbnail,
-    agent_pane_header, append_timeline_row, fold_timeline_rows, timeline_group_kind,
+    COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot, TimelineRow, TimelineStick,
+    agent_attachment_thumbnail, agent_jump_to_bottom_button, agent_pane_header, agent_patch_block,
+    append_timeline_row, fold_timeline_rows, timeline_group_kind,
 };
 use zz_ui::command::palette_shortcut_hint;
 use zz_ui::{
@@ -43,6 +44,7 @@ use crate::{
         AgentSessionHistoryState, AgentSessionSummary, AgentThreadEntry, AgentToolKindModel,
         AgentToolStatusModel, ToolPayload,
     },
+    agent::turn_snapshot::{TurnDiff, TurnFile, TurnFileStatus},
     config::pane_content_radii,
     file_picker::{FilePickerEvent, FilePickerMode, FilePickerView, directory_picker_root},
     mux::client::MuxClient,
@@ -53,6 +55,7 @@ const AGENT_KEY_CONTEXT: &str = "Agent";
 const COMPLETION_ROW_HEIGHT: f32 = 52.0;
 const MAX_VISIBLE_COMPLETION_ROWS: u8 = 6;
 const HISTORY_ROW_HEIGHT: f32 = 52.0;
+const CHANGES_ROW_HEIGHT: f32 = 40.0;
 const COMPOSER_MIN_HEIGHT: f32 = 86.0;
 const COMPOSER_MAX_WIDTH: f32 = AGENT_CONTENT_MAX_WIDTH + 2.0;
 const COMPOSER_OCCLUSION_HEIGHT: f32 = COMPOSER_MIN_HEIGHT / 2.0;
@@ -219,6 +222,155 @@ fn replacement_preserves_folding(previous: &AgentEntry, next: &AgentEntry) -> bo
     timeline_group_kind(previous) == timeline_group_kind(next)
 }
 
+/// What the composer's single action button does right now. A turn already
+/// running turns Send into Queue — zz dispatches a queued prompt as the next
+/// turn, it never injects into the live one — and an empty composer under a
+/// live turn turns it into Stop.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ComposerAction {
+    Send,
+    Queue,
+    Stop,
+}
+
+const fn composer_action(active_turn: bool, has_content: bool) -> ComposerAction {
+    match (active_turn, has_content) {
+        (false, _) => ComposerAction::Send,
+        (true, true) => ComposerAction::Queue,
+        (true, false) => ComposerAction::Stop,
+    }
+}
+
+/// What a wizard interaction asks the controller to do.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum PermissionStep {
+    Stay,
+    /// `option_id` of `None` is the request's cancel path.
+    Answer {
+        request_id: u64,
+        option_id: Option<String>,
+    },
+}
+
+/// The pane's pending permission requests, one per page, in arrival order.
+///
+/// ACP v1 permission options are a closed, typed set, so a page is answered by
+/// picking one of them: the free-text override comet's question wizard carries
+/// would only apply to kindless, question-shaped requests, which v1 cannot
+/// deliver (see `acp_v1_rejects_permission_options_with_an_unknown_kind`).
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct PermissionWizard {
+    page: usize,
+    focused: Option<u64>,
+    highlighted: usize,
+    /// Requests already answered, held until the controller drops them from the
+    /// pending list: a re-render must not re-show an answered page, and a pick
+    /// must never be taken twice.
+    answered: BTreeSet<u64>,
+}
+
+impl PermissionWizard {
+    /// Re-seat the cursor over the pending requests. A request resolved
+    /// elsewhere — auto-approved, or cancelled with the turn — loses its page
+    /// while the cursor keeps its place among the rest.
+    fn sync(&mut self, requests: &[AgentPermissionRequest]) {
+        self.answered
+            .retain(|id| requests.iter().any(|request| request.request_id == *id));
+        let pages = self.pages(requests);
+        let Some(last) = pages.len().checked_sub(1) else {
+            self.page = 0;
+            self.focused = None;
+            self.highlighted = 0;
+            return;
+        };
+        self.page = self
+            .focused
+            .and_then(|id| pages.iter().position(|request| request.request_id == id))
+            .unwrap_or_else(|| self.page.min(last));
+        let focused = pages[self.page].request_id;
+        if self.focused != Some(focused) {
+            self.focused = Some(focused);
+            self.highlighted = 0;
+        }
+    }
+
+    fn pages<'a>(&self, requests: &'a [AgentPermissionRequest]) -> Vec<&'a AgentPermissionRequest> {
+        requests
+            .iter()
+            .filter(|request| !self.answered.contains(&request.request_id))
+            .collect()
+    }
+
+    fn current<'a>(
+        &self,
+        requests: &'a [AgentPermissionRequest],
+    ) -> Option<&'a AgentPermissionRequest> {
+        self.pages(requests).get(self.page).copied()
+    }
+
+    /// `n/m`, only worth showing once a second request is waiting.
+    fn page_label(&self, requests: &[AgentPermissionRequest]) -> Option<String> {
+        let count = self.pages(requests).len();
+        (count > 1).then(|| format!("{}/{count}", self.page + 1))
+    }
+
+    fn highlight(&mut self, option: usize) -> bool {
+        let changed = self.highlighted != option;
+        self.highlighted = option;
+        changed
+    }
+
+    /// Answer the focused page and advance to the next pending request.
+    fn answer(
+        &mut self,
+        requests: &[AgentPermissionRequest],
+        option: Option<usize>,
+    ) -> PermissionStep {
+        let Some(request) = self.current(requests) else {
+            return PermissionStep::Stay;
+        };
+        let request_id = request.request_id;
+        let option_id = match option {
+            Some(index) => match request.options.get(index) {
+                Some(option) => Some(option.id.clone()),
+                None => return PermissionStep::Stay,
+            },
+            None => None,
+        };
+        self.answered.insert(request_id);
+        self.sync(requests);
+        PermissionStep::Answer {
+            request_id,
+            option_id,
+        }
+    }
+
+    /// Number keys 1-9. The composer wins the digit whenever the user is
+    /// actually typing into it.
+    fn press_digit(
+        &mut self,
+        requests: &[AgentPermissionRequest],
+        digit: usize,
+        composer_engaged: bool,
+    ) -> PermissionStep {
+        let Some(option) = digit.checked_sub(1) else {
+            return PermissionStep::Stay;
+        };
+        if composer_engaged {
+            return PermissionStep::Stay;
+        }
+        self.answer(requests, Some(option))
+    }
+
+    fn confirm(&mut self, requests: &[AgentPermissionRequest]) -> PermissionStep {
+        self.answer(requests, Some(self.highlighted))
+    }
+
+    fn cancel(&mut self, requests: &[AgentPermissionRequest]) -> PermissionStep {
+        self.answer(requests, None)
+    }
+}
+
 #[allow(
     clippy::struct_excessive_bools,
     reason = "independent visibility, completion, and history UI states"
@@ -235,9 +387,11 @@ pub(crate) struct AgentView {
     timeline_store: Entity<AgentTimelineStore>,
     timeline_next_revision: u64,
     timeline_scroll: ListState,
+    stick: TimelineStick,
     completion_scroll: UniformListScrollHandle,
     submission_error: Option<Arc<str>>,
     dismissed_notifications: BTreeSet<u64>,
+    permission_wizard: PermissionWizard,
     attachments: Vec<Arc<Image>>,
     completions: Arc<[CommandCompletion]>,
     completion_selected: Option<usize>,
@@ -251,6 +405,14 @@ pub(crate) struct AgentView {
     history_scroll: UniformListScrollHandle,
     history_delete_confirmation: Option<Arc<str>>,
     last_history_query: String,
+    changes_open: bool,
+    changes: Option<Arc<TurnDiff>>,
+    changes_error: Option<Arc<str>>,
+    changes_expanded: Option<SharedString>,
+    changes_scroll: UniformListScrollHandle,
+    changes_patch_scroll: UniformListScrollHandle,
+    /// The in-flight capture. Dropping it cancels the diff.
+    changes_task: Option<Task<()>>,
     directory_picker: Option<Entity<FilePickerView>>,
     window_corners: WindowCorners,
     _subscriptions: Vec<Subscription>,
@@ -317,8 +479,18 @@ impl AgentView {
             )
         };
         let timeline_scroll = ListState::new(0, ListAlignment::Top, px(1_200.0));
-        timeline_scroll.set_follow_mode(FollowMode::Tail);
         timeline_scroll.splice(0..0, timeline.rows.len());
+        let stick = TimelineStick::new(&timeline_scroll, cx.reduce_motion());
+        let scroll_view = cx.weak_entity();
+        timeline_scroll.set_scroll_handler(move |_, _, cx| {
+            // The list still holds its own borrow across this call, so reading
+            // the scroll state back here panics; run after the effect cycle.
+            let view = scroll_view.clone();
+            cx.defer(move |cx| {
+                view.update(cx, |view: &mut Self, cx| view.on_timeline_scroll(cx))
+                    .ok();
+            });
+        });
         let controller_observer = cx.observe(&controller, |view, controller, cx| {
             if view.visible && view.synchronize_controller(&controller, cx) {
                 cx.notify();
@@ -347,9 +519,11 @@ impl AgentView {
             timeline_store,
             timeline_next_revision,
             timeline_scroll,
+            stick,
             completion_scroll: UniformListScrollHandle::new(),
             submission_error: None,
             dismissed_notifications: BTreeSet::new(),
+            permission_wizard: PermissionWizard::default(),
             attachments: Vec::new(),
             completions: Arc::from([]),
             completion_selected: None,
@@ -363,6 +537,13 @@ impl AgentView {
             history_scroll: UniformListScrollHandle::new(),
             history_delete_confirmation: None,
             last_history_query: String::new(),
+            changes_open: false,
+            changes: None,
+            changes_error: None,
+            changes_expanded: None,
+            changes_scroll: UniformListScrollHandle::new(),
+            changes_patch_scroll: UniformListScrollHandle::new(),
+            changes_task: None,
             directory_picker: None,
             window_corners: WindowCorners::NONE,
             _subscriptions: vec![
@@ -438,10 +619,21 @@ impl AgentView {
         controller: &Entity<AgentController>,
         cx: &mut Context<Self>,
     ) -> bool {
+        let reduce_motion = cx.reduce_motion();
         let (changed, store_update) = {
             let controller = controller.read(cx);
-            self.synchronize_controller_state(controller)
+            self.synchronize_controller_state(controller, reduce_motion)
         };
+        // The tail entry of a live turn is the one still taking deltas, so it is
+        // the only one whose display copy may be mended.
+        let streaming = self
+            .pane_state
+            .connection
+            .has_active_turn()
+            .then(|| self.timeline.entry_ids.last().copied())
+            .flatten();
+        self.timeline_store
+            .update(cx, |store, cx| store.set_streaming(streaming, cx));
         let store_changed = self.update_timeline_store(store_update, cx);
         let cwd = self.pane_state.cwd.clone();
         self.timeline_store
@@ -469,6 +661,7 @@ impl AgentView {
     fn synchronize_controller_state(
         &mut self,
         controller: &AgentController,
+        reduce_motion: bool,
     ) -> (bool, TimelineStoreUpdate) {
         let next_state = controller
             .pane_state(self.pane)
@@ -511,7 +704,7 @@ impl AgentView {
                 self.timeline_next_revision = 0;
                 self.dismissed_notifications.clear();
                 self.timeline_scroll.reset(0);
-                self.timeline_scroll.set_follow_mode(FollowMode::Tail);
+                self.stick.engage_now(&self.timeline_scroll, reduce_motion);
                 return (true, TimelineStoreUpdate::Clear);
             }
             return (state_changed, TimelineStoreUpdate::Clear);
@@ -522,7 +715,8 @@ impl AgentView {
             return (state_changed, TimelineStoreUpdate::None);
         }
         self.timeline_next_revision = next_revision;
-        let (timeline_changed, store_update) = self.synchronize_timeline(entries, revisions);
+        let (timeline_changed, store_update) =
+            self.synchronize_timeline(entries, revisions, reduce_motion);
         (timeline_changed || state_changed, store_update)
     }
 
@@ -568,12 +762,13 @@ impl AgentView {
         &mut self,
         entries: &[AgentThreadEntry],
         revisions: &[u64],
+        reduce_motion: bool,
     ) -> (bool, TimelineStoreUpdate) {
         match self.timeline.synchronize(entries, revisions) {
             TimelineModelUpdate::None => (false, TimelineStoreUpdate::None),
             TimelineModelUpdate::Rebuild => {
                 self.timeline_scroll.reset(self.timeline.rows.len());
-                self.timeline_scroll.set_follow_mode(FollowMode::Tail);
+                self.stick.engage_now(&self.timeline_scroll, reduce_motion);
                 (true, TimelineStoreUpdate::Clear)
             }
             TimelineModelUpdate::Incremental {
@@ -589,6 +784,12 @@ impl AgentView {
                 if added_rows > 0 {
                     self.timeline_scroll
                         .splice(splice_start..splice_start, added_rows);
+                }
+                // The grown rows are still unmeasured, so the distance to the
+                // end reads as zero until the next layout: wake the driver
+                // outright rather than waiting for a measurement to show up.
+                if self.stick.is_pinned() {
+                    self.stick.wake();
                 }
                 let store_update = if store_entries.is_empty() {
                     TimelineStoreUpdate::None
@@ -632,11 +833,83 @@ impl AgentView {
             self.open_selected_history(window, cx);
             return;
         }
-        if self.completions.is_empty() {
-            self.submit(window, cx);
-        } else {
+        if !self.completions.is_empty() {
             self.accept_selected_completion(window, cx);
+            return;
         }
+        if self.confirm_permission(cx) {
+            return;
+        }
+        self.submit(window, cx);
+    }
+
+    /// Enter over an empty composer confirms the highlighted permission option.
+    /// It never reaches [`ComposerAction::Stop`]: a stray Enter right after
+    /// sending must not kill the turn it just started.
+    fn confirm_permission(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.input.read(cx).value().trim().is_empty() {
+            return false;
+        }
+        let requests = self.pane_state.pending_permissions.clone();
+        let step = self.permission_wizard.confirm(&requests);
+        self.apply_permission_step(step, cx)
+    }
+
+    fn apply_permission_step(&mut self, step: PermissionStep, cx: &mut Context<Self>) -> bool {
+        let PermissionStep::Answer {
+            request_id,
+            option_id,
+        } = step
+        else {
+            return false;
+        };
+        let pane = self.pane;
+        self.controller.update(cx, |controller, cx| {
+            controller.respond_permission(pane, request_id, option_id, cx);
+        });
+        cx.notify();
+        true
+    }
+
+    /// The user is mid-sentence in the composer, so keys the wizard would claim
+    /// belong to the draft instead.
+    fn composer_engaged(&self, window: &Window, cx: &gpui::App) -> bool {
+        let input = self.input.read(cx);
+        !input.value().trim().is_empty() && input.focus_handle(cx).is_focused(window)
+    }
+
+    fn composer_has_content(&self) -> bool {
+        !self.last_input.trim().is_empty() || !self.attachments.is_empty()
+    }
+
+    /// Digits 1-9 pick an option on the focused permission page, Escape takes
+    /// its cancel path. Answered here rather than through a binding so the
+    /// digit can be swallowed before the composer types it.
+    fn handle_permission_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.pane_state.pending_permissions.is_empty() {
+            return false;
+        }
+        let modifiers = event.keystroke.modifiers;
+        if modifiers.platform || modifiers.alt || modifiers.control || modifiers.function {
+            return false;
+        }
+        let engaged = self.composer_engaged(window, cx);
+        let requests = self.pane_state.pending_permissions.clone();
+        let step = match event.keystroke.key.as_str() {
+            "escape" if !engaged => self.permission_wizard.cancel(&requests),
+            key => match key.parse::<usize>() {
+                Ok(digit) if (1..=9).contains(&digit) => self
+                    .permission_wizard
+                    .press_digit(&requests, digit, engaged),
+                _ => PermissionStep::Stay,
+            },
+        };
+        self.apply_permission_step(step, cx)
     }
 
     fn navigate_completion(&mut self, direction: isize, cx: &mut Context<Self>) {
@@ -803,6 +1076,70 @@ impl AgentView {
         cx.notify();
     }
 
+    fn open_changes(&mut self, cx: &mut Context<Self>) {
+        self.changes_open = true;
+        self.completions = Arc::from([]);
+        self.completion_selected = None;
+        self.refresh_changes(cx);
+    }
+
+    fn close_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.changes_open = false;
+        self.changes_task = None;
+        self.focus(cx).focus(window, cx);
+        cx.notify();
+    }
+
+    /// Diff the worktree against the base this turn started from. The capture
+    /// runs on the background executor; only the result comes back here.
+    fn refresh_changes(&mut self, cx: &mut Context<Self>) {
+        let pane = self.pane;
+        let Some(capture) = self.controller.read(cx).capture_turn_diff(pane, cx) else {
+            self.changes_task = None;
+            self.changes_error = Some(Arc::from("this turn has no snapshot to diff against"));
+            cx.notify();
+            return;
+        };
+        self.changes_error = None;
+        self.changes_task = Some(cx.spawn(async move |view, cx| {
+            let captured = capture.await;
+            view.update(cx, |view, cx| view.apply_turn_diff(captured, cx))
+                .ok();
+        }));
+        cx.notify();
+    }
+
+    fn apply_turn_diff(&mut self, captured: Result<TurnDiff, String>, cx: &mut Context<Self>) {
+        // This runs inside the capture task, so the handle is dropped from the
+        // future it owns: the cancel lands after this poll, on a task that has
+        // already produced everything it was going to.
+        self.changes_task = None;
+        match captured {
+            Ok(diff) => {
+                if !diff.files.iter().any(|file| {
+                    self.changes_expanded
+                        .as_ref()
+                        .is_some_and(|path| path == file.path.as_str())
+                }) {
+                    self.changes_expanded = None;
+                }
+                self.changes = Some(Arc::new(diff));
+                self.changes_error = None;
+            }
+            Err(error) => self.changes_error = Some(Arc::from(error.as_str())),
+        }
+        cx.notify();
+    }
+
+    fn toggle_changed_file(&mut self, path: &SharedString, cx: &mut Context<Self>) {
+        self.changes_expanded = if self.changes_expanded.as_ref() == Some(path) {
+            None
+        } else {
+            Some(path.clone())
+        };
+        cx.notify();
+    }
+
     fn accept_completion(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(completion) = self.completions.get(index).cloned() else {
             return;
@@ -861,12 +1198,25 @@ impl AgentView {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.changes_open && event.keystroke.key.as_str() == "escape" {
+            self.close_changes(window, cx);
+            cx.stop_propagation();
+            return;
+        }
         if self.history_open && event.keystroke.key.as_str() == "escape" {
             if self.history_delete_confirmation.take().is_some() {
                 cx.notify();
             } else {
                 self.close_history(window, cx);
             }
+            cx.stop_propagation();
+            return;
+        }
+        if self.completions.is_empty()
+            && !self.history_open
+            && !self.changes_open
+            && self.handle_permission_key(event, window, cx)
+        {
             cx.stop_propagation();
             return;
         }
@@ -935,7 +1285,7 @@ impl AgentView {
                 self.submission_error = None;
                 self.completions = Arc::from([]);
                 self.completion_selected = None;
-                self.timeline_scroll.set_follow_mode(FollowMode::Tail);
+                self.stick.engage(&self.timeline_scroll, cx.reduce_motion());
             }
             Err(error) => self.submission_error = Some(error),
         }
@@ -1023,20 +1373,27 @@ impl AgentView {
             .child(message)
     }
 
-    fn render_permission(
+    /// One pending permission request at a time, with its page counter, its
+    /// options numbered for the digit keys, and the cancel path.
+    fn render_permission_wizard(
         &self,
-        permission: &AgentPermissionRequest,
+        state: &AgentPaneState,
+        view: &Entity<Self>,
         cx: &gpui::App,
-    ) -> impl IntoElement {
-        let actions = permission
+    ) -> Option<AnyElement> {
+        let permission = self.permission_wizard.current(&state.pending_permissions)?;
+        let counter = self
+            .permission_wizard
+            .page_label(&state.pending_permissions);
+        let highlighted = self.permission_wizard.highlighted;
+        let request_id = permission.request_id;
+        let options = permission
             .options
             .iter()
             .enumerate()
             .map(|(index, option)| {
-                let controller = self.controller.clone();
-                let pane = self.pane;
-                let request_id = permission.request_id;
-                let option_id = option.id.clone();
+                let answer_view = view.clone();
+                let hover_view = view.clone();
                 let button = Button::new(format!(
                     "agent-permission-{}-{request_id}-{index}",
                     self.pane.0
@@ -1044,63 +1401,170 @@ impl AgentView {
                 .small()
                 .label(option.name.clone())
                 .on_click(move |_, _, cx| {
-                    controller.update(cx, |controller, cx| {
-                        controller.respond_permission(
-                            pane,
-                            request_id,
-                            Some(option_id.clone()),
-                            cx,
-                        );
+                    answer_view.update(cx, |view, cx| {
+                        view.answer_permission(index, cx);
                     });
+                    cx.stop_propagation();
                 });
-                match option.kind {
+                let button = match option.kind {
                     AgentPermissionKind::AllowOnce | AgentPermissionKind::AllowAlways => {
                         button.primary()
                     }
                     AgentPermissionKind::RejectOnce | AgentPermissionKind::RejectAlways => {
                         button.danger()
                     }
-                }
-            })
-            .collect::<Vec<_>>();
-        let cancel_controller = self.controller.clone();
-        let pane = self.pane;
-        let request_id = permission.request_id;
-        v_flex()
-            .w_full()
-            .gap_2()
-            .rounded(cx.theme().radius)
-            .border_1()
-            .border_color(cx.theme().warning.outline())
-            .bg(cx.theme().warning.fill())
-            .p_3()
-            .child(
+                };
                 h_flex()
-                    .gap_2()
-                    .text_size(zz_ui::rems_from_px(12.0))
-                    .child(
-                        Icon::new(IconName::TriangleAlert)
-                            .small()
-                            .text_color(cx.theme().warning),
-                    )
-                    .child(permission.title.clone()),
-            )
-            .child(
-                h_flex().flex_wrap().gap_2().children(actions).child(
-                    Button::new(format!(
-                        "agent-permission-cancel-{}-{request_id}",
+                    .id(format!(
+                        "agent-permission-option-{}-{request_id}-{index}",
                         self.pane.0
                     ))
+                    .w_full()
+                    .items_center()
+                    .gap_2()
+                    .rounded(cx.theme().radius)
+                    .px_1()
+                    .py(px(2.0))
+                    .when(index == highlighted, |this| {
+                        this.bg(cx.theme().background.hover())
+                    })
+                    .on_hover(move |hovered, _, cx| {
+                        if *hovered {
+                            hover_view.update(cx, |view, cx| {
+                                if view.permission_wizard.highlight(index) {
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    })
+                    .when(index < 9, |this| {
+                        this.child(
+                            div()
+                                .flex_none()
+                                .rounded(cx.theme().radius)
+                                .bg(cx.theme().background.raised(2))
+                                .px_2()
+                                .py(px(2.0))
+                                .text_size(zz_ui::rems_from_px(9.0))
+                                .text_color(cx.theme().foreground.muted())
+                                .child(format!("{}", index + 1)),
+                        )
+                    })
+                    .child(button)
+            })
+            .collect::<Vec<_>>();
+        let cancel_view = view.clone();
+        Some(
+            v_flex()
+                .w_full()
+                .gap_2()
+                .rounded(cx.theme().radius)
+                .border_1()
+                .border_color(cx.theme().warning.outline())
+                .bg(cx.theme().warning.fill())
+                .p_3()
+                .child(
+                    h_flex()
+                        .w_full()
+                        .items_center()
+                        .gap_2()
+                        .text_size(zz_ui::rems_from_px(12.0))
+                        .child(
+                            Icon::new(IconName::TriangleAlert)
+                                .small()
+                                .flex_none()
+                                .text_color(cx.theme().warning),
+                        )
+                        .child(div().min_w_0().flex_1().child(permission.title.clone()))
+                        .when_some(counter, |this, counter| {
+                            this.child(
+                                div()
+                                    .flex_none()
+                                    .rounded(cx.theme().radius)
+                                    .bg(cx.theme().background.raised(2))
+                                    .px_2()
+                                    .py(px(2.0))
+                                    .text_size(zz_ui::rems_from_px(9.0))
+                                    .text_color(cx.theme().foreground.muted())
+                                    .child(counter),
+                            )
+                        }),
+                )
+                .child(v_flex().w_full().gap_1().children(options))
+                .child(
+                    h_flex()
+                        .w_full()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_size(zz_ui::rems_from_px(9.0))
+                                .text_color(cx.theme().foreground.muted())
+                                .child("1-9 picks · enter confirms · esc cancels"),
+                        )
+                        .child(
+                            Button::new(format!(
+                                "agent-permission-cancel-{}-{request_id}",
+                                self.pane.0
+                            ))
+                            .ghost()
+                            .small()
+                            .label("Cancel request")
+                            .on_click(move |_, _, cx| {
+                                cancel_view.update(cx, |view, cx| {
+                                    view.cancel_permission(cx);
+                                });
+                                cx.stop_propagation();
+                            }),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// How many prompts are waiting behind the live turn, and the way back:
+    /// clicking hands the whole queue to the composer draft.
+    fn render_queue_chip(
+        &self,
+        state: &AgentPaneState,
+        cx: &gpui::App,
+    ) -> Option<impl IntoElement> {
+        let queued = state.queued_prompts;
+        if queued == 0 {
+            return None;
+        }
+        let controller = self.controller.clone();
+        let pane = self.pane;
+        Some(
+            h_flex().w_full().justify_end().child(
+                Button::new(format!("agent-unqueue-{}", self.pane.0))
                     .ghost()
-                    .small()
-                    .label("Cancel request")
+                    .xsmall()
+                    .icon(IconName::Undo2)
+                    .label(format!("{queued} queued"))
+                    .tooltip("Return the queued prompts to the composer")
+                    .text_color(cx.theme().foreground.muted())
                     .on_click(move |_, _, cx| {
-                        cancel_controller.update(cx, |controller, cx| {
-                            controller.respond_permission(pane, request_id, None, cx);
+                        controller.update(cx, |controller, cx| {
+                            controller.unqueue_prompts(pane, cx);
                         });
+                        cx.stop_propagation();
                     }),
-                ),
-            )
+            ),
+        )
+    }
+
+    fn answer_permission(&mut self, option: usize, cx: &mut Context<Self>) {
+        let requests = self.pane_state.pending_permissions.clone();
+        let step = self.permission_wizard.answer(&requests, Some(option));
+        self.apply_permission_step(step, cx);
+    }
+
+    fn cancel_permission(&mut self, cx: &mut Context<Self>) {
+        let requests = self.pane_state.pending_permissions.clone();
+        let step = self.permission_wizard.cancel(&requests);
+        self.apply_permission_step(step, cx);
     }
 
     fn render_error(&self, state: &AgentPaneState, cx: &gpui::App) -> Option<impl IntoElement> {
@@ -1230,6 +1694,351 @@ impl AgentView {
                 view.update(cx, |view, cx| view.open_history(window, cx));
                 cx.stop_propagation();
             })
+    }
+
+    /// The way into the turn diff, shown only once the turn has a base to diff
+    /// against — a pane outside a git worktree never grows the affordance.
+    fn render_changes_button(
+        &self,
+        view: Entity<Self>,
+        cx: &gpui::App,
+    ) -> Option<impl IntoElement> {
+        self.controller.read(cx).turn_base(self.pane)?;
+        Some(
+            agent_chrome_button(("agent-turn-changes", self.pane.0))
+                .icon(IconName::Layers)
+                .label("Changes")
+                .tooltip("What this turn changed in the worktree")
+                .on_click(move |_, _, cx| {
+                    view.update(cx, AgentView::open_changes);
+                    cx.stop_propagation();
+                }),
+        )
+    }
+
+    fn render_changes_overlay(&self, view: &Entity<Self>, cx: &gpui::App) -> impl IntoElement {
+        let pane = self.pane;
+        let diff = self.changes.clone();
+        let loading = self.changes_task.is_some();
+        let rows_diff = diff.clone();
+        let rows_view = view.clone();
+        let rows_expanded = self.changes_expanded.clone();
+        let rows = uniform_list(
+            ("agent-changes-rows", pane.0),
+            rows_diff.as_ref().map_or(0, |diff| diff.files.len()),
+            move |range, _, cx| {
+                let Some(diff) = rows_diff.clone() else {
+                    return Vec::new();
+                };
+                range
+                    .filter_map(|index| {
+                        let file = diff.files.get(index)?;
+                        let path = SharedString::from(file.path.clone());
+                        let is_expanded = rows_expanded.as_ref() == Some(&path);
+                        let click_view = rows_view.clone();
+                        let click_path = path.clone();
+                        Some(
+                            h_flex()
+                                .id(format!("agent-changes-row-{}-{index}", pane.0))
+                                .w_full()
+                                .h(px(CHANGES_ROW_HEIGHT))
+                                .items_center()
+                                .gap_2()
+                                .rounded(cx.theme().radius)
+                                .px_2p5()
+                                .cursor_pointer()
+                                .when(is_expanded, |this| this.bg(cx.theme().background.hover()))
+                                .when(!is_expanded, |this| {
+                                    this.hover(|this| this.bg(cx.theme().background.hover()))
+                                })
+                                .on_click(move |_, _, cx| {
+                                    click_view.update(cx, |view, cx| {
+                                        view.toggle_changed_file(&click_path, cx);
+                                    });
+                                    cx.stop_propagation();
+                                })
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .w(px(16.0))
+                                        .font_family(cx.theme().mono_font_family.clone())
+                                        .text_size(zz_ui::rems_from_px(11.0))
+                                        .text_color(changed_file_color(file.status, cx))
+                                        .child(changed_file_glyph(file.status)),
+                                )
+                                .child(
+                                    v_flex()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .child(
+                                            div()
+                                                .w_full()
+                                                .min_w_0()
+                                                .overflow_hidden()
+                                                .text_ellipsis()
+                                                .whitespace_nowrap()
+                                                .text_size(zz_ui::rems_from_px(12.0))
+                                                .child(path.clone()),
+                                        )
+                                        .when_some(file.old_path.clone(), |this, old_path| {
+                                            this.child(
+                                                div()
+                                                    .w_full()
+                                                    .min_w_0()
+                                                    .overflow_hidden()
+                                                    .text_ellipsis()
+                                                    .whitespace_nowrap()
+                                                    .text_size(zz_ui::rems_from_px(9.0))
+                                                    .text_color(cx.theme().foreground.muted())
+                                                    .child(format!("was {old_path}")),
+                                            )
+                                        }),
+                                )
+                                .child(
+                                    h_flex()
+                                        .flex_none()
+                                        .gap_2()
+                                        .text_size(zz_ui::rems_from_px(10.0))
+                                        .when(file.binary, |this| {
+                                            this.child(
+                                                div()
+                                                    .text_color(cx.theme().foreground.muted())
+                                                    .child("binary"),
+                                            )
+                                        })
+                                        .when(!file.binary, |this| {
+                                            this.child(
+                                                div()
+                                                    .text_color(cx.theme().success)
+                                                    .child(format!("+{}", file.additions)),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_color(cx.theme().danger)
+                                                    .child(format!("−{}", file.deletions)),
+                                            )
+                                        }),
+                                ),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            },
+        )
+        .flex_1()
+        .track_scroll(&self.changes_scroll);
+
+        let summary = diff.as_ref().map_or_else(
+            || "Diffing this turn…".to_owned(),
+            |diff| {
+                format!(
+                    "{} · +{} −{}",
+                    file_count_label(diff.files.len()),
+                    diff.additions,
+                    diff.deletions
+                )
+            },
+        );
+        let truncated = diff.as_ref().is_some_and(|diff| diff.truncated);
+        let empty = diff.as_ref().is_some_and(|diff| diff.files.is_empty());
+        // Borrowed straight out of the retained diff: slicing the patch on every
+        // render is a search, copying it out would be an allocation.
+        let hunks = self
+            .changes
+            .as_ref()
+            .zip(self.changes_expanded.as_ref())
+            .and_then(|(diff, path)| {
+                let index = diff
+                    .files
+                    .iter()
+                    .position(|file| file.path.as_str() == path.as_ref())?;
+                Some((index, file_hunks(&diff.patch, &diff.files[index])))
+            });
+        let refresh_view = view.clone();
+        let close_view = view.clone();
+        let backdrop_view = view.clone();
+
+        div()
+            .id(("agent-changes-overlay", pane.0))
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .p_4()
+            .bg(cx.theme().scrim)
+            .occlude()
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                backdrop_view.update(cx, |view, cx| view.close_changes(window, cx));
+                cx.stop_propagation();
+            })
+            .child(
+                v_flex()
+                    .id(("agent-changes-modal", pane.0))
+                    .relative()
+                    .w(relative(0.92))
+                    .max_w(px(660.0))
+                    .h(relative(0.82))
+                    .min_h(px(240.0))
+                    .max_h(px(720.0))
+                    .overflow_hidden()
+                    .rounded(cx.theme().radius)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().background.raised(1))
+                    .shadow_lg()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .flex_none()
+                            .items_center()
+                            .gap(px(CHROME_GAP))
+                            .border_b_1()
+                            .border_color(cx.theme().border)
+                            .p(px(CHROME_GAP))
+                            .child(
+                                h_flex()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .items_center()
+                                    .gap_2()
+                                    .text_size(zz_ui::rems_from_px(12.0))
+                                    .when(loading, |this| this.child(Spinner::new().xsmall()))
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .whitespace_nowrap()
+                                            .child(summary),
+                                    )
+                                    .when(truncated, |this| {
+                                        this.child(
+                                            div()
+                                                .flex_none()
+                                                .rounded(px(999.0))
+                                                .bg(cx.theme().warning.fill())
+                                                .px_1()
+                                                .text_size(zz_ui::rems_from_px(8.0))
+                                                .text_color(cx.theme().warning)
+                                                .child("PARTIAL"),
+                                        )
+                                    }),
+                            )
+                            .child(
+                                agent_chrome_button(("agent-changes-refresh", pane.0))
+                                    .icon(IconName::Redo2)
+                                    .label("Refresh")
+                                    .disabled(loading)
+                                    .on_click(move |_, _, cx| {
+                                        refresh_view.update(cx, |view, cx| {
+                                            view.refresh_changes(cx);
+                                        });
+                                        cx.stop_propagation();
+                                    }),
+                            )
+                            .child(
+                                agent_chrome_button(("agent-changes-close", pane.0))
+                                    .icon(IconName::Close)
+                                    .tooltip("Close")
+                                    .on_click(move |_, window, cx| {
+                                        close_view.update(cx, |view, cx| {
+                                            view.close_changes(window, cx);
+                                        });
+                                        cx.stop_propagation();
+                                    }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .flex()
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_hidden()
+                            .p(px(CHROME_GAP))
+                            .child(rows)
+                            .when(empty || diff.is_none(), |this| {
+                                this.child(
+                                    div()
+                                        .absolute()
+                                        .inset_0()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_size(zz_ui::rems_from_px(11.0))
+                                        .text_color(cx.theme().foreground.muted())
+                                        .child(if empty {
+                                            "Nothing changed this turn."
+                                        } else {
+                                            "Diffing this turn…"
+                                        }),
+                                )
+                            }),
+                    )
+                    .when_some(hunks, |this, (index, hunks)| {
+                        this.child(match hunks {
+                            Some(hunks) => div()
+                                .w_full()
+                                .flex_none()
+                                .child(agent_patch_block(
+                                    index as u64,
+                                    hunks,
+                                    &self.changes_patch_scroll,
+                                    cx,
+                                ))
+                                .into_any_element(),
+                            None => div()
+                                .w_full()
+                                .flex_none()
+                                .border_t_1()
+                                .border_color(cx.theme().border)
+                                .px_2p5()
+                                .py_2()
+                                .text_size(zz_ui::rems_from_px(10.0))
+                                .text_color(cx.theme().foreground.muted())
+                                .child("This file carries no textual hunk.")
+                                .into_any_element(),
+                        })
+                    })
+                    .when_some(self.changes_error.clone(), |this, error| {
+                        this.child(
+                            div()
+                                .w_full()
+                                .flex_none()
+                                .border_t_1()
+                                .border_color(cx.theme().danger.outline())
+                                .bg(cx.theme().danger.fill())
+                                .px_2p5()
+                                .py_2()
+                                .text_size(zz_ui::rems_from_px(10.0))
+                                .text_color(cx.theme().danger)
+                                .child(error.to_string()),
+                        )
+                    }),
+            )
+    }
+
+    /// The jump-to-bottom pill, floated over the timeline just above the
+    /// composer: an absolute child, so showing it never resizes the scroll
+    /// viewport and moves the very tail it is offering to reveal.
+    fn render_jump_to_end(&self, view: &Entity<Self>, cx: &gpui::App) -> impl IntoElement {
+        let view = view.clone();
+        div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .bottom(px(CHROME_GAP))
+            .flex()
+            .justify_center()
+            .child(
+                agent_jump_to_bottom_button(("agent-jump-to-end", self.pane.0), cx).on_click(
+                    move |_, _, cx| {
+                        view.update(cx, AgentView::jump_to_timeline_end);
+                        cx.stop_propagation();
+                    },
+                ),
+            )
     }
 
     fn render_directory_picker(
@@ -2084,34 +2893,46 @@ impl AgentView {
         view: &Entity<Self>,
         cx: &gpui::App,
     ) -> impl IntoElement {
-        let active = state.connection.has_active_turn();
         let can_submit = state.connection.accepts_prompt();
-        let action = if active {
-            let controller = self.controller.clone();
-            let pane = self.pane;
-            Button::new(format!("agent-cancel-{}", self.pane.0))
-                .danger()
-                .small()
-                .icon(IconName::Close)
-                .rounded(px(999.0))
-                .tooltip("Cancel the current turn")
-                .on_click(move |_, _, cx| {
-                    controller.update(cx, |controller, cx| controller.cancel(pane, cx));
-                })
-                .into_any_element()
-        } else {
-            let submit_view = view.clone();
-            Button::new(format!("agent-submit-{}", self.pane.0))
-                .primary()
-                .small()
-                .icon(IconName::ArrowUp)
-                .rounded(px(999.0))
-                .tooltip("Send message")
-                .disabled(!can_submit)
-                .on_click(move |_, window, cx| {
-                    submit_view.update(cx, |view, cx| view.submit(window, cx));
-                })
-                .into_any_element()
+        let button = Button::new(format!("agent-action-{}", self.pane.0))
+            .small()
+            .rounded(px(999.0));
+        let action = match composer_action(
+            state.connection.has_active_turn(),
+            self.composer_has_content(),
+        ) {
+            ComposerAction::Send => {
+                let submit_view = view.clone();
+                button
+                    .primary()
+                    .icon(IconName::ArrowUp)
+                    .tooltip("Send message")
+                    .disabled(!can_submit)
+                    .on_click(move |_, window, cx| {
+                        submit_view.update(cx, |view, cx| view.submit(window, cx));
+                    })
+            }
+            ComposerAction::Queue => {
+                let submit_view = view.clone();
+                button
+                    .secondary()
+                    .icon(IconName::Plus)
+                    .tooltip("Queue this as the next turn")
+                    .on_click(move |_, window, cx| {
+                        submit_view.update(cx, |view, cx| view.submit(window, cx));
+                    })
+            }
+            ComposerAction::Stop => {
+                let controller = self.controller.clone();
+                let pane = self.pane;
+                button
+                    .danger()
+                    .icon(IconName::Close)
+                    .tooltip("Stop the current turn")
+                    .on_click(move |_, _, cx| {
+                        controller.update(cx, |controller, cx| controller.cancel(pane, cx));
+                    })
+            }
         };
         let settings_enabled = state.connection.accepts_prompt() && !state.settings_busy;
         let permission_option = state
@@ -2184,12 +3005,13 @@ impl AgentView {
                     .mx_auto()
                     .gap_2()
                     .when_some(sticky_strip, |this, sticky_strip| this.child(sticky_strip))
-                    .children(
-                        state
-                            .pending_permissions
-                            .iter()
-                            .map(|permission| self.render_permission(permission, cx)),
+                    .when_some(
+                        self.render_permission_wizard(state, view, cx),
+                        |this, wizard| this.child(wizard),
                     )
+                    .when_some(self.render_queue_chip(state, cx), |this, chip| {
+                        this.child(chip)
+                    })
                     .when_some(self.render_error(state, cx), |this, error| {
                         this.child(error)
                     })
@@ -2267,40 +3089,86 @@ impl Focusable for AgentView {
 impl AgentView {
     fn drain_pending_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let pane = self.pane;
-        let Some(pending) = self
-            .controller
-            .update(cx, |controller, _| controller.take_pending_composer(pane))
-        else {
-            return;
-        };
-        self.input.update(cx, |input, cx| {
-            let current = input.value().to_string();
-            let value = if current.trim().is_empty() {
-                pending
-            } else {
-                format!("{}\n{pending}", current.trim_end_matches('\n'))
-            };
-            input.set_value(value, window, cx);
+        let (pending, images) = self.controller.update(cx, |controller, _| {
+            (
+                controller.take_pending_composer(pane),
+                controller.take_pending_images(pane),
+            )
         });
+        if pending.is_none() && images.is_empty() {
+            return;
+        }
+        self.attachments.extend(images);
+        if let Some(pending) = pending {
+            self.input.update(cx, |input, cx| {
+                let current = input.value().to_string();
+                let value = if current.trim().is_empty() {
+                    pending
+                } else {
+                    format!("{}\n{pending}", current.trim_end_matches('\n'))
+                };
+                input.set_value(value, window, cx);
+            });
+        }
         self.submission_error = None;
-        self.timeline_scroll.set_follow_mode(FollowMode::Tail);
+        self.stick.engage(&self.timeline_scroll, cx.reduce_motion());
+    }
+
+    fn on_timeline_scroll(&mut self, cx: &mut Context<Self>) {
+        let reduce_motion = cx.reduce_motion();
+        if self
+            .stick
+            .on_user_scroll(&self.timeline_scroll, reduce_motion)
+        {
+            cx.notify();
+        }
+    }
+
+    fn jump_to_timeline_end(&mut self, cx: &mut Context<Self>) {
+        self.stick.engage(&self.timeline_scroll, cx.reduce_motion());
+        cx.notify();
+    }
+
+    /// Ask for one spring frame, at most one callback in flight. Each step
+    /// notifies while it still has travel left, which re-enters `render` and
+    /// arms the next frame; the loop stops itself once the spring parks.
+    fn drive_stick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if cx.reduce_motion() || !self.stick.wants_frame(&self.timeline_scroll) {
+            return;
+        }
+        self.stick.arm();
+        let view = cx.weak_entity();
+        window.on_next_frame(move |_, cx| {
+            view.update(cx, |view: &mut Self, cx| {
+                let list = view.timeline_scroll.clone();
+                if view.stick.step(&list) {
+                    cx.notify();
+                }
+            })
+            .ok();
+        });
     }
 }
 
 impl Render for AgentView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.drain_pending_composer(window, cx);
+        self.permission_wizard
+            .sync(&self.pane_state.pending_permissions);
         let state = self.pane_state.clone();
         let rows = self.timeline.rows.clone();
         let sticky_rows = sticky_agent_rows(&rows, &self.dismissed_notifications);
         let timeline_clearance =
             TIMELINE_COMPOSER_CLEARANCE + sticky_strip_clearance(sticky_rows.len());
+        self.stick.set_bottom_padding(timeline_clearance);
+        self.drive_stick(window, cx);
         let view = cx.entity();
         let header_controls = h_flex()
             .min_w_0()
             .gap(px(CHROME_GAP))
             .child(self.render_agent_picker(&state, view.clone()))
-            .child(self.render_history_button(&state, view.clone()));
+            .child(self.render_history_button(&state, view.clone()))
+            .children(self.render_changes_button(view.clone(), cx));
         let input_focus = self.focus(cx);
         let root = div()
             .id(("agent-pane", self.pane.0))
@@ -2357,11 +3225,17 @@ impl Render for AgentView {
                                 .bottom(px(COMPOSER_OCCLUSION_HEIGHT))
                                 .child(Scrollbar::vertical(&self.timeline_scroll)),
                         )
+                        .when(self.stick.shows_jump_button(), |this| {
+                            this.child(self.render_jump_to_end(&view, cx))
+                        })
                     }),
             )
             .child(self.render_composer(&state, &sticky_rows, &view, cx))
             .when(self.history_open, |this| {
                 this.child(self.render_history_overlay(&state, &view, cx))
+            })
+            .when(self.changes_open, |this| {
+                this.child(self.render_changes_overlay(&view, cx))
             })
             .when_some(self.directory_picker.clone(), |this, picker| {
                 this.child(picker)
@@ -2473,6 +3347,7 @@ fn disconnected_pane_state() -> AgentPaneState {
         available_commands: Arc::from([]),
         usage: None,
         pending_composer: None,
+        queued_prompts: 0,
     }
 }
 
@@ -2619,6 +3494,94 @@ fn ui_tool_payload(payload: &ToolPayload) -> AgentToolPayload {
         ToolPayload::Json(json) => AgentToolPayload::Json(json.clone().into()),
         ToolPayload::Terminal(terminal) => AgentToolPayload::Terminal(terminal.clone().into()),
     }
+}
+
+const fn changed_file_glyph(status: TurnFileStatus) -> &'static str {
+    match status {
+        TurnFileStatus::Added => "A",
+        TurnFileStatus::Modified => "M",
+        TurnFileStatus::Deleted => "D",
+        TurnFileStatus::Renamed => "R",
+        TurnFileStatus::Copied => "C",
+        TurnFileStatus::Unmerged => "U",
+    }
+}
+
+fn changed_file_color(status: TurnFileStatus, cx: &gpui::App) -> gpui::Hsla {
+    match status {
+        TurnFileStatus::Added | TurnFileStatus::Copied => cx.theme().success,
+        TurnFileStatus::Deleted => cx.theme().danger,
+        TurnFileStatus::Unmerged => cx.theme().warning,
+        TurnFileStatus::Modified | TurnFileStatus::Renamed => cx.theme().foreground.muted(),
+    }
+}
+
+fn file_count_label(files: usize) -> String {
+    if files == 1 {
+        "1 file".to_owned()
+    } else {
+        format!("{files} files")
+    }
+}
+
+/// The hunks git wrote for one file, sliced out of the turn patch. `None` when
+/// the file has no textual hunk at all — a binary blob, or a pure rename.
+fn file_hunks<'a>(patch: &'a str, file: &TurnFile) -> Option<&'a str> {
+    let mut starts = Vec::new();
+    let mut offset = 0;
+    for line in patch.split_inclusive('\n') {
+        if line.starts_with("diff --git ") {
+            starts.push(offset);
+        }
+        offset += line.len();
+    }
+    starts.iter().enumerate().find_map(|(index, start)| {
+        let end = starts.get(index + 1).copied().unwrap_or(patch.len());
+        let section = &patch[*start..end];
+        section_covers(section, file).then(|| section_hunks(section))?
+    })
+}
+
+/// Match a patch section to a summarized file through its `---`/`+++` header
+/// rather than the `diff --git` line, whose two paths cannot be split apart
+/// unambiguously when a path holds a space.
+fn section_covers(section: &str, file: &TurnFile) -> bool {
+    let old = file.old_path.as_deref().unwrap_or(file.path.as_str());
+    section
+        .lines()
+        .take_while(|line| !line.starts_with("@@"))
+        .any(|line| {
+            line.strip_prefix("+++ ")
+                .and_then(strip_diff_prefix)
+                .is_some_and(|path| path == file.path)
+                || line
+                    .strip_prefix("--- ")
+                    .and_then(strip_diff_prefix)
+                    .is_some_and(|path| path == old)
+        })
+}
+
+fn strip_diff_prefix(path: &str) -> Option<&str> {
+    let path = path.trim_end();
+    if path == "/dev/null" {
+        return None;
+    }
+    Some(
+        path.strip_prefix("a/")
+            .or_else(|| path.strip_prefix("b/"))
+            .unwrap_or(path),
+    )
+}
+
+fn section_hunks(section: &str) -> Option<&str> {
+    let mut offset = 0;
+    for line in section.split_inclusive('\n') {
+        if line.starts_with("@@") {
+            return Some(&section[offset..]);
+        }
+        offset += line.len();
+    }
+    None
 }
 
 fn agent_chrome_button(id: impl Into<ElementId>) -> Button {
@@ -2857,6 +3820,154 @@ mod completion_tests {
         }
     }
 
+    fn permission(request_id: u64) -> AgentPermissionRequest {
+        use crate::agent::controller::AgentPermissionOption;
+
+        AgentPermissionRequest {
+            request_id,
+            tool_call_id: format!("tool-{request_id}"),
+            title: format!("Run command {request_id}"),
+            options: vec![
+                AgentPermissionOption {
+                    id: format!("allow-{request_id}"),
+                    name: "Allow once".to_owned(),
+                    kind: AgentPermissionKind::AllowOnce,
+                },
+                AgentPermissionOption {
+                    id: format!("reject-{request_id}"),
+                    name: "Reject".to_owned(),
+                    kind: AgentPermissionKind::RejectOnce,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn composer_action_follows_the_live_turn_and_the_draft() {
+        assert_eq!(composer_action(false, false), ComposerAction::Send);
+        assert_eq!(composer_action(false, true), ComposerAction::Send);
+        assert_eq!(composer_action(true, true), ComposerAction::Queue);
+        assert_eq!(composer_action(true, false), ComposerAction::Stop);
+    }
+
+    #[test]
+    fn permission_wizard_answers_the_focused_page_then_advances() {
+        let requests = vec![permission(1), permission(2)];
+        let mut wizard = PermissionWizard::default();
+        wizard.sync(&requests);
+
+        assert_eq!(wizard.page_label(&requests).as_deref(), Some("1/2"));
+        assert_eq!(
+            wizard.answer(&requests, Some(1)),
+            PermissionStep::Answer {
+                request_id: 1,
+                option_id: Some("reject-1".to_owned()),
+            }
+        );
+        assert_eq!(
+            wizard.current(&requests).map(|request| request.request_id),
+            Some(2)
+        );
+        assert_eq!(wizard.page_label(&requests), None);
+    }
+
+    #[test]
+    fn permission_wizard_latches_an_answered_page_until_the_controller_drops_it() {
+        let requests = vec![permission(1), permission(2)];
+        let mut wizard = PermissionWizard::default();
+        wizard.sync(&requests);
+        wizard.answer(&requests, Some(0));
+
+        assert_eq!(
+            wizard.answer(&requests, Some(0)),
+            PermissionStep::Answer {
+                request_id: 2,
+                option_id: Some("allow-2".to_owned()),
+            }
+        );
+        assert_eq!(wizard.current(&requests), None);
+
+        wizard.sync(&[]);
+
+        assert!(wizard.answered.is_empty());
+    }
+
+    #[test]
+    fn permission_wizard_keeps_its_page_when_another_request_resolves_elsewhere() {
+        let requests = vec![permission(1), permission(2), permission(3)];
+        let mut wizard = PermissionWizard::default();
+        wizard.sync(&requests);
+        wizard.answer(&requests, Some(0));
+        wizard.highlight(1);
+
+        let remaining = vec![permission(2), permission(3)];
+        wizard.sync(&remaining);
+
+        assert_eq!(
+            wizard.current(&remaining).map(|request| request.request_id),
+            Some(2)
+        );
+        assert_eq!(wizard.highlighted, 1);
+
+        let auto_approved = vec![permission(3)];
+        wizard.sync(&auto_approved);
+
+        assert_eq!(
+            wizard
+                .current(&auto_approved)
+                .map(|request| request.request_id),
+            Some(3)
+        );
+        assert_eq!(wizard.highlighted, 0);
+    }
+
+    #[test]
+    fn permission_digits_defer_to_a_composer_the_user_is_typing_into() {
+        let requests = vec![permission(1)];
+        let mut wizard = PermissionWizard::default();
+        wizard.sync(&requests);
+
+        assert_eq!(wizard.press_digit(&requests, 1, true), PermissionStep::Stay);
+        assert_eq!(
+            wizard.press_digit(&requests, 0, false),
+            PermissionStep::Stay
+        );
+        assert_eq!(
+            wizard.press_digit(&requests, 7, false),
+            PermissionStep::Stay
+        );
+        assert_eq!(
+            wizard.press_digit(&requests, 2, false),
+            PermissionStep::Answer {
+                request_id: 1,
+                option_id: Some("reject-1".to_owned()),
+            }
+        );
+    }
+
+    #[test]
+    fn permission_wizard_confirms_the_highlight_and_cancels_the_page() {
+        let requests = vec![permission(1), permission(2)];
+        let mut wizard = PermissionWizard::default();
+        wizard.sync(&requests);
+        wizard.highlight(1);
+
+        assert_eq!(
+            wizard.confirm(&requests),
+            PermissionStep::Answer {
+                request_id: 1,
+                option_id: Some("reject-1".to_owned()),
+            }
+        );
+        assert_eq!(
+            wizard.cancel(&requests),
+            PermissionStep::Answer {
+                request_id: 2,
+                option_id: None,
+            }
+        );
+    }
+
     fn session(id: &str, cwd: &str, title: Option<&str>) -> AgentSessionSummary {
         AgentSessionSummary {
             session_id: id.to_owned(),
@@ -3065,6 +4176,7 @@ mod completion_tests {
                 },
             ];
 
+            let timeline_scroll = ListState::new(2, ListAlignment::Top, px(1_200.0));
             AgentView {
                 pane: PaneId(7),
                 mux,
@@ -3076,10 +4188,12 @@ mod completion_tests {
                 timeline: TimelineModel::new(&timeline_entries, &[1, 2]),
                 timeline_store,
                 timeline_next_revision: 2,
-                timeline_scroll: ListState::new(2, ListAlignment::Top, px(1_200.0)),
+                stick: TimelineStick::new(&timeline_scroll, false),
+                timeline_scroll,
                 completion_scroll: UniformListScrollHandle::new(),
                 submission_error: None,
                 dismissed_notifications: BTreeSet::new(),
+                permission_wizard: PermissionWizard::default(),
                 attachments: Vec::new(),
                 completions: Arc::from([]),
                 completion_selected: None,
@@ -3093,6 +4207,13 @@ mod completion_tests {
                 history_scroll: UniformListScrollHandle::new(),
                 history_delete_confirmation: None,
                 last_history_query: String::new(),
+                changes_open: false,
+                changes: None,
+                changes_error: None,
+                changes_expanded: None,
+                changes_scroll: UniformListScrollHandle::new(),
+                changes_patch_scroll: UniformListScrollHandle::new(),
+                changes_task: None,
                 directory_picker: None,
                 window_corners: WindowCorners::NONE,
                 _subscriptions: Vec::new(),
@@ -3105,7 +4226,7 @@ mod completion_tests {
         }];
         let (changed, cleared) = cx.update(|_, cx| {
             view.update(cx, |view, cx| {
-                let (changed, store_update) = view.synchronize_timeline(&replacement, &[3]);
+                let (changed, store_update) = view.synchronize_timeline(&replacement, &[3], false);
                 let cleared = view.update_timeline_store(store_update, cx);
                 (changed, cleared)
             })
@@ -3148,6 +4269,7 @@ mod completion_tests {
             let controller =
                 cx.new(|_| AgentController::new(crate::config::AgentConfig::default()));
             let history_input = cx.new(|cx| InputState::new(window, cx));
+            let timeline_scroll = ListState::new(0, ListAlignment::Top, px(1_200.0));
             let view = cx.new(|view_cx| AgentView {
                 pane: PaneId(7),
                 mux,
@@ -3159,10 +4281,12 @@ mod completion_tests {
                 timeline: TimelineModel::default(),
                 timeline_store: view_cx.new(|_| AgentTimelineStore::default()),
                 timeline_next_revision: 0,
-                timeline_scroll: ListState::new(0, ListAlignment::Top, px(1_200.0)),
+                stick: TimelineStick::new(&timeline_scroll, false),
+                timeline_scroll,
                 completion_scroll: UniformListScrollHandle::new(),
                 submission_error: None,
                 dismissed_notifications: BTreeSet::new(),
+                permission_wizard: PermissionWizard::default(),
                 attachments: Vec::new(),
                 completions: vec![
                     CommandCompletion {
@@ -3188,6 +4312,13 @@ mod completion_tests {
                 history_scroll: UniformListScrollHandle::new(),
                 history_delete_confirmation: None,
                 last_history_query: String::new(),
+                changes_open: false,
+                changes: None,
+                changes_error: None,
+                changes_expanded: None,
+                changes_scroll: UniformListScrollHandle::new(),
+                changes_patch_scroll: UniformListScrollHandle::new(),
+                changes_task: None,
                 directory_picker: None,
                 window_corners: WindowCorners::NONE,
                 _subscriptions: Vec::new(),
@@ -3268,6 +4399,99 @@ mod tests {
             summary: summary.to_owned(),
             result_markdown: "details".to_owned(),
         }
+    }
+
+    const TURN_PATCH: &str = concat!(
+        "diff --git a/src/one.rs b/src/one.rs\n",
+        "index 1111111..2222222 100644\n",
+        "--- a/src/one.rs\n",
+        "+++ b/src/one.rs\n",
+        "@@ -1,2 +1,2 @@\n",
+        " keep\n",
+        "-old\n",
+        "+new\n",
+        "diff --git a/old name.txt b/new name.txt\n",
+        "similarity index 88%\n",
+        "rename from old name.txt\n",
+        "rename to new name.txt\n",
+        "--- a/old name.txt\n",
+        "+++ b/new name.txt\n",
+        "@@ -1 +1 @@\n",
+        "-a\n",
+        "+b\n",
+        "diff --git a/blob.bin b/blob.bin\n",
+        "new file mode 100644\n",
+        "index 0000000..3333333\n",
+        "Binary files /dev/null and b/blob.bin differ\n",
+        "diff --git a/gone.txt b/gone.txt\n",
+        "deleted file mode 100644\n",
+        "index 4444444..0000000\n",
+        "--- a/gone.txt\n",
+        "+++ /dev/null\n",
+        "@@ -1 +0,0 @@\n",
+        "-bye\n",
+    );
+
+    fn turn_file(path: &str, old_path: Option<&str>, status: TurnFileStatus) -> TurnFile {
+        TurnFile {
+            path: path.to_owned(),
+            old_path: old_path.map(ToOwned::to_owned),
+            status,
+            additions: 0,
+            deletions: 0,
+            binary: false,
+        }
+    }
+
+    #[test]
+    fn a_files_hunks_are_sliced_out_of_the_turn_patch() {
+        let modified = file_hunks(
+            TURN_PATCH,
+            &turn_file("src/one.rs", None, TurnFileStatus::Modified),
+        )
+        .expect("the edited file has hunks");
+        assert!(modified.starts_with("@@ -1,2 +1,2 @@\n"), "{modified}");
+        assert!(modified.ends_with("+new\n"), "{modified}");
+
+        let renamed = file_hunks(
+            TURN_PATCH,
+            &turn_file(
+                "new name.txt",
+                Some("old name.txt"),
+                TurnFileStatus::Renamed,
+            ),
+        )
+        .expect("a renamed file with an edit has hunks");
+        assert_eq!(renamed, "@@ -1 +1 @@\n-a\n+b\n");
+
+        let deleted = file_hunks(
+            TURN_PATCH,
+            &turn_file("gone.txt", None, TurnFileStatus::Deleted),
+        )
+        .expect("a deleted file has hunks");
+        assert_eq!(deleted, "@@ -1 +0,0 @@\n-bye\n");
+    }
+
+    #[test]
+    fn a_binary_or_unknown_file_slices_to_no_hunk() {
+        assert_eq!(
+            file_hunks(
+                TURN_PATCH,
+                &turn_file("blob.bin", None, TurnFileStatus::Added)
+            ),
+            None
+        );
+        assert_eq!(
+            file_hunks(
+                TURN_PATCH,
+                &turn_file("never-here.rs", None, TurnFileStatus::Modified)
+            ),
+            None
+        );
+        assert_eq!(
+            file_hunks("", &turn_file("src/one.rs", None, TurnFileStatus::Modified)),
+            None
+        );
     }
 
     #[test]

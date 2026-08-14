@@ -14,7 +14,10 @@ pub use catalog::{
 };
 pub use framing::{MAX_ENCODED_FRAME_BYTES, MAX_FRAME_BYTES, ProtocolError};
 pub use id::{ClientId, PaneId, SessionId, SplitId, WindowId};
-pub use key::{Binding, KeyDecision, KeyEngine, KeyTables, canonical_key};
+pub use key::{
+    Binding, KeyDecision, KeyEngine, KeyName, KeyTables, canonical_key, input_key_name,
+    input_typed_text,
+};
 pub use message::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
     ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind, ChooseTreePaneKind,

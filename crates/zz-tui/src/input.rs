@@ -1,3 +1,4 @@
+use zz_client::{ChromeAction, ChromeKeymap};
 use zz_daemon::{
     Endpoint, InteractiveClient, configured_fleet_hosts, validate_fleet_host, write_fleet_host,
 };
@@ -74,7 +75,7 @@ fn handle_key(
     browser: &mut BrowserState,
     event: KeyEvent,
 ) -> Result<InputOutcome, String> {
-    let global_route = global_key_route(model.sidebar.focused, event);
+    let global_route = global_key_route(&model.chrome, model.sidebar.focused, event);
     if global_route == GlobalKeyRoute::Detach {
         client.detach().map_err(|error| error.to_string())?;
         return Ok(InputOutcome::Detach);
@@ -149,11 +150,10 @@ fn handle_key(
         return Ok(InputOutcome::None);
     };
     if event.kind == KeyEventKind::Press
-        && event.modifiers.contains(KeyModifiers::CONTROL)
-        && let Some(step) = match event.code {
-            TerminalKeyCode::Char('=' | '+') => Some(BrowserZoomStep::In),
-            TerminalKeyCode::Char('-' | '_') => Some(BrowserZoomStep::Out),
-            TerminalKeyCode::Char('0') => Some(BrowserZoomStep::Reset),
+        && let Some(step) = match model.chrome.resolve("browser", &key_input(event)) {
+            Some(ChromeAction::BrowserZoomIn) => Some(BrowserZoomStep::In),
+            Some(ChromeAction::BrowserZoomOut) => Some(BrowserZoomStep::Out),
+            Some(ChromeAction::BrowserZoomReset) => Some(BrowserZoomStep::Reset),
             _ => None,
         }
         && browser.zoom(pane, step)
@@ -193,21 +193,17 @@ enum GlobalKeyRoute {
     Other,
 }
 
-fn global_key_route(sidebar_focused: bool, event: KeyEvent) -> GlobalKeyRoute {
-    if event.kind == KeyEventKind::Press
-        && event.modifiers.contains(KeyModifiers::CONTROL)
-        && matches!(event.code, TerminalKeyCode::Char('\\'))
-    {
-        return GlobalKeyRoute::Detach;
-    }
-    if event.kind == KeyEventKind::Press
-        && event.modifiers.contains(KeyModifiers::ALT)
-        && !event
-            .modifiers
-            .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER)
-        && matches!(event.code, TerminalKeyCode::Char('s' | 'S'))
-    {
-        return GlobalKeyRoute::ToggleSidebar;
+fn global_key_route(
+    chrome: &ChromeKeymap,
+    sidebar_focused: bool,
+    event: KeyEvent,
+) -> GlobalKeyRoute {
+    if event.kind == KeyEventKind::Press {
+        match chrome.resolve("ui", &key_input(event)) {
+            Some(ChromeAction::Detach) => return GlobalKeyRoute::Detach,
+            Some(ChromeAction::ToggleSidebar) => return GlobalKeyRoute::ToggleSidebar,
+            _ => {}
+        }
     }
     if sidebar_focused {
         GlobalKeyRoute::Sidebar
@@ -960,10 +956,23 @@ mod tests {
         let alt_s = KeyEvent::new(TerminalKeyCode::Char('s'), KeyModifiers::ALT);
         let detach = KeyEvent::new(TerminalKeyCode::Char('\\'), KeyModifiers::CONTROL);
 
-        assert_eq!(global_key_route(true, ordinary), GlobalKeyRoute::Sidebar);
-        assert_eq!(global_key_route(true, alt_s), GlobalKeyRoute::ToggleSidebar);
-        assert_eq!(global_key_route(true, detach), GlobalKeyRoute::Detach);
-        assert_eq!(global_key_route(false, ordinary), GlobalKeyRoute::Other);
+        let chrome = ChromeKeymap::new();
+        assert_eq!(
+            global_key_route(&chrome, true, ordinary),
+            GlobalKeyRoute::Sidebar
+        );
+        assert_eq!(
+            global_key_route(&chrome, true, alt_s),
+            GlobalKeyRoute::ToggleSidebar
+        );
+        assert_eq!(
+            global_key_route(&chrome, true, detach),
+            GlobalKeyRoute::Detach
+        );
+        assert_eq!(
+            global_key_route(&chrome, false, ordinary),
+            GlobalKeyRoute::Other
+        );
     }
 
     #[test]

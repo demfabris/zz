@@ -1,4 +1,11 @@
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    fmt::{self, Write as _},
+    ops::Deref,
+};
+
+use smallvec::SmallVec;
+use zz_terminal::{KeyCode, KeyInput};
 
 use crate::message::{CommandInvocation, KeyBindingSnapshot, KeyTableSnapshot};
 
@@ -378,6 +385,16 @@ impl Default for KeyTables {
 }
 
 impl KeyTables {
+    /// Tables with no bindings at all, for key surfaces that seed their own
+    /// defaults (client-local chrome tables) instead of the tmux set.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self {
+            prefix: "C-b".to_owned(),
+            tables: BTreeMap::new(),
+        }
+    }
+
     fn bind_copy_mode_search_defaults(&mut self) {
         for (table, key, backward) in [
             ("copy-mode-vi", "/", false),
@@ -451,6 +468,23 @@ impl KeyTables {
                 .filter(move |_| table.is_none_or(|wanted| wanted == name))
                 .map(move |(key, binding)| (name.as_str(), key.as_str(), binding))
         })
+    }
+
+    /// The binding a key press resolves to in `table`, preferring the
+    /// character the press typed (`?` from shift+`/`) over the folded
+    /// physical key name, with an `Any` fallback. This is the one lookup
+    /// semantic shared by the daemon's overlay routing and client-local
+    /// chrome tables.
+    #[must_use]
+    pub fn resolve_input(&self, table: &str, input: &KeyInput) -> Option<&Binding> {
+        if let Some(text) = input_typed_text(input)
+            && text.chars().count() == 1
+            && let Some(binding) = self.get(table, text)
+        {
+            return Some(binding);
+        }
+        self.get(table, input_key_name(input).as_str())
+            .or_else(|| self.get(table, "Any"))
     }
 
     /// Every table flattened for the wire, with command names canonicalized
@@ -637,6 +671,118 @@ fn copy_jump_needs_target(command: &CommandInvocation) -> bool {
         .all(|argument| argument == "--")
 }
 
+const INLINE_KEY_NAME_BYTES: usize = 16;
+
+/// A tmux-grammar key name assembled without heap allocation for every
+/// common chord.
+pub struct KeyName {
+    bytes: SmallVec<[u8; INLINE_KEY_NAME_BYTES]>,
+}
+
+impl KeyName {
+    fn new() -> Self {
+        Self {
+            bytes: SmallVec::new(),
+        }
+    }
+
+    fn push_str(&mut self, value: &str) {
+        self.bytes.extend_from_slice(value.as_bytes());
+    }
+
+    fn push_char(&mut self, value: char) {
+        let mut encoded = [0_u8; 4];
+        self.push_str(value.encode_utf8(&mut encoded));
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes).expect("key names are assembled from valid UTF-8")
+    }
+
+    #[must_use]
+    pub fn into_string(self) -> String {
+        String::from_utf8(self.bytes.into_vec()).expect("key names are assembled from valid UTF-8")
+    }
+
+    /// Whether the name outgrew its inline storage; diagnostics only.
+    #[must_use]
+    pub fn spilled(&self) -> bool {
+        self.bytes.spilled()
+    }
+}
+
+impl fmt::Write for KeyName {
+    fn write_str(&mut self, value: &str) -> fmt::Result {
+        self.push_str(value);
+        Ok(())
+    }
+}
+
+impl Deref for KeyName {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+fn shifted_character(input: &KeyInput, character: char) -> char {
+    if input.modifiers.control() || input.modifiers.alt() {
+        return character;
+    }
+    if input.modifiers.shift() && character.is_ascii_lowercase() {
+        return character.to_ascii_uppercase();
+    }
+    character
+}
+
+/// Fold a wire key press into the tmux-grammar name the key tables index by.
+#[must_use]
+pub fn input_key_name(input: &KeyInput) -> KeyName {
+    let mut name = KeyName::new();
+    if input.modifiers.platform() {
+        return name;
+    }
+    if input.modifiers.control() {
+        name.push_str("C-");
+    }
+    if input.modifiers.alt() {
+        name.push_str("M-");
+    }
+    match input.key {
+        KeyCode::Character(character) => name.push_char(shifted_character(input, character)),
+        KeyCode::Backspace => name.push_str("BSpace"),
+        KeyCode::Enter => name.push_str("Enter"),
+        KeyCode::Tab => name.push_str("Tab"),
+        KeyCode::Escape => name.push_str("Escape"),
+        KeyCode::Delete => name.push_str("DC"),
+        KeyCode::Insert => name.push_str("IC"),
+        KeyCode::Home => name.push_str("Home"),
+        KeyCode::End => name.push_str("End"),
+        KeyCode::PageUp => name.push_str("PPage"),
+        KeyCode::PageDown => name.push_str("NPage"),
+        KeyCode::ArrowUp => name.push_str("Up"),
+        KeyCode::ArrowDown => name.push_str("Down"),
+        KeyCode::ArrowLeft => name.push_str("Left"),
+        KeyCode::ArrowRight => name.push_str("Right"),
+        KeyCode::Function(number) => write!(&mut name, "F{number}").expect("writing key name"),
+        KeyCode::Unidentified => name.push_str(input.text.as_deref().unwrap_or_default()),
+    }
+    name
+}
+
+/// Printable text a key press typed, if the chord carries no command
+/// modifiers.
+#[must_use]
+pub fn input_typed_text(input: &KeyInput) -> Option<&str> {
+    if input.modifiers.control() || input.modifiers.alt() || input.modifiers.platform() {
+        return None;
+    }
+    let text = input.text.as_deref()?;
+    (!text.is_empty() && !text.chars().any(char::is_control)).then_some(text)
+}
+
 /// Fold a tmux key spelling into its canonical form: `Ctrl-`/`Alt-` become
 /// `C-`/`M-` and `Space` becomes a literal space, on both sides of any
 /// modifier chain.
@@ -679,7 +825,97 @@ pub fn canonical_key(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use zz_terminal::{KeyAction, Modifiers};
+
     use super::*;
+
+    fn press(key: KeyCode, modifiers: Modifiers, text: Option<&str>) -> KeyInput {
+        KeyInput {
+            action: KeyAction::Press,
+            key,
+            modifiers,
+            text: text.map(|text| text.to_owned().into_boxed_str()),
+            unshifted_codepoint: None,
+        }
+    }
+
+    #[test]
+    fn shifted_letters_fold_to_their_uppercase_name() {
+        for letter in ['a', 'g', 'n', 'x'] {
+            let upper = letter.to_ascii_uppercase();
+            let input = press(
+                KeyCode::Character(letter),
+                Modifiers::new(true, false, false, false),
+                Some(&upper.to_string()),
+            );
+            assert_eq!(input_key_name(&input).as_str(), upper.to_string());
+        }
+    }
+
+    #[test]
+    fn already_resolved_shifted_symbols_are_left_alone() {
+        for symbol in ['#', '*', '%', ':', '?'] {
+            let input = press(
+                KeyCode::Character(symbol),
+                Modifiers::default(),
+                Some(&symbol.to_string()),
+            );
+            assert_eq!(input_key_name(&input).as_str(), symbol.to_string());
+        }
+    }
+
+    #[test]
+    fn a_key_is_spelled_the_same_on_press_and_release() {
+        let shift = Modifiers::new(true, false, false, false);
+        let mut release = press(KeyCode::Character('g'), shift, None);
+        release.action = KeyAction::Release;
+        assert_eq!(input_key_name(&release).as_str(), "G");
+    }
+
+    #[test]
+    fn a_platform_chord_never_names_a_bare_key() {
+        let command = Modifiers::new(false, false, false, true);
+        let input = press(KeyCode::Character('x'), command, None);
+        assert!(input_key_name(&input).as_str().is_empty());
+    }
+
+    #[test]
+    fn common_tmux_key_names_stay_in_stack_storage() {
+        let control_alt = Modifiers::new(false, true, true, false);
+        for (input, name) in [
+            (press(KeyCode::Enter, Modifiers::default(), None), "Enter"),
+            (press(KeyCode::ArrowLeft, control_alt, None), "C-M-Left"),
+            (press(KeyCode::Function(255), control_alt, None), "C-M-F255"),
+            (press(KeyCode::Character('λ'), control_alt, None), "C-M-λ"),
+        ] {
+            let rendered = input_key_name(&input);
+            assert_eq!(rendered.as_str(), name);
+            assert!(!rendered.spilled());
+        }
+    }
+
+    #[test]
+    fn resolve_input_prefers_the_typed_character() {
+        let tables = KeyTables::default();
+        let question = press(
+            KeyCode::Character('/'),
+            Modifiers::new(true, false, false, false),
+            Some("?"),
+        );
+        let binding = tables
+            .resolve_input("choose-tree", &question)
+            .expect("? resolves in choose-tree");
+        assert_eq!(
+            binding.commands,
+            vec![CommandInvocation::new(
+                "send-keys",
+                ["-X", "search-backward"]
+            )]
+        );
+        let jay = press(KeyCode::Character('j'), Modifiers::default(), Some("j"));
+        assert!(tables.resolve_input("choose-tree", &jay).is_some());
+        assert!(tables.resolve_input("no-such-table", &jay).is_none());
+    }
 
     #[test]
     fn published_tables_canonicalize_command_names_and_cover_every_table() {

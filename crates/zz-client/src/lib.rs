@@ -7,6 +7,8 @@
 //! so a shell can drive it from any runtime — a gpui entity, a TUI reader
 //! thread, a deterministic simulator, or a C caller behind FFI.
 
+mod chrome;
 mod core;
 
+pub use chrome::{ChromeAction, ChromeKeymap, UnknownChromeAction};
 pub use core::{ClientCore, CoreEvent, Outbound, ViewportDamage};

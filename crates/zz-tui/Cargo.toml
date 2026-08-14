@@ -22,6 +22,7 @@ miniz_oxide = "0.8.9"
 rustix.workspace = true
 zz-daemon = { path = "../zz-daemon", default-features = false }
 zz-protocol = { path = "../zz-protocol" }
+zz-client = { path = "../zz-client" }
 zz-terminal = { path = "../zz-terminal", default-features = false }
 
 [lints]

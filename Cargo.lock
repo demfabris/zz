@@ -10905,6 +10905,7 @@ version = "0.2.0-beta.1"
 dependencies = [
  "postcard",
  "serde",
+ "smallvec",
  "thiserror 2.0.18",
  "zz-terminal",
 ]
@@ -10941,6 +10942,7 @@ dependencies = [
  "log",
  "miniz_oxide",
  "rustix 1.1.4",
+ "zz-client",
  "zz-daemon",
  "zz-protocol",
  "zz-terminal",

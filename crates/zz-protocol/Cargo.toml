@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 postcard.workspace = true
 serde.workspace = true
+smallvec.workspace = true
 thiserror.workspace = true
 zz-terminal = { path = "../zz-terminal", default-features = false }
 

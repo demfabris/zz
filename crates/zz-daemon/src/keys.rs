@@ -1,105 +1,12 @@
-use std::{
-    fmt::{self, Write as _},
-    ops::Deref,
-    sync::Arc,
-};
+use std::sync::Arc;
 
-use smallvec::SmallVec;
-use zz_protocol::{ChooseBufferAction, ChooseTreeAction, KeyTables, KeyToken};
+pub(crate) use zz_protocol::input_key_name;
+use zz_protocol::{ChooseBufferAction, ChooseTreeAction, KeyTables, KeyToken, input_typed_text};
 use zz_terminal::{KeyAction, KeyCode, KeyInput, Modifiers, TerminalSession};
 
-const INLINE_KEY_NAME_BYTES: usize = 16;
-
-pub(crate) struct KeyName {
-    bytes: SmallVec<[u8; INLINE_KEY_NAME_BYTES]>,
-}
-
-impl KeyName {
-    fn new() -> Self {
-        Self {
-            bytes: SmallVec::new(),
-        }
-    }
-
-    fn push_str(&mut self, value: &str) {
-        self.bytes.extend_from_slice(value.as_bytes());
-    }
-
-    fn push_char(&mut self, value: char) {
-        let mut encoded = [0_u8; 4];
-        self.push_str(value.encode_utf8(&mut encoded));
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        std::str::from_utf8(&self.bytes).expect("key names are assembled from valid UTF-8")
-    }
-
-    pub(crate) fn into_string(self) -> String {
-        String::from_utf8(self.bytes.into_vec()).expect("key names are assembled from valid UTF-8")
-    }
-}
-
-impl fmt::Write for KeyName {
-    fn write_str(&mut self, value: &str) -> fmt::Result {
-        self.push_str(value);
-        Ok(())
-    }
-}
-
-impl Deref for KeyName {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        self.as_str()
-    }
-}
-
-fn shifted_character(input: &KeyInput, character: char) -> char {
-    if input.modifiers.control() || input.modifiers.alt() {
-        return character;
-    }
-    if input.modifiers.shift() && character.is_ascii_lowercase() {
-        return character.to_ascii_uppercase();
-    }
-    character
-}
-
-pub(crate) fn input_key_name(input: &KeyInput) -> KeyName {
-    let mut name = KeyName::new();
-    if input.modifiers.platform() {
-        return name;
-    }
-    if input.modifiers.control() {
-        name.push_str("C-");
-    }
-    if input.modifiers.alt() {
-        name.push_str("M-");
-    }
-    match input.key {
-        KeyCode::Character(character) => name.push_char(shifted_character(input, character)),
-        KeyCode::Backspace => name.push_str("BSpace"),
-        KeyCode::Enter => name.push_str("Enter"),
-        KeyCode::Tab => name.push_str("Tab"),
-        KeyCode::Escape => name.push_str("Escape"),
-        KeyCode::Delete => name.push_str("DC"),
-        KeyCode::Insert => name.push_str("IC"),
-        KeyCode::Home => name.push_str("Home"),
-        KeyCode::End => name.push_str("End"),
-        KeyCode::PageUp => name.push_str("PPage"),
-        KeyCode::PageDown => name.push_str("NPage"),
-        KeyCode::ArrowUp => name.push_str("Up"),
-        KeyCode::ArrowDown => name.push_str("Down"),
-        KeyCode::ArrowLeft => name.push_str("Left"),
-        KeyCode::ArrowRight => name.push_str("Right"),
-        KeyCode::Function(number) => write!(&mut name, "F{number}").expect("writing key name"),
-        KeyCode::Unidentified => name.push_str(input.text.as_deref().unwrap_or_default()),
-    }
-    name
-}
-
-/// The `send-keys -X <action>` name a chooser table binds `key` to, if any.
-fn bound_overlay_action<'a>(keys: &'a KeyTables, table: &str, key: &str) -> Option<&'a str> {
-    let binding = keys.get(table, key)?;
+/// The `send-keys -X <action>` name a chooser table resolves a key press to.
+fn overlay_key_action<'a>(keys: &'a KeyTables, table: &str, input: &KeyInput) -> Option<&'a str> {
+    let binding = keys.resolve_input(table, input)?;
     let [command] = binding.commands.as_slice() else {
         return None;
     };
@@ -108,28 +15,6 @@ fn bound_overlay_action<'a>(keys: &'a KeyTables, table: &str, key: &str) -> Opti
     }
     let mode_index = command.args.iter().position(|argument| argument == "-X")?;
     command.args.get(mode_index + 1).map(String::as_str)
-}
-
-/// Resolve a key press against a chooser table, preferring the character the
-/// press typed (`?` from shift+`/`) over the folded physical key name.
-fn overlay_key_action<'a>(keys: &'a KeyTables, table: &str, input: &KeyInput) -> Option<&'a str> {
-    if let Some(text) = overlay_search_text(input)
-        && text.chars().count() == 1
-        && let Some(action) = bound_overlay_action(keys, table, &text)
-    {
-        return Some(action);
-    }
-    bound_overlay_action(keys, table, input_key_name(input).as_str())
-        .or_else(|| bound_overlay_action(keys, table, "Any"))
-}
-
-/// Printable text a key press contributes to an overlay search query.
-fn overlay_search_text(input: &KeyInput) -> Option<String> {
-    if input.modifiers.control() || input.modifiers.alt() || input.modifiers.platform() {
-        return None;
-    }
-    let text = input.text.as_deref()?;
-    (!text.is_empty() && !text.chars().any(char::is_control)).then(|| text.to_owned())
 }
 
 pub(crate) fn choose_tree_key_action(
@@ -144,7 +29,9 @@ pub(crate) fn choose_tree_key_action(
             "BSpace" => Some(ChooseTreeAction::SearchBackspace),
             "Up" => Some(ChooseTreeAction::Previous),
             "Down" => Some(ChooseTreeAction::Next),
-            _ => overlay_search_text(input).map(ChooseTreeAction::SearchAppend),
+            _ => {
+                input_typed_text(input).map(|text| ChooseTreeAction::SearchAppend(text.to_owned()))
+            }
         };
     }
     match overlay_key_action(keys, "choose-tree", input)? {
@@ -178,7 +65,8 @@ pub(crate) fn choose_buffer_key_action(
             "BSpace" => Some(ChooseBufferAction::SearchBackspace),
             "Up" => Some(ChooseBufferAction::Previous),
             "Down" => Some(ChooseBufferAction::Next),
-            _ => overlay_search_text(input).map(ChooseBufferAction::SearchAppend),
+            _ => input_typed_text(input)
+                .map(|text| ChooseBufferAction::SearchAppend(text.to_owned())),
         };
     }
     match overlay_key_action(keys, "choose-buffer", input)? {
@@ -293,57 +181,6 @@ mod tests {
         assert_eq!(input_key_name(&interrupt).as_str(), "C-c");
     }
 
-    fn shifted_letter(key: char) -> KeyInput {
-        KeyInput {
-            action: KeyAction::Press,
-            key: KeyCode::Character(key),
-            modifiers: Modifiers::new(true, false, false, false),
-            text: Some(key.to_ascii_uppercase().to_string().into_boxed_str()),
-            unshifted_codepoint: Some(key),
-        }
-    }
-
-    #[test]
-    fn shifted_letters_resolve_by_their_uppercase_binding() {
-        for letter in [
-            'a', 'b', 'd', 'e', 'f', 'g', 'h', 'j', 'k', 'l', 'm', 'n', 'p', 'r', 't', 'v', 'w',
-            'x',
-        ] {
-            let upper = letter.to_ascii_uppercase();
-            assert_eq!(
-                input_key_name(&shifted_letter(letter)).as_str(),
-                upper.to_string(),
-                "shift+{letter} must resolve as {upper}"
-            );
-        }
-    }
-
-    #[test]
-    fn already_resolved_shifted_symbols_are_left_alone() {
-        for symbol in ['#', '*', '%', ':', '?'] {
-            let input = KeyInput {
-                action: KeyAction::Press,
-                key: KeyCode::Character(symbol),
-                modifiers: Modifiers::default(),
-                text: Some(symbol.to_string().into_boxed_str()),
-                unshifted_codepoint: Some(symbol),
-            };
-            assert_eq!(input_key_name(&input).as_str(), symbol.to_string());
-        }
-    }
-
-    #[test]
-    fn a_key_is_spelled_the_same_on_press_and_release() {
-        let mut release = shifted_letter('g');
-        release.action = KeyAction::Release;
-        release.text = None;
-        assert_eq!(input_key_name(&release).as_str(), "G");
-        assert_eq!(
-            input_key_name(&shifted_letter('g')).as_str(),
-            input_key_name(&release).as_str()
-        );
-    }
-
     #[test]
     fn a_platform_chord_never_names_a_bare_key() {
         let mut command_x = named_key("x").expect("supported named key");
@@ -366,12 +203,10 @@ mod tests {
     }
 
     #[test]
-    fn common_tmux_key_names_stay_in_stack_storage() {
+    fn named_keys_round_trip_through_the_shared_fold() {
         for name in ["Enter", "C-M-Left", "C-M-F255", "C-M-λ"] {
             let input = named_key(name).expect("supported named key");
-            let rendered = input_key_name(&input);
-            assert_eq!(rendered.as_str(), name);
-            assert!(!rendered.bytes.spilled());
+            assert_eq!(input_key_name(&input).as_str(), name);
         }
     }
 

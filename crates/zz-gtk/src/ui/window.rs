@@ -21,6 +21,7 @@ use crate::{
         overlay::Overlays,
         pane::TerminalPane,
         panes::{PaneGrid, layout_panes},
+        prefix,
         terminal::TerminalView,
     },
 };
@@ -164,7 +165,9 @@ impl Shell {
         let overlays = Overlays::new(Arc::clone(&engine), &window);
         toolbar.add_bottom_bar(&status_bar);
 
-        // >>> palette agent
+        // >>> palette agent: the prefix claim has to be installed before any
+        // other window controller so no widget can swallow the chord.
+        prefix::install(&window, Arc::clone(&engine));
         floating.add_overlay(overlays.palette());
         // <<< palette agent
 

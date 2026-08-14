@@ -12,11 +12,13 @@ use async_channel::{Receiver, Sender};
 use zz_client::{ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, Outbound};
 use zz_daemon::{Endpoint, InteractiveClient};
 use zz_protocol::{
-    BrowserCommand, CommandInvocation, CommandResponse, GuiResponse, InputMessage, LayoutNode,
-    MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, ProtocolMessage, SessionId, StatusLine,
-    WindowId,
+    BrowserCommand, ChooseBufferState, ChooseTreeState, CommandInvocation, CommandPromptState,
+    CommandResponse, GuiResponse, InputMessage, LayoutNode, MuxSnapshot, PaneId, PaneKindSnapshot,
+    PaneSnapshot, ProtocolMessage, SessionId, StatusLine, WindowId,
 };
-use zz_terminal::{KeyInput, TerminalAppearance, TerminalColorScheme, TerminalViewport};
+use zz_terminal::{
+    ClipboardTarget, KeyInput, TerminalAppearance, TerminalColorScheme, TerminalViewport,
+};
 
 /// What the UI must react to. State changes are notifications — the new value
 /// is read back through the accessors, exactly as [`ClientCore`] intends.
@@ -28,6 +30,14 @@ pub enum EngineEvent {
     FramesReady,
     StatusChanged,
     AppearanceChanged,
+    /// A daemon-owned overlay moved: prefix arming, the command prompt, or
+    /// either chooser. Which one is read back through the accessors.
+    OverlaysChanged,
+    /// The daemon answered a copy request; the payload is not retained.
+    Clipboard {
+        target: ClipboardTarget,
+        text: String,
+    },
     Notice(String),
     Detached,
     Disconnected(String),
@@ -139,6 +149,30 @@ impl Engine {
 
     pub fn appearance(&self) -> TerminalAppearance {
         self.core().appearance().cloned().unwrap_or_default()
+    }
+
+    pub fn prefix_armed(&self) -> bool {
+        self.core().prefix_armed()
+    }
+
+    pub fn command_prompt(&self) -> Option<CommandPromptState> {
+        self.core().command_prompt().cloned()
+    }
+
+    pub fn choose_tree(&self) -> Option<ChooseTreeState> {
+        self.core().choose_tree().cloned()
+    }
+
+    pub fn choose_buffer(&self) -> Option<ChooseBufferState> {
+        self.core().choose_buffer().cloned()
+    }
+
+    /// Republish the desktop's light/dark preference; the daemon answers with a
+    /// fresh appearance rather than the client recoloring anything itself.
+    pub fn set_color_scheme(&self, color_scheme: TerminalColorScheme) {
+        if let Err(error) = self.client.set_color_scheme(color_scheme) {
+            log::warn!("zz-gtk failed to publish the color scheme: {error}");
+        }
     }
 
     /// A clone of the retained viewport: every visible plane is behind an
@@ -259,7 +293,9 @@ impl Engine {
         }
     }
 
-    fn send(&self, input: InputMessage) {
+    /// Forward one input message untouched. Overlay keys ride this: the daemon
+    /// owns chooser and prompt semantics, so the client never resolves them.
+    pub fn send(&self, input: InputMessage) {
         if let Err(error) = self.client.send_input(input) {
             log::warn!("zz-gtk failed to send input: {error}");
         }
@@ -358,6 +394,13 @@ fn reduce(
         CoreEvent::SnapshotChanged => forwarded.push(EngineEvent::SnapshotChanged),
         CoreEvent::StatusChanged => forwarded.push(EngineEvent::StatusChanged),
         CoreEvent::AppearanceChanged => forwarded.push(EngineEvent::AppearanceChanged),
+        CoreEvent::PrefixArmed { .. }
+        | CoreEvent::CommandPromptChanged
+        | CoreEvent::ChooseTreeChanged
+        | CoreEvent::ChooseBufferChanged => forwarded.push(EngineEvent::OverlaysChanged),
+        CoreEvent::Clipboard { target, text, .. } => {
+            forwarded.push(EngineEvent::Clipboard { target, text });
+        }
         CoreEvent::ClientMessage { text, .. } => forwarded.push(EngineEvent::Notice(text)),
         CoreEvent::CommandResponse(CommandResponse::Error { error, .. }) => {
             forwarded.push(EngineEvent::Notice(error.to_string()));

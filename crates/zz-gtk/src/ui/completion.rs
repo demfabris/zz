@@ -769,6 +769,63 @@ mod tests {
         assert!(alias[0].detail.contains("alias neww"));
     }
 
+    /// The five ranking classes the palette promises, in order: an exact name,
+    /// a canonical prefix, an alias prefix, an ordered fuzzy match, and a
+    /// description match as the last resort.
+    #[test]
+    fn the_ranking_classes_lead_in_the_order_the_palette_promises() {
+        let cases: &[(&str, &str, &str)] = &[
+            ("new-window", "new-window", "an exact name leads"),
+            ("new-w", "new-window", "a canonical prefix leads"),
+            ("neww", "new-window", "an alias prefix leads"),
+            ("splitw", "split-window", "an alias beats anything fuzzier"),
+            (
+                "destroy a session",
+                "kill-session",
+                "a description match is the last resort",
+            ),
+        ];
+
+        for (query, expected, why) in cases {
+            let completions = complete_command(
+                query,
+                query.len(),
+                &[],
+                &snapshot(),
+                PaneKindAvailability::default(),
+            );
+            assert_eq!(
+                completions.first().map(|item| item.label.as_str()),
+                Some(*expected),
+                "{query}: {why}"
+            );
+        }
+
+        let fuzzy = complete_command("klsn", 4, &[], &snapshot(), PaneKindAvailability::default());
+        assert!(
+            !"kill-session".starts_with("klsn"),
+            "the fuzzy case must not be reachable by prefix"
+        );
+        assert!(
+            fuzzy.iter().any(|item| item.label == "kill-session"),
+            "an ordered subsequence still matches"
+        );
+
+        let ranked = complete_command("new", 3, &[], &snapshot(), PaneKindAvailability::default());
+        let prefixed = ranked
+            .iter()
+            .take_while(|item| item.label.starts_with("new"))
+            .count();
+        assert!(prefixed >= 3, "the catalog carries several new-* commands");
+        assert!(
+            ranked
+                .iter()
+                .skip(prefixed)
+                .all(|item| !item.label.starts_with("new")),
+            "every prefix match leads every looser one"
+        );
+    }
+
     #[test]
     fn options_and_live_targets_follow_command_context() {
         let options = complete_command(

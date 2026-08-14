@@ -157,6 +157,7 @@ fn reduce(
         CoreEvent::StatusChanged => forwarded.push(EngineEvent::StatusChanged),
         CoreEvent::AppearanceChanged => forwarded.push(EngineEvent::AppearanceChanged),
         CoreEvent::FocusSidebar => forwarded.push(EngineEvent::FocusSidebar),
+        CoreEvent::MuxOptionsChanged => forwarded.push(EngineEvent::MuxOptionsChanged),
         CoreEvent::PrefixArmed { .. }
         | CoreEvent::CommandPromptChanged
         | CoreEvent::ChooseTreeChanged

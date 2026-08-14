@@ -6,8 +6,8 @@ mod parser;
 mod status;
 
 pub use command::{
-    AgentOptions, DEFAULT_BUFFER_LIMIT, Execution, ExecutionContext, MAX_WORD_SEPARATORS_BYTES,
-    MuxEffect, MuxEngine,
+    AgentOptions, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
+    MAX_WORD_SEPARATORS_BYTES, MuxEffect, MuxEngine,
 };
 pub use model::{
     LayoutPreset, MuxState, Pane, PaneDirection, PaneKind, Session, SplitPlacement, Window,

@@ -1,5 +1,5 @@
-use zz_mux::{COMMAND_SPECS, ExecutionContext, MuxEffect, MuxEngine, parse_config};
-use zz_protocol::{Axis, CommandInvocation, LayoutNode, ServerError};
+use zz_mux::{COMMAND_SPECS, DetachScope, ExecutionContext, MuxEffect, MuxEngine, parse_config};
+use zz_protocol::{Axis, CommandInvocation, KeyToken, LayoutNode, ServerError};
 
 fn command(name: &str, args: &[&str]) -> CommandInvocation {
     CommandInvocation::new(name, args.iter().copied())
@@ -82,6 +82,42 @@ fn catalog_covers_the_options_the_handlers_read() {
         .expect("new-session catalogs -t so its value cannot leak into the pane command");
     assert!(!group.completable);
     assert!(new_session.options.iter().any(|option| option.name == "-A"));
+
+    let spec = |name: &str| {
+        COMMAND_SPECS
+            .iter()
+            .find(|spec| spec.name == name)
+            .expect("catalogued command")
+    };
+    assert!(
+        spec("send-keys")
+            .option("-N")
+            .expect("send-keys catalogs -N so the count cannot be typed as a key")
+            .value
+            .is_some()
+    );
+    assert!(spec("send-keys").option("-H").is_some());
+    assert!(spec("copy-mode").option("-d").is_some());
+    assert!(spec("detach-client").option("-a").is_some());
+    assert!(spec("detach-client").option("-s").unwrap().value.is_some());
+    for flag in ["-n", "-p", "-T"] {
+        assert!(
+            spec("select-window").option(flag).is_some(),
+            "select-window catalog is missing {flag}"
+        );
+    }
+    for name in ["next-window", "previous-window"] {
+        assert!(spec(name).option("-a").is_some(), "{name} is missing -a");
+        assert!(
+            spec(name).option("-t").expect(name).value.is_some(),
+            "{name} is missing -t"
+        );
+    }
+    assert!(spec("source-file").option("-q").is_some());
+    assert!(
+        spec("source-file").variadic.is_some(),
+        "source-file takes every path it is given"
+    );
 }
 
 #[test]
@@ -596,4 +632,453 @@ fn resize_pane_rejects_an_unparseable_adjustment() {
         matches!(error, ServerError::InvalidCommand(message) if message == "invalid resize adjustment: wide")
     );
     assert!((split_ratio(&engine) - 0.5).abs() < f32::EPSILON);
+}
+
+fn window_names(engine: &MuxEngine, session_name: &str) -> Vec<String> {
+    let session = engine
+        .state
+        .sessions
+        .values()
+        .find(|session| session.name == session_name)
+        .expect("session exists");
+    session
+        .windows
+        .iter()
+        .map(|window| engine.state.windows[window].name.clone())
+        .collect()
+}
+
+fn active_window_name(engine: &MuxEngine, session_name: &str) -> String {
+    let session = engine
+        .state
+        .sessions
+        .values()
+        .find(|session| session.name == session_name)
+        .expect("session exists");
+    engine.state.windows[&session.active_window].name.clone()
+}
+
+#[test]
+fn send_keys_dash_n_repeats_the_keys_instead_of_typing_the_count() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let sent = engine
+        .execute(&mut context, &command("send-keys", &["-N", "3", "x"]))
+        .unwrap();
+    assert!(
+        matches!(sent.effects.first(), Some(MuxEffect::SendKeys { keys, .. })
+        if keys == &vec![
+            KeyToken::Literal("x".to_owned()),
+            KeyToken::Literal("x".to_owned()),
+            KeyToken::Literal("x".to_owned()),
+        ]),
+        "{:?}",
+        sent.effects
+    );
+
+    let error = engine
+        .execute(&mut context, &command("send-keys", &["-N", "0", "x"]))
+        .unwrap_err();
+    assert!(matches!(error, ServerError::InvalidCommand(message)
+            if message == "send-keys -N needs a positive repeat count: 0"));
+}
+
+#[test]
+fn send_keys_dash_n_repeats_copy_mode_movement_but_never_a_copy() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let moved = engine
+        .execute(
+            &mut context,
+            &command("send-keys", &["-X", "-N", "4", "cursor-up"]),
+        )
+        .unwrap();
+    assert_eq!(moved.effects.len(), 4);
+    let copied = engine
+        .execute(
+            &mut context,
+            &command("send-keys", &["-X", "-N", "4", "copy-selection"]),
+        )
+        .unwrap();
+    assert_eq!(copied.effects.len(), 1);
+}
+
+#[test]
+fn send_keys_dash_h_takes_hexadecimal_character_codes() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let sent = engine
+        .execute(&mut context, &command("send-keys", &["-H", "41", "42"]))
+        .unwrap();
+    assert!(
+        matches!(sent.effects.first(), Some(MuxEffect::SendKeys { keys, .. })
+        if keys == &vec![
+            KeyToken::Literal("A".to_owned()),
+            KeyToken::Literal("B".to_owned()),
+        ]),
+        "{:?}",
+        sent.effects
+    );
+
+    let error = engine
+        .execute(&mut context, &command("send-keys", &["-H", "zz"]))
+        .unwrap_err();
+    assert!(matches!(error, ServerError::InvalidCommand(message)
+            if message == "send-keys -H needs a character code: zz"));
+}
+
+#[test]
+fn send_keys_reports_the_flags_it_cannot_honor() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    for flag in ["-R", "-M", "-K", "-F"] {
+        let error = engine
+            .execute(&mut context, &command("send-keys", &[flag, "x"]))
+            .unwrap_err();
+        assert!(
+            matches!(&error, ServerError::UnsupportedCommand(message)
+                if message == &format!("send-keys {flag}")),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
+fn copy_mode_pages_down_with_dash_d_and_reports_dash_e() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let paged = engine
+        .execute(&mut context, &command("copy-mode", &["-d"]))
+        .unwrap();
+    assert_eq!(paged.effects.len(), 2);
+    let error = engine
+        .execute(&mut context, &command("copy-mode", &["-e"]))
+        .unwrap_err();
+    assert!(
+        matches!(&error, ServerError::UnsupportedCommand(message) if message == "copy-mode -e"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn detach_client_dash_a_leaves_the_caller_attached() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let mine = engine
+        .execute(&mut context, &command("detach-client", &[]))
+        .unwrap();
+    assert_eq!(mine.effects, [MuxEffect::Detach(DetachScope::Client)]);
+
+    let others = engine
+        .execute(&mut context, &command("detach-client", &["-a"]))
+        .unwrap();
+    assert_eq!(others.effects, [MuxEffect::Detach(DetachScope::Others)]);
+
+    let session = engine
+        .state
+        .sessions
+        .values()
+        .find(|session| session.name == "work")
+        .expect("session exists")
+        .id;
+    let by_session = engine
+        .execute(&mut context, &command("detach-client", &["-s", "work"]))
+        .unwrap();
+    assert_eq!(
+        by_session.effects,
+        [MuxEffect::Detach(DetachScope::Session(session))]
+    );
+
+    let error = engine
+        .execute(&mut context, &command("detach-client", &["-t", "0"]))
+        .unwrap_err();
+    assert!(
+        matches!(&error, ServerError::UnsupportedCommand(message) if message == "detach-client -t"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn select_window_steps_and_repeats_like_tmux() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("rename-window", &["first"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("new-window", &["-n", "second"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("new-window", &["-n", "third"]))
+        .unwrap();
+    assert_eq!(window_names(&engine, "work"), ["first", "second", "third"]);
+    assert_eq!(active_window_name(&engine, "work"), "third");
+
+    engine
+        .execute(&mut context, &command("select-window", &["-n"]))
+        .unwrap();
+    assert_eq!(active_window_name(&engine, "work"), "first");
+    engine
+        .execute(&mut context, &command("select-window", &["-p"]))
+        .unwrap();
+    assert_eq!(active_window_name(&engine, "work"), "third");
+    engine
+        .execute(&mut context, &command("select-window", &["-l"]))
+        .unwrap();
+    assert_eq!(active_window_name(&engine, "work"), "first");
+
+    engine
+        .execute(
+            &mut context,
+            &command("select-window", &["-T", "-t", "first"]),
+        )
+        .unwrap();
+    assert_eq!(
+        active_window_name(&engine, "work"),
+        "third",
+        "-T on the current window behaves like last-window"
+    );
+    engine
+        .execute(
+            &mut context,
+            &command("select-window", &["-T", "-t", "second"]),
+        )
+        .unwrap();
+    assert_eq!(active_window_name(&engine, "work"), "second");
+}
+
+#[test]
+fn next_and_previous_window_target_a_session_and_follow_alerts() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("rename-window", &["first"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("new-window", &["-n", "second"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("new-window", &["-n", "third"]))
+        .unwrap();
+    let belled = context.pane.unwrap();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "other"]))
+        .unwrap();
+    assert_eq!(active_window_name(&engine, "work"), "third");
+
+    engine
+        .execute(&mut context, &command("next-window", &["-t", "work"]))
+        .unwrap();
+    assert_eq!(active_window_name(&engine, "work"), "first");
+    engine
+        .execute(&mut context, &command("previous-window", &["-t", "work"]))
+        .unwrap();
+    assert_eq!(active_window_name(&engine, "work"), "third");
+
+    engine
+        .execute(
+            &mut context,
+            &command("select-window", &["-t", "work:first"]),
+        )
+        .unwrap();
+    let error = engine
+        .execute(&mut context, &command("next-window", &["-a"]))
+        .unwrap_err();
+    assert!(
+        matches!(&error, ServerError::MissingTarget(message)
+            if message == "next window with an alert"),
+        "{error:?}"
+    );
+    assert!(engine.state.set_pane_bell(belled, true));
+    engine
+        .execute(&mut context, &command("next-window", &["-a"]))
+        .unwrap();
+    assert_eq!(active_window_name(&engine, "work"), "third");
+}
+
+#[test]
+fn attach_session_reports_the_client_flags_it_cannot_honor() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    for flag in ["-r", "-x", "-E"] {
+        let error = engine
+            .execute(
+                &mut context,
+                &command("attach-session", &[flag, "-t", "work"]),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(&error, ServerError::UnsupportedCommand(message)
+                if message == &format!("attach-session {flag}")),
+            "{error:?}"
+        );
+    }
+    engine
+        .execute(
+            &mut context,
+            &command("attach-session", &["-d", "-t", "work"]),
+        )
+        .unwrap();
+}
+
+#[test]
+fn list_keys_rejects_the_selectors_it_does_not_implement() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    for flag in ["-n", "-a", "-N", "-1"] {
+        let error = engine
+            .execute(&mut context, &command("list-keys", &[flag]))
+            .unwrap_err();
+        assert!(
+            matches!(&error, ServerError::UnsupportedCommand(message)
+                if message == &format!("list-keys {flag}")),
+            "{error:?}"
+        );
+    }
+    let error = engine
+        .execute(&mut context, &command("list-keys", &["c"]))
+        .unwrap_err();
+    assert!(
+        matches!(&error, ServerError::InvalidCommand(message)
+            if message == "list-keys does not take positional arguments: c"),
+        "{error:?}"
+    );
+    let listed = engine
+        .execute(&mut context, &command("list-keys", &["-T", "root"]))
+        .unwrap();
+    assert!(listed.output.lines().all(|line| line.contains("-T root")));
+}
+
+#[test]
+fn source_file_keeps_every_path_in_order() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    let sourced = engine
+        .execute(&mut context, &command("source-file", &["first", "second"]))
+        .unwrap();
+    assert_eq!(
+        sourced.effects,
+        [
+            MuxEffect::SourceFile {
+                path: "first".to_owned(),
+                quiet: false,
+            },
+            MuxEffect::SourceFile {
+                path: "second".to_owned(),
+                quiet: false,
+            },
+        ]
+    );
+    let quiet = engine
+        .execute(&mut context, &command("source-file", &["-q", "maybe"]))
+        .unwrap();
+    assert_eq!(
+        quiet.effects,
+        [MuxEffect::SourceFile {
+            path: "maybe".to_owned(),
+            quiet: true,
+        }]
+    );
+    let error = engine
+        .execute(&mut context, &command("source-file", &["-v", "loud"]))
+        .unwrap_err();
+    assert!(
+        matches!(&error, ServerError::UnsupportedCommand(message) if message == "source-file -v"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn session_targets_accept_a_unique_prefix() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "workshop"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("new-window", &["-t", "works"]))
+        .unwrap();
+    assert_eq!(window_count(&engine, "workshop"), 2);
+    assert_eq!(window_count(&engine, "work"), 1);
+
+    engine
+        .execute(&mut context, &command("new-window", &["-t", "work"]))
+        .unwrap();
+    assert_eq!(
+        window_count(&engine, "work"),
+        2,
+        "an exact name still resolves exactly"
+    );
+
+    let error = engine
+        .execute(&mut context, &command("new-window", &["-t", "wor"]))
+        .unwrap_err();
+    assert!(
+        matches!(&error, ServerError::AmbiguousTarget(message)
+            if message == "wor matches work, workshop"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn set_dash_o_keeps_an_already_set_option() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    engine
+        .execute(
+            &mut context,
+            &command("set-option", &["-g", "prefix", "C-a"]),
+        )
+        .unwrap();
+    let error = engine
+        .execute(
+            &mut context,
+            &command("set-option", &["-go", "prefix", "C-x"]),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(&error, ServerError::InvalidCommand(message)
+            if message == "option is already set: prefix"),
+        "{error:?}"
+    );
+    engine
+        .execute(
+            &mut context,
+            &command("set-option", &["-goq", "prefix", "C-x"]),
+        )
+        .unwrap();
+    assert_eq!(engine.keys.prefix(), "C-a");
 }

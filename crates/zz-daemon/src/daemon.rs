@@ -18,8 +18,8 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use zz_mux::{
-    DEFAULT_BUFFER_LIMIT, Execution, ExecutionContext, KeyDecision, KeyEngine, KeyTables,
-    MuxEffect, MuxEngine, MuxState, PaneKind, canonical_command, parse_config,
+    DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision, KeyEngine,
+    KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, canonical_command, parse_config,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -2079,7 +2079,7 @@ impl Shared {
         let mut cleared_bells = Vec::new();
         let mut display_panes_deadline = None;
         let mut attach = None;
-        let mut detach = false;
+        let mut detach = None;
         let mut detached_session = None;
         let mut reload_config = false;
         let mut snapshot_changed = false;
@@ -2662,11 +2662,13 @@ impl Shared {
                         session,
                         detach_others,
                     } => attach = Some((*session, *detach_others)),
-                    MuxEffect::Detach => {
-                        detach = true;
+                    MuxEffect::Detach(scope) => {
+                        detach = Some(*scope);
                         detached_session = client_attached_session(&inner, client);
                     }
-                    MuxEffect::SourceFile(path) => source_files.push(path.clone()),
+                    MuxEffect::SourceFile { path, quiet } => {
+                        source_files.push((path.clone(), *quiet));
+                    }
                     MuxEffect::ReloadConfig => reload_config = true,
                     MuxEffect::KillServer => self.request_shutdown(),
                     MuxEffect::SnapshotChanged => snapshot_changed = true,
@@ -2716,17 +2718,28 @@ impl Shared {
                 terminal.attach_view(TerminalViewId(client.0));
             }
         }
-        if detach {
-            if let Some(session) = detached_session {
-                self.publish_to_client(client, EventPayload::Detached { session, by: None });
+        match detach {
+            None => {}
+            Some(DetachScope::Client) => {
+                if let Some(session) = detached_session {
+                    self.publish_to_client(client, EventPayload::Detached { session, by: None });
+                }
+                self.detach(client);
             }
-            self.detach(client);
+            Some(DetachScope::Others) => self.evict_clients(None, client),
+            Some(DetachScope::Session(session)) => {
+                self.evict_clients(Some(session), client);
+                if detached_session == Some(session) {
+                    self.publish_to_client(client, EventPayload::Detached { session, by: None });
+                    self.detach(client);
+                }
+            }
         }
         if let Some((session, detach_others)) = attach {
             if kind == ClientKind::Interactive {
                 let mut snapshot = self.attach(client, session)?;
                 if detach_others {
-                    self.evict_other_clients(session, client);
+                    self.evict_clients(Some(session), client);
                     let inner = self.inner.lock();
                     snapshot = inner.engine.state.snapshot();
                     let presence = snapshot_presence(&inner);
@@ -2742,7 +2755,7 @@ impl Shared {
                 }
                 self.publish_snapshot();
             } else if detach_others {
-                self.evict_other_clients(session, client);
+                self.evict_clients(Some(session), client);
                 self.publish_snapshot();
             }
         }
@@ -2791,8 +2804,19 @@ impl Shared {
         } else if status_formats_changed {
             self.refresh_status(false);
         }
-        for path in source_files {
+        for (path, quiet) in source_files {
             let path = expand_path(&path);
+            if !quiet && !path.exists() {
+                self.publish_to_client(
+                    client,
+                    EventPayload::ClientMessage {
+                        pane: context.pane,
+                        kind: ClientMessageKind::Warning,
+                        text: format!("no such file: {}", path.display()),
+                    },
+                );
+                continue;
+            }
             if is_default_mux_config(&path) {
                 reload_config = true;
             } else {
@@ -3448,16 +3472,19 @@ impl Shared {
         }
     }
 
-    fn evict_other_clients(self: &Arc<Self>, session: SessionId, stealer: ClientId) {
+    /// Detach every attached client but `stealer`, either across the server or
+    /// on one session.
+    fn evict_clients(self: &Arc<Self>, session: Option<SessionId>, stealer: ClientId) {
         let (victims, by) = {
             let inner = self.inner.lock();
             let victims = inner
                 .attached
-                .get(&session)
-                .into_iter()
-                .flatten()
-                .copied()
-                .filter(|victim| *victim != stealer)
+                .iter()
+                .filter(|(attached, _)| session.is_none_or(|wanted| wanted == **attached))
+                .flat_map(|(attached, clients)| {
+                    clients.iter().map(move |client| (*attached, *client))
+                })
+                .filter(|(_, victim)| *victim != stealer)
                 .collect::<Vec<_>>();
             let by = inner
                 .client_names
@@ -3466,7 +3493,8 @@ impl Shared {
                 .unwrap_or_else(|| format!("device-{}", stealer.0));
             (victims, by)
         };
-        for victim in victims {
+        let evicted = !victims.is_empty();
+        for (session, victim) in victims {
             self.publish_to_client(
                 victim,
                 EventPayload::Detached {
@@ -3475,6 +3503,9 @@ impl Shared {
                 },
             );
             let _ = self.detach_client_state(victim);
+        }
+        if evicted {
+            self.publish_snapshot();
         }
     }
 
@@ -7007,15 +7038,17 @@ impl Shared {
                 continue;
             }
             if matches!(command.name.as_str(), "source" | "source-file") {
-                if let Some(source) = command
+                let sources = command
                     .args
                     .iter()
-                    .find(|argument| !argument.starts_with('-'))
-                {
+                    .filter(|argument| !argument.starts_with('-'))
+                    .collect::<Vec<_>>();
+                if sources.is_empty() {
+                    log::warn!("{}: ignoring source-file without a path", path.display());
+                }
+                for source in sources {
                     let source = expand_relative(path, source);
                     self.load_config_file_with_report(&source, context, depth + 1, report)?;
-                } else {
-                    log::warn!("{}: ignoring source-file without a path", path.display());
                 }
                 continue;
             }
@@ -16710,6 +16743,121 @@ bind - split-window -v -c "#{pane_current_path}"
                 .attached
                 .values()
                 .all(|clients| !clients.contains(&client))
+        );
+    }
+
+    #[test]
+    fn detach_client_dash_a_kicks_every_peer_and_keeps_the_caller() {
+        let shared = Arc::new(Shared::new(1));
+        let mine = OutboundMailbox::new();
+        let theirs = OutboundMailbox::new();
+        let (caller, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("desktop".to_owned()),
+            None,
+            Arc::clone(&mine),
+        );
+        let (peer, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("laptop".to_owned()),
+            None,
+            Arc::clone(&theirs),
+        );
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "work"]),
+            )
+            .expect("create session");
+        let session = context.session.expect("created session");
+        shared.attach(caller, session).expect("attach caller");
+        shared.attach(peer, session).expect("attach peer");
+        take_reliable_messages(&mine);
+        take_reliable_messages(&theirs);
+
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("detach-client", ["-a"]),
+            )
+            .expect("detach every other client");
+
+        assert!(take_reliable_messages(&theirs).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Detached { session: detached, by: Some(by) },
+                    ..
+                }) if *detached == session && by == "desktop"
+            )
+        }));
+        let inner = shared.inner.lock();
+        assert!(
+            inner.attached[&session].contains(&caller),
+            "-a must never detach its own client"
+        );
+        assert!(!inner.attached[&session].contains(&peer));
+    }
+
+    #[test]
+    fn detach_client_dash_s_clears_the_session_including_the_caller() {
+        let shared = Arc::new(Shared::new(1));
+        let mine = OutboundMailbox::new();
+        let theirs = OutboundMailbox::new();
+        let (caller, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("desktop".to_owned()),
+            None,
+            Arc::clone(&mine),
+        );
+        let (peer, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("laptop".to_owned()),
+            None,
+            Arc::clone(&theirs),
+        );
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "work"]),
+            )
+            .expect("create session");
+        let session = context.session.expect("created session");
+        shared.attach(caller, session).expect("attach caller");
+        shared.attach(peer, session).expect("attach peer");
+        take_reliable_messages(&mine);
+        take_reliable_messages(&theirs);
+
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("detach-client", ["-s", "work"]),
+            )
+            .expect("detach the session");
+
+        assert!(take_reliable_messages(&mine).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Detached { session: detached, by: None },
+                    ..
+                }) if *detached == session
+            )
+        }));
+        let inner = shared.inner.lock();
+        assert!(
+            inner.attached.get(&session).is_none_or(BTreeSet::is_empty),
+            "-s empties the session"
         );
     }
 

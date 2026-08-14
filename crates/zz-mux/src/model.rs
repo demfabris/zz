@@ -1363,13 +1363,34 @@ impl MuxState {
                 .then_some(id)
                 .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
         }
-        unique_match(
-            target,
-            self.sessions
-                .values()
-                .filter(|session| session.name == target)
-                .map(|session| session.id),
-        )
+        if let Some(session) = self
+            .sessions
+            .values()
+            .find(|session| session.name == target)
+            .map(|session| session.id)
+        {
+            return Ok(session);
+        }
+        let mut prefixed = self
+            .sessions
+            .values()
+            .filter(|session| session.name.starts_with(target))
+            .collect::<Vec<_>>();
+        match prefixed.as_slice() {
+            [] => Err(ServerError::MissingTarget(target.to_owned())),
+            [session] => Ok(session.id),
+            _ => {
+                prefixed.sort_unstable_by(|left, right| left.name.cmp(&right.name));
+                let names = prefixed
+                    .iter()
+                    .map(|session| session.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Err(ServerError::AmbiguousTarget(format!(
+                    "{target} matches {names}"
+                )))
+            }
+        }
     }
 
     pub fn resolve_window(
@@ -3186,6 +3207,38 @@ mod tests {
             window
         );
         assert_eq!(state.resolve_pane(Some("%0"), None, None).unwrap(), pane);
+    }
+
+    #[test]
+    fn session_names_resolve_by_exact_match_then_unique_prefix() {
+        let mut state = MuxState::default();
+        let (work, ..) = state.create_session("work").unwrap();
+        let (workshop, ..) = state.create_session("workshop").unwrap();
+        let (other, ..) = state.create_session("other").unwrap();
+
+        assert_eq!(
+            state.resolve_session(Some("work"), None).unwrap(),
+            work,
+            "an exact name wins over the longer session it prefixes"
+        );
+        assert_eq!(
+            state.resolve_session(Some("workshop"), None).unwrap(),
+            workshop
+        );
+        assert_eq!(
+            state.resolve_session(Some("works"), None).unwrap(),
+            workshop
+        );
+        assert_eq!(state.resolve_session(Some("o"), None).unwrap(), other);
+
+        let ambiguous = state.resolve_session(Some("wor"), None).unwrap_err();
+        assert!(
+            matches!(&ambiguous, ServerError::AmbiguousTarget(message)
+                if message == "wor matches work, workshop"),
+            "{ambiguous:?}"
+        );
+        let missing = state.resolve_session(Some("nope"), None).unwrap_err();
+        assert!(matches!(missing, ServerError::MissingTarget(target) if target == "nope"));
     }
 
     #[test]

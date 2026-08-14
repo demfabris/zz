@@ -1,20 +1,23 @@
 mod frames;
+mod reader;
 
 pub use frames::{FrameInbox, FrameUpdate, merge_damage};
 
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::{Arc, Mutex, MutexGuard},
-    thread,
+    mem,
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
-use async_channel::{Receiver, Sender};
-use zz_client::{ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, Outbound};
+use async_channel::Receiver;
+use zz_client::{ChromeKeymap, ChromeProfile, ClientCore};
 use zz_daemon::{Endpoint, InteractiveClient};
 use zz_protocol::{
-    BrowserCommand, CommandInvocation, CommandResponse, GuiResponse, InputMessage, LayoutNode,
-    MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, ProtocolMessage, SessionId, StatusLine,
-    WindowId,
+    CommandInvocation, InputMessage, LayoutNode, MuxSnapshot, PaneId, PaneKindSnapshot,
+    PaneSnapshot, ProtocolMessage, SessionId, StatusLine, WindowId,
 };
 use zz_terminal::{KeyInput, TerminalAppearance, TerminalColorScheme, TerminalViewport};
 
@@ -29,7 +32,18 @@ pub enum EngineEvent {
     StatusChanged,
     AppearanceChanged,
     Notice(String),
+    /// The connection dropped and the engine is retrying, counting from one.
+    /// Every accessor keeps answering with the last state the daemon sent, so
+    /// the UI can leave the frozen frames on screen instead of tearing down.
+    Reconnecting {
+        attempt: u32,
+    },
+    /// A new connection is live and the remembered session is being re-attached;
+    /// [`EngineEvent::Attached`] follows once the daemon agrees.
+    Reconnected,
     Detached,
+    /// The connection is gone for good — the retry window elapsed, or the
+    /// daemon refused. Nothing else follows.
     Disconnected(String),
 }
 
@@ -66,16 +80,13 @@ impl SessionView {
 
 type Geometry = (u16, u16, u32, u32);
 
-/// The display-free half of the client: one socket, one [`ClientCore`], one
-/// reader thread. Everything GTK-shaped lives above it, so the whole protocol
-/// path is exercisable from a plain `#[test]`.
+/// The display-free half of the client: one [`ClientCore`], one reader thread,
+/// and whichever socket is currently live. Everything GTK-shaped lives above
+/// it, so the whole protocol path is exercisable from a plain `#[test]`.
 pub struct Engine {
-    client: Arc<InteractiveClient>,
-    core: Arc<Mutex<ClientCore>>,
-    frames: Arc<FrameInbox>,
+    link: Arc<Link>,
     events: Receiver<EngineEvent>,
     chrome: ChromeKeymap,
-    geometry: Mutex<HashMap<PaneId, Geometry>>,
 }
 
 impl Engine {
@@ -90,26 +101,26 @@ impl Engine {
         let client = InteractiveClient::connect_endpoint(endpoint, color_scheme)
             .map_err(|error| error.to_string())?;
         let core = seeded_core(&client);
-        let client = Arc::new(client);
         client
             .attach(session.to_owned())
             .map_err(|error| error.to_string())?;
 
-        let frames = Arc::new(FrameInbox::default());
+        let link = Arc::new(Link {
+            endpoint: endpoint.clone(),
+            color_scheme,
+            client: Mutex::new(Arc::new(client)),
+            core: Mutex::new(core),
+            frames: FrameInbox::default(),
+            geometry: Mutex::new(HashMap::new()),
+            replay: Mutex::new(Vec::new()),
+            remembered_reattach: AtomicBool::new(false),
+        });
         let (sender, events) = async_channel::unbounded();
-        spawn_reader(
-            Arc::clone(&client),
-            Arc::clone(&core),
-            Arc::clone(&frames),
-            sender,
-        )?;
+        reader::spawn(Arc::clone(&link), sender)?;
         Ok(Arc::new(Self {
-            client,
-            core,
-            frames,
+            link,
             events,
             chrome: ChromeKeymap::for_profile(ChromeProfile::DESKTOP),
-            geometry: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -118,7 +129,7 @@ impl Engine {
     }
 
     pub fn take_frames(&self) -> Vec<FrameUpdate> {
-        self.frames.take()
+        self.link.frames.take()
     }
 
     pub const fn chrome(&self) -> &ChromeKeymap {
@@ -126,28 +137,211 @@ impl Engine {
     }
 
     pub fn snapshot(&self) -> Arc<MuxSnapshot> {
-        Arc::clone(self.core().snapshot())
+        Arc::clone(self.link.core().snapshot())
     }
 
     pub fn attached_session(&self) -> Option<SessionId> {
-        self.core().attached_session()
+        self.link.core().attached_session()
     }
 
     pub fn status(&self) -> StatusLine {
-        self.core().status().clone()
+        self.link.core().status().clone()
     }
 
     pub fn appearance(&self) -> TerminalAppearance {
-        self.core().appearance().cloned().unwrap_or_default()
+        self.link.core().appearance().cloned().unwrap_or_default()
     }
 
     /// A clone of the retained viewport: every visible plane is behind an
     /// `Arc`, so this is a handful of refcount bumps, not a grid copy.
     pub fn viewport(&self, pane: PaneId) -> Option<TerminalViewport> {
-        self.core().viewport(pane).cloned()
+        self.link.core().viewport(pane).cloned()
     }
 
     pub fn session_view(&self) -> Option<SessionView> {
+        self.link.session_view()
+    }
+
+    /// Publish a pane's cell geometry, skipping a resize the daemon already
+    /// has; true when it reached the wire. Widgets re-measure on every
+    /// allocation, so the filter is what keeps a window drag from becoming a
+    /// resize storm.
+    pub fn resize_terminal(
+        &self,
+        pane: PaneId,
+        columns: u16,
+        rows: u16,
+        cell_width_px: u32,
+        cell_height_px: u32,
+    ) -> bool {
+        if columns == 0 || rows == 0 {
+            return false;
+        }
+        self.link
+            .publish_geometry(pane, (columns, rows, cell_width_px, cell_height_px))
+    }
+
+    pub fn send_key(&self, pane: PaneId, input: KeyInput, text_follows: bool) {
+        self.link.send(InputMessage::Key {
+            pane,
+            input,
+            text_follows,
+        });
+    }
+
+    pub fn send_text(&self, pane: PaneId, text: String) {
+        if text.is_empty() {
+            return;
+        }
+        self.link.send(InputMessage::Text { pane, text });
+    }
+
+    pub fn select_window(&self, window: WindowId) {
+        self.execute(CommandInvocation::new(
+            "select-window",
+            ["-t", &window.to_string()],
+        ));
+    }
+
+    pub fn select_pane(&self, pane: PaneId) {
+        self.execute(CommandInvocation::new(
+            "select-pane",
+            ["-t", &pane.to_string()],
+        ));
+    }
+
+    pub fn kill_pane(&self, pane: PaneId) {
+        self.execute(CommandInvocation::new(
+            "kill-pane",
+            ["-t", &pane.to_string()],
+        ));
+    }
+
+    pub fn execute(&self, command: CommandInvocation) {
+        let name = command.name.clone();
+        if let Err(error) = self.link.client().execute(command) {
+            log::warn!("zz-gtk failed to execute {name}: {error}");
+        }
+    }
+
+    /// Leave the session without disturbing it: the daemon keeps running and
+    /// every pane stays alive for the next client.
+    pub fn detach(&self) {
+        if let Err(error) = self.link.client().detach() {
+            log::warn!("zz-gtk failed to detach: {error}");
+        }
+    }
+}
+
+/// The state a connection does not own. It outlives any single socket, which is
+/// what a reconnect needs: the reader swaps the client underneath it while the
+/// core keeps the viewports the widgets are still painting.
+struct Link {
+    endpoint: Endpoint,
+    color_scheme: TerminalColorScheme,
+    client: Mutex<Arc<InteractiveClient>>,
+    core: Mutex<ClientCore>,
+    frames: FrameInbox,
+    geometry: Mutex<HashMap<PaneId, Geometry>>,
+    replay: Mutex<Vec<(PaneId, Geometry)>>,
+    remembered_reattach: AtomicBool,
+}
+
+impl Link {
+    fn client(&self) -> Arc<InteractiveClient> {
+        Arc::clone(&self.client.lock().expect("client slot poisoned"))
+    }
+
+    fn core(&self) -> MutexGuard<'_, ClientCore> {
+        self.core.lock().expect("client core poisoned")
+    }
+
+    fn send(&self, input: InputMessage) {
+        if let Err(error) = self.client().send_input(input) {
+            log::warn!("zz-gtk failed to send input: {error}");
+        }
+    }
+
+    fn publish_geometry(&self, pane: PaneId, geometry: Geometry) -> bool {
+        {
+            let mut sent = self.geometry.lock().expect("geometry poisoned");
+            if sent.get(&pane) == Some(&geometry) {
+                return false;
+            }
+            sent.insert(pane, geometry);
+        }
+        let (columns, rows, cell_width_px, cell_height_px) = geometry;
+        self.send(InputMessage::ResizeTerminal {
+            pane,
+            columns,
+            rows,
+            cell_width_px,
+            cell_height_px,
+        });
+        true
+    }
+
+    /// Re-establish the connection without disturbing what the widgets show.
+    /// Only the hello's settings are adopted — the full
+    /// [`ClientCore::handle_message`] reset would clear the attachment and blank
+    /// the workspace for a whole round trip — and the remembered session is
+    /// re-attached by id, exactly as the desktop does.
+    fn dial(&self) -> Result<(), String> {
+        let client = InteractiveClient::connect_endpoint(&self.endpoint, self.color_scheme)
+            .map_err(|error| error.to_string())?;
+        let session = {
+            let mut core = self.core();
+            core.adopt_hello(client.server_hello().clone());
+            core.attached_session()
+        };
+        client
+            .attach(session.map_or_else(String::new, |session| session.to_string()))
+            .map_err(|error| error.to_string())?;
+        self.remembered_reattach
+            .store(session.is_some(), Ordering::Relaxed);
+        let stale = mem::take(&mut *self.geometry.lock().expect("geometry poisoned"));
+        *self.replay.lock().expect("geometry replay poisoned") = stale.into_iter().collect();
+        *self.client.lock().expect("client slot poisoned") = Arc::new(client);
+        Ok(())
+    }
+
+    /// A reconnected daemon knows nothing about pane geometry, and widgets only
+    /// re-measure when GTK re-allocates them, so the sizes the UI last asked for
+    /// are replayed for every pane the re-attached session still has. Anything
+    /// the UI published in the meantime wins: [`Self::publish_geometry`] skips
+    /// what the fresh connection already carries.
+    fn replay_geometry(&self) {
+        let replay = mem::take(&mut *self.replay.lock().expect("geometry replay poisoned"));
+        if replay.is_empty() {
+            return;
+        }
+        let Some(view) = self.session_view() else {
+            return;
+        };
+        let panes: Vec<PaneId> = view.terminal_panes().collect();
+        for (pane, geometry) in replay {
+            if panes.contains(&pane) {
+                self.publish_geometry(pane, geometry);
+            }
+        }
+    }
+
+    /// The remembered session can be gone from a restarted daemon. The desktop
+    /// answers that one `MissingTarget` by falling back to the default session
+    /// instead of surfacing an error, and so does this; true when the fallback
+    /// consumed the response.
+    fn retry_default_attach(&self, client: &InteractiveClient) -> bool {
+        if !self.remembered_reattach.swap(false, Ordering::Relaxed) {
+            return false;
+        }
+        if let Err(error) = client.attach("") {
+            log::warn!("zz-gtk failed to fall back to the default session: {error}");
+            return false;
+        }
+        true
+    }
+
+    fn session_view(&self) -> Option<SessionView> {
         let core = self.core();
         let attached = core.attached_session()?;
         let snapshot = core.snapshot();
@@ -176,211 +370,14 @@ impl Engine {
             panes: window.panes.clone(),
         })
     }
-
-    /// Publish a pane's cell geometry, skipping a resize the daemon already
-    /// has. Widgets re-measure on every allocation, so the filter is what keeps
-    /// a window drag from becoming a resize storm.
-    pub fn resize_terminal(
-        &self,
-        pane: PaneId,
-        columns: u16,
-        rows: u16,
-        cell_width_px: u32,
-        cell_height_px: u32,
-    ) {
-        if columns == 0 || rows == 0 {
-            return;
-        }
-        let geometry = (columns, rows, cell_width_px, cell_height_px);
-        {
-            let mut sent = self.geometry.lock().expect("geometry poisoned");
-            if sent.get(&pane) == Some(&geometry) {
-                return;
-            }
-            sent.insert(pane, geometry);
-        }
-        self.send(InputMessage::ResizeTerminal {
-            pane,
-            columns,
-            rows,
-            cell_width_px,
-            cell_height_px,
-        });
-    }
-
-    pub fn send_key(&self, pane: PaneId, input: KeyInput, text_follows: bool) {
-        self.send(InputMessage::Key {
-            pane,
-            input,
-            text_follows,
-        });
-    }
-
-    pub fn send_text(&self, pane: PaneId, text: String) {
-        if text.is_empty() {
-            return;
-        }
-        self.send(InputMessage::Text { pane, text });
-    }
-
-    pub fn select_window(&self, window: WindowId) {
-        self.execute(CommandInvocation::new(
-            "select-window",
-            ["-t", &window.to_string()],
-        ));
-    }
-
-    pub fn select_pane(&self, pane: PaneId) {
-        self.execute(CommandInvocation::new(
-            "select-pane",
-            ["-t", &pane.to_string()],
-        ));
-    }
-
-    pub fn kill_pane(&self, pane: PaneId) {
-        self.execute(CommandInvocation::new(
-            "kill-pane",
-            ["-t", &pane.to_string()],
-        ));
-    }
-
-    pub fn execute(&self, command: CommandInvocation) {
-        let name = command.name.clone();
-        if let Err(error) = self.client.execute(command) {
-            log::warn!("zz-gtk failed to execute {name}: {error}");
-        }
-    }
-
-    /// Leave the session without disturbing it: the daemon keeps running and
-    /// every pane stays alive for the next client.
-    pub fn detach(&self) {
-        if let Err(error) = self.client.detach() {
-            log::warn!("zz-gtk failed to detach: {error}");
-        }
-    }
-
-    fn send(&self, input: InputMessage) {
-        if let Err(error) = self.client.send_input(input) {
-            log::warn!("zz-gtk failed to send input: {error}");
-        }
-    }
-
-    fn core(&self) -> MutexGuard<'_, ClientCore> {
-        lock_core(&self.core)
-    }
 }
 
 /// [`InteractiveClient::connect_endpoint`] consumes the hello during the
 /// handshake, so it never reaches `recv()`; feeding it by hand is the only way
 /// the core learns appearance, options and key tables.
-fn seeded_core(client: &InteractiveClient) -> Arc<Mutex<ClientCore>> {
+fn seeded_core(client: &InteractiveClient) -> ClientCore {
     let mut core = ClientCore::new();
     core.handle_message(ProtocolMessage::ServerHello(client.server_hello().clone()));
     while core.poll_event().is_some() {}
-    Arc::new(Mutex::new(core))
-}
-
-fn lock_core(core: &Mutex<ClientCore>) -> MutexGuard<'_, ClientCore> {
-    core.lock().expect("client core poisoned")
-}
-
-/// Reduces one connection: decoded messages in, wire requests straight back
-/// out, frames into the coalescing inbox, everything else to the UI in stream
-/// order. Event sequence gaps are never checked — the daemon supersedes stale
-/// frames under backpressure, so a healthy stream skips numbers.
-fn spawn_reader(
-    client: Arc<InteractiveClient>,
-    core: Arc<Mutex<ClientCore>>,
-    frames: Arc<FrameInbox>,
-    events: Sender<EngineEvent>,
-) -> Result<(), String> {
-    thread::Builder::new()
-        .name("zz-gtk-protocol".to_owned())
-        .spawn(move || {
-            loop {
-                let message = match client.recv() {
-                    Ok(message) => message,
-                    Err(error) => {
-                        let _ = events.send_blocking(EngineEvent::Disconnected(error.to_string()));
-                        break;
-                    }
-                };
-                let forwarded = {
-                    let mut core = lock_core(&core);
-                    core.handle_message(message);
-                    while let Some(Outbound::RequestFull(pane)) = core.poll_outbound() {
-                        if let Err(error) = client.request_full(pane) {
-                            log::warn!(
-                                "zz-gtk failed to request a full viewport for {pane}: {error}"
-                            );
-                        }
-                    }
-                    let mut forwarded = Vec::new();
-                    while let Some(event) = core.poll_event() {
-                        reduce(&core, &client, &frames, event, &mut forwarded);
-                    }
-                    forwarded
-                };
-                for event in forwarded {
-                    if events.send_blocking(event).is_err() {
-                        return;
-                    }
-                }
-            }
-        })
-        .map(drop)
-        .map_err(|error| format!("failed to start the protocol reader: {error}"))
-}
-
-fn reduce(
-    core: &ClientCore,
-    client: &InteractiveClient,
-    frames: &FrameInbox,
-    event: CoreEvent,
-    forwarded: &mut Vec<EngineEvent>,
-) {
-    match event {
-        CoreEvent::ViewportChanged { pane, damage } => {
-            if let Some(viewport) = core.viewport(pane)
-                && frames.publish(pane, viewport.clone(), damage)
-            {
-                forwarded.push(EngineEvent::FramesReady);
-            }
-        }
-        CoreEvent::Attached { session } => {
-            frames.clear();
-            forwarded.push(EngineEvent::Attached(session));
-        }
-        CoreEvent::PaneRemoved { pane } => {
-            frames.forget(pane);
-            forwarded.push(EngineEvent::SnapshotChanged);
-        }
-        CoreEvent::SnapshotChanged => forwarded.push(EngineEvent::SnapshotChanged),
-        CoreEvent::StatusChanged => forwarded.push(EngineEvent::StatusChanged),
-        CoreEvent::AppearanceChanged => forwarded.push(EngineEvent::AppearanceChanged),
-        CoreEvent::ClientMessage { text, .. } => forwarded.push(EngineEvent::Notice(text)),
-        CoreEvent::CommandResponse(CommandResponse::Error { error, .. }) => {
-            forwarded.push(EngineEvent::Notice(error.to_string()));
-        }
-        CoreEvent::Detached { .. } | CoreEvent::ServerStopping => {
-            forwarded.push(EngineEvent::Detached);
-        }
-        CoreEvent::AgentCommand { request_id, .. } => {
-            reject_gui_request(client, request_id, "agent commands require the zz app");
-        }
-        CoreEvent::BrowserCommand {
-            command: BrowserCommand::Screenshot { request_id, .. },
-            ..
-        } => reject_gui_request(client, request_id, "browser panes require the zz app"),
-        _ => {}
-    }
-}
-
-fn reject_gui_request(client: &InteractiveClient, request_id: u64, message: &str) {
-    if let Err(error) = client.send_gui_response(GuiResponse::Error {
-        request_id,
-        message: message.to_owned(),
-    }) {
-        log::warn!("zz-gtk failed to answer a GUI request: {error}");
-    }
+    core
 }

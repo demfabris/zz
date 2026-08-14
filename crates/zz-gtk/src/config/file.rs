@@ -161,6 +161,26 @@ pub fn remove_key_at(path: &Path, key: &str) -> io::Result<()> {
     write_edit_at(path, key, None).map(drop)
 }
 
+/// Delete every line a key has, not only the effective one. What removing a
+/// repeatable entry needs: dropping the last `host-desktop` would promote an
+/// earlier one rather than remove the host.
+pub fn remove_key_group(key: &str) -> io::Result<()> {
+    remove_key_group_at(&path_for_write()?, key)
+}
+
+pub fn remove_key_group_at(path: &Path, key: &str) -> io::Result<()> {
+    let source = match read_source(path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let edited = replace_key_group(&source, key, &[]);
+    if edited == source {
+        return Ok(());
+    }
+    atomic_write(path, edited.as_bytes())
+}
+
 fn write_edit_at(path: &Path, key: &str, value: Option<&str>) -> io::Result<bool> {
     let source = match read_source(path) {
         Ok(source) => source,

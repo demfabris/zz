@@ -18,6 +18,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use zz_daemon::{HostEntry, RejectedHost, apply_fleet_host_entry, validate_fleet_host};
 use zz_protocol::{ConfigOverrideEntry, MuxOptionKey};
 use zz_terminal::AppearanceConfigKey;
 
@@ -59,6 +60,8 @@ pub struct State {
     pub path: Option<PathBuf>,
     values: BTreeMap<String, String>,
     daemon_entries: Vec<ConfigOverrideEntry>,
+    hosts: Vec<HostEntry>,
+    rejected_hosts: Vec<RejectedHost>,
     malformed_lines: Vec<usize>,
 }
 
@@ -81,6 +84,19 @@ impl State {
     #[must_use]
     pub fn daemon_entries(&self) -> &[ConfigOverrideEntry] {
         &self.daemon_entries
+    }
+
+    /// Every `host-<name>` line that names a reachable-looking daemon, in file
+    /// order, resolved by the daemon's own validator so this client and the
+    /// desktop agree byte for byte on what a fleet is.
+    #[must_use]
+    pub fn fleet_hosts(&self) -> &[HostEntry] {
+        &self.hosts
+    }
+
+    #[must_use]
+    pub fn rejected_hosts(&self) -> &[RejectedHost] {
+        &self.rejected_hosts
     }
 
     #[must_use]
@@ -128,6 +144,15 @@ pub fn parse(source: &str) -> State {
             state
                 .daemon_entries
                 .push((key.to_owned(), value.to_owned()));
+        }
+        if let Some(name) = key.strip_prefix("host-") {
+            apply_fleet_host_entry(
+                &mut state.hosts,
+                &mut state.rejected_hosts,
+                key,
+                name,
+                value,
+            );
         }
         state.values.insert(key.to_owned(), value.to_owned());
     }
@@ -227,6 +252,14 @@ fn read_state(stamp: &file::Stamp) -> State {
             path.display(),
         );
     }
+    for host in state.rejected_hosts() {
+        log::warn!(
+            target: "zz_gtk::config",
+            "ignoring `host-{}`: {}",
+            host.name,
+            host.reason,
+        );
+    }
     state.path = Some(path.to_owned());
     state
 }
@@ -238,6 +271,22 @@ pub fn write(key: &str, value: Option<&str>) -> io::Result<()> {
         Some(value) => file::set_key(key, value),
         None => file::remove_key(key),
     }
+}
+
+/// Add or remove one `host-<name>` line, through the same comment-preserving
+/// writer every other key goes through. A removal takes every duplicate with
+/// it — leaving an earlier one behind would only bring the host back — and an
+/// addition is refused by the daemon's validator before it reaches the disk.
+///
+/// Nothing here applies anything: the poll is still what tells the fleet.
+pub fn write_host(name: &str, endpoint: Option<&str>) -> io::Result<()> {
+    let key = format!("host-{name}");
+    let Some(endpoint) = endpoint else {
+        return file::remove_key_group(&key);
+    };
+    validate_fleet_host(name, endpoint)
+        .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?;
+    file::set_key(&key, endpoint)
 }
 
 #[cfg(test)]
@@ -382,6 +431,82 @@ prefix = C-a
             Some(value) => file::set_key_at(path, key, value).expect("set"),
             None => file::remove_key_at(path, key).expect("remove"),
         }
+    }
+
+    /// Host lines are the desktop's, resolved by the daemon's own validator:
+    /// file order, last duplicate wins, and a bad one is reported rather than
+    /// silently dropped.
+    #[test]
+    fn fleet_hosts_parse_in_config_order_and_report_what_they_reject() {
+        let state = parse(
+            "host-desktop = ssh://fabrico@desktop:2222\n\
+             background = #101010\n\
+             host-scratch = unix:///tmp/zz-scratch.sock\n\
+             host-desktop = ssh://new-desktop\n\
+             host-local = ssh://reserved\n\
+             host-broken = quic://gpu:7777\n",
+        );
+
+        let hosts: Vec<(&str, String)> = state
+            .fleet_hosts()
+            .iter()
+            .map(|host| (host.name.as_str(), host.endpoint.to_string()))
+            .collect();
+        assert_eq!(
+            hosts,
+            [
+                ("scratch", "/tmp/zz-scratch.sock".to_owned()),
+                ("desktop", "ssh://new-desktop".to_owned()),
+            ],
+            "a repeated host keeps the last entry, in that entry's position"
+        );
+        let rejected: Vec<&str> = state
+            .rejected_hosts()
+            .iter()
+            .map(|host| host.name.as_str())
+            .collect();
+        assert_eq!(rejected, ["local", "broken"]);
+        assert!(
+            !state
+                .daemon_entries()
+                .iter()
+                .any(|(key, _)| key.starts_with("host-")),
+            "the fleet is the client's business; the daemon is never told about it"
+        );
+    }
+
+    /// Adding and closing a host go through the same comment-preserving writer
+    /// every other key uses — and closing takes every duplicate with it, or the
+    /// host would come back on the next poll.
+    #[test]
+    fn a_host_is_written_and_removed_without_disturbing_the_rest_of_the_file() {
+        let scratch =
+            std::env::temp_dir().join(format!("zz-gtk-hosts-{}-{}", std::process::id(), line!()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let path = scratch.join("zz/config");
+        file::atomic_write(
+            &path,
+            b"# keep\nhost-desktop = ssh://old\nshow-fps = true\nhost-desktop = ssh://new # why\n",
+        )
+        .expect("seed the config");
+
+        file::set_key_at(&path, "host-gpu", "ssh://gpu:9922").expect("write a host");
+        let state = parse(&std::fs::read_to_string(&path).expect("read back"));
+        assert_eq!(
+            state
+                .fleet_hosts()
+                .iter()
+                .map(|host| host.name.as_str())
+                .collect::<Vec<_>>(),
+            ["desktop", "gpu"]
+        );
+
+        file::remove_key_group_at(&path, "host-desktop").expect("close a host");
+        let left = std::fs::read_to_string(&path).expect("read back");
+        assert_eq!(left, "# keep\nshow-fps = true\nhost-gpu = ssh://gpu:9922\n");
+        assert_eq!(parse(&left).fleet_hosts().len(), 1);
+
+        let _ = std::fs::remove_dir_all(&scratch);
     }
 
     #[test]

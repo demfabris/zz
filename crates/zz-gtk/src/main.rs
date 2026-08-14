@@ -1,4 +1,7 @@
-use std::{path::PathBuf, process::ExitCode};
+use std::{
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 use zz_daemon::{Endpoint, default_socket_path};
 use zz_gtk::ui::{self, Launch};
@@ -14,6 +17,9 @@ usage: zz-gtk [options] [session]
 The daemon owns the sessions; zz-gtk attaches to one and renders it.";
 
 fn main() -> ExitCode {
+    if let Some(code) = run_askpass_mode() {
+        return code;
+    }
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     match parse(std::env::args().skip(1)) {
         Ok(Some(launch)) => {
@@ -33,6 +39,20 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Answer one ssh prompt and exit, when ssh ran this binary as its askpass
+/// helper while a fleet host was being dialled.
+///
+/// It runs before anything else and must start nothing: any process that
+/// outlives it holds ssh's answer pipe open forever.
+fn run_askpass_mode() -> Option<ExitCode> {
+    let socket = std::env::var_os(zz_daemon::ASKPASS_SOCKET_ENV)?;
+    let prompt = std::env::args_os().nth(1).unwrap_or_default();
+    Some(zz_daemon::run_helper(
+        Path::new(&socket),
+        &prompt.to_string_lossy(),
+    ))
 }
 
 /// `Ok(None)` means help was asked for and nothing should launch.

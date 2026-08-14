@@ -1,7 +1,8 @@
 /target
-# The ui-showcase is an excluded sub-workspace, so its build output lands here
-# rather than under the root /target above.
+# The ui-showcase and the GTK client are excluded sub-workspaces, so their
+# build output lands here rather than under the root /target above.
 /examples/ui-showcase/target
+/crates/zz-gtk/target
 /dist
 /TODO.md
 /IDEAS.md

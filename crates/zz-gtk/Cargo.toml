@@ -1,0 +1,68 @@
+[workspace]
+resolver = "3"
+
+[package]
+name = "zz-gtk"
+version = "0.2.0-beta.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.97"
+description = "A GTK4/libadwaita GNOME client for zz daemon sessions"
+publish = false
+
+[lib]
+
+[[bin]]
+name = "zz-gtk"
+path = "src/main.rs"
+
+[dependencies]
+adw = { package = "libadwaita", version = "0.9.2", features = ["v1_9"] }
+async-channel = "2.5.0"
+env_logger = "0.11.11"
+gtk = { package = "gtk4", version = "0.11.4", features = ["v4_22"] }
+log = "0.4.29"
+zz-client = { path = "../zz-client" }
+zz-daemon = { path = "../zz-daemon", default-features = false }
+zz-protocol = { path = "../zz-protocol" }
+zz-terminal = { path = "../zz-terminal", default-features = false }
+
+[dev-dependencies]
+zz-daemon = { path = "../zz-daemon" }
+
+# Cargo `[patch]` is not inherited through path dependencies, and this crate is
+# excluded from the zz workspace, so the workspace's libghostty redirect has to
+# be repeated here or `zz-daemon` builds the upstream sys crate against a zig
+# toolchain zz does not pin.
+[patch."https://github.com/uzaaft/libghostty-rs"]
+libghostty-vt-sys = { path = "../../third_party/rust/libghostty-vt-sys" }
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+must_use_candidate = "allow"
+wildcard_imports = "allow"
+enum_glob_use = "allow"
+struct_field_names = "allow"
+items_after_statements = "allow"
+too_many_arguments = "allow"
+too_many_lines = "allow"
+result_large_err = "allow"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+float_cmp = "allow"
+struct_excessive_bools = "allow"
+type_complexity = "allow"
+
+[profile.dev]
+debug = 1
+
+[profile.dev.package."*"]
+opt-level = 2

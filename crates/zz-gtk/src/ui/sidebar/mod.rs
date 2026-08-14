@@ -388,7 +388,7 @@ impl Sidebar {
                 sidebar.syncing.set(false);
             }
         });
-        self.list.add_controller(focus);
+        self.root.add_controller(focus);
 
         let gesture = gtk::GestureClick::new();
         gesture.set_button(gdk::BUTTON_SECONDARY);

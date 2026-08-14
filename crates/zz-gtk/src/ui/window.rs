@@ -412,6 +412,16 @@ impl Shell {
             EngineEvent::AppearanceChanged => self.push_appearance(),
             EngineEvent::Clipboard { target, text } => self.write_clipboard(target, &text),
             EngineEvent::Notice(text) => self.toasts.add_toast(adw::Toast::new(&text)),
+            EngineEvent::Reconnecting { attempt } => {
+                self.overlays.dismiss();
+                if attempt == 1 {
+                    self.toasts
+                        .add_toast(adw::Toast::new("Reconnecting to the zz daemon…"));
+                }
+            }
+            EngineEvent::Reconnected => {
+                self.toasts.add_toast(adw::Toast::new("Reconnected"));
+            }
             EngineEvent::Detached | EngineEvent::Disconnected(_) => {
                 self.overlays.dismiss();
                 self.window.close();

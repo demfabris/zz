@@ -118,15 +118,107 @@ pub fn is_modifier(keyval: gdk::Key) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zz_protocol::{input_key_name, input_typed_text};
+
+    const NONE: gdk::ModifierType = gdk::ModifierType::empty();
+    const SHIFT: gdk::ModifierType = gdk::ModifierType::SHIFT_MASK;
+    const CONTROL: gdk::ModifierType = gdk::ModifierType::CONTROL_MASK;
+    const ALT: gdk::ModifierType = gdk::ModifierType::ALT_MASK;
+    const SUPER: gdk::ModifierType = gdk::ModifierType::SUPER_MASK;
+
+    fn press(keyval: gdk::Key, state: gdk::ModifierType) -> KeyInput {
+        key_input(KeyAction::Press, keyval, state, None)
+    }
+
+    /// Named keys, both keypad spellings of them, function keys across the
+    /// whole F1..F35 range, and the printable keyvals GDK resolves for a
+    /// keypad with num lock on.
+    #[test]
+    fn every_keyval_a_pane_can_receive_folds_onto_a_wire_code() {
+        let cases: &[(gdk::Key, KeyCode)] = &[
+            (gdk::Key::BackSpace, KeyCode::Backspace),
+            (gdk::Key::Return, KeyCode::Enter),
+            (gdk::Key::KP_Enter, KeyCode::Enter),
+            (gdk::Key::ISO_Enter, KeyCode::Enter),
+            (gdk::Key::Tab, KeyCode::Tab),
+            (gdk::Key::KP_Tab, KeyCode::Tab),
+            (gdk::Key::ISO_Left_Tab, KeyCode::Tab),
+            (gdk::Key::Escape, KeyCode::Escape),
+            (gdk::Key::Delete, KeyCode::Delete),
+            (gdk::Key::KP_Delete, KeyCode::Delete),
+            (gdk::Key::Insert, KeyCode::Insert),
+            (gdk::Key::KP_Insert, KeyCode::Insert),
+            (gdk::Key::Home, KeyCode::Home),
+            (gdk::Key::KP_Home, KeyCode::Home),
+            (gdk::Key::End, KeyCode::End),
+            (gdk::Key::KP_End, KeyCode::End),
+            (gdk::Key::Page_Up, KeyCode::PageUp),
+            (gdk::Key::KP_Page_Up, KeyCode::PageUp),
+            (gdk::Key::Page_Down, KeyCode::PageDown),
+            (gdk::Key::KP_Page_Down, KeyCode::PageDown),
+            (gdk::Key::Up, KeyCode::ArrowUp),
+            (gdk::Key::KP_Up, KeyCode::ArrowUp),
+            (gdk::Key::Down, KeyCode::ArrowDown),
+            (gdk::Key::KP_Down, KeyCode::ArrowDown),
+            (gdk::Key::Left, KeyCode::ArrowLeft),
+            (gdk::Key::KP_Left, KeyCode::ArrowLeft),
+            (gdk::Key::Right, KeyCode::ArrowRight),
+            (gdk::Key::KP_Right, KeyCode::ArrowRight),
+            (gdk::Key::F1, KeyCode::Function(1)),
+            (gdk::Key::F7, KeyCode::Function(7)),
+            (gdk::Key::F12, KeyCode::Function(12)),
+            (gdk::Key::F13, KeyCode::Function(13)),
+            (gdk::Key::F35, KeyCode::Function(35)),
+            (gdk::Key::a, KeyCode::Character('a')),
+            (gdk::Key::A, KeyCode::Character('a')),
+            (gdk::Key::space, KeyCode::Character(' ')),
+            (gdk::Key::slash, KeyCode::Character('/')),
+            (gdk::Key::KP_1, KeyCode::Character('1')),
+            (gdk::Key::KP_Add, KeyCode::Character('+')),
+            (gdk::Key::KP_Decimal, KeyCode::Character('.')),
+        ];
+
+        for (keyval, expected) in cases {
+            assert_eq!(press(*keyval, NONE).key, *expected, "{keyval:?}");
+        }
+    }
+
+    /// The daemon resolves a binding from the folded chord name, falling back
+    /// on the typed character, so what the client sends has to spell the chords
+    /// a user actually binds. `input_typed_text` is empty for anything carrying
+    /// a command modifier, which is what keeps Ctrl-C off a plain `c` binding.
+    #[test]
+    fn chords_spell_the_names_the_daemon_binds() {
+        let cases: &[(
+            gdk::Key,
+            gdk::ModifierType,
+            Option<&str>,
+            &str,
+            Option<&str>,
+        )] = &[
+            (gdk::Key::a, NONE, None, "a", Some("a")),
+            (gdk::Key::A, SHIFT, None, "A", Some("A")),
+            (gdk::Key::c, CONTROL, None, "C-c", None),
+            (gdk::Key::C, CONTROL | SHIFT, None, "C-c", None),
+            (gdk::Key::f, ALT, None, "M-f", None),
+            (gdk::Key::b, CONTROL | ALT, None, "C-M-b", None),
+            (gdk::Key::F7, NONE, None, "F7", None),
+            (gdk::Key::KP_Enter, NONE, None, "Enter", None),
+            (gdk::Key::Up, NONE, None, "Up", None),
+            (gdk::Key::Escape, NONE, None, "Escape", None),
+            (gdk::Key::slash, SHIFT, Some("?"), "/", Some("?")),
+        ];
+
+        for (keyval, state, text, name, typed) in cases {
+            let input = key_input(KeyAction::Press, *keyval, *state, *text);
+            assert_eq!(input_key_name(&input).as_str(), *name, "{keyval:?}");
+            assert_eq!(input_typed_text(&input), *typed, "{keyval:?}");
+        }
+    }
 
     #[test]
     fn a_shifted_character_carries_the_typed_text_and_the_unshifted_key() {
-        let input = key_input(
-            KeyAction::Press,
-            gdk::Key::A,
-            gdk::ModifierType::SHIFT_MASK,
-            None,
-        );
+        let input = press(gdk::Key::A, SHIFT);
 
         assert_eq!(input.key, KeyCode::Character('a'));
         assert_eq!(input.text.as_deref(), Some("A"));
@@ -136,54 +228,15 @@ mod tests {
 
     #[test]
     fn committed_text_wins_over_the_keyval() {
-        let input = key_input(
-            KeyAction::Press,
-            gdk::Key::e,
-            gdk::ModifierType::empty(),
-            Some("é"),
-        );
+        let input = key_input(KeyAction::Press, gdk::Key::e, NONE, Some("é"));
 
         assert_eq!(input.key, KeyCode::Character('e'));
         assert_eq!(input.text.as_deref(), Some("é"));
     }
 
     #[test]
-    fn named_and_function_keys_map_onto_the_wire_codes() {
-        assert_eq!(
-            key_input(
-                KeyAction::Press,
-                gdk::Key::KP_Enter,
-                gdk::ModifierType::empty(),
-                None
-            )
-            .key,
-            KeyCode::Enter
-        );
-        assert_eq!(
-            key_input(
-                KeyAction::Press,
-                gdk::Key::F7,
-                gdk::ModifierType::empty(),
-                None
-            )
-            .key,
-            KeyCode::Function(7)
-        );
-        assert!(is_modifier(gdk::Key::Control_L));
-        assert!(!is_modifier(gdk::Key::a));
-    }
-
-    #[test]
     fn every_modifier_bit_survives_the_translation() {
-        let input = key_input(
-            KeyAction::Press,
-            gdk::Key::a,
-            gdk::ModifierType::SHIFT_MASK
-                | gdk::ModifierType::CONTROL_MASK
-                | gdk::ModifierType::ALT_MASK
-                | gdk::ModifierType::SUPER_MASK,
-            None,
-        );
+        let input = press(gdk::Key::a, SHIFT | CONTROL | ALT | SUPER);
 
         assert!(input.modifiers.shift());
         assert!(input.modifiers.control());
@@ -194,9 +247,45 @@ mod tests {
     #[test]
     fn control_keyvals_carry_no_typed_text() {
         for keyval in [gdk::Key::Escape, gdk::Key::BackSpace, gdk::Key::Return] {
-            let input = key_input(KeyAction::Press, keyval, gdk::ModifierType::empty(), None);
+            let input = press(keyval, NONE);
             assert_eq!(input.text, None, "{keyval:?} produced typed text");
             assert_eq!(input.unshifted_codepoint, None);
+        }
+    }
+
+    /// A release only reaches the daemon for a pane in kitty keyboard mode, and
+    /// it has to arrive as the same chord the press did.
+    #[test]
+    fn a_release_keeps_its_action_and_its_chord() {
+        let input = key_input(KeyAction::Release, gdk::Key::a, CONTROL, None);
+
+        assert_eq!(input.action, KeyAction::Release);
+        assert_eq!(input.key, KeyCode::Character('a'));
+        assert_eq!(input_key_name(&input).as_str(), "C-a");
+    }
+
+    /// A bare modifier press folds to an empty wire name, which no table can
+    /// ever match, so it is filtered out before it reaches the daemon.
+    #[test]
+    fn modifier_presses_are_filtered_out_before_the_wire() {
+        for keyval in [
+            gdk::Key::Shift_L,
+            gdk::Key::Control_R,
+            gdk::Key::Alt_L,
+            gdk::Key::Super_L,
+            gdk::Key::Meta_R,
+            gdk::Key::Caps_Lock,
+            gdk::Key::Num_Lock,
+            gdk::Key::ISO_Level3_Shift,
+        ] {
+            assert!(is_modifier(keyval), "{keyval:?} is a modifier");
+            assert!(
+                input_key_name(&press(keyval, NONE)).as_str().is_empty(),
+                "{keyval:?} folded to a name a table could match"
+            );
+        }
+        for keyval in [gdk::Key::a, gdk::Key::F7, gdk::Key::Escape, gdk::Key::KP_1] {
+            assert!(!is_modifier(keyval), "{keyval:?} is not a modifier");
         }
     }
 }

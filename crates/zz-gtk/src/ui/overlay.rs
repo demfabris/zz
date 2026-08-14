@@ -1,34 +1,35 @@
-use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-    sync::Arc,
-};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use adw::prelude::*;
-use gtk::{gdk, glib};
+use gtk::glib;
 use zz_protocol::{
     ChooseBufferAction, ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind,
-    ChooseTreePaneKind, ChooseTreeState, ChooseTreeTarget, CommandPromptAction, InputMessage,
+    ChooseTreePaneKind, ChooseTreeState, ChooseTreeTarget, InputMessage,
 };
 use zz_terminal::KeyAction;
 
-use crate::{engine::Engine, ui::keys};
+use crate::{
+    engine::Engine,
+    ui::{keys, palette::CommandPalette},
+};
 
 const CHOOSER_WIDTH: i32 = 680;
 const CHOOSER_HEIGHT: i32 = 520;
 const HINT: &str = "Enter select · / search · Esc close";
 
 /// The daemon-owned overlays, rendered as GNOME chrome: the choosers as a
-/// dialog over the window, the command prompt as a revealed bottom bar.
+/// dialog over the window, the command prompt as a floating palette.
 ///
-/// Every key press inside them is forwarded raw — the daemon's `choose-tree`,
-/// `choose-buffer` and prompt tables own selection, search and submission, so
-/// the client never advances a cursor of its own.
+/// Every key press inside a chooser is forwarded raw — the daemon's
+/// `choose-tree` and `choose-buffer` tables own selection, search and
+/// submission, so the client never advances a cursor of its own. The palette is
+/// the one exception the protocol asks for: its text and completions are the
+/// client's, and only `Update`/`Submit`/`Close` cross the wire.
 pub struct Overlays {
     engine: Arc<Engine>,
     parent: gtk::Widget,
     chooser: RefCell<Option<Chooser>>,
-    prompt: Prompt,
+    palette: Rc<CommandPalette>,
 }
 
 /// Which chooser the daemon has open. Both carry the whole published list, so
@@ -133,38 +134,30 @@ struct Chooser {
     state: Chosen,
 }
 
-struct Prompt {
-    revealer: gtk::Revealer,
-    label: gtk::Label,
-    entry: gtk::Entry,
-    syncing: Cell<bool>,
-}
-
 impl Overlays {
     pub fn new(engine: Arc<Engine>, parent: &impl IsA<gtk::Widget>) -> Rc<Self> {
-        let overlays = Rc::new(Self {
+        Rc::new(Self {
+            palette: CommandPalette::new(Arc::clone(&engine)),
             engine,
             parent: parent.clone().upcast(),
             chooser: RefCell::new(None),
-            prompt: build_prompt(),
-        });
-        overlays.connect_prompt();
-        overlays
+        })
     }
 
-    /// The command prompt bar, for the shell to mount as a bottom bar.
-    pub fn prompt_bar(&self) -> &gtk::Widget {
-        self.prompt.revealer.upcast_ref()
+    /// The command palette, for the shell to mount as a `GtkOverlay` child so
+    /// it floats over the pane area instead of resizing it.
+    pub fn palette(&self) -> &gtk::Widget {
+        self.palette.widget()
     }
 
     pub fn is_open(&self) -> bool {
-        self.chooser.borrow().is_some() || self.prompt.revealer.reveals_child()
+        self.chooser.borrow().is_some() || self.palette.is_open()
     }
 
     /// Bring every overlay in line with the core. Called for each notification;
     /// the diffing keeps a chooser's rows alive while only its cursor moves.
     pub fn sync(self: &Rc<Self>) {
-        self.sync_prompt();
+        self.palette.sync();
         self.sync_chooser();
     }
 
@@ -174,7 +167,7 @@ impl Overlays {
         if let Some(chooser) = self.chooser.borrow_mut().take() {
             chooser.dialog.force_close();
         }
-        self.prompt.revealer.set_reveal_child(false);
+        self.palette.dismiss();
     }
 
     fn sync_chooser(self: &Rc<Self>) {
@@ -306,75 +299,6 @@ impl Overlays {
         });
         dialog.add_controller(keyboard);
     }
-
-    fn sync_prompt(&self) {
-        let Some(state) = self.engine.command_prompt() else {
-            if self.prompt.revealer.reveals_child() {
-                self.prompt.revealer.set_reveal_child(false);
-            }
-            return;
-        };
-        self.prompt.syncing.set(true);
-        self.prompt.label.set_text(&state.prompt);
-        if self.prompt.entry.text() != state.input {
-            self.prompt.entry.set_text(&state.input);
-        }
-        self.prompt
-            .entry
-            .set_position(i32::try_from(state.cursor).unwrap_or(-1));
-        self.prompt.syncing.set(false);
-        if self.prompt.revealer.reveals_child() {
-            return;
-        }
-        self.prompt.revealer.set_reveal_child(true);
-        self.prompt.entry.grab_focus_without_selecting();
-    }
-
-    fn connect_prompt(self: &Rc<Self>) {
-        let target = Rc::downgrade(self);
-        self.prompt.entry.connect_changed(move |entry| {
-            let Some(overlays) = target.upgrade() else {
-                return;
-            };
-            if overlays.prompt.syncing.get() {
-                return;
-            }
-            overlays.engine.send(InputMessage::CommandPrompt {
-                action: CommandPromptAction::Update {
-                    input: entry.text().to_string(),
-                    cursor: u32::try_from(entry.position()).unwrap_or(0),
-                },
-            });
-        });
-
-        let target = Rc::downgrade(self);
-        self.prompt.entry.connect_activate(move |entry| {
-            if let Some(overlays) = target.upgrade() {
-                overlays.engine.send(InputMessage::CommandPrompt {
-                    action: CommandPromptAction::Submit {
-                        input: entry.text().to_string(),
-                    },
-                });
-            }
-        });
-
-        let keyboard = gtk::EventControllerKey::new();
-        keyboard.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let target = Rc::downgrade(self);
-        keyboard.connect_key_pressed(move |_, keyval, _, _| {
-            let Some(overlays) = target.upgrade() else {
-                return glib::Propagation::Proceed;
-            };
-            if keyval != gdk::Key::Escape {
-                return glib::Propagation::Proceed;
-            }
-            overlays.engine.send(InputMessage::CommandPrompt {
-                action: CommandPromptAction::Close,
-            });
-            glib::Propagation::Stop
-        });
-        self.prompt.entry.add_controller(keyboard);
-    }
 }
 
 impl Chooser {
@@ -386,29 +310,6 @@ impl Chooser {
             }
             None => self.search.set_visible(false),
         }
-    }
-}
-
-fn build_prompt() -> Prompt {
-    let label = gtk::Label::new(None);
-    label.add_css_class("dim-label");
-    label.add_css_class("monospace");
-    let entry = gtk::Entry::builder().hexpand(true).build();
-    entry.add_css_class("monospace");
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    row.add_css_class("toolbar");
-    row.add_css_class("zz-prompt");
-    row.append(&label);
-    row.append(&entry);
-    let revealer = gtk::Revealer::builder()
-        .transition_type(gtk::RevealerTransitionType::SlideUp)
-        .child(&row)
-        .build();
-    Prompt {
-        revealer,
-        label,
-        entry,
-        syncing: Cell::new(false),
     }
 }
 

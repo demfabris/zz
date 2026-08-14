@@ -144,8 +144,13 @@ impl Shell {
         toolbar.add_top_bar(&tab_bar);
         toolbar.set_content(Some(&tabs));
 
+        // >>> palette agent: the floating layer the command palette mounts into.
+        let floating = gtk::Overlay::new();
+        floating.set_child(Some(&toolbar));
+        // <<< palette agent
+
         let toasts = adw::ToastOverlay::new();
-        toasts.set_child(Some(&toolbar));
+        toasts.set_child(Some(&floating));
 
         let window = adw::ApplicationWindow::builder()
             .application(app)
@@ -157,8 +162,11 @@ impl Shell {
             .build();
 
         let overlays = Overlays::new(Arc::clone(&engine), &window);
-        toolbar.add_bottom_bar(overlays.prompt_bar());
         toolbar.add_bottom_bar(&status_bar);
+
+        // >>> palette agent
+        floating.add_overlay(overlays.palette());
+        // <<< palette agent
 
         let shell = Rc::new(Self {
             engine,

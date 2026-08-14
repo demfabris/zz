@@ -296,7 +296,14 @@ impl ClientCore {
         self.display_panes.as_ref()
     }
 
-    fn reset_connection(&mut self, hello: ServerHello) {
+    /// Adopt a handshake's settings — capabilities, appearance, options, key
+    /// tables, status — and nothing else. A shell that keeps rendering its
+    /// last frame across a reconnect calls this instead of feeding the hello
+    /// through [`Self::handle_message`], which is the whole reset:
+    /// `adopt_hello` + [`Self::clear_attachment`] + [`Self::reset_session`].
+    ///
+    /// Emits no events, for the same reason as [`Self::reset_session`].
+    pub fn adopt_hello(&mut self, hello: ServerHello) {
         let ServerHello {
             protocol_version: _,
             server_id: _,
@@ -315,16 +322,41 @@ impl ClientCore {
         self.mux_options = mux_options;
         self.key_tables = key_tables;
         self.status = status;
-        self.snapshot = Arc::new(MuxSnapshot::default());
-        self.attached_session = None;
-        self.viewports.clear();
-        self.full_pending.clear();
+    }
+
+    /// Drop the per-session state a reattach republishes — prefix arming,
+    /// prompt, command output, choosers, display-panes — while keeping what
+    /// the hello established. A shell calls this when the session goes away
+    /// under it (detach, server stopping, host loss) so stale overlays do not
+    /// outlive it.
+    ///
+    /// Emits no events: the caller drove the reset and already knows what it
+    /// cleared, so events here would double-fire against its own bookkeeping.
+    pub fn reset_session(&mut self) {
         self.prefix_armed = false;
         self.command_prompt = None;
         self.command_output = None;
         self.choose_tree = None;
         self.choose_buffer = None;
         self.display_panes = None;
+    }
+
+    /// Forget the current attachment — session, snapshot and retained
+    /// viewports — without disturbing hello state. A shell calls this when it
+    /// moves to a different daemon, so the old machine's layout cannot render
+    /// against the new one. Emits no events, for the same reason as
+    /// [`Self::reset_session`].
+    pub fn clear_attachment(&mut self) {
+        self.attached_session = None;
+        self.snapshot = Arc::new(MuxSnapshot::default());
+        self.viewports.clear();
+        self.full_pending.clear();
+    }
+
+    fn reset_connection(&mut self, hello: ServerHello) {
+        self.adopt_hello(hello);
+        self.clear_attachment();
+        self.reset_session();
         self.events.push_back(CoreEvent::HelloReceived);
     }
 
@@ -549,7 +581,7 @@ impl ClientCore {
     fn update_choose_tree(&mut self, search: Option<ChooseTreeSearchState>, selected: u32) {
         if let Some(state) = self.choose_tree.as_mut() {
             state.search = search;
-            state.selected = selected;
+            state.selected = clamp_selected(selected, state.items.len());
             self.events.push_back(CoreEvent::ChooseTreeChanged);
         }
     }
@@ -557,10 +589,17 @@ impl ClientCore {
     fn update_choose_buffer(&mut self, search: Option<ChooseBufferSearchState>, selected: u32) {
         if let Some(state) = self.choose_buffer.as_mut() {
             state.search = search;
-            state.selected = selected;
+            state.selected = clamp_selected(selected, state.items.len());
             self.events.push_back(CoreEvent::ChooseBufferChanged);
         }
     }
+}
+
+/// A cursor delta indexes the item list the client already holds. The daemon
+/// only sends one when that list is unchanged, so an out-of-range index means
+/// the two sides disagree; parking on the last row beats pointing past the end.
+fn clamp_selected(selected: u32, items: usize) -> u32 {
+    selected.min(u32::try_from(items.saturating_sub(1)).unwrap_or(u32::MAX))
 }
 
 /// Which rows a patch will touch, computed against the pre-apply viewport.

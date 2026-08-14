@@ -15,7 +15,7 @@ use zz_protocol::{
 use zz_terminal::{ClipboardTarget, KeyAction, TerminalAppearance};
 
 use crate::{
-    engine::{Engine, EngineEvent, SessionView},
+    engine::{Engine, EngineEvent, HostId, SessionView},
     ui::{
         keys,
         overlay::Overlays,
@@ -27,6 +27,7 @@ use crate::{
         prefix,
         settings::SettingsRoute,
         sidebar::{Hooks, NewSessionPanel, Sidebar},
+        ssh_prompt,
         terminal::TerminalView,
         tray,
     },
@@ -127,6 +128,9 @@ pub struct Shell {
     focused_pane: Cell<Option<PaneId>>,
     font_offset: Cell<f32>,
     numbering: Cell<bool>,
+    /// The host the pane widgets belong to. Pane ids are per daemon, so a
+    /// switch cannot reuse a single widget however well the ids line up.
+    host: Cell<HostId>,
     syncing: Cell<bool>,
     detaching: Cell<bool>,
     pager: RefCell<Option<OutputPager>>,
@@ -224,6 +228,7 @@ impl Shell {
             focused_pane: Cell::new(None),
             font_offset: Cell::new(0.0),
             numbering: Cell::new(false),
+            host: Cell::new(HostId::LOCAL),
             syncing: Cell::new(false),
             detaching: Cell::new(false),
             pager: RefCell::new(None),
@@ -239,6 +244,7 @@ impl Shell {
         shell.connect_signals();
         shell.connect_sidebar();
         shell.pump_events();
+        shell.pump_ssh_prompts();
         shell.sync();
         shell.sidebar.refresh_status();
         shell
@@ -462,13 +468,19 @@ impl Shell {
     /// Closing the window detaches, unless `quit-daemon-on-exit` says the
     /// daemon should go with it. The value is read from the file at this
     /// moment, so a hand edit a second ago already counts.
+    /// It is the local daemon that key is about — a host's daemon belongs to
+    /// the machine it runs on, and quitting a client here has no business
+    /// stopping it — so the leave is aimed rather than sent to whichever host
+    /// the workspace happens to be showing.
     fn leave(&self) {
         if !self.detaching.get() && self.settings.quit_daemon_on_exit() {
-            self.engine
-                .execute(CommandInvocation::new("kill-server", [] as [&str; 0]));
+            self.engine.execute_on(
+                HostId::LOCAL,
+                CommandInvocation::new("kill-server", [] as [&str; 0]),
+            );
             return;
         }
-        self.engine.detach();
+        self.engine.detach_all();
     }
 
     /// The daemon owns window lifetime, so the tab's close button asks it to
@@ -502,7 +514,45 @@ impl Shell {
         });
     }
 
+    /// ssh's questions, answered in a native dialog. Declining parks the host:
+    /// the connect thread is blocked on this reply, and dialling again would
+    /// only ask the same question one rung later.
+    fn pump_ssh_prompts(self: &Rc<Self>) {
+        let prompts = self.engine.ssh_prompts();
+        let shell = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            while let Ok(request) = prompts.recv().await {
+                let Some(shell) = shell.upgrade() else {
+                    return;
+                };
+                ssh_prompt::present(&shell.window, &shell.engine, &request);
+            }
+        });
+    }
+
     fn handle(self: &Rc<Self>, event: EngineEvent) {
+        // The local daemon's events arrive bare; a host's carry the host they
+        // happened on. Everything below this line is about the host the
+        // workspace is showing, so a background host is answered separately —
+        // a machine nobody is looking at must never close the window or move
+        // the panes.
+        let (host, event) = match event {
+            EngineEvent::Fleet(host, inner) => (host, *inner),
+            EngineEvent::HostState(host) => return self.handle_host_state(host),
+            EngineEvent::FleetChanged => return self.sidebar.sync(),
+            other => (HostId::LOCAL, other),
+        };
+        if host != self.engine.active_host() {
+            return self.handle_background(host, event);
+        }
+        if host != HostId::LOCAL
+            && let EngineEvent::Disconnected(reason) = &event
+        {
+            self.toasts
+                .add_toast(adw::Toast::new(&format!("Host disconnected: {reason}")));
+            self.sidebar.sync();
+            return;
+        }
         match event {
             EngineEvent::FramesReady => self.apply_frames(),
             EngineEvent::StatusChanged => self.sidebar.refresh_status(),
@@ -524,18 +574,25 @@ impl Shell {
             }
             // The ring grew under a scroll that is already on screen; the next
             // notch will reach further back, so nothing has to repaint now.
-            EngineEvent::HistoryChanged(_) => {}
+            // The three fleet variants are unwrapped above and cannot arrive
+            // here at all.
+            EngineEvent::HistoryChanged(_)
+            | EngineEvent::Fleet(..)
+            | EngineEvent::HostState(_)
+            | EngineEvent::FleetChanged => {}
             EngineEvent::OpenUri { uri, .. } => self.open_uri(&uri),
             // ── end gtk-termux ──
             EngineEvent::Notice(text) => self.toasts.add_toast(adw::Toast::new(&text)),
             EngineEvent::Reconnecting { attempt } => {
                 self.overlays.dismiss();
+                self.sidebar.sync();
                 if attempt == 1 {
                     self.toasts
                         .add_toast(adw::Toast::new("Reconnecting to the zz daemon…"));
                 }
             }
             EngineEvent::Reconnected => {
+                self.sidebar.sync();
                 self.settings.resend_overrides();
                 self.toasts.add_toast(adw::Toast::new("Reconnected"));
             }
@@ -552,6 +609,38 @@ impl Shell {
                 self.overlays.dismiss();
                 self.window.close();
             }
+        }
+    }
+
+    /// A host that is not on screen still moves the tree: sessions come and go
+    /// there, and its bells still bubble up. Nothing else about it reaches the
+    /// workspace.
+    fn handle_background(self: &Rc<Self>, host: HostId, event: EngineEvent) {
+        match event {
+            EngineEvent::SnapshotChanged
+            | EngineEvent::Attached(_)
+            | EngineEvent::Detached
+            | EngineEvent::Disconnected(_) => self.sidebar.sync(),
+            // A message from a machine that is not on screen has to say which
+            // machine, or "the zz daemon stopped" reads as the one in front of
+            // you.
+            EngineEvent::Notice(text) => {
+                let named = self
+                    .engine
+                    .host_name(host)
+                    .map_or(text.clone(), |name| format!("{name}: {text}"));
+                self.toasts.add_toast(adw::Toast::new(&named));
+            }
+            _ => {}
+        }
+    }
+
+    /// A connection state moved. The row repaints either way; the workspace
+    /// re-reads itself only when it is that host's panes on screen.
+    fn handle_host_state(self: &Rc<Self>, host: HostId) {
+        self.sidebar.sync();
+        if host == self.engine.active_host() {
+            self.sync();
         }
     }
 
@@ -604,6 +693,14 @@ impl Shell {
 
     fn sync(self: &Rc<Self>) {
         self.sidebar.sync();
+        let host = self.engine.active_host();
+        if self.host.replace(host) != host {
+            // Another machine's panes: nothing on screen can be reused, and a
+            // pane id that happens to match belongs to a different terminal.
+            self.widgets.borrow_mut().clear();
+            self.focused_pane.set(None);
+            self.grid_host.set(None);
+        }
         let Some(view) = self.engine.session_view() else {
             self.sync_empty();
             return;

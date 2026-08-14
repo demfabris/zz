@@ -1,3 +1,4 @@
+mod hosts;
 mod model;
 mod panel;
 
@@ -16,6 +17,7 @@ use zz_terminal::{KeyAction, KeyInput};
 
 use crate::{engine::Engine, ui::keys};
 
+pub use hosts::parse_add_host;
 pub use panel::NewSessionPanel;
 
 use model::{
@@ -57,6 +59,9 @@ pub struct Sidebar {
     tree: RefCell<Tree>,
     rows: RefCell<Vec<Row>>,
     expanded: RefCell<BTreeSet<TreeNode>>,
+    /// Hosts whose first sessions have already been revealed, so a host opens
+    /// itself once rather than every time its tree changes.
+    greeted: RefCell<BTreeSet<HostId>>,
     selected: Cell<Option<TreeNode>>,
     revealed: Cell<Option<TreeNode>>,
     seeded: Cell<bool>,
@@ -135,6 +140,7 @@ impl Sidebar {
             tree: RefCell::new(Tree::default()),
             rows: RefCell::new(Vec::new()),
             expanded: RefCell::new(BTreeSet::new()),
+            greeted: RefCell::new(BTreeSet::new()),
             selected: Cell::new(None),
             revealed: Cell::new(None),
             seeded: Cell::new(false),
@@ -217,15 +223,30 @@ impl Sidebar {
     /// Rebuild the tree from the snapshot the core holds. Identical rows are
     /// left alone, so a redraw costs nothing while the daemon's clock ticks.
     pub fn sync(&self) {
-        let snapshot = self.engine.snapshot();
-        let attached = self.engine.attached_session();
-        let tree = Tree::from_snapshot_for(HostId::LOCAL, &self.host, &snapshot, attached);
+        let hosts = self.engine.hosts();
+        let tree = Tree::from_hosts(&hosts, |view| {
+            if view.id == HostId::LOCAL {
+                self.host.clone()
+            } else {
+                view.name.clone()
+            }
+        });
 
         {
             let mut expanded = self.expanded.borrow_mut();
             if !self.seeded.replace(true) {
                 expanded.insert(TreeNode::Host(HostId::LOCAL));
             }
+            // A host opens itself the first time it has anything to show; a
+            // machine that is still dialling has an empty root, and opening
+            // that would only teach the user to close it again.
+            let mut greeted = self.greeted.borrow_mut();
+            for host in &tree.hosts {
+                if !host.sessions.is_empty() && greeted.insert(host.id) {
+                    expanded.insert(TreeNode::Host(host.id));
+                }
+            }
+            drop(greeted);
             if let Some(active) = tree.active
                 && self.revealed.get() != Some(active)
             {
@@ -289,15 +310,18 @@ impl Sidebar {
         actions.add_action(&action);
 
         let action = gio::SimpleAction::new("add-host", None);
-        action.connect_activate(|_, _| {
-            log::info!("zz-gtk cannot add hosts yet: add a host- line to zz/config");
+        let target = Rc::downgrade(self);
+        action.connect_activate(move |_, _| {
+            if let Some(sidebar) = target.upgrade() {
+                hosts::add(&sidebar.split, &sidebar.engine);
+            }
         });
         actions.add_action(&action);
 
         self.split.insert_action_group("sidebar", Some(&actions));
     }
 
-    fn verbs() -> [(&'static str, fn(&Rc<Self>, TreeNode)); 5] {
+    fn verbs() -> [(&'static str, fn(&Rc<Self>, TreeNode)); 8] {
         [
             ("toggle", |sidebar, node| {
                 sidebar.select(Some(node));
@@ -305,13 +329,13 @@ impl Sidebar {
             }),
             ("rename", |sidebar, node| sidebar.rename(node)),
             ("kill", |sidebar, node| {
-                if let TreeNode::Target(_, target) = node {
-                    sidebar.engine.execute(kill_target_command(target));
+                if let TreeNode::Target(host, target) = node {
+                    sidebar.engine.execute_on(host, kill_target_command(target));
                 }
             }),
             ("new-window", |sidebar, node| {
-                if let TreeNode::Target(_, TreeTarget::Session(session)) = node {
-                    sidebar.engine.execute(new_window_command(session));
+                if let TreeNode::Target(host, TreeTarget::Session(session)) = node {
+                    sidebar.engine.execute_on(host, new_window_command(session));
                 }
             }),
             ("new-pane", |sidebar, node| {
@@ -322,10 +346,39 @@ impl Sidebar {
                 if let Some(pane) = pane {
                     sidebar
                         .engine
-                        .execute(new_pane_command(pane, Axis::Horizontal));
+                        .execute_on(node.host(), new_pane_command(pane, Axis::Horizontal));
                 }
             }),
+            // A host's own verbs. New session lands on that machine rather than
+            // on whichever one the workspace happens to be showing.
+            ("host-new-session", |sidebar, node| {
+                sidebar.engine.new_session_on(node.host());
+            }),
+            ("reconnect-host", |sidebar, node| {
+                sidebar.engine.reconnect_host(node.host());
+            }),
+            ("close-host", |sidebar, node| {
+                let host = node.host();
+                sidebar.close_host(host);
+            }),
         ]
+    }
+
+    /// Closing a host is a config edit, exactly as the desktop makes it: the
+    /// line goes, the poll notices, and the fleet layer drops the connection.
+    /// The row is dropped here as well so the tree answers immediately rather
+    /// than half a second later.
+    fn close_host(&self, host: HostId) {
+        let Some(name) = self.engine.host_name(host) else {
+            return;
+        };
+        if let Err(error) = crate::config::write_host(&name, None) {
+            self.engine
+                .notify(format!("Could not remove host-{name}: {error}"));
+            return;
+        }
+        self.engine.close_host(host);
+        self.sync();
     }
 
     fn connect_signals(self: &Rc<Self>, grip: &gtk::Box) {
@@ -467,12 +520,12 @@ impl Sidebar {
         let activation = self
             .tree
             .borrow()
-            .activation_for_node(node, self.engine.attached_session());
+            .activation_for_node(node, self.attached_on(node.host()));
         let Some(activation) = activation else {
             self.toggle_node(node);
             return;
         };
-        self.perform_activation(activation);
+        self.perform_activation(node.host(), activation);
         if release {
             self.blur();
         }
@@ -482,19 +535,30 @@ impl Sidebar {
         let activation = self
             .tree
             .borrow()
-            .rename_activation_for_node(node, self.engine.attached_session());
+            .rename_activation_for_node(node, self.attached_on(node.host()));
         if let Some(activation) = activation {
-            self.perform_activation(activation);
+            self.perform_activation(node.host(), activation);
         }
     }
 
-    fn perform_activation(&self, activation: Activation) {
+    /// Where the daemon behind `host` is attached, which is what decides
+    /// whether a row on it can be selected outright or has to be attached to
+    /// first. A host nobody has activated yet is attached to nothing.
+    fn attached_on(&self, host: HostId) -> Option<zz_protocol::SessionId> {
+        self.tree
+            .borrow()
+            .host(host)
+            .and_then(|host| host.sessions.iter().find(|session| session.active))
+            .map(|session| session.id)
+    }
+
+    fn perform_activation(&self, host: HostId, activation: Activation) {
         match activation {
-            Activation::Attach(session) => self.engine.attach_session(session),
-            Activation::Execute(command) => self.engine.execute(command),
+            Activation::Attach(session) => self.engine.attach_host_session(host, session),
+            Activation::Execute(command) => self.engine.execute_on(host, command),
             Activation::AttachThenExecute(session, command) => {
-                self.engine.attach_session(session);
-                self.engine.execute(command);
+                self.engine.attach_host_session(host, session);
+                self.engine.execute_on(host, command);
             }
         }
     }
@@ -652,14 +716,16 @@ impl Sidebar {
     }
 
     fn rebuild_rows(&self) {
-        let rows = self.tree.borrow().rows(&self.expanded.borrow());
+        let tree = self.tree.borrow();
+        let rows = tree.rows(&self.expanded.borrow());
         if *self.rows.borrow() == rows {
             return;
         }
         self.list.remove_all();
         for row in &rows {
-            self.list.append(&build_row(row));
+            self.list.append(&build_row(row, &tree));
         }
+        drop(tree);
         self.rows.replace(rows);
     }
 
@@ -671,7 +737,7 @@ impl Sidebar {
             return;
         };
         self.select(Some(node));
-        let menu = row_menu(node, &self.rows.borrow());
+        let menu = row_menu(node, &self.rows.borrow(), &self.tree.borrow());
         self.menu.set_menu_model(Some(&menu));
         let point = self
             .list
@@ -726,7 +792,7 @@ fn build_status() -> (gtk::Box, gtk::Label, gtk::Label) {
 
 /// One row is a widget tree rather than an `adw::ActionRow` so the disclosure,
 /// the kind marker and the hover gutter sit where the desktop puts them.
-fn build_row(row: &Row) -> gtk::ListBoxRow {
+fn build_row(row: &Row, tree: &Tree) -> gtk::ListBoxRow {
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     content.set_margin_start(i32::from(row.depth) * INDENT);
     content.add_css_class("zz-sidebar-row");
@@ -763,6 +829,16 @@ fn build_row(row: &Row) -> gtk::ListBoxRow {
     }
     content.append(&label);
 
+    // A host says what its connection is doing where a session would say
+    // nothing at all — the row itself is the only place a machine that is
+    // retrying can report it.
+    if let Some(detail) = &row.detail {
+        let state = gtk::Label::new(Some(detail));
+        state.add_css_class("dim-label");
+        state.add_css_class("caption");
+        content.append(&state);
+    }
+
     if row.bell {
         let bell = gtk::Label::new(Some("●"));
         bell.add_css_class("zz-bell");
@@ -770,10 +846,13 @@ fn build_row(row: &Row) -> gtk::ListBoxRow {
         content.append(&bell);
     }
 
-    let gutter = build_gutter(row, &target);
+    let gutter = build_gutter(row, &target, tree);
     content.append(&gutter);
 
     let list_row = gtk::ListBoxRow::builder().child(&content).build();
+    if let Some(hint) = &row.hint {
+        list_row.set_tooltip_text(Some(hint));
+    }
     if row.active {
         list_row.add_css_class("zz-sidebar-active");
     }
@@ -790,7 +869,7 @@ fn build_row(row: &Row) -> gtk::ListBoxRow {
 
 /// The hover gutter: what a row can do without a menu. The host keeps its menu
 /// button visible; everything else appears under the pointer.
-fn build_gutter(row: &Row, target: &glib::Variant) -> gtk::Box {
+fn build_gutter(row: &Row, target: &glib::Variant, tree: &Tree) -> gtk::Box {
     let gutter = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     gutter.set_valign(gtk::Align::Center);
 
@@ -800,7 +879,7 @@ fn build_gutter(row: &Row, target: &glib::Variant) -> gtk::Box {
                 &gtk::MenuButton::builder()
                     .icon_name("view-more-symbolic")
                     .tooltip_text("Host actions")
-                    .menu_model(&host_menu())
+                    .menu_model(&host_menu(row.node, tree))
                     .has_frame(false)
                     .build(),
             );
@@ -843,18 +922,35 @@ fn gutter_button(icon: &str, tooltip: &str, action: &str, target: &glib::Variant
     button
 }
 
-fn host_menu() -> gio::Menu {
+/// The local root offers the fleet itself; a host offers only what can be done
+/// to that machine. New session is gated on the connection, because a command
+/// aimed at a daemon that is not there is silently dropped.
+fn host_menu(node: TreeNode, tree: &Tree) -> gio::Menu {
+    let host = node.host();
     let menu = gio::Menu::new();
-    menu.append(Some("New session"), Some("sidebar.new-session"));
-    menu.append(Some("Add host…"), Some("sidebar.add-host"));
+    if host == HostId::LOCAL {
+        menu.append(Some("New session"), Some("sidebar.new-session"));
+        menu.append(Some("Add host…"), Some("sidebar.add-host"));
+        return menu;
+    }
+    let value = node.to_string().to_variant();
+    let connected = tree
+        .host(host)
+        .is_some_and(|host| host.state.is_connected());
+    if connected {
+        menu.append_item(&item("New session", "sidebar.host-new-session", &value));
+    } else {
+        menu.append_item(&item("Reconnect", "sidebar.reconnect-host", &value));
+    }
+    menu.append_item(&item("Close host", "sidebar.close-host", &value));
     menu
 }
 
 /// The right-click menu. Rename is the daemon's value prompt — the client never
 /// edits a name itself, it asks for the prompt the overlay then renders.
-fn row_menu(node: TreeNode, rows: &[Row]) -> gio::Menu {
+fn row_menu(node: TreeNode, rows: &[Row], tree: &Tree) -> gio::Menu {
     let TreeNode::Target(_, target) = node else {
-        return host_menu();
+        return host_menu(node, tree);
     };
     let Some(kind) = rows.iter().find(|row| row.node == node).map(|row| row.kind) else {
         return gio::Menu::new();

@@ -5,14 +5,9 @@ use zz_protocol::{
     WindowId, WindowSnapshot,
 };
 
-/// Which daemon a row belongs to. Only the local one is dialled today; the id
-/// exists so a fleet layer can add roots without reshaping the tree.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct HostId(pub u32);
+pub use crate::engine::HostId;
 
-impl HostId {
-    pub const LOCAL: Self = Self(0);
-}
+use crate::engine::{HostState, HostView};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TreeTarget {
@@ -88,6 +83,11 @@ pub struct Row {
     pub kind: RowKind,
     pub depth: u8,
     pub label: String,
+    /// A host row's connection state, shown after its name. Every other row —
+    /// and a host that is simply connected — has nothing to add.
+    pub detail: Option<String>,
+    /// Why a host is in the state it is in, for the row's tooltip.
+    pub hint: Option<String>,
     /// The row the mux itself is on: attached session, focused window, active
     /// pane. Distinct from the client-local keyboard selection.
     pub active: bool,
@@ -123,6 +123,7 @@ pub struct Tree {
 pub struct TreeHost {
     pub id: HostId,
     pub name: String,
+    pub state: HostState,
     pub sessions: Vec<TreeSession>,
 }
 
@@ -214,10 +215,30 @@ impl Tree {
             hosts: vec![TreeHost {
                 id: host,
                 name: name.to_owned(),
+                state: HostState::Connected,
                 sessions,
             }],
             active,
         }
+    }
+
+    /// The whole fleet as one tree: every host a root, in the order the engine
+    /// lists them. Only the active host has an attachment, so at most one row in
+    /// the whole tree is where the mux is.
+    pub fn from_hosts(hosts: &[HostView], name_of: impl Fn(&HostView) -> String) -> Self {
+        let mut tree = Self::default();
+        for view in hosts {
+            let mut host =
+                Self::from_snapshot_for(view.id, &name_of(view), &view.snapshot, view.attached);
+            tree.active = tree.active.or(host.active);
+            if let Some(root) = host.hosts.pop() {
+                tree.hosts.push(TreeHost {
+                    state: view.state.clone(),
+                    ..root
+                });
+            }
+        }
+        tree
     }
 
     pub fn host(&self, id: HostId) -> Option<&TreeHost> {
@@ -235,6 +256,8 @@ impl Tree {
                 kind: RowKind::Host,
                 depth: 0,
                 label: host.name.clone(),
+                detail: host.state.detail(),
+                hint: host.state.hint().map(str::to_owned),
                 active: false,
                 on_active_path: true,
                 bell: self.has_pending_bell(node),
@@ -252,6 +275,8 @@ impl Tree {
                     kind: RowKind::Session,
                     depth: 1,
                     label: session.label(),
+                    detail: None,
+                    hint: None,
                     active: self.active == Some(node),
                     on_active_path: session.active,
                     bell: self.has_pending_bell(node),
@@ -271,6 +296,8 @@ impl Tree {
                         },
                         depth: 2,
                         label: window.label(),
+                        detail: None,
+                        hint: None,
                         active: self.active == Some(node),
                         on_active_path: window.active,
                         bell: self.has_pending_bell(node),
@@ -288,6 +315,8 @@ impl Tree {
                             kind: RowKind::Pane(pane.kind),
                             depth: 3,
                             label: pane.label.clone(),
+                            detail: None,
+                            hint: None,
                             active,
                             on_active_path: active,
                             bell: pane.bell,
@@ -663,6 +692,8 @@ pub fn rename_prompt_command(target: TreeTarget, current: &str) -> Option<Comman
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use zz_protocol::{LayoutNode, SessionSnapshot, SplitId, WindowSnapshot};
 
     use super::*;
@@ -747,6 +778,64 @@ mod tests {
 
     fn node(target: TreeTarget) -> TreeNode {
         TreeNode::Target(HostId::LOCAL, target)
+    }
+
+    /// A fleet is extra roots, nothing else: each host projects its own daemon,
+    /// only the host with an attachment carries the mux's own row, and a host
+    /// that is not connected still gets a row that says so.
+    #[test]
+    fn every_host_is_a_root_and_only_one_of_them_holds_the_mux() {
+        let fleet = [
+            HostView {
+                id: HostId::LOCAL,
+                name: "local".to_owned(),
+                state: HostState::Connected,
+                snapshot: Arc::new(fixture()),
+                attached: Some(SessionId(1)),
+            },
+            HostView {
+                id: HostId(1),
+                name: "desktop".to_owned(),
+                state: HostState::Reconnecting { attempt: 2 },
+                snapshot: Arc::new(snapshot(vec![session(
+                    9,
+                    "remote",
+                    vec![window(9, 0, "far", vec![pane(9, "htop", false)])],
+                )])),
+                attached: None,
+            },
+        ];
+
+        let tree = Tree::from_hosts(&fleet, |view| view.name.clone());
+        let expanded = BTreeSet::from([TreeNode::Host(HostId::LOCAL), TreeNode::Host(HostId(1))]);
+        let rows = tree.rows(&expanded);
+
+        assert_eq!(
+            rows.iter()
+                .filter(|row| matches!(row.kind, RowKind::Host))
+                .map(|row| (row.label.as_str(), row.detail.clone()))
+                .collect::<Vec<_>>(),
+            [
+                ("local", None),
+                ("desktop", Some("retrying (2)".to_owned()))
+            ]
+        );
+        assert_eq!(
+            tree.active,
+            Some(TreeNode::Target(HostId::LOCAL, TreeTarget::Pane(PaneId(1)))),
+            "the host without an attachment cannot be where the mux is"
+        );
+        assert_eq!(
+            tree.activation_for_node(
+                TreeNode::Target(HostId(1), TreeTarget::Session(SessionId(9))),
+                None
+            ),
+            Some(Activation::Attach(SessionId(9))),
+            "activating a remote row attaches that host, not the local one"
+        );
+        assert!(rows.iter().any(|row| row.label == "remote"));
+        assert!(tree.is_live(TreeNode::Target(HostId(1), TreeTarget::Pane(PaneId(9)))));
+        assert!(!tree.is_live(TreeNode::Target(HostId::LOCAL, TreeTarget::Pane(PaneId(9)))));
     }
 
     #[test]

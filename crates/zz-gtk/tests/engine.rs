@@ -27,8 +27,8 @@ use std::{
 };
 
 use zz_client::{ClientCore, Outbound};
-use zz_daemon::{CommandClient, Daemon, Endpoint, InteractiveClient};
-use zz_gtk::engine::{Engine, EngineEvent};
+use zz_daemon::{CommandClient, Daemon, Endpoint, HostEntry, InteractiveClient};
+use zz_gtk::engine::{Engine, EngineEvent, HostId, HostState};
 use zz_protocol::{CommandInvocation, InputMessage, PaneId, ProtocolMessage};
 use zz_terminal::{
     Glyph, KeyAction, KeyCode, KeyInput, Modifiers, PackedCell, PackedStyle, TerminalColorScheme,
@@ -533,6 +533,172 @@ fn the_daemon_opens_the_output_pager_and_asks_for_the_search_prompt() {
     assert_eq!(opened, pane);
 
     daemon.shutdown();
+}
+
+/// Two daemons, dialled as "local" and as a configured fleet host. The ssh tier
+/// is bypassed on purpose: a host is an `Endpoint`, and `unix://` is one the
+/// desktop already accepts in a `host-` line, so a second socket exercises
+/// every layer above the transport without needing a second machine.
+#[test]
+fn a_configured_host_joins_the_tree_and_activating_it_moves_the_workspace() {
+    let local = Fixture::boot("fleet-local", FIXTURE);
+    let remote = Fixture::boot("fleet-remote", REBORN);
+    let engine = connect(&local);
+    let mut watch = Watch::default();
+
+    let here = watch.poll(&engine, "the local pane", |_| first_terminal_pane(&engine));
+    engine.resize_terminal(here, COLUMNS, ROWS, CELL_WIDTH_PX, CELL_HEIGHT_PX);
+    watch.poll(&engine, "the local banner", |_| {
+        contains(&engine, here, "zz-gtk-ready")
+    });
+
+    assert!(
+        engine.set_fleet_hosts(&[host_entry("remote", &remote.socket)]),
+        "a host the fleet did not have is a change"
+    );
+    let host = watch.poll(&engine, "the host to connect", |_| {
+        let hosts = engine.hosts();
+        let host = hosts.get(1)?;
+        (host.state == HostState::Connected && !host.snapshot.sessions.is_empty())
+            .then_some(host.id)
+    });
+    assert_ne!(host, HostId::LOCAL);
+    assert!(
+        !engine.set_fleet_hosts(&[host_entry("remote", &remote.socket)]),
+        "the same file must not re-dial a host that is already connected"
+    );
+
+    let hosts = engine.hosts();
+    assert_eq!(hosts.len(), 2, "the local daemon and one host");
+    assert_eq!(hosts[0].id, HostId::LOCAL);
+    assert_eq!(hosts[1].name, "remote");
+    assert!(
+        hosts[0].attached.is_some(),
+        "the local daemon is the one the workspace starts on"
+    );
+    assert!(
+        hosts[1].attached.is_none(),
+        "a host is connected but unattached until one of its rows is activated: \
+         an attachment is what makes a daemon stream frames"
+    );
+    assert_eq!(
+        engine.active_host(),
+        HostId::LOCAL,
+        "adding a host must not move the workspace off the machine it is on"
+    );
+
+    let session = hosts[1].snapshot.sessions[0].id;
+    engine.attach_host_session(host, session);
+    assert_eq!(engine.active_host(), host);
+    let there = watch.poll(&engine, "the host's pane", |_| first_terminal_pane(&engine));
+    engine.resize_terminal(there, COLUMNS, ROWS, CELL_WIDTH_PX, CELL_HEIGHT_PX);
+    watch.poll(&engine, "the host's banner", |_| {
+        contains(&engine, there, "zz-gtk-reborn")
+    });
+    engine.send_text(there, "over-there\r\n".to_owned());
+    watch.poll(&engine, "input on the host's pane", |_| {
+        contains(&engine, there, "over-there")
+    });
+    assert_eq!(
+        engine.hosts()[1].attached,
+        Some(session),
+        "activating a row is what attaches its host"
+    );
+
+    local.shutdown();
+    remote.shutdown();
+}
+
+/// The property that makes a fleet worth having: one machine going away is one
+/// machine going away. The dead host keeps the frames it had, the live one keeps
+/// answering, and nothing quietly re-points the workspace at the local daemon.
+#[test]
+fn a_dead_host_freezes_only_itself_and_removing_it_returns_to_the_local_daemon() {
+    let local = Fixture::boot("fleet-live", FIXTURE);
+    let remote = Fixture::boot("fleet-dead", REBORN);
+    let relay = Relay::start("fleet-relay", &remote.socket);
+    let engine = connect(&local);
+    let mut watch = Watch::default();
+
+    let here = watch.poll(&engine, "the local pane", |_| first_terminal_pane(&engine));
+    engine.resize_terminal(here, COLUMNS, ROWS, CELL_WIDTH_PX, CELL_HEIGHT_PX);
+    watch.poll(&engine, "the local banner", |_| {
+        contains(&engine, here, "zz-gtk-ready")
+    });
+
+    engine.set_fleet_hosts(&[host_entry("remote", &relay.front)]);
+    let (host, session) = watch.poll(&engine, "the host to connect", |_| {
+        let hosts = engine.hosts();
+        let host = hosts.get(1)?;
+        let session = host.snapshot.sessions.first()?;
+        (host.state == HostState::Connected).then_some((host.id, session.id))
+    });
+    engine.attach_host_session(host, session);
+    let there = watch.poll(&engine, "the host's pane", |_| first_terminal_pane(&engine));
+    engine.resize_terminal(there, COLUMNS, ROWS, CELL_WIDTH_PX, CELL_HEIGHT_PX);
+    watch.poll(&engine, "the host's banner", |_| {
+        contains(&engine, there, "zz-gtk-reborn")
+    });
+    let frozen = engine.viewport(there).map(|viewport| signature(&viewport));
+
+    relay.cut();
+    let attempt = watch.poll(&engine, "the host's own retry ladder", |_| {
+        match engine.hosts().get(1).map(|host| host.state.clone()) {
+            Some(HostState::Reconnecting { attempt }) => Some(attempt),
+            _ => None,
+        }
+    });
+    assert!(attempt >= 1);
+    assert_eq!(
+        engine.active_host(),
+        host,
+        "a host that failed must never hand the workspace back to the local daemon"
+    );
+    assert_eq!(
+        engine.viewport(there).map(|viewport| signature(&viewport)),
+        frozen,
+        "the dead host's last frame is what stays on screen"
+    );
+    assert_eq!(
+        engine.hosts()[0].state,
+        HostState::Connected,
+        "the local daemon is a different connection and did not notice"
+    );
+
+    // The live daemon is not merely marked live: it still answers.
+    engine.execute_on(
+        HostId::LOCAL,
+        CommandInvocation::new("new-window", [] as [&str; 0]),
+    );
+    watch.poll(&engine, "the local daemon to act on a command", |_| {
+        let hosts = engine.hosts();
+        (hosts[0].snapshot.sessions[0].windows.len() == 2).then_some(())
+    });
+
+    assert!(
+        engine.set_fleet_hosts(&[]),
+        "a host the file dropped is a change"
+    );
+    assert_eq!(engine.hosts().len(), 1);
+    assert_eq!(
+        engine.active_host(),
+        HostId::LOCAL,
+        "closing the host the workspace was on is the one time it falls back"
+    );
+    watch.poll(&engine, "the workspace to be local again", |_| {
+        contains(&engine, here, "zz-gtk-ready")
+    });
+
+    relay.stop();
+    local.shutdown();
+    remote.shutdown();
+}
+
+fn host_entry(name: &str, socket: &Path) -> HostEntry {
+    HostEntry {
+        name: name.to_owned(),
+        endpoint: Endpoint::Local(socket.to_owned()),
+    }
 }
 
 struct Fixture {

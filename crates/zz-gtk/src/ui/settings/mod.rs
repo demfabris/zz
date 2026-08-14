@@ -36,7 +36,7 @@ use crate::{
     ui::keys,
 };
 
-use pages::MuxEditor;
+use pages::{HostsPage, MuxEditor};
 use rows::{Row, Syncing, Write};
 pub use zoom::UiZoom;
 
@@ -55,6 +55,7 @@ pub struct SettingsRoute {
     banner: adw::Banner,
     zoom_row: adw::ActionRow,
     mux: Rc<MuxEditor>,
+    hosts: Rc<HostsPage>,
     zoom: UiZoom,
     css: gtk::CssProvider,
     route: RefCell<Option<gtk::Stack>>,
@@ -92,6 +93,7 @@ impl SettingsRoute {
             banner,
             zoom_row,
             mux,
+            hosts: HostsPage::new(),
             zoom: UiZoom::default(),
             css: gtk::CssProvider::new(),
             route: RefCell::new(None),
@@ -100,6 +102,7 @@ impl SettingsRoute {
         });
         route.build_surface();
         route.connect_mux_save();
+        route.connect_host_edits();
         route.install_css();
         route.apply_file();
         route
@@ -128,6 +131,58 @@ impl SettingsRoute {
                 Err(error) => route.mux.note(&format!("Could not save: {error}")),
             }
         }));
+    }
+
+    /// Adding and removing a host are file edits like any other setting: the
+    /// line is written here and the poll below is what dials or drops the
+    /// connection.
+    fn connect_host_edits(self: &Rc<Self>) {
+        let target = Rc::downgrade(self);
+        let add: Rc<dyn Fn(&str)> = Rc::new(move |typed: &str| {
+            let Some(route) = target.upgrade() else {
+                return;
+            };
+            let existing: Vec<String> = route
+                .store
+                .borrow()
+                .state()
+                .fleet_hosts()
+                .iter()
+                .map(|host| host.name.clone())
+                .collect();
+            let request = match crate::ui::sidebar::parse_add_host(typed, &existing) {
+                Ok(request) => request,
+                Err(message) => return route.hosts.note(&message),
+            };
+            match crate::config::write_host(&request.name, Some(&request.endpoint)) {
+                Ok(()) => {
+                    route.hosts.clear_entry();
+                    route.hosts.note("");
+                    route.store.borrow_mut().invalidate();
+                    route.tick();
+                }
+                Err(error) => route
+                    .hosts
+                    .note(&format!("Could not write zz/config: {error}")),
+            }
+        });
+        let target = Rc::downgrade(self);
+        let remove: Rc<dyn Fn(&str)> = Rc::new(move |name: &str| {
+            let Some(route) = target.upgrade() else {
+                return;
+            };
+            match crate::config::write_host(name, None) {
+                Ok(()) => {
+                    route.hosts.note("");
+                    route.store.borrow_mut().invalidate();
+                    route.tick();
+                }
+                Err(error) => route
+                    .hosts
+                    .note(&format!("Could not write zz/config: {error}")),
+            }
+        });
+        self.hosts.connect(add, remove);
     }
 
     /// The window's own chrome handler, for the chords that reach the settings
@@ -309,6 +364,7 @@ impl SettingsRoute {
                     content.add(self.mux.group());
                     content.upcast()
                 }
+                Page::Hosts => self.hosts.widget().clone().upcast(),
                 Page::About => pages::about(
                     &self.engine.endpoint(),
                     &self.engine.capabilities(),
@@ -451,7 +507,7 @@ impl SettingsRoute {
         })
     }
 
-    fn tick(&self) {
+    fn tick(self: &Rc<Self>) {
         let changed = self.store.borrow_mut().poll();
         if changed {
             self.apply_file();
@@ -460,12 +516,21 @@ impl SettingsRoute {
 
     /// One poll's worth of consequences: the client-local half applied here,
     /// the daemon-owned half published, and the surface re-read from both.
-    fn apply_file(&self) {
+    fn apply_file(self: &Rc<Self>) {
         let store = self.store.borrow();
         let state = store.state();
         apply_theme_mode(state);
         apply_animations(state);
+        // The fleet is a config value like any other: the poll is what adds and
+        // removes hosts, so a hand edit and this surface cannot disagree.
+        self.engine.set_fleet_hosts(state.fleet_hosts());
+        let listed: Vec<(String, String)> = state
+            .fleet_hosts()
+            .iter()
+            .map(|host| (host.name.clone(), host.endpoint.to_string()))
+            .collect();
         drop(store);
+        self.hosts.refresh(&listed);
         self.restyle();
         self.send_overrides(self.store.borrow().state());
         self.refresh_rows();
@@ -573,7 +638,7 @@ impl SettingsRoute {
         dialog.present(Some(&self.split));
     }
 
-    fn run_import(&self) {
+    fn run_import(self: &Rc<Self>) {
         match import::run() {
             Ok(report) => {
                 if report.mux_path.is_some() {

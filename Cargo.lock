@@ -10708,7 +10708,7 @@ dependencies = [
 
 [[package]]
 name = "zz"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "agent-client-protocol",
  "async-channel",
@@ -10756,7 +10756,7 @@ dependencies = [
 
 [[package]]
 name = "zz-browser"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "async-channel",
  "base64",
@@ -10781,7 +10781,7 @@ dependencies = [
 
 [[package]]
 name = "zz-chrome-import"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -10807,7 +10807,7 @@ dependencies = [
 
 [[package]]
 name = "zz-client"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "log",
  "tempfile",
@@ -10818,7 +10818,7 @@ dependencies = [
 
 [[package]]
 name = "zz-client-ffi"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "rustix 1.1.4",
  "zz-client",
@@ -10829,7 +10829,7 @@ dependencies = [
 
 [[package]]
 name = "zz-daemon"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "async-channel",
  "async-signal",
@@ -10858,7 +10858,7 @@ dependencies = [
 
 [[package]]
 name = "zz-gpui-ios"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "accesskit_ios",
  "anyhow",
@@ -10893,7 +10893,7 @@ dependencies = [
 
 [[package]]
 name = "zz-ios"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "gpui",
  "log",
@@ -10905,7 +10905,7 @@ dependencies = [
 
 [[package]]
 name = "zz-mux"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "zz-protocol",
  "zz-terminal",
@@ -10913,7 +10913,7 @@ dependencies = [
 
 [[package]]
 name = "zz-protocol"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "postcard",
  "serde",
@@ -10924,7 +10924,7 @@ dependencies = [
 
 [[package]]
 name = "zz-terminal"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "async-channel",
  "crossbeam-channel",
@@ -10946,7 +10946,7 @@ dependencies = [
 
 [[package]]
 name = "zz-tui"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "async-signal",
  "base64",
@@ -10962,7 +10962,7 @@ dependencies = [
 
 [[package]]
 name = "zz-ui"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -10991,7 +10991,7 @@ dependencies = [
 
 [[package]]
 name = "zz-xtask"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "cargo_metadata",
  "cef",

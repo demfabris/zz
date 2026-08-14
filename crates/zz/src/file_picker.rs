@@ -51,6 +51,10 @@ const _: () = assert!(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FilePickerMode {
+    #[cfg_attr(
+        not(feature = "editor-pane"),
+        allow(dead_code, reason = "only the editor pane constructs a file-mode picker")
+    )]
     Files,
     Directories,
 }

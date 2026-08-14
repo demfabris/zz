@@ -23,6 +23,7 @@ use crate::{
         panes::{PaneGrid, layout_panes},
         prefix,
         terminal::TerminalView,
+        tray,
     },
 };
 
@@ -166,8 +167,10 @@ impl Shell {
         toolbar.add_bottom_bar(&status_bar);
 
         // >>> palette agent: the prefix claim has to be installed before any
-        // other window controller so no widget can swallow the chord.
+        // other window controller so no widget can swallow the chord, and the
+        // tray's close hook before the shell's so hiding wins over detaching.
         prefix::install(&window, Arc::clone(&engine));
+        tray::install(&window, Arc::clone(&engine));
         floating.add_overlay(overlays.palette());
         // <<< palette agent
 

@@ -8,7 +8,13 @@ description = "The zz daemon: session state, PTY workers, client connections"
 publish = false
 
 [features]
-default = ["daemon"]
+default = ["daemon", "agent"]
+agent = [
+    "daemon",
+    "dep:agent-client-protocol",
+    "dep:serde",
+    "dep:serde_json",
+]
 daemon = [
     "dep:async-channel",
     "dep:async-signal",
@@ -21,7 +27,10 @@ daemon = [
 ]
 
 [dependencies]
+agent-client-protocol = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 crossbeam-channel = { workspace = true, optional = true }
 interprocess.workspace = true
 log.workspace = true

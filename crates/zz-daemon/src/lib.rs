@@ -12,6 +12,8 @@ use thiserror::Error;
 use zz_protocol::{ProtocolError, ServerError};
 
 // iOS uses the in-process russh tunnel, leaving the spawned-ssh and askpass halves unreachable.
+#[cfg(feature = "agent")]
+mod agent;
 #[cfg_attr(target_os = "ios", allow(dead_code))]
 mod askpass;
 mod client;

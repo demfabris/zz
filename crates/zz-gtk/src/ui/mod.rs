@@ -3,6 +3,7 @@ mod keys;
 mod overlay;
 mod pane;
 mod panes;
+mod settings;
 mod terminal;
 mod window;
 

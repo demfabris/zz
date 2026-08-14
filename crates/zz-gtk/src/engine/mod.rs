@@ -16,12 +16,13 @@ use async_channel::Receiver;
 use zz_client::{ChromeKeymap, ChromeProfile, ClientCore};
 use zz_daemon::{Endpoint, InteractiveClient};
 use zz_protocol::{
-    ChooseBufferState, ChooseTreeState, CommandInvocation, CommandPromptState, DisplayPanesState,
-    InputMessage, LayoutNode, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, ProtocolMessage,
-    SessionId, StatusLine, WindowId,
+    ChooseBufferState, ChooseTreeState, CommandInvocation, CommandPromptState, ConfigOverrideEntry,
+    DisplayPanesState, InputMessage, LayoutNode, MuxOptions, MuxSnapshot, PaneId, PaneKindSnapshot,
+    PaneSnapshot, ProtocolMessage, SessionId, StatusLine, WindowId,
 };
 use zz_terminal::{
-    ClipboardTarget, KeyInput, TerminalAppearance, TerminalColorScheme, TerminalViewport,
+    AppearanceProvenance, ClipboardTarget, KeyInput, TerminalAppearance, TerminalColorScheme,
+    TerminalViewport,
 };
 
 /// What the UI must react to. State changes are notifications — the new value
@@ -34,6 +35,9 @@ pub enum EngineEvent {
     FramesReady,
     StatusChanged,
     AppearanceChanged,
+    /// The daemon republished its mux options, effective values and all. The
+    /// only honest source for what an override actually did.
+    MuxOptionsChanged,
     /// A daemon-owned overlay moved: prefix arming, the command prompt, either
     /// chooser, or display-panes. Which one is read back through the accessors.
     OverlaysChanged,
@@ -161,6 +165,48 @@ impl Engine {
 
     pub fn appearance(&self) -> TerminalAppearance {
         self.link.core().appearance().cloned().unwrap_or_default()
+    }
+
+    /// Where this client is attached, for the About page.
+    pub fn endpoint(&self) -> String {
+        self.link.endpoint.to_string()
+    }
+
+    /// What the daemon advertised in its handshake.
+    pub fn capabilities(&self) -> Vec<String> {
+        self.link.core().capabilities().to_vec()
+    }
+
+    /// Per-key provenance for the appearance the daemon resolved: whether a
+    /// value came from a theme file, a Ghostty donor, an override, or nothing.
+    pub fn appearance_provenance(&self) -> AppearanceProvenance {
+        self.link.core().appearance_provenance().clone()
+    }
+
+    /// The daemon's complete mux option state, effective values plus the layer
+    /// that last wrote each one.
+    pub fn mux_options(&self) -> MuxOptions {
+        self.link.core().mux_options().clone()
+    }
+
+    /// Whether this daemon accepts `SetConfigOverrides` at all. A skewed or
+    /// older daemon keeps the client's daemon-owned keys local rather than
+    /// having them silently dropped on the far side.
+    pub fn supports_config_overrides(&self) -> bool {
+        self.link
+            .core()
+            .capabilities()
+            .iter()
+            .any(|capability| capability == "config-overrides-v1")
+    }
+
+    /// Publish the daemon-owned half of `zz/config`. The vector is the file's
+    /// own order with duplicates intact: the daemon applies last-writer per key
+    /// and cumulative keys need every occurrence.
+    pub fn set_config_overrides(&self, entries: Vec<ConfigOverrideEntry>) {
+        if let Err(error) = self.link.client().set_config_overrides(entries) {
+            log::warn!("zz-gtk failed to send configuration overrides: {error}");
+        }
     }
 
     pub fn prefix_armed(&self) -> bool {

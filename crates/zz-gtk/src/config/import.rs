@@ -21,8 +21,9 @@ use zz_terminal::{AppearanceConfigKey, discover_ghostty_config};
 
 use crate::config::file;
 
-/// Cap on the verbatim tmux copy, matching the desktop's import bound.
-const MAX_MUX_CONFIG_BYTES: usize = 1024 * 1024;
+/// Cap on the verbatim tmux copy, matching the desktop's import bound. Also
+/// the cap the `zz/mux.conf` editor enforces.
+pub const MAX_MUX_CONFIG_BYTES: usize = 1024 * 1024;
 
 const MARKER_FILE_NAME: &str = "import-prompted";
 

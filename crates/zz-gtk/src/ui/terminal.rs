@@ -1,11 +1,18 @@
-use std::sync::Arc;
+use std::{
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use gtk::{gdk, glib, graphene, gsk, pango, prelude::*, subclass::prelude::*};
 use zz_client::{ChromeAction, ChromeKeymap, ViewportDamage};
-use zz_protocol::PaneId;
+use zz_protocol::{InputMessage, PaneId};
 use zz_terminal::{
-    CellWidth, Cursor, CursorStyle, Glyph, KeyAction, KeyInput, OverlayKind, PackedCell,
-    PackedStyle, TerminalAppearance, TerminalViewport, UnderlineStyle,
+    CellWidth, ClipboardTarget, Cursor, CursorStyle, Glyph, KeyAction, KeyInput, OverlayKind,
+    PackedCell, PackedStyle, PointerCellEvent, TerminalAppearance, TerminalMouseButton,
+    TerminalMouseInput, TerminalMousePhase, TerminalViewAction, TerminalViewport, UnderlineStyle,
 };
 
 use crate::{
@@ -41,12 +48,14 @@ enum ImOutcome {
 mod imp {
     use std::{
         cell::{Cell, RefCell},
+        rc::Rc,
         sync::Arc,
     };
 
     use gtk::{gdk, glib, graphene, gsk, pango, prelude::*, subclass::prelude::*};
+    use zz_client::ChromeAction;
     use zz_protocol::PaneId;
-    use zz_terminal::{TerminalAppearance, TerminalViewport};
+    use zz_terminal::{PointerCellEvent, TerminalAppearance, TerminalViewport};
 
     use super::{CellMetrics, DEFAULT_COLUMNS, DEFAULT_ROWS};
     use crate::engine::Engine;
@@ -54,6 +63,7 @@ mod imp {
     #[derive(Default)]
     pub struct TerminalView {
         pub engine: RefCell<Option<Arc<Engine>>>,
+        pub chrome: RefCell<Option<Rc<dyn Fn(ChromeAction)>>>,
         pub pane: Cell<PaneId>,
         pub viewport: RefCell<Option<TerminalViewport>>,
         pub appearance: RefCell<TerminalAppearance>,
@@ -64,6 +74,11 @@ mod imp {
         pub pending_commit: RefCell<Option<String>>,
         pub in_key_press: Cell<bool>,
         pub composing: Cell<bool>,
+        pub dragging: Cell<bool>,
+        pub anchor: Cell<Option<PointerCellEvent>>,
+        pub extent: Cell<bool>,
+        pub pointer: Cell<(f64, f64)>,
+        pub scroll_remainder: Cell<f32>,
     }
 
     #[glib::object_subclass]
@@ -124,6 +139,13 @@ const DEFAULT_COLUMNS: f32 = 80.0;
 const DEFAULT_ROWS: f32 = 24.0;
 const CURSOR_THICKNESS: f32 = 2.0;
 const FAINT_ALPHA: f32 = 0.6;
+/// Rows one wheel notch moves, matching the raw-terminal client.
+const WHEEL_LINES: f32 = 3.0;
+const MIDDLE_BUTTON: u32 = 2;
+
+/// Copy requests are correlated by the daemon alone; the client only has to
+/// keep two outstanding requests from sharing an id.
+static COPY_REQUEST: AtomicU64 = AtomicU64::new(1);
 
 glib::wrapper! {
     pub struct TerminalView(ObjectSubclass<imp::TerminalView>)
@@ -132,10 +154,18 @@ glib::wrapper! {
 }
 
 impl TerminalView {
-    pub fn new(engine: Arc<Engine>, pane: PaneId, appearance: TerminalAppearance) -> Self {
+    /// `chrome` receives the chrome actions a terminal surface cannot answer on
+    /// its own — detaching, font size, anything window-shaped.
+    pub fn new(
+        engine: Arc<Engine>,
+        pane: PaneId,
+        appearance: TerminalAppearance,
+        chrome: Rc<dyn Fn(ChromeAction)>,
+    ) -> Self {
         let view: Self = glib::Object::new();
         view.imp().pane.set(pane);
         view.imp().engine.replace(Some(engine));
+        view.imp().chrome.replace(Some(chrome));
         view.set_appearance(appearance);
         view
     }
@@ -308,18 +338,224 @@ impl TerminalView {
         });
         self.add_controller(focus);
 
-        let click = gtk::GestureClick::new();
-        let click_target = self.downgrade();
-        click.connect_pressed(move |_, _, _, _| {
-            let Some(view) = click_target.upgrade() else {
-                return;
-            };
-            view.grab_focus();
-            if let Some(engine) = view.engine() {
-                engine.select_pane(view.pane());
+        self.install_pointer();
+    }
+
+    /// Pointer input is daemon business: selection, mouse reporting and
+    /// scrollback all live behind [`TerminalViewAction`], so the client only
+    /// converts pixels into the cell grid and forwards.
+    fn install_pointer(&self) {
+        let click = gtk::GestureClick::builder().button(0).build();
+        let pressed_target = self.downgrade();
+        click.connect_pressed(move |gesture, presses, x, y| {
+            if let Some(view) = pressed_target.upgrade() {
+                view.on_press(gesture, presses, x, y);
+            }
+        });
+        let released_target = self.downgrade();
+        click.connect_released(move |gesture, presses, x, y| {
+            if let Some(view) = released_target.upgrade() {
+                view.on_release(gesture, presses, x, y);
             }
         });
         self.add_controller(click);
+
+        let motion = gtk::EventControllerMotion::new();
+        let motion_target = self.downgrade();
+        motion.connect_motion(move |controller, x, y| {
+            if let Some(view) = motion_target.upgrade() {
+                view.on_motion(controller, x, y);
+            }
+        });
+        self.add_controller(motion);
+
+        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+        let scroll_target = self.downgrade();
+        scroll.connect_scroll(move |controller, _, delta| {
+            let Some(view) = scroll_target.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            view.on_scroll(controller, delta)
+        });
+        self.add_controller(scroll);
+    }
+
+    fn on_press(&self, gesture: &gtk::GestureClick, presses: i32, x: f64, y: f64) {
+        self.grab_focus();
+        let Some(engine) = self.engine() else {
+            return;
+        };
+        engine.select_pane(self.pane());
+        self.imp().pointer.set((x, y));
+        let modifiers = gesture.current_event_state();
+        let button = gesture.current_button();
+        let force = self.force_selection(modifiers);
+        if button == MIDDLE_BUTTON && force {
+            self.paste_from(&self.primary_clipboard());
+            return;
+        }
+        let cell = self.cell_at(x, y, presses, modifiers);
+        self.imp()
+            .dragging
+            .set(button == gdk::BUTTON_PRIMARY && force);
+        self.imp().anchor.set(Some(cell));
+        self.imp().extent.set(false);
+        let input = self.mouse_input(
+            TerminalMousePhase::Press,
+            pointer_button(button),
+            cell,
+            x,
+            y,
+            modifiers,
+            force,
+        );
+        self.view_action(TerminalViewAction::Mouse(input));
+    }
+
+    fn on_motion(&self, controller: &gtk::EventControllerMotion, x: f64, y: f64) {
+        self.imp().pointer.set((x, y));
+        let dragging = self.imp().dragging.get();
+        if !dragging && !self.mouse_tracking() {
+            return;
+        }
+        let modifiers = controller.current_event_state();
+        let cell = self.cell_at(x, y, 1, modifiers);
+        if dragging && self.imp().anchor.get().is_some_and(|anchor| anchor != cell) {
+            self.imp().extent.set(true);
+        }
+        let input = self.mouse_input(
+            TerminalMousePhase::Motion,
+            dragging.then_some(TerminalMouseButton::Left),
+            cell,
+            x,
+            y,
+            modifiers,
+            self.force_selection(modifiers),
+        );
+        self.view_action(TerminalViewAction::Mouse(input));
+    }
+
+    /// A drag that covered more than one cell copies to the primary selection
+    /// on release, the way every X11 and Wayland terminal does.
+    fn on_release(&self, gesture: &gtk::GestureClick, presses: i32, x: f64, y: f64) {
+        let modifiers = gesture.current_event_state();
+        let button = gesture.current_button();
+        let cell = self.cell_at(x, y, presses, modifiers);
+        let copied =
+            self.imp().dragging.get() && self.imp().extent.get() && button == gdk::BUTTON_PRIMARY;
+        let input = self.mouse_input(
+            TerminalMousePhase::Release,
+            pointer_button(button),
+            cell,
+            x,
+            y,
+            modifiers,
+            self.force_selection(modifiers),
+        );
+        self.view_action(TerminalViewAction::Mouse(input));
+        self.imp().dragging.set(false);
+        if copied {
+            self.copy_selection(ClipboardTarget::Primary);
+        }
+    }
+
+    /// Fractional touchpad deltas are accumulated so a slow swipe still moves
+    /// whole rows instead of rounding away to nothing.
+    fn on_scroll(&self, controller: &gtk::EventControllerScroll, delta: f64) -> glib::Propagation {
+        let pending = self.imp().scroll_remainder.get() + delta as f32 * WHEEL_LINES;
+        let lines = pending.trunc();
+        self.imp().scroll_remainder.set(pending - lines);
+        if lines == 0.0 {
+            return glib::Propagation::Stop;
+        }
+        let modifiers = controller.current_event_state();
+        let (x, y) = self.imp().pointer.get();
+        let button = if lines < 0.0 {
+            TerminalMouseButton::ScrollUp
+        } else {
+            TerminalMouseButton::ScrollDown
+        };
+        let input = self.mouse_input(
+            TerminalMousePhase::Press,
+            Some(button),
+            self.cell_at(x, y, 1, modifiers),
+            x,
+            y,
+            modifiers,
+            self.force_selection(modifiers),
+        );
+        self.view_action(TerminalViewAction::ScrollWheel {
+            lines: lines as i32,
+            input,
+        });
+        glib::Propagation::Stop
+    }
+
+    /// True when the press means "select text" rather than "tell the program":
+    /// Shift always forces selection, and so does a pane nobody is tracking.
+    fn force_selection(&self, modifiers: gdk::ModifierType) -> bool {
+        modifiers.contains(gdk::ModifierType::SHIFT_MASK) || !self.mouse_tracking()
+    }
+
+    fn mouse_tracking(&self) -> bool {
+        self.imp()
+            .viewport
+            .borrow()
+            .as_ref()
+            .is_some_and(|viewport| viewport.mouse_tracking)
+    }
+
+    fn cell_at(
+        &self,
+        x: f64,
+        y: f64,
+        presses: i32,
+        modifiers: gdk::ModifierType,
+    ) -> PointerCellEvent {
+        let metrics = self.imp().metrics.get();
+        let (columns, rows) = self
+            .imp()
+            .viewport
+            .borrow()
+            .as_ref()
+            .map_or((1, 1), |v| (v.columns.max(1), v.rows.max(1)));
+        let column = (x as f32 / metrics.width).floor().max(0.0) as u16;
+        let row = (y as f32 / metrics.height).floor().max(0.0) as u16;
+        PointerCellEvent {
+            column: column.min(columns - 1),
+            row: row.min(rows - 1),
+            click_count: u8::try_from(presses).unwrap_or(u8::MAX),
+            rectangle: modifiers.contains(gdk::ModifierType::ALT_MASK),
+        }
+    }
+
+    /// Pixel fields are scaled the same way the published cell geometry is, so
+    /// the daemon's pixel mouse reporting lands on the grid it was told about.
+    fn mouse_input(
+        &self,
+        phase: TerminalMousePhase,
+        button: Option<TerminalMouseButton>,
+        cell: PointerCellEvent,
+        x: f64,
+        y: f64,
+        modifiers: gdk::ModifierType,
+        force_selection: bool,
+    ) -> TerminalMouseInput {
+        let metrics = self.imp().metrics.get();
+        let scale = self.scale_factor().max(1) as f32;
+        TerminalMouseInput::new(
+            phase,
+            button,
+            cell,
+            (x as f32 * scale).max(0.0) as u32,
+            (y as f32 * scale).max(0.0) as u32,
+            (self.width() as f32 * scale).max(0.0) as u32,
+            (self.height() as f32 * scale).max(0.0) as u32,
+            (metrics.width * scale).round() as u32,
+            (metrics.height * scale).round() as u32,
+            keys::modifiers(modifiers),
+            force_selection,
+        )
     }
 
     fn on_focus(&self, focused: bool) {
@@ -331,6 +567,7 @@ impl TerminalView {
                 im.reset();
             }
         }
+        self.view_action(TerminalViewAction::Focus(focused));
         self.queue_draw();
     }
 
@@ -414,25 +651,50 @@ impl TerminalView {
         }
     }
 
+    /// Pane-scoped chrome is answered here; everything window-shaped is handed
+    /// to the shell, which owns tabs, fonts and the connection.
     fn perform(&self, engine: &Arc<Engine>, action: ChromeAction) {
         match action {
-            ChromeAction::Detach => {
-                engine.detach();
-                if let Some(window) = self.root().and_downcast::<gtk::Window>() {
-                    window.close();
+            ChromeAction::ClosePane => engine.kill_pane(self.pane()),
+            ChromeAction::TerminalPaste => self.paste_from(&self.clipboard()),
+            ChromeAction::TerminalCopy => self.copy_selection(ClipboardTarget::Clipboard),
+            ChromeAction::TerminalSelectAll => self.view_action(TerminalViewAction::SelectAll),
+            ChromeAction::TerminalClearHistory => {
+                self.view_action(TerminalViewAction::ClearHistory);
+            }
+            other => {
+                let chrome = self.imp().chrome.borrow().clone();
+                match chrome {
+                    Some(chrome) => chrome(other),
+                    None => log::debug!(
+                        "zz-gtk has no handler for the {} chrome action",
+                        other.name()
+                    ),
                 }
             }
-            ChromeAction::ClosePane => engine.kill_pane(self.pane()),
-            ChromeAction::TerminalPaste => self.paste_from_clipboard(),
-            other => log::debug!(
-                "zz-gtk has no handler for the {} chrome action",
-                other.name()
-            ),
         }
     }
 
-    fn paste_from_clipboard(&self) {
-        let clipboard = self.clipboard();
+    fn view_action(&self, action: TerminalViewAction) {
+        if let Some(engine) = self.engine() {
+            engine.send(InputMessage::TerminalView {
+                pane: self.pane(),
+                action,
+            });
+        }
+    }
+
+    fn copy_selection(&self, target: ClipboardTarget) {
+        self.view_action(TerminalViewAction::CopySelection {
+            request_id: COPY_REQUEST.fetch_add(1, Ordering::Relaxed),
+            target,
+        });
+    }
+
+    /// Pastes travel as a view action rather than typed text so the daemon
+    /// applies bracketed paste and the pane's own paste limits.
+    fn paste_from(&self, clipboard: &gdk::Clipboard) {
+        let clipboard = clipboard.clone();
         let target = self.downgrade();
         glib::spawn_future_local(async move {
             let Ok(text) = clipboard.read_text_future().await else {
@@ -441,8 +703,19 @@ impl TerminalView {
             let (Some(view), Some(text)) = (target.upgrade(), text) else {
                 return;
             };
-            view.send_text(&text);
+            if !text.is_empty() {
+                view.view_action(TerminalViewAction::Paste(text.into()));
+            }
         });
+    }
+}
+
+fn pointer_button(button: u32) -> Option<TerminalMouseButton> {
+    match button {
+        gdk::BUTTON_PRIMARY => Some(TerminalMouseButton::Left),
+        MIDDLE_BUTTON => Some(TerminalMouseButton::Middle),
+        gdk::BUTTON_SECONDARY => Some(TerminalMouseButton::Right),
+        _ => None,
     }
 }
 

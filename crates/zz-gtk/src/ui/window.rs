@@ -367,6 +367,13 @@ impl Shell {
             let Some(shell) = target.upgrade() else {
                 return glib::Propagation::Proceed;
             };
+            // Rebuilding the strip closes its pages, and a close is a close as
+            // far as the tab view is concerned: without this the shell would
+            // ask the daemon to kill every window it was only re-listing.
+            if shell.syncing.get() {
+                tabs.close_page_finish(page, true);
+                return glib::Propagation::Stop;
+            }
             shell.request_close(page);
             tabs.close_page_finish(page, false);
             glib::Propagation::Stop
@@ -455,7 +462,16 @@ impl Shell {
             EngineEvent::Reconnected => {
                 self.toasts.add_toast(adw::Toast::new("Reconnected"));
             }
-            EngineEvent::Detached | EngineEvent::Disconnected(_) => {
+            // A session ending under the client is not the end of the client:
+            // the tree is still there to attach somewhere else, and a daemon
+            // with nothing left offers the new-session card. Quitting closes
+            // the window itself, before the daemon ever answers.
+            EngineEvent::Detached => {
+                self.overlays.dismiss();
+                self.toasts.add_toast(adw::Toast::new("Session ended"));
+                self.sync();
+            }
+            EngineEvent::Disconnected(_) => {
                 self.overlays.dismiss();
                 self.window.close();
             }

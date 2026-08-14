@@ -25,7 +25,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes cmake curl desktop-file-utils ninja-build libfontconfig-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+          sudo apt-get install --yes cmake curl desktop-file-utils dpkg-dev ninja-build libfontconfig-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
 
       - uses: mlugg/setup-zig@v2.2.1
         with:
@@ -74,6 +74,9 @@ jobs:
           test -x target/release/zz
           tar -C target/release -czf "$binary_artifact" zz
           scripts/package-appimage.sh target/cef-bundle "$package_artifact"
+          # Built for its own validation, not uploaded: the deb is a release
+          # artifact, and finding its packaging broken at tag time is too late.
+          scripts/package-deb.sh target/cef-bundle target/zz-linux.deb
 
           echo "ZZ_BINARY_ARTIFACT_PATH=$binary_artifact" >> "$GITHUB_ENV"
           echo "ZZ_PACKAGE_ARTIFACT_PATH=$package_artifact" >> "$GITHUB_ENV"

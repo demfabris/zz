@@ -25,7 +25,7 @@ build platform *args:
 # running instance first and relaunching after. The daemon (and its sessions)
 # survives the swap but runs the previous build until restarted.
 install platform *args:
-    @if [[ "{{ platform }}" != "mac" ]]; then echo "just install currently supports mac only (Arch Linux: just pacman-install)" >&2; exit 2; fi
+    @if [[ "{{ platform }}" != "mac" ]]; then echo "just install currently supports mac only (Arch Linux: just pacman-install; Debian/Ubuntu: just deb-install)" >&2; exit 2; fi
     @just build mac {{ args }}
     @scripts/install-macos.sh
 
@@ -103,6 +103,18 @@ pacman-install *args:
     @if [[ "$(uname -s)" != "Linux" ]] || ! command -v makepkg >/dev/null 2>&1; then echo "just pacman-install requires an Arch Linux system with makepkg" >&2; exit 2; fi
     @just build linux -- {{ args }}
     @cd packaging/arch && makepkg --force --cleanbuild --clean --syncdeps --install
+
+# Build and validate the Debian/Ubuntu package, then emit dist/zz-linux.deb.
+deb-package *args:
+    @if [[ "$(uname -s)" != "Linux" ]] || ! command -v dpkg-deb >/dev/null 2>&1; then echo "just deb-package requires a Debian/Ubuntu system with dpkg-dev" >&2; exit 2; fi
+    @just build linux -- {{ args }}
+    @scripts/package-deb.sh dist/zz dist/zz-linux.deb
+
+# Build the Debian/Ubuntu package and install it, resolving runtime dependencies through apt.
+deb-install *args:
+    @if [[ "$(uname -s)" != "Linux" ]] || ! command -v dpkg-deb >/dev/null 2>&1; then echo "just deb-install requires a Debian/Ubuntu system with dpkg-dev" >&2; exit 2; fi
+    @just deb-package {{ args }}
+    @sudo apt-get install --yes --reinstall "$PWD/dist/zz-linux.deb"
 
 # Store Apple notarization credentials in Keychain (one-time interactive setup).
 notary-setup-mac profile=macos_notary_profile:

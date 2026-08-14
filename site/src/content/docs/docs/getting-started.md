@@ -39,13 +39,25 @@ chmod +x zz-linux-X64.AppImage
 ./zz-linux-X64.AppImage
 ```
 
+Debian and Ubuntu 24.04+ have a `.deb`, which puts the runtime in `/usr/lib/zz`,
+`zz` on your `PATH`, and the desktop entry and icons where the shell looks for
+them:
+
+```sh
+sudo apt install ./zz-<version>-linux-<arch>.deb
+```
+
 Arch users can build a native package from the checkout with
 `just pacman-package`, or `just pacman-install` to build and install in one
-step.
+step; the Debian equivalents are `just deb-package` and `just deb-install`.
 
 Wayland is the most exercised host; X11 is compiled in and works. Chromium picks
 the backend itself. You need unprivileged user namespaces enabled, because zz
-never passes `--no-sandbox`.
+never passes `--no-sandbox`. Ubuntu 24.04 and later restrict those to binaries
+with an AppArmor profile that grants them
+(`kernel.apparmor_restrict_unprivileged_userns=1`). The `.deb` installs one at
+`/etc/apparmor.d/zz`; from the AppImage or a bare bundle, browser panes need
+either your own profile for that path or the restriction turned off.
 
 ### Windows
 
@@ -447,6 +459,7 @@ just run mac         # or: linux -> debug build, straight into a window
 just dmg             # macOS: dist/zz-macos.dmg
 just zip-windows     # Windows: dist/zz-windows.zip
 just pacman-package  # Arch: a native package
+just deb-package     # Debian/Ubuntu: dist/zz-linux.deb
 ```
 
 There is no cross-compilation; build each platform on itself. Checks are plain

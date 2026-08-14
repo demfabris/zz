@@ -1,0 +1,18 @@
+Package: zz
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: Fabricio Dematte <demfabris@gmail.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: @SHLIBDEPS@, libwayland-client0, libwayland-egl1, libegl1, hicolor-icon-theme
+Suggests: gnome-keyring | kwalletd6 | kwalletd5
+Section: utils
+Priority: optional
+Homepage: https://github.com/demfabris/zz
+Description: Terminal multiplexer with terminal, browser, and agent panes
+ zz is a terminal multiplexer with three kinds of pane: a terminal, a Chromium
+ browser, and an AI agent. They share one split layout, one focus model, one
+ set of tmux keys, and one GPU surface. A background daemon keeps the sessions
+ alive after you close the window.
+ .
+ The package carries the complete CEF runtime in /usr/lib/zz and exposes it as
+ /usr/bin/zz.

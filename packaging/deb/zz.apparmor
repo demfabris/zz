@@ -1,0 +1,24 @@
+# Installed as /etc/apparmor.d/zz.
+#
+# Ubuntu 24.04 and later ship kernel.apparmor_restrict_unprivileged_userns=1,
+# which denies unprivileged user namespaces to binaries without a profile that
+# grants them. That is exactly the sandbox layer zz keeps: the CEF runtime
+# disables Chromium's legacy setuid sandbox and never passes --no-sandbox, so
+# the browser zygote has nothing left to unshare with and every browser pane
+# dies at startup. Distributions without the restriction ignore this file.
+#
+# The shape is Ubuntu's own for repackaged Chromium apps (/etc/apparmor.d/chrome
+# from the apparmor package): unconfined apart from the userns grant, which also
+# gives the process a label instead of "unconfined". zz re-execs its own
+# executable for every CEF subprocess (cef_runtime.rs current_exe), so this one
+# attachment covers the whole process tree.
+
+abi <abi/4.0>,
+include <tunables/global>
+
+profile zz /usr/lib/zz/zz flags=(unconfined) {
+  userns,
+
+  # Site-specific additions and overrides. See local/README for details.
+  include if exists <local/zz>
+}

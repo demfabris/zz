@@ -208,12 +208,13 @@ jobs:
             echo "ZZ_VERSION=$version"
             echo "ZZ_TARBALL=dist/zz-$version-linux-${{ matrix.arch }}.tar.gz"
             echo "ZZ_APPIMAGE=dist/zz-$version-linux-${{ matrix.arch }}.AppImage"
+            echo "ZZ_DEB=dist/zz-$version-linux-${{ matrix.arch }}.deb"
           } >> "$GITHUB_ENV"
 
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes cmake curl desktop-file-utils ninja-build libfontconfig-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+          sudo apt-get install --yes cmake curl desktop-file-utils dpkg-dev ninja-build libfontconfig-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
 
       - uses: mlugg/setup-zig@v2.2.1
         with:
@@ -231,18 +232,26 @@ jobs:
       - name: Download verified AppImage tools
         run: scripts/fetch-appimage-tools.sh
 
-      - name: Package the tarball and AppImage
+      - name: Package the tarball, AppImage, and deb
         shell: bash
+        # The runner's distribution is what dpkg-shlibdeps resolves the bundle's
+        # libraries against, so the published deb targets Ubuntu 24.04 and up.
+        # A release artifact is worth the slow compression level the local
+        # `just deb-package` skips.
+        env:
+          ZZ_DEB_COMPRESSION_LEVEL: 19
         run: |
           scripts/package-linux-tarball.sh dist/zz "$ZZ_TARBALL"
           scripts/package-appimage.sh dist/zz "$ZZ_APPIMAGE"
+          scripts/package-deb.sh dist/zz "$ZZ_DEB"
 
       - name: Checksum the release artifacts
         shell: bash
         run: |
           (cd dist && sha256sum "$(basename "$ZZ_TARBALL")" > "$(basename "$ZZ_TARBALL").sha256")
           (cd dist && sha256sum "$(basename "$ZZ_APPIMAGE")" > "$(basename "$ZZ_APPIMAGE").sha256")
-          cat "$ZZ_TARBALL.sha256" "$ZZ_APPIMAGE.sha256"
+          (cd dist && sha256sum "$(basename "$ZZ_DEB")" > "$(basename "$ZZ_DEB").sha256")
+          cat "$ZZ_TARBALL.sha256" "$ZZ_APPIMAGE.sha256" "$ZZ_DEB.sha256"
 
       - name: Attach the artifacts to the GitHub release
         env:
@@ -251,7 +260,8 @@ jobs:
         run: |
           gh release upload "$GITHUB_REF_NAME" \
             "$ZZ_TARBALL" "$ZZ_TARBALL.sha256" \
-            "$ZZ_APPIMAGE" "$ZZ_APPIMAGE.sha256" --clobber
+            "$ZZ_APPIMAGE" "$ZZ_APPIMAGE.sha256" \
+            "$ZZ_DEB" "$ZZ_DEB.sha256" --clobber
 
   windows:
     name: Windows x64

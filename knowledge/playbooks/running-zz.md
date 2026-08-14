@@ -71,7 +71,10 @@ separate Developer ID/notarization step.
 
 On Arch Linux, package that release bundle with `just pacman-package`, or build and install it in
 one step with `just pacman-install`. The installed `/usr/bin/zz` symlink resolves into the complete
-CEF runtime under `/usr/lib/zz`.
+CEF runtime under `/usr/lib/zz`. On Debian and Ubuntu the pair is `just deb-package` (emitting
+`dist/zz-linux.deb`) and `just deb-install`, which installs it through `apt` so the computed
+dependencies resolve. The deb also installs `/etc/apparmor.d/zz`; without that profile, Ubuntu
+24.04+ denies the user namespace the browser panes' zygote needs.
 
 On macOS, `just install mac` builds the release bundle and swaps it into `/Applications/zz.app` in
 one step: it quits a running GUI instance first (CEF spawns helpers by bundle path, so the bundle

@@ -48,7 +48,7 @@ Run `just` recipes from the repo root; `just --list` shows everything.
 | `just showcase` / `showcase-setup` / `showcase-build[-release]` | wasm UI showcase dev loop / toolchain / assets |
 | `just profile-cpu\|profile-system\|profile-metal\|profile-terminal-diagnostics mac …` | Instruments captures (macOS), each with a matching `*-summary` recipe |
 | `just profile-build mac` | Release-optimized bundle with dSYMs for profiling |
-| `just dmg` / `zip-windows` / `pacman-package` / `pacman-install` | Platform packages |
+| `just dmg` / `zip-windows` / `pacman-package` / `pacman-install` / `deb-package` / `deb-install` | Platform packages |
 | `just release-mac <version>` | Full signed+notarized DMG (setup: `notary-setup-mac`; pieces: `sign-mac`, `notarize-mac`, `verify-notarized-mac`, `release-mac-check`) |
 | `bench/run.sh` | Terminal throughput benchmarks |
 </important>

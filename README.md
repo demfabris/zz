@@ -71,6 +71,12 @@ AUR:
 paru zz-bin
 ```
 
+Debian/Ubuntu 24.04+, from a release `.deb`:
+
+```sh
+sudo apt install ./zz-<version>-linux-<arch>.deb
+```
+
 # Development
 
 Install [just](https://github.com/casey/just)
@@ -86,6 +92,7 @@ Install [just](https://github.com/casey/just)
 just [build|install] [mac|linux]
 just dmg
 just pacman-[package|install]
+just deb-[package|install]
 ```
 
 # Connecting

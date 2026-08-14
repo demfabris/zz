@@ -1,0 +1,21 @@
+#!/bin/sh
+# Load the AppArmor profile the package just installed, then refresh the two
+# desktop caches. Every step is best-effort: a machine without AppArmor, or a
+# container without securityfs mounted, still gets a working install.
+set -e
+
+case "$1" in
+    configure)
+        if command -v apparmor_parser >/dev/null 2>&1 \
+            && [ -d /sys/kernel/security/apparmor ] \
+            && [ -e /etc/apparmor.d/zz ]; then
+            apparmor_parser -r -T -W /etc/apparmor.d/zz || true
+        fi
+        if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database -q /usr/share/applications || true
+        fi
+        if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+            gtk-update-icon-cache -q -f -t /usr/share/icons/hicolor || true
+        fi
+        ;;
+esac

@@ -1,0 +1,22 @@
+#!/bin/sh
+# Unload the profile so a removed package leaves no rule loaded in the kernel.
+# On `remove` the conffile is still on disk, which is what apparmor_parser -R
+# needs to name the profile; on `purge` it is already gone and the earlier
+# removal has done the work.
+set -e
+
+case "$1" in
+    remove|purge)
+        if command -v apparmor_parser >/dev/null 2>&1 \
+            && [ -d /sys/kernel/security/apparmor ] \
+            && [ -e /etc/apparmor.d/zz ]; then
+            apparmor_parser -R /etc/apparmor.d/zz || true
+        fi
+        if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database -q /usr/share/applications || true
+        fi
+        if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+            gtk-update-icon-cache -q -f -t /usr/share/icons/hicolor || true
+        fi
+        ;;
+esac

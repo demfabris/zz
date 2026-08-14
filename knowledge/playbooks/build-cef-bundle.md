@@ -3,8 +3,8 @@ type: Playbook
 title: Building and verifying a platform CEF bundle
 description: Step-by-step use of cargo xtask and release recipes to assemble, sign, notarize, and validate platform CEF bundles.
 resource: crates/zz-xtask/src/main.rs
-tags: [cef, xtask, bundle, playbook, sha1, codesign, pacman, profiling, dsym, homebrew, release]
-timestamp: 2026-08-12T00:00:00Z
+tags: [cef, xtask, bundle, playbook, sha1, codesign, pacman, deb, apparmor, profiling, dsym, homebrew, release]
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
@@ -140,6 +140,18 @@ package, or `just pacman-install` to build it and install it through `makepkg`. 
 runtime together in `/usr/lib/zz`, exposes `/usr/bin/zz` as a relative symlink, and installs the
 shared desktop entry and icons.
 
+Debian and Ubuntu have `just deb-package` (emitting `dist/zz-linux.deb`) and `just deb-install`,
+which hands the result to `apt` so its dependencies resolve. The release workflow builds the same
+package per architecture and attaches it to the GitHub release. Two things separate it from the Arch
+package. Its `Depends` is computed rather than curated: `dpkg-shlibdeps` reads the bundle's ELF
+`NEEDED` entries and resolves them against the build host, which is what ties a published deb to
+Ubuntu 24.04 and up, and leaves only the `dlopen`ed libraries (`libwayland-client0`,
+`libwayland-egl1`, `libegl1`) to the hand-written tail of `packaging/deb/control`. And it ships
+`/etc/apparmor.d/zz`, because Ubuntu 24.04+ denies unprivileged user namespaces to unprofiled
+binaries (`kernel.apparmor_restrict_unprivileged_userns=1`) and that namespace is the sandbox zz's
+CEF runtime keeps. Without the profile every browser pane dies at startup; the AppImage and bare
+bundles have the same exposure and no place to install a profile from.
+
 Artifact retention follows the repository's GitHub Actions retention setting.
 
 # Schema
@@ -237,6 +249,7 @@ What `bundle-cef` does, in order:
 | `packaging/homebrew/zz.rb` + `scripts/render-cask.sh` | Cask template for the `demfabris/homebrew-zz` tap, and the renderer that fills in version and checksum |
 | `scripts/package-appimage.sh` + `packaging/linux/` + `assets/linux/hicolor/` | Builds and validates the AppDir/AppImage around a Linux CEF bundle with desktop metadata and the complete icon set |
 | `packaging/arch/PKGBUILD` | Installs the validated Linux bundle, desktop entry, and icons into a native Pacman package |
+| `scripts/package-deb.sh` + `packaging/deb/` | Renders the Debian control from `dpkg-shlibdeps` output, adds the copyright file, AppArmor profile, and maintainer scripts, and validates the built `.deb` |
 | `scripts/package-dmg.sh` | Builds, mounts, and validates the macOS drag-install disk image |
 | `scripts/release-macos.sh` + `packaging/macos-signing/*.plist` | Developer ID signs CEF code with the accepted entitlement split, notarizes/staples the DMG, and verifies Gatekeeper |
 

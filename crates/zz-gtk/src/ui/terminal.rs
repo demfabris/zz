@@ -891,10 +891,14 @@ impl TerminalView {
     ) -> bool {
         let scrollbar = viewport.scrollbar;
         let pane = self.pane();
-        // Warm the ring for wherever this is heading, even when the overlay
-        // cannot take this notch: the next one usually can.
-        engine.request_history(pane, target.saturating_sub(scrollbar.len));
+        // Retire whatever the pane has outgrown before asking for more: the
+        // ring answers "how far back do I already reach" from its anchor, and
+        // an anchor a frame has moved past would aim the request at the wrong
+        // rows — or, on a ring that has never seen a frame, at nothing at all.
         let retained = engine.history_rows(pane, viewport);
+        // Warm it for wherever this is heading, even when the overlay cannot
+        // take this notch: the next one usually can.
+        engine.request_history(pane, target.saturating_sub(scrollbar.len));
         if !local_scroll_gate(viewport, retained) {
             self.clear_local_scroll();
             return false;

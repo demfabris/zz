@@ -1,7 +1,11 @@
 mod frames;
+mod history;
 mod reader;
 
 pub use frames::{FrameInbox, FrameUpdate, merge_damage};
+pub use history::{
+    HistoryChunk, HistoryRing, HistoryRow, MAX_HISTORY_ROWS, local_scroll_gate, max_scroll_offset,
+};
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -19,12 +23,17 @@ use zz_protocol::{
     ChooseBufferState, ChooseTreeState, CommandInvocation, CommandPromptState, ConfigOverrideEntry,
     DisplayPanesState, InputMessage, KeyBindingSnapshot, LayoutNode, MuxOptionKey, MuxOptions,
     MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PaneId, PaneKindSnapshot, PaneSnapshot,
-    ProtocolMessage, SessionId, StatusLine, WindowId, canonical_key,
+    ProtocolMessage, SPLIT_RATIO_BASIS, SessionId, SplitId, StatusLine, WindowId, canonical_key,
 };
 use zz_terminal::{
-    AppearanceProvenance, ClipboardTarget, KeyInput, TerminalAppearance, TerminalColorScheme,
-    TerminalViewport,
+    AppearanceProvenance, ClipboardTarget, KeyInput, SearchDirection, TerminalAppearance,
+    TerminalColorScheme, TerminalViewport,
 };
+
+/// tmux keeps a split from swallowing its neighbour whole; the desktop clamps a
+/// divider drag to the same band before it reaches the wire.
+pub const MIN_SPLIT_RATIO: f32 = 0.1;
+pub const MAX_SPLIT_RATIO: f32 = 0.9;
 
 /// What the UI must react to. State changes are notifications — the new value
 /// is read back through the accessors, exactly as [`ClientCore`] intends.
@@ -45,6 +54,22 @@ pub enum EngineEvent {
     /// The daemon asked for the session tree, the way `focus-sidebar` and
     /// `choose-tree -s|-w` do.
     FocusSidebar,
+    /// The frozen command-output view opened, changed or closed; read it back
+    /// with [`Engine::command_output`].
+    CommandOutputChanged,
+    /// The daemon asked this client to open its search prompt — `C-b /` and the
+    /// copy-mode search bindings arrive this way, never as a key.
+    BeginSearch {
+        pane: PaneId,
+        direction: SearchDirection,
+    },
+    /// Scrollback rows landed in `pane`'s ring; a local scroll can repaint.
+    HistoryChanged(PaneId),
+    /// A link was activated in `pane`. The client opens it; nothing is retained.
+    OpenUri {
+        pane: PaneId,
+        uri: String,
+    },
     /// The daemon answered a copy request; the payload is not retained.
     Clipboard {
         target: ClipboardTarget,
@@ -133,6 +158,7 @@ impl Engine {
             geometry: Mutex::new(HashMap::new()),
             replay: Mutex::new(Vec::new()),
             remembered_reattach: AtomicBool::new(false),
+            history: Mutex::new(HashMap::new()),
         });
         let (sender, events) = async_channel::unbounded();
         reader::spawn(Arc::clone(&link), sender)?;
@@ -247,6 +273,59 @@ impl Engine {
 
     pub fn display_panes(&self) -> Option<DisplayPanesState> {
         self.link.core().display_panes().cloned()
+    }
+
+    /// The frozen `list-keys`-style output view, if the daemon opened one for
+    /// this client. The pane is the one it is anchored to, not a pane of its own.
+    pub fn command_output(&self) -> Option<(PaneId, TerminalViewport)> {
+        self.link
+            .core()
+            .command_output()
+            .map(|(pane, viewport)| (pane, viewport.clone()))
+    }
+
+    /// Rows the ring can paint for the window starting at `target`, oldest
+    /// first, alongside the live viewport top they stop at. Absent rows are
+    /// `None`, which the painter shows as an unfilled band.
+    pub fn history_window(&self, pane: PaneId, target: u32, rows: u16) -> Vec<Option<HistoryRow>> {
+        let history = self.link.history();
+        let ring = history.get(&pane).map(|entry| &entry.ring);
+        (0..u32::from(rows))
+            .map(|row| {
+                ring.and_then(|ring| ring.row(target.saturating_add(row)))
+                    .cloned()
+            })
+            .collect()
+    }
+
+    /// How far back the ring currently reaches, after retiring rows the pane
+    /// has outrun. Called at scroll time, never per frame.
+    pub fn history_rows(&self, pane: PaneId, viewport: &TerminalViewport) -> usize {
+        let mut history = self.link.history();
+        let entry = history.entry(pane).or_default();
+        entry.ring.observe(viewport);
+        entry.ring.len()
+    }
+
+    /// Ask for the next slice of scrollback that would let `target` be painted
+    /// locally. One request per pane is outstanding at a time; the reader
+    /// chains the next one as each chunk lands.
+    pub fn request_history(&self, pane: PaneId, target: u32) {
+        self.link.request_history(pane, target);
+    }
+}
+
+/// Split-divider drags land here: the daemon owns the layout, so the client
+/// previews a ratio locally and commits exactly one message on release.
+impl Engine {
+    pub fn resize_split(&self, window: WindowId, split: SplitId, ratio: f32) {
+        let clamped =
+            if ratio.is_finite() { ratio } else { 0.5 }.clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO);
+        self.send(InputMessage::ResizeSplit {
+            window,
+            split,
+            ratio_basis_points: (clamped * f32::from(SPLIT_RATIO_BASIS)).round() as u16,
+        });
     }
 
     /// Republish the desktop's light/dark preference; the daemon answers with a
@@ -380,6 +459,20 @@ struct Link {
     geometry: Mutex<HashMap<PaneId, Geometry>>,
     replay: Mutex<Vec<(PaneId, Geometry)>>,
     remembered_reattach: AtomicBool,
+    /// Scrollback the client keeps for local scrolling, one ring per pane.
+    /// Deliberately off the frame path: rows arrive only through
+    /// `HistoryRequest`, so nothing here runs while frames do.
+    history: Mutex<HashMap<PaneId, PaneHistory>>,
+}
+
+/// A pane's ring plus the offset the client is still trying to reach with it.
+#[derive(Default)]
+struct PaneHistory {
+    ring: HistoryRing,
+    /// The oldest offset a scroll asked for; kept while requests are in flight
+    /// so the reader can chain chunk after chunk until it is covered.
+    wanted: Option<u32>,
+    requesting: bool,
 }
 
 impl Link {
@@ -389,6 +482,78 @@ impl Link {
 
     fn core(&self) -> MutexGuard<'_, ClientCore> {
         self.core.lock().expect("client core poisoned")
+    }
+
+    fn history(&self) -> MutexGuard<'_, HashMap<PaneId, PaneHistory>> {
+        self.history.lock().expect("pane history poisoned")
+    }
+
+    /// Issue the next backfill for `pane` unless one is already outstanding.
+    /// `target` only ever moves the goal further back, so a fast scroll does not
+    /// shorten a walk already under way.
+    fn request_history(&self, pane: PaneId, target: u32) {
+        let request = {
+            let mut history = self.history();
+            let entry = history.entry(pane).or_default();
+            entry.wanted = Some(entry.wanted.map_or(target, |wanted| wanted.min(target)));
+            if entry.requesting {
+                None
+            } else {
+                entry.ring.next_request(target, MAX_HISTORY_ROWS)
+            }
+        };
+        let Some((start, count)) = request else {
+            return;
+        };
+        self.history().entry(pane).or_default().requesting = true;
+        if let Err(error) = self.client().request_history(pane, start, count) {
+            log::warn!("zz-gtk failed to request scrollback for {pane}: {error}");
+            let mut history = self.history();
+            let entry = history.entry(pane).or_default();
+            entry.requesting = false;
+            entry.wanted = None;
+        }
+    }
+
+    /// Fold one chunk in and say whether the ring grew. The viewport it is
+    /// checked against is the one live when the chunk landed: a chunk the pane
+    /// has already outrun describes a scrollback that has moved.
+    fn absorb_history(
+        &self,
+        pane: PaneId,
+        chunk: HistoryChunk,
+        viewport: &TerminalViewport,
+    ) -> bool {
+        let mut history = self.history();
+        let entry = history.entry(pane).or_default();
+        entry.requesting = false;
+        let absorbed = entry.ring.absorb(chunk, viewport);
+        if !absorbed {
+            entry.wanted = None;
+        }
+        absorbed
+    }
+
+    /// The next slice of a walk that has not reached its goal yet.
+    fn next_history_request(&self, pane: PaneId) -> Option<(u32, u32)> {
+        let mut history = self.history();
+        let entry = history.get_mut(&pane)?;
+        let wanted = entry.wanted?;
+        let next = entry.ring.next_request(wanted, MAX_HISTORY_ROWS);
+        if next.is_none() {
+            entry.wanted = None;
+        } else {
+            entry.requesting = true;
+        }
+        next
+    }
+
+    fn forget_history(&self, pane: PaneId) {
+        self.history().remove(&pane);
+    }
+
+    fn clear_history(&self) {
+        self.history().clear();
     }
 
     fn send(&self, input: InputMessage) {

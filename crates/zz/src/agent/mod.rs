@@ -7,9 +7,13 @@ pub(crate) mod controller;
 #[cfg(feature = "agent-pane")]
 mod environment;
 #[cfg(feature = "agent-pane")]
+mod journal;
+#[cfg(feature = "agent-pane")]
 mod preferences;
 #[cfg(feature = "agent-pane")]
 mod profile;
+#[cfg(feature = "agent-pane")]
+mod turn_snapshot;
 #[cfg(feature = "agent-pane")]
 mod view;
 

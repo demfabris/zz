@@ -17,6 +17,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zz-chrome-import` — Chrome profile, cookie, and history import
 - `crates/zz-ui` — widget layer: a maintained full fork of gpui-component
 - `crates/zz-tui` — raw-terminal attach client
+- `crates/zz-gtk` — GTK4/libadwaita GNOME client, excluded from the workspace (needs system GTK); build it from its own directory
 - `crates/zz-ios` + `crates/zz-gpui-ios` — iPad app and its gpui backend
 - `crates/zz-xtask` — build tooling: CEF bundling, packaging (`cargo xtask`)
 - `knowledge/` — OKF knowledge bundle for the whole system (start at `index.md`)

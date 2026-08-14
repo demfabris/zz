@@ -393,6 +393,81 @@ fn a_flooded_pane_stays_live_and_drains_in_bounded_batches() {
     daemon.shutdown();
 }
 
+/// The scrollback ring, end to end against a real daemon: ask for history,
+/// absorb what comes back, and hand a scroll the rows it needs to paint without
+/// another round trip. The ring is deliberately fed only by these requests —
+/// nothing about it runs while frames do — so this is the whole contract.
+#[test]
+fn scrollback_is_backfilled_on_request_and_answers_a_scrolled_window() {
+    let daemon = Fixture::boot("history", FLOOD);
+    let engine = connect(&daemon);
+    let mut watch = Watch::default();
+
+    let pane = watch.poll(&engine, "the first pane", |_| first_terminal_pane(&engine));
+    engine.resize_terminal(pane, COLUMNS, ROWS, CELL_WIDTH_PX, CELL_HEIGHT_PX);
+    watch.poll(&engine, "the end of the flood", |_| {
+        contains(&engine, pane, "zz-gtk-flooded")
+    });
+    let scrollbar = watch.poll(&engine, "a pane with scrollback to walk", |_| {
+        let scrollbar = engine.viewport(pane)?.scrollbar;
+        (scrollbar.total > scrollbar.len).then_some(scrollbar)
+    });
+    assert_eq!(
+        engine.history_rows(pane, &engine.viewport(pane).expect("a viewport")),
+        0,
+        "the ring must start empty: no frame ever fills it"
+    );
+
+    // One screen back is what a wheel notch would be reaching for.
+    let target = scrollbar.offset.saturating_sub(u32::from(ROWS));
+    engine.request_history(pane, target);
+    let retained = watch.poll(&engine, "the backfilled scrollback", |_| {
+        let viewport = engine.viewport(pane)?;
+        let retained = engine.history_rows(pane, &viewport);
+        (retained >= usize::from(ROWS)).then_some(retained)
+    });
+    assert!(
+        retained <= zz_gtk::engine::MAX_HISTORY_ROWS,
+        "the ring grew past its cap: {retained} rows"
+    );
+
+    let window = engine.history_window(pane, target, ROWS);
+    assert_eq!(window.len(), usize::from(ROWS));
+    assert!(
+        window.iter().all(Option::is_some),
+        "a covered window must not leave rows for the painter to shim"
+    );
+    let columns = engine.viewport(pane).expect("a viewport").columns;
+    for row in window.iter().flatten() {
+        assert_eq!(
+            row.cells.len(),
+            usize::from(columns),
+            "every scrollback row is exactly as wide as the pane"
+        );
+    }
+    assert!(
+        engine
+            .history_window(pane, 0, ROWS)
+            .iter()
+            .any(Option::is_none),
+        "rows the walk has not reached yet must read as absent, not as blanks"
+    );
+
+    // New output moves the scrollback underneath the retained indices, and a
+    // shifted index paints the wrong row — so the ring retires rather than lie.
+    engine.send_text(pane, "after-the-ring\r\n".to_owned());
+    watch.poll(&engine, "output past the ring's anchor", |_| {
+        contains(&engine, pane, "after-the-ring")
+    });
+    assert_eq!(
+        engine.history_rows(pane, &engine.viewport(pane).expect("a viewport")),
+        0,
+        "output must retire the rows rather than leave them misaligned"
+    );
+
+    daemon.shutdown();
+}
+
 struct Fixture {
     socket: PathBuf,
 }

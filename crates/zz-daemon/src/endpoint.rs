@@ -1968,6 +1968,11 @@ mod tests {
             .collect()
     }
 
+    #[test]
+    fn remote_socket_probe_falls_back_to_tmpdir_or_slash_tmp() {
+        assert!(REMOTE_SOCKET_PROBE.contains("${TMPDIR:-/tmp}/zz-$USER"));
+    }
+
     fn command_envs(command: &Command) -> Vec<(String, Option<String>)> {
         command
             .get_envs()

@@ -261,6 +261,24 @@ mod tests {
     }
 
     #[test]
+    fn settings_section_titles_match_the_sidebar_labels() {
+        assert_eq!(
+            SettingsSection::ALL.map(SettingsSection::title),
+            [
+                "Interface",
+                "Editor",
+                "Panes",
+                "Multiplexer",
+                "Browser",
+                "Terminal",
+                "Hosts",
+                "System",
+                "About",
+            ]
+        );
+    }
+
+    #[test]
     fn sections_follow_the_labeled_sidebar_groups() {
         assert_eq!(
             SettingsSection::ALL,

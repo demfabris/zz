@@ -196,4 +196,17 @@ mod tests {
             path
         );
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn platform_default_uses_std_temp_dir_when_xdg_runtime_dir_is_unset() {
+        if std::env::var_os("XDG_RUNTIME_DIR").is_some() {
+            return;
+        }
+        let user = std::env::var("USER").unwrap_or_else(|_| "user".to_owned());
+        assert_eq!(
+            platform_default_socket_path(),
+            std::env::temp_dir().join(format!("zz-{user}/default.sock"))
+        );
+    }
 }

@@ -4054,6 +4054,78 @@ mod tests {
     }
 
     #[test]
+    fn parse_boolean_rejects_tmux_on_yes_one() {
+        assert_eq!(parse_boolean("true"), Ok(true));
+        assert_eq!(parse_boolean("false"), Ok(false));
+        for value in ["on", "yes", "1", "off", "no", "0"] {
+            assert_eq!(
+                parse_boolean(value),
+                Err("expected `true` or `false`".to_owned()),
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn experimental_agent_pane_on_forwards_to_the_daemon_and_leaves_the_gui_off() {
+        let parsed = parse_config("experimental-agent-pane = on\n");
+        assert_eq!(
+            parsed.daemon_entries,
+            [("experimental-agent-pane".to_owned(), "on".to_owned())]
+        );
+        assert!(!parsed.config.experimental_agent_pane.value);
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("true` or `false"))
+        );
+    }
+
+    #[test]
+    fn config_key_surface_is_twenty_five_named_keys_plus_six_chrome_colors() {
+        let named = [
+            "use-system-titlebar",
+            "window-corner-radius",
+            "window-background-blur",
+            "tray",
+            "show-fps",
+            "quit-daemon-on-exit",
+            "auto-restart-stale-daemon",
+            "experimental-agent-pane",
+            "experimental-editor-pane",
+            "pane-gaps",
+            "pane-corner-radius",
+            "pane-margin",
+            "pane-border-width",
+            "widget-corner-radius",
+            "editor-font-size",
+            "editor-line-numbers",
+            "editor-relative-line-numbers",
+            "editor-soft-wrap",
+            "editor-vim-mode",
+            "browser-element-selector-hotkey",
+            "browser-search-provider",
+            "browser-egress",
+            "theme-mode",
+            "app-icon",
+            "chrome-preset",
+        ];
+        assert_eq!(named.len(), 25);
+        assert_eq!(ChromeColor::ALL.len(), 6);
+        for key in named {
+            assert!(ConfigKey::from_str(key).is_some(), "{key}");
+        }
+        for color in ChromeColor::ALL {
+            assert!(
+                ConfigKey::from_str(color.as_str()).is_some(),
+                "{}",
+                color.as_str()
+            );
+        }
+    }
+
+    #[test]
     fn file_loader_rejects_oversized_configuration() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join(CONFIG_FILE_NAME);

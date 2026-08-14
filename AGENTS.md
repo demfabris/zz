@@ -48,6 +48,7 @@ Run `just` recipes from the repo root; `just --list` shows everything.
 | `just install mac` | Build and swap `/Applications/zz.app`; the daemon survives the swap |
 | `just ios` / `just ipad` / `just ios-build` / `just ipad-build` / `just ios-test` / `just ipad-test` / `just ios-device [name]` | Native Apple client on iPhone or iPad simulator / build only / simulator tests / physical device |
 | `just forks` / `just fork-rebase <name>` | Carried-patch fork status / rebase |
+| `just gtk [args]` | Run the GTK4/libadwaita client (`crates/zz-gtk`, workspace-excluded) |
 | `just site` | Docs site dev server with live reload |
 | `just showcase` / `showcase-setup` / `showcase-build[-release]` | wasm UI showcase dev loop / toolchain / assets |
 | `just profile-cpu\|profile-system\|profile-metal\|profile-terminal-diagnostics mac …` | Instruments captures (macOS); read one back with `profile-cpu-summary`, `profile-metal-summary`, or `profile-terminal-summary` (`profile-system` has no summary recipe) |

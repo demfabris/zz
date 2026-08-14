@@ -1,3 +1,12 @@
+//! The environment an ACP child is spawned with.
+//!
+//! A GUI launch (Dock, Finder, a .desktop entry) never runs the user's shell
+//! init, so zz's own PATH misses everything the shell shapes: nvm's shell
+//! function, fnm's per-shell multishells, mise shims, custom npm prefixes.
+//! The agent CLIs live exactly there, so the child gets a repaired PATH:
+//! the login shell's own PATH, then ours, then the Node version-manager bin
+//! directories that exist on disk.
+
 use std::{
     process::{Command, Stdio},
     thread,
@@ -5,25 +14,18 @@ use std::{
 
 use agent_client_protocol::{
     AcpAgent,
-    schema::v1::{EnvVariable as WorkspaceEnvVariable, McpServer as WorkspaceMcpServer},
+    schema::v1::{EnvVariable, McpServer},
 };
 
 use crate::config::AgentConfig;
 
 pub(crate) fn with_platform_environment(agent: AcpAgent) -> AcpAgent {
-    #[cfg(target_os = "macos")]
-    {
-        with_macos_executable_path(agent, macos_executable_path())
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        agent
-    }
+    with_executable_path(agent, executable_path())
 }
 
 /// Pre-populate the npx cache for the pinned adapter packages, off the main
-/// thread, so the first agent pane spawn doesn't pay the download.
+/// thread, so the first agent pane spawn doesn't pay the download — and take
+/// the login-shell PATH snapshot there too, off the spawn path.
 pub fn warm_agent_adapter_cache(config: &AgentConfig) {
     let mut specs: Vec<String> = [config.command.as_str(), config.claude_code_command.as_str()]
         .into_iter()
@@ -31,19 +33,14 @@ pub fn warm_agent_adapter_cache(config: &AgentConfig) {
         .map(str::to_owned)
         .collect();
     specs.dedup();
-    if specs.is_empty() {
-        return;
-    }
     thread::spawn(move || {
-        #[cfg(target_os = "macos")]
-        let path = macos_executable_path();
+        let path = executable_path();
         for spec in specs {
             let mut warm = Command::new("npx");
             warm.args(["--yes", "--package", &spec, "npm", "--version"])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
-            #[cfg(target_os = "macos")]
             if let Some(path) = path {
                 warm.env("PATH", path);
             }
@@ -108,42 +105,18 @@ pub(crate) fn with_workspace_environment(
     workspace: &AgentWorkspaceEnvironment,
 ) -> AcpAgent {
     let mut server = agent.into_server();
-    if let WorkspaceMcpServer::Stdio(stdio) = &mut server {
+    if let McpServer::Stdio(stdio) = &mut server {
         for (name, value) in workspace.entries() {
             if stdio.env.iter().any(|variable| variable.name == name) {
                 continue;
             }
-            stdio.env.push(WorkspaceEnvVariable::new(name, value));
+            stdio.env.push(EnvVariable::new(name, value));
         }
     }
     AcpAgent::new(server)
 }
 
-#[cfg(target_os = "macos")]
-use std::{
-    collections::HashSet,
-    env,
-    ffi::OsStr,
-    io::{Read as _, Seek as _, SeekFrom},
-    path::{Path, PathBuf},
-    sync::OnceLock,
-    time::{Duration, Instant},
-};
-
-#[cfg(target_os = "macos")]
-use agent_client_protocol::schema::v1::{EnvVariable, McpServer};
-
-#[cfg(target_os = "macos")]
-const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(3);
-#[cfg(target_os = "macos")]
-const PATH_CAPTURE_COMMAND: &str = r#"printf '\036%s\037' "$PATH""#;
-#[cfg(target_os = "macos")]
-const PATH_MARKER_START: u8 = 0x1e;
-#[cfg(target_os = "macos")]
-const PATH_MARKER_END: u8 = 0x1f;
-
-#[cfg(target_os = "macos")]
-fn with_macos_executable_path(agent: AcpAgent, path: Option<&str>) -> AcpAgent {
+fn with_executable_path(agent: AcpAgent, path: Option<&str>) -> AcpAgent {
     let Some(path) = path else {
         return agent;
     };
@@ -157,112 +130,395 @@ fn with_macos_executable_path(agent: AcpAgent, path: Option<&str>) -> AcpAgent {
         injected = true;
     }
     if injected {
-        log::debug!(target: "zz::agent", "using login-shell PATH for ACP process");
+        log::debug!(target: "zz::agent", "using the repaired PATH for the ACP process");
     }
     AcpAgent::new(server)
 }
 
-#[cfg(target_os = "macos")]
-fn macos_executable_path() -> Option<&'static str> {
-    static PATH: OnceLock<Option<String>> = OnceLock::new();
+#[cfg(unix)]
+use login_shell::executable_path;
 
-    PATH.get_or_init(resolve_macos_executable_path).as_deref()
+/// Windows GUI launches inherit the user's PATH, so there is nothing to repair.
+#[cfg(not(unix))]
+fn executable_path() -> Option<&'static str> {
+    None
 }
 
-#[cfg(target_os = "macos")]
-fn resolve_macos_executable_path() -> Option<String> {
-    let preferred = capture_login_shell_path().or_else(capture_system_path)?;
-    let inherited = env::var_os("PATH");
-    merge_executable_paths(&preferred, inherited.as_deref()).or(Some(preferred))
-}
-
-#[cfg(target_os = "macos")]
-fn capture_login_shell_path() -> Option<String> {
-    let shell = env::var_os("SHELL")
-        .filter(|shell| {
-            let shell = Path::new(shell);
-            shell.is_absolute() && shell.is_file()
-        })
-        .unwrap_or_else(|| "/bin/zsh".into());
-    let mut capture = tempfile::tempfile().ok()?;
-    let child_stdout = capture.try_clone().ok()?;
-    let mut command = Command::new(shell);
-    command
-        .args(["-l", "-i", "-c", PATH_CAPTURE_COMMAND])
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(child_stdout))
-        .stderr(Stdio::null());
-    if let Some(home) = env::var_os("HOME").filter(|home| Path::new(home).is_dir()) {
-        command.current_dir(home);
-    }
-
-    let mut child = command.spawn().ok()?;
-    let deadline = Instant::now() + LOGIN_SHELL_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            Ok(None) | Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
-    }
-
-    capture.seek(SeekFrom::Start(0)).ok()?;
-    let mut output = Vec::new();
-    capture.read_to_end(&mut output).ok()?;
-    parse_captured_path(&output)
-}
-
-#[cfg(target_os = "macos")]
-fn capture_system_path() -> Option<String> {
-    let output = Command::new("/bin/sh")
-        .args([
-            "-c",
-            r#"PATH=; eval "$(/usr/libexec/path_helper -s)"; printf '\036%s\037' "$PATH""#,
-        ])
-        .env_clear()
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| parse_captured_path(&output.stdout))
-        .flatten()
-}
-
-#[cfg(target_os = "macos")]
-fn parse_captured_path(output: &[u8]) -> Option<String> {
-    let start = output.iter().rposition(|byte| *byte == PATH_MARKER_START)?;
-    let value = output.get(start + 1..)?;
-    let end = value.iter().position(|byte| *byte == PATH_MARKER_END)?;
-    String::from_utf8(value.get(..end)?.to_vec())
-        .ok()
-        .filter(|path| !path.is_empty())
-}
-
-#[cfg(target_os = "macos")]
-fn merge_executable_paths(preferred: &str, inherited: Option<&OsStr>) -> Option<String> {
-    let mut paths = Vec::<PathBuf>::new();
-    let mut seen = HashSet::<PathBuf>::new();
-    let mut push = |path: PathBuf| {
-        if seen.insert(path.clone()) {
-            paths.push(path);
-        }
+#[cfg(unix)]
+mod login_shell {
+    use std::{
+        collections::HashSet,
+        env,
+        ffi::OsStr,
+        fs::{self, File},
+        io::{Read as _, Seek as _, SeekFrom},
+        path::{Path, PathBuf},
+        process::{Command, Stdio},
+        sync::OnceLock,
+        thread,
+        time::{Duration, Instant},
     };
 
-    for path in env::split_paths(OsStr::new(preferred)) {
-        push(path);
+    /// A shell whose init hangs must not stall an agent pane spawn: every
+    /// attempt is killed at this deadline.
+    const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(3);
+    const POLL_INTERVAL: Duration = Duration::from_millis(10);
+    /// Tried in order: rc files that hang or `exec` a multiplexer when
+    /// interactive still answer a non-interactive login shell.
+    const LOGIN_SHELL_FLAGS: [&[&str]; 2] = [&["-l", "-i", "-c"], &["-l", "-c"]];
+    const DEFAULT_SHELLS: [&str; 3] = ["/bin/zsh", "/bin/bash", "/bin/sh"];
+    const PATH_CAPTURE_COMMAND: &str = r#"printf '\036%s\037' "$PATH""#;
+    /// fish keeps `$PATH` as a list, so the POSIX quoting joins it with spaces.
+    const FISH_PATH_CAPTURE_COMMAND: &str = r"printf '\036%s\037' (string join : $PATH)";
+    const PATH_MARKER_START: u8 = 0x1e;
+    const PATH_MARKER_END: u8 = 0x1f;
+
+    /// Resolved once per process, negative results included, so a broken shell
+    /// is probed once rather than on every pane spawn.
+    pub(super) fn executable_path() -> Option<&'static str> {
+        static PATH: OnceLock<Option<String>> = OnceLock::new();
+
+        PATH.get_or_init(resolve_executable_path).as_deref()
     }
-    if let Some(inherited) = inherited {
-        for path in env::split_paths(inherited) {
-            push(path);
+
+    fn resolve_executable_path() -> Option<String> {
+        let login = login_shell_enabled(env::var_os("ZZ_AGENT_LOGIN_SHELL").as_deref())
+            .then(capture_login_shell_path)
+            .flatten()
+            .or_else(system_path);
+        let managers = home()
+            .map(|home| {
+                node_version_manager_bins(
+                    &home,
+                    env::var_os("FNM_DIR").map(PathBuf::from).as_deref(),
+                )
+            })
+            .unwrap_or_default();
+        if login.is_none() && managers.is_empty() {
+            return None;
+        }
+        compose_executable_path(
+            login.as_deref().map(OsStr::new),
+            env::var_os("PATH").as_deref(),
+            &managers,
+        )
+    }
+
+    fn login_shell_enabled(value: Option<&OsStr>) -> bool {
+        value.is_none_or(|value| value != "0")
+    }
+
+    fn home() -> Option<PathBuf> {
+        env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|home| home.is_dir())
+    }
+
+    fn capture_login_shell_path() -> Option<String> {
+        let shell = user_shell()?;
+        LOGIN_SHELL_FLAGS
+            .iter()
+            .find_map(|flags| capture_path_from_shell(&shell, flags))
+    }
+
+    fn user_shell() -> Option<PathBuf> {
+        env::var_os("SHELL")
+            .map(PathBuf::from)
+            .filter(|shell| shell.is_absolute() && shell.is_file())
+            .or_else(|| {
+                DEFAULT_SHELLS
+                    .iter()
+                    .map(PathBuf::from)
+                    .find(|shell| shell.is_file())
+            })
+    }
+
+    fn capture_path_from_shell(shell: &Path, flags: &[&str]) -> Option<String> {
+        let mut capture = tempfile::tempfile().ok()?;
+        let child_stdout = capture.try_clone().ok()?;
+        let mut command = Command::new(shell);
+        command
+            .args(flags)
+            .arg(path_capture_command(shell))
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(child_stdout))
+            .stderr(Stdio::null())
+            .env("ZZ_RESOLVING_ENVIRONMENT", "1");
+        if let Some(home) = home() {
+            command.current_dir(home);
+        }
+
+        let mut child = command.spawn().ok()?;
+        let deadline = Instant::now() + LOGIN_SHELL_TIMEOUT;
+        loop {
+            // Init that blocks after printing must not cost the whole timeout.
+            if let Some(path) = read_captured_path(&mut capture) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Some(path);
+            }
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if Instant::now() < deadline => thread::sleep(POLL_INTERVAL),
+                Ok(None) | Err(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+            }
+        }
+
+        read_captured_path(&mut capture)
+    }
+
+    fn path_capture_command(shell: &Path) -> &'static str {
+        if shell.file_name() == Some(OsStr::new("fish")) {
+            FISH_PATH_CAPTURE_COMMAND
+        } else {
+            PATH_CAPTURE_COMMAND
         }
     }
 
-    env::join_paths(paths).ok()?.into_string().ok()
+    fn read_captured_path(capture: &mut File) -> Option<String> {
+        capture.seek(SeekFrom::Start(0)).ok()?;
+        let mut output = Vec::new();
+        capture.read_to_end(&mut output).ok()?;
+        parse_captured_path(&output)
+    }
+
+    fn system_path() -> Option<String> {
+        #[cfg(target_os = "macos")]
+        {
+            capture_system_path()
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn capture_system_path() -> Option<String> {
+        let output = Command::new("/bin/sh")
+            .args([
+                "-c",
+                r#"PATH=; eval "$(/usr/libexec/path_helper -s)"; printf '\036%s\037' "$PATH""#,
+            ])
+            .env_clear()
+            .output()
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| parse_captured_path(&output.stdout))
+            .flatten()
+    }
+
+    fn parse_captured_path(output: &[u8]) -> Option<String> {
+        let start = output.iter().rposition(|byte| *byte == PATH_MARKER_START)?;
+        let value = output.get(start + 1..)?;
+        let end = value.iter().position(|byte| *byte == PATH_MARKER_END)?;
+        String::from_utf8(value.get(..end)?.to_vec())
+            .ok()
+            .filter(|path| !path.is_empty())
+    }
+
+    /// Bin directories where npm-installed CLIs land under Node version
+    /// managers. A GUI launch never sees them: fnm's multishell entries are
+    /// per-shell and nvm is a shell function, so both live in shell init only.
+    fn node_version_manager_bins(home: &Path, fnm_dir: Option<&Path>) -> Vec<PathBuf> {
+        // fnm's active installation is reachable through the stable
+        // `aliases/default` symlink; its PATH entries are ephemeral.
+        let mut dirs: Vec<PathBuf> = fnm_dir
+            .map(Path::to_path_buf)
+            .into_iter()
+            .chain([
+                home.join(".local/share/fnm"),
+                home.join("Library/Application Support/fnm"),
+                home.join(".fnm"),
+            ])
+            .map(|root| root.join("aliases/default/bin"))
+            .collect();
+        dirs.extend([
+            home.join(".volta/bin"),
+            home.join(".bun/bin"),
+            home.join("Library/pnpm"),
+            home.join(".local/share/pnpm"),
+            home.join(".local/share/mise/shims"),
+        ]);
+
+        let mut versions: Vec<PathBuf> = fs::read_dir(home.join(".nvm/versions/node"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+            .collect();
+        versions.sort();
+        versions.reverse();
+        dirs.extend(versions.into_iter().map(|version| version.join("bin")));
+
+        dirs.retain(|dir| dir.is_dir());
+        dirs
+    }
+
+    /// The login shell's PATH keeps precedence, our own PATH follows, and the
+    /// version-manager bins land last: they are a fallback for what the shell
+    /// never told us about, never a shadow over what it did.
+    fn compose_executable_path(
+        login: Option<&OsStr>,
+        inherited: Option<&OsStr>,
+        managers: &[PathBuf],
+    ) -> Option<String> {
+        let mut paths = Vec::<PathBuf>::new();
+        let mut seen = HashSet::<PathBuf>::new();
+        let mut push = |path: PathBuf| {
+            if !path.as_os_str().is_empty() && seen.insert(path.clone()) {
+                paths.push(path);
+            }
+        };
+
+        for source in [login, inherited].into_iter().flatten() {
+            for path in env::split_paths(source) {
+                push(path);
+            }
+        }
+        for manager in managers {
+            push(manager.clone());
+        }
+
+        env::join_paths(paths)
+            .ok()?
+            .into_string()
+            .ok()
+            .filter(|path| !path.is_empty())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn bins(home: &Path, relative: &[&str]) -> Vec<PathBuf> {
+            relative
+                .iter()
+                .map(|path| {
+                    let path = home.join(path);
+                    fs::create_dir_all(&path).expect("test directory");
+                    path
+                })
+                .collect()
+        }
+
+        #[test]
+        fn captured_path_ignores_noisy_shell_output() {
+            assert_eq!(
+                parse_captured_path(b"startup noise\x1e/first\x1fmore\x1e/custom:/usr/bin\x1f"),
+                Some("/custom:/usr/bin".to_owned())
+            );
+        }
+
+        #[test]
+        fn a_partial_capture_is_not_parsed() {
+            assert_eq!(parse_captured_path(b"noise\x1e/custom:/usr"), None);
+        }
+
+        #[test]
+        fn login_path_keeps_precedence_and_appends_inherited_entries() {
+            assert_eq!(
+                compose_executable_path(
+                    Some(OsStr::new("/custom:/usr/bin")),
+                    Some(OsStr::new("/usr/bin:/opt/homebrew/bin")),
+                    &[],
+                ),
+                Some("/custom:/usr/bin:/opt/homebrew/bin".to_owned())
+            );
+        }
+
+        #[test]
+        fn version_manager_bins_land_after_both_paths_and_empty_entries_are_dropped() {
+            assert_eq!(
+                compose_executable_path(
+                    Some(OsStr::new("/custom::/usr/bin")),
+                    Some(OsStr::new("/usr/bin")),
+                    &[PathBuf::from("/home/u/.bun/bin"), PathBuf::from("/custom")],
+                ),
+                Some("/custom:/usr/bin:/home/u/.bun/bin".to_owned())
+            );
+        }
+
+        #[test]
+        fn a_failed_login_shell_still_yields_the_version_manager_bins() {
+            assert_eq!(
+                compose_executable_path(
+                    None,
+                    Some(OsStr::new("/usr/bin")),
+                    &[PathBuf::from("/home/u/.volta/bin")],
+                ),
+                Some("/usr/bin:/home/u/.volta/bin".to_owned())
+            );
+        }
+
+        #[test]
+        fn nothing_to_compose_is_no_path_at_all() {
+            assert_eq!(compose_executable_path(None, None, &[]), None);
+        }
+
+        #[test]
+        fn version_manager_bins_are_existence_checked_and_newest_first() {
+            let home = tempfile::tempdir().expect("temp home");
+            let home = home.path();
+            let expected = bins(
+                home,
+                &[
+                    ".local/share/fnm/aliases/default/bin",
+                    ".bun/bin",
+                    ".local/share/mise/shims",
+                    ".nvm/versions/node/v24.2.0/bin",
+                    ".nvm/versions/node/v20.11.1/bin",
+                ],
+            );
+            fs::create_dir_all(home.join(".nvm/versions/node/v18.0.0")).expect("empty version");
+
+            assert_eq!(node_version_manager_bins(home, None), expected);
+        }
+
+        #[test]
+        fn an_fnm_dir_override_is_probed_before_the_well_known_roots() {
+            let home = tempfile::tempdir().expect("temp home");
+            let home = home.path();
+            let expected = bins(
+                home,
+                &[
+                    "elsewhere/fnm/aliases/default/bin",
+                    ".fnm/aliases/default/bin",
+                ],
+            );
+
+            assert_eq!(
+                node_version_manager_bins(home, Some(&home.join("elsewhere/fnm"))),
+                expected
+            );
+        }
+
+        #[test]
+        fn the_capture_command_follows_the_shell_family() {
+            assert_eq!(
+                path_capture_command(Path::new("/bin/zsh")),
+                PATH_CAPTURE_COMMAND
+            );
+            assert_eq!(
+                path_capture_command(Path::new("/usr/local/bin/fish")),
+                FISH_PATH_CAPTURE_COMMAND
+            );
+        }
+
+        #[test]
+        fn the_login_shell_probe_is_opt_out() {
+            assert!(login_shell_enabled(None));
+            assert!(login_shell_enabled(Some(OsStr::new("1"))));
+            assert!(!login_shell_enabled(Some(OsStr::new("0"))));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -310,7 +566,7 @@ mod workspace_tests {
 
     use agent_client_protocol::{AcpAgent, schema::v1::McpServer};
 
-    use super::{AgentWorkspaceEnvironment, with_workspace_environment};
+    use super::{AgentWorkspaceEnvironment, with_executable_path, with_workspace_environment};
 
     fn workspace() -> AgentWorkspaceEnvironment {
         AgentWorkspaceEnvironment {
@@ -370,61 +626,32 @@ mod workspace_tests {
         assert_eq!(environment.len(), 1);
         assert_eq!(environment[0], ("ZZ_PANE".to_owned(), "%1".to_owned()));
     }
-}
-
-#[cfg(all(test, target_os = "macos"))]
-mod tests {
-    use std::str::FromStr as _;
-
-    use super::*;
 
     #[test]
-    fn captured_path_ignores_noisy_shell_output() {
-        assert_eq!(
-            parse_captured_path(b"startup noise\x1e/first\x1fmore\x1e/custom:/usr/bin\x1f"),
-            Some("/custom:/usr/bin".to_owned())
-        );
-    }
-
-    #[test]
-    fn login_path_keeps_precedence_and_appends_inherited_entries() {
-        assert_eq!(
-            merge_executable_paths(
-                "/custom:/usr/bin",
-                Some(OsStr::new("/usr/bin:/opt/homebrew/bin")),
-            ),
-            Some("/custom:/usr/bin:/opt/homebrew/bin".to_owned())
-        );
-    }
-
-    #[test]
-    fn agent_path_is_injected_without_replacing_an_explicit_path() {
+    fn the_repaired_path_never_replaces_an_explicit_one() {
         let agent = AcpAgent::from_str("npx -y example").expect("valid command");
-        let agent = with_macos_executable_path(agent, Some("/login/bin:/usr/bin"));
-        let McpServer::Stdio(stdio) = agent.server() else {
-            panic!("expected stdio agent");
-        };
+        let agent = with_executable_path(agent, Some("/login/bin:/usr/bin"));
         assert!(
-            stdio
-                .env
-                .iter()
-                .any(|variable| variable.name == "PATH" && variable.value == "/login/bin:/usr/bin")
+            environment(&agent).contains(&("PATH".to_owned(), "/login/bin:/usr/bin".to_owned()))
         );
 
         let agent = AcpAgent::from_str("PATH=/configured/bin npx -y example")
             .expect("valid configured command");
-        let agent = with_macos_executable_path(agent, Some("/login/bin:/usr/bin"));
-        let McpServer::Stdio(stdio) = agent.server() else {
-            panic!("expected stdio agent");
-        };
+        let agent = with_executable_path(agent, Some("/login/bin:/usr/bin"));
         assert_eq!(
-            stdio
-                .env
-                .iter()
-                .filter(|variable| variable.name == "PATH")
-                .map(|variable| variable.value.as_str())
+            environment(&agent)
+                .into_iter()
+                .filter(|(name, _)| name == "PATH")
+                .map(|(_, value)| value)
                 .collect::<Vec<_>>(),
             ["/configured/bin"]
         );
+    }
+
+    #[test]
+    fn an_unresolved_path_leaves_the_agent_alone() {
+        let agent = AcpAgent::from_str("npx -y example").expect("valid command");
+        let agent = with_executable_path(agent, None);
+        assert!(environment(&agent).is_empty());
     }
 }

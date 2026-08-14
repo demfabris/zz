@@ -6,14 +6,15 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     sync::{Arc, OnceLock},
+    time::Duration,
 };
 
 use crate::{
     ActiveTheme as _, CHROME_GAP, Colorize as _, Icon, IconName, Sizable as _, WindowExt as _,
     attachment::open_attachment_preview,
     h_flex,
+    pulse::pulse_phase,
     scroll::ScrollableElement as _,
-    spinner::Spinner,
     text::{
         MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, TextView,
         TextViewState, TextViewStyle, markdown_ast,
@@ -21,11 +22,12 @@ use crate::{
     v_flex,
 };
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, DispatchPhase, Div, ElementId, Entity, FontStyle,
-    FontWeight, Global, HighlightStyle, Hsla, Image, ImageSource, InteractiveText, IntoElement,
-    ListSizingBehavior, ListState, ObjectFit, Pixels, RenderImage, Rgba, ScrollStrategy,
-    ScrollWheelEvent, SharedString, Stateful, StyledText, Task, UniformListScrollHandle, Window,
-    canvas, div, img, list, prelude::*, px, relative, uniform_list,
+    AnyElement, App, ClipboardItem, Context, DispatchPhase, Div, ElementId, Entity, EntityId,
+    FontStyle, FontWeight, Global, HighlightStyle, Hsla, Image, ImageSource, InteractiveText,
+    IntoElement, ListSizingBehavior, ListState, ObjectFit, Pixels, RenderImage, Rgba,
+    ScrollStrategy, ScrollWheelEvent, SharedString, Stateful, StyledText, Task, Transformation,
+    UniformListScrollHandle, Window, canvas, div, ease_in_out, img, list, percentage, prelude::*,
+    px, relative, uniform_list,
 };
 use similar::{ChangeTag, TextDiff};
 
@@ -37,6 +39,8 @@ const TOOL_CONTENT_MAX_HEIGHT: f32 = 360.0;
 const TOOL_CONTENT_MAX_LINES: usize = 10_000;
 const TOOL_CONTENT_ROW_HEIGHT: f32 = 20.0;
 const MERMAID_CACHE_CAPACITY: usize = 16;
+/// One rotation of the in-flight tool indicator.
+const TOOL_SPINNER_PERIOD: Duration = Duration::from_millis(800);
 pub const AGENT_CONTENT_MAX_WIDTH: f32 = 680.0;
 /// Side of a square attachment tile in a sent message.
 pub const TRANSCRIPT_ATTACHMENT: Pixels = px(140.0);
@@ -602,6 +606,7 @@ fn render_group(
     members: &[AgentEntry],
     cx: &mut App,
 ) -> AnyElement {
+    let view = store.entity_id();
     let expanded = store.update(cx, |store, _| {
         store.expanded(id, DisclosureKind::Group, false)
     });
@@ -667,7 +672,9 @@ fn render_group(
                     h_flex()
                         .flex_none()
                         .gap_1()
-                        .when_some(status, |this, status| this.child(tool_status(status, cx)))
+                        .when_some(status, |this, status| {
+                            this.child(tool_status(status, view, cx))
+                        })
                         .child(
                             Icon::new(if expanded {
                                 IconName::ChevronUp
@@ -956,6 +963,7 @@ fn render_entry(
             summary,
             result_markdown,
         } => {
+            let view = store.entity_id();
             let expandable = !result_markdown.as_str().trim().is_empty();
             let expanded = expandable
                 && store.update(cx, |store, _| {
@@ -987,7 +995,7 @@ fn render_entry(
                                 .flex_1()
                                 .gap_2()
                                 .overflow_hidden()
-                                .child(tool_status(notification_status(&status), cx))
+                                .child(tool_status(notification_status(&status), view, cx))
                                 .child(
                                     div()
                                         .min_w_0()
@@ -1060,6 +1068,7 @@ fn render_tool_entry(
         subagent: _,
         children,
     } = tool;
+    let view = store.entity_id();
     let expandable =
         location.is_some() || input.is_some() || !output.is_empty() || !children.is_empty();
     let content = store.update(cx, |store, _| {
@@ -1133,7 +1142,7 @@ fn render_tool_entry(
                     h_flex()
                         .flex_none()
                         .gap_1()
-                        .child(tool_status(status, cx))
+                        .child(tool_status(status, view, cx))
                         .when(expandable, |this| {
                             this.child(
                                 Icon::new(if expanded {
@@ -1531,20 +1540,23 @@ fn tool_icon(kind: AgentToolKind) -> IconName {
     }
 }
 
-fn tool_status(status: AgentToolStatus, cx: &App) -> AnyElement {
+/// The rotating in-flight indicator, driven by the shared pulse clock rather
+/// than a repeating animation: one mounted `Spinner` would redraw the window on
+/// every display frame for as long as a tool runs.
+fn tool_spinner(color: Hsla, view: EntityId, cx: &mut App) -> AnyElement {
+    let phase = ease_in_out(pulse_phase(TOOL_SPINNER_PERIOD, view, cx));
+    Icon::new(IconName::Loader)
+        .xsmall()
+        .text_color(color)
+        .transform(Transformation::rotate(percentage(phase)))
+        .into_any_element()
+}
+
+fn tool_status(status: AgentToolStatus, view: EntityId, cx: &mut App) -> AnyElement {
     match status {
-        AgentToolStatus::Pending => Spinner::new()
-            .xsmall()
-            .color(cx.theme().foreground.muted())
-            .into_any_element(),
-        AgentToolStatus::Running => Spinner::new()
-            .xsmall()
-            .color(cx.theme().foreground)
-            .into_any_element(),
-        AgentToolStatus::NeedsApproval => Spinner::new()
-            .xsmall()
-            .color(cx.theme().warning)
-            .into_any_element(),
+        AgentToolStatus::Pending => tool_spinner(cx.theme().foreground.muted(), view, cx),
+        AgentToolStatus::Running => tool_spinner(cx.theme().foreground, view, cx),
+        AgentToolStatus::NeedsApproval => tool_spinner(cx.theme().warning, view, cx),
         AgentToolStatus::Completed => Icon::new(IconName::Check)
             .xsmall()
             .text_color(cx.theme().foreground.muted())

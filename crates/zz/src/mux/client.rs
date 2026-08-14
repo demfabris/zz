@@ -13,17 +13,18 @@ use gpui::{ClipboardItem, Context, EventEmitter, Image, RenderImage};
 use image::{Frame as ImageFrame, ImageBuffer, Rgba};
 use parking_lot::RwLock;
 use zz_browser::{diagnostic_url, normalize_url};
+use zz_client::{ClientCore, CoreEvent, Outbound};
 use zz_daemon::{
     AskpassPrompt, AskpassReply, DaemonError, Endpoint, EndpointError, InteractiveClient,
     terminate_incompatible_daemon,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferState, ChooseTreeState, ClientMessageKind,
-    CommandInvocation, CommandPromptState, DisplayPanesState, EventPayload, GuiResponse,
-    InputMessage, KeyBindingSnapshot, KeyTableSnapshot, LayoutNode, MuxOptionKey, MuxOptions,
-    MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneKindSnapshot,
-    PastedImageFormat, ProtocolError, ProtocolMessage, ServerError, ServerHello, SessionId,
-    StatusLine, TerminalUiCommand, WindowSnapshot,
+    CommandInvocation, CommandPromptState, CommandResponse, DisplayPanesState, Event, EventPayload,
+    GuiResponse, InputMessage, KeyBindingSnapshot, LayoutNode, MuxOptionKey, MuxSnapshot,
+    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PastedImageFormat,
+    ProtocolError, ProtocolMessage, ServerError, ServerHello, SessionId, StatusLine,
+    TerminalUiCommand, WindowSnapshot,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME,
@@ -851,18 +852,18 @@ impl HostConnection {
 }
 
 pub struct MuxClient {
+    /// Protocol reduction for the attached connection: snapshot, options, key
+    /// tables, status, prefix arming, attachment and the overlay models. It
+    /// outlives connection churn on purpose — a reconnecting host keeps
+    /// rendering its last frame until the new `ServerHello` resets the core.
+    core: ClientCore,
     registry: HostRegistry,
     connections: HashMap<HostId, HostConnection>,
     attached_host: HostId,
     color_scheme: TerminalColorScheme,
     appearance: Arc<TerminalAppearance>,
-    mux_options: MuxOptions,
-    key_tables: Vec<KeyTableSnapshot>,
-    status: StatusLine,
     status_revision: u64,
-    prefix_armed: bool,
     terminal_font_size_offset_points: f32,
-    snapshot: Arc<MuxSnapshot>,
     #[cfg(test)]
     input_sink: Option<std::rc::Rc<std::cell::RefCell<Vec<InputMessage>>>>,
     attached_snapshot_pending: bool,
@@ -878,17 +879,12 @@ pub struct MuxClient {
     pending_pasted_image_previews: BTreeSet<(PaneId, u32)>,
     pending_commands_revision: u64,
     command_output: Option<CommandOutputModel>,
-    command_prompt: Option<CommandPromptState>,
     command_prompt_revision: u64,
-    choose_tree: Option<ChooseTreeState>,
     choose_tree_revision: u64,
-    choose_buffer: Option<ChooseBufferState>,
     choose_buffer_revision: u64,
-    display_panes: Option<DisplayPanesState>,
     display_panes_revision: u64,
     sidebar_focus_revision: u64,
     bell_revision: u64,
-    attached_session: Option<SessionId>,
     error: Option<Arc<str>>,
     stale_daemon: Option<StaleDaemonInfo>,
     error_after_next_attach: Option<Arc<str>>,
@@ -945,18 +941,14 @@ impl MuxClient {
             connections.insert(HostId::LOCAL, HostConnection::disconnected(HostId::LOCAL));
         }
         let mut state = Self {
+            core: ClientCore::new(),
             registry,
             connections,
             attached_host: HostId::LOCAL,
             color_scheme,
             appearance: Arc::new(TerminalAppearance::default()),
-            mux_options: MuxOptions::default(),
-            key_tables: Vec::new(),
-            status: StatusLine::default(),
             status_revision: 0,
-            prefix_armed: false,
             terminal_font_size_offset_points: 0.0,
-            snapshot: Arc::new(MuxSnapshot::default()),
             #[cfg(test)]
             input_sink: None,
             attached_snapshot_pending: false,
@@ -972,17 +964,12 @@ impl MuxClient {
             pending_pasted_image_previews: BTreeSet::new(),
             pending_commands_revision: 0,
             command_output: None,
-            command_prompt: None,
             command_prompt_revision: 0,
-            choose_tree: None,
             choose_tree_revision: 0,
-            choose_buffer: None,
             choose_buffer_revision: 0,
-            display_panes: None,
             display_panes_revision: 0,
             sidebar_focus_revision: 0,
             bell_revision: 0,
-            attached_session: None,
             error: None,
             stale_daemon: None,
             error_after_next_attach: None,
@@ -1024,7 +1011,7 @@ impl MuxClient {
         client: InteractiveClient,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
-        self.ingest_server_hello(client.server_hello(), cx);
+        self.ingest_server_hello(client.server_hello().clone(), cx);
         let client = Arc::new(client);
         crate::config::register_config_override_client(&client, false, cx);
         client.attach("").map_err(|error| error.to_string())?;
@@ -1034,20 +1021,26 @@ impl MuxClient {
         Ok(())
     }
 
-    fn ingest_server_hello(&mut self, hello: &ServerHello, cx: &mut Context<Self>) {
-        let mut appearance = hello.appearance.clone();
+    /// Adopt a connection's handshake as the attached client's truth: options,
+    /// key tables and status land in the core, the localized appearance stays
+    /// here because font resolution needs the GPUI text system.
+    ///
+    /// Settings only — a reconnect ingests the new hello while the old frame is
+    /// still on screen, and must not blank it. Clearing the attachment is
+    /// `clear_cross_host_state`'s job, and only a host switch does it.
+    fn ingest_server_hello(&mut self, hello: ServerHello, cx: &mut Context<Self>) {
+        self.core.adopt_hello(hello);
+        let provenance = self.core.appearance_provenance().clone();
+        let mut appearance = self.core.appearance().cloned().unwrap_or_default();
         let requested_primary_font = appearance.font_families.first().cloned();
         localize_terminal_font_families(
             &mut appearance,
-            &hello.appearance_provenance,
+            &provenance,
             &cx.text_system().all_font_names(),
         );
         self.terminal_font_size_offset_points =
             apply_terminal_font_size_offset(&mut appearance, self.terminal_font_size_offset_points);
         self.appearance = Arc::new(appearance);
-        self.mux_options.clone_from(&hello.mux_options);
-        self.key_tables.clone_from(&hello.key_tables);
-        self.status.clone_from(&hello.status);
         log::info!(
             target: "zz::diagnostics::appearance",
             "resolved appearance hash={} requested_primary_font={requested_primary_font:?} primary_font={:?} fallback_count={} feature_count={} font_size_points={} padding_left={} padding_right={} padding_top={} padding_bottom={} minimum_contrast={} background_opacity={} blink_policy={:?} blink_interval_ms={}",
@@ -1066,6 +1059,14 @@ impl MuxClient {
             self.appearance.cursor_blink_interval_ms,
         );
         crate::theme::set_terminal_appearance(Arc::clone(&self.appearance), cx);
+    }
+
+    /// Drain the core's queues without acting on them, for state a test stands
+    /// up directly. Left queued, they would replay against the next message.
+    #[cfg(test)]
+    fn discard_core_effects(&mut self) {
+        while self.core.poll_outbound().is_some() {}
+        while self.core.poll_event().is_some() {}
     }
 
     fn attached_connection(&self) -> &HostConnection {
@@ -1092,7 +1093,8 @@ impl MuxClient {
     }
 
     fn history_trickle_budget(&self) -> usize {
-        self.mux_options
+        self.core
+            .mux_options()
             .get(MuxOptionKey::HistoryTrickle)
             .and_then(|option| option.value.parse::<usize>().ok())
             .unwrap_or_default()
@@ -1385,7 +1387,8 @@ impl MuxClient {
     ) -> impl Iterator<Item = (HostId, &str, &HostState, Option<&MuxSnapshot>)> {
         let connections = &self.connections;
         let attached_host = self.attached_host;
-        let attached_snapshot = (!self.attached_snapshot_pending).then(|| self.snapshot.as_ref());
+        let attached_snapshot =
+            (!self.attached_snapshot_pending).then(|| self.core.snapshot().as_ref());
         self.registry.iter().map(move |(host, entry)| {
             let connection = connections
                 .get(&host)
@@ -1763,7 +1766,7 @@ impl MuxClient {
             .expect("a connected host has an interactive client");
         let session = connection.last_attached_session;
 
-        self.ingest_server_hello(&hello, cx);
+        self.ingest_server_hello(hello, cx);
         self.status_revision = self.status_revision.saturating_add(1);
         self.error = None;
         self.error_after_next_attach = None;
@@ -1846,7 +1849,9 @@ impl MuxClient {
             .map_or_else(|| format!("{host:?}"), |entry| entry.name.clone());
         let was_attached = host == self.attached_host;
         let last_attached_session = if was_attached {
-            self.attached_session.or(connection.last_attached_session)
+            self.core
+                .attached_session()
+                .or(connection.last_attached_session)
         } else {
             connection.last_attached_session
         };
@@ -1890,13 +1895,13 @@ impl MuxClient {
 
     #[must_use]
     pub fn snapshot(&self) -> Arc<MuxSnapshot> {
-        Arc::clone(&self.snapshot)
+        Arc::clone(self.core.snapshot())
     }
 
     /// The rendered tmux status line for this client, expanded by the daemon.
     #[must_use]
     pub(crate) const fn status(&self) -> &StatusLine {
-        &self.status
+        self.core.status()
     }
 
     /// Bumped on every status change, so a view can observe the status without
@@ -1911,15 +1916,16 @@ impl MuxClient {
     #[must_use]
     pub(crate) fn canonical_prefix(&self) -> Option<String> {
         self.attached_connection().client.as_ref()?;
-        self.mux_options
-            .get(zz_protocol::MuxOptionKey::Prefix)
+        self.core
+            .mux_options()
+            .get(MuxOptionKey::Prefix)
             .map(|option| zz_protocol::canonical_key(&option.value))
     }
 
     /// Whether the daemon reported this client's prefix sequence as armed.
     #[must_use]
     pub(crate) const fn prefix_armed(&self) -> bool {
-        self.prefix_armed
+        self.core.prefix_armed()
     }
 
     /// The daemon-published prefix key table, or empty while disconnected.
@@ -1929,10 +1935,7 @@ impl MuxClient {
         if self.attached_connection().client.is_none() {
             return &[];
         }
-        self.key_tables
-            .iter()
-            .find(|table| table.name == "prefix")
-            .map_or(&[], |table| table.bindings.as_slice())
+        self.core.prefix_bindings()
     }
 
     #[must_use]
@@ -1950,9 +1953,20 @@ impl MuxClient {
         sink
     }
 
+    /// Reduce one event payload into the core without running its effects, so
+    /// a test can stand a piece of daemon state up directly.
+    #[cfg(test)]
+    fn seed_core(&mut self, payload: EventPayload) {
+        self.core.handle_message(ProtocolMessage::Event(Event {
+            sequence: 0,
+            payload,
+        }));
+        self.discard_core_effects();
+    }
+
     #[cfg(test)]
     pub(crate) fn set_prefix_armed_for_test(&mut self, armed: bool, cx: &mut Context<Self>) {
-        self.prefix_armed = armed;
+        self.seed_core(EventPayload::PrefixArmed { armed });
         cx.notify();
     }
 
@@ -1964,8 +1978,9 @@ impl MuxClient {
         snapshot: MuxSnapshot,
         cx: &mut Context<Self>,
     ) {
-        self.attached_session = Some(session);
-        self.snapshot = Arc::new(snapshot);
+        self.core
+            .handle_message(ProtocolMessage::Attached { session, snapshot });
+        self.discard_core_effects();
         cx.notify();
     }
 
@@ -1978,8 +1993,7 @@ impl MuxClient {
             .get_by_name(name)
             .expect("a fleet host registered for the test");
         self.attached_host = host;
-        self.attached_session = None;
-        self.snapshot = Arc::new(MuxSnapshot::default());
+        self.core.clear_attachment();
         cx.notify();
     }
 
@@ -2132,7 +2146,7 @@ impl MuxClient {
 
     #[must_use]
     pub(crate) fn command_prompt(&self) -> Option<&CommandPromptState> {
-        self.command_prompt.as_ref()
+        self.core.command_prompt()
     }
 
     #[must_use]
@@ -2142,7 +2156,7 @@ impl MuxClient {
 
     #[must_use]
     pub(crate) fn choose_tree(&self) -> Option<&ChooseTreeState> {
-        self.choose_tree.as_ref()
+        self.core.choose_tree()
     }
 
     #[must_use]
@@ -2152,7 +2166,7 @@ impl MuxClient {
 
     #[must_use]
     pub(crate) fn choose_buffer(&self) -> Option<&ChooseBufferState> {
-        self.choose_buffer.as_ref()
+        self.core.choose_buffer()
     }
 
     #[must_use]
@@ -2162,7 +2176,7 @@ impl MuxClient {
 
     #[must_use]
     pub(crate) fn display_panes(&self) -> Option<&DisplayPanesState> {
-        self.display_panes.as_ref()
+        self.core.display_panes()
     }
 
     #[must_use]
@@ -2182,7 +2196,7 @@ impl MuxClient {
 
     #[must_use]
     pub fn attached_session(&self) -> Option<SessionId> {
-        self.attached_session
+        self.core.attached_session()
     }
 
     pub(crate) fn send_input(&self, input: InputMessage) -> bool {
@@ -2351,7 +2365,7 @@ impl MuxClient {
             if self.registry.get(HostId::LOCAL).is_some() {
                 self.attach_to_host_default(HostId::LOCAL, cx);
             } else {
-                let outgoing_snapshot = Arc::clone(&self.snapshot);
+                let outgoing_snapshot = Arc::clone(self.core.snapshot());
                 self.cancel_reconnect(host);
                 self.attached_connection_mut().snapshot = Some(outgoing_snapshot);
                 if let Some(client) = &self.attached_connection().client {
@@ -2408,7 +2422,7 @@ impl MuxClient {
             .current_hello()
             .expect("a connected host has an interactive client");
 
-        let outgoing_snapshot = Arc::clone(&self.snapshot);
+        let outgoing_snapshot = Arc::clone(self.core.snapshot());
         self.cancel_reconnect(self.attached_host);
         self.attached_connection_mut().snapshot = Some(outgoing_snapshot);
         if let Some(current) = &self.attached_connection().client {
@@ -2421,7 +2435,7 @@ impl MuxClient {
         self.error = None;
         self.error_after_next_attach = None;
         self.attached_host = host;
-        self.ingest_server_hello(&hello, cx);
+        self.ingest_server_hello(hello, cx);
         self.status_revision = self.status_revision.saturating_add(1);
         let attach_result = if let Some(client) = client {
             crate::config::register_config_override_client(&client, host != HostId::LOCAL, cx);
@@ -2462,7 +2476,7 @@ impl MuxClient {
         let hello = connection
             .current_hello()
             .expect("a connected host has an interactive client");
-        self.ingest_server_hello(&hello, cx);
+        self.ingest_server_hello(hello, cx);
         self.status_revision = self.status_revision.saturating_add(1);
         let result = if let Some(client) = client {
             crate::config::register_config_override_client(&client, false, cx);
@@ -2485,7 +2499,7 @@ impl MuxClient {
     }
 
     fn clear_cross_host_state(&mut self) {
-        self.snapshot = Arc::new(MuxSnapshot::default());
+        self.core.clear_attachment();
         self.attached_snapshot_pending = true;
         self.viewports.clear();
         self.clear_all_kitty_images();
@@ -2496,7 +2510,6 @@ impl MuxClient {
         self.clear_all_pasted_images();
         self.pending_commands_revision = self.pending_commands_revision.wrapping_add(1).max(1);
         self.command_output = None;
-        self.attached_session = None;
         self.command_output_diff.invalidate();
     }
 
@@ -2506,15 +2519,11 @@ impl MuxClient {
         connection.full_requests_pending.clear();
         connection.history_requests_pending.clear();
         connection.history_backfill_deferred.clear();
-        self.prefix_armed = false;
-        self.command_prompt = None;
+        self.core.reset_session();
         self.command_prompt_revision = self.command_prompt_revision.wrapping_add(1).max(1);
         self.command_output = None;
-        self.choose_tree = None;
         self.choose_tree_revision = self.choose_tree_revision.wrapping_add(1).max(1);
-        self.choose_buffer = None;
         self.choose_buffer_revision = self.choose_buffer_revision.wrapping_add(1).max(1);
-        self.display_panes = None;
         self.display_panes_revision = self.display_panes_revision.wrapping_add(1).max(1);
         self.clear_all_kitty_images();
         self.clear_all_pasted_images();
@@ -2830,17 +2839,17 @@ impl MuxClient {
             self.appearance.stable_hash(),
             self.appearance.font_size_points,
             self.terminal_font_size_offset_points,
-            self.attached_session,
-            self.snapshot.generation,
-            self.snapshot.sessions.len(),
+            self.core.attached_session(),
+            self.core.snapshot().generation,
+            self.core.snapshot().sessions.len(),
             self.viewports.len(),
             self.browser_commands.len(),
             self.terminal_commands.len(),
             self.command_output.is_some(),
-            self.command_prompt.is_some(),
-            self.choose_tree.is_some(),
-            self.choose_buffer.is_some(),
-            self.display_panes.is_some(),
+            self.core.command_prompt().is_some(),
+            self.core.choose_tree().is_some(),
+            self.core.choose_buffer().is_some(),
+            self.core.display_panes().is_some(),
             self.next_row_revision,
             self.attached_connection().resync_pending,
             self.error,
@@ -2848,13 +2857,13 @@ impl MuxClient {
         log::trace!(
             target: "zz::diagnostics::mux_state",
             "snapshot reason={reason} mux={:#?} browser_commands={:#?} terminal_commands={:#?} command_prompt={:#?} choose_tree={:#?} choose_buffer={:#?} display_panes={:#?}",
-            self.snapshot,
+            self.core.snapshot(),
             self.browser_commands,
             self.terminal_commands,
-            self.command_prompt,
-            self.choose_tree,
-            self.choose_buffer,
-            self.display_panes,
+            self.core.command_prompt(),
+            self.core.choose_tree(),
+            self.core.choose_buffer(),
+            self.core.display_panes(),
         );
         for (pane, retained) in &self.viewports {
             let retained_state = retained.read();
@@ -3002,424 +3011,113 @@ impl MuxClient {
             "handle_message begin message={message:#?}"
         );
         match message {
-            ProtocolMessage::Attached { session, snapshot } => {
-                self.clear_all_kitty_images();
-                self.clear_all_pasted_images();
-                self.attached_session = Some(session);
-                self.snapshot = Arc::new(snapshot);
+            // The terminal frame path never reaches the core: the retained
+            // viewport carries the history ring, row revisions and diff
+            // scratch the painter reads, so delegating it would keep a second
+            // copy of every grid and re-apply every patch on the hot path.
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::TerminalViewport { pane, viewport },
+                ..
+            }) => self.apply_terminal_viewport(pane, viewport),
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::TerminalPatch { pane, patch },
+                ..
+            }) => self.apply_terminal_patch(pane, patch),
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::CommandOutput { pane, viewport },
+                ..
+            }) => self.apply_command_output(pane, viewport),
+            message => {
+                // `Detached` clears the attachment during reduction, so the
+                // session it names has to be compared against what the core
+                // held before.
+                let attached_before = self.core.attached_session();
+                self.core.handle_message(message);
+                while let Some(outbound) = self.core.poll_outbound() {
+                    match outbound {
+                        Outbound::RequestFull(pane) => self.request_full_viewport(pane),
+                    }
+                }
+                let mut attaching = false;
+                while let Some(event) = self.core.poll_event() {
+                    self.apply_core_event(host, event, attached_before, &mut attaching, cx);
+                }
+            }
+        }
+        log::trace!(
+            target: "zz::diagnostics::mux",
+            "handle_message end elapsed_us={} mux_generation={} viewports={} resync_pending={}",
+            diagnostics::elapsed_us(started),
+            self.core.snapshot().generation,
+            self.viewports.len(),
+            self.attached_connection().resync_pending,
+        );
+        cx.notify();
+    }
+
+    /// Run the GPUI half of one reduced change: revisions, toasts, clipboard
+    /// and pane bookkeeping. The state itself already landed in the core.
+    ///
+    /// `attaching` records that this message also attached, so the snapshot it
+    /// carries does not re-request history for viewports the outgoing session
+    /// left behind — an `Attached` never did that.
+    fn apply_core_event(
+        &mut self,
+        host: HostId,
+        event: CoreEvent,
+        attached_before: Option<SessionId>,
+        attaching: &mut bool,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            CoreEvent::Attached { session } => {
+                *attaching = true;
+                self.finish_attach(host, session, cx);
+            }
+            CoreEvent::SnapshotChanged => {
                 self.attached_snapshot_pending = false;
                 let connection = self.attached_connection_mut();
-                connection.last_attached_session = Some(session);
-                let reconnected = connection.reconnect_attach.take().is_some();
                 connection.resync_pending = false;
                 connection.full_requests_pending.clear();
                 connection.history_requests_pending.clear();
                 connection.history_backfill_deferred.clear();
-                self.error = self.error_after_next_attach.take();
-                if reconnected {
-                    let name = self
-                        .registry
-                        .get(host)
-                        .map_or_else(|| format!("{host:?}"), |entry| entry.name.clone());
-                    Self::emit_notification(
-                        ClientMessageKind::Success,
-                        format!("reconnected to {name}"),
-                        cx,
-                    );
+                if !*attaching {
+                    self.backfill_retained_history();
                 }
             }
-            ProtocolMessage::Event(event) => match event.payload {
-                EventPayload::Snapshot(snapshot) => {
-                    self.snapshot = Arc::new(snapshot);
-                    self.attached_snapshot_pending = false;
-                    let connection = self.attached_connection_mut();
-                    connection.resync_pending = false;
-                    connection.full_requests_pending.clear();
-                    connection.history_requests_pending.clear();
-                    connection.history_backfill_deferred.clear();
-                    let panes = self.viewports.keys().copied().collect::<Vec<_>>();
-                    for pane in panes {
-                        self.request_history_backfill(pane);
-                    }
-                }
-                EventPayload::AppearanceChanged {
-                    appearance,
-                    provenance,
-                } => {
-                    let previous_hash = self.appearance.stable_hash();
-                    let configured_font_size = appearance.font_size_points;
-                    let mut appearance = *appearance;
-                    let requested_primary_font = appearance.font_families.first().cloned();
-                    self.attached_connection_mut().appearance =
-                        Some((appearance.clone(), provenance.clone()));
-                    localize_terminal_font_families(
-                        &mut appearance,
-                        &provenance,
-                        &cx.text_system().all_font_names(),
-                    );
-                    self.terminal_font_size_offset_points = apply_terminal_font_size_offset(
-                        &mut appearance,
-                        self.terminal_font_size_offset_points,
-                    );
-                    self.appearance = Arc::new(appearance);
-                    crate::theme::set_terminal_appearance(Arc::clone(&self.appearance), cx);
-                    self.command_output_diff.invalidate();
-                    log::info!(
-                        target: "zz::diagnostics::appearance",
-                        "reloaded appearance previous_hash={previous_hash} hash={} scheme={} requested_primary_font={requested_primary_font:?} primary_font={:?} configured_font_size_points={configured_font_size} effective_font_size_points={} font_size_offset_points={}",
-                        self.appearance.stable_hash(),
-                        self.appearance.color_scheme.as_str(),
-                        self.appearance.font_families.first(),
-                        self.appearance.font_size_points,
-                        self.terminal_font_size_offset_points,
-                    );
-                }
-                EventPayload::MuxOptionsChanged { options } => {
-                    self.mux_options = options;
-                    let panes = self.viewports.keys().copied().collect::<Vec<_>>();
-                    for pane in panes {
-                        self.request_history_backfill(pane);
-                    }
-                }
-                EventPayload::KeyTablesChanged { tables } => {
-                    self.key_tables = tables;
-                }
-                EventPayload::StatusChanged { status } => {
-                    self.status = status;
-                    self.status_revision = self.status_revision.saturating_add(1);
-                }
-                EventPayload::PrefixArmed { armed } => {
-                    log::info!(
-                        target: "zz::diagnostics::input",
-                        "prefix_armed_received armed={armed}"
-                    );
-                    self.prefix_armed = armed;
-                }
-                EventPayload::TerminalViewport { pane, viewport } => {
-                    self.kitty_image_cache(pane);
-                    self.viewports.insert(
-                        pane,
-                        Arc::new(RwLock::new(new_retained_viewport(
-                            viewport,
-                            &mut self.next_row_revision,
-                        ))),
-                    );
-                    self.attached_connection_mut()
-                        .full_requests_pending
-                        .remove(&pane);
-                    self.attached_connection_mut()
-                        .history_requests_pending
-                        .remove(&pane);
-                    self.attached_connection_mut()
-                        .history_backfill_deferred
-                        .remove(&pane);
-                    self.request_history_backfill(pane);
-                }
-                EventPayload::TerminalPatch { pane, patch } => {
-                    self.kitty_image_cache(pane);
-                    let retained = self.viewports.get(&pane).cloned();
-                    let request_missing =
-                        retained.is_none() && snapshot_contains_pane(self.snapshot.as_ref(), pane);
-                    let request_failed_patch = retained.is_some();
-                    let apply_result = if let Some(retained) = retained {
-                        let mut retained = retained.write();
-                        if retained.row_revisions.len() == usize::from(patch.rows) {
-                            apply_retained_patch(&mut retained, patch, &mut self.next_row_revision)
-                                .map_err(|error| {
-                                    log::warn!("rejected terminal patch for {pane}: {error}");
-                                })
-                        } else {
-                            log::warn!("terminal row revisions are out of sync for {pane}");
-                            Err(())
-                        }
-                    } else {
-                        log::warn!("received terminal patch for missing pane {pane}");
-                        Err(())
-                    };
-                    if apply_result.is_err() && (request_failed_patch || request_missing) {
-                        let connection = self.attached_connection_mut();
-                        if connection.full_requests_pending.insert(pane)
-                            && let Some(client) = &connection.client
-                            && let Err(error) = client.request_full(pane)
-                        {
-                            connection.full_requests_pending.remove(&pane);
-                            log::warn!(
-                                "failed to request a full terminal viewport for {pane}: {error}"
-                            );
-                        }
-                    } else if apply_result.is_ok() {
-                        self.request_history_backfill(pane);
-                    }
-                }
-                EventPayload::KittyImageBegin {
-                    pane,
-                    image_id,
-                    generation,
-                    width,
-                    height,
-                    total_bytes,
-                } => self.begin_kitty_image(pane, image_id, generation, width, height, total_bytes),
-                EventPayload::KittyImageChunk {
-                    pane,
-                    image_id,
-                    generation,
-                    bytes,
-                } => self.push_kitty_image_chunk(pane, image_id, generation, &bytes),
-                EventPayload::KittyImagesRemoved { pane, image_ids } => {
-                    self.remove_kitty_images(pane, &image_ids);
-                }
-                EventPayload::HistoryChunk {
-                    pane,
-                    start,
-                    total,
-                    offset,
-                    columns,
-                    rows,
-                    dictionary,
-                } => {
-                    let pending = self
-                        .attached_connection_mut()
-                        .history_requests_pending
-                        .remove(&pane);
-                    let mut deferred_mutations = None;
-                    if let Some(retained) = self.viewports.get(&pane) {
-                        let mut retained = retained.write();
-                        if pending.map(|request| request.mutations)
-                            == Some(retained.history_mutations)
-                        {
-                            apply_history_chunk(
-                                &mut retained,
-                                start,
-                                total,
-                                offset,
-                                columns,
-                                rows,
-                                dictionary,
-                                &mut self.next_row_revision,
-                            );
-                        } else if matches!(
-                            pending,
-                            Some(PendingHistoryRequest {
-                                prefetch_target: None,
-                                ..
-                            })
-                        ) {
-                            deferred_mutations = Some(retained.history_mutations);
-                        }
-                    }
-                    if let Some(target) = pending.and_then(|request| request.prefetch_target) {
-                        self.request_history_prefetch(pane, target);
-                    } else if let Some(mutations) = deferred_mutations {
-                        self.defer_history_backfill(pane, mutations, cx);
-                    } else {
-                        self.request_history_backfill(pane);
-                    }
-                }
-                EventPayload::Clipboard { target, text, .. } => {
-                    if !text.is_empty() {
-                        let item = ClipboardItem::new_string(text);
-                        match target {
-                            ClipboardTarget::Clipboard => cx.write_to_clipboard(item),
-                            ClipboardTarget::Primary => {
-                                #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-                                cx.write_to_primary(item);
-                                #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
-                                cx.write_to_clipboard(item);
-                            }
-                        }
-                    }
-                }
-                EventPayload::BrowserCommand { pane, command } => {
-                    if let BrowserCommand::Screenshot { request_id, path } = command {
-                        self.screenshot_requests.push((pane, request_id, path));
-                    } else {
-                        self.browser_commands.entry(pane).or_default().push(command);
-                    }
-                    self.pending_commands_revision =
-                        self.pending_commands_revision.wrapping_add(1).max(1);
-                }
-                EventPayload::AgentCommand {
-                    pane,
-                    request_id,
-                    command,
-                } => {
-                    self.agent_commands
-                        .entry(pane)
-                        .or_default()
-                        .push((request_id, command));
-                    self.pending_commands_revision =
-                        self.pending_commands_revision.wrapping_add(1).max(1);
-                }
-                EventPayload::TerminalUiCommand { pane, command } => {
-                    self.terminal_commands
-                        .entry(pane)
-                        .or_default()
-                        .push(command);
-                    self.pending_commands_revision =
-                        self.pending_commands_revision.wrapping_add(1).max(1);
-                }
-                EventPayload::CommandPrompt { state } => {
-                    self.command_prompt = state;
-                    self.command_prompt_revision =
-                        self.command_prompt_revision.wrapping_add(1).max(1);
-                }
-                EventPayload::ChooseTree { state } => {
-                    self.choose_tree = state;
-                    self.choose_tree_revision = self.choose_tree_revision.wrapping_add(1).max(1);
-                }
-                EventPayload::ChooseTreeUpdate { search, selected } => {
-                    if let Some(state) = self.choose_tree.as_mut() {
-                        state.search = search;
-                        state.selected = selected.min(
-                            u32::try_from(state.items.len().saturating_sub(1)).unwrap_or(u32::MAX),
-                        );
-                        self.choose_tree_revision =
-                            self.choose_tree_revision.wrapping_add(1).max(1);
-                    } else {
-                        log::warn!("received choose-tree cursor update without a tree model");
-                    }
-                }
-                EventPayload::ChooseBuffer { state } => {
-                    self.choose_buffer = state;
-                    self.choose_buffer_revision =
-                        self.choose_buffer_revision.wrapping_add(1).max(1);
-                }
-                EventPayload::ChooseBufferUpdate { search, selected } => {
-                    if let Some(state) = self.choose_buffer.as_mut() {
-                        state.search = search;
-                        state.selected = selected.min(
-                            u32::try_from(state.items.len().saturating_sub(1)).unwrap_or(u32::MAX),
-                        );
-                        self.choose_buffer_revision =
-                            self.choose_buffer_revision.wrapping_add(1).max(1);
-                    } else {
-                        log::warn!("received choose-buffer cursor update without a buffer model");
-                    }
-                }
-                EventPayload::DisplayPanes { state } => {
-                    self.display_panes = state;
-                    self.display_panes_revision =
-                        self.display_panes_revision.wrapping_add(1).max(1);
-                }
-                EventPayload::FocusSidebar => {
-                    self.sidebar_focus_revision =
-                        self.sidebar_focus_revision.wrapping_add(1).max(1);
-                    log::info!(
-                        target: "zz::diagnostics::input",
-                        "focus_sidebar_received revision={}",
-                        self.sidebar_focus_revision
-                    );
-                }
-                EventPayload::CommandOutput { pane, viewport } => {
-                    if let Some(viewport) = viewport {
-                        if let Some(output) = self
-                            .command_output
-                            .as_ref()
-                            .filter(|output| output.pane == pane)
-                        {
-                            let mut retained = output.retained.write();
-                            let patch = TerminalViewport::diff_with_scratch(
-                                &retained.viewport,
-                                &viewport,
-                                &mut self.command_output_diff,
-                            );
-                            if let Some(patch) = patch {
-                                if let Err(error) = apply_retained_patch(
-                                    &mut retained,
-                                    patch,
-                                    &mut self.next_row_revision,
-                                ) {
-                                    log::warn!(
-                                        "could not retain command-output rows for {pane}: {error}"
-                                    );
-                                    replace_retained_viewport(
-                                        &mut retained,
-                                        viewport,
-                                        &mut self.next_row_revision,
-                                    );
-                                    self.command_output_diff.invalidate();
-                                } else {
-                                    self.command_output_diff
-                                        .remember_applied(&retained.viewport);
-                                }
-                            } else {
-                                replace_retained_viewport(
-                                    &mut retained,
-                                    viewport,
-                                    &mut self.next_row_revision,
-                                );
-                                self.command_output_diff.invalidate();
-                            }
-                        } else {
-                            self.command_output_diff.invalidate();
-                            self.command_output = Some(CommandOutputModel {
-                                pane,
-                                retained: Arc::new(RwLock::new(new_retained_viewport(
-                                    viewport,
-                                    &mut self.next_row_revision,
-                                ))),
-                            });
-                        }
-                    } else {
-                        let output_pane = self
-                            .command_output
-                            .as_ref()
-                            .map_or(pane, |output| output.pane);
-                        self.command_output = None;
-                        self.command_output_diff.invalidate();
-                        self.terminal_commands.remove(&output_pane);
-                    }
-                }
-                EventPayload::ClientMessage { kind, text, .. } => {
-                    Self::emit_notification(kind, text, cx);
-                }
-                EventPayload::Bell { pane } => {
-                    self.record_bell(host, pane);
-                }
-                EventPayload::PaneRemoved(pane) => {
-                    self.viewports.remove(&pane);
-                    self.clear_kitty_images(pane);
-                    self.attached_connection_mut()
-                        .full_requests_pending
-                        .remove(&pane);
-                    self.attached_connection_mut()
-                        .history_requests_pending
-                        .remove(&pane);
-                    self.attached_connection_mut()
-                        .history_backfill_deferred
-                        .remove(&pane);
-                    self.browser_commands.remove(&pane);
-                    self.terminal_commands.remove(&pane);
-                    self.pane_images.remove(&pane);
-                    self.pasted_image_assemblies
-                        .retain(|(target, _), _| *target != pane);
-                    self.pending_pasted_image_previews
-                        .retain(|(target, _)| *target != pane);
-                    for (request_id, _) in self.agent_commands.remove(&pane).unwrap_or_default() {
-                        self.respond_to_request(GuiResponse::Error {
-                            request_id,
-                            message: format!("{pane} was closed"),
-                        });
-                    }
-                    let mut removed_screenshots = Vec::new();
-                    self.screenshot_requests.retain(|(target, request_id, _)| {
-                        let keep = *target != pane;
-                        if !keep {
-                            removed_screenshots.push(*request_id);
-                        }
-                        keep
-                    });
-                    for request_id in removed_screenshots {
-                        self.respond_to_request(GuiResponse::Error {
-                            request_id,
-                            message: format!("{pane} was closed"),
-                        });
-                    }
-                }
-                EventPayload::Detached { session, by }
-                    if self.attached_session == Some(session) =>
-                {
-                    self.attached_session = None;
+            CoreEvent::AppearanceChanged => self.adopt_core_appearance(cx),
+            CoreEvent::MuxOptionsChanged => self.backfill_retained_history(),
+            CoreEvent::StatusChanged => {
+                self.status_revision = self.status_revision.saturating_add(1);
+            }
+            CoreEvent::PrefixArmed { armed } => log::info!(
+                target: "zz::diagnostics::input",
+                "prefix_armed_received armed={armed}"
+            ),
+            CoreEvent::CommandPromptChanged => {
+                self.command_prompt_revision = self.command_prompt_revision.wrapping_add(1).max(1);
+            }
+            CoreEvent::ChooseTreeChanged => {
+                self.choose_tree_revision = self.choose_tree_revision.wrapping_add(1).max(1);
+            }
+            CoreEvent::ChooseBufferChanged => {
+                self.choose_buffer_revision = self.choose_buffer_revision.wrapping_add(1).max(1);
+            }
+            CoreEvent::DisplayPanesChanged => {
+                self.display_panes_revision = self.display_panes_revision.wrapping_add(1).max(1);
+            }
+            CoreEvent::PaneRemoved { pane } => self.forget_pane(pane),
+            CoreEvent::Bell { pane } => self.record_bell(host, pane),
+            CoreEvent::FocusSidebar => {
+                self.sidebar_focus_revision = self.sidebar_focus_revision.wrapping_add(1).max(1);
+                log::info!(
+                    target: "zz::diagnostics::input",
+                    "focus_sidebar_received revision={}",
+                    self.sidebar_focus_revision
+                );
+            }
+            CoreEvent::Detached { session, by } => {
+                if attached_before == Some(session) {
                     self.reset_session_state(cx);
                     Self::emit_notification(
                         ClientMessageKind::Warning,
@@ -3430,37 +3128,277 @@ impl MuxClient {
                         cx,
                     );
                 }
-                EventPayload::Detached { .. } => {}
-                EventPayload::ServerStopping => {
-                    self.error_after_next_attach = None;
-                    self.reset_session_state(cx);
-                    if host == HostId::LOCAL {
-                        self.error = Some(Arc::from("zz daemon stopped"));
+            }
+            CoreEvent::ServerStopping => {
+                self.error_after_next_attach = None;
+                self.reset_session_state(cx);
+                if host == HostId::LOCAL {
+                    self.error = Some(Arc::from("zz daemon stopped"));
+                } else {
+                    self.error = None;
+                }
+            }
+            CoreEvent::CommandResponse(response) => {
+                self.handle_command_response(host, response, cx);
+            }
+            CoreEvent::ClientMessage { kind, text, .. } => Self::emit_notification(kind, text, cx),
+            CoreEvent::Clipboard { target, text, .. } => {
+                if !text.is_empty() {
+                    let item = ClipboardItem::new_string(text);
+                    match target {
+                        ClipboardTarget::Clipboard => cx.write_to_clipboard(item),
+                        ClipboardTarget::Primary => {
+                            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+                            cx.write_to_primary(item);
+                            #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+                            cx.write_to_clipboard(item);
+                        }
+                    }
+                }
+            }
+            CoreEvent::OpenUri { pane, uri } => self.route_open_uri(pane, &uri, cx),
+            CoreEvent::AgentCommand {
+                pane,
+                request_id,
+                command,
+            } => {
+                self.agent_commands
+                    .entry(pane)
+                    .or_default()
+                    .push((request_id, command));
+                self.pending_commands_revision =
+                    self.pending_commands_revision.wrapping_add(1).max(1);
+            }
+            CoreEvent::BrowserCommand { pane, command } => {
+                if let BrowserCommand::Screenshot { request_id, path } = command {
+                    self.screenshot_requests.push((pane, request_id, path));
+                } else {
+                    self.browser_commands.entry(pane).or_default().push(command);
+                }
+                self.pending_commands_revision =
+                    self.pending_commands_revision.wrapping_add(1).max(1);
+            }
+            CoreEvent::TerminalUiCommand { pane, command } => {
+                self.terminal_commands
+                    .entry(pane)
+                    .or_default()
+                    .push(command);
+                self.pending_commands_revision =
+                    self.pending_commands_revision.wrapping_add(1).max(1);
+            }
+            CoreEvent::HistoryChunk {
+                pane,
+                start,
+                total,
+                offset,
+                columns,
+                rows,
+                dictionary,
+            } => self.apply_history_chunk_event(
+                pane, start, total, offset, columns, rows, dictionary, cx,
+            ),
+            CoreEvent::KittyImageBegin {
+                pane,
+                image_id,
+                generation,
+                width,
+                height,
+                total_bytes,
+            } => self.begin_kitty_image(pane, image_id, generation, width, height, total_bytes),
+            CoreEvent::KittyImageChunk {
+                pane,
+                image_id,
+                generation,
+                bytes,
+            } => self.push_kitty_image_chunk(pane, image_id, generation, &bytes),
+            CoreEvent::KittyImagesRemoved { pane, image_ids } => {
+                self.remove_kitty_images(pane, &image_ids);
+            }
+            CoreEvent::Message(message) => self.handle_unreduced_message(*message, cx),
+            // Key tables are read straight off the core; the handshake is
+            // ingested rather than received; the frame path never reaches the
+            // core, so its two viewport events cannot fire here.
+            CoreEvent::KeyTablesChanged
+            | CoreEvent::HelloReceived
+            | CoreEvent::ViewportChanged { .. }
+            | CoreEvent::CommandOutputChanged => {}
+        }
+    }
+
+    fn finish_attach(&mut self, host: HostId, session: SessionId, cx: &mut Context<Self>) {
+        self.clear_all_kitty_images();
+        self.clear_all_pasted_images();
+        self.attached_snapshot_pending = false;
+        let connection = self.attached_connection_mut();
+        connection.last_attached_session = Some(session);
+        let reconnected = connection.reconnect_attach.take().is_some();
+        connection.resync_pending = false;
+        connection.full_requests_pending.clear();
+        connection.history_requests_pending.clear();
+        connection.history_backfill_deferred.clear();
+        self.error = self.error_after_next_attach.take();
+        if reconnected {
+            let name = self
+                .registry
+                .get(host)
+                .map_or_else(|| format!("{host:?}"), |entry| entry.name.clone());
+            Self::emit_notification(
+                ClientMessageKind::Success,
+                format!("reconnected to {name}"),
+                cx,
+            );
+        }
+    }
+
+    fn backfill_retained_history(&mut self) {
+        let panes = self.viewports.keys().copied().collect::<Vec<_>>();
+        for pane in panes {
+            self.request_history_backfill(pane);
+        }
+    }
+
+    /// Re-derive the rendered appearance after the core reduced a reload. The
+    /// core keeps the daemon's value; localization and the client-local font
+    /// size offset are GPUI-side and stay here.
+    fn adopt_core_appearance(&mut self, cx: &mut Context<Self>) {
+        let previous_hash = self.appearance.stable_hash();
+        let provenance = self.core.appearance_provenance().clone();
+        let mut appearance = self.core.appearance().cloned().unwrap_or_default();
+        let configured_font_size = appearance.font_size_points;
+        let requested_primary_font = appearance.font_families.first().cloned();
+        self.attached_connection_mut().appearance = Some((appearance.clone(), provenance.clone()));
+        localize_terminal_font_families(
+            &mut appearance,
+            &provenance,
+            &cx.text_system().all_font_names(),
+        );
+        self.terminal_font_size_offset_points =
+            apply_terminal_font_size_offset(&mut appearance, self.terminal_font_size_offset_points);
+        self.appearance = Arc::new(appearance);
+        crate::theme::set_terminal_appearance(Arc::clone(&self.appearance), cx);
+        self.command_output_diff.invalidate();
+        log::info!(
+            target: "zz::diagnostics::appearance",
+            "reloaded appearance previous_hash={previous_hash} hash={} scheme={} requested_primary_font={requested_primary_font:?} primary_font={:?} configured_font_size_points={configured_font_size} effective_font_size_points={} font_size_offset_points={}",
+            self.appearance.stable_hash(),
+            self.appearance.color_scheme.as_str(),
+            self.appearance.font_families.first(),
+            self.appearance.font_size_points,
+            self.terminal_font_size_offset_points,
+        );
+    }
+
+    fn forget_pane(&mut self, pane: PaneId) {
+        self.viewports.remove(&pane);
+        self.clear_kitty_images(pane);
+        let connection = self.attached_connection_mut();
+        connection.full_requests_pending.remove(&pane);
+        connection.history_requests_pending.remove(&pane);
+        connection.history_backfill_deferred.remove(&pane);
+        self.browser_commands.remove(&pane);
+        self.terminal_commands.remove(&pane);
+        self.pane_images.remove(&pane);
+        self.pasted_image_assemblies
+            .retain(|(target, _), _| *target != pane);
+        self.pending_pasted_image_previews
+            .retain(|(target, _)| *target != pane);
+        for (request_id, _) in self.agent_commands.remove(&pane).unwrap_or_default() {
+            self.respond_to_request(GuiResponse::Error {
+                request_id,
+                message: format!("{pane} was closed"),
+            });
+        }
+        let mut removed_screenshots = Vec::new();
+        self.screenshot_requests.retain(|(target, request_id, _)| {
+            let keep = *target != pane;
+            if !keep {
+                removed_screenshots.push(*request_id);
+            }
+            keep
+        });
+        for request_id in removed_screenshots {
+            self.respond_to_request(GuiResponse::Error {
+                request_id,
+                message: format!("{pane} was closed"),
+            });
+        }
+    }
+
+    fn route_open_uri(&mut self, pane: PaneId, uri: &str, cx: &mut Context<Self>) {
+        let route = open_uri_route(
+            self.core.snapshot(),
+            self.core.attached_session(),
+            pane,
+            uri,
+        );
+        match route {
+            OpenUriRoute::Embedded { pane: browser, url } => {
+                log::debug!(
+                    "routing terminal link from {pane} to embedded browser {browser}: {}",
+                    diagnostic_url(&url)
+                );
+                self.browser_commands
+                    .entry(browser)
+                    .or_default()
+                    .push(BrowserCommand::Navigate(url));
+                self.pending_commands_revision =
+                    self.pending_commands_revision.wrapping_add(1).max(1);
+            }
+            OpenUriRoute::PastedImage { pane, number } => self.open_pasted_image(pane, number, cx),
+            OpenUriRoute::External => cx.open_url(uri),
+        }
+    }
+
+    fn handle_command_response(
+        &mut self,
+        host: HostId,
+        response: CommandResponse,
+        cx: &mut Context<Self>,
+    ) {
+        match response {
+            CommandResponse::Error {
+                request_id: 0,
+                error: ServerError::MissingTarget(_),
+            } if self.retry_default_after_missing_session() => {}
+            CommandResponse::Error {
+                request_id: 0,
+                error: ServerError::MissingTarget(_),
+            } if self.core.attached_session().is_none()
+                && self.core.snapshot().sessions.is_empty() =>
+            {
+                self.error = None;
+                let connection = self.attached_connection_mut();
+                if !connection.resync_pending
+                    && let Some(client) = &connection.client
+                {
+                    if let Err(error) = client.request_resync() {
+                        self.error = Some(Arc::from(error.to_string()));
                     } else {
-                        self.error = None;
+                        connection.resync_pending = true;
                     }
                 }
-                EventPayload::OpenUri { pane, uri } => {
-                    match open_uri_route(&self.snapshot, self.attached_session, pane, &uri) {
-                        OpenUriRoute::Embedded { pane: browser, url } => {
-                            log::debug!(
-                                "routing terminal link from {pane} to embedded browser {browser}: {}",
-                                diagnostic_url(&url)
-                            );
-                            self.browser_commands
-                                .entry(browser)
-                                .or_default()
-                                .push(BrowserCommand::Navigate(url));
-                            self.pending_commands_revision =
-                                self.pending_commands_revision.wrapping_add(1).max(1);
-                        }
-                        OpenUriRoute::PastedImage { pane, number } => {
-                            self.open_pasted_image(pane, number, cx);
-                        }
-                        OpenUriRoute::External => cx.open_url(&uri),
-                    }
+            }
+            CommandResponse::Error {
+                request_id: 0,
+                error: ServerError::PaneExited(pane) | ServerError::PaneNotAttached(pane),
+            } => log::debug!("ignoring stale input for detached pane {pane}"),
+            CommandResponse::Error { request_id, error } => {
+                if !self.report_command_failure(host, request_id, &error, cx) {
+                    self.attached_connection_mut().reconnect_attach = None;
+                    self.error = Some(Arc::from(error.to_string()));
                 }
-            },
+            }
+            CommandResponse::Success { request_id, .. } => {
+                self.attached_connection().take_command(request_id);
+                self.error = None;
+            }
+        }
+    }
+
+    /// Inbound messages the core does not reduce. Pasted-image previews are
+    /// assembled here because they end as GPUI `Image`s, not protocol state.
+    fn handle_unreduced_message(&mut self, message: ProtocolMessage, cx: &mut Context<Self>) {
+        match message {
             ProtocolMessage::PastedImageBegin {
                 pane,
                 number,
@@ -3475,59 +3413,161 @@ impl MuxClient {
             ProtocolMessage::PastedImageUnavailable { pane, number } => {
                 self.pasted_image_unavailable(pane, number);
             }
-            ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
-                request_id: 0,
-                error: ServerError::MissingTarget(_),
-            }) if self.retry_default_after_missing_session() => {}
-            ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
-                request_id: 0,
-                error: ServerError::MissingTarget(_),
-            }) if self.attached_session.is_none() && self.snapshot.sessions.is_empty() => {
-                self.error = None;
-                let connection = self.attached_connection_mut();
-                if !connection.resync_pending
-                    && let Some(client) = &connection.client
-                {
-                    if let Err(error) = client.request_resync() {
-                        self.error = Some(Arc::from(error.to_string()));
-                    } else {
-                        connection.resync_pending = true;
-                    }
-                }
-            }
-            ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
-                request_id: 0,
-                error: ServerError::PaneExited(pane) | ServerError::PaneNotAttached(pane),
-            }) => {
-                log::debug!("ignoring stale input for detached pane {pane}");
-            }
-            ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
-                request_id,
-                error,
-            }) => {
-                if !self.report_command_failure(host, request_id, &error, cx) {
-                    self.attached_connection_mut().reconnect_attach = None;
-                    self.error = Some(Arc::from(error.to_string()));
-                }
-            }
-            ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Success {
-                request_id,
-                ..
-            }) => {
-                self.attached_connection().take_command(request_id);
-                self.error = None;
-            }
             _ => {}
         }
-        log::trace!(
-            target: "zz::diagnostics::mux",
-            "handle_message end elapsed_us={} mux_generation={} viewports={} resync_pending={}",
-            diagnostics::elapsed_us(started),
-            self.snapshot.generation,
-            self.viewports.len(),
-            self.attached_connection().resync_pending,
+    }
+
+    fn apply_terminal_viewport(&mut self, pane: PaneId, viewport: TerminalViewport) {
+        self.kitty_image_cache(pane);
+        self.viewports.insert(
+            pane,
+            Arc::new(RwLock::new(new_retained_viewport(
+                viewport,
+                &mut self.next_row_revision,
+            ))),
         );
-        cx.notify();
+        let connection = self.attached_connection_mut();
+        connection.full_requests_pending.remove(&pane);
+        connection.history_requests_pending.remove(&pane);
+        connection.history_backfill_deferred.remove(&pane);
+        self.request_history_backfill(pane);
+    }
+
+    fn apply_terminal_patch(&mut self, pane: PaneId, patch: TerminalViewportPatch) {
+        self.kitty_image_cache(pane);
+        let retained = self.viewports.get(&pane).cloned();
+        let request_missing =
+            retained.is_none() && snapshot_contains_pane(self.core.snapshot(), pane);
+        let request_failed_patch = retained.is_some();
+        let apply_result = if let Some(retained) = retained {
+            let mut retained = retained.write();
+            if retained.row_revisions.len() == usize::from(patch.rows) {
+                apply_retained_patch(&mut retained, patch, &mut self.next_row_revision).map_err(
+                    |error| {
+                        log::warn!("rejected terminal patch for {pane}: {error}");
+                    },
+                )
+            } else {
+                log::warn!("terminal row revisions are out of sync for {pane}");
+                Err(())
+            }
+        } else {
+            log::warn!("received terminal patch for missing pane {pane}");
+            Err(())
+        };
+        if apply_result.is_err() && (request_failed_patch || request_missing) {
+            self.request_full_viewport(pane);
+        } else if apply_result.is_ok() {
+            self.request_history_backfill(pane);
+        }
+    }
+
+    fn request_full_viewport(&mut self, pane: PaneId) {
+        let connection = self.attached_connection_mut();
+        if connection.full_requests_pending.insert(pane)
+            && let Some(client) = &connection.client
+            && let Err(error) = client.request_full(pane)
+        {
+            connection.full_requests_pending.remove(&pane);
+            log::warn!("failed to request a full terminal viewport for {pane}: {error}");
+        }
+    }
+
+    fn apply_command_output(&mut self, pane: PaneId, viewport: Option<TerminalViewport>) {
+        let Some(viewport) = viewport else {
+            let output_pane = self
+                .command_output
+                .as_ref()
+                .map_or(pane, |output| output.pane);
+            self.command_output = None;
+            self.command_output_diff.invalidate();
+            self.terminal_commands.remove(&output_pane);
+            return;
+        };
+        let Some(output) = self
+            .command_output
+            .as_ref()
+            .filter(|output| output.pane == pane)
+        else {
+            self.command_output_diff.invalidate();
+            self.command_output = Some(CommandOutputModel {
+                pane,
+                retained: Arc::new(RwLock::new(new_retained_viewport(
+                    viewport,
+                    &mut self.next_row_revision,
+                ))),
+            });
+            return;
+        };
+        let mut retained = output.retained.write();
+        let patch = TerminalViewport::diff_with_scratch(
+            &retained.viewport,
+            &viewport,
+            &mut self.command_output_diff,
+        );
+        if let Some(patch) = patch {
+            if let Err(error) =
+                apply_retained_patch(&mut retained, patch, &mut self.next_row_revision)
+            {
+                log::warn!("could not retain command-output rows for {pane}: {error}");
+                replace_retained_viewport(&mut retained, viewport, &mut self.next_row_revision);
+                self.command_output_diff.invalidate();
+            } else {
+                self.command_output_diff
+                    .remember_applied(&retained.viewport);
+            }
+        } else {
+            replace_retained_viewport(&mut retained, viewport, &mut self.next_row_revision);
+            self.command_output_diff.invalidate();
+        }
+    }
+
+    fn apply_history_chunk_event(
+        &mut self,
+        pane: PaneId,
+        start: u32,
+        total: u32,
+        offset: u32,
+        columns: u16,
+        rows: Vec<Vec<PackedCell>>,
+        dictionary: TerminalDictionary,
+        cx: &mut Context<Self>,
+    ) {
+        let pending = self
+            .attached_connection_mut()
+            .history_requests_pending
+            .remove(&pane);
+        let mut deferred_mutations = None;
+        if let Some(retained) = self.viewports.get(&pane) {
+            let mut retained = retained.write();
+            if pending.map(|request| request.mutations) == Some(retained.history_mutations) {
+                apply_history_chunk(
+                    &mut retained,
+                    start,
+                    total,
+                    offset,
+                    columns,
+                    rows,
+                    dictionary,
+                    &mut self.next_row_revision,
+                );
+            } else if matches!(
+                pending,
+                Some(PendingHistoryRequest {
+                    prefetch_target: None,
+                    ..
+                })
+            ) {
+                deferred_mutations = Some(retained.history_mutations);
+            }
+        }
+        if let Some(target) = pending.and_then(|request| request.prefetch_target) {
+            self.request_history_prefetch(pane, target);
+        } else if let Some(mutations) = deferred_mutations {
+            self.defer_history_backfill(pane, mutations, cx);
+        } else {
+            self.request_history_backfill(pane);
+        }
     }
 
     fn record_bell(&mut self, host: HostId, pane: PaneId) {
@@ -3823,7 +3863,8 @@ mod tests {
 
     use gpui::{AppContext as _, TestAppContext};
     use zz_protocol::{
-        Axis, BrowserDescriptor, PaneSnapshot, SessionSnapshot, SplitId, WindowId, WindowSnapshot,
+        Axis, BrowserDescriptor, MuxOptions, PaneSnapshot, SessionSnapshot, SplitId, WindowId,
+        WindowSnapshot,
     };
     #[cfg(unix)]
     use zz_protocol::{read_protocol_message, write_protocol_message};
@@ -3859,6 +3900,30 @@ mod tests {
             status: StatusLine::default(),
             key_tables: Vec::new(),
         }
+    }
+
+    /// Reduce a snapshot into the core the way a daemon event would, for a
+    /// test that needs one standing before it drives the client.
+    fn seed_snapshot(mux: &mut MuxClient, snapshot: MuxSnapshot) {
+        mux.seed_core(EventPayload::Snapshot(snapshot));
+    }
+
+    /// Reduce an attachment into the core, session and snapshot together.
+    fn seed_attachment(mux: &mut MuxClient, session: SessionId, snapshot: MuxSnapshot) {
+        mux.core
+            .handle_message(ProtocolMessage::Attached { session, snapshot });
+        mux.discard_core_effects();
+    }
+
+    fn seed_choose_tree(mux: &mut MuxClient) {
+        mux.seed_core(EventPayload::ChooseTree {
+            state: Some(ChooseTreeState {
+                items: Vec::new(),
+                search: None,
+                selected: 0,
+                kind: zz_protocol::ChooseTreeKind::Windows,
+            }),
+        });
     }
 
     fn install_fake_connection(mux: &mut MuxClient, host: HostId) -> Arc<FakeConnectedHost> {
@@ -4414,11 +4479,14 @@ mod tests {
             mux.update(cx, |mux, _| {
                 install_fake_connection(mux, remote);
                 mux.error = Some(Arc::from("keep this error"));
-                mux.snapshot = Arc::new(MuxSnapshot {
-                    generation: 7,
-                    focused_window: None,
-                    sessions: Vec::new(),
-                });
+                seed_snapshot(
+                    mux,
+                    MuxSnapshot {
+                        generation: 7,
+                        focused_window: None,
+                        sessions: Vec::new(),
+                    },
+                );
             });
             let (sink, notifications) = record_notifications(&mux, cx);
             mux.update(cx, |mux, cx| {
@@ -4436,7 +4504,7 @@ mod tests {
             );
             assert_eq!(mux.attached_host, HostId::LOCAL);
             assert_eq!(mux.error.as_deref(), Some("keep this error"));
-            assert_eq!(mux.snapshot.generation, 7);
+            assert_eq!(mux.core.snapshot().generation, 7);
             assert!(mux.error_after_next_attach.is_none());
         });
     }
@@ -4463,25 +4531,23 @@ mod tests {
                 let local = install_fake_connection(mux, HostId::LOCAL);
                 install_fake_connection(mux, remote);
                 mux.attached_host = remote;
-                mux.attached_session = Some(SessionId(9));
-                let snapshot = Arc::new(MuxSnapshot {
-                    generation: 7,
-                    focused_window: None,
-                    sessions: Vec::new(),
-                });
-                mux.snapshot = Arc::clone(&snapshot);
+                seed_attachment(
+                    mux,
+                    SessionId(9),
+                    MuxSnapshot {
+                        generation: 7,
+                        focused_window: None,
+                        sessions: Vec::new(),
+                    },
+                );
+                let snapshot = Arc::clone(mux.core.snapshot());
                 let pane = PaneId(23);
                 let viewport = Arc::new(RwLock::new(new_retained_viewport(
                     TerminalViewport::blank(2, 2, SessionStatus::Running),
                     &mut mux.next_row_revision,
                 )));
                 mux.viewports.insert(pane, Arc::clone(&viewport));
-                mux.choose_tree = Some(ChooseTreeState {
-                    items: Vec::new(),
-                    search: None,
-                    selected: 0,
-                    kind: zz_protocol::ChooseTreeKind::Windows,
-                });
+                seed_choose_tree(mux);
                 mux.error = Some(Arc::from("stale daemon error"));
 
                 mux.handle_host_disconnected(remote, cx);
@@ -4494,13 +4560,13 @@ mod tests {
                 assert_eq!(connection.last_attached_session, Some(SessionId(9)));
                 assert!(connection.reconnect_generation > 0);
                 assert_eq!(mux.attached_host, remote);
-                assert_eq!(mux.attached_session, Some(SessionId(9)));
-                assert!(Arc::ptr_eq(&mux.snapshot, &snapshot));
+                assert_eq!(mux.core.attached_session(), Some(SessionId(9)));
+                assert!(Arc::ptr_eq(mux.core.snapshot(), &snapshot));
                 assert!(Arc::ptr_eq(
                     mux.viewports.get(&pane).expect("frozen viewport"),
                     &viewport
                 ));
-                assert!(mux.choose_tree.is_none());
+                assert!(mux.core.choose_tree().is_none());
                 assert!(mux.error.is_none());
                 assert!(mux.error_after_next_attach.is_none());
                 assert!(
@@ -4537,18 +4603,16 @@ mod tests {
             mux.update(cx, |mux, cx| {
                 install_fake_connection(mux, remote);
                 mux.attached_host = remote;
-                mux.attached_session = Some(SessionId(9));
-                mux.snapshot = Arc::new(MuxSnapshot {
-                    generation: 7,
-                    focused_window: None,
-                    sessions: Vec::new(),
-                });
-                mux.choose_tree = Some(ChooseTreeState {
-                    items: Vec::new(),
-                    search: None,
-                    selected: 0,
-                    kind: zz_protocol::ChooseTreeKind::Windows,
-                });
+                seed_attachment(
+                    mux,
+                    SessionId(9),
+                    MuxSnapshot {
+                        generation: 7,
+                        focused_window: None,
+                        sessions: Vec::new(),
+                    },
+                );
+                seed_choose_tree(mux);
                 mux.error = None;
 
                 mux.handle_host_disconnected(remote, cx);
@@ -4558,9 +4622,9 @@ mod tests {
                     HostState::Reconnecting { attempt: 1 }
                 );
                 assert_eq!(mux.attached_host, remote);
-                assert_eq!(mux.attached_session, Some(SessionId(9)));
-                assert_eq!(mux.snapshot.generation, 7);
-                assert!(mux.choose_tree.is_none());
+                assert_eq!(mux.core.attached_session(), Some(SessionId(9)));
+                assert_eq!(mux.core.snapshot().generation, 7);
+                assert!(mux.core.choose_tree().is_none());
                 assert!(mux.error.is_none());
                 assert!(mux.error_after_next_attach.is_none());
             });
@@ -4592,8 +4656,21 @@ mod tests {
                 connection.fake_client = Some(Arc::clone(&fake));
                 connection.last_attached_session = Some(SessionId(9));
                 mux.attached_host = remote;
-                mux.attached_session = Some(SessionId(9));
-                mux.status.left = "stale".to_owned();
+                seed_attachment(
+                    mux,
+                    SessionId(9),
+                    MuxSnapshot {
+                        generation: 7,
+                        focused_window: None,
+                        sessions: Vec::new(),
+                    },
+                );
+                mux.seed_core(EventPayload::StatusChanged {
+                    status: StatusLine {
+                        left: "stale".to_owned(),
+                        ..StatusLine::default()
+                    },
+                });
             });
             (mux, remote, fake, sink, notifications)
         });
@@ -4603,10 +4680,16 @@ mod tests {
 
                 assert_eq!(fake.attached_session.get(), Some(SessionId(9)));
                 assert!(!fake.attached_default.get());
-                assert_eq!(mux.status.left, "fresh reconnect hello");
+                assert_eq!(mux.core.status().left, "fresh reconnect hello");
                 assert_eq!(
                     mux.connections.get(&remote).unwrap().reconnect_attach,
                     Some(ReconnectAttachState::RememberedSession)
+                );
+                assert_eq!(
+                    (mux.core.snapshot().generation, mux.core.attached_session()),
+                    (7, Some(SessionId(9))),
+                    "re-ingesting the hello must not blank the frame the daemon has \
+                     not re-attached yet",
                 );
 
                 mux.handle_message(
@@ -4624,7 +4707,7 @@ mod tests {
                 let connection = mux.connections.get(&remote).unwrap();
                 assert_eq!(connection.last_attached_session, Some(SessionId(9)));
                 assert!(connection.reconnect_attach.is_none());
-                assert_eq!(mux.snapshot.generation, 12);
+                assert_eq!(mux.core.snapshot().generation, 12);
             });
         });
         cx.run_until_parked();
@@ -4661,7 +4744,7 @@ mod tests {
                 connection.fake_client = Some(Arc::clone(&fake));
                 connection.last_attached_session = Some(SessionId(9));
                 mux.attached_host = remote;
-                mux.attached_session = Some(SessionId(9));
+                seed_attachment(mux, SessionId(9), MuxSnapshot::default());
                 mux.error = None;
                 mux.reattach_after_reconnect(remote, cx);
 
@@ -4837,7 +4920,7 @@ mod tests {
                 let local = install_fake_connection(mux, HostId::LOCAL);
                 install_fake_connection(mux, remote);
                 mux.attached_host = remote;
-                mux.attached_session = Some(SessionId(9));
+                seed_attachment(mux, SessionId(9), MuxSnapshot::default());
                 mux.handle_host_disconnected(remote, cx);
                 let armed_generation = mux.connections.get(&remote).unwrap().reconnect_generation;
 
@@ -4876,7 +4959,7 @@ mod tests {
                 install_fake_connection(mux, HostId::LOCAL);
                 install_fake_connection(mux, remote);
                 mux.attached_host = remote;
-                mux.attached_session = Some(SessionId(9));
+                seed_attachment(mux, SessionId(9), MuxSnapshot::default());
                 mux.handle_host_disconnected(remote, cx);
 
                 for attempt in 1..=(MAX_UNATTACHED_RECONNECT_ATTEMPTS + 2) {
@@ -5168,7 +5251,7 @@ mod tests {
         });
         wait_for_mux(cx, &mux, "fake remote Attached response", |mux| {
             mux.attached_host == remote
-                && mux.attached_session == Some(remote_session)
+                && mux.core.attached_session() == Some(remote_session)
                 && mux
                     .viewports
                     .get(&PaneId(77))
@@ -5177,7 +5260,7 @@ mod tests {
         let (frozen_snapshot, frozen_viewport) = cx.update(|cx| {
             let mux = mux.read(cx);
             (
-                Arc::clone(&mux.snapshot),
+                Arc::clone(mux.core.snapshot()),
                 Arc::clone(mux.viewports.get(&PaneId(77)).expect("first remote frame")),
             )
         });
@@ -5190,10 +5273,10 @@ mod tests {
             .expect("remote socket dropped");
         wait_for_mux(cx, &mux, "frozen reconnect state", |mux| {
             mux.attached_host == remote
-                && mux.attached_session == Some(remote_session)
+                && mux.core.attached_session() == Some(remote_session)
                 && mux.error.is_none()
                 && !local.attached_default.get()
-                && Arc::ptr_eq(&mux.snapshot, &frozen_snapshot)
+                && Arc::ptr_eq(mux.core.snapshot(), &frozen_snapshot)
                 && mux
                     .viewports
                     .get(&PaneId(77))
@@ -5206,8 +5289,8 @@ mod tests {
         respawn_remote.send(()).expect("respawn fake remote");
         wait_for_mux(cx, &mux, "same-session reconnect frame", |mux| {
             mux.attached_host == remote
-                && mux.attached_session == Some(remote_session)
-                && mux.snapshot.generation == 3
+                && mux.core.attached_session() == Some(remote_session)
+                && mux.core.snapshot().generation == 3
                 && mux
                     .viewports
                     .get(&PaneId(77))
@@ -5303,7 +5386,7 @@ mod tests {
         });
         wait_for_mux(cx, &mux, "first process-backed remote frame", |mux| {
             mux.attached_host == remote
-                && mux.attached_session == Some(session)
+                && mux.core.attached_session() == Some(session)
                 && !mux.viewports.is_empty()
         });
         let pane = cx.update(|cx| {
@@ -5314,10 +5397,11 @@ mod tests {
         remote_daemon.stop();
         wait_for_mux(cx, &mux, "process-backed daemon reconnect state", |mux| {
             mux.attached_host == remote
-                && mux.attached_session == Some(session)
+                && mux.core.attached_session() == Some(session)
                 && mux.error.is_none()
                 && mux
-                    .snapshot
+                    .core
+                    .snapshot()
                     .sessions
                     .iter()
                     .any(|candidate| candidate.id == session)
@@ -5330,7 +5414,7 @@ mod tests {
         let (frozen_snapshot, frozen_viewport) = cx.update(|cx| {
             let mux = mux.read(cx);
             (
-                Arc::clone(&mux.snapshot),
+                Arc::clone(mux.core.snapshot()),
                 Arc::clone(mux.viewports.get(&pane).unwrap()),
             )
         });
@@ -5345,13 +5429,14 @@ mod tests {
             "process-backed same-session reattach and fresh frame",
             |mux| {
                 mux.attached_host == remote
-                    && mux.attached_session == Some(session)
+                    && mux.core.attached_session() == Some(session)
                     && mux
-                        .snapshot
+                        .core
+                        .snapshot()
                         .sessions
                         .iter()
                         .any(|candidate| candidate.id == session && candidate.name == session_name)
-                    && !Arc::ptr_eq(&mux.snapshot, &frozen_snapshot)
+                    && !Arc::ptr_eq(mux.core.snapshot(), &frozen_snapshot)
                     && mux
                         .viewports
                         .get(&pane)
@@ -5426,7 +5511,7 @@ mod tests {
             });
         });
         wait_for_mux(cx, &mux, "remote Attached response", |mux| {
-            mux.attached_host == remote && mux.attached_session == Some(remote_session)
+            mux.attached_host == remote && mux.core.attached_session() == Some(remote_session)
         });
         cx.update(|cx| {
             let mux = mux.read(cx);
@@ -5435,22 +5520,15 @@ mod tests {
             assert_eq!(local.reconnect_attempt_in_flight, None);
         });
         cx.update(|cx| {
-            mux.update(cx, |mux, _| {
-                mux.choose_tree = Some(ChooseTreeState {
-                    items: Vec::new(),
-                    search: None,
-                    selected: 0,
-                    kind: zz_protocol::ChooseTreeKind::Windows,
-                });
-            });
+            mux.update(cx, |mux, _| seed_choose_tree(mux));
         });
 
         remote_daemon.stop();
         wait_for_mux(cx, &mux, "remote ServerStopping event", |mux| {
-            mux.choose_tree.is_none()
+            mux.core.choose_tree().is_none()
                 && mux.error.is_none()
                 && mux.attached_host == remote
-                && mux.attached_session == Some(remote_session)
+                && mux.core.attached_session() == Some(remote_session)
         });
         local_daemon.stop();
     }
@@ -5472,17 +5550,15 @@ mod tests {
             let remote = mux.read(cx).registry.get_by_name("remote").unwrap().0;
 
             mux.update(cx, |mux, cx| {
-                mux.snapshot = Arc::new(MuxSnapshot {
-                    generation: 3,
-                    focused_window: None,
-                    sessions: Vec::new(),
-                });
-                mux.choose_tree = Some(ChooseTreeState {
-                    items: Vec::new(),
-                    search: None,
-                    selected: 0,
-                    kind: zz_protocol::ChooseTreeKind::Windows,
-                });
+                seed_snapshot(
+                    mux,
+                    MuxSnapshot {
+                        generation: 3,
+                        focused_window: None,
+                        sessions: Vec::new(),
+                    },
+                );
+                seed_choose_tree(mux);
                 let revision = mux.choose_tree_revision;
 
                 mux.handle_message(
@@ -5498,7 +5574,7 @@ mod tests {
                     cx,
                 );
 
-                assert_eq!(mux.snapshot.generation, 3);
+                assert_eq!(mux.core.snapshot().generation, 3);
                 assert_eq!(
                     mux.connections
                         .get(&remote)
@@ -5537,7 +5613,7 @@ mod tests {
                 );
 
                 assert_eq!(mux.sidebar_focus_revision, 4);
-                assert_eq!(mux.attached_session, None);
+                assert_eq!(mux.core.attached_session(), None);
                 assert_eq!(
                     mux.connections
                         .get(&remote)
@@ -5784,7 +5860,7 @@ mod tests {
                 let local = install_fake_connection(mux, HostId::LOCAL);
                 install_fake_connection(mux, remote);
                 mux.attached_host = remote;
-                mux.attached_session = Some(SessionId(9));
+                seed_attachment(mux, SessionId(9), MuxSnapshot::default());
                 let route = Arc::clone(&mux.connections.get(&remote).unwrap().route);
                 mux.release_host(HostId::LOCAL, cx);
                 assert_eq!(mux.attached_host, remote);
@@ -5830,7 +5906,7 @@ mod tests {
                 let local = install_fake_connection(mux, HostId::LOCAL);
                 install_fake_connection(mux, remote);
                 mux.attached_host = remote;
-                mux.attached_session = Some(SessionId(9));
+                seed_attachment(mux, SessionId(9), MuxSnapshot::default());
                 let route = Arc::clone(&mux.connections.get(&remote).unwrap().route);
                 mux.handle_host_disconnected(remote, cx);
                 (local, route)
@@ -5842,8 +5918,8 @@ mod tests {
                 assert!(mux.registry.get_by_name("remote").is_none());
                 assert_eq!(mux.attached_host, HostId::LOCAL);
                 assert!(local.attached_default.get());
-                assert!(mux.snapshot.sessions.is_empty());
-                assert!(mux.attached_session.is_none());
+                assert!(mux.core.snapshot().sessions.is_empty());
+                assert!(mux.core.attached_session().is_none());
                 assert_eq!(mux.error.as_deref(), Some("fleet host remote disconnected"));
                 assert_eq!(*route.read(), None);
             });
@@ -5871,19 +5947,22 @@ mod tests {
                 mux.connections.get_mut(&remote).unwrap().state = HostState::Unreachable {
                     reason: "offline".to_owned(),
                 };
-                mux.snapshot = Arc::new(MuxSnapshot {
-                    generation: 9,
-                    focused_window: None,
-                    sessions: Vec::new(),
-                });
-                mux.attached_session = Some(SessionId(7));
+                seed_attachment(
+                    mux,
+                    SessionId(7),
+                    MuxSnapshot {
+                        generation: 9,
+                        focused_window: None,
+                        sessions: Vec::new(),
+                    },
+                );
                 let error = mux.error.clone();
 
                 mux.attach_to_host(remote, SessionId(11), cx);
 
                 assert_eq!(mux.attached_host, HostId::LOCAL);
-                assert_eq!(mux.attached_session, Some(SessionId(7)));
-                assert_eq!(mux.snapshot.generation, 9);
+                assert_eq!(mux.core.attached_session(), Some(SessionId(7)));
+                assert_eq!(mux.core.snapshot().generation, 9);
                 assert_eq!(mux.error, error);
             });
         });
@@ -5939,13 +6018,16 @@ mod tests {
             mux.update(cx, |mux, cx| {
                 install_fake_connection(mux, HostId::LOCAL);
                 let remote_client = install_fake_connection(mux, remote);
-                let local_snapshot = Arc::new(MuxSnapshot {
-                    generation: 19,
-                    focused_window: None,
-                    sessions: Vec::new(),
-                });
-                mux.snapshot = Arc::clone(&local_snapshot);
-                mux.attached_session = Some(SessionId(7));
+                seed_attachment(
+                    mux,
+                    SessionId(7),
+                    MuxSnapshot {
+                        generation: 19,
+                        focused_window: None,
+                        sessions: Vec::new(),
+                    },
+                );
+                let local_snapshot = Arc::clone(mux.core.snapshot());
 
                 assert!(mux.attach_to_host(remote, SessionId(11), cx));
 
@@ -5995,12 +6077,15 @@ mod tests {
                     TerminalViewport::blank(1, 1, SessionStatus::Running),
                     &mut mux.next_row_revision,
                 )));
-                mux.snapshot = Arc::new(MuxSnapshot {
-                    generation: 9,
-                    focused_window: None,
-                    sessions: Vec::new(),
-                });
-                mux.attached_session = Some(SessionId(7));
+                seed_attachment(
+                    mux,
+                    SessionId(7),
+                    MuxSnapshot {
+                        generation: 9,
+                        focused_window: None,
+                        sessions: Vec::new(),
+                    },
+                );
                 mux.viewports.insert(pane, Arc::clone(&retained));
                 mux.browser_commands
                     .entry(pane)
@@ -6027,9 +6112,9 @@ mod tests {
 
                 assert_eq!(fake_remote.attached_session.get(), Some(SessionId(11)));
                 assert_eq!(mux.attached_host, remote);
-                assert_eq!(mux.attached_session, None);
-                assert_eq!(mux.snapshot.generation, 0);
-                assert!(mux.snapshot.sessions.is_empty());
+                assert_eq!(mux.core.attached_session(), None);
+                assert_eq!(mux.core.snapshot().generation, 0);
+                assert!(mux.core.snapshot().sessions.is_empty());
                 assert!(mux.viewports.is_empty());
                 assert!(mux.browser_commands.is_empty());
                 assert!(mux.agent_commands.is_empty());
@@ -6075,12 +6160,15 @@ mod tests {
                         viewers: Vec::new(),
                     }],
                 }));
-                mux.snapshot = Arc::new(MuxSnapshot {
-                    generation: 19,
-                    focused_window: None,
-                    sessions: Vec::new(),
-                });
-                mux.attached_session = Some(SessionId(7));
+                seed_attachment(
+                    mux,
+                    SessionId(7),
+                    MuxSnapshot {
+                        generation: 19,
+                        focused_window: None,
+                        sessions: Vec::new(),
+                    },
+                );
 
                 assert!(mux.attach_to_host(remote, SessionId(11), cx));
 
@@ -6998,7 +7086,7 @@ mod tests {
                 "600",
                 zz_protocol::MuxOptionSource::RuntimeCommand,
             );
-            mux.mux_options = options;
+            mux.seed_core(EventPayload::MuxOptionsChanged { options });
             fake
         });
         let viewport = history_fixture_viewport(&[1_200, 1_201, 1_202], 1, 1_203, 1_200);
@@ -7373,7 +7461,7 @@ mod tests {
                     "600",
                     zz_protocol::MuxOptionSource::RuntimeCommand,
                 );
-                mux.mux_options = options;
+                mux.seed_core(EventPayload::MuxOptionsChanged { options });
                 fake
             });
             let pane = PaneId(71);
@@ -7520,7 +7608,7 @@ mod tests {
                     "0",
                     zz_protocol::MuxOptionSource::RuntimeCommand,
                 );
-                mux.mux_options = options;
+                mux.seed_core(EventPayload::MuxOptionsChanged { options });
                 fake
             });
             let pane = PaneId(73);

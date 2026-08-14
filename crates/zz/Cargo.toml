@@ -60,6 +60,7 @@ smallvec.workspace = true
 sysinfo.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
+zz-client = { path = "../zz-client" }
 zz-mux = { path = "../zz-mux" }
 zz-protocol = { path = "../zz-protocol" }
 zz-ui = { path = "../zz-ui", features = ["editor", "tree-sitter"] }

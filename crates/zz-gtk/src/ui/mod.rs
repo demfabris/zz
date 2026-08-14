@@ -7,6 +7,7 @@ mod pane;
 mod panes;
 mod prefix;
 mod terminal;
+mod tray;
 mod window;
 
 use adw::prelude::*;

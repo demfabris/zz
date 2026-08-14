@@ -140,12 +140,6 @@ pub struct Setting {
     pub kind: Kind,
 }
 
-impl Setting {
-    pub const fn is_daemon_owned(&self) -> bool {
-        !matches!(self.owner, Owner::Client)
-    }
-}
-
 const THEME_MODES: &[Choice] = &[
     choice("system", "System"),
     choice("light", "Light"),

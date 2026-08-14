@@ -128,7 +128,11 @@ impl MuxEditor {
 /// The client's own identity. The window's About action still owns the GNOME
 /// dialog; this page adds what a zz client is actually asked about — which
 /// daemon it reached and on what protocol.
-pub fn about(socket: &str, capabilities: &[String]) -> adw::PreferencesPage {
+pub fn about(
+    socket: &str,
+    capabilities: &[String],
+    config: Option<&std::path::Path>,
+) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
 
     let heading = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -147,6 +151,13 @@ pub fn about(socket: &str, capabilities: &[String]) -> adw::PreferencesPage {
     identity.add(&heading);
     identity.add(&link_row("Website", "https://zzmux.sh"));
     identity.add(&value_row("Client", "zz-gtk, a GTK4 and libadwaita shell"));
+    identity.add(&value_row(
+        "Configuration",
+        &config.map_or_else(
+            || "no zz/config yet; the first edit creates one".to_owned(),
+            |path| path.display().to_string(),
+        ),
+    ));
     page.add(&identity);
 
     let connection = adw::PreferencesGroup::builder().title("Daemon").build();

@@ -1,7 +1,9 @@
+mod fleet;
 mod frames;
 mod history;
 mod reader;
 
+pub use fleet::{HostId, HostState, HostView, SshPromptRequest};
 pub use frames::{FrameInbox, FrameUpdate, merge_damage};
 pub use history::{
     HistoryChunk, HistoryRing, HistoryRow, MAX_HISTORY_ROWS, local_scroll_gate, max_scroll_offset,
@@ -18,7 +20,9 @@ use std::{
 
 use async_channel::{Receiver, Sender};
 use zz_client::{ChromeKeymap, ChromeProfile, ClientCore};
-use zz_daemon::{Endpoint, InteractiveClient};
+use zz_daemon::{Endpoint, HostEntry, InteractiveClient};
+
+use fleet::{AUTH_DECLINED_REASON, Fleet, PromptRoute};
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, CommandInvocation, CommandPromptState, ConfigOverrideEntry,
     DisplayPanesState, InputMessage, KeyBindingSnapshot, LayoutNode, MuxOptionKey, MuxOptions,
@@ -89,6 +93,17 @@ pub enum EngineEvent {
     /// The connection is gone for good — the retry window elapsed, or the
     /// daemon refused. Nothing else follows.
     Disconnected(String),
+    /// Everything above, as it happened on a fleet host rather than on the
+    /// local daemon. The local daemon's events ride the channel bare, so a
+    /// surface that knows nothing about fleets sees exactly what it saw before
+    /// hosts existed.
+    Fleet(HostId, Box<EngineEvent>),
+    /// A host's connection state moved — dialling, connected, retrying,
+    /// stopped. Read it back with [`Engine::hosts`]; the reconnect ladder is
+    /// per host and carries its attempt in the state rather than in the event.
+    HostState(HostId),
+    /// A host joined or left the fleet, because `zz/config` said so.
+    FleetChanged,
 }
 
 /// One zz window, as the tab strip needs it.
@@ -124,13 +139,30 @@ impl SessionView {
 
 type Geometry = (u16, u16, u32, u32);
 
-/// The display-free half of the client: one [`ClientCore`], one reader thread,
-/// and whichever socket is currently live. Everything GTK-shaped lives above
-/// it, so the whole protocol path is exercisable from a plain `#[test]`.
+/// Which retry ladder a connection climbs. They differ because the failures do:
+/// the local daemon is a process on this machine that was probably just
+/// restarted, while a host is a machine that may be asleep.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ladder {
+    Local,
+    Fleet,
+}
+
+/// The display-free half of the client: one [`ClientCore`] and one reader
+/// thread per daemon it is talking to, and whichever socket each of those has
+/// live. Everything GTK-shaped lives above it, so the whole protocol path is
+/// exercisable from a plain `#[test]`.
+///
+/// Every accessor here answers about the *active* host — the one whose session
+/// the workspace is rendering — which is the local daemon until a fleet row is
+/// activated. The fleet-shaped API is the block further down; nothing above it
+/// changed shape when hosts arrived.
 pub struct Engine {
-    link: Arc<Link>,
+    fleet: Mutex<Fleet>,
     events: Receiver<EngineEvent>,
     notices: Sender<EngineEvent>,
+    prompts: Receiver<SshPromptRequest>,
+    asked: Sender<SshPromptRequest>,
     chrome: ChromeKeymap,
 }
 
@@ -150,23 +182,21 @@ impl Engine {
             .attach(session.to_owned())
             .map_err(|error| error.to_string())?;
 
-        let link = Arc::new(Link {
-            endpoint: endpoint.clone(),
-            color_scheme: Mutex::new(color_scheme),
-            client: Mutex::new(Arc::new(client)),
-            core: Mutex::new(core),
-            frames: FrameInbox::default(),
-            geometry: Mutex::new(HashMap::new()),
-            replay: Mutex::new(Vec::new()),
-            remembered_reattach: AtomicBool::new(false),
-            history: Mutex::new(HashMap::new()),
-        });
+        let link = Arc::new(Link::local(
+            endpoint.clone(),
+            color_scheme,
+            Arc::new(client),
+            core,
+        ));
         let (sender, events) = async_channel::unbounded();
+        let (asked, prompts) = async_channel::unbounded();
         reader::spawn(Arc::clone(&link), sender.clone())?;
         Ok(Arc::new(Self {
-            link,
+            fleet: Mutex::new(Fleet::new(link, endpoint.clone())),
             events,
             notices: sender,
+            prompts,
+            asked,
             chrome: ChromeKeymap::for_profile(ChromeProfile::DESKTOP),
         }))
     }
@@ -176,7 +206,26 @@ impl Engine {
     }
 
     pub fn take_frames(&self) -> Vec<FrameUpdate> {
-        self.link.frames.take()
+        self.link().frames.take()
+    }
+
+    /// The active host's link. Every accessor below goes through it, which is
+    /// what makes activating a remote session move the whole workspace.
+    fn link(&self) -> Arc<Link> {
+        self.fleet().active_link()
+    }
+
+    fn fleet(&self) -> MutexGuard<'_, Fleet> {
+        self.fleet.lock().expect("fleet registry poisoned")
+    }
+
+    /// Every live connection, for the handful of things that are told to the
+    /// whole fleet rather than to the host on screen.
+    fn links(&self) -> Vec<Arc<Link>> {
+        self.fleet()
+            .iter()
+            .map(|host| Arc::clone(&host.link))
+            .collect()
     }
 
     pub const fn chrome(&self) -> &ChromeKeymap {
@@ -184,48 +233,48 @@ impl Engine {
     }
 
     pub fn snapshot(&self) -> Arc<MuxSnapshot> {
-        Arc::clone(self.link.core().snapshot())
+        Arc::clone(self.link().core().snapshot())
     }
 
     pub fn attached_session(&self) -> Option<SessionId> {
-        self.link.core().attached_session()
+        self.link().core().attached_session()
     }
 
     pub fn status(&self) -> StatusLine {
-        self.link.core().status().clone()
+        self.link().core().status().clone()
     }
 
     pub fn appearance(&self) -> TerminalAppearance {
-        self.link.core().appearance().cloned().unwrap_or_default()
+        self.link().core().appearance().cloned().unwrap_or_default()
     }
 
     /// Where this client is attached, for the About page.
     pub fn endpoint(&self) -> String {
-        self.link.endpoint.to_string()
+        self.link().endpoint.to_string()
     }
 
     /// What the daemon advertised in its handshake.
     pub fn capabilities(&self) -> Vec<String> {
-        self.link.core().capabilities().to_vec()
+        self.link().core().capabilities().to_vec()
     }
 
     /// Per-key provenance for the appearance the daemon resolved: whether a
     /// value came from a theme file, a Ghostty donor, an override, or nothing.
     pub fn appearance_provenance(&self) -> AppearanceProvenance {
-        self.link.core().appearance_provenance().clone()
+        self.link().core().appearance_provenance().clone()
     }
 
     /// The daemon's complete mux option state, effective values plus the layer
     /// that last wrote each one.
     pub fn mux_options(&self) -> MuxOptions {
-        self.link.core().mux_options().clone()
+        self.link().core().mux_options().clone()
     }
 
     /// Whether this daemon accepts `SetConfigOverrides` at all. A skewed or
     /// older daemon keeps the client's daemon-owned keys local rather than
     /// having them silently dropped on the far side.
     pub fn supports_config_overrides(&self) -> bool {
-        self.link
+        self.link()
             .core()
             .capabilities()
             .iter()
@@ -236,20 +285,23 @@ impl Engine {
     /// own order with duplicates intact: the daemon applies last-writer per key
     /// and cumulative keys need every occurrence.
     pub fn set_config_overrides(&self, entries: Vec<ConfigOverrideEntry>) {
-        if let Err(error) = self.link.client().set_config_overrides(entries) {
+        let Some(client) = self.link().client() else {
+            return;
+        };
+        if let Err(error) = client.set_config_overrides(entries) {
             log::warn!("zz-gtk failed to send configuration overrides: {error}");
         }
     }
 
     pub fn prefix_armed(&self) -> bool {
-        self.link.core().prefix_armed()
+        self.link().core().prefix_armed()
     }
 
     /// The chord that arms the prefix, in the daemon's own canonical spelling.
     /// It is a live mux option, so a `set -g prefix` reaches the interceptor
     /// without a restart.
     pub fn prefix_chord(&self) -> Option<String> {
-        self.link
+        self.link()
             .core()
             .mux_options()
             .get(MuxOptionKey::Prefix)
@@ -259,12 +311,12 @@ impl Engine {
     /// The daemon-published `prefix` table, or empty before the hello. Keys are
     /// tmux-grammar strings; commands carry canonical names.
     pub fn prefix_bindings(&self) -> Vec<KeyBindingSnapshot> {
-        self.link.core().prefix_bindings().to_vec()
+        self.link().core().prefix_bindings().to_vec()
     }
 
     /// The focused window's active pane, without cloning the session view.
     pub fn active_pane(&self) -> Option<PaneId> {
-        self.link.active_pane()
+        self.link().active_pane()
     }
 
     /// Raise a client-local notice on the same channel the daemon's messages
@@ -276,25 +328,25 @@ impl Engine {
     }
 
     pub fn command_prompt(&self) -> Option<CommandPromptState> {
-        self.link.core().command_prompt().cloned()
+        self.link().core().command_prompt().cloned()
     }
 
     pub fn choose_tree(&self) -> Option<ChooseTreeState> {
-        self.link.core().choose_tree().cloned()
+        self.link().core().choose_tree().cloned()
     }
 
     pub fn choose_buffer(&self) -> Option<ChooseBufferState> {
-        self.link.core().choose_buffer().cloned()
+        self.link().core().choose_buffer().cloned()
     }
 
     pub fn display_panes(&self) -> Option<DisplayPanesState> {
-        self.link.core().display_panes().cloned()
+        self.link().core().display_panes().cloned()
     }
 
     /// The frozen `list-keys`-style output view, if the daemon opened one for
     /// this client. The pane is the one it is anchored to, not a pane of its own.
     pub fn command_output(&self) -> Option<(PaneId, TerminalViewport)> {
-        self.link
+        self.link()
             .core()
             .command_output()
             .map(|(pane, viewport)| (pane, viewport.clone()))
@@ -304,7 +356,8 @@ impl Engine {
     /// first, alongside the live viewport top they stop at. Absent rows are
     /// `None`, which the painter shows as an unfilled band.
     pub fn history_window(&self, pane: PaneId, target: u32, rows: u16) -> Vec<Option<HistoryRow>> {
-        let history = self.link.history();
+        let link = self.link();
+        let history = link.history();
         let ring = history.get(&pane).map(|entry| &entry.ring);
         (0..u32::from(rows))
             .map(|row| {
@@ -317,7 +370,8 @@ impl Engine {
     /// How far back the ring currently reaches, after retiring rows the pane
     /// has outrun. Called at scroll time, never per frame.
     pub fn history_rows(&self, pane: PaneId, viewport: &TerminalViewport) -> usize {
-        let mut history = self.link.history();
+        let link = self.link();
+        let mut history = link.history();
         let entry = history.entry(pane).or_default();
         entry.ring.observe(viewport);
         entry.ring.len()
@@ -327,7 +381,7 @@ impl Engine {
     /// locally. One request per pane is outstanding at a time; the reader
     /// chains the next one as each chunk lands.
     pub fn request_history(&self, pane: PaneId, target: u32) {
-        self.link.request_history(pane, target);
+        self.link().request_history(pane, target);
     }
 }
 
@@ -347,18 +401,21 @@ impl Engine {
     /// Republish the desktop's light/dark preference; the daemon answers with a
     /// fresh appearance rather than the client recoloring anything itself. The
     /// preference is remembered so a reconnect dials with the current scheme.
+    /// Every host hears it: each one resolves its own palette.
     pub fn set_color_scheme(&self, color_scheme: TerminalColorScheme) {
-        self.link.set_color_scheme(color_scheme);
+        for link in self.links() {
+            link.set_color_scheme(color_scheme);
+        }
     }
 
     /// A clone of the retained viewport: every visible plane is behind an
     /// `Arc`, so this is a handful of refcount bumps, not a grid copy.
     pub fn viewport(&self, pane: PaneId) -> Option<TerminalViewport> {
-        self.link.core().viewport(pane).cloned()
+        self.link().core().viewport(pane).cloned()
     }
 
     pub fn session_view(&self) -> Option<SessionView> {
-        self.link.session_view()
+        self.link().session_view()
     }
 
     /// Publish a pane's cell geometry, skipping a resize the daemon already
@@ -376,12 +433,12 @@ impl Engine {
         if columns == 0 || rows == 0 {
             return false;
         }
-        self.link
+        self.link()
             .publish_geometry(pane, (columns, rows, cell_width_px, cell_height_px))
     }
 
     pub fn send_key(&self, pane: PaneId, input: KeyInput, text_follows: bool) {
-        self.link.send(InputMessage::Key {
+        self.link().send(InputMessage::Key {
             pane,
             input,
             text_follows,
@@ -392,15 +449,13 @@ impl Engine {
         if text.is_empty() {
             return;
         }
-        self.link.send(InputMessage::Text { pane, text });
+        self.link().send(InputMessage::Text { pane, text });
     }
 
     /// Move this client to another session. The daemon answers with a fresh
     /// snapshot and an [`EngineEvent::Attached`]; nothing is assumed here.
     pub fn attach_session(&self, session: SessionId) {
-        if let Err(error) = self.link.client().attach(session.to_string()) {
-            log::warn!("zz-gtk failed to attach to {session}: {error}");
-        }
+        self.attach_host_session(self.active_host(), session);
     }
 
     /// Create a session and land in it. A daemon that advertises
@@ -408,16 +463,7 @@ impl Engine {
     /// the follow-up attach, which is why the capability is consulted rather
     /// than assumed.
     pub fn new_session(&self) {
-        self.execute(CommandInvocation::new("new-session", [] as [&str; 0]));
-        let attaches = self
-            .link
-            .core()
-            .capabilities()
-            .iter()
-            .any(|capability| capability == NEW_SESSION_ATTACH_CAPABILITY);
-        if !attaches {
-            self.execute(CommandInvocation::new("attach-session", [] as [&str; 0]));
-        }
+        self.new_session_on(self.active_host());
     }
 
     pub fn select_window(&self, window: WindowId) {
@@ -444,21 +490,215 @@ impl Engine {
     /// Forward one input message untouched. Overlay keys ride this: the daemon
     /// owns chooser and prompt semantics, so the client never resolves them.
     pub fn send(&self, input: InputMessage) {
-        self.link.send(input);
+        self.link().send(input);
     }
 
     pub fn execute(&self, command: CommandInvocation) {
-        let name = command.name.clone();
-        if let Err(error) = self.link.client().execute(command) {
-            log::warn!("zz-gtk failed to execute {name}: {error}");
-        }
+        self.execute_on(self.active_host(), command);
     }
 
     /// Leave the session without disturbing it: the daemon keeps running and
     /// every pane stays alive for the next client.
     pub fn detach(&self) {
-        if let Err(error) = self.link.client().detach() {
+        let Some(client) = self.link().client() else {
+            return;
+        };
+        if let Err(error) = client.detach() {
             log::warn!("zz-gtk failed to detach: {error}");
+        }
+    }
+}
+
+/// The fleet: one connection per configured host, alongside the local one.
+///
+/// A host that goes away is a host that goes away — its ladder, its frozen
+/// frames and its failure all stay on its own connection, and nothing here ever
+/// answers a question about one host with another host's state.
+impl Engine {
+    /// The host the workspace is rendering. [`HostId::LOCAL`] until a fleet row
+    /// is activated.
+    pub fn active_host(&self) -> HostId {
+        self.fleet().active()
+    }
+
+    /// Every host, local first, in the order `zz/config` lists them.
+    pub fn hosts(&self) -> Vec<HostView> {
+        self.fleet()
+            .iter()
+            .map(|host| {
+                let core = host.link.core();
+                HostView {
+                    id: host.id,
+                    name: host.name.clone(),
+                    state: host.link.state(),
+                    snapshot: Arc::clone(core.snapshot()),
+                    attached: core.attached_session(),
+                }
+            })
+            .collect()
+    }
+
+    pub fn host_name(&self, host: HostId) -> Option<String> {
+        self.fleet().get(host).map(|host| host.name.clone())
+    }
+
+    /// ssh's questions, for the surface that answers them. One receiver for the
+    /// whole fleet: the request names the host it came from.
+    pub fn ssh_prompts(&self) -> Receiver<SshPromptRequest> {
+        self.prompts.clone()
+    }
+
+    /// Bring the fleet in line with `zz/config`. Hosts that are new are dialled,
+    /// hosts the file dropped — or repointed — are closed, and everything else
+    /// is left connected. True when the set changed, which is the caller's cue
+    /// that the tree has a different shape.
+    ///
+    /// This is the only way hosts appear or vanish: the settings poller is the
+    /// single apply path for the file, exactly as it is for every other key.
+    pub fn set_fleet_hosts(&self, configured: &[HostEntry]) -> bool {
+        // The registry lock is taken and released around each step rather than
+        // held across the loop: closing and dialling both need it themselves.
+        let stale = self.fleet().stale(configured);
+        let mut changed = !stale.is_empty();
+        for host in stale {
+            self.close_host(host);
+        }
+        let fresh: Vec<&HostEntry> = {
+            let fleet = self.fleet();
+            configured
+                .iter()
+                .filter(|entry| !fleet.contains(&entry.name))
+                .collect()
+        };
+        changed |= !fresh.is_empty();
+        for entry in fresh {
+            self.dial_host(entry);
+        }
+        if changed {
+            self.announce(EngineEvent::FleetChanged);
+        }
+        changed
+    }
+
+    /// Attach to a session on `host` and make it the host the workspace shows.
+    /// The active host moves first: the daemon resolves `-t` against the
+    /// attachment, so anything that follows has to reach the same connection.
+    pub fn attach_host_session(&self, host: HostId, session: SessionId) {
+        self.set_active_host(host);
+        let Some(client) = self.fleet().link(host).and_then(|link| link.client()) else {
+            log::warn!("zz-gtk cannot attach to {session}: {host:?} is not connected");
+            return;
+        };
+        if let Err(error) = client.attach(session.to_string()) {
+            log::warn!("zz-gtk failed to attach to {session}: {error}");
+        }
+    }
+
+    pub fn execute_on(&self, host: HostId, command: CommandInvocation) {
+        let name = command.name.clone();
+        let Some(client) = self.fleet().link(host).and_then(|link| link.client()) else {
+            log::warn!("zz-gtk dropped {name}: {host:?} is not connected");
+            return;
+        };
+        if let Err(error) = client.execute(command) {
+            log::warn!("zz-gtk failed to execute {name}: {error}");
+        }
+    }
+
+    /// Create a session on `host` and land in it.
+    pub fn new_session_on(&self, host: HostId) {
+        let attaches = self.fleet().link(host).is_some_and(|link| {
+            link.core()
+                .capabilities()
+                .iter()
+                .any(|capability| capability == NEW_SESSION_ATTACH_CAPABILITY)
+        });
+        self.set_active_host(host);
+        self.execute_on(host, CommandInvocation::new("new-session", [] as [&str; 0]));
+        if !attaches {
+            self.execute_on(
+                host,
+                CommandInvocation::new("attach-session", [] as [&str; 0]),
+            );
+        }
+    }
+
+    /// Dial a host that stopped — a failed ladder, or one parked because an ssh
+    /// question was dismissed. The reader thread is gone by then, so this is a
+    /// fresh one rather than a nudge.
+    pub fn reconnect_host(&self, host: HostId) {
+        let Some(link) = self.fleet().link(host) else {
+            return;
+        };
+        if link.running() {
+            return;
+        }
+        link.revive();
+        self.announce(EngineEvent::HostState(host));
+        if let Err(error) = reader::spawn(link, self.notices.clone()) {
+            log::warn!("zz-gtk could not restart the connection to {host:?}: {error}");
+        }
+    }
+
+    /// Stop talking to a host and forget it. The workspace falls back to the
+    /// local daemon only here, where the host is being taken away on purpose;
+    /// a host that merely failed keeps the workspace exactly where it was.
+    pub fn close_host(&self, host: HostId) {
+        let Some(removed) = self.fleet().remove(host) else {
+            return;
+        };
+        removed.link.close();
+    }
+
+    /// Park a host because an ssh question was dismissed. Nothing dials it
+    /// again until [`Self::reconnect_host`], which is what keeps a cancelled
+    /// password prompt from reopening on the next rung of the ladder.
+    pub fn park_host(&self, host: HostId) {
+        if let Some(link) = self.fleet().link(host) {
+            link.parked.store(true, Ordering::Release);
+        }
+    }
+
+    fn set_active_host(&self, host: HostId) {
+        let mut fleet = self.fleet();
+        if fleet.active() == host {
+            return;
+        }
+        // The frames the outgoing host queued are for a screen nobody is about
+        // to paint, and leaving the inbox armed would swallow the wake its next
+        // frame needs. The core keeps the viewports, so the widgets rebuild
+        // from those instead.
+        fleet.active_link().frames.clear();
+        fleet.set_active(host);
+    }
+
+    fn dial_host(&self, entry: &HostEntry) {
+        let color_scheme = self.link().color_scheme();
+        let link = {
+            let mut fleet = self.fleet();
+            let host = fleet.reserve();
+            let link = Arc::new(Link::host(
+                host,
+                entry.endpoint.clone(),
+                color_scheme,
+                PromptRoute::new(host, &entry.endpoint, self.asked.clone()),
+            ));
+            fleet.push(
+                host,
+                entry.name.clone(),
+                entry.endpoint.clone(),
+                Arc::clone(&link),
+            );
+            link
+        };
+        if let Err(error) = reader::spawn(link, self.notices.clone()) {
+            log::warn!("zz-gtk could not connect to {}: {error}", entry.name);
+        }
+    }
+
+    fn announce(&self, event: EngineEvent) {
+        if let Err(error) = self.notices.try_send(event) {
+            log::warn!("zz-gtk dropped a fleet event: {error}");
         }
     }
 }
@@ -468,8 +708,19 @@ impl Engine {
 /// core keeps the viewports the widgets are still painting.
 struct Link {
     endpoint: Endpoint,
+    /// `None` for the local daemon, whose events are the client's own; a fleet
+    /// host stamps every event it publishes with this.
+    tag: Option<HostId>,
+    /// How long this connection waits between dials. The local daemon retries
+    /// hard and briefly — it was probably just restarted underneath us — while
+    /// a host climbs the desktop's 1/2/4/8/16/30s ladder.
+    ladder: Ladder,
+    /// Whether a connection with nothing remembered should land on the daemon's
+    /// default session. True for the local daemon, which is the workspace; a
+    /// host stays connected but unattached until one of its rows is activated.
+    attaches_by_default: bool,
     color_scheme: Mutex<TerminalColorScheme>,
-    client: Mutex<Arc<InteractiveClient>>,
+    client: Mutex<Option<Arc<InteractiveClient>>>,
     core: Mutex<ClientCore>,
     frames: FrameInbox,
     geometry: Mutex<HashMap<PaneId, Geometry>>,
@@ -479,6 +730,17 @@ struct Link {
     /// Deliberately off the frame path: rows arrive only through
     /// `HistoryRequest`, so nothing here runs while frames do.
     history: Mutex<HashMap<PaneId, PaneHistory>>,
+    state: Mutex<HostState>,
+    /// Whether this is the host the workspace is showing. An unwatched host
+    /// gives up sooner, exactly as the desktop's does.
+    active: AtomicBool,
+    /// An ssh question was dismissed; nothing dials again until a person says so.
+    parked: AtomicBool,
+    /// The host left the fleet. The reader stops at its next quiet moment.
+    closed: AtomicBool,
+    /// Whether a reader thread is still driving this link.
+    running: AtomicBool,
+    prompts: Option<PromptRoute>,
 }
 
 /// A pane's ring plus the offset the client is still trying to reach with it.
@@ -492,8 +754,133 @@ struct PaneHistory {
 }
 
 impl Link {
-    fn client(&self) -> Arc<InteractiveClient> {
-        Arc::clone(&self.client.lock().expect("client slot poisoned"))
+    /// The local daemon: already connected, already attached, and the one whose
+    /// events ride the channel bare.
+    fn local(
+        endpoint: Endpoint,
+        color_scheme: TerminalColorScheme,
+        client: Arc<InteractiveClient>,
+        core: ClientCore,
+    ) -> Self {
+        Self {
+            client: Mutex::new(Some(client)),
+            core: Mutex::new(core),
+            ..Self::blank(endpoint, color_scheme)
+        }
+    }
+
+    /// A fleet host: nothing is connected yet, and the reader thread is what
+    /// dials it — over ssh that can block for seconds, which the main loop
+    /// cannot afford to do.
+    fn host(
+        host: HostId,
+        endpoint: Endpoint,
+        color_scheme: TerminalColorScheme,
+        prompts: Option<PromptRoute>,
+    ) -> Self {
+        Self {
+            tag: Some(host),
+            ladder: Ladder::Fleet,
+            attaches_by_default: false,
+            state: Mutex::new(HostState::Connecting),
+            active: AtomicBool::new(false),
+            prompts,
+            ..Self::blank(endpoint, color_scheme)
+        }
+    }
+
+    /// The local daemon's shape, which is also every host's before it is told
+    /// what makes it one.
+    fn blank(endpoint: Endpoint, color_scheme: TerminalColorScheme) -> Self {
+        Self {
+            endpoint,
+            tag: None,
+            ladder: Ladder::Local,
+            attaches_by_default: true,
+            color_scheme: Mutex::new(color_scheme),
+            client: Mutex::new(None),
+            core: Mutex::new(ClientCore::new()),
+            frames: FrameInbox::default(),
+            geometry: Mutex::new(HashMap::new()),
+            replay: Mutex::new(Vec::new()),
+            remembered_reattach: AtomicBool::new(false),
+            history: Mutex::new(HashMap::new()),
+            state: Mutex::new(HostState::Connected),
+            active: AtomicBool::new(true),
+            parked: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
+            running: AtomicBool::new(false),
+            prompts: None,
+        }
+    }
+
+    /// Stamp an event with the host it happened on. The local daemon's events
+    /// are published unchanged, which is what keeps every surface that predates
+    /// the fleet working untouched.
+    fn tag(&self, event: EngineEvent) -> EngineEvent {
+        match self.tag {
+            Some(host) => EngineEvent::Fleet(host, Box::new(event)),
+            None => event,
+        }
+    }
+
+    fn state(&self) -> HostState {
+        self.state.lock().expect("host state poisoned").clone()
+    }
+
+    /// Record a connection state and say whether it moved, so the reader only
+    /// wakes the UI for a change it can see.
+    fn set_state(&self, state: HostState) -> bool {
+        let mut current = self.state.lock().expect("host state poisoned");
+        if *current == state {
+            return false;
+        }
+        *current = state;
+        true
+    }
+
+    fn set_active(&self, active: bool) {
+        self.active.store(active, Ordering::Release);
+    }
+
+    fn is_active(&self) -> bool {
+        self.active.load(Ordering::Acquire)
+    }
+
+    fn running(&self) -> bool {
+        self.running.load(Ordering::Acquire)
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+
+    /// Clear whatever stopped the last reader, for a host being dialled again
+    /// by hand.
+    fn revive(&self) {
+        self.parked.store(false, Ordering::Release);
+        self.set_state(HostState::Connecting);
+    }
+
+    /// Leave the fleet. The reader notices at its next message or nap; the
+    /// detach is what makes that next message arrive rather than never, since a
+    /// quiet connection would otherwise sit in `recv` forever.
+    fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+        if let Some(client) = self.client() {
+            let _ = client.detach();
+        }
+    }
+
+    fn color_scheme(&self) -> TerminalColorScheme {
+        *self.color_scheme.lock().expect("color scheme poisoned")
+    }
+
+    /// `None` while a host is between connections. Nothing queues: a keystroke
+    /// aimed at a machine that is not there is dropped rather than replayed
+    /// into whatever session the reconnect lands on.
+    fn client(&self) -> Option<Arc<InteractiveClient>> {
+        self.client.lock().expect("client slot poisoned").clone()
     }
 
     fn core(&self) -> MutexGuard<'_, ClientCore> {
@@ -522,7 +909,15 @@ impl Link {
             return;
         };
         self.history().entry(pane).or_default().requesting = true;
-        if let Err(error) = self.client().request_history(pane, start, count) {
+        let sent = self
+            .client()
+            .ok_or_else(|| "the daemon is not connected".to_owned())
+            .and_then(|client| {
+                client
+                    .request_history(pane, start, count)
+                    .map_err(|error| error.to_string())
+            });
+        if let Err(error) = sent {
             log::warn!("zz-gtk failed to request scrollback for {pane}: {error}");
             let mut history = self.history();
             let entry = history.entry(pane).or_default();
@@ -573,14 +968,20 @@ impl Link {
     }
 
     fn send(&self, input: InputMessage) {
-        if let Err(error) = self.client().send_input(input) {
+        let Some(client) = self.client() else {
+            return;
+        };
+        if let Err(error) = client.send_input(input) {
             log::warn!("zz-gtk failed to send input: {error}");
         }
     }
 
     fn set_color_scheme(&self, color_scheme: TerminalColorScheme) {
         *self.color_scheme.lock().expect("color scheme poisoned") = color_scheme;
-        if let Err(error) = self.client().set_color_scheme(color_scheme) {
+        let Some(client) = self.client() else {
+            return;
+        };
+        if let Err(error) = client.set_color_scheme(color_scheme) {
             log::warn!("zz-gtk failed to publish the color scheme: {error}");
         }
     }
@@ -610,22 +1011,33 @@ impl Link {
     /// the workspace for a whole round trip — and the remembered session is
     /// re-attached by id, exactly as the desktop does.
     fn dial(&self) -> Result<(), String> {
-        let color_scheme = *self.color_scheme.lock().expect("color scheme poisoned");
-        let client = InteractiveClient::connect_endpoint(&self.endpoint, color_scheme)
-            .map_err(|error| error.to_string())?;
+        let color_scheme = self.color_scheme();
+        let prompts = self.prompts.as_ref().map(PromptRoute::prompts);
+        let client =
+            InteractiveClient::connect_endpoint_with_prompts(&self.endpoint, color_scheme, prompts)
+                .map_err(|error| error.to_string())?;
         let session = {
             let mut core = self.core();
             core.adopt_hello(client.server_hello().clone());
             core.attached_session()
         };
-        client
-            .attach(session.map_or_else(String::new, |session| session.to_string()))
-            .map_err(|error| error.to_string())?;
+        if session.is_some() || self.attaches_by_default {
+            client
+                .attach(session.map_or_else(String::new, |session| session.to_string()))
+                .map_err(|error| error.to_string())?;
+        } else {
+            // A daemon publishes its tree when something moves, and an idle one
+            // never moves. Attaching is what usually asks; a host that is only
+            // connected has to ask outright, exactly as the desktop does when
+            // it dials a fleet member. This is the one non-error resync: the
+            // client is not chasing a gap, it has no snapshot at all.
+            client.request_resync().map_err(|error| error.to_string())?;
+        }
         self.remembered_reattach
             .store(session.is_some(), Ordering::Relaxed);
         let stale = mem::take(&mut *self.geometry.lock().expect("geometry poisoned"));
         *self.replay.lock().expect("geometry replay poisoned") = stale.into_iter().collect();
-        *self.client.lock().expect("client slot poisoned") = Arc::new(client);
+        *self.client.lock().expect("client slot poisoned") = Some(Arc::new(client));
         Ok(())
     }
 

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use gtk::{gdk, glib, graphene, gsk, pango, prelude::*, subclass::prelude::*};
-use zz_client::{ChromeAction, ViewportDamage};
+use zz_client::{ChromeAction, ChromeKeymap, ViewportDamage};
 use zz_protocol::PaneId;
 use zz_terminal::{
     CellWidth, Cursor, CursorStyle, Glyph, KeyAction, KeyInput, OverlayKind, PackedCell,
@@ -200,6 +200,9 @@ impl TerminalView {
         self.imp().engine.borrow().clone()
     }
 
+    /// Cell height is the font's ascent plus descent, not pango's line height:
+    /// the latter adds the family's line gap, which a terminal cell must not
+    /// carry or the grid drifts apart by a few pixels a row.
     fn refresh_font(&self) {
         let imp = self.imp();
         let appearance = imp.appearance.borrow();
@@ -218,7 +221,7 @@ impl TerminalView {
         font.set_size((appearance.font_size_points * pango::SCALE as f32).round() as i32);
         let metrics = self.pango_context().metrics(Some(&font), None);
         let width = metrics.approximate_char_width() as f32 / pango::SCALE as f32;
-        let height = metrics.height() as f32 / pango::SCALE as f32;
+        let height = (metrics.ascent() + metrics.descent()) as f32 / pango::SCALE as f32;
         imp.metrics.set(CellMetrics {
             width: if width > 1.0 { width } else { 8.0 },
             height: if height > 1.0 { height } else { 16.0 },
@@ -348,7 +351,7 @@ impl TerminalView {
             return glib::Propagation::Proceed;
         };
         let probe = keys::key_input(action, keyval, state, None);
-        if let Some(chrome) = resolve_chrome(&engine, &probe) {
+        if let Some(chrome) = resolve_chrome(engine.chrome(), &probe) {
             self.perform(&engine, chrome);
             return glib::Propagation::Stop;
         }
@@ -445,11 +448,10 @@ impl TerminalView {
 
 /// The `ui` table owns chords that belong to the whole client; `terminal` owns
 /// the ones only a terminal surface answers.
-fn resolve_chrome(engine: &Arc<Engine>, input: &KeyInput) -> Option<ChromeAction> {
-    engine
-        .chrome()
+fn resolve_chrome(chrome: &ChromeKeymap, input: &KeyInput) -> Option<ChromeAction> {
+    chrome
         .resolve(zz_client::UI_TABLE, input)
-        .or_else(|| engine.chrome().resolve(zz_client::TERMINAL_TABLE, input))
+        .or_else(|| chrome.resolve(zz_client::TERMINAL_TABLE, input))
 }
 
 struct StyleRun {
@@ -750,4 +752,54 @@ fn run_attributes(style: PackedStyle) -> pango::AttrList {
         ));
     }
     attributes
+}
+
+#[cfg(test)]
+mod tests {
+    use gtk::gdk;
+    use zz_client::{ChromeAction, ChromeKeymap, ChromeProfile};
+    use zz_terminal::KeyAction;
+
+    use super::resolve_chrome;
+    use crate::ui::keys;
+
+    fn press(keyval: gdk::Key, state: gdk::ModifierType) -> zz_terminal::KeyInput {
+        keys::key_input(KeyAction::Press, keyval, state, None)
+    }
+
+    #[test]
+    fn chrome_claims_its_own_chords() {
+        let chrome = ChromeKeymap::for_profile(ChromeProfile::DESKTOP);
+
+        let copy = press(
+            gdk::Key::C,
+            gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK,
+        );
+
+        assert_eq!(
+            resolve_chrome(&chrome, &copy),
+            Some(ChromeAction::TerminalCopy)
+        );
+    }
+
+    #[test]
+    fn plain_typing_never_reaches_chrome() {
+        let chrome = ChromeKeymap::for_profile(ChromeProfile::DESKTOP);
+
+        for keyval in [gdk::Key::a, gdk::Key::A, gdk::Key::Return, gdk::Key::slash] {
+            assert_eq!(
+                resolve_chrome(&chrome, &press(keyval, gdk::ModifierType::empty())),
+                None,
+                "chrome swallowed {keyval:?}"
+            );
+        }
+        assert_eq!(
+            resolve_chrome(
+                &chrome,
+                &press(gdk::Key::c, gdk::ModifierType::CONTROL_MASK)
+            ),
+            None,
+            "Control-C belongs to the pane"
+        );
+    }
 }

@@ -10,5 +10,8 @@
 mod chrome;
 mod core;
 
-pub use chrome::{ChromeAction, ChromeKeymap, UnknownChromeAction};
+pub use chrome::{
+    BROWSER_TABLE, CHROME_TABLES, ChromeAction, ChromeKey, ChromeKeymap, ChromeProfile,
+    SIDEBAR_TABLE, TERMINAL_TABLE, UI_TABLE, UnknownChromeAction,
+};
 pub use core::{ClientCore, CoreEvent, Outbound, ViewportDamage};

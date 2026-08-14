@@ -25,6 +25,7 @@ use zz_terminal::{
 
 use crate::{
     app_icon::AppIconSetting,
+    keymap::ChromeOverride,
     mux::hosts::{HostId, HostRegistry},
     theme::{ChromeColor, ChromePresetId, ThemeModeSetting},
     window::corners::WindowCorners,
@@ -67,6 +68,10 @@ const DEFAULT_AUTO_RESTART_STALE_DAEMON: bool = false;
 pub(crate) const DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY: &str = "cmd-shift-c";
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
 pub(crate) const DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY: &str = "ctrl-shift-c";
+/// Repeatable chrome binding overrides: `<table>:<key>=<action>` and
+/// `<table>:<key>`.
+const CHROME_KEYBIND_KEY: &str = "chrome-keybind";
+const CHROME_UNBIND_KEY: &str = "chrome-unbind";
 const DEFAULT_BROWSER_SEARCH_PROVIDER: SearchProvider = SearchProvider::Google;
 const DEFAULT_BROWSER_EGRESS: bool = true;
 const DEFAULT_EDITOR_FONT_SIZE: f32 = 13.0;
@@ -473,6 +478,7 @@ struct ParsedConfig {
     hosts: Vec<HostEntry>,
     rejected_hosts: Vec<RejectedHost>,
     daemon_entries: Vec<ConfigOverrideEntry>,
+    chrome_overrides: Vec<ChromeOverride>,
     diagnostics: Vec<ConfigDiagnostic>,
 }
 
@@ -550,6 +556,7 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
         cx.set_global(AgentConfig::default());
         cx.set_global(FleetHosts::default());
         cx.set_global(DaemonConfigOverrides::default());
+        crate::keymap::install(&[], DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY, cx);
         send_current_config_overrides(cx);
         return;
     };
@@ -609,6 +616,11 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
         entries: parsed.hosts,
     });
     log_fleet_hosts(cx);
+    crate::keymap::install(
+        &parsed.chrome_overrides,
+        &parsed.browser.element_selector_hotkey.value,
+        cx,
+    );
     cx.set_global(parsed.config);
     cx.set_global(parsed.browser);
     apply_animations(cx);
@@ -885,11 +897,6 @@ pub(crate) fn browser_config(cx: &App) -> BrowserConfig {
     cx.try_global::<BrowserConfig>()
         .cloned()
         .unwrap_or_default()
-}
-
-#[cfg_attr(target_os = "ios", allow(dead_code))]
-pub(crate) fn browser_element_selector_hotkey(cx: &App) -> ConfigValue<String> {
-    browser_config(cx).element_selector_hotkey
 }
 
 #[cfg_attr(target_os = "ios", allow(dead_code))]
@@ -1293,6 +1300,22 @@ fn parse_config(source: &str) -> ParsedConfig {
                 apply_agent_key(&mut parsed.agent, agent_key, key, value, line_number)
             {
                 parsed.diagnostics.push(diagnostic);
+            }
+            continue;
+        }
+
+        if matches!(key, CHROME_KEYBIND_KEY | CHROME_UNBIND_KEY) {
+            let entry = if key == CHROME_KEYBIND_KEY {
+                crate::keymap::parse_bind(value)
+            } else {
+                crate::keymap::parse_unbind(value)
+            };
+            match entry {
+                Ok(entry) => parsed.chrome_overrides.push(entry),
+                Err(message) => parsed.diagnostics.push(ConfigDiagnostic {
+                    line: line_number,
+                    message: format!("invalid `{key}`: {message}"),
+                }),
             }
             continue;
         }
@@ -2295,6 +2318,63 @@ mod tests {
         assert_eq!(
             parsed.browser.search_provider.provenance,
             ConfigProvenance::Override
+        );
+    }
+
+    #[test]
+    fn parser_collects_chrome_binding_overrides() {
+        let parsed = parse_config(
+            "chrome-keybind = browser:Cmd-Shift-p=browser-new-tab\n\
+             chrome-keybind = terminal:C-S-y=terminal-copy  # a note\n\
+             chrome-unbind = sidebar:q\n",
+        );
+
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        assert_eq!(
+            parsed.chrome_overrides,
+            vec![
+                ChromeOverride::Bind {
+                    table: "browser",
+                    key: "D-S-p".to_owned(),
+                    action: "browser-new-tab".to_owned(),
+                },
+                ChromeOverride::Bind {
+                    table: "terminal",
+                    key: "C-S-y".to_owned(),
+                    action: "terminal-copy".to_owned(),
+                },
+                ChromeOverride::Unbind {
+                    table: "sidebar",
+                    key: "q".to_owned(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn chrome_binding_overrides_report_what_they_cannot_honour() {
+        let parsed = parse_config(
+            "chrome-keybind = browser:D-t\n\
+             chrome-keybind = pane:D-t=browser-new-tab\n\
+             chrome-keybind = browser:D-t=teleport\n\
+             chrome-unbind = browser\n",
+        );
+
+        assert_eq!(parsed.diagnostics.len(), 4);
+        assert!(parsed.chrome_overrides.is_empty());
+        assert!(
+            parsed.diagnostics[1]
+                .message
+                .contains("unknown chrome table"),
+            "{:?}",
+            parsed.diagnostics[1],
+        );
+        assert!(
+            parsed.diagnostics[2]
+                .message
+                .contains("unknown chrome action"),
+            "{:?}",
+            parsed.diagnostics[2],
         );
     }
 

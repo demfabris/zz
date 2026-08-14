@@ -18,6 +18,7 @@ use gpui::{
     Task, UTF16Selection, Window, anchored, deferred, div, font, img, point, prelude::*, px,
 };
 use parking_lot::RwLock;
+use zz_client::{ChromeAction, TERMINAL_TABLE};
 use zz_protocol::{ClientMessageKind, CommandInvocation, InputMessage, PaneId, TerminalUiCommand};
 use zz_terminal::{
     AppearanceColor, AppearanceConfigKey, AppearanceProvenance, AppearanceSource, ClipboardTarget,
@@ -38,6 +39,7 @@ use zz_ui::{
 use crate::{
     config::pane_content_radii,
     diagnostics,
+    keymap::ChromeChord,
     mux::client::{
         HistoryRing, KittyImageCache, MuxClient, RetainedTerminalViewport,
         TerminalFontSizeAdjustment,
@@ -113,17 +115,32 @@ fn mode_indicator(mode: TerminalMode, unseen_output: u32) -> Option<ModeIndicato
 }
 
 pub fn init(cx: &mut App) {
-    cx.bind_keys(terminal_key_bindings());
+    cx.bind_keys(raw_key_bindings());
+    crate::keymap::bind(cx, TERMINAL_TABLE, terminal_key_bindings);
 }
 
-fn terminal_key_bindings() -> [KeyBinding; 5] {
+fn raw_key_bindings() -> [KeyBinding; 2] {
     [
         KeyBinding::new("tab", NoAction, Some(TERMINAL_KEY_CONTEXT)),
         KeyBinding::new("shift-tab", NoAction, Some(TERMINAL_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-=", NoAction, Some(TERMINAL_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-+", NoAction, Some(TERMINAL_KEY_CONTEXT)),
-        KeyBinding::new("ctrl--", NoAction, Some(TERMINAL_KEY_CONTEXT)),
     ]
+}
+
+/// A terminal pane resolves its own chrome on the raw key path, so the only
+/// gpui bindings it needs are the ones that keep the font chords away from the
+/// application zoom bound at the root.
+fn terminal_key_bindings(chords: &[ChromeChord]) -> Vec<KeyBinding> {
+    let context = Some(TERMINAL_KEY_CONTEXT);
+    chords
+        .iter()
+        .filter(|chord| {
+            matches!(
+                chord.action(),
+                ChromeAction::TerminalFontIncrease | ChromeAction::TerminalFontDecrease
+            )
+        })
+        .map(|chord| chord.binding(NoAction, context))
+        .collect()
 }
 
 /// Resolve daemon-declared font stacks against the machine that actually
@@ -1890,7 +1907,13 @@ impl TerminalView {
         self.reset_cursor_blink(cx);
         let code = key_code(&event.keystroke.key);
         let modifiers = modifiers(event.keystroke.modifiers);
-        if let Some(adjustment) = terminal_font_size_adjustment(&event.keystroke) {
+        let chrome = crate::keymap::resolve(cx, TERMINAL_TABLE, &event.keystroke);
+        let font_adjustment = match chrome {
+            Some(ChromeAction::TerminalFontIncrease) => Some(TerminalFontSizeAdjustment::Increase),
+            Some(ChromeAction::TerminalFontDecrease) => Some(TerminalFontSizeAdjustment::Decrease),
+            _ => None,
+        };
+        if let Some(adjustment) = font_adjustment {
             self.mux.update(cx, |mux, cx| {
                 mux.adjust_terminal_font_size(adjustment, cx);
             });
@@ -1901,9 +1924,7 @@ impl TerminalView {
             cx.stop_propagation();
             return;
         }
-        if (modifiers.control() && modifiers.shift() || modifiers.platform())
-            && matches!(code, KeyCode::Character('f' | 'F'))
-        {
+        if chrome == Some(ChromeAction::TerminalSearch) {
             let query = SearchQuery::default();
             self.search_query = Some(query.clone());
             self.search_prompt_behavior = SearchPromptBehavior::Navigate;
@@ -1980,32 +2001,24 @@ impl TerminalView {
             cx.stop_propagation();
             return;
         }
-        if (modifiers.control() && modifiers.shift() || modifiers.platform())
-            && matches!(code, KeyCode::Character('c' | 'C'))
-        {
+        if chrome == Some(ChromeAction::TerminalCopy) {
             self.copy_selection(cx, ClipboardTarget::Clipboard);
             cx.stop_propagation();
             return;
         }
-        if (modifiers.control() && modifiers.shift() || modifiers.platform())
-            && matches!(code, KeyCode::Character('a' | 'A'))
-        {
+        if chrome == Some(ChromeAction::TerminalSelectAll) {
             self.send_view_action(cx, TerminalViewAction::SelectAll);
             cx.stop_propagation();
             return;
         }
-        if (modifiers.control() && modifiers.shift() || modifiers.platform())
-            && matches!(code, KeyCode::Character('k' | 'K'))
-        {
+        if chrome == Some(ChromeAction::TerminalClearHistory) {
             if !self.command_output {
                 self.send_view_action(cx, TerminalViewAction::ClearHistory);
             }
             cx.stop_propagation();
             return;
         }
-        if (modifiers.control() && modifiers.shift() || modifiers.platform())
-            && matches!(code, KeyCode::Character('v' | 'V'))
-        {
+        if chrome == Some(ChromeAction::TerminalPaste) {
             let item = cx.read_from_clipboard();
             if let Some(text) = item.as_ref().and_then(ClipboardItem::text) {
                 self.request_paste(text, cx);
@@ -2494,23 +2507,6 @@ fn single_character(key: &str) -> Option<char> {
     characters.next().is_none().then_some(character)
 }
 
-fn terminal_font_size_adjustment(keystroke: &Keystroke) -> Option<TerminalFontSizeAdjustment> {
-    let modifiers = keystroke.modifiers;
-    if !modifiers.control || modifiers.alt || modifiers.platform {
-        return None;
-    }
-
-    match keystroke.key.as_str() {
-        "-" => Some(TerminalFontSizeAdjustment::Decrease),
-        "=" | "+" => Some(TerminalFontSizeAdjustment::Increase),
-        _ => match keystroke.key_char.as_deref() {
-            Some("-") => Some(TerminalFontSizeAdjustment::Decrease),
-            Some("=" | "+") => Some(TerminalFontSizeAdjustment::Increase),
-            _ => None,
-        },
-    }
-}
-
 fn cursor_should_blink(
     cursor: Option<zz_terminal::Cursor>,
     policy: CursorBlinkPolicy,
@@ -2606,13 +2602,18 @@ mod tests {
         );
     }
 
+    fn chrome_action(source: &str) -> Option<ChromeAction> {
+        let keystroke = Keystroke::parse(source).expect("valid test keystroke");
+        crate::keymap::test_resolve(TERMINAL_TABLE, &keystroke)
+    }
+
     #[test]
     fn terminal_context_leaves_tab_for_raw_key_input() {
         let mut bindings = vec![
             KeyBinding::new("tab", FocusNext, Some("Root")),
             KeyBinding::new("shift-tab", FocusPrevious, Some("Root")),
         ];
-        bindings.extend(terminal_key_bindings());
+        bindings.extend(raw_key_bindings());
         let keymap = gpui::Keymap::new(bindings);
         let root_context = gpui::KeyContext::parse("Root").expect("valid root key context");
         let terminal_context =
@@ -2638,48 +2639,49 @@ mod tests {
 
     #[test]
     fn terminal_font_shortcuts_accept_minus_equal_and_shifted_plus() {
-        let adjustment = |source| {
-            let keystroke = Keystroke::parse(source).expect("valid test keystroke");
-            terminal_font_size_adjustment(&keystroke)
-        };
-
-        assert_eq!(
-            adjustment("ctrl--"),
-            Some(TerminalFontSizeAdjustment::Decrease)
-        );
-        assert_eq!(
-            adjustment("ctrl-="),
-            Some(TerminalFontSizeAdjustment::Increase)
-        );
-        assert_eq!(
-            adjustment("ctrl-+"),
-            Some(TerminalFontSizeAdjustment::Increase)
-        );
-        assert_eq!(
-            adjustment("ctrl-shift-="),
-            Some(TerminalFontSizeAdjustment::Increase)
-        );
+        for (source, action) in [
+            ("ctrl--", ChromeAction::TerminalFontDecrease),
+            ("ctrl-=", ChromeAction::TerminalFontIncrease),
+            ("ctrl-+", ChromeAction::TerminalFontIncrease),
+            ("ctrl-shift-=", ChromeAction::TerminalFontIncrease),
+        ] {
+            assert_eq!(chrome_action(source), Some(action), "{source}");
+        }
     }
 
     #[test]
-    fn terminal_font_shortcuts_do_not_capture_other_modifier_chords() {
-        let adjustment = |source| {
-            let keystroke = Keystroke::parse(source).expect("valid test keystroke");
-            terminal_font_size_adjustment(&keystroke)
-        };
+    fn terminal_chrome_leaves_every_other_chord_to_the_pane() {
+        for source in ["-", "ctrl-alt-=", "cmd-=", "ctrl-c", "ctrl-f", "ctrl-v"] {
+            assert_eq!(chrome_action(source), None, "{source}");
+        }
+    }
 
-        assert_eq!(adjustment("-"), None);
-        assert_eq!(adjustment("ctrl-alt-="), None);
-        assert_eq!(adjustment("cmd-="), None);
+    #[test]
+    fn terminal_chrome_claims_the_shifted_control_chords() {
+        for (source, action) in [
+            ("ctrl-shift-f", ChromeAction::TerminalSearch),
+            ("ctrl-shift-c", ChromeAction::TerminalCopy),
+            ("ctrl-shift-a", ChromeAction::TerminalSelectAll),
+            ("ctrl-shift-k", ChromeAction::TerminalClearHistory),
+            ("ctrl-shift-v", ChromeAction::TerminalPaste),
+            ("cmd-f", ChromeAction::TerminalSearch),
+            ("cmd-c", ChromeAction::TerminalCopy),
+            ("cmd-a", ChromeAction::TerminalSelectAll),
+            ("cmd-k", ChromeAction::TerminalClearHistory),
+            ("cmd-v", ChromeAction::TerminalPaste),
+        ] {
+            assert_eq!(chrome_action(source), Some(action), "{source}");
+        }
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     #[test]
     fn terminal_font_zoom_suppresses_application_ui_scaling() {
-        let mut bindings = crate::ui_scale::key_bindings()
-            .into_iter()
-            .collect::<Vec<_>>();
-        bindings.extend(terminal_key_bindings());
+        let mut bindings =
+            crate::ui_scale::key_bindings(&crate::keymap::test_chords(zz_client::UI_TABLE));
+        bindings.extend(terminal_key_bindings(&crate::keymap::test_chords(
+            TERMINAL_TABLE,
+        )));
         let keymap = gpui::Keymap::new(bindings);
         let contexts = [
             gpui::KeyContext::parse(zz_ui::ROOT_KEY_CONTEXT).expect("valid zz root context"),

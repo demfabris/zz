@@ -15,9 +15,9 @@ use gpui::PromptLevel;
 use gpui::{
     Anchor, AnyElement, AnyView, App, Bounds, ClipboardEntry, ClipboardItem, ClipboardString,
     Context, Corners, CursorStyle, DismissEvent, Entity, EntityInputHandler, FocusHandle,
-    Focusable, Global, Image, ImageFormat, IntoElement, KeyBinding, KeyDownEvent, KeyUpEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, NoAction, PathPromptOptions, Pixels,
-    Point, Render, RenderImage, ScrollWheelEvent, SharedString, StyleRefinement, Subscription,
+    Focusable, Image, ImageFormat, IntoElement, KeyBinding, KeyDownEvent, KeyUpEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, NoAction, PathPromptOptions, Pixels, Point,
+    Render, RenderImage, ScrollWheelEvent, SharedString, StyleRefinement, Subscription,
     UTF16Selection, WeakEntity, Window, anchored, deferred, div, point, prelude::*, px,
 };
 #[cfg(target_os = "windows")]
@@ -33,6 +33,7 @@ use zz_browser::{
     SessionId, Viewport, WheelEvent, diagnostic_url, normalize_browser_profile_name, normalize_url,
     parse_cookie_import, resolve_address,
 };
+use zz_client::{BROWSER_TABLE, ChromeAction};
 use zz_protocol::{
     BrowserCommand, BrowserDescriptor, ClientMessageKind, CommandInvocation, GuiResponse,
     InputMessage, KeyToken, PaneId,
@@ -71,6 +72,7 @@ use crate::{
     config::{pane_content_radii, resolved_config},
     diagnostics,
     diagnostics::fps::{FPS_SAMPLE_INTERVAL, FrameRateSampler},
+    keymap::ChromeChord,
     mux::{client::MuxClient, prefix::terminal_key_input},
     window::corners::{WindowCorners, round_div_radii},
     workspace::ClosePane,
@@ -125,46 +127,12 @@ struct SelectTab {
 #[derive(Clone, Debug, gpui::Action, PartialEq, Eq, serde::Deserialize)]
 #[action(namespace = browser, no_json)]
 struct ConfiguredElementSelector {
-    hotkey: String,
+    chord: String,
 }
-
-#[derive(Default)]
-struct BoundElementSelectorHotkeys(Vec<String>);
-
-impl Global for BoundElementSelectorHotkeys {}
 
 pub fn init(cx: &mut App) {
-    cx.bind_keys(browser_key_bindings());
-    cx.set_global(BoundElementSelectorHotkeys::default());
-    bind_configured_element_selector(cx);
-    cx.observe_global::<crate::config::BrowserConfig>(bind_configured_element_selector)
-        .detach();
-}
-
-fn bind_configured_element_selector(cx: &mut App) {
-    let hotkey = crate::config::browser_element_selector_hotkey(cx).value;
-    let should_bind = {
-        let bound = cx.global_mut::<BoundElementSelectorHotkeys>();
-        if bound.0.contains(&hotkey) {
-            false
-        } else {
-            bound.0.push(hotkey.clone());
-            true
-        }
-    };
-    if should_bind {
-        cx.bind_keys([configured_element_selector_binding(&hotkey)]);
-    }
-}
-
-fn configured_element_selector_binding(hotkey: &str) -> KeyBinding {
-    KeyBinding::new(
-        hotkey,
-        ConfiguredElementSelector {
-            hotkey: hotkey.to_owned(),
-        },
-        Some(BROWSER_KEY_CONTEXT),
-    )
+    cx.bind_keys(raw_key_bindings());
+    crate::keymap::bind(cx, BROWSER_TABLE, browser_chrome_bindings);
 }
 
 #[cfg(target_os = "macos")]
@@ -186,79 +154,13 @@ fn prompt_for_chrome_data_access(window: &mut Window, cx: &mut App) {
     .detach();
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-fn browser_key_bindings() -> Vec<KeyBinding> {
-    let mut bindings = vec![
-        KeyBinding::new("tab", NoAction, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("shift-tab", NoAction, Some(BROWSER_KEY_CONTEXT)),
-        browser_edit_binding("cmd-z", EditCommand::Undo),
-        browser_edit_binding("cmd-shift-z", EditCommand::Redo),
-        browser_edit_binding("cmd-x", EditCommand::Cut),
-        browser_edit_binding("cmd-c", EditCommand::Copy),
-        browser_edit_binding("cmd-v", EditCommand::Paste),
-        browser_edit_binding("cmd-shift-v", EditCommand::PasteAndMatchStyle),
-        browser_edit_binding("cmd-a", EditCommand::SelectAll),
-        KeyBinding::new("cmd-=", ZoomIn, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("cmd-+", ZoomIn, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("cmd--", ZoomOut, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("cmd-0", ResetZoom, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("cmd-alt-i", ToggleDevTools, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("cmd-t", NewTab, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-tab", NextTab, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-shift-tab", PreviousTab, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("cmd-alt-right", NextTab, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("cmd-alt-left", PreviousTab, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("cmd-shift-]", NextTab, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("cmd-shift-[", PreviousTab, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("cmd-9", SelectLastTab, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("cmd-l", FocusAddress, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("cmd-r", Reload, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("cmd-[", GoBack, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("cmd-]", GoForward, Some(BROWSER_KEY_CONTEXT)),
-    ];
-    bindings.extend(select_tab_bindings("cmd"));
-    bindings.extend(omnibox_key_bindings());
-    bindings
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn browser_key_bindings() -> Vec<KeyBinding> {
-    let mut bindings = vec![
-        KeyBinding::new("tab", NoAction, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("shift-tab", NoAction, Some(BROWSER_KEY_CONTEXT)),
-        browser_edit_binding("ctrl-z", EditCommand::Undo),
-        browser_edit_binding("ctrl-y", EditCommand::Redo),
-        browser_edit_binding("ctrl-shift-z", EditCommand::Redo),
-        browser_edit_binding("ctrl-x", EditCommand::Cut),
-        browser_edit_binding("ctrl-c", EditCommand::Copy),
-        browser_edit_binding("ctrl-v", EditCommand::Paste),
-        browser_edit_binding("ctrl-shift-v", EditCommand::PasteAndMatchStyle),
-        browser_edit_binding("ctrl-a", EditCommand::SelectAll),
-        KeyBinding::new("ctrl-=", ZoomIn, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-+", ZoomIn, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl--", ZoomOut, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-0", ResetZoom, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-shift-i", ToggleDevTools, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-t", NewTab, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-w", ClosePane, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-tab", NextTab, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-shift-tab", PreviousTab, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-pagedown", NextTab, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-pageup", PreviousTab, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-9", SelectLastTab, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-l", FocusAddress, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-r", Reload, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("f5", Reload, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("alt-left", GoBack, Some(BROWSER_KEY_CONTEXT)),
-        KeyBinding::new("alt-right", GoForward, Some(BROWSER_KEY_CONTEXT)),
-    ];
-    bindings.extend(select_tab_bindings("ctrl"));
-    bindings.extend(omnibox_key_bindings());
-    bindings
-}
-
-fn omnibox_key_bindings() -> [KeyBinding; 3] {
+/// Bindings a browser pane owns outright: the tabs it swallows so focus never
+/// leaves the page, and the omnibox list keys, which belong to an input widget
+/// rather than to chrome.
+fn raw_key_bindings() -> [KeyBinding; 5] {
     [
+        KeyBinding::new("tab", NoAction, Some(BROWSER_KEY_CONTEXT)),
+        KeyBinding::new("shift-tab", NoAction, Some(BROWSER_KEY_CONTEXT)),
         KeyBinding::new("down", OmniboxNext, Some(OMNIBOX_INPUT_KEY_CONTEXT)),
         KeyBinding::new("up", OmniboxPrevious, Some(OMNIBOX_INPUT_KEY_CONTEXT)),
         KeyBinding::new(
@@ -269,22 +171,53 @@ fn omnibox_key_bindings() -> [KeyBinding; 3] {
     ]
 }
 
-fn browser_edit_binding(keystroke: &str, command: EditCommand) -> KeyBinding {
-    KeyBinding::new(
-        keystroke,
-        BrowserEdit { command },
-        Some(BROWSER_KEY_CONTEXT),
-    )
-}
-
-fn select_tab_bindings(modifier: &str) -> impl Iterator<Item = KeyBinding> + '_ {
-    (0..8).map(move |index| {
-        KeyBinding::new(
-            &format!("{modifier}-{}", index + 1),
-            SelectTab { index },
-            Some(BROWSER_KEY_CONTEXT),
-        )
-    })
+fn browser_chrome_bindings(chords: &[ChromeChord]) -> Vec<KeyBinding> {
+    let context = Some(BROWSER_KEY_CONTEXT);
+    chords
+        .iter()
+        .filter_map(|chord| {
+            let edit = |command| BrowserEdit { command };
+            Some(match chord.action() {
+                ChromeAction::BrowserZoomIn => chord.binding(ZoomIn, context),
+                ChromeAction::BrowserZoomOut => chord.binding(ZoomOut, context),
+                ChromeAction::BrowserZoomReset => chord.binding(ResetZoom, context),
+                ChromeAction::BrowserDevTools => chord.binding(ToggleDevTools, context),
+                ChromeAction::BrowserNewTab => chord.binding(NewTab, context),
+                ChromeAction::BrowserNextTab => chord.binding(NextTab, context),
+                ChromeAction::BrowserPreviousTab => chord.binding(PreviousTab, context),
+                ChromeAction::BrowserSelectTab(index) => chord.binding(
+                    SelectTab {
+                        index: usize::from(index),
+                    },
+                    context,
+                ),
+                ChromeAction::BrowserSelectLastTab => chord.binding(SelectLastTab, context),
+                ChromeAction::BrowserBack => chord.binding(GoBack, context),
+                ChromeAction::BrowserForward => chord.binding(GoForward, context),
+                ChromeAction::BrowserReload => chord.binding(Reload, context),
+                ChromeAction::BrowserFocusAddress => chord.binding(FocusAddress, context),
+                ChromeAction::BrowserElementSelector => chord.binding(
+                    ConfiguredElementSelector {
+                        chord: chord.key().to_owned(),
+                    },
+                    context,
+                ),
+                ChromeAction::BrowserUndo => chord.binding(edit(EditCommand::Undo), context),
+                ChromeAction::BrowserRedo => chord.binding(edit(EditCommand::Redo), context),
+                ChromeAction::BrowserCut => chord.binding(edit(EditCommand::Cut), context),
+                ChromeAction::BrowserCopy => chord.binding(edit(EditCommand::Copy), context),
+                ChromeAction::BrowserPaste => chord.binding(edit(EditCommand::Paste), context),
+                ChromeAction::BrowserPasteAndMatchStyle => {
+                    chord.binding(edit(EditCommand::PasteAndMatchStyle), context)
+                }
+                ChromeAction::BrowserSelectAll => {
+                    chord.binding(edit(EditCommand::SelectAll), context)
+                }
+                ChromeAction::ClosePane => chord.binding(ClosePane, context),
+                _ => return None,
+            })
+        })
+        .collect()
 }
 
 fn is_blank_url(url: &str) -> bool {
@@ -2196,7 +2129,9 @@ impl BrowserView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if action.hotkey != crate::config::browser_element_selector_hotkey(cx).value {
+        if crate::keymap::action_for(cx, BROWSER_TABLE, &action.chord)
+            != Some(ChromeAction::BrowserElementSelector)
+        {
             cx.propagate();
             return;
         }
@@ -4038,6 +3973,14 @@ mod tests {
         assert_eq!(bindings[0].action().as_any().type_id(), TypeId::of::<A>());
     }
 
+    fn browser_key_bindings() -> Vec<KeyBinding> {
+        let mut bindings = raw_key_bindings().to_vec();
+        bindings.extend(browser_chrome_bindings(&crate::keymap::test_chords(
+            BROWSER_TABLE,
+        )));
+        bindings
+    }
+
     fn browser_binding_identity(binding: &KeyBinding) -> String {
         let action = binding.action();
         if let Some(action) = action.as_any().downcast_ref::<BrowserEdit>() {
@@ -4045,6 +3988,13 @@ mod tests {
         }
         if let Some(action) = action.as_any().downcast_ref::<SelectTab>() {
             return format!("tab:{}", action.index);
+        }
+        if action
+            .as_any()
+            .downcast_ref::<ConfiguredElementSelector>()
+            .is_some()
+        {
+            return "element-selector".to_owned();
         }
         for (type_id, name) in [
             (TypeId::of::<NoAction>(), "raw-tab"),
@@ -4153,6 +4103,7 @@ mod tests {
             ("cmd-r", "reload"),
             ("cmd-[", "back"),
             ("cmd-]", "forward"),
+            ("cmd-shift-c", "element-selector"),
             ("cmd-1", "tab:0"),
             ("cmd-2", "tab:1"),
             ("cmd-3", "tab:2"),
@@ -4194,6 +4145,7 @@ mod tests {
             ("f5", "reload"),
             ("alt-left", "back"),
             ("alt-right", "forward"),
+            ("ctrl-shift-c", "element-selector"),
             ("ctrl-1", "tab:0"),
             ("ctrl-2", "tab:1"),
             ("ctrl-3", "tab:2"),
@@ -4356,9 +4308,8 @@ mod tests {
 
     #[test]
     fn page_zoom_outranks_application_ui_scaling_in_the_browser_context() {
-        let mut bindings = crate::ui_scale::key_bindings()
-            .into_iter()
-            .collect::<Vec<_>>();
+        let mut bindings =
+            crate::ui_scale::key_bindings(&crate::keymap::test_chords(zz_client::UI_TABLE));
         bindings.extend(browser_key_bindings());
         let keymap = Keymap::new(bindings);
         let contexts = [
@@ -4430,10 +4381,15 @@ mod tests {
     }
 
     #[test]
-    fn configured_element_selector_binding_is_browser_scoped_and_carries_its_hotkey() {
-        let hotkey = crate::config::DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY.to_owned();
-        let keymap = Keymap::new(vec![configured_element_selector_binding(&hotkey)]);
-        let bindings = browser_bindings_for(&keymap, &hotkey);
+    fn configured_element_selector_binding_is_browser_scoped_and_carries_its_chord() {
+        let hotkey = crate::config::DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY;
+        let keymap = Keymap::new(browser_key_bindings());
+        let bindings = browser_bindings_for(&keymap, hotkey);
+        let chord = if cfg!(any(target_os = "macos", target_os = "ios")) {
+            "D-S-c"
+        } else {
+            "C-S-c"
+        };
 
         assert_eq!(bindings.len(), 1);
         assert_eq!(
@@ -4441,7 +4397,9 @@ mod tests {
                 .action()
                 .as_any()
                 .downcast_ref::<ConfiguredElementSelector>(),
-            Some(&ConfiguredElementSelector { hotkey }),
+            Some(&ConfiguredElementSelector {
+                chord: chord.to_owned()
+            }),
         );
     }
 

@@ -15,6 +15,7 @@ mod file_picker;
 mod fleet;
 #[cfg(target_os = "ios")]
 mod ios_input;
+mod keymap;
 #[cfg(target_os = "macos")]
 mod macos_app;
 mod mux;

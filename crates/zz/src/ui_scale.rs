@@ -1,7 +1,10 @@
 //! Application-wide UI zoom, the browser kind.
 
 use gpui::{App, KeyBinding, Window};
+use zz_client::{ChromeAction, UI_TABLE};
 use zz_ui::{ROOT_KEY_CONTEXT, UiZoom};
+
+use crate::keymap::ChromeChord;
 
 /// The clamp floor. Below this the chrome stops being legible.
 pub const MIN_UI_ZOOM: f32 = 50.0;
@@ -13,7 +16,7 @@ const DEFAULT_UI_ZOOM: f32 = 100.0;
 gpui::actions!(zz, [IncreaseUiZoom, DecreaseUiZoom, ResetUiZoom]);
 
 pub fn init(cx: &mut App) {
-    cx.bind_keys(key_bindings());
+    crate::keymap::bind(cx, UI_TABLE, key_bindings);
     cx.on_action(|_: &IncreaseUiZoom, cx| {
         set_percent(effective_percent(cx) + UI_ZOOM_STEP, cx);
     });
@@ -79,24 +82,19 @@ pub fn is_effective_percent(percent: f32, cx: &App) -> bool {
     zoom_for_percent(percent) == UiZoom::get(cx)
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-pub(crate) fn key_bindings() -> [KeyBinding; 4] {
-    [
-        KeyBinding::new("cmd-=", IncreaseUiZoom, Some(ROOT_KEY_CONTEXT)),
-        KeyBinding::new("cmd-+", IncreaseUiZoom, Some(ROOT_KEY_CONTEXT)),
-        KeyBinding::new("cmd--", DecreaseUiZoom, Some(ROOT_KEY_CONTEXT)),
-        KeyBinding::new("cmd-0", ResetUiZoom, Some(ROOT_KEY_CONTEXT)),
-    ]
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-pub(crate) fn key_bindings() -> [KeyBinding; 4] {
-    [
-        KeyBinding::new("ctrl-=", IncreaseUiZoom, Some(ROOT_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-+", IncreaseUiZoom, Some(ROOT_KEY_CONTEXT)),
-        KeyBinding::new("ctrl--", DecreaseUiZoom, Some(ROOT_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-0", ResetUiZoom, Some(ROOT_KEY_CONTEXT)),
-    ]
+pub(crate) fn key_bindings(chords: &[ChromeChord]) -> Vec<KeyBinding> {
+    let context = Some(ROOT_KEY_CONTEXT);
+    chords
+        .iter()
+        .filter_map(|chord| {
+            Some(match chord.action() {
+                ChromeAction::UiZoomIn => chord.binding(IncreaseUiZoom, context),
+                ChromeAction::UiZoomOut => chord.binding(DecreaseUiZoom, context),
+                ChromeAction::UiZoomReset => chord.binding(ResetUiZoom, context),
+                _ => return None,
+            })
+        })
+        .collect()
 }
 
 fn effective_percent(cx: &App) -> f32 {
@@ -143,7 +141,7 @@ mod tests {
 
     #[test]
     fn shortcuts_are_scoped_to_the_ui_root() {
-        let keymap = Keymap::new(key_bindings().into());
+        let keymap = Keymap::new(key_bindings(&crate::keymap::test_chords(UI_TABLE)));
         let root = KeyContext::parse(ROOT_KEY_CONTEXT).expect("valid root context");
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         let shortcuts = [

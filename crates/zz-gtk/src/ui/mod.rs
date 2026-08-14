@@ -1,14 +1,18 @@
 mod colors;
+pub mod completion;
 mod keys;
 mod overlay;
 mod pager;
+pub mod palette;
 mod pane;
 mod panes;
 mod picker;
+pub mod prefix;
 mod search;
 mod settings;
 mod sidebar;
 mod terminal;
+mod tray;
 mod window;
 
 use adw::prelude::*;

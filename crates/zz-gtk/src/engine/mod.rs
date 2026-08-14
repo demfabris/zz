@@ -16,7 +16,7 @@ use std::{
     },
 };
 
-use async_channel::Receiver;
+use async_channel::{Receiver, Sender};
 use zz_client::{ChromeKeymap, ChromeProfile, ClientCore};
 use zz_daemon::{Endpoint, InteractiveClient};
 use zz_protocol::{
@@ -130,6 +130,7 @@ type Geometry = (u16, u16, u32, u32);
 pub struct Engine {
     link: Arc<Link>,
     events: Receiver<EngineEvent>,
+    notices: Sender<EngineEvent>,
     chrome: ChromeKeymap,
 }
 
@@ -161,10 +162,11 @@ impl Engine {
             history: Mutex::new(HashMap::new()),
         });
         let (sender, events) = async_channel::unbounded();
-        reader::spawn(Arc::clone(&link), sender)?;
+        reader::spawn(Arc::clone(&link), sender.clone())?;
         Ok(Arc::new(Self {
             link,
             events,
+            notices: sender,
             chrome: ChromeKeymap::for_profile(ChromeProfile::DESKTOP),
         }))
     }
@@ -243,9 +245,10 @@ impl Engine {
         self.link.core().prefix_armed()
     }
 
-    /// The daemon's prefix chord in tmux grammar, or `None` until it publishes
-    /// the option.
-    pub fn prefix_key(&self) -> Option<String> {
+    /// The chord that arms the prefix, in the daemon's own canonical spelling.
+    /// It is a live mux option, so a `set -g prefix` reaches the interceptor
+    /// without a restart.
+    pub fn prefix_chord(&self) -> Option<String> {
         self.link
             .core()
             .mux_options()
@@ -257,6 +260,19 @@ impl Engine {
     /// tmux-grammar strings; commands carry canonical names.
     pub fn prefix_bindings(&self) -> Vec<KeyBindingSnapshot> {
         self.link.core().prefix_bindings().to_vec()
+    }
+
+    /// The focused window's active pane, without cloning the session view.
+    pub fn active_pane(&self) -> Option<PaneId> {
+        self.link.active_pane()
+    }
+
+    /// Raise a client-local notice on the same channel the daemon's messages
+    /// ride, so the shell toasts both the same way and in order.
+    pub fn notify(&self, text: String) {
+        if let Err(error) = self.notices.try_send(EngineEvent::Notice(text)) {
+            log::warn!("zz-gtk dropped a notice: {error}");
+        }
     }
 
     pub fn command_prompt(&self) -> Option<CommandPromptState> {
@@ -647,6 +663,22 @@ impl Link {
             return false;
         }
         true
+    }
+
+    fn active_pane(&self) -> Option<PaneId> {
+        let core = self.core();
+        let attached = core.attached_session()?;
+        let snapshot = core.snapshot();
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == attached)?;
+        let focused = snapshot.focused_window_for(session);
+        session
+            .windows
+            .iter()
+            .find(|window| window.id == focused)
+            .map(|window| window.active_pane)
     }
 
     fn session_view(&self) -> Option<SessionView> {

@@ -132,7 +132,7 @@ impl NewSessionPanel {
         }
         let prefix = self
             .engine
-            .prefix_key()
+            .prefix_chord()
             .unwrap_or_else(|| DEFAULT_PREFIX.to_owned());
         let bindings = self.engine.prefix_bindings();
         let section = gtk::Label::builder()

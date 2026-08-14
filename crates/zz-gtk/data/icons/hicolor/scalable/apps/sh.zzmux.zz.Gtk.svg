@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a4150"/>
+      <stop offset="1" stop-color="#20242c"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#shell)"/>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="none" stroke="#0b0d11" stroke-width="2"/>
+  <polyline points="30,42 72,42 30,80 72,80" fill="none" stroke="#f6f7f9" stroke-width="11"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="80,60 100,60 80,88 100,88" fill="none" stroke="#7ea2ff" stroke-width="9"
+            stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

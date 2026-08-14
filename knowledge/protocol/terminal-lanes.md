@@ -4,7 +4,7 @@ title: Packed terminal lanes (terminal_codec.rs)
 description: The hand-packed, fixed-width Terminal envelope lane that fans immutable terminal viewports and row patches out to clients with deduplicated style and grapheme dictionaries over one ordered stream, local or ssh-forwarded.
 resource: crates/zz-protocol/src/terminal_codec.rs
 tags: [protocol, terminal, wire, packing, fanout]
-timestamp: 2026-08-01T00:00:00Z
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
@@ -83,6 +83,8 @@ styles  [fg:u32 bg:u32 underline:u32 attrs:u16 underline_kind:u8 0:u8] × style_
 grapheme_offsets [u32] × grapheme_offset_count                    (4 B each)
 grapheme_bytes  (UTF-8 arena)                                     × grapheme_byte_count
 overlays [row:u16 start:u16 end:u16 kind_and_flags:u16] × overlay_count (8 B each)
+kitty_placement_count:u32
+kitty placements [72 B each] × kitty_placement_count              (see table)
 ```
 
 The 115 fixed bytes are the 75 above `mode` plus `unseen_output` (8) plus the eight `u32` counts (32);
@@ -136,6 +138,8 @@ appended_styles   × appended_style_count   (16 B each)
 appended_grapheme_lengths [u32] × count    (4 B each)
 appended_grapheme_bytes (UTF-8)            × appended_grapheme_byte_count
 overlays × overlay_count                   (8 B each)
+kitty_placement_count:u32
+kitty placements [72 B each] × kitty_placement_count
 ```
 
 The 143 fixed bytes are the 95 above `mode` plus `unseen_output` (8) plus the ten `u32` counts (40).
@@ -152,6 +156,7 @@ grid: positive shifts must re-supply the newly-exposed top rows, negative the bo
 | Style (`PackedStyle`) | 16 | `foreground:u32`, `background:u32`, `underline_color:u32`, `attributes:u16`, `underline_kind:u8`, reserved `0:u8` |
 | Grapheme offset | 4 | `u32` byte-offset into the grapheme arena (monotonic, first `0`, last = arena len) |
 | Overlay (`OverlaySpan`) | 8 | `row:u16`, `start:u16`, `end:u16`, `kind_and_flags:u16` |
+| Kitty placement | 72 | `image_id:u32`, `image_generation:u64`, `layer:u8`, `has_source_rect:u8`, reserved `0:u16`, `viewport_col:i32`, `viewport_row:i32`, `absolute_row:u64`, `cell_offset_x:u32`, `cell_offset_y:u32`, `grid_cols:u32`, `grid_rows:u32`, `pixel_width:u32`, `pixel_height:u32`, source rect `x/y/width/height:u32` (zeros when `has_source_rect` is 0). `layer` is `0` BelowBg, `1` BelowText, `2` AboveText |
 | Row record (patch) | 4 + 8·cols | `row:u16`, reserved `0:u16`, then one cell per column |
 
 **Colors** are packed to 24 bits (`decode_color` rejects values `> 0x00ff_ffff`; underline color may
@@ -171,8 +176,9 @@ offset table + byte arena. A patch appends only new dictionary entries beyond
 # Validation & safety limits
 
 Both directions validate before exposing data. Section counts are checked against caps *before*
-allocation, and the decoder **preflights** every declared section against the remaining bytes (exact,
-no trailing) so a lying length cannot force an over-allocation:
+allocation, and the decoder **preflights** every declared section against the remaining bytes (exact
+remaining after the kitty-placement trailer, not after overlays) so a lying length cannot force an
+over-allocation:
 
 The cloned preflight reader treats bounded status, title, working-directory, and hovered-URI payloads
 as raw byte ranges; its job is only to prove that every declared section fits exactly. The
@@ -189,6 +195,7 @@ malformed text is still rejected without scanning valid metadata twice per frame
 | `MAX_GRAPHEME_COUNT` | 1 MiB |
 | `MAX_GRAPHEME_BYTES` | 16 MiB |
 | `MAX_OVERLAY_COUNT` | 1 MiB |
+| `MAX_KITTY_PLACEMENTS` | 512 |
 
 `validate_viewport` / `validate_patch` further check: cell count matches `columns × rows`; every cell's
 `style_id` and grapheme index resolve; grapheme offsets are monotonic and UTF-8-valid; overlays and the

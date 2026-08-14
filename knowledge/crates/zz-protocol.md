@@ -4,7 +4,7 @@ title: zz-protocol crate
 description: The stable, versioned wire vocabulary (IDs, framing, control messages, packed terminal lanes, and mux snapshots) shared by every zz client and the daemon.
 resource: crates/zz-protocol/src/lib.rs
 tags: [protocol, crate, wire, ipc]
-timestamp: 2026-08-12T00:00:00Z
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
@@ -21,7 +21,7 @@ The crate is small and dependency-light: exactly four dependencies, `postcard`, 
 and `zz-terminal` (for `TerminalViewport`, `TerminalAppearance`, `PackedCell`, and friends that ride
 the terminal lane). It has no cargo features at all since v43 retired `compress` and its optional
 `zstd`. Because it encodes the wire format, **any encoding-affecting change requires bumping
-`PROTOCOL_VERSION`**, currently 51. See [the wire protocol](/protocol/wire-protocol.md).
+`PROTOCOL_VERSION`**, currently 52. See [the wire protocol](/protocol/wire-protocol.md).
 
 # What it exports
 
@@ -62,9 +62,11 @@ and a frame's payload is now always exactly what the lane's encoder produced.
 # Handshake vocabulary
 
 `ClientHello` carries the protocol version, a `ClientKind`, an optional `device_name` (the client's
-short hostname, bounded at 256 bytes), a capability list, and the client's color scheme.
+short hostname, bounded at 256 bytes), a capability list, the client's color scheme, and an optional
+`origin` pane (`$ZZ_PANE`) so untargeted CLI commands resolve against the invoking pane.
 `ServerHello` answers with the assigned `ClientId`, the daemon's own capabilities, resolved
-appearance plus provenance, the effective `MuxOptions`, and the rendered status line. Both capability
+appearance plus provenance, the effective `MuxOptions`, the rendered status line, and
+`prefix_bindings` (the current prefix table, refreshed later by `PrefixBindingsChanged`). Both capability
 vectors deserialize through one bounded visitor: at most 64 entries of at most 256 bytes, rejected
 before the strings materialize. One capability name is a constant here,
 `NEW_SESSION_ATTACH_CAPABILITY` (`new-session-attach-v1`); every other advertised string is a literal
@@ -103,7 +105,7 @@ or names a window that no longer exists, so removing a focused window needs no s
 |------|------|
 | `crates/zz-protocol/src/lib.rs` | Crate root; declares the five private modules and re-exports the public API |
 | `crates/zz-protocol/src/framing.rs` | Length-prefixed envelope, `Lane` tag, reserved flags byte, version check, `ProtocolError`, control-lane `encode/decode/read/write` |
-| `crates/zz-protocol/src/message.rs` | `PROTOCOL_VERSION = 51` and its bump-by-bump changelog, `ProtocolMessage` (including `RequestFull` and `HistoryRequest`), `MuxOptionKey`/`MuxOptions`, ordered configuration override entries, appearance provenance payloads, `Event`/`EventPayload` (including `HistoryChunk` and `Detached`), `InputMessage`, hello/command/error/UI-state types and their byte bounds |
+| `crates/zz-protocol/src/message.rs` | `PROTOCOL_VERSION = 52` and its bump-by-bump changelog, `ProtocolMessage` (including `RequestFull`, `HistoryRequest`, and `SetTerminalPreview`), `MuxOptionKey`/`MuxOptions`, ordered configuration override entries, appearance provenance payloads, `Event`/`EventPayload` (including `HistoryChunk` and `Detached`), `InputMessage`, hello/command/error/UI-state types and their byte bounds |
 | `crates/zz-protocol/src/id.rs` | The `stable_id!` macro and the five sigil-prefixed `u64` newtype IDs |
 | `crates/zz-protocol/src/terminal_codec.rs` | Terminal-lane packer/unpacker for viewports and patches, plus lane-selecting encode/decode entrypoints and validation |
 | `crates/zz-protocol/src/snapshot.rs` | `MuxSnapshot` and the session/window/pane/layout tree it carries, plus per-client window focus and `SessionViewer` presence |

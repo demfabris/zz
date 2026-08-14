@@ -32,5 +32,6 @@ pub use snapshot::{
 pub use terminal_codec::{
     decode_protocol_frame, encode_protocol_message, encode_protocol_message_into,
     encode_terminal_viewport_event, encode_terminal_viewport_event_into, read_protocol_message,
-    read_protocol_message_into, write_protocol_message,
+    read_protocol_message_into, terminal_patch_frame_len, terminal_viewport_frame_len,
+    write_protocol_message,
 };

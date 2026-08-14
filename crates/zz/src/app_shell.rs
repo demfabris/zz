@@ -175,36 +175,38 @@ impl Render for AppShell {
             let sidebar = self.sidebar.read(cx);
             (sidebar.route(), sidebar.mode())
         };
-        let (sidebar, titlebar) = match route {
-            WorkspaceRoute::Settings => (
-                self.sidebar.clone().into_any_element(),
-                self.render_control_strip(window, cx),
-            ),
-            WorkspaceRoute::App => match mode {
-                ChromeMode::Sidebar => (
+        let overview_open = self.workspace.read(cx).window_overview_open();
+        let (sidebar, titlebar) = if overview_open {
+            (div().into_any_element(), None)
+        } else {
+            match route {
+                WorkspaceRoute::Settings => (
                     self.sidebar.clone().into_any_element(),
                     self.render_control_strip(window, cx),
                 ),
-                ChromeMode::Titlebar => (
-                    div().into_any_element(),
-                    Some(self.render_workspace_strip(window, cx)),
-                ),
-            },
+                WorkspaceRoute::App => match mode {
+                    ChromeMode::Sidebar => (
+                        self.sidebar.clone().into_any_element(),
+                        self.render_control_strip(window, cx),
+                    ),
+                    ChromeMode::Titlebar => (
+                        div().into_any_element(),
+                        Some(self.render_workspace_strip(window, cx)),
+                    ),
+                },
+            }
         };
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let notification_layer = Root::render_notification_layer(window, cx);
 
-        let slideover = (route == WorkspaceRoute::App && self.sidebar.read(cx).slideover_open())
-            .then(|| self.render_slideover(cx));
-        let overview = (route == WorkspaceRoute::App)
-            .then(|| self.workspace.read(cx).window_overview())
-            .flatten()
-            .map(IntoElement::into_any_element);
+        let slideover = (route == WorkspaceRoute::App
+            && !overview_open
+            && self.sidebar.read(cx).slideover_open())
+        .then(|| self.render_slideover(cx));
         let overlays = show_fps
             .then(|| app_fps_overlay(self.app_fps_meter.clone()).into_any_element())
             .into_iter()
             .chain(slideover)
-            .chain(overview)
             .chain(dialog_layer.into_iter().map(IntoElement::into_any_element))
             .chain(
                 notification_layer

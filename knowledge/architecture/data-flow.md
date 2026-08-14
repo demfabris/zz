@@ -47,16 +47,17 @@ PTY child ──bytes──▶ libghostty-vt (worker thread)  [zz-terminal]
 # Browser path (local to the GUI process)
 
 ```
-CEF renderer ──BGRA frame──▶ one-slot mailbox (latest only)  [zz-browser]
+CEF renderer ──shared GPU texture or BGRA──▶ one-slot mailbox (latest only)  [zz-browser]
         │
         ▼
-   browser_element paints the latest frame as a GPUI image  [app]
+   browser_element paints the latest frame (external_texture / paint_surface / D3D11 / BGRA)  [zz]
 ```
 
-- CEF Alloy OSR publishes owned BGRA frames into a **one-slot mailbox**; only the latest frame is
-  kept. See [OSR rendering](/browser/osr-rendering.md).
+- CEF Alloy OSR publishes into a **one-slot mailbox**; only the latest frame is kept. The default
+  tiers are Linux wgpu `external_texture`, macOS Metal-IOSurface, and Windows D3D11; owned BGRA
+  readback is the fallback. See [OSR rendering](/browser/osr-rendering.md).
 - The daemon never transports browser video frames; the browser lives entirely in the
-  GUI process. The daemon only persists a browser pane's last URL + [profile](/browser/profile.md).
+  GUI process. The daemon only persists a browser pane's tab list + [profile](/browser/profile.md).
 
 # Agent path (local to the GUI process)
 

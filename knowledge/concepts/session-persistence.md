@@ -71,8 +71,8 @@ When a client handshakes with a daemon speaking a different `PROTOCOL_VERSION`, 
 the old one before rebinding. This is deliberately paranoid so it never kills an unrelated process:
 
 - `Daemon::run_foreground` installs a `DaemonIdentityGuard` that atomically writes a private
-  `<socket>.identity` file (magic `zz-daemon-identity-v1`, `pid` + process `start_time`, Unix mode
-  `0o600`).
+  `<socket>.identity` file (magic `zz-daemon-identity-v2`, `pid` + process `start_time` +
+  `protocol_version={PROTOCOL_VERSION}`, Unix mode `0o600`).
 - `terminate_incompatible_daemon` cross-checks the **kernel-reported socket peer PID**
   (`LocalStream::peer_credentials`), the identity file, the process owner, and the executable/command
   line (`zz … daemon`) and start time before sending a single non-escalating `SIGTERM` (Unix) or

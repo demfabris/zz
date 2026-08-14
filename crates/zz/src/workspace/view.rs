@@ -10,9 +10,9 @@ use std::{
 
 use gpui::{
     Animation, AnimationExt as _, AnyElement, AnyView, AnyWindowHandle, App, Bounds, Context,
-    CursorStyle, DragMoveEvent, Entity, EntityId, EventEmitter, FocusHandle, IntoElement,
+    Corners, CursorStyle, DragMoveEvent, Entity, EntityId, EventEmitter, FocusHandle, IntoElement,
     KeyUpEvent, Keystroke, MouseButton, MouseExitEvent, MouseUpEvent, Pixels, Point, Render, Size,
-    StyleRefinement, Window, div, ease_out_quint, prelude::*, px,
+    StyleRefinement, Window, div, ease_in_out, ease_out_quint, prelude::*, px, size,
 };
 use zz_mux::{joined_layout, swapped_layout};
 use zz_protocol::{
@@ -24,22 +24,30 @@ use zz_terminal::KeyAction as TerminalKeyAction;
 use zz_ui::attachment::open_attachment_preview;
 use zz_ui::dialog::DialogButtonProps;
 use zz_ui::{
-    ActiveTheme as _, ElementExt as _, WindowExt as _, draws_window_controls, kbd::Kbd,
+    ActiveTheme as _, ElementExt as _, Icon, IconName, Sizable as _, StyledExt as _, UiZoom,
+    WindowExt as _,
+    button::{Button, ButtonVariants as _},
+    draws_window_controls,
+    kbd::Kbd,
     notification::Notification,
 };
 use zz_ui::{
     pane::{
-        PaneChrome, PaneDragOverlayState, PaneOverlayCorner, PaneSplitAxis, pane_drag_chip,
-        pane_drag_overlay, pane_drop_preview, pane_indicator_card, pane_indicator_overlay,
-        pane_overlay_stack, pane_split_hit_target, pane_split_slot, pane_split_surface,
-        pane_surface, pane_sync_badge, pane_unzoom_control, pane_waiting_state,
+        PaneChrome, PaneDragOverlayState, PaneOverlayCorner, PaneSplitAxis, PaneSplitHighlight,
+        PaneSplitSide, pane_drag_chip, pane_drag_overlay, pane_drop_preview, pane_indicator_card,
+        pane_indicator_overlay, pane_overlay_stack, pane_split_hit_target, pane_split_slot,
+        pane_split_surface, pane_surface, pane_sync_badge, pane_unzoom_control, pane_waiting_state,
     },
     shell::{app_connection_state, app_workspace_surface},
 };
 
 use super::{
     new_session::NewSessionView,
-    overview::{DismissWindowOverview, WindowOverview, overview_available},
+    overview::{
+        OVERVIEW_CLOSE_DURATION, OVERVIEW_INSERT_KEY_CONTEXT, OVERVIEW_NORMAL_KEY_CONTEXT,
+        OVERVIEW_OPEN_DURATION, OverviewDirection, OverviewGrid, interpolate_bounds,
+        next_overview_pane, overview_available, overview_edge_bounds, overview_zoom,
+    },
     sidebar::{
         ChromeMode, SidebarModeChanged, SidebarReleaseFocus, SidebarRouteChanged, WorkspaceRoute,
         WorkspaceSidebar,
@@ -59,10 +67,11 @@ use crate::{
     mux::{
         client::{AttachmentPreviewRequest, ClientNotification, MuxClient, SshPromptRequest},
         hosts::HostId,
+        nav::{TreeTarget, kill_target_command},
         prefix::{PrefixClaim, PressDisposition, keystroke_is, terminal_key_input},
     },
     pane::display::DisplayPanesView,
-    pane::layout::{NormalizedPaneRect, pane_rects},
+    pane::layout::{NormalizedPaneRect, SeparatorSide, pane_rects, pane_separator},
     pane::picker::PanePickerView,
     terminal::view::{TERMINAL_FONT, TerminalView},
     window::corners::WindowCorners,
@@ -517,7 +526,6 @@ impl AppRevision {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OverlayKind {
-    WindowOverview,
     CommandPalette,
     ChooseBuffer,
     ChooseTree,
@@ -532,6 +540,108 @@ struct SynchronizeSignature {
     sidebar_focused: bool,
     route: WorkspaceRoute,
     window_overview_open: bool,
+}
+
+#[derive(Clone)]
+struct WindowOverviewState {
+    revision: u64,
+    from: f32,
+    target: f32,
+    duration: Duration,
+    home: WindowId,
+    return_pane: PaneId,
+    selected: PaneId,
+    mode: OverviewInputMode,
+    claimed_releases: Vec<Keystroke>,
+    source: Bounds<Pixels>,
+    rendered_progress: Rc<Cell<f32>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OverviewInputMode {
+    Normal,
+    Insert,
+}
+
+#[derive(Clone, Copy)]
+enum OverviewKeyAction {
+    Move(OverviewDirection),
+    Insert,
+    Normal,
+    Commit,
+    Cancel,
+}
+
+impl WindowOverviewState {
+    fn new(
+        home: WindowId,
+        return_pane: PaneId,
+        source: Bounds<Pixels>,
+        reduced_motion: bool,
+    ) -> Self {
+        Self {
+            revision: 0,
+            from: 0.0,
+            target: 1.0,
+            duration: if reduced_motion {
+                Duration::ZERO
+            } else {
+                OVERVIEW_OPEN_DURATION
+            },
+            home,
+            return_pane,
+            selected: return_pane,
+            mode: OverviewInputMode::Normal,
+            claimed_releases: Vec::new(),
+            source,
+            rendered_progress: Rc::new(Cell::new(0.0)),
+        }
+    }
+
+    fn progress(&self, delta: f32) -> f32 {
+        self.from + (self.target - self.from) * delta
+    }
+
+    fn animation(&self) -> Animation {
+        Animation::new(self.duration.max(Duration::from_millis(1))).with_easing(ease_in_out)
+    }
+
+    fn retarget(
+        &mut self,
+        target: f32,
+        home: WindowId,
+        full_duration: Duration,
+        reduced_motion: bool,
+    ) -> Duration {
+        let current = self.rendered_progress.get().clamp(0.0, 1.0);
+        self.revision = self.revision.wrapping_add(1);
+        self.from = current;
+        self.target = target;
+        self.home = home;
+        self.duration = if reduced_motion {
+            Duration::ZERO
+        } else {
+            full_duration.mul_f32((target - current).abs())
+        };
+        self.duration
+    }
+}
+
+fn overview_group_progress(progress: f32, index: usize, home: bool) -> f32 {
+    if home {
+        return progress.clamp(0.0, 1.0);
+    }
+    let delay = (index as f32 * 0.025).min(0.125);
+    ((progress - delay) / (1.0 - delay)).clamp(0.0, 1.0)
+}
+
+fn scaled_pane_radii(radii: Corners<Pixels>, scale: f32) -> Corners<Pixels> {
+    Corners {
+        top_left: radii.top_left * scale,
+        top_right: radii.top_right * scale,
+        bottom_right: radii.bottom_right * scale,
+        bottom_left: radii.bottom_left * scale,
+    }
 }
 
 // Each focus debt is owed by a different thing, so folding them into one enum
@@ -553,7 +663,8 @@ pub struct AppView {
     choose_buffer: Option<Entity<ChooseBufferView>>,
     display_panes: Option<Entity<DisplayPanesView>>,
     command_palette: Option<Entity<CommandPaletteView>>,
-    window_overview: Option<Entity<WindowOverview>>,
+    window_overview: Option<WindowOverviewState>,
+    window_overview_focus: FocusHandle,
     pane_indicators: BTreeMap<PaneId, PaneIndicator>,
     focused_pane: Option<(PaneId, EntityId)>,
     focused_overlay: Option<OverlayKind>,
@@ -568,7 +679,7 @@ pub struct AppView {
     pane_drag: Option<PaneDragState>,
     pane_drop_preview: Rc<Cell<DropPreviewFrame>>,
     pane_layout_override: Option<PaneLayoutOverride>,
-    pane_canvas_size: Rc<Cell<Size<Pixels>>>,
+    pane_canvas_bounds: Rc<Cell<Bounds<Pixels>>>,
     prefix_claim: PrefixClaim,
     synchronized_signature: Option<SynchronizeSignature>,
 }
@@ -696,13 +807,17 @@ impl AppView {
         .detach();
         cx.subscribe(&sidebar, |_, _, _: &SidebarModeChanged, cx| cx.notify())
             .detach();
-        cx.subscribe(&sidebar, |view, sidebar, _: &SidebarRouteChanged, cx| {
-            view.prefix_claim.clear();
-            if sidebar.read(cx).route() != WorkspaceRoute::App {
-                view.close_window_overview(cx);
-            }
-            cx.notify();
-        })
+        cx.subscribe_in(
+            &sidebar,
+            window,
+            |view, sidebar, _: &SidebarRouteChanged, window, cx| {
+                view.prefix_claim.clear();
+                if sidebar.read(cx).route() != WorkspaceRoute::App {
+                    view.close_window_overview(window, cx);
+                }
+                cx.notify();
+            },
+        )
         .detach();
         let sidebar_focus = sidebar.read(cx).focus_handle();
         cx.on_focus(&sidebar_focus, window, |_, _, _| {
@@ -714,6 +829,7 @@ impl AppView {
         })
         .detach();
         let new_session = cx.new(|cx| NewSessionView::new(mux.clone(), cx));
+        let window_overview_focus = cx.focus_handle();
         Self {
             controller,
             agent_controller,
@@ -731,6 +847,7 @@ impl AppView {
             display_panes: None,
             command_palette: None,
             window_overview: None,
+            window_overview_focus,
             pane_indicators: BTreeMap::new(),
             focused_pane: None,
             focused_overlay: None,
@@ -745,7 +862,7 @@ impl AppView {
             pane_drag: None,
             pane_drop_preview: Rc::new(Cell::new(DropPreviewFrame::default())),
             pane_layout_override: None,
-            pane_canvas_size: Rc::new(Cell::new(Size::default())),
+            pane_canvas_bounds: Rc::new(Cell::new(Bounds::default())),
             prefix_claim: PrefixClaim::default(),
             synchronized_signature: None,
         }
@@ -761,6 +878,9 @@ impl AppView {
             return;
         }
         if self.sidebar.read(cx).route() == WorkspaceRoute::Settings {
+            return;
+        }
+        if self.intercept_window_overview_keystroke(event, window, cx) {
             return;
         }
         let keystroke = &event.keystroke;
@@ -782,7 +902,7 @@ impl AppView {
             cx.stop_active_drag(window);
             cx.notify();
         }
-        let Some(pane) = self.active_pane(cx) else {
+        let Some(pane) = self.input_pane(cx) else {
             log::warn!(
                 target: "zz::diagnostics::input",
                 "prefix_key_dropped keystroke={keystroke} armed={armed} reason=no_active_pane"
@@ -817,13 +937,169 @@ impl AppView {
         cx.stop_propagation();
     }
 
+    fn intercept_window_overview_keystroke(
+        &mut self,
+        event: &gpui::KeystrokeEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(overview) = self.window_overview.as_ref() else {
+            return false;
+        };
+        let already_claimed = overview
+            .claimed_releases
+            .iter()
+            .any(|claimed| claimed == &event.keystroke);
+        if overview.target <= 0.0
+            || already_claimed
+                && (overview.mode == OverviewInputMode::Insert
+                    || event.keystroke.key == "escape" && event.is_held)
+        {
+            if already_claimed {
+                cx.stop_propagation();
+            }
+            return already_claimed;
+        }
+        if event.keystroke.modifiers != gpui::Modifiers::default() {
+            return false;
+        }
+        let action = match (overview.mode, event.keystroke.key.as_str()) {
+            (OverviewInputMode::Insert, "escape") => Some(OverviewKeyAction::Normal),
+            (OverviewInputMode::Normal, "escape") => Some(OverviewKeyAction::Cancel),
+            (OverviewInputMode::Normal, "h" | "left") => {
+                Some(OverviewKeyAction::Move(OverviewDirection::Left))
+            }
+            (OverviewInputMode::Normal, "l" | "right") => {
+                Some(OverviewKeyAction::Move(OverviewDirection::Right))
+            }
+            (OverviewInputMode::Normal, "k" | "up") => {
+                Some(OverviewKeyAction::Move(OverviewDirection::Up))
+            }
+            (OverviewInputMode::Normal, "j" | "down") => {
+                Some(OverviewKeyAction::Move(OverviewDirection::Down))
+            }
+            (OverviewInputMode::Normal, "a" | "i") => Some(OverviewKeyAction::Insert),
+            (OverviewInputMode::Normal, "enter") => Some(OverviewKeyAction::Commit),
+            _ => None,
+        };
+        let Some(action) = action else {
+            return false;
+        };
+        if !already_claimed && let Some(overview) = &mut self.window_overview {
+            overview.claimed_releases.push(event.keystroke.clone());
+        }
+        match action {
+            OverviewKeyAction::Move(direction) => {
+                self.move_window_overview_selection(direction, window, cx);
+            }
+            OverviewKeyAction::Insert => self.enter_window_overview_insert(window, cx),
+            OverviewKeyAction::Normal => self.leave_window_overview_insert(window, cx),
+            OverviewKeyAction::Commit => self.commit_window_overview(window, cx),
+            OverviewKeyAction::Cancel => self.close_window_overview(window, cx),
+        }
+        cx.stop_propagation();
+        true
+    }
+
+    fn release_window_overview_key(&mut self, keystroke: &Keystroke) -> bool {
+        let Some(overview) = &mut self.window_overview else {
+            return false;
+        };
+        let Some(index) = overview
+            .claimed_releases
+            .iter()
+            .position(|claimed| claimed == keystroke)
+        else {
+            return false;
+        };
+        overview.claimed_releases.swap_remove(index);
+        true
+    }
+
+    fn move_window_overview_selection(
+        &mut self,
+        direction: OverviewDirection,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(current) = self
+            .window_overview
+            .as_ref()
+            .map(|overview| overview.selected)
+        else {
+            return;
+        };
+        let panes = self.window_overview_panes(window, cx);
+        let Some(next) = next_overview_pane(current, &panes, direction) else {
+            return;
+        };
+        if let Some(overview) = &mut self.window_overview {
+            overview.selected = next;
+            overview.mode = OverviewInputMode::Normal;
+        }
+        cx.notify();
+    }
+
+    fn enter_window_overview_insert(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pane) = self.window_overview.as_mut().map(|overview| {
+            overview.mode = OverviewInputMode::Insert;
+            overview.selected
+        }) else {
+            return;
+        };
+        self.mux.read(cx).execute(pane_select_command(pane));
+        if let Some((entity, focus)) = self.pane_focus_target(pane, cx) {
+            focus.focus(window, cx);
+            self.focused_pane = Some((pane, entity));
+            self.pane_focus_owed = false;
+        }
+        cx.notify();
+    }
+
+    fn leave_window_overview_insert(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(overview) = self
+            .window_overview
+            .as_mut()
+            .filter(|overview| overview.target > 0.0)
+        else {
+            return;
+        };
+        overview.mode = OverviewInputMode::Normal;
+        self.focused_pane = None;
+        self.pane_focus_owed = false;
+        self.window_overview_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn activate_window_overview_pane(
+        &mut self,
+        pane: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(overview) = self
+            .window_overview
+            .as_mut()
+            .filter(|overview| overview.target > 0.0)
+        else {
+            return;
+        };
+        overview.selected = pane;
+        overview.mode = OverviewInputMode::Insert;
+        self.enter_window_overview_insert(window, cx);
+    }
+
     /// Forward a claimed key's release to the daemon and stop it reaching the
     /// widget that never saw the press.
     pub fn on_claim_key_up(&mut self, event: &KeyUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.release_window_overview_key(&event.keystroke) {
+            cx.stop_propagation();
+            return;
+        }
         if !self.prefix_claim.consume_release(&event.keystroke) {
             return;
         }
-        if let Some(pane) = self.active_pane(cx) {
+        if let Some(pane) = self.input_pane(cx) {
             self.mux.read(cx).send_input(InputMessage::Key {
                 pane,
                 input: terminal_key_input(&event.keystroke, TerminalKeyAction::Release),
@@ -831,6 +1107,14 @@ impl AppView {
             });
         }
         cx.stop_propagation();
+    }
+
+    fn input_pane(&self, cx: &App) -> Option<PaneId> {
+        self.window_overview
+            .as_ref()
+            .filter(|overview| overview.mode == OverviewInputMode::Insert)
+            .map(|overview| overview.selected)
+            .or_else(|| self.active_pane(cx))
     }
 
     fn active_pane(&self, cx: &App) -> Option<PaneId> {
@@ -855,10 +1139,9 @@ impl AppView {
         let Some(pane) = self.active_pane(cx) else {
             return false;
         };
-        self.mux.read(cx).execute(CommandInvocation::new(
-            "kill-pane",
-            ["-t".to_owned(), pane.to_string()],
-        ));
+        self.mux
+            .read(cx)
+            .execute(kill_target_command(TreeTarget::Pane(pane)));
         true
     }
 
@@ -866,8 +1149,8 @@ impl AppView {
         self.sidebar.clone()
     }
 
-    pub(crate) fn window_overview(&self) -> Option<Entity<WindowOverview>> {
-        self.window_overview.clone()
+    pub(crate) const fn window_overview_open(&self) -> bool {
+        self.window_overview.is_some()
     }
 
     pub(crate) fn toggle_window_overview(
@@ -876,7 +1159,11 @@ impl AppView {
         cx: &mut Context<Self>,
     ) -> bool {
         if let Some(overview) = &self.window_overview {
-            overview.update(cx, |overview, cx| overview.dismiss(window, cx));
+            if overview.target > 0.0 {
+                self.close_window_overview(window, cx);
+            } else {
+                self.open_window_overview(window, cx);
+            }
             return true;
         }
         if self.visible_overlay(cx).is_some() {
@@ -886,26 +1173,256 @@ impl AppView {
         if !overview_available(self.mux.read(cx), route) {
             return false;
         }
-        let overview = cx.new(|cx| WindowOverview::new(self.mux.clone(), cx));
-        cx.subscribe(&overview, |view, _, _: &DismissWindowOverview, cx| {
-            if view.window_overview.take().is_some() {
-                cx.emit(WindowOverviewChanged);
-                cx.notify();
-            }
-        })
-        .detach();
-        self.window_overview = Some(overview);
-        self.prefix_claim.clear();
-        cx.emit(WindowOverviewChanged);
-        cx.notify();
+        self.open_window_overview(window, cx);
         true
     }
 
-    fn close_window_overview(&mut self, cx: &mut Context<Self>) {
-        if self.window_overview.take().is_some() {
-            cx.emit(WindowOverviewChanged);
-            cx.notify();
+    fn open_window_overview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(home) = self.focused_window_id(cx) else {
+            return;
+        };
+        let Some(return_pane) = self.active_pane(cx) else {
+            return;
+        };
+        if let Some(overview) = &mut self.window_overview {
+            if overview.target > 0.0 {
+                return;
+            }
+            overview.return_pane = return_pane;
+            overview.selected = return_pane;
+            overview.mode = OverviewInputMode::Normal;
+            overview.claimed_releases.clear();
+            overview.retarget(1.0, home, OVERVIEW_OPEN_DURATION, cx.reduce_motion());
+        } else {
+            let source = self.overview_source_bounds(window);
+            self.window_overview = Some(WindowOverviewState::new(
+                home,
+                return_pane,
+                source,
+                cx.reduce_motion(),
+            ));
         }
+        self.mux.update(cx, |mux, _| {
+            mux.set_terminal_preview(true);
+        });
+        let (duration, revision) = self
+            .window_overview
+            .as_ref()
+            .map(|overview| (overview.duration, overview.revision))
+            .expect("overview was opened");
+        if duration.is_zero() {
+            if let Some(overview) = &mut self.window_overview {
+                overview.rendered_progress.set(1.0);
+            }
+            self.set_pane_geometry_frozen(true, window, cx);
+        } else {
+            self.set_pane_geometry_frozen(true, window, cx);
+            cx.spawn_in(window, async move |view, cx| {
+                cx.background_executor().timer(duration).await;
+                let _ = view.update_in(cx, |view, _window, cx| {
+                    let settled = view.window_overview.as_mut().is_some_and(|overview| {
+                        if overview.revision == revision && overview.target >= 1.0 {
+                            overview.rendered_progress.set(1.0);
+                            overview.duration = Duration::ZERO;
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                    if settled {
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
+        self.focused_pane = None;
+        self.pane_focus_owed = false;
+        self.window_overview_focus.focus(window, cx);
+        self.prefix_claim.clear();
+        self.synchronize_window_overview_zoom(window, cx);
+        cx.emit(WindowOverviewChanged);
+        cx.notify();
+    }
+
+    fn close_window_overview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((home, pane)) = self.window_overview.as_ref().and_then(|overview| {
+            (overview.target > 0.0).then_some((overview.home, overview.return_pane))
+        }) else {
+            return;
+        };
+        self.mux.read(cx).execute(pane_select_command(pane));
+        self.begin_window_overview_close(home, window, cx);
+    }
+
+    fn commit_window_overview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pane) = self
+            .window_overview
+            .as_ref()
+            .filter(|overview| overview.target > 0.0)
+            .map(|overview| overview.selected)
+        else {
+            return;
+        };
+        let Some(home) = self.window_for_pane(pane, cx) else {
+            return;
+        };
+        self.mux.read(cx).execute(pane_select_command(pane));
+        self.begin_window_overview_close(home, window, cx);
+    }
+
+    fn begin_window_overview_close(
+        &mut self,
+        home: WindowId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(overview) = &mut self.window_overview else {
+            return;
+        };
+        if overview.target <= 0.0 {
+            return;
+        }
+        let duration = overview.retarget(0.0, home, OVERVIEW_CLOSE_DURATION, cx.reduce_motion());
+        overview.mode = OverviewInputMode::Normal;
+        let revision = overview.revision;
+        self.set_pane_geometry_frozen(true, window, cx);
+        self.prefix_claim.clear();
+        self.window_overview_focus.focus(window, cx);
+        cx.notify();
+        cx.spawn_in(window, async move |view, cx| {
+            cx.background_executor().timer(duration).await;
+            let _ = view.update_in(cx, |view, window, cx| {
+                let finished = view.window_overview.as_ref().is_some_and(|overview| {
+                    overview.revision == revision && overview.target <= 0.0
+                });
+                if !finished {
+                    return;
+                }
+                view.set_pane_geometry_frozen(false, window, cx);
+                view.window_overview = None;
+                view.mux.update(cx, |mux, _| {
+                    mux.set_terminal_preview(false);
+                });
+                window.set_zoom(UiZoom::get(cx));
+                view.focused_pane = None;
+                view.pane_focus_owed = true;
+                cx.emit(WindowOverviewChanged);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn synchronize_window_overview_zoom(&self, window: &mut Window, cx: &App) {
+        if self.window_overview.is_none() {
+            return;
+        }
+        let count = self
+            .mux
+            .read(cx)
+            .attached_session()
+            .and_then(|attached| {
+                self.mux
+                    .read(cx)
+                    .snapshot()
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == attached)
+                    .map(|session| session.windows.len())
+            })
+            .unwrap_or_default();
+        let viewport = window.viewport_size();
+        let physical_viewport = size(
+            viewport.width * window.zoom(),
+            viewport.height * window.zoom(),
+        );
+        window.set_zoom(overview_zoom(UiZoom::get(cx), physical_viewport, count));
+    }
+
+    fn focused_window_id(&self, cx: &App) -> Option<WindowId> {
+        let mux = self.mux.read(cx);
+        let attached = mux.attached_session()?;
+        let snapshot = mux.snapshot();
+        snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == attached)
+            .map(|session| snapshot.focused_window_for(session))
+    }
+
+    fn window_for_pane(&self, pane: PaneId, cx: &App) -> Option<WindowId> {
+        let mux = self.mux.read(cx);
+        let attached = mux.attached_session()?;
+        mux.snapshot()
+            .sessions
+            .iter()
+            .find(|session| session.id == attached)?
+            .windows
+            .iter()
+            .find(|window| window.panes.contains_key(&pane))
+            .map(|window| window.id)
+    }
+
+    fn overview_source_bounds(&self, window: &Window) -> Bounds<Pixels> {
+        let bounds = self.pane_canvas_bounds.get();
+        let zoom = window.zoom();
+        if bounds.size.width > px(0.0) && bounds.size.height > px(0.0) {
+            Bounds::new(
+                Point::new(bounds.origin.x * zoom, bounds.origin.y * zoom),
+                size(bounds.size.width * zoom, bounds.size.height * zoom),
+            )
+        } else {
+            let viewport = window.viewport_size();
+            Bounds::new(
+                Point::default(),
+                size(viewport.width * zoom, viewport.height * zoom),
+            )
+        }
+    }
+
+    fn window_overview_panes(&self, window: &Window, cx: &App) -> Vec<(PaneId, Bounds<Pixels>)> {
+        let mux = self.mux.read(cx);
+        let Some(attached) = mux.attached_session() else {
+            return Vec::new();
+        };
+        let snapshot = mux.snapshot();
+        let Some(session) = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == attached)
+        else {
+            return Vec::new();
+        };
+        let focused = snapshot.focused_window_for(session);
+        let (grid, _, _) = window_overview_grid(&session.windows, window, cx);
+        session
+            .windows
+            .iter()
+            .zip(&grid.groups)
+            .flat_map(|(mux_window, group)| {
+                let layout = if mux_window.id == focused {
+                    self.pane_layout_override
+                        .as_ref()
+                        .map_or(&mux_window.layout, |pending| &pending.layout)
+                } else {
+                    &mux_window.layout
+                };
+                pane_rects(layout).into_iter().map(move |(pane, rect)| {
+                    let bounds = pane_bounds(rect, group.size);
+                    (
+                        pane,
+                        Bounds::new(
+                            Point::new(
+                                group.origin.x + bounds.origin.x,
+                                group.origin.y + bounds.origin.y,
+                            ),
+                            bounds.size,
+                        ),
+                    )
+                })
+            })
+            .collect()
     }
 
     fn pane_focus_target(&self, pane: PaneId, cx: &App) -> Option<(EntityId, FocusHandle)> {
@@ -997,12 +1514,7 @@ impl AppView {
     }
 
     fn visible_overlay(&self, cx: &App) -> Option<(OverlayKind, FocusHandle)> {
-        if let Some(overview) = &self.window_overview {
-            Some((
-                OverlayKind::WindowOverview,
-                overview.read(cx).focus().clone(),
-            ))
-        } else if let Some(palette) = &self.command_palette {
+        if let Some(palette) = &self.command_palette {
             Some((OverlayKind::CommandPalette, palette.read(cx).focus(cx)))
         } else if let Some(chooser) = &self.choose_buffer {
             Some((OverlayKind::ChooseBuffer, chooser.read(cx).focus().clone()))
@@ -1319,13 +1831,14 @@ impl AppView {
 
         if self.window_overview.is_some()
             && (route != WorkspaceRoute::App
+                || active_window.is_none()
                 || self.command_output.is_some()
                 || self.command_palette.is_some()
                 || self.choose_tree.is_some()
                 || self.choose_buffer.is_some()
                 || self.display_panes.is_some())
         {
-            self.close_window_overview(cx);
+            self.close_window_overview(window, cx);
         }
 
         for pane in &wanted_terminals {
@@ -1382,9 +1895,9 @@ impl AppView {
                     let covered_by_choose_tree = self.choose_tree.is_some();
                     let covered_by_choose_buffer = self.choose_buffer.is_some();
                     let covered_by_settings = route == WorkspaceRoute::Settings;
-                    let visible_in_layout =
-                        mux_window.zoomed_pane.is_none_or(|zoomed| zoomed == *pane);
-                    let visible = active_window_visible
+                    let visible_in_layout = self.window_overview.is_some()
+                        || mux_window.zoomed_pane.is_none_or(|zoomed| zoomed == *pane);
+                    let visible = (active_window_visible || self.window_overview.is_some())
                         && visible_in_layout
                         && !covered_by_output
                         && !covered_by_choose_tree
@@ -1402,6 +1915,9 @@ impl AppView {
             }
         }
 
+        let geometry_frozen = self.window_overview.is_some();
+        self.set_pane_geometry_frozen(geometry_frozen, window, cx);
+
         let active_pane = snapshot
             .sessions
             .iter()
@@ -1414,12 +1930,40 @@ impl AppView {
                     .find(|mux_window| mux_window.id == focused_window)
             })
             .map(|mux_window| mux_window.active_pane);
+        if let Some(overview) = &mut self.window_overview {
+            let selected_exists = wanted_pickers.contains(&overview.selected)
+                || wanted_terminals.contains(&overview.selected)
+                || wanted_browsers.contains(&overview.selected)
+                || wanted_agents.contains(&overview.selected)
+                || wanted_editors.contains(&overview.selected);
+            let return_exists = wanted_pickers.contains(&overview.return_pane)
+                || wanted_terminals.contains(&overview.return_pane)
+                || wanted_browsers.contains(&overview.return_pane)
+                || wanted_agents.contains(&overview.return_pane)
+                || wanted_editors.contains(&overview.return_pane);
+            if !selected_exists && let Some(active) = active_pane {
+                overview.selected = active;
+                overview.mode = OverviewInputMode::Normal;
+            }
+            if !return_exists
+                && let (Some(active), Some(active_window)) = (active_pane, active_window)
+            {
+                overview.return_pane = active;
+                overview.home = active_window;
+            }
+        }
+        let keyboard_pane = self
+            .window_overview
+            .as_ref()
+            .filter(|overview| overview.mode == OverviewInputMode::Insert)
+            .map(|overview| overview.selected)
+            .or(active_pane);
         let persistent_navigator_focused = {
             let sidebar = self.sidebar.read(cx);
             sidebar.is_focused(window)
                 && (sidebar.mode() == ChromeMode::Sidebar || sidebar.slideover_open())
         };
-        let picker_takes_over = active_pane.is_some_and(|active| {
+        let picker_takes_over = keyboard_pane.is_some_and(|active| {
             self.pickers.contains_key(&active)
                 && self.focused_pane.map(|(pane, _)| pane) != Some(active)
         });
@@ -1431,6 +1975,11 @@ impl AppView {
             .as_ref()
             .is_some_and(|(kind, _)| self.focused_overlay != Some(*kind));
         self.focused_overlay = overlay.as_ref().map(|(kind, _)| *kind);
+        let overview_normal_focus = self
+            .window_overview
+            .as_ref()
+            .is_some_and(|overview| overview.mode == OverviewInputMode::Normal)
+            .then(|| self.window_overview_focus.clone());
         if route == WorkspaceRoute::Settings {
             if entering_settings && let Some(settings) = self.sidebar.read(cx).settings_view() {
                 let entity = settings.entity_id();
@@ -1449,6 +1998,13 @@ impl AppView {
                 self.sidebar_focus_owed = persistent_navigator_focused;
                 focus.focus(window, cx);
             }
+            self.pane_focus_owed = false;
+            self.focused_pane = None;
+        } else if let Some(focus) = overview_normal_focus {
+            if !focus.contains_focused(window, cx) {
+                focus.focus(window, cx);
+            }
+            self.sidebar_focus_owed = false;
             self.pane_focus_owed = false;
             self.focused_pane = None;
         } else if sidebar_focus_requested {
@@ -1477,7 +2033,7 @@ impl AppView {
             self.focused_pane = None;
         } else if persistent_navigator_focused && !picker_takes_over && !self.pane_focus_owed {
             self.focused_pane = None;
-        } else if let Some((pane, entity, focus)) = active_pane.and_then(|pane| {
+        } else if let Some((pane, entity, focus)) = keyboard_pane.and_then(|pane| {
             self.pane_focus_target(pane, cx)
                 .map(|(entity, focus)| (pane, entity, focus))
         }) {
@@ -1674,8 +2230,8 @@ impl AppView {
             source,
             window.id,
             &window.layout,
-            self.pane_canvas_size.get(),
-            pane_split_slot(config::pane_margin(cx)),
+            self.pane_canvas_bounds.get().size,
+            pane_split_slot(config::pane_margin(cx), 1.0),
         )
     }
 
@@ -1891,19 +2447,212 @@ impl AppView {
         )
     }
 
+    fn render_window_overview(
+        &self,
+        windows: &[WindowSnapshot],
+        session_name: &str,
+        focused_window: Option<WindowId>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let overview = self
+            .window_overview
+            .as_ref()
+            .expect("overview state exists while rendering")
+            .clone();
+        let viewport = window.viewport_size();
+        let (grid, metric_scale, group_gap) = window_overview_grid(windows, window, cx);
+        let source = Bounds::new(
+            Point::new(
+                overview.source.origin.x / window.zoom(),
+                overview.source.origin.y / window.zoom(),
+            ),
+            size(
+                overview.source.size.width / window.zoom(),
+                overview.source.size.height / window.zoom(),
+            ),
+        );
+        let groups = windows
+            .iter()
+            .zip(grid.groups)
+            .enumerate()
+            .map(|(index, (mux_window, bounds))| {
+                let id = mux_window.id;
+                let focused = focused_window == Some(id);
+                let home = overview.home == id;
+                let start = if home {
+                    source
+                } else {
+                    overview_edge_bounds(viewport, bounds, group_gap)
+                };
+                let layout = if focused {
+                    self.pane_layout_override.as_ref().map_or_else(
+                        || mux_window.layout.clone(),
+                        |pending| pending.layout.clone(),
+                    )
+                } else {
+                    mux_window.layout.clone()
+                };
+                let content = self.render_layout(
+                    &layout,
+                    mux_window,
+                    WindowCorners::NONE,
+                    PaneDragLayer::Idle,
+                    Some(metric_scale),
+                    cx,
+                );
+                let group_motion = overview.clone();
+                div()
+                    .id(("window-overview-group", id.0))
+                    .debug_selector(|| format!("window-overview-group-{}", id.0))
+                    .absolute()
+                    .flex()
+                    .min_w_0()
+                    .min_h_0()
+                    .child(content)
+                    .with_animation(
+                        format!(
+                            "window-overview-group-motion-{}-{}",
+                            id.0, overview.revision
+                        ),
+                        overview.animation(),
+                        move |group, delta| {
+                            let progress =
+                                overview_group_progress(group_motion.progress(delta), index, home);
+                            let frame = interpolate_bounds(start, bounds, progress);
+                            group
+                                .left(frame.origin.x)
+                                .top(frame.origin.y)
+                                .w(frame.size.width)
+                                .h(frame.size.height)
+                                .opacity(if home { 1.0 } else { progress })
+                        },
+                    )
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        let count = windows
+            .iter()
+            .map(|window| window.panes.len())
+            .sum::<usize>();
+        let header_motion = overview.clone();
+        let header = div()
+            .absolute()
+            .left(px(20.0 * metric_scale))
+            .right(px(20.0 * metric_scale))
+            .flex()
+            .items_end()
+            .justify_between()
+            .child(
+                div()
+                    .text_size(zz_ui::rems_from_px(16.0 * metric_scale))
+                    .font_semibold()
+                    .child("Panes"),
+            )
+            .child(
+                div()
+                    .text_size(zz_ui::rems_from_px(11.0 * metric_scale))
+                    .text_color(cx.theme().foreground.muted())
+                    .child(format!(
+                        "{session_name} · {count} {}",
+                        if count == 1 { "pane" } else { "panes" }
+                    )),
+            )
+            .with_animation(
+                format!("window-overview-header-{}", overview.revision),
+                overview.animation(),
+                move |header, delta| {
+                    let progress = header_motion.progress(delta);
+                    header
+                        .top(px((10.0 + 8.0 * progress) * metric_scale))
+                        .opacity(progress)
+                },
+            );
+        let footer_motion = overview.clone();
+        let footer = div()
+            .absolute()
+            .left(px(20.0 * metric_scale))
+            .right(px(20.0 * metric_scale))
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(zz_ui::rems_from_px(11.0 * metric_scale))
+            .text_color(cx.theme().foreground.muted())
+            .child(match overview.mode {
+                OverviewInputMode::Normal => {
+                    "NORMAL · h j k l move · a / i insert · Enter open · Esc close"
+                }
+                OverviewInputMode::Insert => "INSERT · typing in selected pane · Esc normal",
+            })
+            .with_animation(
+                format!("window-overview-footer-{}", overview.revision),
+                overview.animation(),
+                move |footer, delta| {
+                    let progress = footer_motion.progress(delta);
+                    footer
+                        .bottom(px((8.0 + 6.0 * progress) * metric_scale))
+                        .opacity(progress)
+                },
+            );
+        let progress_motion = overview.clone();
+        let rendered_progress = overview.rendered_progress.clone();
+        div()
+            .id("window-overview")
+            .debug_selector(|| "window-overview".to_owned())
+            .relative()
+            .track_focus(&self.window_overview_focus)
+            .key_context(match overview.mode {
+                OverviewInputMode::Normal => OVERVIEW_NORMAL_KEY_CONTEXT,
+                OverviewInputMode::Insert => OVERVIEW_INSERT_KEY_CONTEXT,
+            })
+            .size_full()
+            .overflow_hidden()
+            .bg(crate::theme::chrome_background(cx))
+            .text_color(cx.theme().foreground)
+            .child(header)
+            .children(groups)
+            .child(footer)
+            .with_animation(
+                format!("window-overview-motion-{}", overview.revision),
+                overview.animation(),
+                move |overview, delta| {
+                    rendered_progress.set(progress_motion.progress(delta));
+                    overview
+                },
+            )
+            .into_any_element()
+    }
+
     fn render_layout(
         &self,
         node: &LayoutNode,
         window: &WindowSnapshot,
         corners: WindowCorners,
         drag_layer: PaneDragLayer,
+        overview_geometry_scale: Option<f32>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match node {
             LayoutNode::Pane(pane) => {
-                let radii = config::pane_content_radii(cx, corners);
-                let gap_background = crate::theme::chrome_background(cx);
-                let inactive = *pane != window.active_pane;
+                let geometry_scale = overview_geometry_scale.unwrap_or(1.0);
+                let panorama = overview_geometry_scale.is_some();
+                let overview_selected = overview_geometry_scale.and_then(|_| {
+                    self.window_overview
+                        .as_ref()
+                        .map(|overview| overview.selected)
+                });
+                let radii =
+                    scaled_pane_radii(config::pane_content_radii(cx, corners), geometry_scale);
+                let gap_background = if panorama {
+                    cx.theme().transparent
+                } else {
+                    crate::theme::chrome_background(cx)
+                };
+                let active = overview_selected
+                    .map_or(*pane == window.active_pane, |selected| selected == *pane);
+                let inactive = overview_selected
+                    .map_or(*pane != window.active_pane, |selected| selected != *pane);
+                let pane_id = *pane;
                 let synchronized = window
                     .panes
                     .get(pane)
@@ -1959,7 +2708,7 @@ impl AppView {
                 let content = pane_content.as_ref().map_or_else(
                     || {
                         crate::window::corners::round_div_radii(
-                            div().size_full().bg(gap_background),
+                            div().size_full().bg(crate::theme::app_pane_background(cx)),
                             radii,
                         )
                         .into_any_element()
@@ -1967,6 +2716,29 @@ impl AppView {
                     PaneContent::element,
                 );
                 let mut status_tags: Vec<AnyElement> = Vec::new();
+                if panorama {
+                    let mux = self.mux.clone();
+                    status_tags.push(
+                        Button::new(("window-overview-pane-close", pane_id.0))
+                            .ghost()
+                            .compact()
+                            .with_size(px(40.0) * geometry_scale)
+                            .child(Icon::new(IconName::Close).with_size(px(12.0) * geometry_scale))
+                            .text_color(cx.theme().foreground.muted())
+                            .tooltip("Close pane")
+                            .tab_stop(false)
+                            .occlude()
+                            .debug_selector(move || {
+                                format!("window-overview-pane-close-{}", pane_id.0)
+                            })
+                            .on_click(move |_, _, cx| {
+                                cx.stop_propagation();
+                                mux.read(cx)
+                                    .execute(kill_target_command(TreeTarget::Pane(pane_id)));
+                            })
+                            .into_any_element(),
+                    );
+                }
                 if waiting {
                     status_tags
                         .push(pane_waiting_state(format!("waiting for {pane}")).into_any_element());
@@ -2009,21 +2781,35 @@ impl AppView {
                     && pane_content
                         .as_ref()
                         .is_none_or(|content| content.inactive_style == PaneInactiveStyle::Surface);
-                pane_surface(
-                    ("mux-pane", pane.0),
+                let border_width = config::pane_border_width(cx) * geometry_scale;
+                let surface = pane_surface(
+                    ("mux-pane", pane_id.0),
                     content,
                     overlays,
                     PaneChrome::new(
                         radii,
-                        config::pane_border_width(cx),
-                        cx.theme().border,
+                        border_width,
+                        if active {
+                            cx.theme().foreground.wash()
+                        } else {
+                            cx.theme().border
+                        },
                         gap_background,
                     )
                     .dimmed(surface_dimmed),
                     cx,
                 )
-                .key_context(pane_key_context(*pane))
-                .into_any_element()
+                .key_context(pane_key_context(pane_id))
+                .debug_selector(|| format!("mux-pane-{}", pane_id.0));
+                if overview_geometry_scale.is_some() {
+                    surface
+                        .capture_any_mouse_down(cx.listener(move |view, _, window, cx| {
+                            view.activate_window_overview_pane(pane_id, window, cx);
+                        }))
+                        .into_any_element()
+                } else {
+                    surface.into_any_element()
+                }
             }
             LayoutNode::Split {
                 id,
@@ -2032,19 +2818,56 @@ impl AppView {
                 first,
                 second,
             } => {
+                let geometry_scale = overview_geometry_scale.unwrap_or(1.0);
                 let snapshot_ratio = *ratio;
                 let ratio = self
                     .split_drag
                     .filter(|drag| drag.drag.window == window.id && drag.drag.split == *id)
                     .map_or(snapshot_ratio, |drag| drag.ratio);
                 let (first_corners, second_corners) = corners.split(*axis);
-                let first_element =
-                    self.render_layout(first, window, first_corners, drag_layer, cx);
-                let second_element =
-                    self.render_layout(second, window, second_corners, drag_layer, cx);
+                let first_element = self.render_layout(
+                    first,
+                    window,
+                    first_corners,
+                    drag_layer,
+                    overview_geometry_scale,
+                    cx,
+                );
+                let second_element = self.render_layout(
+                    second,
+                    window,
+                    second_corners,
+                    drag_layer,
+                    overview_geometry_scale,
+                    cx,
+                );
                 let resizing = self
                     .split_drag
                     .is_some_and(|drag| drag.drag.window == window.id && drag.drag.split == *id);
+                let ratio_override = self
+                    .split_drag
+                    .filter(|drag| drag.drag.window == window.id)
+                    .map(|drag| (drag.drag.split, drag.ratio));
+                let active_pane = overview_geometry_scale
+                    .and_then(|_| {
+                        self.window_overview
+                            .as_ref()
+                            .map(|overview| overview.selected)
+                    })
+                    .unwrap_or(window.active_pane);
+                let highlight =
+                    pane_separator(node, active_pane, ratio_override).map(|separator| {
+                        let span = separator.span();
+                        PaneSplitHighlight::new(
+                            span.start(),
+                            span.length(),
+                            match separator.side() {
+                                SeparatorSide::First => PaneSplitSide::First,
+                                SeparatorSide::Second => PaneSplitSide::Second,
+                            },
+                            cx.theme().foreground.wash(),
+                        )
+                    });
                 let split_axis = match axis {
                     Axis::Horizontal => PaneSplitAxis::Horizontal,
                     Axis::Vertical => PaneSplitAxis::Vertical,
@@ -2055,6 +2878,7 @@ impl AppView {
                     start_ratio: snapshot_ratio,
                     axis: *axis,
                 };
+                let pane_gap = config::pane_margin(cx) * geometry_scale;
                 let hit_target: AnyElement = if matches!(drag_layer, PaneDragLayer::Dragging(_)) {
                     div().absolute().into_any_element()
                 } else {
@@ -2062,7 +2886,8 @@ impl AppView {
                         ("split-divider", id.0),
                         split_axis,
                         ratio,
-                        config::pane_margin(cx),
+                        pane_gap,
+                        geometry_scale,
                     )
                     .on_drag(drag, |_: &SplitDrag, _, _, cx| cx.new(|_| SplitDragPreview))
                     .into_any_element()
@@ -2074,11 +2899,17 @@ impl AppView {
                     ratio,
                     resizing,
                     config::pane_gaps(cx),
-                    config::pane_margin(cx),
+                    pane_gap,
+                    geometry_scale,
+                    highlight,
                     first_element,
                     second_element,
                     hit_target,
-                    crate::theme::chrome_background(cx),
+                    if overview_geometry_scale.is_some() {
+                        cx.theme().transparent
+                    } else {
+                        crate::theme::chrome_background(cx)
+                    },
                     cx,
                 )
                 .on_drag_move::<SplitDrag>(cx.listener(
@@ -2147,6 +2978,14 @@ impl AppView {
         }
     }
 
+    fn set_pane_geometry_frozen(&mut self, frozen: bool, _: &Window, cx: &mut Context<Self>) {
+        for terminal in self.terminals.values() {
+            terminal.update(cx, |terminal, cx| {
+                terminal.set_geometry_frozen(frozen, cx);
+            });
+        }
+    }
+
     fn pane_indicator(&self, indicator: PaneIndicator, cx: &Context<Self>) -> impl IntoElement {
         let active = indicator.active();
         let key: AnyElement = match indicator
@@ -2201,6 +3040,7 @@ impl AppView {
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let started = diagnostics::timer(DIAGNOSTIC_TARGET);
+        self.synchronize_window_overview_zoom(window, cx);
         self.synchronize_panes(window, cx);
 
         let (snapshot, attached, error, prefix_armed, has_hosts) = {
@@ -2242,18 +3082,22 @@ impl Render for AppView {
         self.reconcile_split_drag(active_window, cx);
         self.reconcile_pane_drag(active_window, prefix_armed, window, cx);
         self.reconcile_pane_layout_override(active_window, snapshot.generation);
-        let strip_above_panes =
-            matches!(chrome, ChromeMode::Titlebar) || draws_window_controls(window);
-        let layout_corners = match chrome {
-            ChromeMode::Sidebar => {
-                let corners = WindowCorners::for_window(window).right();
-                if strip_above_panes {
-                    corners.bottom()
-                } else {
-                    corners
+        let strip_above_panes = self.window_overview.is_none()
+            && (matches!(chrome, ChromeMode::Titlebar) || draws_window_controls(window));
+        let layout_corners = if self.window_overview.is_some() {
+            WindowCorners::NONE
+        } else {
+            match chrome {
+                ChromeMode::Sidebar => {
+                    let corners = WindowCorners::for_window(window).right();
+                    if strip_above_panes {
+                        corners.bottom()
+                    } else {
+                        corners
+                    }
                 }
+                ChromeMode::Titlebar => WindowCorners::for_window(window).bottom(),
             }
-            ChromeMode::Titlebar => WindowCorners::for_window(window).bottom(),
         };
         let predicted_layout = self
             .pane_layout_override
@@ -2261,7 +3105,11 @@ impl Render for AppView {
             .map(|pending| pending.layout.clone());
         let pane_layout =
             active_window.map(|window| predicted_layout.as_ref().unwrap_or(&window.layout));
-        self.synchronize_pane_corners(active_window, pane_layout, layout_corners, cx);
+        if self.window_overview.is_some() {
+            self.synchronize_pane_corners(None, None, WindowCorners::NONE, cx);
+        } else {
+            self.synchronize_pane_corners(active_window, pane_layout, layout_corners, cx);
+        }
         let pane_drag_armed = prefix_armed
             && active_window
                 .is_some_and(|window| window.zoomed_pane.is_none() && window.panes.len() > 1);
@@ -2281,7 +3129,20 @@ impl Render for AppView {
             .filter(|_| cx.has_active_drag())
             .and_then(|drag| self.pane_drop_preview_element(drag, cx));
 
-        let content = if let Some(settings) = settings_view {
+        let content = if self.window_overview.is_some() {
+            active_session.map_or_else(
+                || div().size_full().into_any_element(),
+                |session| {
+                    self.render_window_overview(
+                        &session.windows,
+                        &session.name,
+                        active_window.map(|window| window.id),
+                        window,
+                        cx,
+                    )
+                },
+            )
+        } else if let Some(settings) = settings_view {
             settings.into_any_element()
         } else if let Some(active_window) = active_window {
             if let Some(pane) = active_window.zoomed_pane {
@@ -2290,6 +3151,7 @@ impl Render for AppView {
                     active_window,
                     layout_corners,
                     PaneDragLayer::Idle,
+                    None,
                     cx,
                 )
             } else {
@@ -2298,6 +3160,7 @@ impl Render for AppView {
                     active_window,
                     layout_corners,
                     drag_layer,
+                    None,
                     cx,
                 )
             }
@@ -2356,8 +3219,13 @@ impl Render for AppView {
             .flatten()
             .collect::<Vec<_>>()
         };
-        let measured_canvas_size = self.pane_canvas_size.clone();
-        let gap_background = crate::theme::chrome_background(cx);
+        let measured_canvas_bounds = self.pane_canvas_bounds.clone();
+        let workspace_background = crate::theme::chrome_background(cx);
+        let gap_background = if self.window_overview.is_some() {
+            cx.theme().transparent
+        } else {
+            workspace_background
+        };
         let pane_margin = config::pane_margin(cx);
         let canvas_top = if strip_above_panes {
             px(0.)
@@ -2382,8 +3250,10 @@ impl Render for AppView {
                     .top(canvas_top)
                     .right(pane_margin)
                     .bottom(pane_margin)
+                    .id("pane-canvas")
+                    .debug_selector(|| "pane-canvas".to_owned())
                     .on_prepaint(move |bounds, _, _| {
-                        measured_canvas_size.set(bounds.size);
+                        measured_canvas_bounds.set(bounds);
                     })
                     .on_drag_move::<PaneDrag>(cx.listener(Self::on_pane_drag_move))
                     .on_drop(cx.listener(|view, drag: &PaneDrag, window, cx| {
@@ -2397,7 +3267,7 @@ impl Render for AppView {
                 .when(
                     (active_window.is_none() && route == WorkspaceRoute::App)
                         || !crate::theme::chrome_blur(cx),
-                    |surface| surface.bg(gap_background),
+                    |surface| surface.bg(workspace_background),
                 )
                 .capture_any_mouse_up(cx.listener(Self::on_split_mouse_up))
                 .capture_any_mouse_up(cx.listener(Self::on_pane_mouse_up))
@@ -2584,6 +3454,37 @@ fn pane_bounds(rect: NormalizedPaneRect, canvas_size: Size<Pixels>) -> Bounds<Pi
     )
 }
 
+fn window_overview_grid(
+    windows: &[WindowSnapshot],
+    window: &Window,
+    cx: &App,
+) -> (OverviewGrid, f32, Pixels) {
+    let viewport = window.viewport_size();
+    let physical_viewport = size(
+        viewport.width * window.zoom(),
+        viewport.height * window.zoom(),
+    );
+    let metric_scale = UiZoom::get(cx) / window.zoom();
+    let pane_gap = config::pane_margin(cx) * metric_scale;
+    let group_gap = if config::pane_gaps(cx) {
+        pane_split_slot(pane_gap, metric_scale)
+    } else {
+        Pixels::ZERO
+    };
+    let columns = OverviewGrid::new(physical_viewport, windows.len()).columns;
+    (
+        OverviewGrid::with_columns_scaled(
+            viewport,
+            windows.len(),
+            columns,
+            metric_scale,
+            group_gap,
+        ),
+        metric_scale,
+        group_gap,
+    )
+}
+
 fn lerp_bounds(from: Bounds<Pixels>, to: Bounds<Pixels>, delta: f32) -> Bounds<Pixels> {
     Bounds::new(
         gpui::point(
@@ -2651,6 +3552,60 @@ mod tests {
 
     use super::*;
     use gpui::{Modifiers, TestAppContext, point};
+
+    struct OverviewTestShell {
+        workspace: Entity<AppView>,
+    }
+
+    impl OverviewTestShell {
+        fn new(workspace: Entity<AppView>, cx: &mut Context<Self>) -> Self {
+            cx.subscribe(&workspace, |_, _, _: &WindowOverviewChanged, cx| {
+                cx.notify();
+            })
+            .detach();
+            Self { workspace }
+        }
+    }
+
+    impl Render for OverviewTestShell {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let workspace = self.workspace.clone();
+            div()
+                .relative()
+                .size_full()
+                .child(self.workspace.clone())
+                .capture_key_up(cx.listener(move |_, event: &KeyUpEvent, window, cx| {
+                    workspace.update(cx, |workspace, cx| {
+                        workspace.on_claim_key_up(event, window, cx);
+                    });
+                }))
+        }
+    }
+
+    #[test]
+    fn window_overview_retargets_from_its_rendered_frame() {
+        let mut overview = WindowOverviewState::new(
+            WindowId(0),
+            PaneId(0),
+            Bounds::new(Point::default(), size(px(1_000.0), px(700.0))),
+            false,
+        );
+        overview.rendered_progress.set(0.4);
+
+        let close_duration = overview.retarget(0.0, WindowId(1), OVERVIEW_CLOSE_DURATION, false);
+
+        assert!((overview.progress(0.0) - 0.4).abs() < f32::EPSILON);
+        assert_eq!(overview.progress(1.0), 0.0);
+        assert_eq!(overview.home, WindowId(1));
+        assert!((close_duration.as_secs_f32() - 0.12).abs() < 0.000_001);
+
+        overview.rendered_progress.set(0.25);
+        let open_duration = overview.retarget(1.0, WindowId(0), OVERVIEW_OPEN_DURATION, false);
+
+        assert!((overview.progress(0.0) - 0.25).abs() < f32::EPSILON);
+        assert_eq!(overview.progress(1.0), 1.0);
+        assert!((open_duration.as_secs_f32() - 0.315).abs() < 0.000_001);
+    }
 
     #[derive(Debug, PartialEq)]
     enum PaneReleaseStep {
@@ -3194,6 +4149,431 @@ mod tests {
                 viewers: Vec::new(),
             }],
         }
+    }
+
+    #[gpui::test]
+    fn panorama_mounts_every_window_and_keeps_panes_interactive(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let workspace_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let captured_workspace = Rc::clone(&workspace_slot);
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let workspace =
+                cx.new(|cx| AppView::new(controller, agent_controller, mux.clone(), window, cx));
+            captured_mux.replace(Some(mux));
+            captured_workspace.replace(Some(workspace.clone()));
+            OverviewTestShell::new(workspace, cx)
+        });
+        let mux: Entity<MuxClient> = mux_slot.borrow().clone().expect("captured mux");
+        let workspace: Entity<AppView> =
+            workspace_slot.borrow().clone().expect("captured workspace");
+        let terminal = PaneId(0);
+        let other_terminal = PaneId(2);
+        let browser = PaneId(3);
+        let pane_snapshot = |id: PaneId, kind: PaneKindSnapshot| zz_protocol::PaneSnapshot {
+            id,
+            title: id.to_string(),
+            kind,
+            synchronized_input: false,
+            bell: false,
+        };
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(
+                SessionId(0),
+                MuxSnapshot {
+                    generation: 100,
+                    focused_window: Some(WindowId(0)),
+                    sessions: vec![zz_protocol::SessionSnapshot {
+                        id: SessionId(0),
+                        name: "zz".to_owned(),
+                        active_window: WindowId(0),
+                        windows: vec![
+                            WindowSnapshot {
+                                id: WindowId(0),
+                                index: 0,
+                                name: "main".to_owned(),
+                                active_pane: terminal,
+                                zoomed_pane: None,
+                                layout: LayoutNode::Pane(terminal),
+                                panes: [(
+                                    terminal,
+                                    pane_snapshot(terminal, PaneKindSnapshot::Terminal),
+                                )]
+                                .into_iter()
+                                .collect(),
+                            },
+                            WindowSnapshot {
+                                id: WindowId(1),
+                                index: 1,
+                                name: "tools".to_owned(),
+                                active_pane: other_terminal,
+                                zoomed_pane: Some(other_terminal),
+                                layout: LayoutNode::Split {
+                                    id: SplitId(1),
+                                    axis: Axis::Horizontal,
+                                    ratio: 0.5,
+                                    first: Box::new(LayoutNode::Pane(other_terminal)),
+                                    second: Box::new(LayoutNode::Pane(browser)),
+                                },
+                                panes: [
+                                    (
+                                        other_terminal,
+                                        pane_snapshot(other_terminal, PaneKindSnapshot::Terminal),
+                                    ),
+                                    (
+                                        browser,
+                                        pane_snapshot(
+                                            browser,
+                                            PaneKindSnapshot::Browser(
+                                                zz_protocol::BrowserDescriptor::single(
+                                                    "https://example.com".to_owned(),
+                                                    "default".to_owned(),
+                                                ),
+                                            ),
+                                        ),
+                                    ),
+                                ]
+                                .into_iter()
+                                .collect(),
+                            },
+                        ],
+                        viewers: Vec::new(),
+                    }],
+                },
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        cx.update(|window, _| {
+            window.set_zoom(1.3);
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let source = cx.debug_bounds("pane-canvas").expect("source pane canvas");
+        let source_zoom = cx.update(|window, _| window.zoom());
+        let sent = mux.update(cx, |mux, _| mux.record_input_for_test());
+        let previews = mux.update(cx, |mux, _| mux.record_terminal_preview_for_test());
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.open_window_overview(window, cx);
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let overview_zoom = cx.update(|window, _| window.zoom());
+        let active_start = cx
+            .debug_bounds("window-overview-group-0")
+            .expect("active window group");
+        let offscreen_start = cx
+            .debug_bounds("window-overview-group-1")
+            .expect("offscreen window group");
+        let close = |left: Pixels, right: Pixels| (f32::from(left) - f32::from(right)).abs() < 8.0;
+        assert!(close(
+            active_start.origin.x * overview_zoom,
+            source.origin.x * source_zoom,
+        ));
+        assert!(close(
+            active_start.origin.y * overview_zoom,
+            source.origin.y * source_zoom,
+        ));
+        assert!(
+            close(
+                active_start.size.width * overview_zoom,
+                source.size.width * source_zoom,
+            ),
+            "active width {:?} did not start at source width {:?}",
+            active_start.size.width * overview_zoom,
+            source.size.width * source_zoom
+        );
+        assert!(
+            close(
+                active_start.size.height * overview_zoom,
+                source.size.height * source_zoom,
+            ),
+            "active height {:?} did not start at source height {:?}",
+            active_start.size.height * overview_zoom,
+            source.size.height * source_zoom
+        );
+        let physical_width = cx.update(|window, _| window.viewport_size().width * window.zoom());
+        assert!(offscreen_start.origin.x * overview_zoom >= physical_width);
+        assert!(
+            !sent
+                .borrow()
+                .iter()
+                .any(|input| matches!(input, InputMessage::ResizeTerminal { .. }))
+        );
+        assert_eq!(&*previews.borrow(), &[true]);
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            let overview = workspace
+                .window_overview
+                .as_mut()
+                .expect("overview animation");
+            overview.rendered_progress.set(1.0);
+            overview.duration = Duration::ZERO;
+            workspace.set_pane_geometry_frozen(true, window, cx);
+        });
+        sent.borrow_mut().clear();
+        cx.update(|_, cx| cx.set_reduce_motion(true));
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert!(
+            !sent
+                .borrow()
+                .iter()
+                .any(|input| matches!(input, InputMessage::ResizeTerminal { .. }))
+        );
+        let active_end = cx
+            .debug_bounds("window-overview-group-0")
+            .expect("active window group after animation");
+        let offscreen_end = cx
+            .debug_bounds("window-overview-group-1")
+            .expect("other window group after animation");
+        let source_width = f32::from(source.size.width * source_zoom);
+        let active_end_width = f32::from(active_end.size.width * overview_zoom);
+        assert!(active_end_width < source_width);
+        let offscreen_start_x = f32::from(offscreen_start.origin.x * overview_zoom);
+        let offscreen_end_x = f32::from(offscreen_end.origin.x * overview_zoom);
+        assert!(offscreen_end_x < offscreen_start_x);
+        assert!(close(active_end.right(), offscreen_end.origin.x));
+
+        sent.borrow_mut().clear();
+        assert!(cx.debug_bounds("window-overview").is_some());
+        assert!(cx.debug_bounds("window-overview-card-0").is_none());
+        assert!(cx.debug_bounds("mux-pane-0").is_some());
+        assert!(cx.debug_bounds("mux-pane-2").is_some());
+        assert!(cx.debug_bounds("mux-pane-3").is_some());
+        assert!((cx.update(|window, _| window.zoom()) - 0.6).abs() < f32::EPSILON);
+        let single_pane = cx.debug_bounds("mux-pane-0").expect("single pane");
+        assert!(close(single_pane.origin.x, active_end.origin.x));
+        assert!(close(single_pane.origin.y, active_end.origin.y));
+        assert!(close(single_pane.size.width, active_end.size.width));
+        assert!(close(single_pane.size.height, active_end.size.height));
+
+        let mut config = crate::config::AppConfig::default();
+        config.pane_gaps.value = true;
+        config.pane_margin.value = 9.0;
+        config.pane_border_width.value = 2.0;
+        config.pane_corner_radius.value = 11.0;
+        cx.update(|_, cx| cx.set_global(config));
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let active_spaced = cx
+            .debug_bounds("window-overview-group-0")
+            .expect("spaced active window group");
+        let other_spaced = cx
+            .debug_bounds("window-overview-group-1")
+            .expect("spaced other window group");
+        let second_terminal_bounds = cx
+            .debug_bounds("mux-pane-2")
+            .expect("spaced second terminal");
+        let browser_bounds = cx.debug_bounds("mux-pane-3").expect("spaced browser");
+        let physical_zoom = cx.update(|window, _| window.zoom());
+        assert!(close(
+            (other_spaced.origin.x - active_spaced.right()) * physical_zoom,
+            px(9.0),
+        ));
+        assert!(close(
+            (browser_bounds.origin.x - second_terminal_bounds.right()) * physical_zoom,
+            px(9.0),
+        ));
+
+        let during = workspace.read_with(cx, |workspace, cx| {
+            workspace
+                .browsers
+                .get(&browser)
+                .expect("browser entity")
+                .read(cx)
+                .viewport_for_test()
+        });
+        assert!(during.visible);
+        assert!(during.width > 0 && during.height > 0);
+        assert!(cx.update(|window, _| {
+            let contexts = window.context_stack();
+            contexts
+                .iter()
+                .any(|context| context.contains(OVERVIEW_NORMAL_KEY_CONTEXT))
+        }));
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| {
+                let overview = workspace.window_overview.as_ref().expect("overview");
+                (overview.mode, overview.selected)
+            }),
+            (OverviewInputMode::Normal, terminal)
+        );
+        for selector in [
+            "window-overview-pane-close-0",
+            "window-overview-pane-close-2",
+            "window-overview-pane-close-3",
+        ] {
+            assert!(cx.debug_bounds(selector).is_some());
+        }
+        let close_browser = cx
+            .debug_bounds("window-overview-pane-close-3")
+            .expect("browser close control");
+        let close_browser = point(
+            close_browser.center().x * physical_zoom,
+            close_browser.center().y * physical_zoom,
+        );
+        cx.simulate_mouse_move(close_browser, None::<MouseButton>, Modifiers::default());
+        cx.simulate_mouse_down(close_browser, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_up(close_browser, MouseButton::Left, Modifiers::default());
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| {
+                let overview = workspace.window_overview.as_ref().expect("overview");
+                (overview.mode, overview.selected)
+            }),
+            (OverviewInputMode::Normal, terminal)
+        );
+
+        sent.borrow_mut().clear();
+        cx.simulate_input("n");
+        assert!(!sent.borrow().iter().any(|input| matches!(
+            input,
+            InputMessage::Text { text, .. } if text == "n"
+        )));
+        cx.simulate_keystrokes("l");
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| {
+                workspace
+                    .window_overview
+                    .as_ref()
+                    .expect("overview")
+                    .selected
+            }),
+            other_terminal
+        );
+        cx.simulate_keystrokes("i");
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert!(workspace.read_with(cx, |workspace, _| workspace.window_overview_open()));
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| {
+                workspace.window_overview.as_ref().expect("overview").mode
+            }),
+            OverviewInputMode::Insert
+        );
+        assert!(cx.update(|window, _| {
+            window
+                .context_stack()
+                .iter()
+                .any(|context| context.contains("Terminal"))
+        }));
+        cx.simulate_input("x");
+        assert!(sent.borrow().iter().any(|input| matches!(
+            input,
+            InputMessage::Text { pane, text } if *pane == other_terminal && text == "x"
+        )));
+        cx.simulate_keystrokes("enter");
+        assert!(workspace.read_with(cx, |workspace, _| workspace.window_overview_open()));
+
+        cx.update(|_, cx| cx.set_reduce_motion(false));
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| {
+                let overview = workspace.window_overview.as_ref().expect("overview");
+                (overview.mode, overview.selected, overview.target)
+            }),
+            (OverviewInputMode::Normal, other_terminal, 1.0)
+        );
+        assert!(cx.update(|window, _| {
+            window
+                .context_stack()
+                .iter()
+                .any(|context| context.contains(OVERVIEW_NORMAL_KEY_CONTEXT))
+        }));
+        cx.simulate_keystrokes("escape");
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| {
+                let overview = workspace
+                    .window_overview
+                    .as_ref()
+                    .expect("closing overview");
+                (overview.home, overview.return_pane, overview.target)
+            }),
+            (WindowId(0), terminal, 0.0)
+        );
+        cx.executor().advance_clock(OVERVIEW_CLOSE_DURATION);
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert!(!workspace.read_with(cx, |workspace, _| workspace.window_overview_open()));
+        assert_eq!(&*previews.borrow(), &[true, false]);
+
+        cx.update(|_, cx| cx.set_reduce_motion(true));
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.open_window_overview(window, cx);
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        cx.update(|_, cx| cx.set_reduce_motion(false));
+        cx.simulate_keystrokes("l enter");
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| {
+                let overview = workspace
+                    .window_overview
+                    .as_ref()
+                    .expect("closing overview");
+                (overview.home, overview.selected, overview.target)
+            }),
+            (WindowId(1), other_terminal, 0.0)
+        );
+        cx.executor().advance_clock(OVERVIEW_CLOSE_DURATION);
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert!(!workspace.read_with(cx, |workspace, _| workspace.window_overview_open()));
+        assert_eq!(&*previews.borrow(), &[true, false, true, false]);
+        assert_eq!(cx.update(|window, _| window.zoom()), 1.0);
+        let after = workspace.read_with(cx, |workspace, cx| {
+            workspace
+                .browsers
+                .get(&browser)
+                .expect("browser entity")
+                .read(cx)
+                .viewport_for_test()
+        });
+        assert!(!after.visible);
+        assert!(cx.update(|window, _| {
+            window
+                .context_stack()
+                .iter()
+                .any(|context| context.contains("Terminal"))
+        }));
     }
 
     #[gpui::test]

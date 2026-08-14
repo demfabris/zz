@@ -405,6 +405,10 @@ impl InteractiveClient {
         self.send(&ProtocolMessage::RequestFull { pane })
     }
 
+    pub fn set_terminal_preview(&self, enabled: bool) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::SetTerminalPreview { enabled })
+    }
+
     pub fn request_history(&self, pane: PaneId, start: u32, count: u32) -> Result<(), DaemonError> {
         self.send(&ProtocolMessage::HistoryRequest { pane, start, count })
     }

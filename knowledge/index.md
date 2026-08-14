@@ -20,7 +20,7 @@ there before acting, because source is the ground truth and these pages are a ma
 |---------|-----------------|
 | [architecture](architecture/index.md) | System overview, process/threading model, end-to-end data flow |
 | [crates](crates/index.md) | Crate-level concepts for `zz` and its major `zz-*` support crates |
-| [protocol](protocol/index.md) | Wire protocol (v51), stable IDs, packed terminal lanes, snapshots |
+| [protocol](protocol/index.md) | Wire protocol (v52), stable IDs, packed terminal lanes, snapshots |
 | [tmux](tmux/index.md) | tmux-compat philosophy, config parser, key tables, commands, copy-mode, choosers |
 | [terminal](terminal/index.md) | libghostty embedding, Zed rendering parity, interaction, appearance |
 | [browser](browser/index.md) | CEF runtime, OSR rendering + DPI/blur fix, lifecycle, profile, input, element picker |

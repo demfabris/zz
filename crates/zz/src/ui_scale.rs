@@ -45,10 +45,13 @@ pub fn set_percent(percent: f32, cx: &mut App) {
         percent_for_zoom(next),
         next,
     );
-    cx.defer(|cx| {
-        let zoom = UiZoom::get(cx);
+    cx.defer(move |cx| {
         for window in cx.windows() {
-            window.update(cx, |_, window, _| window.set_zoom(zoom)).ok();
+            window
+                .update(cx, |_, window, _| {
+                    window.set_zoom(composed_window_zoom(window.zoom(), previous, next));
+                })
+                .ok();
         }
     });
 }
@@ -111,6 +114,14 @@ fn percent_for_zoom(zoom: f32) -> f32 {
     zoom * 100.0
 }
 
+fn composed_window_zoom(window_zoom: f32, previous_ui_zoom: f32, next_ui_zoom: f32) -> f32 {
+    if previous_ui_zoom > 0.0 {
+        window_zoom * next_ui_zoom / previous_ui_zoom
+    } else {
+        next_ui_zoom
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::any::TypeId;
@@ -139,6 +150,13 @@ mod tests {
             zoom_for_percent(MAX_UI_ZOOM + UI_ZOOM_STEP),
             zoom_for_percent(MAX_UI_ZOOM)
         );
+    }
+
+    #[test]
+    fn ui_zoom_preserves_per_window_zoom_modes() {
+        assert_eq!(composed_window_zoom(0.5, 1.0, 1.2), 0.6);
+        assert_eq!(composed_window_zoom(1.0, 1.0, 1.2), 1.2);
+        assert_eq!(composed_window_zoom(0.5, 0.0, 1.2), 1.2);
     }
 
     #[test]

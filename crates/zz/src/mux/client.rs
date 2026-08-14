@@ -611,6 +611,7 @@ struct FakeConnectedHost {
     attached_default: std::cell::Cell<bool>,
     commands: std::cell::RefCell<Vec<CommandInvocation>>,
     history_requests: std::cell::RefCell<Vec<(PaneId, u32, u32)>>,
+    terminal_previews: std::cell::RefCell<Vec<bool>>,
     next_request_id: std::cell::Cell<u64>,
 }
 
@@ -623,6 +624,7 @@ impl FakeConnectedHost {
             attached_default: std::cell::Cell::new(false),
             commands: std::cell::RefCell::new(Vec::new()),
             history_requests: std::cell::RefCell::new(Vec::new()),
+            terminal_previews: std::cell::RefCell::new(Vec::new()),
             next_request_id: std::cell::Cell::new(1),
         }
     }
@@ -654,6 +656,10 @@ impl FakeConnectedHost {
         self.history_requests
             .borrow_mut()
             .push((pane, start, count));
+    }
+
+    fn set_terminal_preview(&self, enabled: bool) {
+        self.terminal_previews.borrow_mut().push(enabled);
     }
 }
 
@@ -865,6 +871,10 @@ pub struct MuxClient {
     snapshot: Arc<MuxSnapshot>,
     #[cfg(test)]
     input_sink: Option<std::rc::Rc<std::cell::RefCell<Vec<InputMessage>>>>,
+    #[cfg(test)]
+    terminal_preview_sink: Option<std::rc::Rc<std::cell::RefCell<Vec<bool>>>>,
+    terminal_preview_enabled: bool,
+    terminal_preview_panes: BTreeSet<PaneId>,
     attached_snapshot_pending: bool,
     viewports: BTreeMap<PaneId, Arc<RwLock<RetainedTerminalViewport>>>,
     kitty_images: BTreeMap<PaneId, Arc<RwLock<KittyImageCache>>>,
@@ -959,6 +969,10 @@ impl MuxClient {
             snapshot: Arc::new(MuxSnapshot::default()),
             #[cfg(test)]
             input_sink: None,
+            #[cfg(test)]
+            terminal_preview_sink: None,
+            terminal_preview_enabled: false,
+            terminal_preview_panes: BTreeSet::new(),
             attached_snapshot_pending: false,
             viewports: BTreeMap::new(),
             kitty_images: BTreeMap::new(),
@@ -1174,6 +1188,11 @@ impl MuxClient {
     }
 
     fn request_history(&mut self, pane: PaneId, prefetch_target: Option<u32>) {
+        if !self.terminal_is_foreground(pane)
+            && (self.terminal_preview_enabled || self.terminal_preview_panes.contains(&pane))
+        {
+            return;
+        }
         if prefetch_target.is_none()
             && self
                 .attached_connection()
@@ -1948,6 +1967,15 @@ impl MuxClient {
     }
 
     #[cfg(test)]
+    pub(crate) fn record_terminal_preview_for_test(
+        &mut self,
+    ) -> std::rc::Rc<std::cell::RefCell<Vec<bool>>> {
+        let sink = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        self.terminal_preview_sink = Some(std::rc::Rc::clone(&sink));
+        sink
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_prefix_armed_for_test(&mut self, armed: bool, cx: &mut Context<Self>) {
         self.prefix_armed = armed;
         cx.notify();
@@ -2180,6 +2208,62 @@ impl MuxClient {
     #[must_use]
     pub fn attached_session(&self) -> Option<SessionId> {
         self.attached_session
+    }
+
+    fn terminal_is_foreground(&self, pane: PaneId) -> bool {
+        let Some(attached) = self.attached_session else {
+            return false;
+        };
+        let Some(session) = self
+            .snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == attached)
+        else {
+            return false;
+        };
+        let focused_window = self.snapshot.focused_window_for(session);
+        let Some(window) = session
+            .windows
+            .iter()
+            .find(|window| window.id == focused_window)
+        else {
+            return false;
+        };
+        window.zoomed_pane.is_none_or(|zoomed| zoomed == pane)
+            && matches!(
+                window.panes.get(&pane).map(|pane| &pane.kind),
+                Some(PaneKindSnapshot::Terminal)
+            )
+    }
+
+    fn send_terminal_preview_state(&self) -> bool {
+        #[cfg(test)]
+        if let Some(sink) = &self.terminal_preview_sink {
+            sink.borrow_mut().push(self.terminal_preview_enabled);
+            return true;
+        }
+        if let Some(client) = &self.attached_connection().client {
+            if let Err(error) = client.set_terminal_preview(self.terminal_preview_enabled) {
+                log::warn!("failed to update terminal preview streaming: {error}");
+                return false;
+            }
+            return true;
+        }
+        #[cfg(test)]
+        if let Some(client) = &self.attached_connection().fake_client {
+            client.set_terminal_preview(self.terminal_preview_enabled);
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn set_terminal_preview(&mut self, enabled: bool) -> bool {
+        if self.terminal_preview_enabled == enabled {
+            return true;
+        }
+        self.terminal_preview_enabled = enabled;
+        self.send_terminal_preview_state()
     }
 
     pub(crate) fn send_input(&self, input: InputMessage) -> bool {
@@ -2485,6 +2569,7 @@ impl MuxClient {
         self.snapshot = Arc::new(MuxSnapshot::default());
         self.attached_snapshot_pending = true;
         self.viewports.clear();
+        self.terminal_preview_panes.clear();
         self.clear_all_kitty_images();
         self.browser_commands.clear();
         self.agent_commands.clear();
@@ -3024,6 +3109,9 @@ impl MuxClient {
                         cx,
                     );
                 }
+                if self.terminal_preview_enabled {
+                    self.send_terminal_preview_state();
+                }
             }
             ProtocolMessage::Event(event) => match event.payload {
                 EventPayload::Snapshot(snapshot) => {
@@ -3093,6 +3181,9 @@ impl MuxClient {
                     self.prefix_armed = armed;
                 }
                 EventPayload::TerminalViewport { pane, viewport } => {
+                    if self.terminal_preview_enabled && !self.terminal_is_foreground(pane) {
+                        self.terminal_preview_panes.insert(pane);
+                    }
                     self.kitty_image_cache(pane);
                     self.viewports.insert(
                         pane,
@@ -3113,6 +3204,9 @@ impl MuxClient {
                     self.request_history_backfill(pane);
                 }
                 EventPayload::TerminalPatch { pane, patch } => {
+                    if self.terminal_preview_enabled && !self.terminal_is_foreground(pane) {
+                        self.terminal_preview_panes.insert(pane);
+                    }
                     self.kitty_image_cache(pane);
                     let retained = self.viewports.get(&pane).cloned();
                     let request_missing =
@@ -3375,6 +3469,7 @@ impl MuxClient {
                 }
                 EventPayload::PaneRemoved(pane) => {
                     self.viewports.remove(&pane);
+                    self.terminal_preview_panes.remove(&pane);
                     self.clear_kitty_images(pane);
                     self.attached_connection_mut()
                         .full_requests_pending
@@ -7496,6 +7591,128 @@ mod tests {
                 );
             });
             assert_eq!(fake.history_requests.borrow().len(), 3);
+        });
+    }
+
+    #[gpui::test]
+    fn terminal_preview_skips_background_history_and_restores_after_attach(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(|cx| {
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("fixture".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let fake = mux.update(cx, |mux, _| {
+                let fake = install_fake_connection(mux, HostId::LOCAL);
+                let foreground = routing_pane(71, false);
+                let background = routing_pane(72, false);
+                mux.attached_session = Some(SessionId(7));
+                mux.snapshot = Arc::new(routing_snapshot(vec![
+                    routing_window(
+                        1,
+                        LayoutNode::Pane(foreground.id),
+                        std::slice::from_ref(&foreground),
+                    ),
+                    routing_window(
+                        2,
+                        LayoutNode::Pane(background.id),
+                        std::slice::from_ref(&background),
+                    ),
+                ]));
+                assert!(mux.set_terminal_preview(true));
+                fake
+            });
+            let viewport = |offset| {
+                let mut viewport = TerminalViewport::blank(1, 3, SessionStatus::Running);
+                viewport.scrollbar = ScrollbarState {
+                    total: offset + 3,
+                    offset,
+                    len: 3,
+                };
+                viewport
+            };
+
+            mux.update(cx, |mux, cx| {
+                mux.handle_message(
+                    HostId::LOCAL,
+                    ProtocolMessage::Event(zz_protocol::Event {
+                        sequence: 1,
+                        payload: EventPayload::TerminalViewport {
+                            pane: PaneId(72),
+                            viewport: viewport(1_000),
+                        },
+                    }),
+                    cx,
+                );
+                assert!(fake.history_requests.borrow().is_empty());
+                mux.handle_message(
+                    HostId::LOCAL,
+                    ProtocolMessage::Event(zz_protocol::Event {
+                        sequence: 2,
+                        payload: EventPayload::TerminalViewport {
+                            pane: PaneId(71),
+                            viewport: viewport(1_000),
+                        },
+                    }),
+                    cx,
+                );
+            });
+            assert_eq!(&*fake.history_requests.borrow(), &[(PaneId(71), 488, 512)]);
+
+            fake.history_requests.borrow_mut().clear();
+            let mut focused_background = routing_snapshot(vec![
+                routing_window(1, LayoutNode::Pane(PaneId(71)), &[routing_pane(71, false)]),
+                routing_window(2, LayoutNode::Pane(PaneId(72)), &[routing_pane(72, false)]),
+            ]);
+            focused_background.generation = 2;
+            focused_background.focused_window = Some(WindowId(2));
+            mux.update(cx, |mux, cx| {
+                mux.handle_message(
+                    HostId::LOCAL,
+                    ProtocolMessage::Event(zz_protocol::Event {
+                        sequence: 3,
+                        payload: EventPayload::Snapshot(focused_background.clone()),
+                    }),
+                    cx,
+                );
+            });
+            assert_eq!(&*fake.history_requests.borrow(), &[(PaneId(72), 488, 512)]);
+
+            mux.update(cx, |mux, cx| {
+                mux.handle_message(
+                    HostId::LOCAL,
+                    ProtocolMessage::Attached {
+                        session: SessionId(7),
+                        snapshot: focused_background,
+                    },
+                    cx,
+                );
+                assert!(mux.set_terminal_preview(false));
+            });
+            assert_eq!(&*fake.terminal_previews.borrow(), &[true, true, false]);
+
+            fake.history_requests.borrow_mut().clear();
+            let mut focused_foreground = routing_snapshot(vec![
+                routing_window(1, LayoutNode::Pane(PaneId(71)), &[routing_pane(71, false)]),
+                routing_window(2, LayoutNode::Pane(PaneId(72)), &[routing_pane(72, false)]),
+            ]);
+            focused_foreground.generation = 3;
+            focused_foreground.focused_window = Some(WindowId(1));
+            mux.update(cx, |mux, cx| {
+                mux.handle_message(
+                    HostId::LOCAL,
+                    ProtocolMessage::Event(zz_protocol::Event {
+                        sequence: 4,
+                        payload: EventPayload::Snapshot(focused_foreground),
+                    }),
+                    cx,
+                );
+            });
+            assert_eq!(&*fake.history_requests.borrow(), &[(PaneId(71), 488, 512)]);
         });
     }
 

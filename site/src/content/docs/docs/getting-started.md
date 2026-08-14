@@ -206,12 +206,12 @@ surface as your terminals. It takes the browser chords you already know:
 a terminal opens it in the nearest browser pane of the same window. See
 [Browser panes](/docs/browser/).
 
-### Two more pane types, not ready yet
+### Two more pane types, off by default
 
-**Agent panes** will run Claude Code or Codex over the Agent Client Protocol,
-with the conversation drawn natively. **Editor panes** will be a built-in text
-editor with vim mode. Both are upcoming work, compiled out of every release
-build, and neither appears in the picker until you turn it on yourself.
+**Agent panes** run Claude Code or Codex over the Agent Client Protocol, with
+the conversation drawn natively. **Editor panes** are a built-in text editor
+with vim mode. Both are compiled out of default and release builds, and
+neither appears in the picker until you turn them on yourself.
 
 Following along means building with the cargo feature:
 
@@ -226,7 +226,7 @@ see [Agent panes](/docs/agents/).
 
 ## Driving it from a shell
 
-The `zz` on your `PATH` is the same binary as the app. Any of the ~70 supported
+The `zz` on your `PATH` is the same binary as the app. Any of the 58 supported
 commands works from any shell against the running daemon:
 
 ```sh
@@ -481,7 +481,7 @@ costs roughly 600 MB on macOS and more on Linux. By default that lands in
 export CEF_PATH="$HOME/.cache/cef"
 ```
 
-The two upcoming pane types are behind cargo features and compiled out by
+The two extra pane types are behind cargo features and compiled out by
 default. To build with them anyway:
 
 ```sh

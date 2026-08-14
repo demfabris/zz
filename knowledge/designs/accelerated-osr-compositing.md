@@ -2,7 +2,7 @@
 type: Design Plan
 title: Accelerated OSR compositing & external begin frames
 description: The plan that replaced the CPU BGRA readback pipeline with CEF shared GPU textures and phase-locked Chromium to zz's frame clock via external BeginFrames; shipped on Linux, macOS, and Windows, with external BeginFrames still unsupported on Windows.
-status: In Progress
+status: Complete (Windows BeginFrames open)
 tags:
 - browser
 - osr

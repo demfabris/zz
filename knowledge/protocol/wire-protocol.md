@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v51)
+title: zz wire protocol (v52)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-08-12T00:00:00Z
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 51`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 52`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (51) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (52) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -83,13 +83,18 @@ fields in declaration order.
 | `SetColorScheme(TerminalColorScheme)` | light/dark | Client-driven appearance change |
 | `SetConfigOverrides { entries }` | ordered `Vec<(String, String)>` | Replace the daemon's complete appearance and mux override sets; an empty vector clears both |
 | `Input(InputMessage)` | see below | Keyboard / resize / view / split input |
-| `GuiResponse(GuiResponse)` | `Success { request_id, output }` / `Error { request_id, message }` | Interactive client → daemon answer to an `AgentCommand` or `BrowserCommand::Screenshot` request; both strings bounded to `MAX_GUI_TEXT_BYTES` (64 KiB) |
 | `Event(Event)` | `sequence: u64`, `payload: EventPayload` | Ordered daemon → client push |
+| `GuiResponse(GuiResponse)` | `Success { request_id, output }` / `Error { request_id, message }` | Interactive client → daemon answer to an `AgentCommand` or `BrowserCommand::Screenshot` request; both strings bounded to `MAX_GUI_TEXT_BYTES` (64 KiB) |
 | `Resync` | . | Client requests a fresh snapshot after a sequence gap |
 | `RequestFull { pane: PaneId }` | `pane` | Client asks for one full replacement viewport for a single pane after a dropped or unusable terminal frame |
 | `HistoryRequest { pane: PaneId, start: u32, count: u32 }` | scrollback window | Client asks for a chunk of a pane's scrollback; the daemon answers with `EventPayload::HistoryChunk` |
-| `PasteUploadBegin { upload_id: u64, pane: PaneId, extension: String, total_bytes: u32 }` | one image announced | Interactive client → daemon: start streaming a pasted image to the host `pane` runs on. `extension` is 1..=8 lowercase ASCII alphanumerics, `total_bytes` is 1..=`MAX_PASTE_UPLOAD_BYTES` (6 MiB) |
+| `PasteUploadBegin { upload_id, pane, purpose, extension, total_bytes }` | one image announced | Interactive client → daemon: start streaming a pasted image. `purpose` is `PastePath` (write the file on the daemon host and paste that path) or `RecordPastedImage` (keep encoded bytes until the terminal prints a numbered placeholder). `extension` is 1..=8 lowercase ASCII alphanumerics, `total_bytes` is 1..=`MAX_PASTE_UPLOAD_BYTES` (6 MiB) |
 | `PasteUploadChunk { upload_id: u64, bytes: Vec<u8> }` | one ordered slice | Body of the announced upload, at most `MAX_PASTE_UPLOAD_CHUNK_BYTES` (1 MiB) per message |
+| `FetchPastedImage { pane, number }` | one placeholder | Interactive client → daemon: fetch the encoded image the terminal numbered `number` in `pane` |
+| `PastedImageBegin { pane, number, format, total_bytes }` | one image announced | Daemon → client: start streaming that numbered image. `format` is `Png` / `Jpeg` / `Gif` / `Webp` |
+| `PastedImageChunk { pane, number, bytes }` | one ordered slice | Body of the announced fetch, at most `MAX_PASTE_UPLOAD_CHUNK_BYTES` (1 MiB) per message |
+| `PastedImageUnavailable { pane, number }` | one placeholder | Daemon → client: that numbered image is gone or could not be encoded |
+| `SetTerminalPreview { enabled: bool }` | one boolean | Interactive client toggles best-effort terminal preview streaming for every terminal in its attached session. Preview panes do not gain foreground geometry, history, or Kitty image delivery |
 
 `ClientKind`: `Interactive | Command`. `ClientMessageKind` (typed notifications introduced in v17):
 `Info | Success | Warning | Error`.
@@ -133,8 +138,10 @@ clears.
 `PrefixBindingsChanged { bindings }`,
 `Detached { session: SessionId, by: Option<String> }`, `HistoryChunk { pane, start: u32, total: u32,
 offset: u32, columns: u16, rows: Vec<Vec<PackedCell>>, dictionary: TerminalDictionary }`,
-`KittyImageBegin { pane, image_id, generation, width, height, total_bytes }`,
-`KittyImageChunk { pane, image_id, generation, bytes }`, and
+`KittyImageBegin { pane, image_id, generation, width, height, total_bytes }`
+(`total_bytes` ≤ `MAX_KITTY_IMAGE_BYTES`, 16 MiB),
+`KittyImageChunk { pane, image_id, generation, bytes }`
+(each chunk ≤ `MAX_KITTY_IMAGE_CHUNK_BYTES`, 1 MiB), and
 `KittyImagesRemoved { pane, image_ids }`.
 
 The three payloads `TerminalViewport`, `TerminalPatch`, and `CommandOutput { viewport: Some(..) }` are
@@ -199,20 +206,27 @@ bytes instead. It normalizes the clipboard image exactly as an Agent pane does (
 transcoded, long edge capped at 1568 px, 5 MiB ceiling), then sends one `PasteUploadBegin` followed by
 `PasteUploadChunk`s of at most 1 MiB, all under one writer lock so nothing interleaves.
 
+`PasteUploadBegin.purpose` chooses what happens after the bytes land:
+
+- `PastePath` writes `<runtime-dir>/paste/paste-<client>-<upload id>.<extension>` (directory `0700`,
+  file `0600` on unix) next to the daemon socket, keeps only the newest 8 files there, and pastes
+  that absolute path into the pane through the ordinary bracketed-paste path. Path-aware CLIs read
+  the file from there.
+- `RecordPastedImage` keeps the encoded bytes until the terminal prints a numbered placeholder
+  (`[Image #N]`). A later `FetchPastedImage { pane, number }` asks the daemon to stream that image
+  back as `PastedImageBegin` + `PastedImageChunk`s, or `PastedImageUnavailable` if it is gone.
+
 There is no End message and no offsets: the stream is reliable and ordered, so the daemon appends
 chunks until the accumulated length **equals** `total_bytes`, and that is what completes the upload.
-It then writes `<runtime-dir>/paste/paste-<client>-<upload id>.<extension>` (directory `0700`, file
-`0600` on unix) next to its own socket, keeps only the newest 8 files there, and pastes the absolute
-path into the pane through the ordinary bracketed-paste path. The pasted path *is* the success
-signal; every path-aware CLI reads the file from there.
 
 Bounds hold on encode and on decode, and again in the daemon: the extension alphabet is what keeps
 the name inside one path segment, uploads are capped at **2 concurrent per client** (a third is
 refused), a `Begin` reusing a live `upload_id` replaces it, a chunk for an unknown id is ignored as
 debris behind a dropped upload, and overflowing the declared total drops the upload. Every refusal
 and every IO failure comes back as an `EventPayload::ClientMessage` error toast to the uploading
-client; a disconnect drops that client's in-flight uploads. **Local panes are untouched** . they keep
-reading the local pasteboard themselves, with the `[Image #N]` snapshot machinery unchanged.
+client; a disconnect drops that client's in-flight uploads. A local pane that only needs a file path
+still reads the local pasteboard; the upload path is the remote `PastePath` case and the
+record/fetch round-trip for numbered placeholders.
 
 # Remote transport
 
@@ -224,9 +238,12 @@ and no client-opened tunnel: every frame is reliable and ordered, exactly as it 
 what makes the protocol location-transparent.
 
 The old QUIC transport was deleted on 2026-08-01 along with the per-frame unidirectional streams,
-the negotiated zstd envelope flag, and browser egress. `RequestFull { pane }` outlives it: a client
-that cannot apply a patch still repairs one pane at a time, and the daemon's frame supersession now
-happens entirely in the outbound mailbox (see [zz-daemon](/crates/zz-daemon.md)).
+the negotiated zstd envelope flag, and the mux `browser-egress` option / QUIC splice. Remote browser
+egress itself is current: a client-local `browser-egress` key in `zz/config` points CEF at
+`ssh -D` (`socks5-direct`). See [remote browser egress](/designs/remote-browser-egress.md).
+`RequestFull { pane }` outlives QUIC: a client that cannot apply a patch still repairs one pane at a
+time, and the daemon's frame supersession now happens entirely in the outbound mailbox (see
+[zz-daemon](/crates/zz-daemon.md)).
 
 When a forward dies, the client reconnects with a backoff of 1, 2, 4, 8, 16, then 30 seconds, and
 re-attaches the same session. Every reconnect timer is guarded by a connection generation counter, so
@@ -273,7 +290,7 @@ unbounded `#()` script off the wire.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 51`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 52`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
 - **Any change that affects an already shipped encoding** (new enum variants, reordered fields,
@@ -290,9 +307,10 @@ unbounded `#()` script off the wire.
   a frame is encoded any more.
 - The **flags byte is entirely reserved** and every nonzero value is rejected, so no silent
   capability drift is possible.
-- Bounded decoders reject oversized input before allocating: `ClientHello.device_name` is capped at
-  256 bytes, `capabilities` at 64 entries of ≤256 bytes during deserialization, and lengths are
-  validated against `MAX_FRAME_BYTES`.
+- Bounded decoders reject oversized input: `ClientHello.capabilities` uses a visitor that refuses
+  each entry in `visit_str` before `to_owned`. `device_name`, status-line halves, and several other
+  strings deserialize first and then reject on `len() > limit`. Frame lengths are validated against
+  `MAX_FRAME_BYTES` before the payload buffer grows.
   `SetConfigOverrides` is additionally validated at no more than 1,024 single-line pairs, with
   nonempty keys of at most 128 bytes and values of at most 64 KiB. Each mux-option payload must be a
   complete 11-key map with values of at most 64 KiB; bounded value deserialization rejects an
@@ -311,24 +329,25 @@ unbounded `#()` script off the wire.
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 44, kind: Interactive, device_name: None, capabilities: [],
-color_scheme: Some(Dark) }` is 15 bytes on the wire: an 8-byte envelope over a 7-byte postcard
-payload.
+`ClientHello { protocol_version: 52, kind: Interactive, device_name: None, capabilities: [],
+color_scheme: Some(Dark), origin: None }` is 16 bytes on the wire: an 8-byte envelope over an
+8-byte postcard payload.
 
 ```text
-byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14
-      0b 00 00 00  00     00      2c 00         00 2c 00 00 00 01 01
+byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15
+      0c 00 00 00  00     00      34 00         00 34 00 00 00 01 01 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 11  Control        (= 44)
+      length = 12  Control        (= 52)
 ```
 
-- **length `11`** = `ENVELOPE_BYTES` (4) + payload (7); it counts the four envelope bytes, not itself.
-- **payload** `00 2c 00 00 00 01 01`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x2c` (= 44), `kind` variant `0` (`Interactive`), `device_name`
+- **length `12`** = `ENVELOPE_BYTES` (4) + payload (8); it counts the four envelope bytes, not itself.
+- **payload** `00 34 00 00 00 01 01 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x34` (= 52), `kind` variant `0` (`Interactive`), `device_name`
   as the `Option::None` tag `00`, `capabilities` as the sequence length `00`, `Option::Some` tag
-  `01`, then `TerminalColorScheme` variant `1` (`Dark`). Postcard writes multi-byte integers as
-  LEB128 varints, so the version is one byte here and two in the envelope, which is fixed-width LE.
-  A real interactive hello carries the device's short hostname and still no capabilities.
+  `01`, `TerminalColorScheme` variant `1` (`Dark`), then `origin` as `Option::None` (`00`). Postcard
+  writes multi-byte integers as LEB128 varints, so the version is one byte here and two in the
+  envelope, which is fixed-width LE. A real interactive hello carries the device's short hostname
+  and still no capabilities.
 
 The round-trip test asserts `&frame[6..8] == PROTOCOL_VERSION.to_le_bytes()` and that lane byte 4 is
 `Lane::Control`.
@@ -348,19 +367,19 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 `ProtocolError` variants: `Truncated`, `FrameTooLarge(usize)`, `LengthMismatch`,
 `UnsupportedLane(u8)`, `UnsupportedFlags(u8)`,
 `VersionMismatch { expected, received }`, `Encode/Decode(postcard::Error)`, `InvalidTerminal`,
-`InvalidAppearance`, `InvalidServerHello`, `InvalidConfigOverrides`, `InvalidGuiRequest`,
-`InvalidPasteUpload`, `Io`.
+`InvalidAppearance`, `InvalidServerHello`, `InvalidClientHello`, `InvalidConfigOverrides`,
+`InvalidGuiRequest`, `InvalidPasteUpload`, `Io`.
 
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 44, kind: Interactive, device_name: Some("laptop"),
-                       capabilities: [], color_scheme: Some(Dark) }
-server → ServerHello { protocol_version: 44, server_id, client_id: c11,
+client → ClientHello { protocol_version: 52, kind: Interactive, device_name: Some("laptop"),
+                       capabilities: [], color_scheme: Some(Dark), origin: None }
+server → ServerHello { protocol_version: 52, server_id, client_id: c11,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],
-                       appearance, appearance_provenance, mux_options, status }
+                       appearance, appearance_provenance, mux_options, status, prefix_bindings }
 client → SetConfigOverrides { entries: [("theme", "Catppuccin Mocha"),
                                         ("font-size", "13"),
                                         ("prefix", "C-a"), ("mode-keys", "vi"), ...] }

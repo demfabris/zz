@@ -80,6 +80,35 @@ pub fn pane_surface(
                 })
                 .children(overlays),
         )
+        .children(pane_border_shadow(chrome, cx))
+}
+
+fn pane_border_shadow(chrome: PaneChrome, cx: &App) -> Option<gpui::Div> {
+    let width = chrome.border_width.max(Pixels::ZERO);
+    if width <= Pixels::ZERO || !cx.theme().shadow {
+        return None;
+    }
+    let scrim = cx.theme().scrim;
+    Some(
+        div()
+            .absolute()
+            .inset_0()
+            .rounded_tl(chrome.radii.top_left)
+            .rounded_tr(chrome.radii.top_right)
+            .rounded_bl(chrome.radii.bottom_left)
+            .rounded_br(chrome.radii.bottom_right)
+            .shadow(pane_border_shadow_style(width, scrim)),
+    )
+}
+
+fn pane_border_shadow_style(width: Pixels, scrim: Hsla) -> Vec<BoxShadow> {
+    vec![BoxShadow {
+        color: scrim.divide(0.12),
+        offset: point(Pixels::ZERO, Pixels::ZERO),
+        blur_radius: Pixels::ZERO,
+        spread_radius: width,
+        inset: true,
+    }]
 }
 
 fn pane_corner_notches(chrome: PaneChrome) -> Option<gpui::Div> {
@@ -224,12 +253,38 @@ pub enum PaneSplitAxis {
     Vertical,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaneSplitSide {
+    First,
+    Second,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PaneSplitHighlight {
+    pub start: f32,
+    pub length: f32,
+    pub side: PaneSplitSide,
+    pub color: Hsla,
+}
+
+impl PaneSplitHighlight {
+    #[must_use]
+    pub const fn new(start: f32, length: f32, side: PaneSplitSide, color: Hsla) -> Self {
+        Self {
+            start,
+            length,
+            side,
+            color,
+        }
+    }
+}
+
 /// The space a split keeps between its two children: the configured gap, or a
 /// 1px hairline slot when there is none. Anything reconstructing pane boxes
 /// from slot geometry must use this too.
 #[must_use]
-pub fn pane_split_slot(gap: Pixels) -> Pixels {
-    px(f32::from(gap).max(PANE_SPLIT_DIVIDER_THICKNESS))
+pub fn pane_split_slot(gap: Pixels, scale: f32) -> Pixels {
+    px(f32::from(gap).max(PANE_SPLIT_DIVIDER_THICKNESS * scale.max(0.1)))
 }
 
 /// Draggable hit target for a pane split. The caller attaches the drag
@@ -239,9 +294,12 @@ pub fn pane_split_hit_target(
     axis: PaneSplitAxis,
     ratio: f32,
     gap: Pixels,
+    scale: f32,
 ) -> Stateful<gpui::Div> {
-    let slot = f32::from(pane_split_slot(gap));
-    let offset = -(PANE_SPLIT_HIT_THICKNESS - slot) / 2.0;
+    let scale = scale.max(0.1);
+    let slot = f32::from(pane_split_slot(gap, scale));
+    let hit_thickness = PANE_SPLIT_HIT_THICKNESS * scale;
+    let offset = -(hit_thickness - slot) / 2.0;
     div()
         .id(id)
         .absolute()
@@ -254,14 +312,14 @@ pub fn pane_split_hit_target(
             element
                 .left(relative(ratio))
                 .ml(px(offset))
-                .w(px(PANE_SPLIT_HIT_THICKNESS))
+                .w(px(hit_thickness))
                 .h_full()
         })
         .when(axis == PaneSplitAxis::Vertical, |element| {
             element
                 .top(relative(ratio))
                 .mt(px(offset))
-                .h(px(PANE_SPLIT_HIT_THICKNESS))
+                .h(px(hit_thickness))
                 .w_full()
         })
 }
@@ -276,13 +334,17 @@ pub fn pane_split_surface(
     resizing: bool,
     gaps: bool,
     gap: Pixels,
+    scale: f32,
+    highlight: Option<PaneSplitHighlight>,
     first_content: impl IntoElement,
     second_content: impl IntoElement,
     hit_target: impl IntoElement,
     gap_background: Hsla,
     cx: &App,
 ) -> Stateful<gpui::Div> {
-    let slot = f32::from(pane_split_slot(gap));
+    let scale = scale.max(0.1);
+    let divider_thickness = PANE_SPLIT_DIVIDER_THICKNESS * scale;
+    let slot = f32::from(pane_split_slot(gap, scale));
     let first = div()
         .flex()
         .flex_none()
@@ -307,23 +369,57 @@ pub fn pane_split_surface(
             let hairline = div()
                 .absolute()
                 .bg(if resizing {
-                    cx.theme().foreground
+                    cx.theme().foreground.wash()
                 } else {
                     cx.theme().border
                 })
                 .when(axis == PaneSplitAxis::Horizontal, |line| {
                     line.left(relative(0.5))
-                        .ml(px(-PANE_SPLIT_DIVIDER_THICKNESS / 2.0))
-                        .w(px(PANE_SPLIT_DIVIDER_THICKNESS))
+                        .ml(px(-divider_thickness / 2.0))
+                        .w(px(divider_thickness))
                         .h_full()
                 })
                 .when(axis == PaneSplitAxis::Vertical, |line| {
                     line.top(relative(0.5))
-                        .mt(px(-PANE_SPLIT_DIVIDER_THICKNESS / 2.0))
-                        .h(px(PANE_SPLIT_DIVIDER_THICKNESS))
+                        .mt(px(-divider_thickness / 2.0))
+                        .h(px(divider_thickness))
                         .w_full()
                 });
-            divider.child(hairline)
+            divider.child(hairline).when_some(
+                highlight.filter(|_| !resizing),
+                |divider, highlight| {
+                    let half = divider_thickness / 2.0;
+                    divider.child(
+                        div()
+                            .absolute()
+                            .bg(highlight.color)
+                            .when(axis == PaneSplitAxis::Horizontal, |segment| {
+                                segment
+                                    .top(relative(highlight.start))
+                                    .h(relative(highlight.length))
+                                    .w(px(half))
+                                    .when(highlight.side == PaneSplitSide::First, |segment| {
+                                        segment.left(relative(0.5)).ml(px(-divider_thickness / 2.0))
+                                    })
+                                    .when(highlight.side == PaneSplitSide::Second, |segment| {
+                                        segment.left(relative(0.5))
+                                    })
+                            })
+                            .when(axis == PaneSplitAxis::Vertical, |segment| {
+                                segment
+                                    .left(relative(highlight.start))
+                                    .w(relative(highlight.length))
+                                    .h(px(half))
+                                    .when(highlight.side == PaneSplitSide::First, |segment| {
+                                        segment.top(relative(0.5)).mt(px(-divider_thickness / 2.0))
+                                    })
+                                    .when(highlight.side == PaneSplitSide::Second, |segment| {
+                                        segment.top(relative(0.5))
+                                    })
+                            }),
+                    )
+                },
+            )
         });
 
     div()
@@ -556,4 +652,21 @@ pub fn terminal_link_popup(uri: impl IntoElement, cx: &App) -> Tag {
         .text_color(cx.theme().foreground)
         .text_size(crate::rems_from_px(11.0))
         .child(uri)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pane_border_shadow_is_an_unblurred_inset() {
+        let shadow = pane_border_shadow_style(px(3.0), gpui::hsla(0.0, 0.0, 0.0, 0.2));
+        let shadow = &shadow[0];
+
+        assert!(shadow.inset);
+        assert_eq!(shadow.spread_radius, px(3.0));
+        assert_eq!(shadow.blur_radius, Pixels::ZERO);
+        assert_eq!(shadow.offset, point(Pixels::ZERO, Pixels::ZERO));
+        assert_eq!(shadow.color.a, 0.12);
+    }
 }

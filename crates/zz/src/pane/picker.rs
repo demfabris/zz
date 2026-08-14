@@ -282,7 +282,7 @@ impl Render for PanePickerView {
                 .items_center()
                 .justify_center()
                 .overflow_hidden()
-                .bg(crate::theme::chrome_background(cx))
+                .bg(crate::theme::app_pane_background(cx))
                 .text_color(cx.theme().foreground)
                 .px(px(12.0))
                 .child(

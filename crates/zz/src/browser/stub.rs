@@ -116,6 +116,19 @@ pub(crate) mod view {
         ) {
         }
 
+        #[cfg(test)]
+        pub(crate) const fn viewport_for_test(&self) -> zz_browser::Viewport {
+            zz_browser::Viewport {
+                width: 800,
+                height: 500,
+                scale_factor: 1.0,
+                window_zoom: 1.0,
+                screen_x: 0,
+                screen_y: 0,
+                visible: false,
+            }
+        }
+
         pub(crate) fn apply_command(&mut self, _command: BrowserCommand, _cx: &mut Context<Self>) {}
 
         pub(crate) fn screenshot(
@@ -145,7 +158,7 @@ pub(crate) mod view {
                 .flex()
                 .items_center()
                 .justify_center()
-                .bg(cx.theme().background)
+                .bg(crate::theme::app_pane_background(cx))
                 .text_color(cx.theme().foreground.muted())
                 .child("Browser panes are desktop-only")
         }

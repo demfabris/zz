@@ -479,6 +479,7 @@ pub(crate) struct TerminalView {
     swallowed_overlay_key: Option<KeyCode>,
     forwarded_keys: HashSet<String>,
     last_grid_size: Option<GridSize>,
+    geometry_frozen: bool,
     hit_grid: Option<HitGrid>,
     pointer_position: Option<Point<Pixels>>,
     pointer_global: Option<Point<Pixels>>,
@@ -864,6 +865,7 @@ impl TerminalView {
             swallowed_overlay_key: None,
             forwarded_keys: HashSet::new(),
             last_grid_size: None,
+            geometry_frozen: false,
             hit_grid: None,
             pointer_position: None,
             pointer_global: None,
@@ -1103,6 +1105,13 @@ impl TerminalView {
         self.focus_handle.clone()
     }
 
+    pub(crate) fn set_geometry_frozen(&mut self, frozen: bool, cx: &mut Context<Self>) {
+        if self.geometry_frozen != frozen {
+            self.geometry_frozen = frozen;
+            cx.notify();
+        }
+    }
+
     pub(crate) const fn is_command_output(&self) -> bool {
         self.command_output
     }
@@ -1121,7 +1130,7 @@ impl TerminalView {
     ) {
         let started = diagnostics::timer(DIAGNOSTIC_TARGET);
         let previous = self.last_grid_size;
-        if self.last_grid_size != Some(grid_size) {
+        if !self.geometry_frozen && self.last_grid_size != Some(grid_size) {
             self.mux.read(cx).send_input(if self.command_output {
                 InputMessage::ResizeCommandOutput {
                     columns: grid_size.columns,

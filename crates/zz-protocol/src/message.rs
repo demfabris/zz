@@ -14,8 +14,8 @@ use crate::{ClientId, MuxSnapshot, PaneId, SessionId, SplitId, WindowId};
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-/// v51 separates browser-surface input from tmux key-table input.
-pub const PROTOCOL_VERSION: u16 = 51;
+/// v52 adds bounded terminal preview streaming for the window overview.
+pub const PROTOCOL_VERSION: u16 = 52;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
@@ -1219,6 +1219,9 @@ pub enum ProtocolMessage {
     PastedImageUnavailable {
         pane: PaneId,
         number: u32,
+    },
+    SetTerminalPreview {
+        enabled: bool,
     },
 }
 

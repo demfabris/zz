@@ -4,7 +4,7 @@ title: zz-daemon crate
 description: The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions, and the fan-out engine that streams coalesced terminal frames to attached and short-lived clients over a socket or named pipe.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [crate, daemon, ipc, fanout, transport]
-timestamp: 2026-08-01T00:00:00Z
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
@@ -226,7 +226,7 @@ writer thread (`recv()` priority: `reliable` → `command_output` → `terminals
 |------------------------|---------|-----------|
 | `reliable: VecDeque<Vec<u8>>` | `ServerHello`, command responses, snapshots, non-terminal events | Never dropped; bounded at `MAX_RELIABLE_MESSAGES = 256` / `MAX_OUTBOUND_BYTES = 72 MiB` |
 | `command_output: Option<Vec<u8>>` | Native command-output viewport | One coalesced slot; newest replaces stale |
-| `terminals: BTreeMap<PaneId, PendingTerminal>` | Per-pane `TerminalViewport`/`TerminalPatch` frames | **One pending frame per pane**; newest replaces stale under backpressure |
+| `terminals: BTreeMap<PaneId, PendingTerminal>` | Per-pane `TerminalViewport`/`TerminalPatch` frames | **One pending frame per pane**; foreground replaces stale work, while preview collisions schedule one bounded latest-state refresh |
 
 A command-output watcher publishes in two phases: it validates the current terminal and captures the
 subscriber under `ServerState`, encodes the potentially megabyte-scale viewport after releasing that global
@@ -237,22 +237,41 @@ eligible only for buffer recycling; it cannot reappear after the newer state tra
 A `zz-pane-{n}` watcher walks the pane's per-view viewports (`TerminalViewId(client.0)`, one per
 attached client), diffs each against that view's previous viewport, and produces either a full
 `EventPayload::TerminalViewport` or a smaller `EventPayload::TerminalPatch`. It calls
-`publish_terminal_for_pane` per view, which delivers **only to a client attached to the session that
-owns the pane and only while the pane is visible to that client** (`visible_terminals`, honoring its
-focused window and zoom). `enqueue_terminal` validates that a patch's base generation matches the
-last delivered
-generation (`delivered_terminals`); a mismatch returns `NeedsFull` and the patch is promoted to a
-full viewport via `replace_terminal`. Completed frame buffers are recycled (bounded pool:
-`MAX_RECYCLED_FRAME_BUFFERS = 8`, `MAX_RECYCLED_FRAME_CAPACITY = 8 MiB`). Overflow on any lane closes
-the mailbox rather than growing unboundedly, applying backpressure up to the terminal worker.
+`publish_terminal_for_pane` per view and checks one cached `streamed_terminals` entry. Foreground
+entries come from `visible_terminals`, which still honors the client's focused window and zoom.
+An interactive client can temporarily add every other terminal in its attached session as a
+`Preview` entry with `SetTerminalPreview { enabled: true }`. The default path remains foreground
+only.
 
-Layout changes call `refresh_terminal_visibility`, which `cancel_terminal`s panes that left the
-visible set and seeds a fresh full viewport for panes that became visible.
+Foreground delivery retains the existing latest-wins repair contract. `enqueue_terminal` validates
+that a patch's base generation matches `delivered_terminals`; a mismatch promotes the update to a
+full viewport through `replace_terminal`. Preview delivery keeps at most one pending frame per pane,
+reserves terminal slots for every foreground pane, and caps the complete preview share of the 72 MiB
+mailbox at about 8 MiB so one maximum-size foreground frame still fits. Exact frame-length preflight
+drops an over-budget preview before encoding.
+
+A collision or temporary admission failure records the pane in a 128-entry refresh set. Repeated
+updates reuse that marker without serializing another viewport or adding queued bytes. The writer
+takes at most one marker with each frame and samples one current full viewport after the write
+succeeds. A quiet final update such as `Ctrl+L` reaches the client after the older pending
+frame drains. Reliable, command-output, Kitty, pasted-image, and foreground terminal traffic move
+shed previews into the same refresh path before claiming their mailbox space. Completed frame
+buffers use the bounded recycling pool (`MAX_RECYCLED_FRAME_BUFFERS = 8`,
+`MAX_RECYCLED_FRAME_CAPACITY = 8 MiB`).
+
+Layout changes call `refresh_terminal_visibility`, which reconciles both maps. Suspending a preview
+removes its pending terminal frame and generation without clearing its delivered Kitty ledger, so
+reopening the overview does not resend image pixels the client already owns. Preview panes never
+receive Kitty hydration, never enter `visible_terminals`, never own PTY geometry, and never receive
+history chunks. The daemon also rejects `ResizeTerminal` from a pane classified as `Preview`, so a
+scaled overview cannot poison the pane's saved rows and columns without changing the legacy ability
+to record geometry for an attached hidden pane before selecting it.
 
 A client that misses a frame asks for repair rather than waiting: `ProtocolMessage::RequestFull`
-runs `send_full`, which re-sends the pane's current viewport when that pane is still visible to the
-requester, and `ProtocolMessage::HistoryRequest` runs `send_history`, which pulls a clamped
-scrollback range off the terminal actor and answers with one self-contained `HistoryChunk`.
+runs `send_full`, which re-sends a foreground or subscribed preview viewport through its matching
+delivery policy. `ProtocolMessage::HistoryRequest` runs `send_history` only for a foreground pane,
+pulling a clamped scrollback range off the terminal actor and answering with one self-contained
+`HistoryChunk`.
 
 There is one writer path: the writer thread streams every frame onto the one ordered stream, whether
 that stream is a unix socket, a named pipe, or the remote end of an `ssh -L` forward. Newest-wins is

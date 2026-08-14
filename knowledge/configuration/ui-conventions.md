@@ -4,7 +4,7 @@ title: UI design conventions
 description: The component, palette, and styling rules that keep zz application chrome consistent and theme-aware.
 resource: crates/zz/src/command/palette.rs
 tags: [ui, gpui, zz-ui, theme, chrome, clippy]
-timestamp: 2026-07-31T00:00:00Z
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
@@ -163,9 +163,9 @@ instead, with “Preset” shown when an otherwise-unset root inherits from the 
 `ThemeColor` is seven roots and every other color is derived through `Colorize` at paint time, so
 overriding a root needs no parallel token table kept in step. Views read
 `cx.theme()` and never receive a copied palette or local color literals.
-Translucent base colors are composited exactly once per visible surface: pane-owned workspace
-backgrounds do not sit over another tinted workspace layer, and the sidebar titlebar inherits the
-sidebar shell tint instead of repainting it.
+Chrome tint is composited once per visible surface, and the sidebar titlebar inherits the sidebar
+shell tint instead of repainting it. App-owned pane roots use `theme::app_pane_background` and stay
+opaque. The terminal surface owns pane transparency through Ghostty `background-opacity`.
 
 # Related
 

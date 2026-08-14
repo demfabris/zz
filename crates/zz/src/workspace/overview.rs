@@ -1,31 +1,29 @@
 use std::time::Duration;
 
-use gpui::{
-    Animation, AnimationExt as _, App, Bounds, Context, EventEmitter, FocusHandle, Focusable,
-    IntoElement, KeyBinding, KeyDownEvent, MouseButton, Pixels, Render, Size, Window, div,
-    ease_out_quint, point, prelude::*, px, relative, size,
-};
-use zz_protocol::{PaneKindSnapshot, WindowId, WindowSnapshot};
-use zz_ui::{
-    ActiveTheme as _, Colorize as _, Icon, IconName, Sizable as _, StyledExt as _,
-    command::palette_shortcut_hint,
-};
+use gpui::{App, Bounds, KeyBinding, MIN_WINDOW_ZOOM, Pixels, Size, point, px, size};
+use zz_protocol::PaneId;
 
-use crate::{
-    mux::{client::MuxClient, nav::select_window_command},
-    pane::layout::pane_rects,
-};
+use crate::mux::client::MuxClient;
 
 use super::sidebar::WorkspaceRoute;
 
-const OVERVIEW_KEY_CONTEXT: &str = "WindowOverview";
-const OVERVIEW_OPEN: Duration = Duration::from_millis(260);
-const OVERVIEW_CLOSE: Duration = Duration::from_millis(210);
-const CARD_ASPECT_RATIO: f32 = 1.6;
-const SIDE_PADDING: f32 = 32.0;
-const TOP_PADDING: f32 = 76.0;
-const BOTTOM_PADDING: f32 = 54.0;
-const CARD_GAP: f32 = 18.0;
+const SIDE_PADDING: f32 = 20.0;
+const TOP_PADDING: f32 = 48.0;
+const BOTTOM_PADDING: f32 = 34.0;
+const CONTENT_ZOOM_BOOST: f32 = 1.2;
+
+pub(crate) const OVERVIEW_OPEN_DURATION: Duration = Duration::from_millis(420);
+pub(crate) const OVERVIEW_CLOSE_DURATION: Duration = Duration::from_millis(300);
+pub(crate) const OVERVIEW_NORMAL_KEY_CONTEXT: &str = "WindowOverviewNormal";
+pub(crate) const OVERVIEW_INSERT_KEY_CONTEXT: &str = "WindowOverviewInsert";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OverviewDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
 
 gpui::actions!(zz, [ToggleWindowOverview]);
 
@@ -51,573 +49,54 @@ pub(crate) fn key_bindings() -> [KeyBinding; 1] {
     )]
 }
 
-pub(crate) struct DismissWindowOverview;
-
-#[derive(Clone, Copy)]
-struct Closing {
-    focus: WindowId,
-}
-
-pub(crate) struct WindowOverview {
-    mux: gpui::Entity<MuxClient>,
-    focus_handle: FocusHandle,
-    selected: Option<WindowId>,
-    closing: Option<Closing>,
-    animation_revision: u64,
-}
-
-impl WindowOverview {
-    pub(crate) fn new(mux: gpui::Entity<MuxClient>, cx: &mut Context<Self>) -> Self {
-        cx.observe(&mux, |_, _, cx| cx.notify()).detach();
-        let selected = focused_window(mux.read(cx));
-        Self {
-            mux,
-            focus_handle: cx.focus_handle(),
-            selected,
-            closing: None,
-            animation_revision: 0,
-        }
-    }
-
-    pub(crate) fn focus(&self) -> &FocusHandle {
-        &self.focus_handle
-    }
-
-    pub(crate) fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.begin_close(None, window, cx);
-    }
-
-    fn activate(&mut self, target: WindowId, window: &mut Window, cx: &mut Context<Self>) {
-        self.begin_close(Some(target), window, cx);
-    }
-
-    fn begin_close(
-        &mut self,
-        target: Option<WindowId>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.closing.is_some() {
-            return;
-        }
-        let focus = target
-            .or_else(|| focused_window(self.mux.read(cx)))
-            .or(self.selected);
-        let Some(focus) = focus else {
-            cx.emit(DismissWindowOverview);
-            return;
-        };
-        self.closing = Some(Closing { focus });
-        self.animation_revision = self.animation_revision.wrapping_add(1);
-        if let Some(target) = target {
-            self.mux.read(cx).execute(select_window_command(target));
-        }
-        cx.notify();
-        let duration = if cx.reduce_motion() {
-            Duration::ZERO
-        } else {
-            OVERVIEW_CLOSE
-        };
-        cx.spawn_in(window, async move |view, cx| {
-            cx.background_executor().timer(duration).await;
-            let _ = view.update_in(cx, |_, _, cx| cx.emit(DismissWindowOverview));
-        })
-        .detach();
-    }
-
-    fn select(&mut self, selected: WindowId, cx: &mut Context<Self>) {
-        if self.closing.is_none() && self.selected != Some(selected) {
-            self.selected = Some(selected);
-            cx.notify();
-        }
-    }
-
-    fn move_selection(&mut self, direction: OverviewMove, window: &Window, cx: &mut Context<Self>) {
-        if self.closing.is_some() {
-            return;
-        }
-        let mux = self.mux.read(cx);
-        let snapshot = mux.snapshot();
-        let Some(attached) = mux.attached_session() else {
-            return;
-        };
-        let Some(session) = snapshot
-            .sessions
-            .iter()
-            .find(|session| session.id == attached)
-        else {
-            return;
-        };
-        let count = session.windows.len();
-        if count == 0 {
-            return;
-        }
-        let grid = OverviewGrid::new(window.viewport_size(), count);
-        let current = self
-            .selected
-            .and_then(|selected| {
-                session
-                    .windows
-                    .iter()
-                    .position(|candidate| candidate.id == selected)
-            })
-            .unwrap_or(0);
-        let next = moved_index(current, count, grid.columns, direction);
-        self.selected = session.windows.get(next).map(|window| window.id);
-        cx.notify();
-    }
-
-    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        match event.keystroke.key.as_str() {
-            "escape" | "q" => self.dismiss(window, cx),
-            "enter" | "space" => {
-                if let Some(selected) = self.selected {
-                    self.activate(selected, window, cx);
-                }
-            }
-            "left" | "h" => self.move_selection(OverviewMove::Left, window, cx),
-            "right" | "l" => self.move_selection(OverviewMove::Right, window, cx),
-            "up" | "k" => self.move_selection(OverviewMove::Up, window, cx),
-            "down" | "j" => self.move_selection(OverviewMove::Down, window, cx),
-            "home" => self.move_selection(OverviewMove::First, window, cx),
-            "end" => self.move_selection(OverviewMove::Last, window, cx),
-            "tab" if event.keystroke.modifiers.shift => {
-                self.move_selection(OverviewMove::Previous, window, cx);
-            }
-            "tab" => self.move_selection(OverviewMove::Next, window, cx),
-            _ => {}
-        }
-        cx.stop_propagation();
-    }
-
-    fn render_window_card(
-        &self,
-        mux_window: &WindowSnapshot,
-        target: Bounds<Pixels>,
-        focus_bounds: Bounds<Pixels>,
-        index: usize,
-        current: bool,
-        selected: bool,
-        closing: Option<Closing>,
-        cx: &mut Context<Self>,
-    ) -> gpui::AnyElement {
-        let id = mux_window.id;
-        let pane_count = mux_window.panes.len();
-        let title = window_label(mux_window);
-        let panes = pane_rects(&mux_window.layout)
-            .into_iter()
-            .filter_map(|(pane, rect)| {
-                let snapshot = mux_window.panes.get(&pane)?;
-                let active = pane == mux_window.active_pane;
-                let fill = if active {
-                    cx.theme().background.raised(3)
-                } else {
-                    cx.theme().background.raised(2)
-                };
-                Some(
-                    div()
-                        .absolute()
-                        .left(relative(rect.left()))
-                        .top(relative(rect.top()))
-                        .w(relative(rect.width()))
-                        .h(relative(rect.height()))
-                        .p(px(2.0))
-                        .child(
-                            div()
-                                .id(("window-overview-pane", pane.0))
-                                .flex()
-                                .size_full()
-                                .min_w_0()
-                                .items_center()
-                                .gap_1()
-                                .overflow_hidden()
-                                .rounded(cx.theme().radius)
-                                .border_1()
-                                .border_color(if active {
-                                    cx.theme().foreground.muted()
-                                } else {
-                                    cx.theme().border.subtle()
-                                })
-                                .bg(fill)
-                                .px(px(6.0))
-                                .text_size(zz_ui::rems_from_px(10.0))
-                                .text_color(if active {
-                                    cx.theme().foreground
-                                } else {
-                                    cx.theme().foreground.muted()
-                                })
-                                .child(Icon::new(pane_kind_icon(&snapshot.kind)).xsmall())
-                                .child(
-                                    div()
-                                        .min_w_0()
-                                        .truncate()
-                                        .child(crate::mux::nav::pane_label(snapshot)),
-                                ),
-                        ),
-                )
-            })
-            .collect::<Vec<_>>();
-        let card = div()
-            .id(("window-overview-card", id.0))
-            .absolute()
-            .flex()
-            .flex_col()
-            .overflow_hidden()
-            .cursor_pointer()
-            .rounded(cx.theme().radius)
-            .border_1()
-            .border_color(if selected {
-                cx.theme().foreground
-            } else {
-                cx.theme().border
-            })
-            .bg(cx.theme().background.raised(1).opaque())
-            .shadow_lg()
-            .hover(|card| card.bg(cx.theme().background.raised(2).opaque()))
-            .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .h(px(38.0))
-                    .min_w_0()
-                    .items_center()
-                    .gap_2()
-                    .px(px(12.0))
-                    .border_b_1()
-                    .border_color(cx.theme().border.subtle())
-                    .child(Icon::new(IconName::AppWindow).small())
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .font_semibold()
-                            .child(title),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_xs()
-                            .text_color(cx.theme().foreground.muted())
-                            .child(format!(
-                                "{pane_count} {}",
-                                if pane_count == 1 { "pane" } else { "panes" }
-                            )),
-                    )
-                    .when(current, |header| {
-                        header.child(
-                            div()
-                                .flex_none()
-                                .rounded_full()
-                                .bg(cx.theme().foreground.wash())
-                                .px(px(6.0))
-                                .py(px(2.0))
-                                .text_size(zz_ui::rems_from_px(9.0))
-                                .child("current"),
-                        )
-                    }),
-            )
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_h_0()
-                    .bg(cx.theme().background)
-                    .children(panes),
-            )
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_hover(cx.listener(move |view, hovered, _, cx| {
-                if *hovered {
-                    view.select(id, cx);
-                }
-            }))
-            .on_click(cx.listener(move |view, _, window, cx| {
-                view.activate(id, window, cx);
-                cx.stop_propagation();
-            }));
-        let opening_start = if current {
-            focus_bounds
-        } else {
-            stacked_bounds(focus_bounds, index)
-        };
-        let revision = self.animation_revision;
-        let animation = Animation::new(if closing.is_some() {
-            OVERVIEW_CLOSE
-        } else {
-            OVERVIEW_OPEN
-        })
-        .with_easing(ease_out_quint());
-        card.with_animation(
-            format!("window-overview-card-{}-{revision}", id.0),
-            animation,
-            move |card, delta| {
-                let (bounds, opacity) = if let Some(closing) = closing {
-                    if id == closing.focus {
-                        (lerp_bounds(target, focus_bounds, delta), 1.0)
-                    } else {
-                        (
-                            lerp_bounds(target, stacked_bounds(focus_bounds, index), delta),
-                            1.0 - delta,
-                        )
-                    }
-                } else {
-                    (
-                        lerp_bounds(opening_start, target, delta),
-                        if current { 1.0 } else { delta },
-                    )
-                };
-                card.left(bounds.origin.x)
-                    .top(bounds.origin.y)
-                    .w(bounds.size.width)
-                    .h(bounds.size.height)
-                    .opacity(opacity)
-            },
-        )
-        .into_any_element()
-    }
-}
-
-impl EventEmitter<DismissWindowOverview> for WindowOverview {}
-
-impl Focusable for WindowOverview {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus_handle.clone()
-    }
-}
-
-impl Render for WindowOverview {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mux = self.mux.read(cx);
-        let snapshot = mux.snapshot();
-        let attached = mux.attached_session();
-        let session = attached.and_then(|attached| {
-            snapshot
-                .sessions
-                .iter()
-                .find(|session| session.id == attached)
-        });
-        let active = session.map(|session| snapshot.focused_window_for(session));
-        let windows = session.map_or(&[][..], |session| session.windows.as_slice());
-        if self
-            .selected
-            .is_none_or(|selected| !windows.iter().any(|window| window.id == selected))
-        {
-            self.selected = active.or_else(|| windows.first().map(|window| window.id));
-        }
-        let grid = OverviewGrid::new(window.viewport_size(), windows.len());
-        let closing = self.closing;
-        let cards = windows
-            .iter()
-            .enumerate()
-            .map(|(index, mux_window)| {
-                self.render_window_card(
-                    mux_window,
-                    grid.cards[index],
-                    grid.focus,
-                    index,
-                    active == Some(mux_window.id),
-                    self.selected == Some(mux_window.id),
-                    closing,
-                    cx,
-                )
-            })
-            .collect::<Vec<_>>();
-        let session_name = session.map_or("Windows", |session| session.name.as_str());
-        let count = windows.len();
-        let revision = self.animation_revision;
-        let closing_now = closing.is_some();
-        let chrome_animation = Animation::new(if closing_now {
-            OVERVIEW_CLOSE
-        } else {
-            OVERVIEW_OPEN
-        })
-        .with_easing(ease_out_quint());
-        let backdrop = div()
-            .absolute()
-            .inset_0()
-            .bg(cx.theme().background.floating())
-            .with_animation(
-                format!("window-overview-backdrop-{revision}"),
-                chrome_animation.clone(),
-                move |backdrop, delta| {
-                    backdrop.opacity(if closing_now { 1.0 - delta } else { delta })
-                },
-            );
-        let header = div()
-            .absolute()
-            .top(px(22.0))
-            .left(px(SIDE_PADDING))
-            .right(px(SIDE_PADDING))
-            .flex()
-            .items_end()
-            .justify_between()
-            .child(div().text_lg().font_semibold().child("Windows"))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().foreground.muted())
-                    .child(format!(
-                        "{session_name} · {count} {}",
-                        if count == 1 { "window" } else { "windows" }
-                    )),
-            )
-            .with_animation(
-                format!("window-overview-header-{revision}"),
-                chrome_animation.clone(),
-                move |header, delta| header.opacity(if closing_now { 1.0 - delta } else { delta }),
-            );
-        let footer = div()
-            .absolute()
-            .bottom(px(16.0))
-            .left(px(SIDE_PADDING))
-            .right(px(SIDE_PADDING))
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(px(18.0))
-            .text_size(zz_ui::rems_from_px(10.0))
-            .text_color(cx.theme().foreground.muted())
-            .child(palette_shortcut_hint(
-                ["up", "down", "left", "right"],
-                "Move",
-            ))
-            .child(palette_shortcut_hint(["enter"], "Open"))
-            .child(palette_shortcut_hint(["escape"], "Close"))
-            .with_animation(
-                format!("window-overview-footer-{revision}"),
-                chrome_animation,
-                move |footer, delta| footer.opacity(if closing_now { 1.0 - delta } else { delta }),
-            );
-        div()
-            .id("window-overview")
-            .key_context(OVERVIEW_KEY_CONTEXT)
-            .track_focus(&self.focus_handle)
-            .absolute()
-            .inset_0()
-            .occlude()
-            .overflow_hidden()
-            .text_color(cx.theme().foreground)
-            .on_key_down(cx.listener(Self::on_key_down))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|view, _, window, cx| {
-                    view.dismiss(window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .child(backdrop)
-            .child(header)
-            .children(cards)
-            .child(footer)
-    }
-}
-
-fn focused_window(mux: &MuxClient) -> Option<WindowId> {
-    let attached = mux.attached_session()?;
-    let snapshot = mux.snapshot();
-    snapshot
-        .sessions
-        .iter()
-        .find(|session| session.id == attached)
-        .map(|session| snapshot.focused_window_for(session))
-}
-
-fn window_label(window: &WindowSnapshot) -> String {
-    let name = window.name.trim();
-    let name = if name.is_empty() {
-        window
-            .panes
-            .get(&window.active_pane)
-            .map_or_else(|| window.id.to_string(), crate::mux::nav::pane_label)
-    } else {
-        name.to_owned()
-    };
-    format!("{}:{name}", window.index)
-}
-
-const fn pane_kind_icon(kind: &PaneKindSnapshot) -> IconName {
-    match kind {
-        PaneKindSnapshot::Picker => IconName::Plus,
-        PaneKindSnapshot::Terminal => IconName::SquareTerminal,
-        PaneKindSnapshot::Browser(_) => IconName::Globe,
-        PaneKindSnapshot::Agent(_) => IconName::Bot,
-        PaneKindSnapshot::Editor(_) => IconName::File,
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum OverviewMove {
-    Left,
-    Right,
-    Up,
-    Down,
-    First,
-    Last,
-    Previous,
-    Next,
-}
-
-fn moved_index(current: usize, count: usize, columns: usize, direction: OverviewMove) -> usize {
-    if count == 0 {
-        return 0;
-    }
-    match direction {
-        OverviewMove::Left | OverviewMove::Previous => current.saturating_sub(1),
-        OverviewMove::Right | OverviewMove::Next => (current + 1).min(count - 1),
-        OverviewMove::Up => current.saturating_sub(columns),
-        OverviewMove::Down => (current + columns).min(count - 1),
-        OverviewMove::First => 0,
-        OverviewMove::Last => count - 1,
-    }
-}
-
 #[derive(Clone, Debug)]
-struct OverviewGrid {
-    columns: usize,
-    cards: Vec<Bounds<Pixels>>,
-    focus: Bounds<Pixels>,
+pub(crate) struct OverviewGrid {
+    pub(crate) columns: usize,
+    pub(crate) groups: Vec<Bounds<Pixels>>,
 }
 
 impl OverviewGrid {
-    fn new(viewport: Size<Pixels>, count: usize) -> Self {
+    pub(crate) fn new(viewport: Size<Pixels>, count: usize) -> Self {
+        let columns = best_columns(viewport, count);
+        Self::with_columns(viewport, count, columns)
+    }
+
+    pub(crate) fn with_columns(viewport: Size<Pixels>, count: usize, columns: usize) -> Self {
+        Self::with_columns_scaled(viewport, count, columns, 1.0, Pixels::ZERO)
+    }
+
+    pub(crate) fn with_columns_scaled(
+        viewport: Size<Pixels>,
+        count: usize,
+        columns: usize,
+        metric_scale: f32,
+        group_gap: Pixels,
+    ) -> Self {
+        let requested_count = count;
+        let count = count.max(1);
+        let columns = columns.clamp(1, count);
+        let rows = count.div_ceil(columns);
         let viewport_width = f32::from(viewport.width).max(1.0);
         let viewport_height = f32::from(viewport.height).max(1.0);
-        let side_padding = SIDE_PADDING.min(viewport_width * 0.08);
-        let top_padding = TOP_PADDING.min(viewport_height * 0.24);
-        let bottom_padding = BOTTOM_PADDING.min(viewport_height * 0.18);
+        let metric_scale = metric_scale.max(0.1);
+        let side_padding = (SIDE_PADDING * metric_scale).min(viewport_width * 0.08);
+        let top_padding = (TOP_PADDING * metric_scale).min(viewport_height * 0.18);
+        let bottom_padding = (BOTTOM_PADDING * metric_scale).min(viewport_height * 0.14);
         let content_width = (viewport_width - side_padding * 2.0).max(1.0);
         let content_height = (viewport_height - top_padding - bottom_padding).max(1.0);
-        let gap = CARD_GAP.min((content_width / count.max(1) as f32).max(4.0));
-        let mut columns = 1;
-        let mut rows = count.max(1);
-        let mut card_width = content_width;
-        let mut card_height = content_height.min(card_width / CARD_ASPECT_RATIO);
-        let mut best_area = 0.0;
-        let mut best_empty = usize::MAX;
-        for candidate_columns in 1..=count.max(1) {
-            let candidate_rows = count.max(1).div_ceil(candidate_columns);
-            let slot_width = ((content_width - gap * candidate_columns.saturating_sub(1) as f32)
-                / candidate_columns as f32)
-                .max(1.0);
-            let slot_height = ((content_height - gap * candidate_rows.saturating_sub(1) as f32)
-                / candidate_rows as f32)
-                .max(1.0);
-            let candidate_width = slot_width.min(slot_height * CARD_ASPECT_RATIO);
-            let candidate_height = candidate_width / CARD_ASPECT_RATIO;
-            let area = candidate_width * candidate_height;
-            let empty = candidate_columns * candidate_rows - count;
-            if area > best_area || area == best_area && empty < best_empty {
-                best_area = area;
-                best_empty = empty;
-                columns = candidate_columns;
-                rows = candidate_rows;
-                card_width = candidate_width;
-                card_height = candidate_height;
-            }
-        }
+        let gap = f32::from(group_gap)
+            .max(0.0)
+            .min((content_width / count as f32).max(4.0));
+        let aspect_ratio = (viewport_width / viewport_height).max(0.1);
+        let slot_width =
+            ((content_width - gap * columns.saturating_sub(1) as f32) / columns as f32).max(1.0);
+        let slot_height =
+            ((content_height - gap * rows.saturating_sub(1) as f32) / rows as f32).max(1.0);
+        let card_width = slot_width.min(slot_height * aspect_ratio);
+        let card_height = card_width / aspect_ratio;
         let grid_height = rows as f32 * card_height + rows.saturating_sub(1) as f32 * gap;
         let start_y = top_padding + (content_height - grid_height) * 0.5;
-        let cards = (0..count)
+        let groups = (0..count)
             .map(|index| {
                 let row = index / columns;
                 let column = index % columns;
@@ -634,62 +113,176 @@ impl OverviewGrid {
                     size(px(card_width), px(card_height)),
                 )
             })
+            .take(requested_count)
             .collect();
-        let focus = centered_fit_bounds(viewport, px(18.0), CARD_ASPECT_RATIO);
-        Self {
-            columns,
-            cards,
-            focus,
-        }
+        Self { columns, groups }
     }
 }
 
-fn centered_fit_bounds(
+fn best_columns(viewport: Size<Pixels>, count: usize) -> usize {
+    let count = count.max(1);
+    let viewport_width = f32::from(viewport.width).max(1.0);
+    let viewport_height = f32::from(viewport.height).max(1.0);
+    let aspect_ratio = (viewport_width / viewport_height).max(0.1);
+    let mut best = 1;
+    let mut best_area = 0.0;
+    let mut best_empty = usize::MAX;
+    for columns in 1..=count {
+        let rows = count.div_ceil(columns);
+        let width = viewport_width / columns as f32;
+        let height = viewport_height / rows as f32;
+        let card_width = width.min(height * aspect_ratio);
+        let area = card_width * card_width / aspect_ratio;
+        let empty = columns * rows - count;
+        if area > best_area
+            || area == best_area && (empty < best_empty || empty == best_empty && columns > best)
+        {
+            best = columns;
+            best_area = area;
+            best_empty = empty;
+        }
+    }
+    best
+}
+
+pub(crate) fn overview_zoom(base_zoom: f32, physical_viewport: Size<Pixels>, count: usize) -> f32 {
+    let grid = OverviewGrid::new(physical_viewport, count);
+    let rows = count.max(1).div_ceil(grid.columns);
+    (base_zoom * CONTENT_ZOOM_BOOST / grid.columns.max(rows) as f32)
+        .min(base_zoom)
+        .max(MIN_WINDOW_ZOOM)
+}
+
+pub(crate) fn overview_edge_bounds(
     viewport: Size<Pixels>,
-    padding: Pixels,
-    aspect_ratio: f32,
+    target: Bounds<Pixels>,
+    group_gap: Pixels,
 ) -> Bounds<Pixels> {
-    let width = (f32::from(viewport.width) - f32::from(padding) * 2.0).max(1.0);
-    let height = (f32::from(viewport.height) - f32::from(padding) * 2.0).max(1.0);
-    let fitted_width = width.min(height * aspect_ratio);
-    let fitted_height = fitted_width / aspect_ratio;
-    Bounds::new(
-        point(
-            px((f32::from(viewport.width) - fitted_width) * 0.5),
-            px((f32::from(viewport.height) - fitted_height) * 0.5),
-        ),
-        size(px(fitted_width), px(fitted_height)),
-    )
+    let left = f32::from(target.origin.x);
+    let top = f32::from(target.origin.y);
+    let right = f32::from(viewport.width - target.right());
+    let bottom = f32::from(viewport.height - target.bottom());
+    let gap = group_gap.max(Pixels::ZERO);
+    let edge = [left, right, top, bottom]
+        .into_iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| a.total_cmp(b))
+        .map_or(0, |(edge, _)| edge);
+    let origin = match edge {
+        0 => point(-target.size.width - gap, target.origin.y),
+        1 => point(viewport.width + gap, target.origin.y),
+        2 => point(target.origin.x, -target.size.height - gap),
+        _ => point(target.origin.x, viewport.height + gap),
+    };
+    Bounds::new(origin, target.size)
 }
 
-fn stacked_bounds(focus: Bounds<Pixels>, index: usize) -> Bounds<Pixels> {
-    let width = focus.size.width * 0.58;
-    let height = focus.size.height * 0.58;
-    let offset = px((index % 7) as f32 * 4.0 - 12.0);
+pub(crate) fn interpolate_bounds(
+    from: Bounds<Pixels>,
+    to: Bounds<Pixels>,
+    progress: f32,
+) -> Bounds<Pixels> {
+    let progress = progress.clamp(0.0, 1.0);
     Bounds::new(
         point(
-            focus.origin.x + (focus.size.width - width) * 0.5 + offset,
-            focus.origin.y + (focus.size.height - height) * 0.5 + offset,
-        ),
-        size(width, height),
-    )
-}
-
-fn lerp_bounds(from: Bounds<Pixels>, to: Bounds<Pixels>, delta: f32) -> Bounds<Pixels> {
-    Bounds::new(
-        point(
-            lerp_pixels(from.origin.x, to.origin.x, delta),
-            lerp_pixels(from.origin.y, to.origin.y, delta),
+            from.origin.x + (to.origin.x - from.origin.x) * progress,
+            from.origin.y + (to.origin.y - from.origin.y) * progress,
         ),
         size(
-            lerp_pixels(from.size.width, to.size.width, delta),
-            lerp_pixels(from.size.height, to.size.height, delta),
+            from.size.width + (to.size.width - from.size.width) * progress,
+            from.size.height + (to.size.height - from.size.height) * progress,
         ),
     )
 }
 
-fn lerp_pixels(from: Pixels, to: Pixels, delta: f32) -> Pixels {
-    from + (to - from) * delta
+pub(crate) fn next_overview_pane(
+    current: PaneId,
+    panes: &[(PaneId, Bounds<Pixels>)],
+    direction: OverviewDirection,
+) -> Option<PaneId> {
+    let current_bounds = panes
+        .iter()
+        .find_map(|(pane, bounds)| (*pane == current).then_some(*bounds))?;
+    let center = current_bounds.center();
+    panes
+        .iter()
+        .filter_map(|(pane, bounds)| {
+            if *pane == current {
+                return None;
+            }
+            let candidate = bounds.center();
+            let (primary, perpendicular) = match direction {
+                OverviewDirection::Left => (
+                    f32::from(center.x - candidate.x),
+                    interval_separation(
+                        current_bounds.origin.y,
+                        current_bounds.bottom(),
+                        bounds.origin.y,
+                        bounds.bottom(),
+                    ),
+                ),
+                OverviewDirection::Right => (
+                    f32::from(candidate.x - center.x),
+                    interval_separation(
+                        current_bounds.origin.y,
+                        current_bounds.bottom(),
+                        bounds.origin.y,
+                        bounds.bottom(),
+                    ),
+                ),
+                OverviewDirection::Up => (
+                    f32::from(center.y - candidate.y),
+                    interval_separation(
+                        current_bounds.origin.x,
+                        current_bounds.right(),
+                        bounds.origin.x,
+                        bounds.right(),
+                    ),
+                ),
+                OverviewDirection::Down => (
+                    f32::from(candidate.y - center.y),
+                    interval_separation(
+                        current_bounds.origin.x,
+                        current_bounds.right(),
+                        bounds.origin.x,
+                        bounds.right(),
+                    ),
+                ),
+            };
+            let cross = match direction {
+                OverviewDirection::Left | OverviewDirection::Right => {
+                    f32::from((candidate.y - center.y).abs())
+                }
+                OverviewDirection::Up | OverviewDirection::Down => {
+                    f32::from((candidate.x - center.x).abs())
+                }
+            };
+            (primary > 0.0).then_some((*pane, perpendicular.0, perpendicular.1, primary, cross))
+        })
+        .min_by(|left, right| {
+            left.1
+                .cmp(&right.1)
+                .then_with(|| left.2.total_cmp(&right.2))
+                .then_with(|| left.3.total_cmp(&right.3))
+                .then_with(|| left.4.total_cmp(&right.4))
+                .then_with(|| left.0.cmp(&right.0))
+        })
+        .map(|(pane, _, _, _, _)| pane)
+}
+
+fn interval_separation(
+    first_start: Pixels,
+    first_end: Pixels,
+    second_start: Pixels,
+    second_end: Pixels,
+) -> (bool, f32) {
+    if first_end > second_start && second_end > first_start {
+        (false, 0.0)
+    } else if first_end <= second_start {
+        (true, f32::from(second_start - first_end))
+    } else {
+        (true, f32::from(first_start - second_end))
+    }
 }
 
 pub(crate) fn overview_available(mux: &MuxClient, route: WorkspaceRoute) -> bool {
@@ -715,28 +308,109 @@ mod tests {
     use super::*;
 
     #[test]
-    fn grid_balances_cards_and_centers_incomplete_rows() {
+    fn grid_balances_groups_and_centers_incomplete_rows() {
         let grid = OverviewGrid::new(size(px(1_200.0), px(800.0)), 5);
 
         assert_eq!(grid.columns, 3);
-        assert_eq!(grid.cards.len(), 5);
-        assert!(grid.cards.iter().all(|bounds| {
+        assert_eq!(grid.groups.len(), 5);
+        assert!(grid.groups.iter().all(|bounds| {
             bounds.origin.x >= px(0.0)
                 && bounds.origin.y >= px(0.0)
                 && bounds.right() <= px(1_200.0)
                 && bounds.bottom() <= px(800.0)
         }));
-        assert!(grid.cards[3].origin.x > grid.cards[0].origin.x);
-        assert!(grid.cards[4].origin.x < grid.cards[2].origin.x);
+        assert!(grid.groups[3].origin.x > grid.groups[0].origin.x);
+        assert!(grid.groups[4].origin.x < grid.groups[2].origin.x);
     }
 
     #[test]
-    fn directional_selection_clamps_at_real_cards() {
-        assert_eq!(moved_index(0, 5, 3, OverviewMove::Left), 0);
-        assert_eq!(moved_index(1, 5, 3, OverviewMove::Down), 4);
-        assert_eq!(moved_index(2, 5, 3, OverviewMove::Down), 4);
-        assert_eq!(moved_index(4, 5, 3, OverviewMove::Right), 4);
-        assert_eq!(moved_index(3, 5, 3, OverviewMove::Up), 0);
+    fn window_groups_use_the_requested_pane_gap() {
+        let viewport = size(px(1_200.0), px(800.0));
+        let flush = OverviewGrid::with_columns_scaled(viewport, 2, 2, 1.0, Pixels::ZERO);
+        let spaced = OverviewGrid::with_columns_scaled(viewport, 2, 2, 1.0, px(9.0));
+
+        assert_eq!(flush.groups[0].right(), flush.groups[1].origin.x);
+        assert_eq!(
+            spaced.groups[1].origin.x - spaced.groups[0].right(),
+            px(9.0)
+        );
+    }
+
+    #[test]
+    fn panorama_zoom_composes_with_ui_zoom_and_clamps() {
+        let viewport = size(px(1_200.0), px(800.0));
+
+        assert_eq!(overview_zoom(1.3, viewport, 1), 1.3);
+        assert!((overview_zoom(1.3, viewport, 4) - 0.78).abs() < f32::EPSILON);
+        assert!((overview_zoom(1.2, viewport, 9) - 0.48).abs() < f32::EPSILON);
+        assert_eq!(overview_zoom(0.5, viewport, 9), MIN_WINDOW_ZOOM);
+    }
+
+    #[test]
+    fn groups_enter_from_their_nearest_viewport_edge() {
+        let viewport = size(px(1_200.0), px(800.0));
+        let top_left = Bounds::new(point(px(30.0), px(70.0)), size(px(500.0), px(300.0)));
+        let bottom_right = Bounds::new(point(px(670.0), px(430.0)), size(px(500.0), px(300.0)));
+
+        let first = overview_edge_bounds(viewport, top_left, px(12.0));
+        let last = overview_edge_bounds(viewport, bottom_right, px(12.0));
+
+        assert!(first.right() < px(0.0));
+        assert!(last.origin.x > viewport.width);
+        assert_eq!(interpolate_bounds(first, top_left, 1.0), top_left);
+        assert_eq!(interpolate_bounds(first, top_left, 0.0), first);
+        assert_eq!(
+            interpolate_bounds(first, top_left, 0.5),
+            Bounds::new(
+                point(
+                    (first.origin.x + top_left.origin.x) * 0.5,
+                    (first.origin.y + top_left.origin.y) * 0.5,
+                ),
+                size(
+                    (first.size.width + top_left.size.width) * 0.5,
+                    (first.size.height + top_left.size.height) * 0.5,
+                ),
+            )
+        );
+    }
+
+    #[test]
+    fn directional_navigation_prefers_aligned_panes_across_window_groups() {
+        let panes = [
+            (
+                PaneId(1),
+                Bounds::new(point(px(0.0), px(0.0)), size(px(300.0), px(300.0))),
+            ),
+            (
+                PaneId(2),
+                Bounds::new(point(px(300.0), px(0.0)), size(px(300.0), px(150.0))),
+            ),
+            (
+                PaneId(3),
+                Bounds::new(point(px(300.0), px(150.0)), size(px(300.0), px(150.0))),
+            ),
+            (
+                PaneId(4),
+                Bounds::new(point(px(650.0), px(20.0)), size(px(300.0), px(300.0))),
+            ),
+        ];
+
+        assert_eq!(
+            next_overview_pane(PaneId(1), &panes, OverviewDirection::Right),
+            Some(PaneId(2))
+        );
+        assert_eq!(
+            next_overview_pane(PaneId(2), &panes, OverviewDirection::Down),
+            Some(PaneId(3))
+        );
+        assert_eq!(
+            next_overview_pane(PaneId(3), &panes, OverviewDirection::Right),
+            Some(PaneId(4))
+        );
+        assert_eq!(
+            next_overview_pane(PaneId(1), &panes, OverviewDirection::Left),
+            None
+        );
     }
 
     #[test]

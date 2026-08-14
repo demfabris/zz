@@ -534,7 +534,7 @@ impl Render for EditorView {
             .flex()
             .size_full()
             .overflow_hidden()
-            .bg(cx.theme().background)
+            .bg(crate::theme::app_pane_background(cx))
             .font_family(cx.theme().mono_font_family.clone())
             .text_size(config::editor_font_size(cx))
             .on_action(cx.listener(Self::open_file))

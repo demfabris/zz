@@ -88,7 +88,7 @@ pub(crate) fn begin_enveloped_into(
     Ok(())
 }
 
-fn enveloped_capacity(payload_capacity: usize) -> Result<usize, ProtocolError> {
+pub(crate) fn enveloped_capacity(payload_capacity: usize) -> Result<usize, ProtocolError> {
     let following_capacity = ENVELOPE_BYTES
         .checked_add(payload_capacity)
         .ok_or(ProtocolError::FrameTooLarge(usize::MAX))?;

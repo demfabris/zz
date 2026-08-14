@@ -1,8 +1,8 @@
 ---
 type: Design Plan
 title: Scene-streaming remote attach ("mosh for GUIs")
-description: Proposed plan to let a GPUI client attach to a zz daemon on a remote host by streaming the renderer-neutral scene (cells, layouts, damage) instead of pixels or raw bytes.
-status: In Progress
+description: Partially retired 2026-08-01. QUIC/zstd/predictor deleted; surviving pieces (history ring, RequestFull, local-scroll, reconnect) plus zz attach are current. Historical record of the scene-streaming campaign.
+status: Partially Retired
 tags:
 - remote
 - streaming
@@ -25,12 +25,16 @@ timestamp: 2026-07-16T13:24:55Z
 > transport-independent and still current: **M0**'s `Transport` seam and `Endpoint` (now
 > `unix://` + `ssh://`), **M2.5**'s client history ring with `HistoryRequest`/`HistoryChunk`
 > backfill and `history-trickle`, **M2**'s per-pane `RequestFull` repair, **M3**'s local-scroll
-> overlay and frozen-frame auto-reconnect (`HostState::Reconnecting`), and **M6**'s still-unbuilt
-> TUI renderer. The premise . stream the renderer-neutral scene, rasterize locally . is unchanged;
-> only the pipe is. QUIC returns only if a mobile client ever needs it, behind `Endpoint::parse`.
-> Everything below is the design record as of 2026-07-31.
+> overlay and frozen-frame auto-reconnect (`HostState::Reconnecting`). **M6**'s TUI client landed
+> 2026-08-09 as `zz attach` ([tui-client](/designs/tui-client.md)); remaining TUI work is that
+> design's open rungs, not this one. The premise . stream the renderer-neutral scene, rasterize
+> locally . is unchanged; only the pipe is. QUIC returns only if a mobile client ever needs it,
+> behind `Endpoint::parse`. Everything below is the design record as of 2026-07-31.
 >
-> **Status (2026-07-31): In progress. M0–M5 shipped; M6's TUI renderer is the only unbuilt piece.** M0 landed 2026-07-16 (commits
+> **Status (2026-08-13): partially retired.** QUIC/zstd/predictor/egress-splice are gone. Surviving
+> transport-independent pieces and `zz attach` are current. The live wire is protocol v52 over a
+> unix socket or `ssh -L`, documented in [wire-protocol](/protocol/wire-protocol.md). Historical
+> record of the 2026-07-31 campaign follows. M0 landed 2026-07-16 (commits
 > `6e6509c`, `7e5410c`): `ZZ_SOCKET`/global `--socket` overrides, the monomorphized `Transport`
 > trait seam in `crates/zz-daemon/src/transport.rs`, the `measure_attach` example, and
 > `scripts/remote-attach.sh` . byte-identical attach through a forwarded socket, ~40 µs local
@@ -58,10 +62,11 @@ timestamp: 2026-07-16T13:24:55Z
 > confidence machinery . apps that never echo never render), and auto-reconnect with backoff +
 > same-session re-attach + frozen-frame UX (`HostState::Reconnecting`; an attached remote that
 > drops no longer falls back to local). The sections below are the design record; the shipped
-> behavior is folded into the subsystem concept docs (wire-protocol.md tracks v41). M5 shipped in [remote browser egress](/designs/remote-browser-egress.md); M6's
-> multi-client half was superseded by the shipped
-> [multi-device attach](/designs/multi-device-attach.md); the TUI renderer remains the only
-> unbuilt milestone.
+> behavior is folded into the subsystem concept docs (wire-protocol.md tracks v52). M5's QUIC
+> splice was deleted, then reintroduced as ssh `-D` in
+> [remote browser egress](/designs/remote-browser-egress.md). M6's multi-client half was
+> superseded by [multi-device attach](/designs/multi-device-attach.md); the TUI renderer shipped
+> as `zz attach`.
 
 Scene-streaming remote attach lets the [zz daemon](/crates/zz-daemon.md) live on a **remote host**
 while GPUI clients attach over the network. Instead of streaming pixels (VNC/RDP: heavy, blurry,
@@ -70,8 +75,9 @@ DPI-locked) or raw bytes (ssh/tmux: no local intelligence, replay-on-reconnect),
 damage. The client rasterizes locally with its own fonts, theme, DPI, and GPU.
 
 ```
-today:     GPUI client ──unix socket / named pipe── daemon (PTYs, mux, frames)
-proposed:  GPUI client ──QUIC over the internet──── same daemon, any host
+today:     GPUI client ──unix socket / named pipe / ssh -L── daemon (PTYs, mux, frames)
+historical proposal (deleted 2026-08-01):
+           GPUI client ──QUIC over the internet──── same daemon, any host
            renders locally                          owns processes durably
 ```
 

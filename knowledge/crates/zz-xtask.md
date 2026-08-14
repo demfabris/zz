@@ -38,8 +38,8 @@ Subcommands are parsed by `run()` and `parse_bundle_options()` in `crates/zz-xta
 
 | OS | Backend called | Notes |
 | --- | --- | --- |
-| Linux | `cef::build_util::linux::build_bundle` | `--release` supported |
-| Windows | `cef::build_util::win::build_bundle` | `--release` supported |
+| Linux | `cef::build_util::linux::bundle` | `--release` supported |
+| Windows | local `bundle_windows` (not the upstream `win::build_bundle`) | `--release` supported |
 | macOS | Cargo JSON artifact discovery + `cef::build_util::mac::bundle` | Debug, `--release`, and named Cargo profiles are supported; the `profiling` profile forces native Ghostty to production `ReleaseFast`, then copies and UUID-validates app/helper dSYMs before the normal inside-out signing and verification |
 
 Required files checked by `platform_bundle_files` (also `crates/zz-xtask/src/main.rs`):

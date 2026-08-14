@@ -10,3 +10,7 @@
 * [zz-xtask crate](zz-xtask.md) - Workspace build task that assembles and validates desktop CEF bundles and the iOS simulator app bundle.
 * [zz crate (the GPUI client)](zz.md) - The long-lived GPUI desktop client. Reconciles recursive pane layouts and hosts stable terminal, Chromium browser, and native Agent pane entities.
 <!-- okf:listing:end -->
+
+Workspace members without a crate page here: `zz-ui` (maintained gpui-component fork), `zz-tui`
+(`zz attach`), and `zz-ios` / `zz-gpui-ios` (iPad client). The map in
+[architecture/overview](/architecture/overview.md) uses the live `zz-*` names.

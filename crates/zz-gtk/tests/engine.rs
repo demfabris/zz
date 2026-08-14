@@ -39,7 +39,10 @@ const FIXTURE: &str = "printf 'zz-gtk-ready\\r\\n'; exec /bin/cat";
 const REBORN: &str = "printf 'zz-gtk-reborn\\r\\n'; exec /bin/cat";
 const FLOOD: &str = "seq 1 20000; printf 'zz-gtk-flooded\\r\\n'; exec /bin/cat";
 const SESSION: &str = "gtk";
-const DEADLINE: Duration = Duration::from_mins(1);
+/// Generous on purpose: the flood tests share the machine with up to a dozen
+/// concurrently booted daemons under `cargo test`, and one minute has proven
+/// too tight under that load while never being approached solo.
+const DEADLINE: Duration = Duration::from_mins(3);
 const POLL: Duration = Duration::from_millis(10);
 const COLUMNS: u16 = 80;
 const ROWS: u16 = 24;

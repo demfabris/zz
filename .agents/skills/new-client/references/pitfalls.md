@@ -246,3 +246,35 @@ verify the copy with a `strings` marker unique to your change before running
 it. Never `pkill -f <pattern>` where the pattern matches your own wrapper
 shell's command line (it kills your tool call; use `pkill -x`), and keep
 scratch files in a private subdirectory of the shared scratchpad.
+
+## 25. A freshly connected, unattached client has no snapshot
+
+The daemon publishes `MuxSnapshot` only on change, so a fleet host you connect
+to but do not attach stays empty forever. `request_resync()` immediately after
+connect is the sanctioned initial-tree request — the desktop does exactly
+this, and it does not contradict pitfall #1: having no snapshot at all is not
+a sequence gap.
+
+## 26. Multi-daemon state is per daemon — never key across hosts
+
+Pane ids collide across daemons (`%1` on host A and `%1` on host B are
+different terminals), so any pane→widget or pane→state map must be cleared on
+a host switch. An undrained `FrameInbox` latches its wake flag — clear it when
+its host leaves the screen or `FramesReady` never fires again. And once more
+than one daemon is connected, AIM your commands: an unaimed `kill-server` on
+quit stops whichever daemon is active — possibly a remote machine's.
+
+## 27. Retiring a live connection takes more than a flag
+
+A quiet connection blocks in `recv()` forever, so a reader thread never
+notices a closed flag on its own. Set the flag AND provoke a response the
+daemon will send (`detach()` triggers a snapshot publish). Related Rust trap
+that cost a 300-second test hang: a `MutexGuard` temporary inside a `for`
+iterator expression lives for the whole loop body — bind the collected `Vec`
+to a variable before iterating, or any re-entrant lock deadlocks.
+
+## 28. `unix://` is a first-class fleet endpoint
+
+A `host-<name> = unix:///tmp/…` config line pointing at a second local daemon
+is a complete fleet fixture — every layer above the transport (host rows,
+per-host reconnect, frozen frames, host removal) is testable without ssh.

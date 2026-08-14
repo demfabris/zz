@@ -1,5 +1,7 @@
 mod colors;
 mod keys;
+mod overlay;
+mod pane;
 mod panes;
 mod terminal;
 mod window;
@@ -25,20 +27,39 @@ pub fn run(launch: Launch) -> glib::ExitCode {
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::NON_UNIQUE)
         .build();
+    glib::set_application_name("zz");
+    app.connect_startup(|_| gtk::Window::set_default_icon_name(APP_ID));
     app.connect_activate(move |app| activate(app, &launch));
     app.run_with_args::<&str>(&[])
 }
 
 fn activate(app: &adw::Application, launch: &Launch) {
-    let color_scheme = if adw::StyleManager::default().is_dark() {
+    match Engine::connect(&launch.endpoint, &launch.session, color_scheme()) {
+        Ok(engine) => {
+            follow_system_theme(&engine);
+            window::Shell::build(app, engine).present();
+        }
+        Err(error) => present_failure(app, &error),
+    }
+}
+
+fn color_scheme() -> TerminalColorScheme {
+    if adw::StyleManager::default().is_dark() {
         TerminalColorScheme::Dark
     } else {
         TerminalColorScheme::Light
-    };
-    match Engine::connect(&launch.endpoint, &launch.session, color_scheme) {
-        Ok(engine) => window::Shell::build(app, engine).present(),
-        Err(error) => present_failure(app, &error),
     }
+}
+
+/// The daemon resolves the palette, so a live light/dark switch is republished
+/// rather than recolored here; the appearance it answers with drives every pane.
+fn follow_system_theme(engine: &std::sync::Arc<Engine>) {
+    let engine = std::sync::Arc::downgrade(engine);
+    adw::StyleManager::default().connect_dark_notify(move |_| {
+        if let Some(engine) = engine.upgrade() {
+            engine.set_color_scheme(color_scheme());
+        }
+    });
 }
 
 fn present_failure(app: &adw::Application, error: &str) {

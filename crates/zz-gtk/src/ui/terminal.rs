@@ -168,6 +168,10 @@ const SHIMMER_ALPHA: f32 = 0.04;
 /// The daemon reports a hovered link through the viewport; the popup shows at
 /// most this much of it.
 const HOVER_URI_CHARACTERS: usize = 96;
+/// A hovered link is washed at this alpha and underlined at full strength, so
+/// the text stays readable under the affordance.
+const LINK_HOVER_ALPHA: f32 = 72.0 / 255.0;
+const LINK_UNDERLINE_THICKNESS: f32 = 1.0;
 
 /// Copy requests are correlated by the daemon alone; the client only has to
 /// keep two outstanding requests from sharing an id.
@@ -1404,21 +1408,35 @@ impl TerminalView {
             .iter()
             .filter(|overlay| usize::from(overlay.row) == row && overlay.end > overlay.start)
         {
+            let x = f32::from(overlay.start) * metrics.width;
+            let width = f32::from(overlay.end - overlay.start) * metrics.width;
+            // A hovered link is washed and underlined rather than filled: the
+            // text under it has to stay readable, since reading it is the point.
+            if overlay.kind() == OverlayKind::LinkHover {
+                snapshot.append_color(
+                    &colors::rgba_faded(appearance.link_color, LINK_HOVER_ALPHA),
+                    &graphene::Rect::new(x, 0.0, width, metrics.height),
+                );
+                snapshot.append_color(
+                    &colors::rgba(appearance.link_color),
+                    &graphene::Rect::new(
+                        x,
+                        metrics.height - LINK_UNDERLINE_THICKNESS,
+                        width,
+                        LINK_UNDERLINE_THICKNESS,
+                    ),
+                );
+                continue;
+            }
             let color = match overlay.kind() {
                 OverlayKind::Selection => appearance.selection_background,
                 OverlayKind::SearchMatch => appearance.search_match_color,
                 OverlayKind::SearchCurrent => appearance.search_current_color,
-                OverlayKind::CopyCursor => appearance.copy_cursor_color,
-                OverlayKind::LinkHover => continue,
+                OverlayKind::CopyCursor | OverlayKind::LinkHover => appearance.copy_cursor_color,
             };
             snapshot.append_color(
                 &colors::appearance_rgba(color),
-                &graphene::Rect::new(
-                    f32::from(overlay.start) * metrics.width,
-                    0.0,
-                    f32::from(overlay.end - overlay.start) * metrics.width,
-                    metrics.height,
-                ),
+                &graphene::Rect::new(x, 0.0, width, metrics.height),
             );
         }
     }

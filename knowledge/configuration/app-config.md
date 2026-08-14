@@ -186,13 +186,15 @@ issues `detach()`. Leaving it off is what preserves the multiplexer guarantee th
 outlive the window; see [session persistence](/concepts/session-persistence.md) for the daemon's own
 exit rule.
 
-The agent and editor panes are additionally **compiled out by default**: the `agent-pane` /
-`editor-pane` cargo features on the app crate (mirrored by `agent` / `editor` on `zz-ui`) gate the
-implementations behind facade modules (`crates/zz/src/agent/mod.rs`, `crates/zz/src/editor/mod.rs`)
-whose stubs keep every call site compiling. In a build without a feature the matching config flag
-below reads false regardless of the file, the Settings switch and Editor page disappear, and a pane
-handed over by a featureful daemon renders a labelled placeholder. Dev builds opt back in with
-`ZZ_CARGO_FEATURES=agent-pane,editor-pane just run mac` (or `--features` on cargo directly).
+The editor pane is additionally **compiled out by default**: the `editor-pane` cargo feature on the
+app crate (mirrored by `editor` on `zz-ui`) gates the implementation behind a facade module
+(`crates/zz/src/editor/mod.rs`) whose stub keeps every call site compiling. In a build without the
+feature the matching config flag below reads false regardless of the file, the Settings switch and
+Editor page disappear, and a pane handed over by a featureful daemon renders a labelled placeholder.
+Dev builds opt back in with `ZZ_CARGO_FEATURES=editor-pane just run mac` (or `--features` on cargo
+directly). The `agent-pane` feature works the same way and keeps the same facade
+(`crates/zz/src/agent/mod.rs`), but it is **in the default set** since 0.2.0-beta.2, so
+`experimental-agent-pane` is the only gate a stock build has.
 
 `experimental-agent-pane` and `experimental-editor-pane` are **hard capability gates** with two
 consumers of the same config entry. Client-side they gate the pane picker rows (and the `a`/`e`
@@ -303,6 +305,7 @@ square top corners and only follow the pane curve at the bottom.
 | `agent-command` | `npx -y @agentclientprotocol/codex-acp@1.1.7` | Nonempty command string or raw ACP stdio JSON configuration used by Codex panes |
 | `agent-claude-code-command` | `npx -y @agentclientprotocol/claude-agent-acp@0.63.0` | Nonempty command string or raw ACP stdio JSON configuration used by Claude Code panes |
 | `agent-working-directory` | unset | Absolute path only; overrides the donor cwd for brand-new Agent sessions |
+| `agent-auto-approve` | `true` | `true` or `false`; when on, a kinded `session/request_permission` is answered with the agent's preferred allow option (`allow_always`, else `allow_once`) and the tool call is still rendered. A request with no allow option always falls through to the permission wizard |
 
 The command value may be unquoted, wrapped in matching single/double quotes, or supplied as raw JSON
 when explicit arguments/environment variables are needed. zz does not log the configured command,
@@ -477,7 +480,7 @@ is the only row on the page that is always live.
 | Editor | **Typography** (`editor-font-size`) · **Display** (`editor-line-numbers`, `editor-relative-line-numbers`, `editor-soft-wrap`, `editor-vim-mode`) |
 | Panes | **Layout** (`pane-gaps`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
 | Hosts | **Machines** (configured hosts, live connection state, Remove) · **Add host** (an inline ssh destination field) |
-| System | **Daemon** (`quit-daemon-on-exit`) · **Diagnostics** (`show-fps`) · **Experimental** (`experimental-editor-pane`, `experimental-agent-pane`). `auto-restart-stale-daemon` is a file key with no Settings row |
+| System | **Tray** (`tray`, only where the profile has one) · **Daemon** (`quit-daemon-on-exit`) · **Diagnostics** (`show-fps`) · **Experimental** (`experimental-editor-pane`, `experimental-agent-pane`, each row present only with its cargo feature). `auto-restart-stale-daemon` is a file key with no Settings row |
 | Multiplexer | Full-file editor for `zz/mux.conf`, with Save and donor-specific **Import tmux…** |
 | Terminal | **Import Ghostty…** · **Font** · **Colors** · **Cursor** · **Selection & highlights** · **Padding**, covering every settable daemon appearance key except file-only `theme` and `background-opacity` |
 | About | Centered mark (the Dock render at 88pt), name, tagline and version badge · **Build** (`CARGO_PKG_VERSION`, OS · arch, the short `ZZ_GPUI_SOURCE` revision, with a copy button on Version that puts all three on one line) · **Project** (repository, releases, new issue, license). Writes nothing |

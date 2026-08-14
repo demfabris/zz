@@ -19,9 +19,9 @@ tmux-style model:
 - a native **Agent pane** backed by a pane-local Codex or Claude Code ACP process, with streaming
   Markdown, Mermaid, reasoning, plans, structured tool activity, slash skills/commands, dynamic
   permission, model, and effort controls, cancellation, and agent-owned session replay (see
-  [Agent pane](/concepts/agent-pane.md)). Agent and Editor panes are compiled out of default
-  builds (`agent-pane` / `editor-pane` cargo features) and additionally gated by
-  `experimental-agent-pane` / `experimental-editor-pane`.
+  [Agent pane](/concepts/agent-pane.md)). The Agent pane is compiled into default builds and gated
+  at runtime by `experimental-agent-pane`; the Editor pane is still compiled out behind the
+  `editor-pane` cargo feature as well as `experimental-editor-pane`.
 
 The browser is **not** a native child window. CEF publishes frames into a one-slot mailbox; the
 default path is a shared GPU texture (Linux wgpu `external_texture`, macOS Metal-IOSurface

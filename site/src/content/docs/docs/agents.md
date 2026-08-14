@@ -1,46 +1,56 @@
 ---
 title: Agent panes
-description: Claude Code and Codex as panes, over ACP. Off by default.
+description: Claude Code and Codex as panes, over ACP. Experimental.
 ---
 
-:::caution[Off by default]
-Agent panes are compiled out of default and release builds. Turn them on with
-the `agent-pane` cargo feature plus `experimental-agent-pane = true` in
-`zz/config` (or the Settings → System → Experimental toggle). Expect rough
-edges.
+:::caution[Experimental]
+Agent panes ship in every build, but stay off until you ask for them: set
+`experimental-agent-pane = true` in `zz/config`, or flip the toggle under
+**Settings → Advanced → System → Experimental**. Expect rough edges. Turning
+it back off blocks new agent panes everywhere; panes that are already open
+keep running.
 :::
 
-The plan is a pane that runs Claude Code or Codex over the Agent Client
-Protocol, with the conversation drawn natively rather than as terminal output:
-streaming Markdown, Mermaid diagrams, reasoning, plans, tool calls with typed
-payloads (a diff renders as a diff, not as JSON), live command output with exit
-codes, subagent timelines, and permission approvals.
+An agent pane runs Claude Code or Codex over the Agent Client Protocol, with
+the conversation drawn natively rather than as terminal output: streaming
+Markdown, Mermaid diagrams, reasoning, plans, tool calls with typed payloads
+(a diff renders as a diff, not as JSON), live command output with exit codes,
+subagent timelines, and permission approvals.
 
 Adapter versions are pinned and their cache is warmed at launch, so a pane
-should open without waiting on the network. Detaching and reattaching replays
-the conversation.
+should open without waiting on the network. A GUI launch never runs your shell
+init, so zz also repairs the agent's `PATH` from your login shell plus any fnm,
+nvm, volta, bun, pnpm, or mise bin directory on disk — the agent CLIs usually
+live exactly there, and a Dock launch would otherwise miss them.
 
-## Trying it early
+## Running a turn
 
-Agent panes need two things turned on, and both are off by default. Build with
-the cargo feature:
+One button carries the whole turn. It sends when the pane is idle, **queues**
+when you type while the agent is working, and **stops** the turn when the
+composer is empty. Queued prompts fire in order as each turn settles, and a
+chip above the composer hands them all back to the draft — text and pasted
+images — if you change your mind or the turn dies.
 
-```sh
-cargo build --features agent-pane
-```
+Approvals are automatic by default. A permission request that carries a normal
+allow option is answered with it, so the agent runs its tools without stopping
+to ask; the tool call still lands in the transcript, so nothing happens out of
+sight. Set `agent-auto-approve = false` to answer them yourself, and they
+arrive as a wizard — `1`-`9` picks an option, Enter confirms the highlight,
+Escape cancels.
 
-then set `experimental-agent-pane = true` in `zz/config`, or use the toggle
-under **Settings → Advanced → System → Experimental**. Without the cargo
-feature the config key reads false whatever the file says. While either is off,
-nothing creates an agent pane: not the pane picker, not the command palette,
-not the CLI.
+**Changes** in the pane header shows what the turn did to your worktree: a
+file list with line counts, and hunks per file. It diffs against a snapshot
+taken when the prompt was sent, using a throwaway git index, so your real
+staging area is never touched and files that were already untracked don't
+show up as new.
 
-Expect rough edges. This is the path for people who want to follow along, not a
-supported configuration.
+If an adapter goes quiet mid-turn for two minutes with nothing outstanding,
+zz parks the turn instead of killing it: the spinner settles, the pane accepts
+prompts again, and the agent process is left alone.
 
 ## Getting things in
 
-Once a pane exists, you pipe into it from any shell:
+You pipe into a pane from any shell:
 
 ```sh
 git diff | zz agent-send                 # into the composer
@@ -76,3 +86,34 @@ zz agent-send -t %5 'check the failing test'
 
 `zz tools` works in any build. The rest of that list needs a browser pane or an
 agent pane to aim at.
+
+## What survives a restart
+
+The daemon keeps the pane, its provider, and its working directory, but the
+agent process itself belongs to the app. Close every window and the child
+stops. Open it again and zz asks the adapter to replay the conversation; if it
+can't, zz replays its own journal of the session instead, so the transcript
+comes back either way. Restarting the *daemon* is different — that takes the
+pane with it, and there is nothing left to replay into.
+
+Journals live under zz's application-data directory, one file per session,
+kept for 30 days.
+
+## Configuration
+
+`zz/config` keys, all optional:
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `agent-auto-approve` | `true` | Answer permission requests with the agent's preferred allow option. Off means you answer them |
+| `agent-command` | pinned `codex-acp` | Command line or raw ACP stdio JSON for Codex panes |
+| `agent-claude-code-command` | pinned `claude-agent-acp` | Same, for Claude Code panes |
+| `agent-working-directory` | the donor pane's cwd | Absolute path for brand-new sessions |
+
+Environment knobs, for when the defaults get in the way:
+
+| Variable | Effect |
+| --- | --- |
+| `ZZ_AGENT_LOGIN_SHELL=0` | Skip the login-shell `PATH` probe. Use it if your shell init is slow or does something exotic |
+| `ZZ_AGENT_QUIESCE_MS` | Milliseconds of silence before a turn is parked. Default 120000; `0` disables the watchdog |
+| `ZZ_AGENT_SOUND=0` | Silence the chimes that play when a pane needs you or finishes |

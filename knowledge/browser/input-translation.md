@@ -244,6 +244,8 @@ assert_eq!(
 | `src/cef_runtime.rs` | `BrowserSession`, main-thread `BrowserCommandSink`, CEF input/edit helpers, `event_flags`, coordinate scaling. |
 | `crates/zz/src/browser/controller.rs` | Ordered foreground CEF command queue and the GPUI re-entrancy boundary. |
 | `crates/zz/src/browser/view.rs` | Platform keybindings, nested omnibox key context, input events, selection and Escape stages, page edit actions, zoom actions, and menu controls. |
+| `crates/zz-client/src/chrome.rs` | Browser chrome action names, platform profile defaults, extended chord grammar, and table resolution. |
+| `crates/zz/src/keymap.rs` | GPUI bridge for browser chrome defaults and `chrome-keybind`/`chrome-unbind` overrides. |
 | `crates/zz/src/browser/recent_pages.rs` | Profile-scoped history queries, scoring, inline eligibility, learned selections, and deletion. |
 
 # Related

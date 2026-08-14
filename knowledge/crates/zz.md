@@ -309,17 +309,19 @@ calls `handle_message`. That depth-1 bound is deliberate backpressure: if the GP
 behind, the reader thread stops draining the socket instead of buffering unbounded terminal frames
 client-side (pressure then lands on the daemon's own per-pane mailbox).
 
-`handle_message` reduces every `EventPayload` variant into local state: per-pane
-`RetainedTerminalViewport` (viewport + `row_revisions` + `row_revision_epoch`, used by
-`terminal_element`'s row cache), `CommandOutputModel`, `ChooseTreeState`/`ChooseBufferState`/
-`DisplayPanesState` plus monotonic revision counters the corresponding view compares against,
-queued `BrowserCommand`/`TerminalUiCommand` per pane, clipboard writes (routed to primary selection
-on Linux/FreeBSD), and terminal `OpenUri` routing. For a browser-supported URL, the source pane's
+`handle_message` keeps the terminal hot path outside the shared core: full viewports, row patches,
+and command-output frames go straight into `RetainedTerminalViewport` and `CommandOutputModel`,
+preserving the history ring, row revisions, and diff scratch the painter consumes. Every other
+message goes through `zz_client::ClientCore`; `MuxClient` drains its `Outbound` requests and typed
+`CoreEvent`s into GPUI revisions, queued browser/terminal commands, clipboard effects, and local UI
+state. For a browser-supported URL, the source pane's
 layout-tree path selects the topologically nearest browser in the same mux window (layout distance
 and forward layout order break ties), then queues `BrowserCommand::Navigate` without changing pane
 focus. Unsupported schemes and windows without a browser fall back to `cx.open_url`. It also owns a
 client-local terminal font-size offset (`Ctrl+-`/`Ctrl+=`) applied on top of whatever
-`TerminalAppearance` the daemon publishes.
+`TerminalAppearance` the daemon publishes. The default Control-minus/equal/plus chords resolve as
+`TerminalFontDecrease`/`TerminalFontIncrease` through `ChromeKeymap`, so `chrome-keybind` and
+`chrome-unbind` can replace them without changing terminal input code.
 
 `MuxClient` also sends the `ServerHello` appearance to `theme.rs` at construction and repeats that
 handoff for every `AppearanceChanged` event after preserving the local font-size offset. These
@@ -352,9 +354,8 @@ An attached remote host that drops never falls back to the local daemon. It ente
 on a 1/2/4/8/16/30-second backoff, re-attaching to the same session on success. Every
 `HostConnection` carries a `reconnect_generation` that each armed timer captures; a timer whose
 generation or attempt no longer matches is a superseded attempt and returns without dialing, so a
-fast reconnect racing a slow one cannot resurrect the loser. Quinn's own path migration already
-covers survivable address changes on the wildcard-bound socket, so this loop starts only once the
-connection is really dead.
+fast reconnect racing a slow one cannot resurrect the loser. The loop starts after the ssh-forwarded
+local socket connection dies.
 
 # Terminal rendering (`terminal/view.rs`, `terminal/element.rs`)
 
@@ -415,12 +416,12 @@ Cookie imports and current-origin data clears are asynchronous controller operat
 external message pump active and participate in the same shutdown barrier until their CEF callbacks
 settle.
 
-A browser pane always browses from the **client's** network, including a pane whose session lives on a
-remote daemon: a `localhost:3000` dev server on that machine is not reachable from the pane. The
-egress tunnel that used to fix this (`browser/egress_proxy.rs`, the composite `@egress-<hash8>`
-profile, the `browser-egress` option) was deleted with QUIC on 2026-08-01; the answer today is a
-plain `ssh -D` SOCKS forward the user sets up themselves. See
-[remote browser egress](/designs/remote-browser-egress.md) for the retired design.
+A browser pane for a local session browses from the client's network. For an attached ssh host, the
+managed forward opens both the daemon's `ssh -L` socket and an `ssh -D` SOCKS listener. The client
+derives a local `<profile>@egress-<hash8>` CEF context and points it at that SOCKS port, so remote
+hostnames and `localhost` resolve from the attached host. `browser-egress` enables this by default;
+Windows keeps client-local egress because its bridged-pipe attach path exposes no loopback SOCKS
+listener. See [remote browser egress](/designs/remote-browser-egress.md).
 
 `BrowserView` is the per-pane entity: owns a `zz_ui::input::InputState` child entity for
 the toolbar URL bar, the current `Viewport` (size/scale/screen offset sent to CEF), the current frame
@@ -453,8 +454,10 @@ Loading and error overlays keep that base, and navigating away adds the CEF fram
 the pane becomes inactive, the shared `PaneChrome` scrim covers both toolbar and page content;
 Browser does not carry a separate toolbar-only inactive layer.
 
-Keyboard input has no client-side modes: **the configured tmux prefix always wins, from every focus
-context**, and the daemon's [key tables](/tmux/key-tables.md) are the only resolver.
+Keyboard input has two client-side gates before daemon routing. The configured tmux prefix wins from
+every focus context through the window-root claim. Focused surfaces then resolve their `ui`,
+`sidebar`, `browser`, or `terminal` table through `zz_client::ChromeKeymap`; the skin applies the
+returned `ChromeAction`, which may stay local or send a protocol command.
 
 - Terminal keys and committed text resolve the daemon's root key table. Browser page input uses a
   separate surface route that skips root bindings and passes directly through the synchronized
@@ -466,7 +469,8 @@ context**, and the daemon's [key tables](/tmux/key-tables.md) are the only resol
   source. Platform (`cmd`) chords are never claimed; autorepeat of a held claimed key is swallowed
   so holding the prefix cannot spam `send-prefix`; releases of claimed presses are forwarded and
   stopped, keeping the daemon's swallowed-key pairing balanced and the widget release-free.
-- The client never learns the tables; one prefix string and one armed bool are its whole model.
+- `ServerHello.key_tables` and `KeyTablesChanged` give the client every daemon table for labels,
+  hints, and help. Pane semantics still resolve on the daemon.
 - `bind -n` root bindings fire from Terminal panes. Browser pages and local text widgets expose
   only the captured prefix/armed sequence to the key tables.
 
@@ -613,6 +617,7 @@ without either being wrong, and neither replaces CEF's own frame-rate ceilings.
 | `crates/zz/src/fleet.rs` | `zz fleet add <name> <ssh-destination>` / `list` / `remove` . each one config-file edit, sharing `Endpoint::parse` and `config::validate_fleet_host` with the GUI dialog |
 | `crates/zz/src/macos_app.rs` | macOS application/window actions, native app menu, and standard command-key bindings |
 | `crates/zz/src/config/mod.rs` | Platform-aware bounded `zz/config` discovery/parsing, `host-<name>` fleet entries and their add/remove/republish helpers, per-provider ACP command/cwd configuration, ordered daemon overrides, per-knob provenance, and comment-preserving atomic edits |
+| `crates/zz/src/keymap.rs` | Bridges `ChromeKeymap` defaults and `chrome-keybind`/`chrome-unbind` overrides into GPUI bindings and action resolution |
 | `crates/zz/src/config/settings.rs` | Root-managed native settings dialog with local and Terminal appearance controls, plus a compact full-file `zz/mux.conf` editor, explicit Save, and confirmed tmux import |
 | `crates/zz/src/app_shell.rs` | `AppShell` . root application surface: floating window controls (non-macOS), dialog/notification layers, hosts `AppView` and the Linux client frame |
 | `crates/zz/src/theme.rs` | Centralized theme customization over zz-ui's own light/dark palettes: retains the daemon appearance, applies the terminal `mono_font_family` crossover, and owns the translucent chrome plus opaque app-pane fills |
@@ -626,7 +631,7 @@ without either being wrong, and neither replaces CEF's own frame-rate ceilings.
 | `crates/zz/src/agent/preferences.rs` | Bounded versioned GUI-owned store for provider/agent/workspace-scoped model, effort, and permission selections |
 | `crates/zz/src/agent/view.rs` | Stable native Agent pane entity with provider and searchable virtualized history controls, live timeline, slash completion, sticky dynamic permission/model/effort controls, polished auto-growing composer, cancel, approval/auth actions, errors, and session status |
 | `crates/zz/src/workspace/new_session.rs` | Zero-session which-key panel: the New session and Settings rows that work from an empty workspace, then the prefix bindings that need a session, with click and Enter activation |
-| `crates/zz/src/mux/client.rs` | `MuxClient` . host-keyed `HostConnection` map (client `Arc`, reader thread + depth-1 channel, per-host state/snapshot), reduces the attached host's `ProtocolMessage`s into local UI state; per-pane `HistoryRing` and chunked backfill, remote connect machinery, cross-host `attach_to_host` (explicit session) / `attach_to_host_default`, generation-guarded reconnect backoff |
+| `crates/zz/src/mux/client.rs` | `MuxClient` . host-keyed `HostConnection` map (client `Arc`, reader thread + depth-1 channel, per-host state/snapshot), delegates non-frame protocol reduction to `ClientCore`, intercepts the retained terminal hot path, drains core effects into GPUI state, and owns `HistoryRing`, remote connect machinery, cross-host attach, and generation-guarded reconnect backoff |
 | `crates/zz/src/mux/hosts.rs` | `HostId`/`HostRegistry`/`HostState` (including `Reconnecting { attempt }`) . fleet host identity from `host-*` config entries, `local` pinned at id 0, retained-host range for a removed-but-attached host |
 | `crates/zz/src/mux/prefix.rs` | Window-root prefix claim, its display keystroke for key hints, and GPUI-to-terminal key translation shared by workspace and browser input |
 | `crates/zz/src/terminal/view.rs` | `TerminalView` . per-pane terminal entity: input translation, selection, search, IME, cursor blink |
@@ -661,6 +666,8 @@ without either being wrong, and neither replaces CEF's own frame-rate ceilings.
   tables this crate only renders and forwards input to.
 - [Protocol](/crates/zz-protocol.md) . `MuxSnapshot`, `InputMessage`, `EventPayload`, and the IDs
   (`PaneId`, `WindowId`, `SessionId`, `SplitId`) this crate keys every entity by.
+- [Shared client core](/crates/zz-client.md) . renderer-free protocol reduction and chrome actions
+  consumed by this GPUI shell.
 - [Browser core](/crates/zz-browser.md) . `BrowserRuntime`/`BrowserSession`/`OsrFrame` consumed by
   `browser/controller.rs`.
 - [Terminal core](/crates/zz-terminal.md) . `TerminalViewport`/`TerminalAppearance`/`PackedCell`

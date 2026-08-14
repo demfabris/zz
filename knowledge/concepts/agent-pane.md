@@ -243,7 +243,7 @@ The controller reduces ACP notifications into provider-neutral entries with stab
 - `Reasoning { id, label, markdown, default_expanded }`
 - `Plan { id, markdown }`
 - `Tool { id, protocol_id, kind, status, label, location, input, output, default_expanded, subagent, children }`
-- `Notification { id, task_id, status, summary, result_markdown }`
+- `Notification { id, task_id, tool_use_id, status, summary, result_markdown }` (`tool_use_id` keys reducer upserts and is dropped at the UI boundary)
 
 Tool input and output use the provider-neutral `ToolPayload` variants `Diff { path, old, new }`,
 `Text`, `Json`, and `Terminal`. ACP diff and terminal content stay typed instead of being serialized
@@ -270,9 +270,13 @@ the `$ <command>` line of a terminal payload: `command_from_title` (`:5487`) pre
 span and returns nothing for a placeholder, so the payload falls back to `[terminal <id>]`.
 
 `agent/profile.rs` is the only provider-artifact recognition seam. Its streaming scanner carries
-partial opening markers across ACP chunk boundaries and recognizes only the explicit table:
+partial opening markers across ACP chunk boundaries and recognizes the explicit table:
 Claude's `<task-notification>` and `<system-reminder>`, and Codex's `<oai-mem-citation>`,
-`::git-stage{...}`, and `::git-commit{...}`. Unknown XML and directives remain literal. Task
+`::git-stage{...}`, and `::git-commit{...}`. Unknown XML and directives remain literal. Beyond the
+scanner table, `profile.rs` also recognizes Codex collaboration/subagent tooling: `_meta.codex.subagent`
+markers and `collaboration.tool` values (`spawnAgent`/`resumeAgent`/`sendInput`/`wait`/`closeAgent`)
+are parsed, labeled, and formatted for the timeline (`codex_collaboration`, `codex_tool_subagent`,
+`codex_collab_label`). Task
 notifications become durable transcript cards even when they arrive as pseudo-user text during
 local user-echo suppression; reminders and app-control directives are removed. Memory citation
 entries are parsed and retained on the owning assistant entry for provenance, without a citation
@@ -570,7 +574,8 @@ Ellipsis-only ACP description placeholders are suppressed while meaningful descr
 visible. The menu closes once the user begins the command argument.
 
 The composer renders generic ACP `Select` options categorized as `Mode`, `Model`, and `ThoughtLevel`
-as the permission, model, and effort pickers. It sends each opaque config ID/value through
+as the permission, model, and effort pickers (`ModelConfig` and `Other` categories are parsed and
+stored but never rendered; `Boolean` config options are discarded at `config_option_model`). It sends each opaque config ID/value through
 `session/set_config_option` and adopts the complete option vector returned by the agent. When an
 older agent supplies no generic config options, the permission picker falls back to legacy
 `SessionMode` and `session/set_mode`. The compact triggers use the same text scale as their entries,

@@ -103,8 +103,8 @@ click-outside close it, consuming exactly one pointer event.
 
 `CommandPromptState { prompt, input, cursor, kind, history }` is published on open, explicit server
 change, and resync. `kind` separates command and value prompts; `history` is populated only for
-command prompts. The `Update`/`Submit`/`Close` actions and this state shape are part of the current
-wire protocol (`PROTOCOL_VERSION` = 32 in `crates/zz-protocol/src/message.rs`); see
+command prompts. The `Update`/`Submit`/`Close` actions and this state shape entered the wire at v32;
+the live version is the `PROTOCOL_VERSION` constant in `crates/zz-protocol/src/message.rs`. See
 [the wire protocol](/protocol/wire-protocol.md).
 
 # Key files
@@ -113,7 +113,7 @@ wire protocol (`PROTOCOL_VERSION` = 32 in `crates/zz-protocol/src/message.rs`); 
 | --- | --- |
 | `crates/zz/src/command/palette.rs` | Input, suggestion selection, history rendering, pointer dismissal, prompt synchronization |
 | `crates/zz/src/command/completion.rs` | Tokenizes and ranks catalog, option, enum, and live-target completions against the current `MuxSnapshot` |
-| `crates/zz-mux/src/catalog.rs` | The renderer-free command catalog shared by execution parsing and UI completion; tests enforce unique canonical names, aliases, and options |
+| `crates/zz-protocol/src/catalog.rs` | The renderer-free command catalog shared by execution parsing and UI completion; tests enforce unique canonical names, aliases, and options |
 | `crates/zz-protocol/src/message.rs` | Prompt kind/history and the native edit/submit/close actions |
 | `crates/zz-daemon/src/daemon.rs` | Prompt state, bounded history, template substitution, and final execution |
 

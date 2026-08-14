@@ -98,8 +98,8 @@ impl TransportStream for RusshStream {
 }
 
 pub(crate) struct RusshForward {
-    shutdown: Option<oneshot::Sender<()>>,
-    thread: Option<thread::JoinHandle<()>>,
+    shutdown: Mutex<Option<oneshot::Sender<()>>>,
+    thread: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 impl RusshForward {
@@ -157,8 +157,8 @@ impl RusshForward {
         match ready_rx.recv_timeout(HANDSHAKE_TIMEOUT) {
             Ok(Ok(())) => Ok((
                 Self {
-                    shutdown: Some(shutdown_tx),
-                    thread: Some(thread),
+                    shutdown: Mutex::new(Some(shutdown_tx)),
+                    thread: Mutex::new(Some(thread)),
                 },
                 stream,
             )),
@@ -179,14 +179,18 @@ impl RusshForward {
     pub(crate) fn socks_port(&self) -> Option<u16> {
         None
     }
+
+    pub(crate) fn shutdown(&self) {
+        if let Some(shutdown) = self.shutdown.lock().take() {
+            let _ = shutdown.send(());
+        }
+    }
 }
 
 impl Drop for RusshForward {
     fn drop(&mut self) {
-        if let Some(shutdown) = self.shutdown.take() {
-            let _ = shutdown.send(());
-        }
-        if let Some(thread) = self.thread.take() {
+        self.shutdown();
+        if let Some(thread) = self.thread.get_mut().take() {
             let _ = thread.join();
         }
     }

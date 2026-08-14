@@ -151,6 +151,15 @@ impl LocalStream {
             effective_user_id: credentials.euid(),
         })
     }
+
+    #[cfg(unix)]
+    pub(crate) fn shutdown(&self) -> io::Result<()> {
+        match &self.0 {
+            LocalSocketStream::UdSocket(stream) => {
+                stream.inner().shutdown(std::net::Shutdown::Both)
+            }
+        }
+    }
 }
 
 impl TransportStream for LocalStream {

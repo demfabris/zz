@@ -143,3 +143,21 @@ every running daemon to restart. Client-side work (all of the above) needs no
 bump. If you do change the wire: postcard tags enum variants by index, so
 append variants, never reorder, and update
 `knowledge/protocol/wire-protocol.md` including its byte-level example.
+
+## 14. Free must stop and join an FFI reader
+
+The reader owns an `Arc<InteractiveClient>` while blocked in `recv()`. Dropping
+only the public handle leaves the socket, daemon attachment, thread, and event
+producer alive. It can also write to a wake fd after the caller closed the read
+end. Keep the reader `JoinHandle`, shut down the connection to unblock `recv()`,
+and join before dropping the wake fd. The C smoke client frees and reconnects in
+one process to keep this lifecycle pinned.
+
+## 15. Terminal rows need the grapheme dictionary
+
+`PackedCell::glyph()` values with `GRAPHEME_TABLE_BIT` set index the viewport's
+UTF-8 grapheme arena. Casting those ids to characters loses emoji and combining
+clusters. Wide cells also carry spacer heads/tails that must not produce a
+second glyph. Use `TerminalViewport::glyph` or the C ABI's
+`zz_viewport_row_text`, preserve empty narrow cells as spaces for a row-shaped
+string, and truncate only between complete UTF-8 sequences.

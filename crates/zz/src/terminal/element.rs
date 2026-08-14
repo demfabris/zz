@@ -527,10 +527,6 @@ fn kitty_display_row(
     display.checked_sub(first_visible.checked_sub(anchor)?)
 }
 
-#[allow(
-    clippy::cast_precision_loss,
-    reason = "terminal image geometry is bounded viewport/pixel metadata converted to GPUI floats"
-)]
 fn collect_kitty_images(
     viewport: &TerminalViewport,
     cache: &KittyImageCache,
@@ -845,11 +841,6 @@ impl Element for TerminalElement {
         });
         let hidden_composition_cells = composition.as_ref().and_then(|composition| {
             let cursor = cursor_cell?;
-            #[allow(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                reason = "positive shaped composition width is rounded up to a visible cell span"
-            )]
             let shaped_cells = (f32::from(composition.line.width) / f32::from(cell_width))
                 .ceil()
                 .max(1.0) as usize;
@@ -1482,10 +1473,6 @@ fn copy_cursor_line_color(appearance: &TerminalAppearance) -> Hsla {
     color
 }
 
-#[allow(
-    clippy::cast_precision_loss,
-    reason = "scrollbar ratios are normalized and only used for subpixel paint geometry"
-)]
 fn push_scrollbar_quad(
     scrollbar: ScrollbarState,
     bounds: Bounds<Pixels>,
@@ -2838,11 +2825,6 @@ fn relative_luminance(color: Color) -> f32 {
 }
 
 #[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "the interpolated channel is rounded and clamped to the u8 color domain"
-)]
-#[allow(
     clippy::disallowed_methods,
     reason = "terminal color blending operates on terminal palette colors, not application chrome"
 )]
@@ -2961,11 +2943,6 @@ fn last_visible_row_has_content(viewport: &TerminalViewport, visible_rows: u16) 
     })
 }
 
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "the floating-point value is floored and clamped to the u16 domain"
-)]
 fn grid_dimension(available: Pixels, cell: Pixels, scale: f32) -> u16 {
     let tolerance = device_pixel(scale) * 0.01;
     let cells = ((available + tolerance) / cell).floor();
@@ -3049,11 +3026,6 @@ fn search_ime_bounds(
     ))
 }
 
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "the device-pixel value is rounded and clamped to a positive u16-sized domain"
-)]
 fn physical_pixels(value: Pixels, scale: f32) -> u32 {
     (f32::from(value) * scale)
         .round()

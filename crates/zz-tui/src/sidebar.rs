@@ -6,10 +6,7 @@ use zz_protocol::{
     WindowId, WindowSnapshot,
 };
 
-use crate::{
-    layout::Rect,
-    terminal_event::{KeyCode, KeyEvent, KeyEventKind},
-};
+use crate::layout::Rect;
 
 pub(crate) const WIDTH: u16 = 28;
 pub(crate) const BORDER_WIDTH: u16 = 1;
@@ -371,31 +368,6 @@ pub(crate) fn canvas_rect(columns: u16, rows: u16, sidebar_visible: bool) -> Rec
 
 pub(crate) const fn tree_height(rows: u16) -> u16 {
     rows.saturating_sub(STATUS_ROWS)
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum KeyAction {
-    Previous,
-    Next,
-    Activate,
-    Rename,
-    Blur,
-    Hide,
-}
-
-pub(crate) fn key_action(event: KeyEvent) -> Option<KeyAction> {
-    if event.kind == KeyEventKind::Release {
-        return None;
-    }
-    match event.code {
-        KeyCode::Up | KeyCode::Char('k') => Some(KeyAction::Previous),
-        KeyCode::Down | KeyCode::Char('j') => Some(KeyAction::Next),
-        KeyCode::Enter => Some(KeyAction::Activate),
-        KeyCode::Char('r') => Some(KeyAction::Rename),
-        KeyCode::Esc => Some(KeyAction::Blur),
-        KeyCode::Char('q') => Some(KeyAction::Hide),
-        _ => None,
-    }
 }
 
 fn scalar_byte_index(text: &str, scalar: usize) -> usize {

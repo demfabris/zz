@@ -26,9 +26,9 @@ const SELECT_TAB_NAMES: [&str; 8] = [
     "browser-select-tab-8",
 ];
 
-/// A client-local chrome action: behavior that never crosses the wire because
-/// it belongs to the skin (detach, sidebar focus, local browser zoom). Skins
-/// switch on the resolved action and never inspect chords themselves.
+/// A chrome action resolved client-side before the skin applies its local or
+/// protocol-backed effect. Skins switch on the action instead of inspecting
+/// chords themselves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChromeAction {
     Detach,
@@ -62,7 +62,7 @@ pub enum ChromeAction {
     BrowserNewTab,
     BrowserNextTab,
     BrowserPreviousTab,
-    /// Activate a tab by position. The payload is always in `0..8`, the range
+    /// Activate a tab by position. Named actions cover the `0..8` range that
     /// [`ChromeAction::from_name`] accepts.
     BrowserSelectTab(u8),
     BrowserSelectLastTab,
@@ -115,7 +115,8 @@ impl ChromeAction {
             Self::BrowserNewTab => "browser-new-tab",
             Self::BrowserNextTab => "browser-next-tab",
             Self::BrowserPreviousTab => "browser-previous-tab",
-            Self::BrowserSelectTab(index) => SELECT_TAB_NAMES[index as usize],
+            Self::BrowserSelectTab(index) if index < 8 => SELECT_TAB_NAMES[index as usize],
+            Self::BrowserSelectTab(_) => "browser-select-tab",
             Self::BrowserSelectLastTab => "browser-select-last-tab",
             Self::BrowserBack => "browser-back",
             Self::BrowserForward => "browser-forward",
@@ -306,7 +307,7 @@ impl ChromeProfile {
 
     const fn defaults(self) -> [&'static [ChromeDefault]; 2] {
         match self {
-            Self::Tui => [TUI_DEFAULTS, &[]],
+            Self::Tui => [TUI_DEFAULTS, TUI_SIDEBAR_DEFAULTS],
             Self::Desktop => [DESKTOP_DEFAULTS, DESKTOP_CONTROL_DEFAULTS],
             Self::DesktopApple => [DESKTOP_DEFAULTS, DESKTOP_COMMAND_DEFAULTS],
         }
@@ -325,6 +326,17 @@ const TUI_DEFAULTS: &[ChromeDefault] = &[
     (BROWSER_TABLE, "C--", ChromeAction::BrowserZoomOut),
     (BROWSER_TABLE, "C-_", ChromeAction::BrowserZoomOut),
     (BROWSER_TABLE, "C-0", ChromeAction::BrowserZoomReset),
+];
+
+const TUI_SIDEBAR_DEFAULTS: &[ChromeDefault] = &[
+    (SIDEBAR_TABLE, "Up", ChromeAction::SidebarSelectUp),
+    (SIDEBAR_TABLE, "k", ChromeAction::SidebarSelectUp),
+    (SIDEBAR_TABLE, "Down", ChromeAction::SidebarSelectDown),
+    (SIDEBAR_TABLE, "j", ChromeAction::SidebarSelectDown),
+    (SIDEBAR_TABLE, "Enter", ChromeAction::SidebarConfirm),
+    (SIDEBAR_TABLE, "r", ChromeAction::SidebarRename),
+    (SIDEBAR_TABLE, "Escape", ChromeAction::SidebarCancel),
+    (SIDEBAR_TABLE, "q", ChromeAction::ToggleSidebar),
 ];
 
 /// Desktop chrome that spells the same chord on every platform.
@@ -697,7 +709,10 @@ mod tests {
     fn bindings_flatten_for_help_surfaces() {
         let bindings = ChromeKeymap::new().bindings();
         assert!(bindings.contains(&("ui".to_owned(), "C-\\".to_owned(), ChromeAction::Detach)));
-        assert_eq!(bindings.len(), TUI_DEFAULTS.len());
+        assert_eq!(
+            bindings.len(),
+            TUI_DEFAULTS.len() + TUI_SIDEBAR_DEFAULTS.len()
+        );
     }
 
     #[test]
@@ -717,6 +732,14 @@ mod tests {
         );
         assert_eq!(ChromeAction::from_name("browser-select-tab-9"), None);
         assert_eq!(ChromeAction::from_name("browser-select-tab-0"), None);
+        assert_eq!(
+            ChromeAction::BrowserSelectTab(8).name(),
+            "browser-select-tab"
+        );
+        assert_eq!(
+            ChromeAction::BrowserSelectTab(u8::MAX).name(),
+            "browser-select-tab"
+        );
     }
 
     #[test]

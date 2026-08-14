@@ -47,7 +47,7 @@ All engine-tested and smoke-verified against a live daemon at land time.
 | Item | Where |
 | --- | --- |
 | `%if` blocks skipped with a diagnostic instead of executing both branches | `zz-mux/src/parser.rs` `skip_conditional_blocks` |
-| `prefix ]`, `0-9`, `l` bound; `last-window` command; `Session.last_window` slot; kill-window falls back to last window | `zz-mux/src/key.rs` defaults, `model.rs` `activate_window`/`forget_window` |
+| `prefix ]`, `0-9`, `l` bound; `last-window` command; `Session.last_window` slot; kill-window falls back to last window | `zz-protocol/src/key.rs` defaults, `zz-mux/src/model.rs` `activate_window`/`forget_window` |
 | Cell-based `resize-pane` (was ratio: `-R 5` moved the split 25%) | `command.rs` `window_cell_extent`, `model.rs` `pane_axis_fraction`; daemon feeds geometry on `ResizeTerminal` |
 | `split-window`/`new-window`/`new-session [shell-command]` (was silently discarded) | `MuxEffect::PaneCreated.command` → `TerminalSpawn` (`sh -c`) |
 | `ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET` in terminal panes (tmux's `$TMUX` contract) | `zz-terminal` `run_terminal`; daemon builds the env |

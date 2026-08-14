@@ -1,17 +1,16 @@
 use std::{
     collections::VecDeque,
     ffi::{CStr, c_char, c_int},
-    os::fd::{AsRawFd, OwnedFd},
+    os::{fd::AsRawFd, unix::net::UnixStream},
     path::Path,
     sync::{Arc, Mutex, PoisonError},
     thread,
 };
 
-use rustix::pipe::PipeFlags;
 use zz_client::{ClientCore, CoreEvent, Outbound};
 use zz_daemon::InteractiveClient;
 use zz_protocol::{CommandInvocation, InputMessage, PaneId, PaneKindSnapshot, ProtocolMessage};
-use zz_terminal::{GRAPHEME_TABLE_BIT, TerminalViewport};
+use zz_terminal::{CellWidth, Glyph, TerminalViewport};
 
 /// Event kinds mirrored in `include/zz-client.h`; values are ABI.
 #[repr(u32)]
@@ -37,12 +36,13 @@ pub struct ZzEvent {
 }
 
 /// An attached client: connection, reader thread, reduced core, event queue,
-/// and the wake pipe the caller's main loop polls.
+/// and the wake fd the caller's main loop polls.
 pub struct ZzClient {
     client: Arc<InteractiveClient>,
     core: Arc<Mutex<ClientCore>>,
     events: Arc<Mutex<VecDeque<ZzEvent>>>,
-    wake_read: OwnedFd,
+    wake_read: UnixStream,
+    reader: Option<thread::JoinHandle<()>>,
 }
 
 /// A caller-owned viewport snapshot; cheap to acquire (shared immutable
@@ -72,12 +72,12 @@ fn spawn_reader(
     client: &Arc<InteractiveClient>,
     core: &Arc<Mutex<ClientCore>>,
     events: &Arc<Mutex<VecDeque<ZzEvent>>>,
-    wake_write: OwnedFd,
-) {
+    wake_write: UnixStream,
+) -> std::io::Result<thread::JoinHandle<()>> {
     let client = Arc::clone(client);
     let core = Arc::clone(core);
     let events = Arc::clone(events);
-    let spawned = thread::Builder::new()
+    thread::Builder::new()
         .name("zz-client-ffi-reader".to_owned())
         .spawn(move || {
             while let Ok(message) = client.recv() {
@@ -100,8 +100,16 @@ fn spawn_reader(
                     let _ = rustix::io::write(&wake_write, &[1]);
                 }
             }
-        });
-    drop(spawned);
+        })
+}
+
+impl Drop for ZzClient {
+    fn drop(&mut self) {
+        let _ = self.client.shutdown();
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+    }
 }
 
 /// Connect to a zz daemon socket and start the reader thread.
@@ -122,11 +130,12 @@ pub unsafe extern "C" fn zz_client_connect(socket_path: *const c_char) -> *mut Z
     let Ok(client) = InteractiveClient::connect(Path::new(path)) else {
         return std::ptr::null_mut();
     };
-    let Ok((wake_read, wake_write)) =
-        rustix::pipe::pipe_with(PipeFlags::CLOEXEC | PipeFlags::NONBLOCK)
-    else {
+    let Ok((wake_read, wake_write)) = UnixStream::pair() else {
         return std::ptr::null_mut();
     };
+    if wake_read.set_nonblocking(true).is_err() || wake_write.set_nonblocking(true).is_err() {
+        return std::ptr::null_mut();
+    }
     let client = Arc::new(client);
     let core = Arc::new(Mutex::new(ClientCore::new()));
     lock(&core).handle_message(ProtocolMessage::ServerHello(client.server_hello().clone()));
@@ -137,12 +146,15 @@ pub unsafe extern "C" fn zz_client_connect(socket_path: *const c_char) -> *mut Z
             queue_event(&events, &event);
         }
     }
-    spawn_reader(&client, &core, &events, wake_write);
+    let Ok(reader) = spawn_reader(&client, &core, &events, wake_write) else {
+        return std::ptr::null_mut();
+    };
     Box::into_raw(Box::new(ZzClient {
         client,
         core,
         events,
         wake_read,
+        reader: Some(reader),
     }))
 }
 
@@ -426,28 +438,74 @@ pub unsafe extern "C" fn zz_viewport_row_text(
     if buf.is_null() || capacity == 0 || row >= viewport.rows {
         return 0;
     }
-    let mut text = String::new();
-    let start = usize::from(row) * usize::from(viewport.columns);
-    for cell in viewport
-        .cells
-        .iter()
-        .skip(start)
-        .take(usize::from(viewport.columns))
-    {
-        let glyph = cell.glyph();
-        if glyph == 0 {
-            text.push(' ');
-        } else if glyph & GRAPHEME_TABLE_BIT == 0 {
-            text.push(char::from_u32(glyph).unwrap_or(' '));
-        } else {
-            text.push('?');
+    let output = unsafe { std::slice::from_raw_parts_mut(buf.cast::<u8>(), capacity) };
+    let mut length = 0;
+    for cell in viewport.row(row).unwrap_or_default() {
+        if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
+            continue;
         }
+        let mut scalar = [0; 4];
+        let bytes = match viewport.glyph(*cell) {
+            Glyph::Empty => b" ".as_slice(),
+            Glyph::Scalar(value) => value.encode_utf8(&mut scalar).as_bytes(),
+            Glyph::Grapheme(value) => value.as_bytes(),
+        };
+        let end = length + bytes.len();
+        if end >= capacity {
+            break;
+        }
+        output[length..end].copy_from_slice(bytes);
+        length = end;
     }
-    let bytes = text.as_bytes();
-    let length = bytes.len().min(capacity - 1);
-    unsafe {
-        std::ptr::copy_nonoverlapping(bytes.as_ptr().cast::<c_char>(), buf, length);
-        buf.add(length).write(0);
-    }
+    output[length] = 0;
     length
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use zz_terminal::{GRAPHEME_TABLE_BIT, PackedCell, SessionStatus, TerminalDictionary};
+
+    use super::*;
+
+    fn decode(viewport: &TerminalViewport, capacity: usize) -> Vec<u8> {
+        let viewport = ZzViewport(viewport.clone());
+        let mut output = vec![0_i8; capacity];
+        let length =
+            unsafe { zz_viewport_row_text(&viewport, 0, output.as_mut_ptr(), output.len()) };
+        output[..length].iter().map(|byte| *byte as u8).collect()
+    }
+
+    #[test]
+    fn row_text_resolves_graphemes_and_omits_spacer_cells() {
+        let grapheme = "e\u{301}";
+        let mut viewport = TerminalViewport::blank(5, 1, SessionStatus::Running);
+        viewport.cells = Arc::from([
+            PackedCell::EMPTY,
+            PackedCell::new(GRAPHEME_TABLE_BIT, 0, CellWidth::Wide),
+            PackedCell::new(0, 0, CellWidth::SpacerTail),
+            PackedCell::new(u32::from('界'), 0, CellWidth::Wide),
+            PackedCell::new(0, 0, CellWidth::SpacerTail),
+        ]);
+        viewport.dictionary = Arc::new(TerminalDictionary::from_shared(
+            Arc::clone(&viewport.dictionary.styles),
+            Arc::from([0, u32::try_from(grapheme.len()).unwrap()]),
+            Arc::from(grapheme.as_bytes()),
+        ));
+
+        assert_eq!(
+            String::from_utf8(decode(&viewport, 32)).unwrap(),
+            " e\u{301}界"
+        );
+    }
+
+    #[test]
+    fn row_text_never_splits_a_utf8_scalar() {
+        let mut viewport = TerminalViewport::blank(1, 1, SessionStatus::Running);
+        viewport.cells = Arc::from([PackedCell::new(u32::from('界'), 0, CellWidth::Narrow)]);
+
+        assert!(decode(&viewport, 3).is_empty());
+        assert_eq!(String::from_utf8(decode(&viewport, 4)).unwrap(), "界");
+    }
 }

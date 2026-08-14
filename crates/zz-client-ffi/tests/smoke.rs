@@ -40,16 +40,29 @@ fn static_library() -> PathBuf {
 fn compile_smoke_client(scratch: &Path) -> PathBuf {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let binary = scratch.join("zz-smoke-client");
-    let output = Command::new("cc")
+    let mut compiler = Command::new("cc");
+    compiler
         .arg(manifest.join("tests/smoke.c"))
         .arg("-I")
         .arg(manifest.join("include"))
         .arg("-o")
         .arg(&binary)
-        .arg(static_library())
-        .args(["-lpthread", "-ldl", "-lm"])
-        .output()
-        .expect("run the C compiler");
+        .arg(static_library());
+    #[cfg(target_os = "macos")]
+    compiler.args([
+        "-framework",
+        "CoreFoundation",
+        "-lobjc",
+        "-framework",
+        "IOKit",
+        "-liconv",
+        "-lSystem",
+        "-lc",
+        "-lm",
+    ]);
+    #[cfg(not(target_os = "macos"))]
+    compiler.args(["-lpthread", "-ldl", "-lm"]);
+    let output = compiler.output().expect("run the C compiler");
     assert!(
         output.status.success(),
         "compiling the smoke client failed:\n{}",

@@ -10,7 +10,7 @@ timestamp: 2026-08-01T00:00:00Z
 # Overview
 
 `zz-mux` is the renderer-free heart of zz's multiplexer: a pure state machine
-for layouts, target resolution, tmux-style commands, key tables, and the supported `.tmux.conf`
+for layouts, target resolution, tmux-style commands, and the supported `.tmux.conf`
 parser. It compiles without GPUI, CEF, or PTYs and never renders anything; it takes parsed
 `CommandInvocation`s and key presses and returns structured [`MuxEffect`](/tmux/commands.md) side
 effects plus [`MuxSnapshot`](/protocol/snapshots.md) state for the daemon adapter to act on. All
@@ -35,11 +35,11 @@ window-scoped `set-window-option`, and emits `MuxEffect::MuxOptionChanged` so th
 `browser-egress`; both were deleted with the QUIC transport on 2026-08-01, as were the `pair` command
 and the `listen` option.
 
-`lib.rs` is a thin facade that wires six private modules together and re-exports the public API:
-`catalog` (canonical commands, aliases, options, and completion metadata), `command` (the
-`MuxEngine` executor + `MuxEffect`), `key` (`KeyTables`/`KeyEngine` bindings), `model`
-(`MuxState`, the sessions/windows/panes/splits tree), `parser` (`parse_config` for `.tmux.conf`),
-and `status` (the FORMATS subset behind the `StatusHooks` seam).
+`lib.rs` is a thin facade over four private modules: `command` (the `MuxEngine` executor +
+`MuxEffect`), `model` (`MuxState`, the sessions/windows/panes/splits tree), `parser`
+(`parse_config` for `.tmux.conf`), and `status` (the FORMATS subset behind the `StatusHooks` seam).
+It re-exports the shared command catalog and key model from `zz-protocol`, while the daemon remains
+the runtime authority that mutates and resolves those tables.
 
 # What `model.rs` owns
 
@@ -77,11 +77,11 @@ that the prediction matches the mutation.
 
 | File | Role |
 | --- | --- |
-| `crates/zz-mux/src/lib.rs` | Crate facade; declares the six modules and re-exports the public API. |
-| `crates/zz-mux/src/catalog.rs` | Canonical commands, aliases, descriptions, accepted options, and completion value kinds. |
+| `crates/zz-mux/src/lib.rs` | Crate facade; declares four private modules and re-exports the shared catalog and key contract from `zz-protocol`. |
+| `crates/zz-protocol/src/catalog.rs` | Canonical commands, aliases, descriptions, accepted options, and completion value kinds. |
 | `crates/zz-mux/src/model.rs` | `MuxState`: sessions/windows/panes, the recursive `LayoutNode` split tree, target resolution, layout presets, zoom, swap/rotate/break/join, `validate()`, and the free `swapped_layout`/`joined_layout` predictors. See [split-pane layout](/concepts/split-pane-layout.md). |
 | `crates/zz-mux/src/command.rs` | `MuxEngine`: executes tmux-style commands, parses options/`-t` targets, emits `MuxEffect`s, and holds server/session/window options including `history-trickle`. See [commands](/tmux/commands.md). |
-| `crates/zz-mux/src/key.rs` | `KeyTables`/`KeyEngine`: root/prefix/copy-mode tables, default prefix `C-b`, bind/unbind, prefix-mode state machine. See [key tables](/tmux/key-tables.md). |
+| `crates/zz-protocol/src/key.rs` | `KeyTables`/`KeyEngine`: root/prefix/copy-mode and overlay tables, default prefix `C-b`, bind/unbind, key folding, and the prefix-mode state machine. See [key tables](/tmux/key-tables.md). |
 | `crates/zz-mux/src/parser.rs` | `parse_config`: the `.tmux.conf` tokenizer producing `CommandInvocation`s + diagnostics. See [conf parser](/tmux/conf-parser.md). |
 | `crates/zz-mux/src/status.rs` | `StatusFormats`/`StatusOption`, `StatusContext`, and `expand_status`: the tmux FORMATS subset behind the `StatusHooks` seam that keeps the clock and `#()` out of this crate. See [status line](/tmux/status-line.md). |
 

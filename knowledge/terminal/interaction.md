@@ -126,11 +126,13 @@ counter the debounced task captured, so the queued `ScrollToOffset` never fires.
 
 # Keyboard routing (client side)
 
-Terminal keys and committed text go to the daemon, where the
-[key tables](/tmux/key-tables.md) resolve first (the configured prefix arms the prefix table for
-exactly one following key, tmux-style), and anything unbound passes through to the PTY. The client
-does no key resolution of its own beyond the window-root
-[prefix claim](/crates/zz.md), which recognizes only the configured prefix chord.
+The window-root [prefix claim](/crates/zz.md) sends the configured tmux prefix and armed sequence to
+the daemon first. A focused terminal then resolves the client-local `terminal` table through
+`ChromeKeymap`; its stock Control-minus/equal/plus actions adjust the local font and its other
+actions cover copy, paste, search, selection, and history. Any press left over goes to the daemon,
+where the [key tables](/tmux/key-tables.md) resolve root/prefix semantics and pass unbound root keys
+through to the PTY. `chrome-keybind` and `chrome-unbind` change the client table without changing
+the daemon's pane tables.
 
 There is no client-side predictive echo. `Predictor` and the `predict` mux option existed to hide
 WAN latency over QUIC and were deleted with that transport on 2026-08-01; a keystroke is drawn when

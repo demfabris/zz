@@ -114,7 +114,7 @@ get to exfiltrate whatever the local machine copied. Kitty's OSC 5522 is unimple
 | File | Role |
 | --- | --- |
 | `crates/zz-mux/src/command.rs` | `copy_mode`, `copy_mode_search_prompt`, `copy_mode_action`, `copy_pipe_action`, `copy_selection_action`, `copy_jump_action`. |
-| `crates/zz-mux/src/key.rs` | Default `copy-mode`/`copy-mode-vi` tables and search bindings; jump-target and numeric-prefix capture. |
+| `crates/zz-protocol/src/key.rs` | Default `copy-mode`/`copy-mode-vi` tables and search bindings; jump-target and numeric-prefix capture. |
 | `crates/zz-daemon/src/daemon.rs` | `copy_sessions` authority: `enter_copy_session`, `exit_copy_session`, `unfocused_copy_sessions`, `retarget_copy_mode_tables`, `reconcile_copy_session`; `deliver_clipboard_write` applies `set-clipboard` to OSC 52 writes. |
 | `crates/zz-terminal/src/session.rs` | Native action execution plus `register_clipboard_write` / `clipboard_write_request` for OSC 52. |
 | `crates/zz-terminal/src/session/mode_revision.rs` | Frozen selection text formatting, including hard/soft line structure and blank-cell spacing. |

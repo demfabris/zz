@@ -378,7 +378,7 @@ server → ServerHello { protocol_version: 52, server_id, client_id: c11,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],
-                       appearance, appearance_provenance, mux_options, status, prefix_bindings }
+                       appearance, appearance_provenance, mux_options, status, key_tables }
 client → SetConfigOverrides { entries: [("theme", "Catppuccin Mocha"),
                                         ("font-size", "13"),
                                         ("prefix", "C-a"), ("mode-keys", "vi"), ...] }

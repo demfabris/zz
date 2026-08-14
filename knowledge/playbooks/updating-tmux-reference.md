@@ -69,7 +69,7 @@ implementation. That is a research-and-port task, unlike the mechanical version 
 | --- | --- |
 | `third_party/tmux-reference/UPSTREAM.md` | The pinned commit and list of relevant upstream files |
 | `crates/zz-mux/src/**` | The Rust reimplementation being verified against upstream behavior |
-| `crates/zz-mux/src/catalog.rs` | The supported command surface to manually re-check, mirrored in [tmux command set](/tmux/commands.md) |
+| `crates/zz-protocol/src/catalog.rs` | The supported command surface to manually re-check, mirrored in [tmux command set](/tmux/commands.md) |
 
 # Related
 

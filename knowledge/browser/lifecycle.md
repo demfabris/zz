@@ -4,7 +4,7 @@ title: Browser runtime & session lifecycle
 description: Runtime/profile-context/session state machines and the browser-neutral events that CEF callbacks translate into.
 resource: crates/zz-browser/src/lifecycle.rs
 tags: [browser, lifecycle, events, state-machine]
-timestamp: 2026-08-01T00:00:00Z
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
@@ -57,10 +57,11 @@ only when CEF never initialized; a failure after successful init still follows
 `Arc<AtomicU64>` incremented at `create_session` and decremented in
 `mark_closed`.
 
-A remote pane adds no extra readiness work. The composite-context + loopback-proxy
-dance a browser pane used to do for egress was deleted on 2026-08-01 with the
-QUIC transport; every pane now takes the plain named context and browses from the
-client's network.
+A remote pane uses a local composite request context named
+`<profile>@egress-<hash8>`. Once that context becomes ready, the controller points
+its proxy preference at the managed `ssh -D` SOCKS port before creating the
+session. Local panes keep the plain named context. A reconnect can change the
+SOCKS port, so snapshot refresh re-applies the preference to the retained context.
 
 # Session control (`BrowserSession`)
 

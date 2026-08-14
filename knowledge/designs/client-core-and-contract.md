@@ -1,8 +1,8 @@
 ---
 type: Design Plan
 title: Client core & contract - one brain, every face
-description: Proposed plan to finish detaching zz's client from gpui - consolidate one exportable contract (command catalog + key grammar + key resolver) in zz-protocol, publish live key tables over the wire, extract a C-shaped sans-IO zz-client brain crate hardened by deterministic simulation, and export it over FFI so GTK, Qt, and Swift clients become thin skins.
-status: Rungs 1-6 landed 2026-08-14 - contract consolidated in zz-protocol (key tables, engine, fold, resolve_input, catalog); full key tables published over v52; chooser keymaps daemon-side; zz-client sans-IO core gated by a daemon-backed convergence simulator; ChromeKeymap engine with zz-tui as first consumer; zz-client-ffi C ABI proven by a from-scratch C smoke client. Follow-ups landed same day - zz-tui and MuxClient reduce through ClientCore (the desktop frame path deliberately stays client-side - RetainedTerminalViewport carries painter state the core does not model, keeping the hot path byte-identical, which satisfies the bench gate by construction), and the desktop chrome chords resolve from ChromeKeymap with chrome-keybind/chrome-unbind config overrides, a D-/S- chrome-only grammar extension, and per-profile default tables. Known limit - gpui keymaps only grow, so a live cross-surface rebind needs a restart; same-surface rebinds and unbinds apply live via NoAction shadows
+description: Decision record for the shared client contract - command and key ownership moved to zz-protocol, v52 publishes live tables, zz-client provides sans-IO reduction and chrome actions, and a narrow C ABI proves the integration shape.
+status: Contract consolidation, v52 key-table publication, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The desktop keeps its retained terminal hot path. zz-client-ffi ships a hand-maintained proof ABI for connect, events, commands, and basic viewports; the original full graphical ABI and the broader connection, layout, history, and Kitty extraction remain open. GPUI cross-surface rebinding still needs a restart
 tags:
 - client
 - ffi
@@ -15,46 +15,34 @@ timestamp: 2026-08-14T00:00:00Z
 
 # Overview
 
-The daemon-side inversion is done: sessions, layout, key tables, copy mode, search,
-selection, command execution, and status expansion all live behind protocol v51, and
-the [TUI client](/designs/tui-client.md) proved a complete second client needs only
-`zz-protocol` + `zz-daemon` (client half) + `zz-terminal` (model half). What is
-**not** done is the client side of the same inversion: there is no shared client
-brain. The GPUI app and the TUI each hand-roll connection lifecycle, layout
-geometry, key encoding, scrollback, and snapshot reconciliation, and the binding
-story is split between rebindable daemon key tables and ~15 hardcoded
-`gpui::KeyBinding` sites of which exactly two are user-configurable.
+The shipped split uses protocol v52. `zz-protocol` owns the command catalog, key grammar, tables,
+and resolver; the daemon publishes every live table. `zz-client::ClientCore` reduces decoded
+messages into shared state and typed effects, while `ChromeKeymap` owns client-side chords. The TUI
+uses both directly. The GPUI `MuxClient` sends non-frame messages through the core but keeps terminal
+frames in `RetainedTerminalViewport`, avoiding a second patch application on the paint hot path.
 
-This plan finishes the job in two moves that share one constraint:
+`zz-client-ffi` proves the C integration shape with a pollable wake fd and a from-scratch smoke
+client. Its current hand-maintained header is narrower than the original Pillar 6 target: it lacks
+raw key forwarding, style/grapheme tables, generation counters, catalog/table access, and chrome
+action events. GTK, Qt, or Swift work must extend that contract first.
 
-1. **One contract.** The command catalog, the key spelling grammar, the key-table
-   data model, and the key resolver consolidate into `zz-protocol` and become
-   queryable — statically (linked catalog) and dynamically (daemon publishes its
-   live tables over the wire).
-2. **One brain.** A new `zz-client` crate absorbs everything desktop and TUI
-   duplicate today, with its public API designed *as if C were consuming it* — no
-   async types, no gpui types, no generics on the surface — so a thin
-   `zz-client-ffi` shim + cbindgen header makes GTK, Qt, and Swift clients
-   first-class skins, not ports.
+The sections below retain the original proposal and its acceptance criteria. The rung ladder marks
+the parts that shipped and the parts that remain design intent.
 
-End state: daemon key tables = pane semantics, one client keymap = chrome, one
-client crate = shared brain. A new client starts at "render viewports, forward
-keys, switch on actions" instead of ~7k lines.
+# Historical starting point (verified before v52 on 2026-08-14)
 
-# What is already true (verified 2026-08-14)
-
-- **Clients send raw keys; the daemon resolves everything.** One `KeyEngine`
-  cursor per client (`key_engines` in `crates/zz-daemon/src/daemon.rs`,
-  engine in `crates/zz-mux/src/key.rs`) runs the `root`/`prefix`/
-  `copy-mode`/`copy-mode-vi` tables. The TUI forwards essentially every key
-  (`crates/zz-tui/src/input.rs`) and contains zero binding logic.
+- **Pane keys resolve on the daemon.** One `KeyEngine` cursor per client
+  (`key_engines` in `crates/zz-daemon/src/daemon.rs`; the engine now lives in
+  `crates/zz-protocol/src/key.rs`) runs the `root`/`prefix`/`copy-mode`/
+  `copy-mode-vi` tables. The TUI forwarded pane keys but still held local chrome
+  and sidebar chord matches.
 - **Terminal content crosses the wire render-ready** — packed cell grids with
   shared style/grapheme dictionaries (`encode_viewport_into` in
   `crates/zz-protocol/src/terminal_codec.rs`), never raw PTY bytes. This format
   is already the renderer-neutral render contract this plan reuses over FFI.
-- **The publish pattern exists in miniature**: `ServerHello.prefix_bindings`,
-  `EventPayload::PrefixBindingsChanged`, and `PrefixArmed`
-  (`crates/zz-protocol/src/message.rs`) already push binding truth to clients.
+- **The old publish pattern existed in miniature**: v51 carried
+  `ServerHello.prefix_bindings` and `PrefixBindingsChanged`. v52 replaced them
+  with `ServerHello.key_tables` and `KeyTablesChanged`; `PrefixArmed` remains.
 - **Commands travel tokenized-but-unparsed** (`CommandInvocation`); parsing,
   aliases, flags, and target resolution are daemon-side
   (`crates/zz-mux/src/command.rs`).
@@ -76,16 +64,11 @@ keys, switch on actions" instead of ~7k lines.
 | Sidebar tree projection | `crates/zz/src/mux/nav.rs` + `workspace/sidebar.rs` | `crates/zz-tui/src/sidebar.rs` |
 | Kitty image assembly | `KittyImageCache` on the terminal element | `KittyImageAssembler` in `crates/zz-tui/src/kitty.rs` |
 
-Chrome-binding facts that motivate the keymap half: there is no keymap file
-anywhere — every gpui binding is a programmatic `KeyBinding::new` call or raw
-`on_key_down` matcher; only the browser element-selector hotkey and the editor
-vim-mode toggle are user-configurable (`crates/zz/src/config/mod.rs`); vim
-bindings live in four independent homes (daemon `copy-mode-vi` table, desktop
-chooser/sidebar maps, the TUI's second chooser copy, and the modal vim layer in
-`crates/zz-ui/src/widget/code_editor/vim/`); and the new-session hint keys are
-hardcoded guesses reconciled against live `prefix_bindings`
-(`resolve_binding_key` in `crates/zz/src/workspace/new_session.rs`) — a hack
-that generalizes away once full tables are published.
+At the starting point, GPUI bindings were programmatic `KeyBinding::new` calls or raw
+`on_key_down` matches, and only two actions were configurable. Chooser and sidebar maps were
+duplicated across clients, while new-session hints reconciled hardcoded guesses against the lone
+published prefix table. Full table publication and `ChromeKeymap` removed those specific splits;
+widget-internal editing and the zz-ui editor's modal vim layer remain separate by design.
 
 # Design
 
@@ -111,7 +94,7 @@ execution engine. No protocol bump; pure refactor.
 
 ## Pillar 2 - the daemon publishes its live tables
 
-Generalize the `prefix_bindings` pattern to the whole `KeyTables`:
+Replace the v51 prefix-only publication with the whole `KeyTables`:
 
 - `ServerHello.key_tables: Vec<KeyTableSnapshot>` (table name, key spelling,
   bound `CommandInvocation`s, repeat flag, note)
@@ -133,7 +116,7 @@ defaults, and let clients forward raw keys into them exactly as they do for
 panes. Deletes both hardcoded maps and makes chooser vim-nav rebindable via
 `bind-key -T choose-tree`. Free for every future client.
 
-## Pillar 4 - zz-client: the shared brain, C-shaped from day one
+## Pillar 4 - zz-client: original target, partially landed
 
 New crate sitting between the contract and any skin. Contents (lifted from
 `MuxClient` and `zz-tui`, decoupled from gpui):
@@ -173,13 +156,12 @@ The zz-ui widget layer's internal bindings (text inputs, menus) and the code
 editor's modal vim engine stay where they are — widget-internal editing behavior
 is not chrome and not part of the contract.
 
-## Pillar 6 - zz-client-ffi
+## Pillar 6 - zz-client-ffi target and shipped proof
 
-Thin `#[no_mangle]` shim + cbindgen header, libghostty-style — the same shape zz
-already embeds and trusts. C ABI is the lowest common denominator that covers all
-three announced targets natively (GTK is C; Qt eats C or a small RAII wrapper;
-Swift imports C headers first-class). No UniFFI: it covers only Swift of the
-three and adds codegen machinery cbindgen makes unnecessary.
+The shipped proof is a thin `#[no_mangle]` shim with a hand-maintained header. It covers connection,
+event wake/drain, attach, text, command execution, resize, pane IDs, basic cells, and decoded row
+text. The C smoke test compiles and links that contract, then frees and reconnects in one process.
+The fuller target below has not shipped:
 
 - **Render contract**: the packed viewport *is* the FFI render type — flat cell
   buffer + style table + grapheme arena + generation counters, handed out as
@@ -279,24 +261,21 @@ functions (layout solver: no overlap, full coverage, px/cell agreement;
 simulation through the C header under ASan/TSan and asserts the Rust API and C
 API emit identical event sequences.
 
-# Rung ladder
+# Rung ladder and result
 
-Ship each rung independently; never let a higher rung block a lower one.
-
-1. **Contract consolidation.** `canonical_key` + `key.rs` + `COMMAND_SPECS` move
-   to `zz-protocol`; `zz-mux` re-exports; delete `canonical_prefix`. Pure
-   refactor, no bump.
-2. **Publish key tables** (`ServerHello.key_tables` + `KeyTablesChanged`);
-   replace the new-session hint reconciliation with published truth. Bump.
-3. **Overlay tables daemon-side**; delete both chooser keymaps. Same or next
-   bump.
-4. **Extract `zz-client`**, TUI first (it is closest to the model), then port
-   `MuxClient`/desktop onto it. The gpui-free dep tree is the compile-time fence,
-   exactly as it was for zz-tui; the simulator lands with this rung and gates it.
-5. **Chrome keymap + second engine**; convert gpui `KeyBinding` sites to action
-   consumers.
-6. **`zz-client-ffi`** + cbindgen header + a smoke consumer (a ~300-line C or
-   GTK proof client that attaches, renders one terminal pane, forwards keys).
+1. **Contract consolidation: shipped.** `canonical_key`, `key.rs`, and `COMMAND_SPECS` moved to
+   `zz-protocol`; `zz-mux` re-exports them.
+2. **Publish key tables: shipped in v52.** `ServerHello.key_tables` and `KeyTablesChanged` replaced
+   prefix-only publication.
+3. **Overlay tables daemon-side: shipped.** Chooser keys resolve through daemon tables.
+4. **Extract `zz-client`: partially shipped.** `ClientCore` owns shared protocol reduction and the
+   simulator covers convergence. Connection lifecycle, layout, history, key encoding, and Kitty
+   assembly remain in their shells; desktop keeps its retained terminal frame path.
+5. **Chrome keymap: shipped.** Desktop and TUI resolve client-owned actions through profile tables;
+   desktop config supports `chrome-keybind` and `chrome-unbind`.
+6. **`zz-client-ffi`: proof surface shipped.** The C smoke client attaches, reads rows, types,
+   frees, and reconnects. The full render/key/catalog/action contract above remains open, and the
+   header is hand-maintained rather than generated by cbindgen.
 
 # Hard parts
 

@@ -138,7 +138,7 @@ GPUI resolves a shifted **symbol** before zz sees it: `shift+5` arrives as `%` w
 *cleared*, so `%`, `"`, `!`, `&`, `?`, `=`, `{`, `}`, `:` and `$` look up directly.
 
 A shifted **letter** is the exception: it arrives as the lowercase key with the shift bit still set.
-`shifted_character` (`crates/zz-daemon/src/keys.rs`) uppercases an ASCII lowercase character when shift
+The shared fold in `crates/zz-protocol/src/key.rs` uppercases an ASCII lowercase character when shift
 is held, which is what makes the uppercase bindings the copy-mode table is full of (`A`, `B`, `D`,
 `E`, `F`, `G`, `H`, `J`, `K`, `L`, `M`, `N`, `T`, `V`, `W`, `X`) resolve instead of hitting their
 lowercase twins. The fold reads
@@ -152,14 +152,16 @@ With control or alt held nothing is uppercased: the binding is spelled off the b
 
 | File | Role |
 | --- | --- |
-| `crates/zz-mux/src/key.rs` | `KeyTables`, `KeyEngine` (`handle`), `Binding`, `KeyDecision`, `canonical_key`, default bindings. |
+| `crates/zz-protocol/src/key.rs` | `KeyTables`, `KeyEngine` (`handle`), `Binding`, `KeyDecision`, `canonical_key`, `input_key_name`, typed-text precedence, and default bindings. |
 | `crates/zz-mux/src/command.rs` | `bind-key`/`unbind-key`/`list-keys`, `send-prefix`, and `set-option prefix` drive these tables. |
-| `crates/zz-daemon/src/keys.rs` | `input_key_name` and the shifted-spelling fold used for every lookup. |
-| `crates/zz/src/mux/prefix.rs` | The window-root claim; the only key resolution the client owns is recognizing the configured prefix (plus the daemon-reported armed window). |
+| `crates/zz-daemon/src/keys.rs` | Daemon overlay-action projection and tmux `send-keys` token conversion; it consumes the shared fold and tables. |
+| `crates/zz-client/src/chrome.rs` | Client-side `ui`, `sidebar`, `browser`, and `terminal` chrome tables, resolved before the skin applies an action. |
+| `crates/zz/src/mux/prefix.rs` | The desktop window-root claim that forwards the configured prefix and the daemon-reported armed sequence from local widgets. |
 
 # Related
 
 - Bindings run [commands](/tmux/commands.md); copy-mode tables drive [copy mode](/tmux/copy-mode.md).
 - Populated at load time by the [conf parser](/tmux/conf-parser.md).
 - Audited against the pinned `key-bindings.c` tables; see [tmux compatibility](/tmux/tmux-compat.md) and the
-  [tmux upstream reference](/references/tmux-upstream.md). Lives in [crates/zz-mux](/crates/zz-mux.md).
+  [tmux upstream reference](/references/tmux-upstream.md). The contract lives in
+  [zz-protocol](/crates/zz-protocol.md) and the execution engine in [zz-mux](/crates/zz-mux.md).

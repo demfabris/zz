@@ -70,15 +70,15 @@ Ship each rung independently; never let a higher rung block a lower one.
 
 Separate package `crates/zz-tui`, mirroring `crates/zz-ios` in workspace shape but
 inverting the dependency direction: zz-ios depends on the `zz` lib (it IS the gpui
-app on another backend); zz-tui must NOT — it depends only on `zz-daemon` (client
-transport, `Endpoint`, `SshForward`), `zz-protocol` (codec), and crossterm (raw
-mode + input). Lib + thin `[[bin]]` in one crate: `crates/zz` links the lib for
+app on another backend); zz-tui must NOT. It depends on `zz-client` for reduction and
+chrome tables, the client-only `zz-daemon` transport, `zz-protocol`, model-only
+`zz-terminal`, and small runtime/encoding crates. Lib + thin `[[bin]]` in one crate: `crates/zz` links the lib for
 `zz attach`, the standalone binary serves headless boxes. One forced extraction:
 `configured_fleet_hosts`/`HostEntry` move from `crates/zz/src/config/mod.rs`
 (gpui-entangled module) down to `zz-daemon` beside `Endpoint`. The gpui-free dep
 tree doubles as compile-time enforcement of what the TUI must never grow: VT
-parsing, layout math beyond ratio→rect, config semantics, key-binding logic —
-all daemon territory.
+parsing, daemon option semantics, or pane key-table execution. Layout projection
+remains presentation work, and client chrome resolves through `ChromeKeymap`.
 
 # Chrome direction (settled 2026-08-09, after rung 1)
 
@@ -97,8 +97,9 @@ browser panes created from a TUI materialize as daemon descriptors and are
 live when a GUI next attaches; the agent entry is hinted "(runs in the zz
 app)". Focus model: sidebar-focus toggle (`EventPayload::FocusSidebar`
 exists), arrows + Enter, mouse on tree rows; sidebar auto-hides under a
-minimum width like the GUI slideover. tmux muscle memory is untouched — the
-prefix engine and key tables stay daemon-side. Deferred: multi-host tree
+minimum width like the GUI slideover. Sidebar Up/k, Down/j, Enter, r, Escape, and
+q now come from the TUI `sidebar` chrome table instead of inline chord matches.
+tmux muscle memory is untouched because the prefix engine and pane key tables stay daemon-side. Deferred: multi-host tree
 (one `InteractiveClient` per host side by side, a later rung, not a v1
 compromise).
 

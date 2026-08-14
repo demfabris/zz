@@ -102,6 +102,13 @@ int main(int argc, char **argv) {
     }
 
     zz_client_free(client);
+    client = zz_client_connect(argv[1]);
+    if (client == NULL || !zz_client_attach(client, "smoke")) {
+        fprintf(stderr, "smoke: reconnect after free failed\n");
+        return 1;
+    }
+    sleep(2);
+    zz_client_free(client);
     printf("smoke: ok\n");
     return 0;
 }

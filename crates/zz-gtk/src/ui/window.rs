@@ -223,6 +223,12 @@ impl Shell {
                 }
             }
             EngineEvent::Notice(text) => self.toasts.add_toast(adw::Toast::new(&text)),
+            EngineEvent::Reconnecting { attempt } => self.toasts.add_toast(adw::Toast::new(
+                &format!("Reconnecting… (attempt {attempt})"),
+            )),
+            EngineEvent::Reconnected => {
+                self.toasts.add_toast(adw::Toast::new("Reconnected"));
+            }
             EngineEvent::Detached | EngineEvent::Disconnected(_) => self.window.close(),
         }
     }

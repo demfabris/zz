@@ -22,7 +22,7 @@ use std::{
 };
 
 use adw::prelude::*;
-use gtk::glib;
+use gtk::{gio, glib};
 use zz_client::{ChromeAction, ChromeKeymap};
 use zz_protocol::{CommandInvocation, MuxOptionSource};
 use zz_terminal::{AppearanceProvenance, AppearanceSource, KeyAction, TerminalAppearance};
@@ -139,12 +139,18 @@ impl SettingsRoute {
     /// Put the route in front of the pane area. The pane widget and this
     /// surface become the two children of one stack, so opening settings hides
     /// the panes exactly the way the desktop's route swap does.
+    ///
+    /// The toolbar's content is cleared first: `panes` is already its child at
+    /// this point, and adding a parented widget to the stack leaves GTK
+    /// unable to reconcile the two, which it reports forever as a failure to
+    /// remove a non-child.
     pub fn install(
         self: &Rc<Self>,
         toolbar: &adw::ToolbarView,
         tab_bar: &adw::TabBar,
         panes: &impl IsA<gtk::Widget>,
     ) {
+        toolbar.set_content(gtk::Widget::NONE);
         let route = gtk::Stack::new();
         route.add_named(panes, Some("panes"));
         route.add_named(&self.split, Some("settings"));
@@ -158,9 +164,32 @@ impl SettingsRoute {
         let target = Rc::downgrade(self);
         route.connect_map(move |_| {
             if let Some(route) = target.upgrade() {
+                route.install_window_action();
                 route.prompt_import();
             }
         });
+    }
+
+    /// The window only exists once the tree is mapped, so the deep-link action
+    /// is registered then rather than at construction.
+    fn install_window_action(self: &Rc<Self>) {
+        let Some(window) = self.split.root().and_downcast::<adw::ApplicationWindow>() else {
+            return;
+        };
+        if window.lookup_action("settings-page").is_some() {
+            return;
+        }
+        let action = gio::SimpleAction::new("settings-page", Some(glib::VariantTy::STRING));
+        let target = Rc::downgrade(self);
+        action.connect_activate(move |_, parameter| {
+            let (Some(route), Some(name)) =
+                (target.upgrade(), parameter.and_then(glib::Variant::str))
+            else {
+                return;
+            };
+            route.open_at(name);
+        });
+        window.add_action(&action);
     }
 
     pub fn zoom(&self) -> &UiZoom {
@@ -191,10 +220,22 @@ impl SettingsRoute {
     }
 
     pub fn open(&self) {
+        self.open_at(Page::Interface.name());
+    }
+
+    /// Open the route on a named page. `win.settings-page` reaches this, which
+    /// is how a menu item, another surface, or a script deep-links into one
+    /// page the way a desktop settings app does.
+    pub fn open_at(&self, name: &str) {
+        let page = Page::ALL
+            .iter()
+            .position(|page| page.name() == name)
+            .unwrap_or(0);
         self.show("settings");
         self.mux.reload();
         self.refresh_rows();
-        self.list.select_row(self.list.row_at_index(0).as_ref());
+        self.list
+            .select_row(self.list.row_at_index(page as i32).as_ref());
         self.split.grab_focus();
     }
 

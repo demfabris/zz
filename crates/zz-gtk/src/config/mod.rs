@@ -49,12 +49,6 @@ impl Provenance {
             Self::RuntimeCommand => "Set at runtime",
         }
     }
-
-    /// Whether resetting can change anything. Only a line in `zz/config` is
-    /// this client's to delete; a value the daemon sourced elsewhere is not.
-    pub const fn is_resettable(self) -> bool {
-        matches!(self, Self::Override)
-    }
 }
 
 /// One parse of the file. Values are kept as the raw trimmed text the file
@@ -165,7 +159,11 @@ impl Default for Store {
 impl Store {
     #[must_use]
     pub fn load() -> Self {
-        let candidates = file::candidates();
+        Self::for_candidates(file::candidates())
+    }
+
+    #[must_use]
+    pub fn for_candidates(candidates: Vec<PathBuf>) -> Self {
         let stamp = file::Stamp::detect(&candidates);
         let state = read_state(&stamp);
         Self {
@@ -336,6 +334,54 @@ prefix = C-a
         let state = parse("ok = 1\nbroken\n");
 
         assert_eq!(state.malformed_lines(), [2]);
+    }
+
+    /// The whole apply path, minus the widget that pulls the trigger: a GUI
+    /// edit writes the file and the poll is what applies it, so a hand edit and
+    /// a click are indistinguishable by construction.
+    #[test]
+    fn a_written_key_reaches_the_ui_only_through_the_poll() {
+        let scratch =
+            std::env::temp_dir().join(format!("zz-gtk-store-{}-{}", std::process::id(), line!()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let path = scratch.join("zz/config");
+        file::atomic_write(&path, SAMPLE.as_bytes()).expect("seed the config");
+
+        let mut store = Store::for_candidates(vec![path.clone()]);
+        assert_eq!(store.state().value("pane-margin"), Some("8"));
+        assert!(!store.state().is_overridden("pane-gaps"));
+
+        write_at(&path, "pane-gaps", Some("true"));
+        store.invalidate();
+        assert!(store.poll(), "the poll must notice the write");
+        assert!(store.state().boolean("pane-gaps", false));
+        assert!(store.state().is_overridden("pane-gaps"));
+
+        write_at(&path, "pane-margin", None);
+        store.invalidate();
+        assert!(store.poll());
+        assert!(!store.state().is_overridden("pane-margin"));
+        assert_eq!(store.state().number("pane-margin", 6.0), 6.0);
+
+        let left = std::fs::read_to_string(&path).expect("read back");
+        assert!(
+            left.starts_with("# the zz configuration\n"),
+            "the writer ate a comment: {left:?}"
+        );
+        assert!(
+            left.contains("prefix = C-a"),
+            "the writer ate an unrelated key: {left:?}"
+        );
+        assert!(!store.poll(), "an unchanged file must not re-apply");
+
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    fn write_at(path: &std::path::Path, key: &str, value: Option<&str>) {
+        match value {
+            Some(value) => file::set_key_at(path, key, value).expect("set"),
+            None => file::remove_key_at(path, key).expect("remove"),
+        }
     }
 
     #[test]

@@ -323,10 +323,11 @@ impl Overlays {
             .entry
             .set_position(i32::try_from(state.cursor).unwrap_or(-1));
         self.prompt.syncing.set(false);
-        if !self.prompt.revealer.reveals_child() {
-            self.prompt.revealer.set_reveal_child(true);
+        if self.prompt.revealer.reveals_child() {
+            return;
         }
-        self.prompt.entry.grab_focus();
+        self.prompt.revealer.set_reveal_child(true);
+        self.prompt.entry.grab_focus_without_selecting();
     }
 
     fn connect_prompt(self: &Rc<Self>) {

@@ -471,7 +471,7 @@ impl Fixture {
             .expect("rename the boot session");
         commands
             .execute(CommandInvocation::new("split-window", ["-t", "0", command]))
-            .expect("split the fixture in beside the boot pane");
+            .expect("add the fixture pane beside the boot pane");
         commands
             .execute(CommandInvocation::new("kill-pane", ["-t", "0"]))
             .expect("retire the boot pane");

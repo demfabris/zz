@@ -81,10 +81,10 @@ __zz_title_preexec() {
 
 if (( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 3) )); then
   # shellcheck disable=SC2016 # Bash expands this when PS0 is displayed.
-  [[ $PS0 == *'__zz_title_preexec'* ]] || PS0+='${ __zz_title_preexec; }'
+  [[ $PS0 == *'__zz_title_preexec'* ]] || PS0='${ __zz_title_preexec; }'"${PS0-}"
 elif (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
   # shellcheck disable=SC2016 # Bash expands this when PS0 is displayed.
-  [[ $PS0 == *'__zz_title_preexec'* ]] || PS0+='$(__zz_title_preexec >/dev/tty)'
+  [[ $PS0 == *'__zz_title_preexec'* ]] || PS0='$(__zz_title_preexec >/dev/tty)'"${PS0-}"
 fi
 
 if [[ $(builtin declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a '* ]]; then

@@ -246,8 +246,12 @@ full viewport via `replace_terminal`. Completed frame buffers are recycled (boun
 `MAX_RECYCLED_FRAME_BUFFERS = 8`, `MAX_RECYCLED_FRAME_CAPACITY = 8 MiB`). Overflow on any lane closes
 the mailbox rather than growing unboundedly, applying backpressure up to the terminal worker.
 
-Layout changes call `refresh_terminal_visibility`, which `cancel_terminal`s panes that left the
-visible set and seeds a fresh full viewport for panes that became visible.
+Layout changes call `refresh_terminal_visibility`, which `suspend_terminal`s panes that left the
+visible set and seeds a fresh full viewport for panes that became visible. Suspending drops the
+pane's pending frame and delivered generation but **keeps its Kitty and pasted-image ledgers**, so
+switching windows and coming back does not resend image pixels the client already holds;
+`cancel_terminal` is the harder form that clears those ledgers too, reserved for a pane that is
+really going away.
 
 A client that misses a frame asks for repair rather than waiting: `ProtocolMessage::RequestFull`
 runs `send_full`, which re-sends the pane's current viewport when that pane is still visible to the

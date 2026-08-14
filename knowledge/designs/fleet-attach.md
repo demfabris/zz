@@ -188,11 +188,10 @@ adopted now: version bumps stay honest . any wire change bumps . so "same versio
 
 Recorded so later phases inherit intent, ordered roughly by expected sequence.
 
-- **QUIC arm (M1)**: ~~implement `quic://` behind the endpoint seam~~ shipped 2026-07-29
-  and is compiled unconditionally as of 2026-07-31 . see the
-  [scene-streaming status block](/designs/scene-streaming-remote.md). `quic://` fleet hosts
-  work end to end; the mobile prerequisite is unlocked. One-command pairing over ssh
-  (`zz fleet add`) landed 2026-07-30.
+- **QUIC arm (M1)**: shipped 2026-07-29, then **deleted 2026-08-01** with the ssh-only
+  consolidation. `Endpoint::parse` rejects `quic://` and points at `ssh://`. See the
+  [scene-streaming status block](/designs/scene-streaming-remote.md). `zz fleet add`
+  still adds an `ssh://` host.
 - **Pairing without ssh**: designed in [fleet pairing & discovery](/designs/fleet-pairing.md)
   . SPAKE2 short codes over the QUIC listener, two-way trust per pairing; the QR/mobile
   variant rides the same channel.

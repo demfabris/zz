@@ -1,12 +1,13 @@
 ---
 title: Agent panes
-description: Upcoming work. Claude Code and Codex as panes, over ACP.
+description: Claude Code and Codex as panes, over ACP. Off by default.
 ---
 
-:::caution[Not shipped yet]
-Agent panes are upcoming work. They are compiled out of every release build,
-and nothing on this page is something you can use today. It describes where the
-feature is heading, so treat the details as subject to change.
+:::caution[Off by default]
+Agent panes are compiled out of default and release builds. Turn them on with
+the `agent-pane` cargo feature plus `experimental-agent-pane = true` in
+`zz/config` (or the Settings → System → Experimental toggle). Expect rough
+edges.
 :::
 
 The plan is a pane that runs Claude Code or Codex over the Agent Client

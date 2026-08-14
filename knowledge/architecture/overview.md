@@ -19,10 +19,13 @@ tmux-style model:
 - a native **Agent pane** backed by a pane-local Codex or Claude Code ACP process, with streaming
   Markdown, Mermaid, reasoning, plans, structured tool activity, slash skills/commands, dynamic
   permission, model, and effort controls, cancellation, and agent-owned session replay (see
-  [Agent pane](/concepts/agent-pane.md)).
+  [Agent pane](/concepts/agent-pane.md)). Agent and Editor panes are compiled out of default
+  builds (`agent-pane` / `editor-pane` cargo features) and additionally gated by
+  `experimental-agent-pane` / `experimental-editor-pane`.
 
-The browser is **not** a native child window. CEF publishes owned BGRA frames into a one-slot mailbox,
-the app keeps only the latest frame, and one custom GPUI element paints it with normal clipping. See
+The browser is **not** a native child window. CEF publishes frames into a one-slot mailbox; the
+default path is a shared GPU texture (Linux wgpu `external_texture`, macOS Metal-IOSurface
+`paint_surface`, Windows D3D11). CPU BGRA readback is the fallback tier. See
 [OSR rendering](/browser/osr-rendering.md). Pointer, wheel, keyboard, committed text, IME, focus,
 resize, navigation, and cursor state travel through browser-neutral types.
 
@@ -53,13 +56,17 @@ alive without a GUI.
 
 | Crate | Role |
 |-------|------|
-| [protocol](/crates/zz-protocol.md) | stable IDs, versioned length-prefixed control protocol, packed terminal lanes |
-| [mux](/crates/zz-mux.md) | renderer-free state machine: layouts, targets, commands, key tables, `.tmux.conf` |
-| [server](/crates/zz-daemon.md) | persistent daemon: mux state, PTYs, frame fanout, sockets, attachment, CLI |
+| [zz-protocol](/crates/zz-protocol.md) | stable IDs, versioned length-prefixed control protocol, packed terminal lanes |
+| [zz-mux](/crates/zz-mux.md) | renderer-free state machine: layouts, targets, commands, key tables, `.tmux.conf` |
+| [zz-daemon](/crates/zz-daemon.md) | persistent daemon: mux state, PTYs, frame fanout, sockets, attachment, CLI |
 | [zz-terminal](/crates/zz-terminal.md) | per-PTY child + libghostty on a worker thread; publishes terminal frames |
 | [zz-browser](/crates/zz-browser.md) | CEF init, subprocess dispatch, request context, input translation, frame mailboxes |
-| [app](/crates/zz.md) | long-lived GPUI mux client; reconciles layouts; hosts terminal, CEF, and Agent views |
-| [xtask](/crates/zz-xtask.md) | builds and validates platform CEF bundles |
+| [zz](/crates/zz.md) | long-lived GPUI mux client; reconciles layouts; hosts terminal, CEF, and Agent views |
+| [zz-chrome-import](/crates/zz-chrome-import.md) | Chrome profile discovery, cookie decryption, read-only history extraction |
+| [zz-xtask](/crates/zz-xtask.md) | builds and validates platform CEF bundles |
+
+Workspace members without a dedicated page here: `zz-ui` (widget fork), `zz-tui` (`zz attach`),
+`zz-ios` / `zz-gpui-ios` (iPad client). See [crates](/crates/index.md).
 
 # Platform status
 

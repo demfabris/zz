@@ -1,8 +1,8 @@
 ---
 type: Design Plan
 title: iOS/iPadOS client v1 . the desktop client, compiled for iPad
-description: Agreed plan for a gpui-powered zz client on iOS - crates/zz itself gated to build for aarch64-apple-ios on the out-of-tree zz-gpui-ios backend, feature-split zz-terminal/zz-daemon so the client half compiles without libghostty or CEF, simulator-first against the host daemon's unix socket, russh in-process ssh last for physical devices.
-status: Complete (v1, simulator)
+description: iPad client v1. crates/zz gated for aarch64-apple-ios on zz-gpui-ios; simulator and just ios-device install exist. Remaining gaps are safe-area insets, UITextInput, and an interactive tunnel pass.
+status: Complete (v1; device install exists)
 tags:
 - ios
 - gpui
@@ -19,10 +19,10 @@ timestamp: 2026-08-07T18:00:00Z
 > keyboard/scroll/CADisplayLink/clipboard, M3 in-process russh tunnel
 > (TOFU + generated ed25519 + `zz proxy` over an exec channel), M4
 > lifecycle/appearance/key-strip and `cargo xtask ios-sim [--run]`.
-> Still owed before physical hardware: device signing, dynamic safe-area
-> insets, the UITextInput stub for the spacebar cursor, and an interactive
-> attach-through-tunnel pass. Keychain-backed key storage landed 2026-08-08
-> (see M3).
+> Device signing and install exist (`just ios-device`, `scripts/ios-device.sh`).
+> Still owed: dynamic safe-area insets, the UITextInput stub for the spacebar
+> cursor, and an interactive attach-through-tunnel pass. Keychain-backed key
+> storage landed 2026-08-08 (see M3).
 
 v1 goal: the zz experience on iPad — session-tree sidebar, live terminal panes,
 hardware + soft keyboard, touch scrolling — attached to a real zz daemon. The
@@ -61,13 +61,14 @@ packaging. One attached host at a time, same as desktop.
 6. **React Native rejected** (byte-stream widget vs cell-patch protocol
    mismatch; see knowledge on the copy-mode single-writer redesign).
 
-# Reuse map (verified 2026-08-07, protocol v44)
+# Reuse map (verified 2026-08-07 against protocol v44; live wire is v51)
 
 Clean on iOS as-is:
 
 - `zz-protocol` — framing (`framing.rs`: u32 LE length, lane u8, flags u8,
-  version u16, checked every frame), message enums (`message.rs:1123-1179`),
-  snapshot tree (`snapshot.rs:340-381`). Pure serde.
+  version u16, checked every frame), `ProtocolMessage` / `EventPayload` in
+  `message.rs`, snapshot tree in `snapshot.rs`. Pure serde. iOS speaks whatever
+  `PROTOCOL_VERSION` the linked `zz-protocol` crate defines.
 - `zz-terminal` client half — `model.rs` (PackedCell/TerminalViewport/
   `apply_patch`), `input.rs` (KeyInput), `interaction.rs`
   (TerminalViewAction), `appearance.rs`, `paste.rs`, `word.rs`. Zero libghostty
@@ -353,8 +354,9 @@ value-per-effort within each tier.
    existing `traitCollectionDidChange:` (atomics only — that callback must not
    re-enter gpui). Accessibility text sizes reach ~3.1x and clip against
    `MAX_UI_ZOOM` (300%). `reduce_motion`/`reduce_transparency` are exported as
-   live reads of the two `UIAccessibilityIs*Enabled` functions; **nothing in
-   the shell consumes them yet**, and a live flip forces no redraw.
+   live reads of the two `UIAccessibilityIs*Enabled` functions. Startup folds
+   `reduce_motion` into the global interface-animation preference; a live flip still forces no
+   redraw. `reduce_transparency` remains unconsumed.
 
 **Tier 3 — platform citizenship:**
 

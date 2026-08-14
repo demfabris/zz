@@ -38,7 +38,7 @@ Run `just` recipes from the repo root; `just --list` shows everything.
 | `cargo test --workspace --all-features` | Tests (what CI runs) |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Lint (what CI runs) |
 | `cargo fmt --all` | Format |
-| `just run <mac\|linux\|windows> [-- args]` | Launch a fresh debug instance; append `--verbose` for diagnostics |
+| `just run <mac\|linux> [--verbose] [--features <list>]` | Launch a fresh debug instance. Extra args are those two flags, not Cargo passthrough. No `windows` |
 | `just watch <platform>` | Rebuild and relaunch on source change |
 | `just build <platform>` | Release bundle into `dist/zz` (wraps `cargo xtask bundle-cef`) |
 | `just install mac` | Build and swap `/Applications/zz.app`; the daemon survives the swap |

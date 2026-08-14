@@ -24,7 +24,7 @@ calls the session methods on the foreground thread.
 
 | Type | Shape / notes |
 | --- | --- |
-| `Viewport` | `{ width, height, scale_factor, screen_x, screen_y, visible }`; `sanitized()` clamps `scale_factor` to `[0.5, 8.0]` (NaN → 1.0). |
+| `Viewport` | `{ width, height, scale_factor, window_zoom, screen_x, screen_y, visible }`; `sanitized()` clamps `scale_factor` to `[0.5, 8.0]` and `window_zoom` to `[0.25, 4.0]` (non-finite or non-positive → 1.0). `window_zoom` is what `GetScreenPoint` folds into view-relative coordinates so Chromium-owned popups land correctly while the app UI is zoomed. |
 | `Modifiers` | `#[repr(transparent)]` packed `u8`: SHIFT, CONTROL, ALT, PLATFORM, LEFT/MIDDLE/RIGHT_MOUSE, IS_REPEAT. Const builder + accessors. |
 | `PointerButton` | `Left \| Middle \| Right`. |
 | `PointerPhase` | `Move \| Leave \| Down \| Up`. |

@@ -4,7 +4,7 @@ title: zz crate (the GPUI client)
 description: The long-lived GPUI desktop client. Reconciles recursive pane layouts and hosts stable terminal, Chromium browser, and native Agent pane entities.
 resource: crates/zz/src/lib.rs
 tags: [gpui, crate, client, terminal, browser, agent, ui]
-timestamp: 2026-08-02T10:59:04-03:00
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
@@ -16,8 +16,8 @@ sessions (`zz_browser::BrowserRuntime`, wrapped by `browser::controller::Browser
 app-owned pane-local ACP runtimes (`agent::AgentController`), then reconciles them against
 `zz_protocol::MuxSnapshot` on every render. It also owns
 the CEF *subprocess* entrypoints: `zz` itself re-execs as a renderer/GPU/utility subprocess
-(detected via `--type=`), and a tiny sibling binary (`zz_helper`) exists only to be that
-subprocess executable on Linux/Windows.
+(detected via `--type=`), and a tiny sibling binary (`zz_helper`) is that subprocess executable
+on every desktop CEF bundle. macOS also clones it into the Helper.app roles.
 
 `MuxClient` retains each decoded `MuxSnapshot` behind an `Arc`, so `AppView`, the workspace sidebar,
 and the command palette share one immutable allocation until the daemon publishes a replacement.
@@ -37,8 +37,7 @@ ACP runtimes whose durable identity comes from daemon snapshots.
 
 # Process modes (`main.rs` / `lib.rs`)
 
-`zz::run()` (in `lib.rs`, invoked from `main.rs`) branches into one of four things before ever
-opening a window:
+`zz::run()` (in `lib.rs`, invoked from `main.rs`) branches before ever opening a window:
 
 1. **CEF subprocess** . `is_cef_subprocess()` checks for a `--type`/`--type=` argument; if present,
    control passes straight into `zz_browser::bootstrap()` without touching diagnostics, the mux
@@ -46,12 +45,16 @@ opening a window:
    the same `zz` executable).
 2. **`daemon` command** . runs `zz_daemon::Daemon::run_foreground()` in place (used when the app
    auto-spawns its own daemon, and by `cargo run -p zz -- daemon`).
-3. **CLI command mode** . any other leading argument (`list-panes`, `split-window`, `kill-server`,
+3. **`proxy` command** . `zz_daemon::run_socket_proxy`, the stdio socket proxy used by in-process
+   ssh (iOS russh, Windows-port shape).
+4. **`attach` command** . hands off to [`zz-tui`](/designs/tui-client.md): a raw-terminal client
+   that speaks the same wire protocol (`zz attach [session]`).
+5. **CLI command mode** . any other leading argument (`list-panes`, `split-window`, `kill-server`,
    …) is sent through a short-lived `zz_daemon::CommandClient` to an existing or freshly spawned
    daemon; output prints to stdout and the process exits without opening GPUI. `--version`/`-V` is
    answered in place, before that connection: routing it to the daemon would spawn one just to
    report an unknown command.
-4. **GUI mode** . no arguments: `run_app` connects (or spawns-and-connects)
+6. **GUI mode** . no arguments: `run_app` connects (or spawns-and-connects)
    `zz_daemon::InteractiveClient`, boots CEF (`zz_browser::bootstrap`), builds `MuxClient` +
    `BrowserController` + `AgentController`, opens the one native window (`AppShell` → `AppView`),
    restores its last usable bounds through `window/state.rs`, and wires window close / app-quit to
@@ -73,9 +76,10 @@ askpass . and only refuses to open the GUI, pointing at the bundle instead.
 # Application configuration (`config/mod.rs`)
 
 On GUI startup, the app loads the first bounded [`zz/config`](/configuration/app-config.md) file from
-the platform's user configuration roots into GPUI globals. `ConfigKey` enumerates twenty-eight
-client-local knobs: eleven switches, six lengths, four enumerated selectors, the browser
-element-selector hotkey, and six `chrome-*` palette overrides. `AppConfig` stays `Copy`;
+the platform's user configuration roots into GPUI globals. `ConfigKey` enumerates thirty-two
+client-local knobs: fifteen switches (including `auto-restart-stale-daemon`), six lengths, four
+enumerated selectors, the browser element-selector hotkey, and six `chrome-*` palette overrides.
+`AppConfig` stays `Copy`;
 the string-valued browser shortcut is published through a separate `BrowserConfig` global. Three
 app-owned Agent keys
 (`agent-command`, `agent-claude-code-command`, and an optional absolute working directory) select
@@ -85,23 +89,24 @@ complete daemon-owned entry vector crosses the wire on connect and every poll ch
 empty vector that restores donor/default values.
 
 The settings view is a Root-managed zz-ui dialog opened with `Cmd+,` on macOS or `Ctrl+,`
-elsewhere. Its seven sections render in this order, with a separator before the two lower-level
-pages:
+elsewhere. `SettingsSection::ALL` is nine pages, titled Interface, Editor, Panes, Multiplexer,
+Browser, Terminal, Hosts, System, About:
 
 | Section | Contents |
 |---------|----------|
-| Appearance | Theme (`theme-mode`, transient UI zoom, and macOS app-icon pickers), Chroma Colors (presets and `chrome-*` colors), Tweaks (`widget-corner-radius`, window blur, and Linux `use-system-titlebar`) |
-| Browser | Browser-local shortcuts, beginning with the element-selector hotkey |
+| Interface | Theme (`theme-mode`, transient UI zoom, and macOS app-icon pickers), Chroma Colors (presets and `chrome-*` colors), Tweaks (`animations`, `widget-corner-radius`, window blur, and Linux `use-system-titlebar`) |
 | Editor | Editor-pane typography and display controls, when compiled in |
-| Panes | Layout (`pane-gaps`, `pane-margin`, `pane-corner-radius`), Frame (`pane-border-width`); gapped panes always carry the shared inset control ring |
-| Advanced | Daemon (`quit-daemon-on-exit`), Diagnostics (`show-fps`), Experimental pane gates |
+| Panes | Layout (`pane-gaps`, `pane-margin`, `pane-corner-radius`), Frame (`pane-border-width`); gapped panes carry subtle inset surface rings |
 | Multiplexer | Full-file `zz/mux.conf` editor without line numbers, 12px text, Save, and tmux import |
+| Browser | Browser-local shortcuts, beginning with the element-selector hotkey |
 | Terminal | Structured terminal appearance controls with effective values, provenance, palette swatches, and Reset |
+| Hosts | Configured `host-<name>` machines, live connection state, Remove, and an inline Add host form |
+| System | Daemon (`quit-daemon-on-exit`), Diagnostics (`show-fps`), Experimental pane gates |
+| About | Version, build identity, and project links |
 
-A **Devices** page sat between Multiplexer and Terminal until 2026-08-01; it managed pairing, trust,
-and network discovery, and was deleted with them. Fleet hosts are plain `host-<name>` config lines
-now, added from the sidebar host menu's **Add host** dialog or `zz fleet add`, and removed by the
-same menu's **Close host** or `zz fleet remove`.
+A **Devices** pairing page sat in this list until 2026-08-01 and was deleted with QUIC pairing.
+Fleet hosts are plain `host-<name>` config lines, added from Settings › Hosts, the sidebar host
+menu's **Add host** dialog, or `zz fleet add`, and removed by **Close host** or `zz fleet remove`.
 
 The ordinary controls, including Terminal, retain the typed comment-preserving writer.
 Multiplexer's code editor saves its bounded file atomically; a clean editor reloads on navigation,
@@ -128,11 +133,12 @@ Windows uses DWM's system backdrop; Wayland uses GPUI's standard `ext-background
 when advertised and retains the legacy KDE protocol as a fallback. X11 publishes KDE's rounded
 blur-behind region and refreshes it as window bounds change. The request is capability-gated:
 unsupported compositors retain opaque app paint instead of exposing an unblurred desktop.
-`background-opacity` remains terminal-local and is applied exactly: `1` stays opaque, while a lower
-value reveals zz's blurred surface beneath the terminal. Ghostty's `background-blur` is ignored; the
-app-level switch above is the only native blur request. The pane picker uses the blur-aware Chroma
-material behind washed choice rows. A Browser pane uses that material only for its native
-`about:blank` state; real Chromium page frames remain opaque.
+`background-opacity` remains terminal-local: the client paints the terminal color at that alpha over
+an opaque app-pane base. `1` shows the terminal background, while lower values mix toward the app
+surface without exposing compositor blur. Ghostty's `background-blur` is ignored; the app-level
+switch above is the only native blur request. The pane picker, Agent, Editor, Browser shell, waiting
+state, and terminal cover the native backdrop. Browser blank, loading, error, and toolbar states
+share that surface; Chromium page frames retain their own pixels.
 
 The Linux-only system-titlebar switch requests GPUI server-side decorations for new and open
 workspace/Settings windows. KDE can honor it on Wayland and X11; unsupported Wayland compositors
@@ -279,16 +285,15 @@ built:
   corresponding `FocusHandle` only when it changed.
 
 `AppView::render_layout` recursively renders `zz_protocol::LayoutNode::{Pane, Split}` into a plain
-`div()` tree: pane leaves are borderless, and split nodes alone paint draggable 1px hairline separators
-between siblings (`SplitDrag`/`SplitDragState`, `MIN/MAX_SPLIT_RATIO` clamps). A single or zoomed
-pane therefore has no frame at all; synchronized-input state remains visible through its `SYNC`
-badge. **Nothing marks the active pane; every other pane is marked instead.** `PaneChrome::dimmed`
-fades each inactive pane behind a scrim (`INACTIVE_PANE_FADE` = 0.3 toward the opaque window
-background, so it reads as receding in both light and dark mode), and pane borders and split
-separators stay neutral in every state. The scrim sits above the pane content but below the pane's
-overlays, so `SYNC`, the waiting placeholder, and the `display-panes` card keep full contrast on a
-dimmed pane, and it carries no `occlude`, so the click that activates the pane passes straight
-through. Divider drags preview the ratio locally at pointer rate and commit
+`div()` tree. Flush layouts use draggable 1px split-owned separators; the active pane colors only
+its half of each adjacent segment with a washed foreground accent, including the projected edge at
+nested T-junctions. Gapped layouts use the configured border width around each pane, replacing the
+active pane's neutral border color with the same wash. Their half-pixel surface ring matches the
+Settings stack and paints before the pane background without a directional tail.
+`PaneChrome::dimmed` still fades inactive panes behind a scrim
+(`INACTIVE_PANE_FADE` = 0.3 toward the opaque window background).
+The scrim sits above pane content and below overlays, so `SYNC`, the waiting placeholder, and the
+`display-panes` card keep full contrast. Divider drags preview the ratio locally and commit
 `InputMessage::ResizeSplit` only on mouse-up.
 Zoomed panes short-circuit straight to `render_layout(&LayoutNode::Pane(zoomed))`, skipping the rest
 of the tree. `AppView` owns the current `CommandPaletteView` and renders it as an absolute overlay;
@@ -440,13 +445,13 @@ raw browser-key forwarding. `BrowserView` retains the current Chrome-style zoom 
 session recreation, and `AppView` recreates only the affected session when its daemon-persisted
 profile name changes.
 
-The native `about:blank` surface suppresses CEF's otherwise opaque blank frame while retaining the
-`BrowserElement` geometry pass, then paints one blur-aware Chroma base behind either the first-run
-hint or up to eight recent URLs. Those URLs are one-line, 360px-wide washed rows matching the pane
-picker’s 40px height, 12px text, 4px spacing, and configured widget radius; there is no enclosing
-card or heading. Navigating away restores the ordinary opaque browser root and CEF frame. When the
-pane becomes inactive, the shared `PaneChrome` scrim covers both toolbar and page content; Browser
-does not carry a separate toolbar-only inactive layer.
+The native `about:blank` surface suppresses CEF's blank frame while retaining the `BrowserElement`
+geometry pass, then paints the first-run hint or up to eight recent URLs over the browser's opaque
+pane base. Those URLs are one-line, 360px-wide washed rows matching the pane picker's 40px height,
+12px text, 4px spacing, and configured widget radius; there is no enclosing card or heading.
+Loading and error overlays keep that base, and navigating away adds the CEF frame above it. When
+the pane becomes inactive, the shared `PaneChrome` scrim covers both toolbar and page content;
+Browser does not carry a separate toolbar-only inactive layer.
 
 Keyboard input has no client-side modes: **the configured tmux prefix always wins, from every focus
 context**, and the daemon's [key tables](/tmux/key-tables.md) are the only resolver.
@@ -595,7 +600,7 @@ without either being wrong, and neither replaces CEF's own frame-rate ceilings.
 
 | Binary | Role |
 |--------|------|
-| `zz_helper` | The CEF **subprocess entrypoint** on Linux/Windows. One line: calls `zz_browser::run_subprocess()` and exits with its code. CEF's multi-process model needs a plain, minimal executable to re-exec as renderer/GPU/zygote/utility processes; `Cargo.toml`'s `[package.metadata.cef.bundle] helper_name = "zz_helper"` tells `zz-xtask` to ship it in the bundle. (On Linux `zz` itself can also serve this role via `--type=`, but the bundle uses the dedicated helper for the renderer sandbox.) |
+| `zz_helper` | The CEF **subprocess entrypoint** on every desktop bundle. One line: calls `zz_browser::run_subprocess()` and exits with its code. CEF's multi-process model needs a plain, minimal executable to re-exec as renderer/GPU/zygote/utility processes; `Cargo.toml`'s `[package.metadata.cef.bundle] helper_name = "zz_helper"` tells `zz-xtask` to ship it. macOS nests copies of it into the Helper.app roles. (On Linux `zz` itself can also serve this role via `--type=`, but the bundle uses the dedicated helper for the renderer sandbox.) |
 | `zz_cli` | The **`PATH` launcher**, shipped in the macOS bundle as `Contents/MacOS/cli` and symlinked onto `PATH` as `zz` by the Homebrew cask. It canonicalizes its own path and execs the `zz` beside it. Necessary because macOS resolves an app bundle from the launch path without following symlinks: symlinking the real executable would start zz with no `Info.plist` (no bundle identifier, no icon, no camera/microphone usage descriptions), and `current_exe` would additionally point the CEF framework lookup at the symlink's directory. See [the bundle playbook](/playbooks/build-cef-bundle.md). |
 | `zz_browser_fixture` | A deterministic, loopback-only plain-TCP HTTP server (default port 9324, no CEF/GPUI/external network) used as a manual browser smoke-test target. Serves a fixture page with a BGRA color-channel proof, text input, title mutation, same-session navigation, a long scroll area, and persistent cookie/`localStorage` counters. |
 
@@ -610,7 +615,7 @@ without either being wrong, and neither replaces CEF's own frame-rate ceilings.
 | `crates/zz/src/config/mod.rs` | Platform-aware bounded `zz/config` discovery/parsing, `host-<name>` fleet entries and their add/remove/republish helpers, per-provider ACP command/cwd configuration, ordered daemon overrides, per-knob provenance, and comment-preserving atomic edits |
 | `crates/zz/src/config/settings.rs` | Root-managed native settings dialog with local and Terminal appearance controls, plus a compact full-file `zz/mux.conf` editor, explicit Save, and confirmed tmux import |
 | `crates/zz/src/app_shell.rs` | `AppShell` . root application surface: floating window controls (non-macOS), dialog/notification layers, hosts `AppView` and the Linux client frame |
-| `crates/zz/src/theme.rs` | Centralized theme customization over zz-ui's own light/dark palettes: retains the daemon appearance, applies the terminal `mono_font_family` crossover, and owns the blur-aware chrome fill |
+| `crates/zz/src/theme.rs` | Centralized theme customization over zz-ui's own light/dark palettes: retains the daemon appearance, applies the terminal `mono_font_family` crossover, and owns the translucent chrome plus opaque app-pane fills |
 | `crates/zz/src/window/frame.rs` | Linux client-side shadow, fixed derived corner geometry, border, and resize hit zones |
 | `crates/zz/src/window/corners.rs` | Exposed-corner geometry and split propagation shared by window surfaces |
 | `crates/zz/src/window/state.rs` | Versioned main-window bounds persistence with display-aware validation, clamping, debounce, and atomic writes |

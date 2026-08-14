@@ -22,7 +22,7 @@ supports `session/load` to replay the conversation.
 
 | Layer | Representation | Responsibility |
 | --- | --- | --- |
-| protocol | `PaneKindSnapshot::Agent(AgentDescriptor)` | Versioned pane identity plus `provider`, `cwd`, and opaque ACP `session_id`; current protocol v32 |
+| protocol | `PaneKindSnapshot::Agent(AgentDescriptor)` | Versioned pane identity plus `provider`, `cwd`, and opaque ACP `session_id`; introduced across v22–v32. The live wire version is `PROTOCOL_VERSION` (51) |
 | mux | `PaneKind::Agent(AgentDescriptor)` | Stable layout leaf, targeting, titles, and validated restore-metadata updates |
 | server | no PTY, CEF, or agent child | Materializes the leaf and captures the donor terminal's live working directory |
 | app | shared `Entity<AgentController>` | Launches one provider process per `PaneId`, routes its ACP session, lists and transactionally loads provider-owned history, restores sticky settings, reduces events/configuration, and owns cleanup |

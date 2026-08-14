@@ -29,8 +29,8 @@ timestamp: 2026-07-30T23:00:00Z
 > transport-agnostic . attached sets, per-client views, latest-active-wins sizing, presence, and
 > steal-attach live entirely in the daemon and the envelope. Only the references below to QUIC
 > and to pairing changed meaning: the devices that co-attach now reach the daemon over a unix
-> socket or an `ssh://` forward, and [remote browser egress](/designs/remote-browser-egress.md)
-> was retired the same day.
+> socket or an `ssh://` forward. The QUIC egress splice was retired that day; ssh `-D` egress
+> shipped again on 2026-08-07, see [remote browser egress](/designs/remote-browser-egress.md).
 
 With [fleet attach](/designs/fleet-attach.md) and [fleet pairing](/designs/fleet-pairing.md)
 shipped, the remaining "multiplayer" gap is that two of the user's own devices cannot look at

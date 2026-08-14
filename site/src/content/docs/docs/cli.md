@@ -28,9 +28,9 @@ pane's lifetime, visible in `choose-tree` and `display-panes`.
 | `zz new-pane [-h\|-v]` | split into an empty pane and pick its type |
 | `zz tools` | the command catalog written for agents |
 
-Two more verbs, `zz agent-send` and `zz send-last-output`, exist but need
-somewhere to send to. They wait on [agent panes](/docs/agents/), which are
-upcoming work.
+Two more verbs, `zz agent-send` and `zz send-last-output`, talk to an Agent
+pane. They need a build with `--features agent-pane` and
+`experimental-agent-pane` on; see [agent panes](/docs/agents/).
 
 ## Sessions
 

@@ -9,14 +9,14 @@ tags:
 - window
 - appearance
 - mux
-timestamp: 2026-08-02T00:00:00Z
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
 
 The GUI process loads the first existing `zz/config` file from the user's platform configuration
 roots. `crates/zz/src/config/mod.rs` resolves the candidates when `run_app` enters the GPUI application
-closure, parses twenty-eight client-local behavior/layout/diagnostic/theme/browser knobs into typed
+closure, parses thirty-two client-local behavior/layout/diagnostic/theme/browser knobs into typed
 `AppConfig` and `BrowserConfig` values, parses three app-owned ACP launch keys into `AgentConfig`,
 and collects the supported
 daemon-owned appearance and mux entries as ordered raw `(key, value)` pairs. Client-reserved
@@ -31,7 +31,7 @@ preserving every other byte, comments included; the GUI fields reject a duplicat
 call it. `zz fleet list` prints name and endpoint; `zz fleet remove <name>` deletes every matching
 host line, as does a remote row's **Close host** . which additionally republishes `FleetHosts`
 (`config::remove_fleet_host_live`) so the running fleet drops the machine immediately. There is no bootstrap step, no key pinning, and no daemon-side setup . ssh already owns
-identity. The twenty-eight local
+identity. The thirty-two local
 knobs retain `Default`/`Override` provenance. Daemon-owned value grammar deliberately stays in the zz-terminal appearance loader or
 mux `set-option` engine.
 
@@ -74,7 +74,7 @@ candidate exists, edits continue to target the first existing file selected by n
 
 ## Client-local keys
 
-The client-local schema is **thirty keys: thirteen switches, six logical-pixel geometry
+The client-local schema is **thirty-two keys: fifteen switches, six logical-pixel geometry
 controls, four enumerated selectors (theme mode, app icon, chrome preset, and browser search
 engine), one browser-local hotkey, and six chrome colors.**
 
@@ -83,12 +83,14 @@ engine), one browser-local hotkey, and six chrome colors.**
 | `use-system-titlebar` | `false` | `true` or `false` | On Linux, request a desktop-owned titlebar and window border instead of client-side window decorations |
 | `window-corner-radius` | `13.5` | `0..=32` | The app-drawn window frame's corner, visible only under Linux client-side decorations |
 | `window-background-blur` | `false` | `true` or `false` | Whether the desktop shows through the window chrome, blurred |
+| `animations` | `true` | `true` or `false` | Whether interface transitions, loading indicators, scrollbar fades, and animated UI images move |
 | `tray` | `true` | `true` or `false` | Whether zz puts an icon in the system tray (macOS status item, Windows notification icon, Linux StatusNotifierItem), toggling the window on click with a menu carrying Show/Hide and Quit. A live tray turns the close button into hide-to-tray on every platform (macOS hides the app); without a tray host (bare GNOME) close quits as before. Surfaced in Settings under Advanced; read once at startup |
 | `show-fps` | `false` | `true` or `false` | Whether the titlebar GPUI meter **and** each browser pane's CEF meter are shown |
 | `quit-daemon-on-exit` | `false` | `true` or `false` | Whether quitting the app stops the daemon even while sessions are live |
+| `auto-restart-stale-daemon` | `false` | `true` or `false` | Whether a protocol-mismatched local daemon is terminated and replaced on connect. Off by default because it ends every running session |
 | `experimental-agent-pane` | `false` | `true` or `false` | Whether new Agent panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind agent` |
 | `experimental-editor-pane` | `false` | `true` or `false` | Whether new Editor panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind editor` |
-| `pane-gaps` | `false` | `true` or `false` | Whether panes use the gapped border, radius, outer edge ring, and divider treatment |
+| `pane-gaps` | `false` | `true` or `false` | Whether panes use the gapped border, radius, surface ring, and divider treatment |
 | `pane-margin` | `6` | `0..=32` | Inset around each pane, on every platform; applies only with `pane-gaps` |
 | `pane-corner-radius` | `13.5` | `0..=32` | All four corners of every pane, on every platform; applies only with `pane-gaps` |
 | `pane-border-width` | `1` | `0..=8` | Border width while pane gaps are enabled; `0` disables the border |
@@ -139,6 +141,13 @@ pane, so an edit reaches every open Browser pane on the next Enter. The engine s
 `zz_browser::SearchProvider`, which owns the query endpoints; the address bar's decision between
 navigating and searching is `zz_browser::resolve_address` (see
 [input translation](/browser/input-translation.md)).
+
+`animations = false` sets GPUI's reduced-motion state. GPUI transitions, spinners, switches,
+dialogs, notifications, and animated UI images settle on a static frame; the custom scrollbar holds
+at full opacity and then disappears without a fade. iOS also honors UIKit Reduce Motion, even when
+the file enables animations. Cursor blinking and Chromium page animation are content behavior and
+keep their own controls. Desktop GPUI does not currently publish the operating system's motion
+preference, so macOS, Linux, and Windows follow this key directly.
 
 ## Chrome theming
 
@@ -225,28 +234,22 @@ chrome, `Opaque`/`Transparent` native request . logged at startup. picom ignores
 property entirely (open upstream feature request), so picom setups stay in the opaque fallback by
 design.
 
-**The blur reads through translucent chrome and pane-owned backgrounds.** All platform requests are
-window-wide, because a backdrop blur is visible only through translucent pixels: app paint decides
-where it lands. While blur is active, chrome uses `BLURRED_CHROME_ALPHA` through
-`theme::chrome_background`. A terminal instead applies its resolved Ghostty `background-opacity`
-directly: the default `1` stays opaque, while any lower value reveals zz's blurred window surface in
-the terminal's own palette color. Ghostty's `background-blur` is ignored; only zz's
-`window-background-blur` owns the native compositor request. The pane picker uses the blur-aware
-Chroma fill, and its choice rows use the workspace navigation wash rather than opaque elevation
-fills. A Browser pane suppresses Chromium's opaque frame while its native `about:blank` or load-error
-state is visible, so its Chroma base, washed recent-URL rows, and washed error card show the same
-backdrop; real Browser page pixels and the app-owned Agent and Editor pane surfaces retain their own
-opaque fills.
+**Only window chrome reveals the compositor blur.** All platform requests remain window-wide, and
+app paint decides where the backdrop appears. While blur is active, chrome uses
+`BLURRED_CHROME_ALPHA` through `theme::chrome_background`. Pane roots force an opaque theme base.
+The pane picker, Agent, Editor, Browser shell, waiting state, and terminal cover the native
+backdrop. Browser blank, loading, error, and toolbar states share the same pane base; Chromium
+pages keep their own pixels above it.
 
-Each visible region paints that tint exactly once; 0.9 over 0.9 would become effectively 0.99 and
-hide the backdrop. During active blur the workspace root is therefore unpainted underneath pane
-rectangles. An empty sibling's pane-margin border owns only the outer gap, split gap layers own
-inter-pane gaps, rounded corner bands own the wedges outside each pane arc, and pane content owns
-the interior. Both gap layers paint before their pane surfaces, so an outside edge ring remains
-visible over them. When blur is off or compositor support is unavailable, the opaque workspace root
-returns so a configured terminal `background-opacity` still blends toward the theme base rather
-than the native window's black surface. The Settings window has no workspace chrome plane and stays
-opaque throughout.
+A terminal paints its resolved Ghostty background color as a tint over that opaque pane base.
+`background-opacity = 1` shows the terminal color, and lower values mix it toward the app pane
+color. The setting no longer exposes the desktop or chrome blur. Ghostty's `background-blur` stays
+ignored; `window-background-blur` owns the native compositor request.
+
+Each chrome region paints its tint once; 0.9 over 0.9 becomes 0.99 and hides the
+backdrop. During active blur the workspace root leaves pane rectangles unpainted. The outer margin,
+split gaps, and rounded corner wedges paint chrome around opaque pane interiors. The Settings
+window has no workspace chrome plane and stays opaque.
 
 Linux window geometry starts from `window-corner-radius` (default 13.5px, targeting the macOS 27
 window radius . ~13.5pt tangent-circle equivalent, measured from a macOS 27 screenshot against the
@@ -265,23 +268,18 @@ the effect region. KWin changes pixels even where the client surface is transpar
 does not extend into the client-side shadow inset. Transparent shadow and corner pixels retain the
 compositor's unmodified background; tiled and square corners remain square.
 
-`pane-gaps = false` is the flush treatment and the only switch that reaches it: margin,
-corner radius and border width all resolve to `0` whatever the file says, because each describes
-the space *between* panes and there is none. Split nodes retain their neutral 1px
-hairline plus active-pane highlight. With
-`pane-gaps = true` every value applies exactly as configured, defaults included . a 6px margin and a
-13.5px radius, the window's own corner, so a maximized grid reads as one rounded surface. There is
+`pane-gaps = false` keeps the regular workspace flush: margin, corner radius, and border width
+resolve to `0`, and split nodes retain their neutral 1px hairline. The active pane colors only its
+half of each adjacent separator with a washed foreground accent; nested T-junctions limit the
+segment to the edge the pane touches. With `pane-gaps = true` every value applies exactly as
+configured, defaults included . a 6px margin and a 13.5px radius, the window's own corner, so a
+maximized grid reads as one rounded surface. There is
 no second tier of gapped defaults: the number Settings shows is the number the panes use, which is
-what lets the disabled Frame rows stay honest. The border uses
-`pane-border-width` and the theme border color, while the active pane uses the same foreground or
-danger accent as the legacy split highlight. Every gapped pane also paints the calibrated 0.5px
-control ring outside its border. It uses the same theme-derived scrim ink as Settings controls and
-has no soft falloff. The ring is an inset shadow on a box expanded by the same 0.5px, which keeps its
-ink outside the pane instead of putting a shadow plane beneath translucent content. Gapped split
-allocations leave overflow visible so the ring can enter the gap, and both the outer gutter and
-split gap paint before the pane rings. The pane surface still clips terminal, browser, Agent, and
-Editor content. This treatment is inherent rather than configurable; the retired `pane-shadow` key
-produces the normal unsupported-key diagnostic.
+what lets the disabled Frame rows stay honest. The border uses `pane-border-width` and the theme
+border color; the active pane keeps that exact width and replaces the color with a washed foreground
+accent. A theme-derived half-pixel inset ring follows the pane's exact curve, matching the Settings
+stack edge without painting outside the pane. Borderless gapped panes keep the ring. This treatment
+is built in; the retired `pane-shadow` key produces the normal unsupported-key diagnostic.
 Split divider visuals disappear in this mode because the gap is the separator, but the unchanged
 16px drag target still resizes the split.
 
@@ -293,11 +291,10 @@ margin and each split's slot *is* the one inter-pane gap, so `pane-margin = 2` y
 between panes and 2px at the frame; gaps never sum to double between neighbors. The gap paints the
 window's base plane (`chrome-background`) from three places: the frame inset is a border band on the
 layout root rather than padding, the split slot is the divider's own fill, and each rounded pane
-fills the four wedges its arc leaves bare inside its own box with a band clipped to that box. None
-of the three paints under a pane, because a fill there would composite a second time with a
-translucent terminal background and cancel `background-opacity`. In browser panes
-the toolbar owns the pane's top arc: the Chromium surface and the overlays that replace it (error
-panel, empty state) keep square top corners and only follow the pane curve at the bottom.
+fills the four wedges its arc leaves bare inside its own box with a band clipped to that box. Pane
+roots cover the native backdrop inside those bounds. In browser panes the toolbar owns the pane's
+top arc: the Chromium surface and the overlays that replace it (error panel, empty state) keep
+square top corners and only follow the pane curve at the bottom.
 
 ## App-owned Agent keys
 
@@ -354,7 +351,7 @@ accepts their spellings, which is what makes a Ghostty file importable, but they
 
 ## Daemon-owned mux option keys
 
-The ten mux keys are also transported raw and in file order. The daemon turns each entry into a
+The eleven mux keys are also transported raw and in file order. The daemon turns each entry into a
 global `set-option`, so repeated keys retain normal last-writer behavior and invalid entries produce
 a daemon diagnostic without blocking later entries.
 
@@ -370,6 +367,7 @@ a daemon diagnostic without blocking later entries.
 | `synchronize-panes` | `off` | `on` or `off`; controls global synchronized input inheritance |
 | `experimental-agent-pane` | `off` | flag value (`on`/`off`/`true`/`false`/…); gates `select-pane-kind agent` in the engine |
 | `experimental-editor-pane` | `off` | flag value; gates `select-pane-kind editor` in the engine |
+| `history-trickle` | `2000` | integer `0..=10000`; background scrollback backfill budget. `0` disables trickle and leaves scroll-driven prefetch intact |
 
 # Parsing contract
 
@@ -458,9 +456,9 @@ connected the file is picked up at the next daemon startup.
 # Settings view
 
 `crates/zz/src/config/settings.rs` renders the `WorkspaceRoute::Settings` route in the main window.
-`Cmd+,` on macOS or `Ctrl+,` elsewhere opens it. `SettingsSection::ALL` is **nine pages: Appearance,
-Editor, Panes, Multiplexer, Browser, Terminal, Hosts, Advanced, About**. The sidebar labels them as
-Appearance, Tools, and Advanced groups. There is deliberately no "General": the page that name described
+`Cmd+,` on macOS or `Ctrl+,` elsewhere opens it. `SettingsSection::ALL` is **nine pages**, titled
+Interface, Editor, Panes, Multiplexer, Browser, Terminal, Hosts, System, About. The sidebar labels
+them as Appearance, Tools, and Advanced groups. There is deliberately no "General": the page that name described
 had accumulated window chrome, a global widget metric, daemon lifecycle and a debug overlay. The
 device/pairing page that sat before Terminal was deleted on 2026-08-01 along with pairing itself;
 fleet hosts live in `zz/config` and can be managed from the sidebar or **Settings › Hosts**.
@@ -474,12 +472,12 @@ is the only row on the page that is always live.
 
 | Page | Groups |
 | --- | --- |
-| Appearance | **Theme** (`theme-mode` as three drawn window previews, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the six `chrome-*` pickers) · **Tweaks** (`widget-corner-radius`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
+| Interface | **Theme** (`theme-mode` as three drawn window previews, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the six `chrome-*` pickers) · **Tweaks** (`animations`, `widget-corner-radius`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
 | Browser | **Search** (`browser-search-provider`) · **Shortcuts** (`browser-element-selector-hotkey`) |
 | Editor | **Typography** (`editor-font-size`) · **Display** (`editor-line-numbers`, `editor-relative-line-numbers`, `editor-soft-wrap`, `editor-vim-mode`) |
 | Panes | **Layout** (`pane-gaps`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
 | Hosts | **Machines** (configured hosts, live connection state, Remove) · **Add host** (an inline ssh destination field) |
-| Advanced | **Daemon** (`quit-daemon-on-exit`) · **Diagnostics** (`show-fps`) · **Experimental** (`experimental-editor-pane`, `experimental-agent-pane`) |
+| System | **Daemon** (`quit-daemon-on-exit`) · **Diagnostics** (`show-fps`) · **Experimental** (`experimental-editor-pane`, `experimental-agent-pane`). `auto-restart-stale-daemon` is a file key with no Settings row |
 | Multiplexer | Full-file editor for `zz/mux.conf`, with Save and donor-specific **Import tmux…** |
 | Terminal | **Import Ghostty…** · **Font** · **Colors** · **Cursor** · **Selection & highlights** · **Padding**, covering every settable daemon appearance key except file-only `theme` and `background-opacity` |
 | About | Centered mark (the Dock render at 88pt), name, tagline and version badge · **Build** (`CARGO_PKG_VERSION`, OS · arch, the short `ZZ_GPUI_SOURCE` revision, with a copy button on Version that puts all three on one line) · **Project** (repository, releases, new issue, license). Writes nothing |
@@ -551,11 +549,16 @@ provenance, and refreshes the open dialog.
 # Let KDE (or another capable Linux desktop) own the titlebar and window border.
 use-system-titlebar = true
 
-# Ask GPUI and the platform compositor for a blurred window backdrop.
+# Blend the terminal color over its opaque pane base.
 background-opacity = 0.85
+
+# Ask GPUI and the platform compositor to blur app chrome.
 window-background-blur = true
 
-# The toggle alone uses a 6px margin, 13.5px radius, 1px border, and outer edge ring.
+# Set every interface transition to its static state.
+animations = false
+
+# The toggle uses a 6px margin, 13.5px radius, 1px border, and surface ring.
 pane-gaps = true
 
 # Optional explicit chrome overrides

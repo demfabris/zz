@@ -27,9 +27,13 @@ timestamp: 2026-07-31T00:00:00Z
 > it slots back in behind `Endpoint::parse`, and pairing would be redesigned from scratch rather
 > than restored. Everything below is the historical record of the shipped 2026-07-31 design.
 >
-> **Status: implemented on 2026-07-31.**
+> **Historical status (2026-07-31): implemented.** The body below is an archive of that
+> design, not current product behavior. Current remote attach is
+> [fleet attach](/designs/fleet-attach.md) over `ssh://`.
 
-zz has one contextual GUI pairing operation: select an unpaired machine that automatic discovery
+# Archive
+
+zz had one contextual GUI pairing operation: select an unpaired machine that automatic discovery
 has placed in the sidebar or Settings -> Devices. There is no Add host, Pair this machine, Pair a
 device picker, or discoverability-status workflow.
 

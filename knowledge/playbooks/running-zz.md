@@ -35,9 +35,13 @@ cargo xtask bundle-cef --release --output dist/zz
 dist\zz\zz.exe
 ```
 
-The normal development loop is `just run <platform>`. On Linux this runs the binary straight from
+The normal development loop is `just run <mac|linux>`. On Linux this runs the binary straight from
 Cargo; on macOS it builds an unoptimized, locally signed bundle separately from the release output
-and launches a fresh app instance:
+and launches a fresh app instance. `just run` does not accept `windows`. Extra args are
+`--verbose` and `--features <list>` (merged into `ZZ_CARGO_FEATURES`), not Cargo passthrough.
+
+`zz attach [session]` is the raw-terminal client (`zz-tui`). It speaks the same wire protocol as
+the GUI and can render kitty-graphics browser panes when CEF is available in the environment.
 
 ```sh
 just run linux   # cargo run -p zz

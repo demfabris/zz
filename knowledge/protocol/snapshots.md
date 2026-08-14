@@ -4,7 +4,7 @@ title: Mux snapshots (snapshot.rs)
 description: The MuxSnapshot state tree (sessions, windows, recursive split layouts, pane descriptors, per-client focus, and viewer presence) that clients reconcile on attach and after a resync.
 resource: crates/zz-protocol/src/snapshot.rs
 tags: [protocol, snapshot, layout, state, presence]
-timestamp: 2026-07-31T00:00:00Z
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
@@ -43,15 +43,17 @@ deserializer so hostile nesting is rejected before it can exhaust the receiving 
 | `SessionSnapshot` | `id: SessionId`, `name: String`, `active_window: WindowId`, `windows: Vec<WindowSnapshot>`, `viewers: Vec<SessionViewer>` |
 | `SessionViewer` | `name: String`, `window: WindowId`, `is_self: bool` |
 | `WindowSnapshot` | `id: WindowId`, `index: u32`, `name: String`, `active_pane: PaneId`, `zoomed_pane: Option<PaneId>`, `layout: LayoutNode`, `panes: BTreeMap<PaneId, PaneSnapshot>` |
-| `PaneSnapshot` | `id: PaneId`, `title: String`, `kind: PaneKindSnapshot`, `synchronized_input: bool` |
+| `PaneSnapshot` | `id: PaneId`, `title: String`, `kind: PaneKindSnapshot`, `synchronized_input: bool`, `bell: bool` |
 | `PaneKindSnapshot` | `Picker` \| `Terminal` \| `Browser(BrowserDescriptor)` \| `Agent(AgentDescriptor)` \| `Editor(EditorDescriptor)` |
-| `BrowserDescriptor` | `url: String`, `profile: String` |
+| `BrowserDescriptor` | `tabs: Vec<String>`, `active_tab: usize`, `profile: String` |
 | `AgentDescriptor` | `provider: AgentProvider`, `cwd: Option<PathBuf>`, `session_id: Option<String>` |
 | `EditorDescriptor` | `path: Option<String>`, `cwd: String` |
 
 `generation` is the version stamp for the whole tree; `WindowSnapshot.index` is the tmux-style window
 number; `zoomed_pane` records a temporarily maximized pane; `synchronized_input` marks panes receiving
-mirrored keystrokes. `WindowSnapshot.name` is the user's stable, explicit window name;
+mirrored keystrokes; `bell` is latched until the pane is read after a BEL. `BrowserDescriptor.tabs`
+is the strip in order (never empty in the type's contract; `url()` returns the active tab or
+`about:blank`). `WindowSnapshot.name` is the user's stable, explicit window name;
 `PaneSnapshot.title` is live presentation metadata. Terminal OSC title changes are synchronized by
 the daemon's terminal watcher; automatic Unix Bash/zsh hooks publish the working directory at a
 prompt and the full command immediately before execution, while applications may override either
@@ -153,7 +155,7 @@ let snapshot = MuxSnapshot {
 ```
 
 A browser pane's kind carries its descriptor:
-`PaneKindSnapshot::Browser(BrowserDescriptor { url: "https://example.com".into(), profile: "default".into() })`.
+`PaneKindSnapshot::Browser(BrowserDescriptor { tabs: vec!["https://example.com".into()], active_tab: 0, profile: "default".into() })`.
 An Agent pane carries restore metadata:
 `PaneKindSnapshot::Agent(AgentDescriptor { provider: AgentProvider::Codex, cwd: Some("/workspace".into()), session_id: Some("opaque-session".into()) })`.
 An Editor pane carries the file it reopens:

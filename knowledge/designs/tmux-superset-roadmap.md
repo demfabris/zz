@@ -81,11 +81,10 @@ done | fzf
 
 # Tier 3 — the TUI presentation backend
 
-Once `--host` exists, the last structural gap is one verb: `zz --host box attach`
-from a raw TTY. The wire already ships rendered cell grids, so the thin client is
-blit-and-forward — and it extends to the full pane-kind set. Design:
-[TUI client](/designs/tui-client.md). Shares its client seams with the
-[iOS client](/designs/ios-client.md).
+`zz attach` landed 2026-08-09 as the TUI presentation backend
+([tui-client](/designs/tui-client.md) rungs 1+3). `--host attach` is still
+refused. Remaining TUI work is that design's open rungs (agent panes), not a
+missing verb. Shares its client seams with the [iOS client](/designs/ios-client.md).
 
 # Never (by design, not backlog)
 

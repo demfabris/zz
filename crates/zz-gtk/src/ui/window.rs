@@ -21,6 +21,7 @@ use crate::{
         overlay::Overlays,
         pane::TerminalPane,
         panes::{PaneGrid, layout_panes},
+        settings::SettingsRoute,
         terminal::TerminalView,
     },
 };
@@ -84,6 +85,7 @@ pub struct Shell {
     status_left: gtk::Label,
     status_right: gtk::Label,
     overlays: Rc<Overlays>,
+    settings: Rc<SettingsRoute>,
     grid: PaneGrid,
     widgets: RefCell<HashMap<PaneId, PaneWidget>>,
     pages: RefCell<Vec<(WindowId, adw::TabPage)>>,
@@ -92,6 +94,7 @@ pub struct Shell {
     font_offset: Cell<f32>,
     numbering: Cell<bool>,
     syncing: Cell<bool>,
+    detaching: Cell<bool>,
 }
 
 impl Shell {
@@ -144,6 +147,9 @@ impl Shell {
         toolbar.add_top_bar(&tab_bar);
         toolbar.set_content(Some(&tabs));
 
+        let settings = SettingsRoute::new(Arc::clone(&engine));
+        settings.install(&toolbar, &tab_bar, &tabs);
+
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(&toolbar));
 
@@ -171,6 +177,7 @@ impl Shell {
             status_left,
             status_right,
             overlays,
+            settings,
             grid: PaneGrid::new(),
             widgets: RefCell::new(HashMap::new()),
             pages: RefCell::new(Vec::new()),
@@ -179,7 +186,14 @@ impl Shell {
             font_offset: Cell::new(0.0),
             numbering: Cell::new(false),
             syncing: Cell::new(false),
+            detaching: Cell::new(false),
         });
+        let target = Rc::downgrade(&shell);
+        shell.settings.attach_chrome(Rc::new(move |action| {
+            if let Some(shell) = target.upgrade() {
+                shell.perform(action);
+            }
+        }));
         shell.install_actions();
         shell.connect_signals();
         shell.pump_events();
@@ -226,7 +240,7 @@ impl Shell {
         self.window.add_action(&focus);
     }
 
-    fn verbs() -> [(&'static str, fn(&Rc<Self>)); 10] {
+    fn verbs() -> [(&'static str, fn(&Rc<Self>)); 11] {
         [
             ("new-window", |shell| {
                 shell.on_session(|session| {
@@ -268,11 +282,9 @@ impl Shell {
                     CommandInvocation::new("kill-pane", ["-t", &pane.to_string()])
                 });
             }),
-            ("detach", |shell| {
-                shell.engine.detach();
-                shell.window.close();
-            }),
+            ("detach", |shell| shell.detach()),
             ("about", |shell| shell.present_about()),
+            ("settings", |shell| shell.settings.toggle()),
         ]
     }
 
@@ -365,11 +377,31 @@ impl Shell {
         let target = Rc::downgrade(self);
         self.window.connect_close_request(move |_| {
             if let Some(shell) = target.upgrade() {
-                shell.engine.detach();
+                shell.leave();
                 shell.engine.events().close();
             }
             glib::Propagation::Proceed
         });
+    }
+
+    /// Detach is the explicit "leave it running" verb, so it is remembered and
+    /// the close that follows never escalates to stopping the daemon.
+    fn detach(&self) {
+        self.detaching.set(true);
+        self.engine.detach();
+        self.window.close();
+    }
+
+    /// Closing the window detaches, unless `quit-daemon-on-exit` says the
+    /// daemon should go with it. The value is read from the file at this
+    /// moment, so a hand edit a second ago already counts.
+    fn leave(&self) {
+        if !self.detaching.get() && self.settings.quit_daemon_on_exit() {
+            self.engine
+                .execute(CommandInvocation::new("kill-server", [] as [&str; 0]));
+            return;
+        }
+        self.engine.detach();
     }
 
     /// The daemon owns window lifetime, so the tab's close button asks it to
@@ -409,7 +441,11 @@ impl Shell {
             EngineEvent::StatusChanged => self.refresh_status(),
             EngineEvent::SnapshotChanged | EngineEvent::Attached(_) => self.sync(),
             EngineEvent::OverlaysChanged => self.refresh_overlays(),
-            EngineEvent::AppearanceChanged => self.push_appearance(),
+            EngineEvent::AppearanceChanged => {
+                self.push_appearance();
+                self.settings.refresh_daemon_values();
+            }
+            EngineEvent::MuxOptionsChanged => self.settings.refresh_daemon_values(),
             EngineEvent::Clipboard { target, text } => self.write_clipboard(target, &text),
             EngineEvent::Notice(text) => self.toasts.add_toast(adw::Toast::new(&text)),
             EngineEvent::Reconnecting { attempt } => {
@@ -420,6 +456,7 @@ impl Shell {
                 }
             }
             EngineEvent::Reconnected => {
+                self.settings.resend_overrides();
                 self.toasts.add_toast(adw::Toast::new("Reconnected"));
             }
             EngineEvent::Detached | EngineEvent::Disconnected(_) => {
@@ -622,19 +659,16 @@ impl Shell {
     /// window rather than to one pane.
     fn perform(&self, action: ChromeAction) {
         match action {
-            ChromeAction::Detach => {
-                self.engine.detach();
-                self.window.close();
-            }
-            ChromeAction::TerminalFontIncrease | ChromeAction::UiZoomIn => {
-                self.adjust_font(FONT_STEP_POINTS);
-            }
-            ChromeAction::TerminalFontDecrease | ChromeAction::UiZoomOut => {
-                self.adjust_font(-FONT_STEP_POINTS);
-            }
-            ChromeAction::UiZoomReset => {
-                self.font_offset.set(0.0);
-                self.push_appearance();
+            ChromeAction::Detach => self.detach(),
+            ChromeAction::OpenSettings => self.settings.toggle(),
+            ChromeAction::TerminalFontIncrease => self.adjust_font(FONT_STEP_POINTS),
+            ChromeAction::TerminalFontDecrease => self.adjust_font(-FONT_STEP_POINTS),
+            zoom @ (ChromeAction::UiZoomIn
+            | ChromeAction::UiZoomOut
+            | ChromeAction::UiZoomReset) => {
+                if self.settings.adjust_zoom(zoom) {
+                    self.push_appearance();
+                }
             }
             other => log::debug!(
                 "zz-gtk has no handler for the {} chrome action",
@@ -652,10 +686,15 @@ impl Shell {
         self.push_appearance();
     }
 
+    /// The daemon's font size, plus the pane-local zoom offset, times the
+    /// transient interface zoom. The grid caches its cell metrics and only
+    /// re-measures when the appearance value changes, so the zoom has to arrive
+    /// as a different point size rather than as a style rule.
     fn appearance(&self) -> TerminalAppearance {
         let mut appearance = self.engine.appearance();
-        appearance.font_size_points = (appearance.font_size_points + self.font_offset.get())
-            .clamp(MIN_FONT_POINTS, MAX_FONT_POINTS);
+        appearance.font_size_points = ((appearance.font_size_points + self.font_offset.get())
+            * self.settings.zoom().scale())
+        .clamp(MIN_FONT_POINTS, MAX_FONT_POINTS);
         appearance
     }
 
@@ -716,6 +755,7 @@ fn primary_menu() -> gio::Menu {
     panes.append(Some("Close Pane"), Some("win.close-pane"));
 
     let session = gio::Menu::new();
+    session.append(Some("Settings"), Some("win.settings"));
     session.append(Some("Detach"), Some("win.detach"));
     session.append(Some("About zz"), Some("win.about"));
 

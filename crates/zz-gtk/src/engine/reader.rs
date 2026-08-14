@@ -156,6 +156,15 @@ fn reduce(
         CoreEvent::SnapshotChanged => forwarded.push(EngineEvent::SnapshotChanged),
         CoreEvent::StatusChanged => forwarded.push(EngineEvent::StatusChanged),
         CoreEvent::AppearanceChanged => forwarded.push(EngineEvent::AppearanceChanged),
+        CoreEvent::MuxOptionsChanged => forwarded.push(EngineEvent::MuxOptionsChanged),
+        CoreEvent::PrefixArmed { .. }
+        | CoreEvent::CommandPromptChanged
+        | CoreEvent::ChooseTreeChanged
+        | CoreEvent::ChooseBufferChanged
+        | CoreEvent::DisplayPanesChanged => forwarded.push(EngineEvent::OverlaysChanged),
+        CoreEvent::Clipboard { target, text, .. } => {
+            forwarded.push(EngineEvent::Clipboard { target, text });
+        }
         CoreEvent::ClientMessage { text, .. } => forwarded.push(EngineEvent::Notice(text)),
         CoreEvent::CommandResponse(CommandResponse::Error { error, .. }) => {
             if matches!(error, ServerError::MissingTarget(_)) && link.retry_default_attach(client) {

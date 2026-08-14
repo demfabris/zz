@@ -56,14 +56,15 @@ place that already owns each grammar.
 |-------|-------|-------------------------|
 | Window chrome, pane geometry, widget radius, theme mode, paired `chrome-preset`, six optional `chrome-*` roots | GUI client | `crates/zz/src/config/mod.rs` |
 | Browser-local element-selector hotkey | GUI client | `crates/zz/src/config/mod.rs` |
+| Repeatable `chrome-keybind` / `chrome-unbind` overrides for `ui`, `sidebar`, `browser`, and `terminal` actions | GUI client | `crates/zz/src/config/mod.rs` + `crates/zz-client/src/chrome.rs` |
 | Three ACP launch keys (`agent-command`, `agent-claude-code-command`, `agent-working-directory`) | GUI client | `crates/zz/src/config/mod.rs`; file-only, no settings row |
 | Terminal appearance, including face-specific `font-family*` stacks, `font-feature`, synthetic/thickening policy, colors, palette, padding, policy, `theme`, and the `zz-*` extension keys | daemon | `crates/zz-terminal/src/appearance.rs` |
 | `prefix`, `mode-keys`, `history-limit`, `word-separators`, `copy-command`, `set-clipboard`, `buffer-limit`, `synchronize-panes` | daemon | `crates/zz-mux/src/command.rs` |
 
-General keybinding tables are deliberately excluded from both `zz/config` and the settings view: a
-binding editor is its own project, and `zz/mux.conf` already covers power users in tmux grammar.
-The browser element-selector shortcut is a bounded exception: one app-local action represented as
-one validated scalar, not an editor for mux or application binding tables.
+Daemon-owned pane key tables remain in `zz/mux.conf`; the Settings view still has no binding editor.
+Client-owned chrome gained repeatable file-only overrides through `chrome-keybind` and
+`chrome-unbind`, resolved by `ChromeKeymap`. The browser element-selector shortcut remains a
+dedicated validated scalar because Settings exposes that one action directly.
 
 The `zz-*` appearance keys exist because zz's own daemon-side knobs previously had nowhere native to
 live and were smuggled into the *Ghostty* file. They are `zz/config`-native now; the Ghostty parser

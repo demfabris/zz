@@ -349,7 +349,7 @@ cargo test -p zz-browser --no-default-features
 | `crates/zz/src/bin/zz_browser_fixture.rs` | Loopback-only HTTP fixture used as the standard browser-pane example |
 | `crates/zz/src/bin/zz_helper.rs` | CEF helper/bootstrap binary bundled alongside `zz` |
 | `crates/zz/src/lib.rs` | Argument parsing, `run_command_mode` (the CLI path), daemon spawn, and the log-directory resolution documented above |
-| `crates/zz-mux/src/catalog.rs` | The canonical command list the CLI and command palette share (`list-sessions`, `split-window`, `send-keys`, …); see the [tmux command set](/tmux/commands.md) |
+| `crates/zz-protocol/src/catalog.rs` | The canonical command list the CLI and command palette share (`list-sessions`, `split-window`, `send-keys`, …); see the [tmux command set](/tmux/commands.md) |
 
 # Related
 

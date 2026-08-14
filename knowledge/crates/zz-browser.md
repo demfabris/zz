@@ -4,7 +4,7 @@ title: zz-browser crate
 description: Browser-neutral abstraction over CEF Alloy off-screen rendering. Owns CEF init, named private request contexts, page zoom, input, lifecycle, and frame mailboxes.
 resource: crates/zz-browser/src/lib.rs
 tags: [browser, cef, crate, osr]
-timestamp: 2026-08-01T00:00:00Z
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
@@ -50,17 +50,16 @@ frame, and the app moves it onward without another pixel copy. A slow GPUI
 consumer therefore never builds an unbounded queue; it always paints the newest
 frame.
 
-## No proxy plumbing
+## Remote proxy plumbing
 
-The crate sets no proxy preferences on any request context. It used to: a pane on
-a remote session ran on a composite `<profile>@egress-<hash8>` profile whose
-context carried a `fixed_servers` pref at a loopback tunnel. That whole path .
-`egress_profile_name`, `ensure_egress_profile`, `set_profile_proxy`, and
-`BrowserError::ProxyPreference` . was deleted on 2026-08-01 with the QUIC
-transport it tunnelled over. A pane's traffic leaves from the client's own
-network, and one profile name means one context and one jar. The protocol's
-user-facing profile-name cap binds the daemon-owned
-prefix alone.
+A local pane uses its plain named request context and the client's network. A
+pane attached through ssh uses a local `<profile>@egress-<hash8>` context whose
+proxy preference targets the managed `ssh -D` SOCKS listener.
+`BrowserProfilePaths::egress_profile_name` derives the bounded composite name,
+and `BrowserRuntime::set_profile_proxy` installs `fixed_servers` with
+`socks5://127.0.0.1:<port>` plus Chromium's `<-loopback>` bypass override. The
+logical profile name remains the daemon-owned descriptor; the composite context
+and its per-host cookie jar never cross the wire.
 
 # Public API surface
 

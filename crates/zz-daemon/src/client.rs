@@ -59,6 +59,17 @@ impl Write for ClientStream {
     }
 }
 
+#[cfg(unix)]
+impl ClientStream {
+    fn shutdown(&self) -> io::Result<()> {
+        match self {
+            Self::Local(stream) => stream.shutdown(),
+            #[cfg(target_os = "ios")]
+            Self::Ssh(_) => Ok(()),
+        }
+    }
+}
+
 impl TransportStream for ClientStream {
     fn try_clone(&self) -> io::Result<Self> {
         match self {
@@ -423,6 +434,17 @@ impl InteractiveClient {
         entries: Vec<ConfigOverrideEntry>,
     ) -> Result<(), DaemonError> {
         self.send(&ProtocolMessage::SetConfigOverrides { entries })
+    }
+
+    #[cfg(unix)]
+    pub fn shutdown(&self) -> Result<(), DaemonError> {
+        #[cfg(target_os = "ios")]
+        if let Some(forward) = &self.russh_forward {
+            forward.shutdown();
+            return Ok(());
+        }
+        self.writer.lock().stream.shutdown()?;
+        Ok(())
     }
 
     pub fn recv(&self) -> Result<ProtocolMessage, DaemonError> {

@@ -277,14 +277,14 @@ macOS/Windows/X11 and `page zoom × display scale` on the Wayland physical-OSR
 path. Session creation, navigation callbacks, and viewport scale changes all
 reapply that combined value so navigation cannot silently reset page zoom.
 
-# No proxy preferences
+# Remote proxy preferences
 
-The runtime writes no CEF preferences on a request context. `set_profile_proxy`
-and `ensure_egress_profile_context` . the pair that pointed a remote pane's
-composite context at a loopback CONNECT proxy with `bypass_list = <-loopback>` .
-were deleted on 2026-08-01 with the QUIC tunnel behind them (see
-[remote browser egress](/designs/remote-browser-egress.md)). Every context browses
-directly from the client's network.
+`set_profile_proxy(profile, port)` points one ready request context at
+`socks5://127.0.0.1:<port>` and sets `bypass_list = <-loopback>`. Remote browser
+panes use a composite `<profile>@egress-<hash8>` context, so Chromium sends DNS
+names and loopback destinations through the `ssh -D` listener owned by the active
+ssh attachment. Local panes retain their plain context and direct client egress.
+See [remote browser egress](/designs/remote-browser-egress.md).
 
 # Key files
 
@@ -305,5 +305,5 @@ directly from the client's network.
   [process model](/architecture/process-model.md).
 - CEF version/artifact pins: [CEF artifacts](/references/cef-artifacts.md);
   bundling: [build a CEF bundle](/playbooks/build-cef-bundle.md).
-- The wire and daemon halves behind the proxy preference:
+- The ssh and client halves behind the proxy preference:
   [remote browser egress](/designs/remote-browser-egress.md).

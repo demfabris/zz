@@ -17,20 +17,22 @@ timestamp: 2026-08-14T00:00:00Z
 the shared vocabulary that keeps [the mux state machine](/crates/zz-mux.md), [the daemon](/crates/zz-daemon.md),
 and [the GPUI client](/crates/zz.md) interoperable across a socket or named pipe.
 
-The crate is small and dependency-light: exactly four dependencies, `postcard`, `serde`, `thiserror`,
-and `zz-terminal` (for `TerminalViewport`, `TerminalAppearance`, `PackedCell`, and friends that ride
-the terminal lane). It has no cargo features at all since v43 retired `compress` and its optional
+The crate is small and dependency-light: five dependencies, `postcard`, `serde`, `smallvec`,
+`thiserror`, and `zz-terminal` (for `TerminalViewport`, `TerminalAppearance`, `PackedCell`, and
+friends that ride the terminal lane). It has no cargo features at all since v43 retired `compress` and its optional
 `zstd`. Because it encodes the wire format, **any encoding-affecting change requires bumping
-`PROTOCOL_VERSION`**, currently 51. See [the wire protocol](/protocol/wire-protocol.md).
+`PROTOCOL_VERSION`**, currently 52. See [the wire protocol](/protocol/wire-protocol.md).
 
 # What it exports
 
-`lib.rs` re-exports five modules' public surface:
+`lib.rs` re-exports seven modules' public surface:
 
 | Module | Re-exported symbols (selection) | Documented in |
 |--------|--------------------------------|---------------|
+| `catalog` | `COMMAND_SPECS`, `CommandSpec`, `CommandOptionSpec`, `CommandValueKind`, `canonical_command`, `command_spec` | [commands](/tmux/commands.md) |
 | `framing` | `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, `ProtocolError` | [wire protocol](/protocol/wire-protocol.md) |
 | `id` | `ClientId`, `PaneId`, `SessionId`, `SplitId`, `WindowId` | [stable IDs](/protocol/ids.md) |
+| `key` | `Binding`, `KeyTables`, `KeyEngine`, `KeyDecision`, `canonical_key`, `input_key_name`, `input_typed_text` | [key tables](/tmux/key-tables.md) |
 | `message` | `ProtocolMessage`, `Event`, `EventPayload`, `InputMessage`, `ClientHello`, `ServerHello`, `ServerError`, `ConfigOverrideEntry`, `MuxOptions`/`MuxOptionKey`/`MuxOptionValue`, `PROTOCOL_VERSION`, `NEW_SESSION_ATTACH_CAPABILITY`, `SPLIT_RATIO_BASIS`, choose-tree / choose-buffer / display-panes types | [wire protocol](/protocol/wire-protocol.md) |
 | `snapshot` | `MuxSnapshot`, `SessionSnapshot`, `SessionViewer`, `WindowSnapshot`, `PaneSnapshot`, `LayoutNode`, `Axis`, `BrowserDescriptor`, `AgentDescriptor`, `AgentProvider`, `EditorDescriptor`, `PaneKindSnapshot` | [snapshots](/protocol/snapshots.md) |
 | `terminal_codec` | `encode_protocol_message`, `decode_protocol_frame`, `read_protocol_message`, `write_protocol_message`, and their `_into` buffer-reusing variants | [packed terminal lanes](/protocol/terminal-lanes.md) |
@@ -66,7 +68,7 @@ short hostname, bounded at 256 bytes), a capability list, the client's color sch
 `origin` pane (`$ZZ_PANE`) so untargeted CLI commands resolve against the invoking pane.
 `ServerHello` answers with the assigned `ClientId`, the daemon's own capabilities, resolved
 appearance plus provenance, the effective `MuxOptions`, the rendered status line, and
-`prefix_bindings` (the current prefix table, refreshed later by `PrefixBindingsChanged`). Both capability
+`key_tables` (every live table, refreshed later by `KeyTablesChanged`). Both capability
 vectors deserialize through one bounded visitor: at most 64 entries of at most 256 bytes, rejected
 before the strings materialize. One capability name is a constant here,
 `NEW_SESSION_ATTACH_CAPABILITY` (`new-session-attach-v1`); every other advertised string is a literal
@@ -103,13 +105,15 @@ or names a window that no longer exists, so removing a focused window needs no s
 
 | File | Role |
 |------|------|
-| `crates/zz-protocol/src/lib.rs` | Crate root; declares the five private modules and re-exports the public API |
+| `crates/zz-protocol/src/lib.rs` | Crate root; declares the seven private modules and re-exports the public API |
+| `crates/zz-protocol/src/catalog.rs` | Canonical command names, aliases, descriptions, accepted options, and completion value kinds |
 | `crates/zz-protocol/src/framing.rs` | Length-prefixed envelope, `Lane` tag, reserved flags byte, version check, `ProtocolError`, control-lane `encode/decode/read/write` |
-| `crates/zz-protocol/src/message.rs` | `PROTOCOL_VERSION = 51` and its bump-by-bump changelog, `ProtocolMessage` (including `RequestFull` and `HistoryRequest`), `MuxOptionKey`/`MuxOptions`, ordered configuration override entries, appearance provenance payloads, `Event`/`EventPayload` (including `HistoryChunk` and `Detached`), `InputMessage`, hello/command/error/UI-state types and their byte bounds |
+| `crates/zz-protocol/src/key.rs` | Shared `KeyTables`/`KeyEngine` model, default pane and overlay tables, key folding, typed-text precedence, bind/unbind, and snapshots |
+| `crates/zz-protocol/src/message.rs` | `PROTOCOL_VERSION = 52` and its bump-by-bump changelog, `ProtocolMessage` (including `RequestFull` and `HistoryRequest`), `MuxOptionKey`/`MuxOptions`, ordered configuration override entries, appearance provenance payloads, `Event`/`EventPayload` (including `KeyTablesChanged`, `HistoryChunk`, and `Detached`), `InputMessage`, hello/command/error/UI-state types and their byte bounds |
 | `crates/zz-protocol/src/id.rs` | The `stable_id!` macro and the five sigil-prefixed `u64` newtype IDs |
 | `crates/zz-protocol/src/terminal_codec.rs` | Terminal-lane packer/unpacker for viewports and patches, plus lane-selecting encode/decode entrypoints and validation |
 | `crates/zz-protocol/src/snapshot.rs` | `MuxSnapshot` and the session/window/pane/layout tree it carries, plus per-client window focus and `SessionViewer` presence |
-| `crates/zz-protocol/Cargo.toml` | Deps: `postcard`, `serde`, `thiserror`, `zz-terminal`. No features |
+| `crates/zz-protocol/Cargo.toml` | Deps: `postcard`, `serde`, `smallvec`, `thiserror`, `zz-terminal`. No features |
 
 # Related
 

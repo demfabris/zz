@@ -1,4 +1,4 @@
-use zz_client::{ChromeAction, ChromeKeymap};
+use zz_client::{ChromeAction, ChromeKeymap, SIDEBAR_TABLE};
 use zz_daemon::{
     Endpoint, InteractiveClient, configured_fleet_hosts, validate_fleet_host, write_fleet_host,
 };
@@ -19,9 +19,7 @@ use crate::{
     },
     layout::Rect,
     picker::{self, Action as PickerAction},
-    sidebar::{
-        self, EditKind as SidebarEditKind, KeyAction as SidebarKeyAction, Target as SidebarTarget,
-    },
+    sidebar::{self, EditKind as SidebarEditKind, Target as SidebarTarget},
     state::{HostSwitch, Model},
     terminal_event::{
         Event as TerminalEvent, KeyCode as TerminalKeyCode, KeyEvent, KeyEventKind, KeyModifiers,
@@ -217,28 +215,32 @@ fn handle_sidebar_key(
     client: &InteractiveClient,
     event: KeyEvent,
 ) -> Result<InputOutcome, String> {
-    let Some(action) = sidebar::key_action(event) else {
+    if event.kind == KeyEventKind::Release {
+        return Ok(InputOutcome::None);
+    }
+    let Some(action) = model.chrome.resolve(SIDEBAR_TABLE, &key_input(event)) else {
         return Ok(InputOutcome::None);
     };
     match action {
-        SidebarKeyAction::Previous => model.move_sidebar_selection(-1),
-        SidebarKeyAction::Next => model.move_sidebar_selection(1),
-        SidebarKeyAction::Activate => {
+        ChromeAction::SidebarSelectUp => model.move_sidebar_selection(-1),
+        ChromeAction::SidebarSelectDown => model.move_sidebar_selection(1),
+        ChromeAction::SidebarConfirm => {
             if let Some(target) = model.selected_sidebar_target()
                 && let Some(host) = activate_sidebar_target(model, client, target)?
             {
                 return Ok(InputOutcome::SwitchHost(host));
             }
         }
-        SidebarKeyAction::Rename => model.begin_sidebar_rename(),
-        SidebarKeyAction::Blur => model.sidebar.focused = false,
-        SidebarKeyAction::Hide => {
+        ChromeAction::SidebarRename => model.begin_sidebar_rename(),
+        ChromeAction::SidebarCancel => model.sidebar.focused = false,
+        ChromeAction::ToggleSidebar => {
             return Ok(if model.hide_sidebar() {
                 InputOutcome::RepaintAll
             } else {
                 InputOutcome::Repaint
             });
         }
+        _ => return Ok(InputOutcome::None),
     }
     Ok(InputOutcome::Repaint)
 }
@@ -972,6 +974,26 @@ mod tests {
         assert_eq!(
             global_key_route(&chrome, false, ordinary),
             GlobalKeyRoute::Other
+        );
+    }
+
+    #[test]
+    fn sidebar_keys_come_from_the_chrome_table() {
+        let mut chrome = ChromeKeymap::new();
+        let key = KeyEvent::new(TerminalKeyCode::Char('k'), KeyModifiers::NONE);
+        assert_eq!(
+            chrome.resolve(SIDEBAR_TABLE, &key_input(key)),
+            Some(ChromeAction::SidebarSelectUp)
+        );
+        assert!(chrome.unbind(SIDEBAR_TABLE, "k"));
+        assert_eq!(chrome.resolve(SIDEBAR_TABLE, &key_input(key)), None);
+        chrome
+            .bind(SIDEBAR_TABLE, "x", "sidebar-select-up")
+            .unwrap();
+        let rebound = KeyEvent::new(TerminalKeyCode::Char('x'), KeyModifiers::NONE);
+        assert_eq!(
+            chrome.resolve(SIDEBAR_TABLE, &key_input(rebound)),
+            Some(ChromeAction::SidebarSelectUp)
         );
     }
 

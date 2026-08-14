@@ -3,6 +3,8 @@
 
 * [zz-browser crate](zz-browser.md) - Browser-neutral abstraction over CEF Alloy off-screen rendering. Owns CEF init, named private request contexts, page zoom, input, lifecycle, and frame mailboxes.
 * [zz-chrome-import crate](zz-chrome-import.md) - Store-agnostic Google Chrome data import - profile discovery, cookie snapshot/decryption, and read-only history extraction - isolating the app's only sqlite/crypto/keychain dependencies.
+* [zz-client-ffi crate](zz-client-ffi.md) - The Unix C ABI proof surface over zz-client, with a pollable wake fd, typed events, daemon commands, and caller-owned terminal viewport snapshots.
+* [zz-client crate](zz-client.md) - The renderer-free client core that reduces protocol messages into shared state and typed effects, plus the client-local chrome keymap used by desktop and TUI skins.
 * [zz-daemon crate](zz-daemon.md) - The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions, and the fan-out engine that streams coalesced terminal frames to attached and short-lived clients over a socket or named pipe.
 * [zz-mux crate . renderer-free mux state machine](zz-mux.md) - The pure, UI-agnostic multiplexer core that owns sessions/windows/panes/splits, resolves tmux-style targets, executes tmux-compatible commands, holds key tables, and parses .tmux.conf.
 * [zz-protocol crate](zz-protocol.md) - The stable, versioned wire vocabulary (IDs, framing, control messages, packed terminal lanes, and mux snapshots) shared by every zz client and the daemon.

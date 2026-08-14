@@ -61,11 +61,13 @@ alive without a GUI.
 | [zz-daemon](/crates/zz-daemon.md) | persistent daemon: mux state, PTYs, frame fanout, sockets, attachment, CLI |
 | [zz-terminal](/crates/zz-terminal.md) | per-PTY child + libghostty on a worker thread; publishes terminal frames |
 | [zz-browser](/crates/zz-browser.md) | CEF init, subprocess dispatch, request context, input translation, frame mailboxes |
+| [zz-client](/crates/zz-client.md) | sans-IO protocol reduction and client-local chrome key tables shared by client shells |
+| [zz-client-ffi](/crates/zz-client-ffi.md) | Unix C ABI proof surface over the shared client core |
 | [zz](/crates/zz.md) | long-lived GPUI mux client; reconciles layouts; hosts terminal, CEF, and Agent views |
 | [zz-chrome-import](/crates/zz-chrome-import.md) | Chrome profile discovery, cookie decryption, read-only history extraction |
 | [zz-xtask](/crates/zz-xtask.md) | builds and validates platform CEF bundles |
 
-Workspace members without a dedicated page here: `zz-ui` (widget fork), `zz-tui` (`zz attach`),
+Workspace members without a dedicated page here: `zz-ui` (widget fork), `zz-tui` (`zz attach`), and
 `zz-ios` / `zz-gpui-ios` (iPad client). See [crates](/crates/index.md).
 
 # Platform status

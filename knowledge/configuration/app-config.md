@@ -18,7 +18,7 @@ The GUI process loads the first existing `zz/config` file from the user's platfo
 roots. `crates/zz/src/config/mod.rs` resolves the candidates when `run_app` enters the GPUI application
 closure, parses thirty-two client-local behavior/layout/diagnostic/theme/browser knobs into typed
 `AppConfig` and `BrowserConfig` values, parses three app-owned ACP launch keys into `AgentConfig`,
-and collects the supported
+collects repeatable `chrome-keybind`/`chrome-unbind` entries for the client-local keymap, and collects the supported
 daemon-owned appearance and mux entries as ordered raw `(key, value)` pairs. Client-reserved
 `host-<name> = <uri>` entries ([fleet attach](/designs/fleet-attach.md)) are matched before any
 of that: validated via `zz_daemon::Endpoint::parse`, published through a dedicated `FleetHosts`
@@ -71,6 +71,15 @@ absolute, otherwise `$HOME/.config/zz/config`, creating parent directories as ne
 candidate exists, edits continue to target the first existing file selected by normal discovery.
 
 # Schema
+
+## Repeatable chrome bindings
+
+`chrome-keybind = <table>:<key>=<action>` replaces or adds one binding, and
+`chrome-unbind = <table>:<key>` removes one. The allowed tables are `ui`, `sidebar`, `browser`, and
+`terminal`; action names come from `zz_client::ChromeAction`. Keys use the chrome grammar from
+`zz-client`, including `D-` for Command/Super and `S-` for Shift. These directives may appear more
+than once, preserve file order, and stay client-side. They are separate from the thirty-two scalar
+knobs below and from the daemon-owned tmux tables in `zz/mux.conf`.
 
 ## Client-local keys
 

@@ -56,12 +56,13 @@ packaging. One attached host at a time, same as desktop.
    needed for physical devices.
 5. **Feature-split, not crate-split, for v1.** `zz-terminal` grows a `session`
    feature (default-on) gating the libghostty/PTY half; `zz-daemon` grows a
-   `daemon` feature (default-on) gating the daemon half. A `zz-client` crate
-   extraction stays available later if the seams prove out.
+   `daemon` feature (default-on) gating the daemon half. The later `zz-client`
+   extraction now supplies shared protocol reduction, while iOS still compiles
+   the GPUI shell and its retained terminal path.
 6. **React Native rejected** (byte-stream widget vs cell-patch protocol
    mismatch; see knowledge on the copy-mode single-writer redesign).
 
-# Reuse map (verified 2026-08-07 against protocol v44; live wire is v51)
+# Reuse map (verified 2026-08-07 against protocol v44; live wire is v52)
 
 Clean on iOS as-is:
 
@@ -78,11 +79,10 @@ Clean on iOS as-is:
   ClientHello/ServerHello (version gate, not negotiation), `Attach{""}` →
   `Attached` + resync burst (`daemon.rs:4279-4366` is the authoritative
   post-attach sequence).
-- `MuxClient` (`crates/zz/src/mux/client.rs`) — the client brain: reconnect
-  ladder (1,1,2,4,8,16,30s; attached host retries forever), viewport
-  retention, history backfill, `RequestFull` recovery. It's a gpui Entity —
-  fine, we have gpui. Needs its `zz_browser::{diagnostic_url,normalize_url}`
-  imports gated.
+- `MuxClient` (`crates/zz/src/mux/client.rs`) — the GPUI shell around
+  `zz_client::ClientCore`: reconnect ladder (1,1,2,4,8,16,30s; attached host
+  retries forever), retained terminal hot path, history backfill, and
+  `RequestFull` recovery. It is a gpui Entity, which fits this client.
 - Key encoding — `terminal/view.rs:2232-2377` (`key_code`, `modifiers`,
   `key_input`) and `mux/prefix.rs` (zero crate:: imports) are free functions
   over `gpui::Keystroke` + zz-terminal types.

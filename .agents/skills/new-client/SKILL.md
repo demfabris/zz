@@ -30,12 +30,16 @@ territory. The knowledge bundle is the map; source is ground truth.
 ## Pick your integration route
 
 1. **C or any non-Rust toolkit (GTK, Qt, Swift, …)** — link `zz-client-ffi`
-   (staticlib/cdylib) against `include/zz-client.h`. The complete working
-   reference client is `crates/zz-client-ffi/tests/smoke.c` (~100 lines:
-   connect, attach, list panes, resize, read rows, type, verify). Main-loop
+   (staticlib/cdylib) against `include/zz-client.h`. The current ABI is a
+   text-terminal proof surface, and `crates/zz-client-ffi/tests/smoke.c` is its
+   working reference: connect, attach, list panes, resize, read rows, type,
+   free, and reconnect. Main-loop
    integration is fd-based by design: poll `zz_client_event_fd`, then drain
    `zz_client_next_event` until false — plugs into GSource, QSocketNotifier,
-   or DispatchSource with no cross-thread callbacks.
+   or DispatchSource with no cross-thread callbacks. A full graphical skin
+   still needs ABI exports for raw keys, styles/graphemes, generation counters,
+   catalog/key-table access, and chrome action events; do not recreate those
+   contracts in toolkit code.
 2. **Rust surface** — depend on `zz-client` + `zz-daemon` (client half) +
    `zz-protocol` and drive `ClientCore` yourself. `crates/zz-tui` is the
    exemplar: reader thread reduces into `Arc<Mutex<ClientCore>>`, the main

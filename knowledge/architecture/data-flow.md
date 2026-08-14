@@ -83,19 +83,26 @@ AgentController reducer ─────────────▶ AgentTimeline
 
 ```
 GPUI event ─┬─ prefix chord (any focus) ─▶ window-root claim ─▶ mux key tables       [server]
-            ├─ terminal focused ─▶ key encoding ─▶ mux key tables ─▶ Pass ─▶ PTY     [server]
-            ├─ browser focused  ─▶ key encoding ─▶ mux key tables ─▶ Pass ─▶ CEF     [server]
-            └─ Agent focused    ─▶ composer / cancel / approval ─▶ ACP controller
+            ├─ chrome action ─▶ ChromeKeymap ─▶ local or protocol-backed effect      [client]
+            ├─ terminal raw key ─▶ mux key tables ─▶ Pass ─▶ PTY                     [server]
+            ├─ browser page key ─▶ browser-surface route ─▶ CEF sink                 [server/client]
+            └─ Agent focused ─▶ composer / cancel / approval ─▶ ACP controller
 ```
 
 - The renderer-free [mux](/crates/zz-mux.md) handles prefix key tables and command
   resolution; the same [commands](/tmux/commands.md) are also reachable from any shell as
   CLI clients (e.g. `send-keys -t %0 …`). The prefix is one-shot, exactly as in tmux: it arms the
-  prefix table for a single following key, and unbound keys pass through to the pane.
+  prefix table for a single following key; an unbound prefix-table key is swallowed and exits the
+  table, while an unbound root key passes through to the pane.
 - The tmux prefix is authoritative from **every** focus context. Terminal and Browser keys reach
-  the daemon anyway; local text widgets (composer, address bar) are covered by the window-root
+  the daemon; local text widgets (composer, address bar) are covered by the window-root
   prefix claim, which forwards the chord (and the armed sequence that follows it, tracked via
   `PrefixArmed` events) with the active pane as command source.
+- `zz-client::ChromeKeymap` resolves client-owned `ui`, `sidebar`, `browser`, and `terminal`
+  actions after the prefix claim. The daemon publishes all of its pane tables through
+  `ServerHello.key_tables` and `KeyTablesChanged`, but keeps authority over their execution.
+- Browser page input uses dedicated Browser-surface messages that skip root-table resolution and
+  feed the synchronized CEF sink. The prefix claim remains available from the page.
 - Browser input translation (pointer, wheel, keyboard, committed text, IME, focus, resize) lives in
   [input translation](/browser/input-translation.md).
 - Wheel scroll over a live pane with a warm history ring repaints from the ring on the next frame and

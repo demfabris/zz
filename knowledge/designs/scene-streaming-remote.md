@@ -32,7 +32,7 @@ timestamp: 2026-07-16T13:24:55Z
 > behind `Endpoint::parse`. Everything below is the design record as of 2026-07-31.
 >
 > **Status (2026-08-13): partially retired.** QUIC/zstd/predictor/egress-splice are gone. Surviving
-> transport-independent pieces and `zz attach` are current. The live wire is protocol v51 over a
+> transport-independent pieces and `zz attach` are current. The live wire is protocol v52 over a
 > unix socket or `ssh -L`, documented in [wire-protocol](/protocol/wire-protocol.md). Historical
 > record of the 2026-07-31 campaign follows. M0 landed 2026-07-16 (commits
 > `6e6509c`, `7e5410c`): `ZZ_SOCKET`/global `--socket` overrides, the monomorphized `Transport`
@@ -62,7 +62,7 @@ timestamp: 2026-07-16T13:24:55Z
 > confidence machinery . apps that never echo never render), and auto-reconnect with backoff +
 > same-session re-attach + frozen-frame UX (`HostState::Reconnecting`; an attached remote that
 > drops no longer falls back to local). The sections below are the design record; the shipped
-> behavior is folded into the subsystem concept docs (wire-protocol.md tracks v51). M5's QUIC
+> behavior is folded into the subsystem concept docs (wire-protocol.md tracks v52). M5's QUIC
 > splice was deleted, then reintroduced as ssh `-D` in
 > [remote browser egress](/designs/remote-browser-egress.md). M6's multi-client half was
 > superseded by [multi-device attach](/designs/multi-device-attach.md); the TUI renderer shipped

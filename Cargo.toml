@@ -14,6 +14,7 @@ members = [
     "crates/zz-xtask",
 ]
 exclude = [
+    "crates/zz-gtk",
     "examples/ui-showcase",
     "third_party/rust/libghostty-vt-sys",
     "third_party/rust/proc-macro-error2",

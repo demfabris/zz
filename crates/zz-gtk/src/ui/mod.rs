@@ -1,8 +1,8 @@
 mod colors;
-mod completion;
+pub mod completion;
 mod keys;
 mod overlay;
-mod palette;
+pub mod palette;
 mod pane;
 mod panes;
 mod prefix;

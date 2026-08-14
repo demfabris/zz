@@ -32,6 +32,15 @@ const ROW_HEIGHT: i32 = 40;
 const COMMAND_HINT: &str = "Tab complete · ↑↓ select · Enter run · Esc close";
 const VALUE_HINT: &str = "Enter apply · Esc close";
 
+/// The daemon can still make a browser pane this client renders as a
+/// placeholder, so browser commands stay in the catalog; agent and editor panes
+/// are experiments zz-gtk does not carry at all.
+const AVAILABILITY: PaneKindAvailability = PaneKindAvailability {
+    browser: true,
+    agent: false,
+    editor: false,
+};
+
 const STYLE: &str = "
 .zz-palette {
     background-color: @popover_bg_color;
@@ -91,13 +100,13 @@ pub struct PaletteModel {
 }
 
 impl PaletteModel {
-    pub fn new(availability: PaneKindAvailability) -> Self {
+    pub fn new() -> Self {
         Self {
             kind: CommandPromptKind::Command,
             prompt: String::new(),
             history: Vec::new(),
             snapshot: Arc::new(MuxSnapshot::default()),
-            availability,
+            availability: AVAILABILITY,
             input: String::new(),
             cursor: 0,
             suggestions: Vec::new(),
@@ -266,6 +275,12 @@ impl PaletteModel {
     }
 }
 
+impl Default for PaletteModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// The palette surface. Mount [`CommandPalette::widget`] as a `GtkOverlay`
 /// child so it floats over the pane area instead of resizing it.
 pub struct CommandPalette {
@@ -332,7 +347,7 @@ impl CommandPalette {
 
         let palette = Rc::new(Self {
             engine,
-            model: RefCell::new(PaletteModel::new(PaneKindAvailability::default())),
+            model: RefCell::new(PaletteModel::new()),
             root,
             label,
             entry,
@@ -435,10 +450,10 @@ impl CommandPalette {
         }
     }
 
+    /// `GtkListBox` keeps children a `remove` refuses to take — an empty list
+    /// still answers `first_child`, and draining it by hand spins forever.
     fn clear_rows(&self) {
-        while let Some(child) = self.list.first_child() {
-            self.list.remove(&child);
-        }
+        self.list.remove_all();
         self.rendered.borrow_mut().clear();
     }
 
@@ -680,10 +695,6 @@ mod tests {
         }
     }
 
-    fn model() -> PaletteModel {
-        PaletteModel::new(PaneKindAvailability::default())
-    }
-
     fn labels(model: &PaletteModel) -> Vec<&str> {
         model
             .suggestions()
@@ -694,7 +705,7 @@ mod tests {
 
     #[test]
     fn a_fresh_prompt_is_adopted_and_a_republished_one_is_not() {
-        let mut model = model();
+        let mut model = PaletteModel::new();
         let state = command("", 0, &[]);
 
         assert_eq!(
@@ -719,7 +730,7 @@ mod tests {
 
     #[test]
     fn value_prompts_are_never_completed() {
-        let mut model = model();
+        let mut model = PaletteModel::new();
         let state = CommandPromptState {
             prompt: "rename-window: ".to_owned(),
             input: "notes".to_owned(),
@@ -738,7 +749,7 @@ mod tests {
 
     #[test]
     fn navigation_engages_before_it_steps_and_wraps_both_ways() {
-        let mut model = model();
+        let mut model = PaletteModel::new();
         model.sync(
             Some(&command("new-", 4, &[])),
             Arc::new(MuxSnapshot::default()),
@@ -772,7 +783,7 @@ mod tests {
 
     #[test]
     fn enter_runs_while_typing_and_accepts_once_the_list_is_engaged() {
-        let mut model = model();
+        let mut model = PaletteModel::new();
         model.sync(
             Some(&command("new-w", 5, &[])),
             Arc::new(MuxSnapshot::default()),
@@ -792,7 +803,7 @@ mod tests {
 
     #[test]
     fn tab_accepts_the_top_suggestion_without_engaging_the_list() {
-        let mut model = model();
+        let mut model = PaletteModel::new();
         model.sync(
             Some(&command("new-w", 5, &[])),
             Arc::new(MuxSnapshot::default()),
@@ -808,7 +819,7 @@ mod tests {
 
     #[test]
     fn history_leads_the_ranking_and_survives_a_snapshot_bump() {
-        let mut model = model();
+        let mut model = PaletteModel::new();
         model.sync(
             Some(&command("", 0, &["list-panes", "split-window -h"])),
             Arc::new(MuxSnapshot::default()),
@@ -853,7 +864,7 @@ mod tests {
 
     #[test]
     fn a_unicode_prompt_keeps_its_cursor_through_a_round_trip() {
-        let mut model = model();
+        let mut model = PaletteModel::new();
         model.sync(
             Some(&command("rename-window café", 18, &[])),
             Arc::new(MuxSnapshot::default()),

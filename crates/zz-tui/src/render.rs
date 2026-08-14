@@ -18,21 +18,16 @@ use crate::{
     state::Model,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum FrameDamage {
-    All,
-    Rows(Vec<u16>),
-}
+pub(crate) use zz_client::ViewportDamage as FrameDamage;
 
-impl FrameDamage {
-    pub fn merge(&mut self, incoming: Self) {
-        match (&mut *self, incoming) {
-            (Self::All, _) | (_, Self::All) => *self = Self::All,
-            (Self::Rows(existing), Self::Rows(mut rows)) => {
-                existing.append(&mut rows);
-                existing.sort_unstable();
-                existing.dedup();
-            }
+/// Folds a coalesced frame's damage into the damage already pending for a pane.
+pub(crate) fn merge_damage(damage: &mut FrameDamage, incoming: FrameDamage) {
+    match (&mut *damage, incoming) {
+        (FrameDamage::All, _) | (_, FrameDamage::All) => *damage = FrameDamage::All,
+        (FrameDamage::Rows(existing), FrameDamage::Rows(mut rows)) => {
+            existing.append(&mut rows);
+            existing.sort_unstable();
+            existing.dedup();
         }
     }
 }

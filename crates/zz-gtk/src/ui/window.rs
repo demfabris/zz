@@ -223,9 +223,12 @@ impl Shell {
                 }
             }
             EngineEvent::Notice(text) => self.toasts.add_toast(adw::Toast::new(&text)),
-            EngineEvent::Reconnecting { attempt } => self.toasts.add_toast(adw::Toast::new(
-                &format!("Reconnecting… (attempt {attempt})"),
-            )),
+            EngineEvent::Reconnecting { attempt } => {
+                if attempt == 1 {
+                    self.toasts
+                        .add_toast(adw::Toast::new("Reconnecting to the zz daemon…"));
+                }
+            }
             EngineEvent::Reconnected => {
                 self.toasts.add_toast(adw::Toast::new("Reconnected"));
             }

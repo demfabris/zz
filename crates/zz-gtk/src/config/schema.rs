@@ -192,8 +192,7 @@ const CHROME_PRESETS: &[Choice] = &[
     choice("macos-classic", "macOS Classic"),
 ];
 
-const PANE_GEOMETRY_NOTE: &str = "zz-gtk draws splits as a fixed two-pixel divider; \
-     the value is written for the zz app until this client's grid reads it.";
+const PANE_GEOMETRY_NOTE: &str = "the grid draws a fixed two-pixel divider.";
 
 pub const SETTINGS: &[Setting] = &[
     Setting {
@@ -288,8 +287,7 @@ pub const SETTINGS: &[Setting] = &[
         group: "Chrome colors",
         owner: Owner::Client,
         support: Support::Unwired(
-            "zz-gtk takes its chrome from the GNOME stylesheet; explicit chrome colors above \
-             override it.",
+            "chrome comes from the GNOME stylesheet; the colors above override it.",
         ),
         kind: Kind::Choice {
             default: "",
@@ -319,9 +317,7 @@ pub const SETTINGS: &[Setting] = &[
         page: Page::Interface,
         group: "Window",
         owner: Owner::Client,
-        support: Support::Inapplicable(
-            "GTK always uses the toolkit's own header bar and the compositor's decorations.",
-        ),
+        support: Support::Inapplicable("the toolkit and compositor own the window frame."),
         kind: Kind::Toggle { default: false },
     },
     Setting {
@@ -331,7 +327,7 @@ pub const SETTINGS: &[Setting] = &[
         page: Page::Interface,
         group: "Window",
         owner: Owner::Client,
-        support: Support::Inapplicable("The window shape is the compositor's under GTK."),
+        support: Support::Inapplicable("the compositor owns the window shape."),
         kind: Kind::Number {
             default: 13.5,
             min: 0.0,
@@ -347,7 +343,7 @@ pub const SETTINGS: &[Setting] = &[
         page: Page::Interface,
         group: "Window",
         owner: Owner::Client,
-        support: Support::Inapplicable("No blurred surface exists in the GTK shell."),
+        support: Support::Inapplicable("no blurred surface exists in this shell."),
         kind: Kind::Toggle { default: false },
     },
     Setting {
@@ -517,7 +513,7 @@ pub const SETTINGS: &[Setting] = &[
         page: Page::Terminal,
         group: "Colors",
         owner: Owner::Appearance(AppearanceConfigKey::BackgroundOpacity),
-        support: Support::Unwired("The GTK pane paints an opaque background."),
+        support: Support::Unwired("the pane paints an opaque background."),
         kind: Kind::Number {
             default: 1.0,
             min: 0.0,
@@ -615,7 +611,7 @@ pub const SETTINGS: &[Setting] = &[
         page: Page::Terminal,
         group: "Selection and search",
         owner: Owner::Appearance(AppearanceConfigKey::ZzRoundedSelection),
-        support: Support::Unwired("The GTK pane fills selection rectangles square."),
+        support: Support::Unwired("the pane fills selection rectangles square."),
         kind: Kind::Toggle { default: false },
     },
     Setting {
@@ -645,7 +641,7 @@ pub const SETTINGS: &[Setting] = &[
         page: Page::Terminal,
         group: "Selection and search",
         owner: Owner::Appearance(AppearanceConfigKey::ZzLinkColor),
-        support: Support::Unwired("The GTK pane does not paint link decorations yet."),
+        support: Support::Unwired("the pane paints no link decorations yet."),
         kind: Kind::Color,
     },
     Setting {
@@ -655,7 +651,7 @@ pub const SETTINGS: &[Setting] = &[
         page: Page::Terminal,
         group: "Padding",
         owner: Owner::Appearance(AppearanceConfigKey::WindowPaddingX),
-        support: Support::Unwired("The GTK pane pads its grid from the widget's own margins."),
+        support: Support::Unwired("the pane pads its grid from the widget's own margins."),
         kind: Kind::Text { placeholder: "0,0" },
     },
     Setting {
@@ -665,7 +661,7 @@ pub const SETTINGS: &[Setting] = &[
         page: Page::Terminal,
         group: "Padding",
         owner: Owner::Appearance(AppearanceConfigKey::WindowPaddingY),
-        support: Support::Unwired("The GTK pane pads its grid from the widget's own margins."),
+        support: Support::Unwired("the pane pads its grid from the widget's own margins."),
         kind: Kind::Text { placeholder: "0,0" },
     },
     Setting {
@@ -806,9 +802,7 @@ pub const SETTINGS: &[Setting] = &[
         page: Page::System,
         group: "Daemon",
         owner: Owner::Client,
-        support: Support::Inapplicable(
-            "zz-gtk never spawns a daemon; it dials the socket it was given.",
-        ),
+        support: Support::Inapplicable("this client never spawns a daemon; it dials a socket."),
         kind: Kind::Toggle { default: false },
     },
     Setting {
@@ -818,7 +812,7 @@ pub const SETTINGS: &[Setting] = &[
         page: Page::System,
         group: "Daemon",
         owner: Owner::Client,
-        support: Support::Inapplicable("zz-gtk publishes no StatusNotifierItem."),
+        support: Support::Inapplicable("this client publishes no StatusNotifierItem."),
         kind: Kind::Toggle { default: true },
     },
     Setting {
@@ -828,7 +822,7 @@ pub const SETTINGS: &[Setting] = &[
         page: Page::System,
         group: "Daemon",
         owner: Owner::Client,
-        support: Support::Inapplicable("zz-gtk has no frame counter; GTK owns the frame clock."),
+        support: Support::Inapplicable("GTK owns the frame clock."),
         kind: Kind::Toggle { default: false },
     },
     Setting {
@@ -838,7 +832,7 @@ pub const SETTINGS: &[Setting] = &[
         page: Page::System,
         group: "Experimental",
         owner: Owner::Mux(MuxOptionKey::ExperimentalAgentPane),
-        support: Support::Unwired("zz-gtk renders a placeholder where an agent pane would be."),
+        support: Support::Unwired("this client renders a placeholder for agent panes."),
         kind: Kind::Toggle { default: false },
     },
     Setting {
@@ -848,7 +842,7 @@ pub const SETTINGS: &[Setting] = &[
         page: Page::System,
         group: "Experimental",
         owner: Owner::Mux(MuxOptionKey::ExperimentalEditorPane),
-        support: Support::Unwired("zz-gtk renders a placeholder where an editor pane would be."),
+        support: Support::Unwired("this client renders a placeholder for editor panes."),
         kind: Kind::Toggle { default: false },
     },
 ];

@@ -11,6 +11,7 @@ pub mod prefix;
 mod search;
 mod settings;
 mod sidebar;
+mod ssh_prompt;
 mod terminal;
 mod tray;
 mod window;

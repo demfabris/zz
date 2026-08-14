@@ -9,7 +9,7 @@ use zz_client::{ClientCore, CoreEvent, Outbound};
 use zz_daemon::InteractiveClient;
 use zz_protocol::{BrowserCommand, CommandResponse, GuiResponse, ServerError, TerminalUiCommand};
 
-use super::{EngineEvent, HistoryChunk, Link};
+use super::{AUTH_DECLINED_REASON, EngineEvent, HistoryChunk, HostState, Ladder, Link};
 
 /// The first retry fires almost immediately — a daemon that was restarted under
 /// the client is usually back before a human notices — and the ladder doubles up
@@ -21,34 +21,74 @@ const RETRY_WINDOW: Duration = Duration::from_secs(30);
 /// Retry naps are slept in slices so a closed UI is noticed promptly.
 const NAP_SLICE: Duration = Duration::from_millis(50);
 
+/// How many rungs a host nobody is watching climbs before it is left alone. The
+/// desktop's number: a host on screen retries until it comes back, and one in a
+/// collapsed corner of the tree stops asking and offers Reconnect instead.
+const MAX_UNWATCHED_ATTEMPTS: u32 = 3;
+
+/// The desktop's fleet ladder, in seconds.
+fn host_delay(attempt: u32) -> Duration {
+    Duration::from_secs(match attempt {
+        0 | 1 => 1,
+        2 => 2,
+        3 => 4,
+        4 => 8,
+        5 => 16,
+        _ => 30,
+    })
+}
+
 /// Reduces one connection at a time and re-establishes the next one itself:
 /// decoded messages in, wire requests straight back out, frames into the
 /// coalescing inbox, everything else to the UI in stream order.
 pub fn spawn(link: Arc<Link>, events: Sender<EngineEvent>) -> Result<(), String> {
+    link.running.store(true, Ordering::Release);
+    let guard = Arc::clone(&link);
     thread::Builder::new()
         .name("zz-gtk-protocol".to_owned())
-        .spawn(move || supervise(&link, &events))
+        .spawn(move || {
+            supervise(&link, &events);
+            link.running.store(false, Ordering::Release);
+        })
         .map(drop)
-        .map_err(|error| format!("failed to start the protocol reader: {error}"))
+        .map_err(|error| {
+            guard.running.store(false, Ordering::Release);
+            format!("failed to start the protocol reader: {error}")
+        })
 }
 
 fn supervise(link: &Link, events: &Sender<EngineEvent>) {
+    if link.client().is_none() && !first_dial(link, events) {
+        return;
+    }
     while let Some(reason) = pump(link, events) {
-        if !reconnect(link, events, reason) {
+        if link.is_closed() || !reconnect(link, events, reason) {
             return;
         }
+    }
+}
+
+/// A host is dialled by its own reader thread rather than by whoever added it:
+/// ssh can take seconds to answer, and the main loop cannot wait for that.
+fn first_dial(link: &Link, events: &Sender<EngineEvent>) -> bool {
+    match link.dial() {
+        Ok(()) => publish_state(link, events, HostState::Connected),
+        Err(reason) => reconnect(link, events, reason),
     }
 }
 
 /// Drain the live connection until it fails, returning why. `None` means the UI
 /// hung up and the thread is done.
 fn pump(link: &Link, events: &Sender<EngineEvent>) -> Option<String> {
-    let client = link.client();
+    let client = link.client()?;
     loop {
         let message = match client.recv() {
             Ok(message) => message,
             Err(error) => return Some(error.to_string()),
         };
+        if link.is_closed() {
+            return None;
+        }
         let forwarded = {
             let mut core = link.core();
             core.handle_message(message);
@@ -70,16 +110,25 @@ fn pump(link: &Link, events: &Sender<EngineEvent>) -> Option<String> {
             link.replay_geometry();
         }
         for event in forwarded {
-            events.send_blocking(event).ok()?;
+            events.send_blocking(link.tag(event)).ok()?;
         }
     }
 }
 
 /// Retry the endpoint on a bounded ladder, keeping every accessor answering
 /// with the state the dead connection left behind. True when a fresh connection
-/// took over; false when the window elapsed or the UI hung up.
+/// took over; false when the ladder gave up or the UI hung up.
 fn reconnect(link: &Link, events: &Sender<EngineEvent>, reason: String) -> bool {
     log::warn!("zz-gtk lost the daemon connection: {reason}");
+    match link.ladder {
+        Ladder::Local => reconnect_local(link, events, reason),
+        Ladder::Fleet => reconnect_host(link, events, reason),
+    }
+}
+
+/// The local daemon: retry hard for half a minute, then close the window. There
+/// is no workspace without it.
+fn reconnect_local(link: &Link, events: &Sender<EngineEvent>, reason: String) -> bool {
     let started = Instant::now();
     let mut delay = FIRST_DELAY;
     let mut attempt = 1;
@@ -92,8 +141,10 @@ fn reconnect(link: &Link, events: &Sender<EngineEvent>, reason: String) -> bool 
         {
             return false;
         }
+        link.set_state(HostState::Reconnecting { attempt });
         match link.dial() {
             Ok(()) => {
+                link.set_state(HostState::Connected);
                 return [
                     EngineEvent::Reconnected,
                     EngineEvent::AppearanceChanged,
@@ -107,8 +158,60 @@ fn reconnect(link: &Link, events: &Sender<EngineEvent>, reason: String) -> bool 
         delay = (delay * 2).min(MAX_DELAY);
         attempt += 1;
     }
+    link.set_state(HostState::Unreachable {
+        reason: last.clone(),
+    });
     let _ = events.send_blocking(EngineEvent::Disconnected(last));
     false
+}
+
+/// A fleet host: the desktop's 1/2/4/8/16/30s ladder, forever while the host is
+/// the one on screen and for three rungs while it is not. A host that stops
+/// retrying keeps every frame it had — nothing here ever reaches for the local
+/// daemon instead, because the panes on screen belong to a different machine.
+fn reconnect_host(link: &Link, events: &Sender<EngineEvent>, reason: String) -> bool {
+    let mut attempt = 1;
+    let mut last = reason;
+    loop {
+        if link.parked.load(Ordering::Acquire) {
+            publish_state(
+                link,
+                events,
+                HostState::Parked {
+                    reason: AUTH_DECLINED_REASON.to_owned(),
+                },
+            );
+            return false;
+        }
+        if !link.is_active() && attempt > MAX_UNWATCHED_ATTEMPTS {
+            publish_state(link, events, HostState::Unreachable { reason: last });
+            return false;
+        }
+        if !publish_state(link, events, HostState::Reconnecting { attempt })
+            || !nap(events, host_delay(attempt))
+            || link.is_closed()
+        {
+            return false;
+        }
+        match link.dial() {
+            Ok(()) => return publish_state(link, events, HostState::Connected),
+            Err(error) => last = error,
+        }
+        attempt = attempt.saturating_add(1);
+    }
+}
+
+/// Record a state and tell the UI, unless the UI is gone. False also when the
+/// channel closed, which is every caller's cue to stop.
+fn publish_state(link: &Link, events: &Sender<EngineEvent>, state: HostState) -> bool {
+    let moved = link.set_state(state);
+    let Some(host) = link.tag else {
+        return !events.is_closed();
+    };
+    if !moved {
+        return !events.is_closed();
+    }
+    events.send_blocking(EngineEvent::HostState(host)).is_ok()
 }
 
 /// False once the UI closed the event channel; the caller stops there.

@@ -7,10 +7,10 @@ use std::{
 
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, Timelike as _};
 use gpui::{
-    Anchor, AnyElement, Context, ElementId, Entity, FocusHandle, Focusable, FollowMode, Image,
-    IntoElement, KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, Render,
-    ScrollStrategy, SharedString, Subscription, UniformListScrollHandle, Window, div, prelude::*,
-    px, relative, uniform_list,
+    Anchor, AnyElement, Context, ElementId, Entity, FocusHandle, Focusable, Image, IntoElement,
+    KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, Render, ScrollStrategy,
+    SharedString, Subscription, UniformListScrollHandle, Window, div, prelude::*, px, relative,
+    uniform_list,
 };
 use zz_protocol::{AgentDescriptor, AgentProvider, CommandInvocation, PaneId};
 #[cfg(all(test, not(target_os = "macos")))]
@@ -18,8 +18,9 @@ use zz_ui::agent::DisclosureKind;
 use zz_ui::agent::{
     AGENT_CHROME_CONTROL_HEIGHT, AGENT_CONTENT_MAX_WIDTH, AgentEntry, AgentTimeline,
     AgentTimelineStore, AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus,
-    COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot, TimelineRow, agent_attachment_thumbnail,
-    agent_pane_header, append_timeline_row, fold_timeline_rows, timeline_group_kind,
+    COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot, TimelineRow, TimelineStick,
+    agent_attachment_thumbnail, agent_jump_to_bottom_button, agent_pane_header,
+    append_timeline_row, fold_timeline_rows, timeline_group_kind,
 };
 use zz_ui::command::palette_shortcut_hint;
 use zz_ui::{
@@ -235,6 +236,7 @@ pub(crate) struct AgentView {
     timeline_store: Entity<AgentTimelineStore>,
     timeline_next_revision: u64,
     timeline_scroll: ListState,
+    stick: TimelineStick,
     completion_scroll: UniformListScrollHandle,
     submission_error: Option<Arc<str>>,
     dismissed_notifications: BTreeSet<u64>,
@@ -317,8 +319,18 @@ impl AgentView {
             )
         };
         let timeline_scroll = ListState::new(0, ListAlignment::Top, px(1_200.0));
-        timeline_scroll.set_follow_mode(FollowMode::Tail);
         timeline_scroll.splice(0..0, timeline.rows.len());
+        let stick = TimelineStick::new(&timeline_scroll, cx.reduce_motion());
+        let scroll_view = cx.weak_entity();
+        timeline_scroll.set_scroll_handler(move |_, _, cx| {
+            // The list still holds its own borrow across this call, so reading
+            // the scroll state back here panics; run after the effect cycle.
+            let view = scroll_view.clone();
+            cx.defer(move |cx| {
+                view.update(cx, |view: &mut Self, cx| view.on_timeline_scroll(cx))
+                    .ok();
+            });
+        });
         let controller_observer = cx.observe(&controller, |view, controller, cx| {
             if view.visible && view.synchronize_controller(&controller, cx) {
                 cx.notify();
@@ -347,6 +359,7 @@ impl AgentView {
             timeline_store,
             timeline_next_revision,
             timeline_scroll,
+            stick,
             completion_scroll: UniformListScrollHandle::new(),
             submission_error: None,
             dismissed_notifications: BTreeSet::new(),
@@ -438,9 +451,10 @@ impl AgentView {
         controller: &Entity<AgentController>,
         cx: &mut Context<Self>,
     ) -> bool {
+        let reduce_motion = cx.reduce_motion();
         let (changed, store_update) = {
             let controller = controller.read(cx);
-            self.synchronize_controller_state(controller)
+            self.synchronize_controller_state(controller, reduce_motion)
         };
         let store_changed = self.update_timeline_store(store_update, cx);
         let cwd = self.pane_state.cwd.clone();
@@ -469,6 +483,7 @@ impl AgentView {
     fn synchronize_controller_state(
         &mut self,
         controller: &AgentController,
+        reduce_motion: bool,
     ) -> (bool, TimelineStoreUpdate) {
         let next_state = controller
             .pane_state(self.pane)
@@ -511,7 +526,7 @@ impl AgentView {
                 self.timeline_next_revision = 0;
                 self.dismissed_notifications.clear();
                 self.timeline_scroll.reset(0);
-                self.timeline_scroll.set_follow_mode(FollowMode::Tail);
+                self.stick.engage_now(&self.timeline_scroll, reduce_motion);
                 return (true, TimelineStoreUpdate::Clear);
             }
             return (state_changed, TimelineStoreUpdate::Clear);
@@ -522,7 +537,8 @@ impl AgentView {
             return (state_changed, TimelineStoreUpdate::None);
         }
         self.timeline_next_revision = next_revision;
-        let (timeline_changed, store_update) = self.synchronize_timeline(entries, revisions);
+        let (timeline_changed, store_update) =
+            self.synchronize_timeline(entries, revisions, reduce_motion);
         (timeline_changed || state_changed, store_update)
     }
 
@@ -568,12 +584,13 @@ impl AgentView {
         &mut self,
         entries: &[AgentThreadEntry],
         revisions: &[u64],
+        reduce_motion: bool,
     ) -> (bool, TimelineStoreUpdate) {
         match self.timeline.synchronize(entries, revisions) {
             TimelineModelUpdate::None => (false, TimelineStoreUpdate::None),
             TimelineModelUpdate::Rebuild => {
                 self.timeline_scroll.reset(self.timeline.rows.len());
-                self.timeline_scroll.set_follow_mode(FollowMode::Tail);
+                self.stick.engage_now(&self.timeline_scroll, reduce_motion);
                 (true, TimelineStoreUpdate::Clear)
             }
             TimelineModelUpdate::Incremental {
@@ -589,6 +606,12 @@ impl AgentView {
                 if added_rows > 0 {
                     self.timeline_scroll
                         .splice(splice_start..splice_start, added_rows);
+                }
+                // The grown rows are still unmeasured, so the distance to the
+                // end reads as zero until the next layout: wake the driver
+                // outright rather than waiting for a measurement to show up.
+                if self.stick.is_pinned() {
+                    self.stick.wake();
                 }
                 let store_update = if store_entries.is_empty() {
                     TimelineStoreUpdate::None
@@ -935,7 +958,7 @@ impl AgentView {
                 self.submission_error = None;
                 self.completions = Arc::from([]);
                 self.completion_selected = None;
-                self.timeline_scroll.set_follow_mode(FollowMode::Tail);
+                self.stick.engage(&self.timeline_scroll, cx.reduce_motion());
             }
             Err(error) => self.submission_error = Some(error),
         }
@@ -1230,6 +1253,28 @@ impl AgentView {
                 view.update(cx, |view, cx| view.open_history(window, cx));
                 cx.stop_propagation();
             })
+    }
+
+    /// The jump-to-bottom pill, floated over the timeline just above the
+    /// composer: an absolute child, so showing it never resizes the scroll
+    /// viewport and moves the very tail it is offering to reveal.
+    fn render_jump_to_end(&self, view: &Entity<Self>, cx: &gpui::App) -> impl IntoElement {
+        let view = view.clone();
+        div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .bottom(px(CHROME_GAP))
+            .flex()
+            .justify_center()
+            .child(
+                agent_jump_to_bottom_button(("agent-jump-to-end", self.pane.0), cx).on_click(
+                    move |_, _, cx| {
+                        view.update(cx, AgentView::jump_to_timeline_end);
+                        cx.stop_propagation();
+                    },
+                ),
+            )
     }
 
     fn render_directory_picker(
@@ -2283,7 +2328,42 @@ impl AgentView {
             input.set_value(value, window, cx);
         });
         self.submission_error = None;
-        self.timeline_scroll.set_follow_mode(FollowMode::Tail);
+        self.stick.engage(&self.timeline_scroll, cx.reduce_motion());
+    }
+
+    fn on_timeline_scroll(&mut self, cx: &mut Context<Self>) {
+        let reduce_motion = cx.reduce_motion();
+        if self
+            .stick
+            .on_user_scroll(&self.timeline_scroll, reduce_motion)
+        {
+            cx.notify();
+        }
+    }
+
+    fn jump_to_timeline_end(&mut self, cx: &mut Context<Self>) {
+        self.stick.engage(&self.timeline_scroll, cx.reduce_motion());
+        cx.notify();
+    }
+
+    /// Ask for one spring frame, at most one callback in flight. Each step
+    /// notifies while it still has travel left, which re-enters `render` and
+    /// arms the next frame; the loop stops itself once the spring parks.
+    fn drive_stick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if cx.reduce_motion() || !self.stick.wants_frame(&self.timeline_scroll) {
+            return;
+        }
+        self.stick.arm();
+        let view = cx.weak_entity();
+        window.on_next_frame(move |_, cx| {
+            view.update(cx, |view: &mut Self, cx| {
+                let list = view.timeline_scroll.clone();
+                if view.stick.step(&list) {
+                    cx.notify();
+                }
+            })
+            .ok();
+        });
     }
 }
 
@@ -2295,6 +2375,8 @@ impl Render for AgentView {
         let sticky_rows = sticky_agent_rows(&rows, &self.dismissed_notifications);
         let timeline_clearance =
             TIMELINE_COMPOSER_CLEARANCE + sticky_strip_clearance(sticky_rows.len());
+        self.stick.set_bottom_padding(timeline_clearance);
+        self.drive_stick(window, cx);
         let view = cx.entity();
         let header_controls = h_flex()
             .min_w_0()
@@ -2357,6 +2439,9 @@ impl Render for AgentView {
                                 .bottom(px(COMPOSER_OCCLUSION_HEIGHT))
                                 .child(Scrollbar::vertical(&self.timeline_scroll)),
                         )
+                        .when(self.stick.shows_jump_button(), |this| {
+                            this.child(self.render_jump_to_end(&view, cx))
+                        })
                     }),
             )
             .child(self.render_composer(&state, &sticky_rows, &view, cx))
@@ -2473,6 +2558,7 @@ fn disconnected_pane_state() -> AgentPaneState {
         available_commands: Arc::from([]),
         usage: None,
         pending_composer: None,
+        queued_prompts: 0,
     }
 }
 
@@ -3065,6 +3151,7 @@ mod completion_tests {
                 },
             ];
 
+            let timeline_scroll = ListState::new(2, ListAlignment::Top, px(1_200.0));
             AgentView {
                 pane: PaneId(7),
                 mux,
@@ -3076,7 +3163,8 @@ mod completion_tests {
                 timeline: TimelineModel::new(&timeline_entries, &[1, 2]),
                 timeline_store,
                 timeline_next_revision: 2,
-                timeline_scroll: ListState::new(2, ListAlignment::Top, px(1_200.0)),
+                stick: TimelineStick::new(&timeline_scroll, false),
+                timeline_scroll,
                 completion_scroll: UniformListScrollHandle::new(),
                 submission_error: None,
                 dismissed_notifications: BTreeSet::new(),
@@ -3105,7 +3193,7 @@ mod completion_tests {
         }];
         let (changed, cleared) = cx.update(|_, cx| {
             view.update(cx, |view, cx| {
-                let (changed, store_update) = view.synchronize_timeline(&replacement, &[3]);
+                let (changed, store_update) = view.synchronize_timeline(&replacement, &[3], false);
                 let cleared = view.update_timeline_store(store_update, cx);
                 (changed, cleared)
             })
@@ -3148,6 +3236,7 @@ mod completion_tests {
             let controller =
                 cx.new(|_| AgentController::new(crate::config::AgentConfig::default()));
             let history_input = cx.new(|cx| InputState::new(window, cx));
+            let timeline_scroll = ListState::new(0, ListAlignment::Top, px(1_200.0));
             let view = cx.new(|view_cx| AgentView {
                 pane: PaneId(7),
                 mux,
@@ -3159,7 +3248,8 @@ mod completion_tests {
                 timeline: TimelineModel::default(),
                 timeline_store: view_cx.new(|_| AgentTimelineStore::default()),
                 timeline_next_revision: 0,
-                timeline_scroll: ListState::new(0, ListAlignment::Top, px(1_200.0)),
+                stick: TimelineStick::new(&timeline_scroll, false),
+                timeline_scroll,
                 completion_scroll: UniformListScrollHandle::new(),
                 submission_error: None,
                 dismissed_notifications: BTreeSet::new(),

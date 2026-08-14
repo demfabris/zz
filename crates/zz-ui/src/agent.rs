@@ -6,13 +6,14 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     sync::{Arc, OnceLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crate::{
     ActiveTheme as _, CHROME_GAP, Colorize as _, Icon, IconName, Sizable as _, WindowExt as _,
     attachment::open_attachment_preview,
-    h_flex,
+    button::{Button, ButtonVariants as _},
+    control_shadow, h_flex,
     pulse::pulse_phase,
     scroll::ScrollableElement as _,
     text::{
@@ -23,11 +24,11 @@ use crate::{
 };
 use gpui::{
     AnyElement, App, ClipboardItem, Context, DispatchPhase, Div, ElementId, Entity, EntityId,
-    FontStyle, FontWeight, Global, HighlightStyle, Hsla, Image, ImageSource, InteractiveText,
-    IntoElement, ListSizingBehavior, ListState, ObjectFit, Pixels, RenderImage, Rgba,
-    ScrollStrategy, ScrollWheelEvent, SharedString, Stateful, StyledText, Task, Transformation,
-    UniformListScrollHandle, Window, canvas, div, ease_in_out, img, list, percentage, prelude::*,
-    px, relative, uniform_list,
+    FollowMode, FontStyle, FontWeight, Global, HighlightStyle, Hsla, Image, ImageSource,
+    InteractiveText, IntoElement, ListSizingBehavior, ListState, ObjectFit, Pixels, RenderImage,
+    Rgba, ScrollStrategy, ScrollWheelEvent, SharedString, Stateful, StyledText, Task,
+    Transformation, UniformListScrollHandle, Window, canvas, div, ease_in_out, img, list,
+    percentage, prelude::*, px, relative, uniform_list,
 };
 use similar::{ChangeTag, TextDiff};
 
@@ -523,6 +524,343 @@ pub fn append_timeline_row(rows: &mut Vec<TimelineRow>, entry: AgentEntry) -> (u
     (row_index, true)
 }
 
+/// Padding above the first timeline row. It lives inside the scrolled content,
+/// so a caller measuring the distance to the end has to account for it.
+pub const AGENT_TIMELINE_TOP_PADDING: f32 = 16.0;
+/// Treat the timeline as exactly pinned within this distance of the end.
+pub const AGENT_AT_BOTTOM_PX: f32 = 2.0;
+/// Offer the jump-to-bottom pill beyond this distance from the end.
+pub const AGENT_JUMP_TO_BOTTOM_PX: f32 = 320.0;
+/// Teleport when farther than this many viewports from the end, then glide the
+/// rest — a full-history jump would otherwise spend seconds scrolling.
+pub const AGENT_GLIDE_MAX_VIEWPORTS: f32 = 2.5;
+/// Keep the spring loop warm this long after landing, so a pause between
+/// streamed chunks resumes at cruise instead of re-accelerating from zero.
+pub const AGENT_SPRING_SETTLE_GRACE: Duration = Duration::from_millis(500);
+/// Re-engage the pin when a user scroll returns within this many px of the end.
+const AGENT_STICK_THRESHOLD_PX: f32 = 70.0;
+
+const SPRING_DAMPING: f32 = 0.7;
+const SPRING_STIFFNESS: f32 = 0.05;
+const SPRING_MASS: f32 = 1.25;
+const SPRING_FRAME_MS: f32 = 1000.0 / 60.0;
+const SPRING_MAX_CATCHUP_FRAMES: f32 = 8.0;
+const SPRING_GROWTH_EMA: f32 = 0.12;
+const SPRING_CHASE_MAX_LEAD: f32 = 32.0;
+const SPRING_CHASE_LEAD_FRAMES: f32 = 9.0;
+
+/// Whether a user scroll should re-engage the bottom pin: inside the stick band
+/// *and* moving toward the end. Direction matters — a small wheel-up notch from
+/// the pinned bottom stays inside the band, and resticking on it would snap the
+/// view straight back, making the pin impossible to break.
+pub fn agent_should_restick(distance: f32, previous: f32) -> bool {
+    distance <= AGENT_STICK_THRESHOLD_PX && distance < previous
+}
+
+/// Pure stick-to-bottom spring stepper. Velocity relaxes toward
+/// `(damping·v + stiffness·diff)/mass` per 60fps sub-frame, position advances
+/// by `v + target_vel` where `target_vel` is a feed-forward EMA of target
+/// growth in px per frame, and the chase point sits up to
+/// [`SPRING_CHASE_MAX_LEAD`] px above the true end in proportion to that
+/// growth — so a streaming tail is followed at its own speed instead of being
+/// hauled after a target that has already moved again.
+#[derive(Debug, Clone, Copy)]
+pub struct StickSpring {
+    velocity: f32,
+    target_vel: f32,
+    last_target: Option<f32>,
+}
+
+impl Default for StickSpring {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StickSpring {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            velocity: 0.0,
+            target_vel: 0.0,
+            last_target: None,
+        }
+    }
+
+    /// Park the spring; the next step starts cold.
+    pub fn reset(&mut self) {
+        *self = Self::new();
+    }
+
+    /// Whether the residual motion is below the settle threshold.
+    #[must_use]
+    pub fn is_idle(&self) -> bool {
+        self.velocity < 0.05 && self.target_vel < 0.05
+    }
+
+    /// `elapsed` in 60fps frames, capped so a hitch catches up over a few
+    /// sub-steps rather than teleporting a frame's worth of stalled time.
+    #[must_use]
+    pub fn frames(elapsed: Duration) -> f32 {
+        (elapsed.as_secs_f32() * 1000.0 / SPRING_FRAME_MS).min(SPRING_MAX_CATCHUP_FRAMES)
+    }
+
+    /// Advance one tick. `pos` and `target` are scroll offsets in px, larger
+    /// meaning closer to the end. Never overshoots `target`, is monotone while
+    /// approaching, and snaps exactly once within half a pixel.
+    #[must_use]
+    pub fn step(&mut self, mut pos: f32, target: f32, mut frames: f32) -> f32 {
+        let grew = self.last_target.map_or(0.0, |last| target - last);
+        self.last_target = Some(target);
+        if grew < -1.0 {
+            self.target_vel = 0.0;
+        } else {
+            let observed = grew.max(0.0) / frames.max(0.25);
+            self.target_vel += SPRING_GROWTH_EMA * (observed - self.target_vel);
+        }
+        let chase =
+            target - (self.target_vel * SPRING_CHASE_LEAD_FRAMES).min(SPRING_CHASE_MAX_LEAD);
+        let mut velocity = self.velocity;
+        while frames > 0.0 {
+            let step = frames.min(1.0);
+            frames -= step;
+            let diff = (chase - pos).max(0.0);
+            velocity += step
+                * ((SPRING_DAMPING * velocity + SPRING_STIFFNESS * diff) / SPRING_MASS - velocity);
+            pos = (pos + (velocity + self.target_vel) * step).min(target);
+        }
+        self.velocity = velocity;
+        if target - pos <= 0.5 { target } else { pos }
+    }
+
+    #[cfg(test)]
+    fn target_vel(&self) -> f32 {
+        self.target_vel
+    }
+}
+
+/// The jump-to-bottom pill. Paint it as an overlay: it must not take part in
+/// the timeline's layout, or appearing would resize the scroll viewport and
+/// move the very content it is offering to reveal.
+pub fn agent_jump_to_bottom_button(id: impl Into<ElementId>, cx: &App) -> Button {
+    let pill = Button::new(id)
+        .secondary()
+        .xsmall()
+        .rounded(px(999.0))
+        .icon(IconName::ChevronDown)
+        .label("Jump to latest");
+    if cx.theme().shadow {
+        pill.shadow(control_shadow(cx))
+    } else {
+        pill
+    }
+}
+
+/// The timeline's tail pin: a spring that chases the end of the transcript
+/// instead of teleporting to it on every streamed token.
+///
+/// The pin belongs to the caller, not to the list, so [`FollowMode::Tail`]
+/// stays off unless reduced motion is on — gpui's tail mode both snaps on every
+/// layout and re-engages itself from scroll *position*, which would make a
+/// deliberate scroll-up impossible to hold while the agent is still writing.
+pub struct TimelineStick {
+    pinned: bool,
+    spring: StickSpring,
+    last_tick: Option<Instant>,
+    settled_at: Option<Instant>,
+    scheduled: bool,
+    kick: bool,
+    last_distance: f32,
+    show_jump: bool,
+    bottom_padding: f32,
+}
+
+impl TimelineStick {
+    pub fn new(list: &ListState, reduce_motion: bool) -> Self {
+        let mut stick = Self {
+            pinned: true,
+            spring: StickSpring::new(),
+            last_tick: None,
+            settled_at: None,
+            scheduled: false,
+            kick: false,
+            last_distance: 0.0,
+            show_jump: false,
+            bottom_padding: 0.0,
+        };
+        stick.engage_now(list, reduce_motion);
+        stick
+    }
+
+    pub fn is_pinned(&self) -> bool {
+        self.pinned
+    }
+
+    pub fn shows_jump_button(&self) -> bool {
+        self.show_jump
+    }
+
+    /// The list's own bottom padding, which the caller recomputes from whatever
+    /// chrome overlaps the end of the transcript.
+    pub fn set_bottom_padding(&mut self, padding: f32) {
+        self.bottom_padding = padding;
+    }
+
+    /// The end of the scrollable range and the current distance to it, or
+    /// `None` while the content is shorter than the viewport.
+    ///
+    /// `max_offset_for_scrollbar` measures the items alone, but the list also
+    /// scrolls through its own padding, so the true end sits that much lower.
+    fn bottom(&self, list: &ListState) -> Option<(f32, f32)> {
+        let measured = f32::from(list.max_offset_for_scrollbar().y);
+        if measured <= 0.0 {
+            return None;
+        }
+        let target = measured + AGENT_TIMELINE_TOP_PADDING + self.bottom_padding;
+        let position = -f32::from(list.scroll_px_offset_for_scrollbar().y);
+        Some((target, (target - position).max(0.0)))
+    }
+
+    pub fn distance_from_bottom(&self, list: &ListState) -> f32 {
+        self.bottom(list).map_or(0.0, |(_, distance)| distance)
+    }
+
+    /// Re-arm the driver without disturbing the position: content grew, or the
+    /// pin was just taken.
+    pub fn wake(&mut self) {
+        self.settled_at = None;
+        self.kick = true;
+    }
+
+    fn release(&mut self, list: &ListState) {
+        self.pinned = false;
+        self.spring.reset();
+        self.last_tick = None;
+        self.settled_at = None;
+        self.kick = false;
+        list.set_follow_mode(FollowMode::Normal);
+    }
+
+    /// Take the pin and land on the end immediately — for a transcript that is
+    /// being replaced wholesale, where there is no motion to show.
+    pub fn engage_now(&mut self, list: &ListState, reduce_motion: bool) {
+        self.pinned = true;
+        self.show_jump = false;
+        self.spring.reset();
+        self.last_tick = None;
+        self.settled_at = None;
+        self.kick = false;
+        self.last_distance = 0.0;
+        if reduce_motion {
+            list.set_follow_mode(FollowMode::Tail);
+        } else {
+            list.set_follow_mode(FollowMode::Normal);
+            list.scroll_to_end();
+        }
+    }
+
+    /// Take the pin and glide to the end. A jump longer than
+    /// [`AGENT_GLIDE_MAX_VIEWPORTS`] teleports most of the way first, so a
+    /// whole-history return still lands in one gesture's worth of motion.
+    pub fn engage(&mut self, list: &ListState, reduce_motion: bool) {
+        if reduce_motion {
+            self.engage_now(list, reduce_motion);
+            return;
+        }
+        self.pinned = true;
+        self.show_jump = false;
+        list.set_follow_mode(FollowMode::Normal);
+        let viewport = f32::from(list.viewport_bounds().size.height);
+        let distance = self.distance_from_bottom(list);
+        let glide_max = AGENT_GLIDE_MAX_VIEWPORTS * viewport;
+        if viewport > 0.0 && distance > glide_max {
+            list.scroll_by(px(distance - glide_max));
+        }
+        self.last_distance = self.distance_from_bottom(list);
+        self.wake();
+    }
+
+    /// Wheel or drag input. This is the *only* path that can break the pin: the
+    /// list calls its scroll handler from its input path alone, so content
+    /// growth — which moves the distance to the end just as far — never reaches
+    /// here. Reports whether the jump-button state changed.
+    pub fn on_user_scroll(&mut self, list: &ListState, reduce_motion: bool) -> bool {
+        let distance = self.distance_from_bottom(list);
+        let previous = std::mem::replace(&mut self.last_distance, distance);
+        if distance > previous + 1.0 && distance > AGENT_AT_BOTTOM_PX {
+            self.release(list);
+        } else if !self.pinned
+            && (distance <= AGENT_AT_BOTTOM_PX || agent_should_restick(distance, previous))
+        {
+            self.engage(list, reduce_motion);
+        }
+        let show = distance > AGENT_JUMP_TO_BOTTOM_PX && !self.pinned;
+        let changed = show != self.show_jump;
+        self.show_jump = show;
+        changed
+    }
+
+    /// Whether the driver should schedule a frame. False while one is already
+    /// in flight, so the loop can never run more than one callback at a time.
+    pub fn wants_frame(&self, list: &ListState) -> bool {
+        self.pinned
+            && !self.scheduled
+            && (self.kick
+                || self.settled_at.is_some()
+                || !self.spring.is_idle()
+                || self.distance_from_bottom(list) > 0.5)
+    }
+
+    /// Claim the one frame slot; pair with [`Self::step`], which releases it.
+    pub fn arm(&mut self) {
+        self.scheduled = true;
+    }
+
+    /// One spring frame, reporting whether the view needs another. Call it
+    /// after layout, so the measurements it reads are the current frame's.
+    pub fn step(&mut self, list: &ListState) -> bool {
+        self.scheduled = false;
+        self.kick = false;
+        if !self.pinned {
+            self.last_tick = None;
+            return false;
+        }
+        let now = Instant::now();
+        let frames = self
+            .last_tick
+            .map_or(1.0, |last| StickSpring::frames(now.duration_since(last)));
+        self.last_tick = Some(now);
+        let Some((target, mut distance)) = self.bottom(list) else {
+            self.last_distance = 0.0;
+            return false;
+        };
+        let viewport = f32::from(list.viewport_bounds().size.height);
+        let glide_max = AGENT_GLIDE_MAX_VIEWPORTS * viewport;
+        if viewport > 0.0 && distance > glide_max {
+            list.scroll_by(px(distance - glide_max));
+            distance = glide_max;
+        }
+        let position = target - distance;
+        let next = self.spring.step(position, target, frames);
+        if next > position {
+            list.scroll_by(px(next - position));
+        }
+        self.last_distance = (target - next).max(0.0);
+        if target - next <= 0.5 {
+            let settled = *self.settled_at.get_or_insert(now);
+            if now.duration_since(settled) >= AGENT_SPRING_SETTLE_GRACE && self.spring.is_idle() {
+                self.spring.reset();
+                self.last_tick = None;
+                self.settled_at = None;
+                return false;
+            }
+        } else {
+            self.settled_at = None;
+        }
+        true
+    }
+}
+
 #[derive(Clone, IntoElement)]
 pub struct AgentTimeline {
     rows: Arc<Vec<TimelineRow>>,
@@ -579,7 +917,7 @@ impl gpui::RenderOnce for AgentTimeline {
         })
         .with_sizing_behavior(ListSizingBehavior::Auto)
         .size_full()
-        .pt(px(16.0))
+        .pt(px(AGENT_TIMELINE_TOP_PADDING))
         .pb(px(bottom_padding))
     }
 }
@@ -2744,6 +3082,31 @@ mod tests {
         store: Entity<AgentTimelineStore>,
     }
 
+    const TAIL_PIN_ROW_HEIGHT: f32 = 50.0;
+    const TAIL_PIN_BOTTOM_PADDING: f32 = 120.0;
+
+    struct TailPinTest {
+        state: ListState,
+    }
+
+    impl Render for TailPinTest {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(400.0)).h(px(300.0)).child(
+                list(self.state.clone(), |_, _, _| {
+                    div().w_full().h(px(TAIL_PIN_ROW_HEIGHT)).into_any_element()
+                })
+                .with_sizing_behavior(ListSizingBehavior::Auto)
+                .size_full()
+                .pt(px(AGENT_TIMELINE_TOP_PADDING))
+                .pb(px(TAIL_PIN_BOTTOM_PADDING)),
+            )
+        }
+    }
+
+    fn scroll_position(state: &ListState) -> f32 {
+        -f32::from(state.scroll_px_offset_for_scrollbar().y)
+    }
+
     struct UserEntryTest {
         store: Entity<AgentTimelineStore>,
         entry: AgentEntry,
@@ -3545,5 +3908,251 @@ mod tests {
             timeline_scroll.scroll_px_offset_for_scrollbar(),
             outer_offset
         );
+    }
+    fn tail_pin_window(
+        cx: &mut TestAppContext,
+        rows: usize,
+    ) -> (ListState, &mut VisualTestContext) {
+        cx.update(crate::init);
+        let state = ListState::new(0, gpui::ListAlignment::Top, px(200.0));
+        state.splice(0..0, rows);
+        let (_, cx) = cx.add_window_view({
+            let state = state.clone();
+            move |_, _| TailPinTest {
+                state: state.clone(),
+            }
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        (state, cx)
+    }
+
+    #[gpui::test]
+    fn the_pin_measures_the_end_through_the_lists_own_padding(cx: &mut TestAppContext) {
+        let (state, cx) = tail_pin_window(cx, 40);
+        let mut stick = TimelineStick::new(&state, false);
+        stick.set_bottom_padding(TAIL_PIN_BOTTOM_PADDING);
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(stick.distance_from_bottom(&state) <= AGENT_AT_BOTTOM_PX);
+
+        // Whatever the list's padding is, the distance to the end has to equal
+        // the travel the list itself just performed; measuring the items alone
+        // would report the padding short.
+        let landed = scroll_position(&state);
+        state.scroll_by(px(-500.0));
+        let moved = landed - scroll_position(&state);
+        assert!(moved > 0.0);
+        assert!(
+            (stick.distance_from_bottom(&state) - moved).abs() < 1.0,
+            "distance {} should equal the {moved}px just scrolled away",
+            stick.distance_from_bottom(&state)
+        );
+    }
+
+    #[gpui::test]
+    fn growing_the_transcript_cannot_break_the_pin(cx: &mut TestAppContext) {
+        let (state, cx) = tail_pin_window(cx, 40);
+        let mut stick = TimelineStick::new(&state, false);
+        stick.set_bottom_padding(TAIL_PIN_BOTTOM_PADDING);
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        let count = state.item_count();
+        state.splice(count..count, 20);
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        // The end ran away from the viewport — the same position change a
+        // wheel notch would make — and the pin is untouched, with a frame
+        // asked for to chase it.
+        assert!(stick.distance_from_bottom(&state) > AGENT_AT_BOTTOM_PX);
+        assert!(stick.is_pinned());
+        assert!(!stick.shows_jump_button());
+        assert!(stick.wants_frame(&state));
+    }
+
+    #[gpui::test]
+    fn a_wheel_scroll_away_breaks_the_pin_and_returning_restores_it(cx: &mut TestAppContext) {
+        let (state, cx) = tail_pin_window(cx, 40);
+        let mut stick = TimelineStick::new(&state, false);
+        stick.set_bottom_padding(TAIL_PIN_BOTTOM_PADDING);
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        let landed = scroll_position(&state);
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(10.0), px(10.0)),
+            delta: ScrollDelta::Pixels(point(px(0.0), px(400.0))),
+            ..Default::default()
+        });
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(landed - scroll_position(&state) > AGENT_JUMP_TO_BOTTOM_PX);
+        stick.on_user_scroll(&state, false);
+        assert!(!stick.is_pinned());
+        assert!(stick.shows_jump_button());
+
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(10.0), px(10.0)),
+            delta: ScrollDelta::Pixels(point(px(0.0), px(-4_000.0))),
+            ..Default::default()
+        });
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        stick.on_user_scroll(&state, false);
+        assert!(stick.is_pinned());
+        assert!(!stick.shows_jump_button());
+    }
+
+    #[gpui::test]
+    fn reduced_motion_keeps_the_lists_own_tail_follow(cx: &mut TestAppContext) {
+        let (state, cx) = tail_pin_window(cx, 40);
+        let mut stick = TimelineStick::new(&state, true);
+        stick.set_bottom_padding(TAIL_PIN_BOTTOM_PADDING);
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(state.is_following_tail());
+
+        let count = state.item_count();
+        state.splice(count..count, 20);
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(state.is_following_tail());
+        assert!(stick.distance_from_bottom(&state) <= AGENT_AT_BOTTOM_PX);
+    }
+}
+
+#[cfg(test)]
+mod stick_spring_tests {
+    use super::{
+        AGENT_STICK_THRESHOLD_PX, SPRING_CHASE_MAX_LEAD, StickSpring, agent_should_restick,
+    };
+    use std::time::Duration;
+
+    #[test]
+    fn the_spring_lands_exactly_on_a_fixed_target() {
+        let mut spring = StickSpring::new();
+        let target = 400.0;
+        let mut pos = 0.0;
+        let mut frames = 0;
+        while pos < target && frames < 600 {
+            pos = spring.step(pos, target, 1.0);
+            frames += 1;
+        }
+        assert_eq!(pos, target, "the spring must land exactly on the target");
+        assert!(
+            frames < 300,
+            "400px should converge in under 5s, took {frames}"
+        );
+        for _ in 0..120 {
+            pos = spring.step(pos, target, 1.0);
+            assert_eq!(pos, target);
+        }
+        assert!(spring.is_idle(), "no residual motion at rest");
+    }
+
+    #[test]
+    fn the_spring_never_overshoots_or_oscillates() {
+        let mut spring = StickSpring::new();
+        let target = 250.0;
+        let mut pos = 0.0;
+        let mut last = pos;
+        for _ in 0..600 {
+            pos = spring.step(pos, target, 1.0);
+            assert!(pos <= target, "overshoot: {pos} > {target}");
+            assert!(
+                pos >= last - 1e-3,
+                "oscillation: position moved backwards {last} -> {pos}"
+            );
+            last = pos;
+        }
+        assert_eq!(pos, target);
+    }
+
+    #[test]
+    fn the_feed_forward_tracks_constant_growth() {
+        let growth = 2.0;
+        let mut spring = StickSpring::new();
+        let mut target = 600.0;
+        let mut pos = 600.0;
+        let mut deltas: Vec<f32> = Vec::new();
+        for frame in 0..400 {
+            target += growth;
+            let next = spring.step(pos, target, 1.0);
+            if frame >= 200 {
+                deltas.push(next - pos);
+            }
+            pos = next;
+        }
+        let mean = deltas.iter().sum::<f32>() / deltas.len() as f32;
+        assert!(
+            (mean - growth).abs() < 0.2,
+            "steady-state speed {mean} should track growth {growth}"
+        );
+        for delta in &deltas {
+            assert!(*delta > 0.0, "the viewport stalled mid-stream");
+            assert!(
+                *delta < growth * 3.0,
+                "the viewport jumped {delta}px in one frame"
+            );
+        }
+        assert!((spring.target_vel() - growth).abs() < 0.3);
+        assert!(target - pos <= SPRING_CHASE_MAX_LEAD + growth);
+    }
+
+    #[test]
+    fn the_feed_forward_resets_when_the_target_shrinks() {
+        let mut spring = StickSpring::new();
+        let mut pos = 0.0;
+        for i in 1..=50u8 {
+            pos = spring.step(pos, 100.0 + f32::from(i) * 4.0, 1.0);
+        }
+        assert!(spring.target_vel() > 1.0);
+        let _ = spring.step(pos.min(120.0), 120.0, 1.0);
+        assert_eq!(spring.target_vel(), 0.0);
+    }
+
+    #[test]
+    fn a_hitch_catches_up_instead_of_teleporting() {
+        let target = 300.0;
+        let mut stepped = StickSpring::new();
+        let mut pos_stepped = 0.0;
+        for _ in 0..5 {
+            pos_stepped = stepped.step(pos_stepped, target, 1.0);
+        }
+        let mut hitched = StickSpring::new();
+        let pos_hitched = hitched.step(0.0, target, 5.0);
+        assert!(
+            (pos_stepped - pos_hitched).abs() < 1.0,
+            "{pos_stepped} vs {pos_hitched}"
+        );
+        assert!(pos_hitched <= target);
+    }
+
+    #[test]
+    fn a_long_stall_is_capped_at_the_catchup_budget() {
+        assert!((StickSpring::frames(Duration::from_millis(16)) - 0.96).abs() < 1e-4);
+        assert_eq!(StickSpring::frames(Duration::from_secs(2)), 8.0);
+    }
+
+    #[test]
+    fn resticking_is_direction_aware() {
+        assert!(!agent_should_restick(20.0, 0.0));
+        assert!(!agent_should_restick(69.0, 30.0));
+        assert!(agent_should_restick(30.0, 69.0));
+        assert!(agent_should_restick(AGENT_STICK_THRESHOLD_PX, 400.0));
+        assert!(!agent_should_restick(AGENT_STICK_THRESHOLD_PX + 1.0, 400.0));
     }
 }

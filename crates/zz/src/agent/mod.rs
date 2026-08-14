@@ -12,6 +12,9 @@ mod journal;
 mod preferences;
 #[cfg(feature = "agent-pane")]
 mod profile;
+/// Unconditional: the workspace chrome renders agent badges in every build,
+/// and without the feature the status map is simply always empty.
+pub(crate) mod sound;
 #[cfg(feature = "agent-pane")]
 mod turn_snapshot;
 #[cfg(feature = "agent-pane")]

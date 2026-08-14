@@ -1,8 +1,9 @@
-use gpui::{AnyElement, Entity, Keystroke, MouseButton, prelude::*};
+use gpui::{AnyElement, Entity, MouseButton, prelude::*};
 use zz_protocol::{
     ChooseTreeAction, ChooseTreeItem, ChooseTreeKind, ChooseTreePaneKind, ChooseTreeState,
     InputMessage,
 };
+use zz_terminal::KeyInput;
 use zz_ui::chooser::{ChooserPaneKind, tree_chooser_row};
 
 use crate::{
@@ -100,16 +101,8 @@ impl ChooserSpec for TreeChooser {
         tree_row(item, index, selected, mux, theme)
     }
 
-    fn key_action(keystroke: &Keystroke, searching: bool) -> Option<Self::Action> {
-        choose_tree_key_action(keystroke, searching)
-    }
-
-    fn search_active_after(action: &Self::Action) -> Option<bool> {
-        match action {
-            ChooseTreeAction::SearchStart { .. } => Some(true),
-            ChooseTreeAction::SearchAccept | ChooseTreeAction::SearchCancel => Some(false),
-            _ => None,
-        }
+    fn key(input: KeyInput) -> Self::Action {
+        ChooseTreeAction::Key(input)
     }
 
     fn search_append(text: String) -> Self::Action {
@@ -181,93 +174,4 @@ fn tree_row_element(
         theme,
         TERMINAL_FONT,
     )
-}
-
-fn choose_tree_key_action(keystroke: &Keystroke, searching: bool) -> Option<ChooseTreeAction> {
-    let modifiers = keystroke.modifiers;
-    let key = keystroke.key.as_str();
-    let character = keystroke.key_char.as_deref().unwrap_or(key);
-    if searching {
-        return match key {
-            "escape" => Some(ChooseTreeAction::SearchCancel),
-            "enter" => Some(ChooseTreeAction::SearchAccept),
-            "backspace" => Some(ChooseTreeAction::SearchBackspace),
-            "up" => Some(ChooseTreeAction::Previous),
-            "down" => Some(ChooseTreeAction::Next),
-            "g" if modifiers.control => Some(ChooseTreeAction::SearchCancel),
-            _ => None,
-        };
-    }
-
-    match key {
-        "escape" => Some(ChooseTreeAction::Close),
-        "enter" => Some(ChooseTreeAction::Activate),
-        "up" => Some(ChooseTreeAction::Previous),
-        "down" => Some(ChooseTreeAction::Next),
-        "left" => Some(ChooseTreeAction::Collapse),
-        "right" => Some(ChooseTreeAction::Expand),
-        "pageup" => Some(ChooseTreeAction::PagePrevious),
-        "pagedown" => Some(ChooseTreeAction::PageNext),
-        "home" => Some(ChooseTreeAction::First),
-        "end" => Some(ChooseTreeAction::Last),
-        "p" if modifiers.control => Some(ChooseTreeAction::Previous),
-        "n" if modifiers.control => Some(ChooseTreeAction::Next),
-        "b" if modifiers.control => Some(ChooseTreeAction::PagePrevious),
-        "f" if modifiers.control => Some(ChooseTreeAction::PageNext),
-        "s" if modifiers.control => Some(ChooseTreeAction::SearchStart { reverse: false }),
-        "g" | "[" if modifiers.control => Some(ChooseTreeAction::Close),
-        "q" if no_command_modifiers(modifiers) => Some(ChooseTreeAction::Close),
-        "k" if no_command_modifiers(modifiers) => Some(ChooseTreeAction::Previous),
-        "j" if no_command_modifiers(modifiers) => Some(ChooseTreeAction::Next),
-        "h" | "-" if no_command_modifiers(modifiers) => Some(ChooseTreeAction::Collapse),
-        "l" if no_command_modifiers(modifiers) => Some(ChooseTreeAction::Expand),
-        "g" if no_command_modifiers(modifiers) && character != "G" => Some(ChooseTreeAction::First),
-        "n" if no_command_modifiers(modifiers) => Some(ChooseTreeAction::SearchNext {
-            reverse: modifiers.shift,
-        }),
-        _ if character == "G" => Some(ChooseTreeAction::Last),
-        _ if character == "+" => Some(ChooseTreeAction::Expand),
-        _ if character == "/" => Some(ChooseTreeAction::SearchStart { reverse: false }),
-        _ if character == "?" => Some(ChooseTreeAction::SearchStart { reverse: true }),
-        _ => None,
-    }
-}
-
-fn no_command_modifiers(modifiers: gpui::Modifiers) -> bool {
-    !modifiers.control && !modifiers.alt && !modifiers.platform
-}
-
-#[cfg(test)]
-mod tests {
-    use gpui::Modifiers;
-
-    use super::*;
-
-    fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
-        Keystroke {
-            key: key.to_owned(),
-            key_char: key_char.map(str::to_owned),
-            modifiers,
-        }
-    }
-
-    #[test]
-    fn tmux_tree_keys_map_to_native_actions() {
-        assert_eq!(
-            choose_tree_key_action(&key("j", Some("j"), Modifiers::default()), false),
-            Some(ChooseTreeAction::Next)
-        );
-        assert_eq!(
-            choose_tree_key_action(&key("/", Some("?"), Modifiers::default()), false),
-            Some(ChooseTreeAction::SearchStart { reverse: true })
-        );
-        assert_eq!(
-            choose_tree_key_action(&key("escape", None, Modifiers::default()), true),
-            Some(ChooseTreeAction::SearchCancel)
-        );
-        assert_eq!(
-            choose_tree_key_action(&key("enter", None, Modifiers::default()), false),
-            Some(ChooseTreeAction::Activate)
-        );
-    }
 }

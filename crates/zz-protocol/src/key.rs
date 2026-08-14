@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use zz_protocol::CommandInvocation;
+use crate::message::{CommandInvocation, KeyBindingSnapshot, KeyTableSnapshot};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Binding {
@@ -262,6 +262,62 @@ impl Default for KeyTables {
             ("copy-mode", "C-g", "clear-selection"),
             ("copy-mode", "C-c", "cancel"),
             ("copy-mode", "Escape", "cancel"),
+            ("choose-tree", "Up", "cursor-up"),
+            ("choose-tree", "k", "cursor-up"),
+            ("choose-tree", "C-p", "cursor-up"),
+            ("choose-tree", "Down", "cursor-down"),
+            ("choose-tree", "j", "cursor-down"),
+            ("choose-tree", "C-n", "cursor-down"),
+            ("choose-tree", "PPage", "page-up"),
+            ("choose-tree", "C-b", "page-up"),
+            ("choose-tree", "NPage", "page-down"),
+            ("choose-tree", "C-f", "page-down"),
+            ("choose-tree", "Home", "history-top"),
+            ("choose-tree", "g", "history-top"),
+            ("choose-tree", "End", "history-bottom"),
+            ("choose-tree", "G", "history-bottom"),
+            ("choose-tree", "Left", "collapse"),
+            ("choose-tree", "h", "collapse"),
+            ("choose-tree", "-", "collapse"),
+            ("choose-tree", "Right", "expand"),
+            ("choose-tree", "l", "expand"),
+            ("choose-tree", "+", "expand"),
+            ("choose-tree", "Enter", "accept"),
+            ("choose-tree", "q", "cancel"),
+            ("choose-tree", "Escape", "cancel"),
+            ("choose-tree", "C-g", "cancel"),
+            ("choose-tree", "C-[", "cancel"),
+            ("choose-tree", "/", "search-forward"),
+            ("choose-tree", "C-s", "search-forward"),
+            ("choose-tree", "?", "search-backward"),
+            ("choose-tree", "n", "search-again"),
+            ("choose-tree", "N", "search-reverse"),
+            ("choose-buffer", "Up", "cursor-up"),
+            ("choose-buffer", "k", "cursor-up"),
+            ("choose-buffer", "C-p", "cursor-up"),
+            ("choose-buffer", "Down", "cursor-down"),
+            ("choose-buffer", "j", "cursor-down"),
+            ("choose-buffer", "C-n", "cursor-down"),
+            ("choose-buffer", "PPage", "page-up"),
+            ("choose-buffer", "C-b", "page-up"),
+            ("choose-buffer", "NPage", "page-down"),
+            ("choose-buffer", "C-f", "page-down"),
+            ("choose-buffer", "Home", "history-top"),
+            ("choose-buffer", "g", "history-top"),
+            ("choose-buffer", "End", "history-bottom"),
+            ("choose-buffer", "G", "history-bottom"),
+            ("choose-buffer", "Enter", "accept"),
+            ("choose-buffer", "p", "paste"),
+            ("choose-buffer", "d", "delete"),
+            ("choose-buffer", "q", "cancel"),
+            ("choose-buffer", "Escape", "cancel"),
+            ("choose-buffer", "C-g", "cancel"),
+            ("choose-buffer", "C-[", "cancel"),
+            ("choose-buffer", "/", "search-forward"),
+            ("choose-buffer", "C-s", "search-forward"),
+            ("choose-buffer", "?", "search-backward"),
+            ("choose-buffer", "n", "search-again"),
+            ("choose-buffer", "N", "search-reverse"),
         ] {
             tables.bind(
                 table,
@@ -397,21 +453,30 @@ impl KeyTables {
         })
     }
 
-    /// The prefix table flattened for the wire, with command names canonicalized
+    /// Every table flattened for the wire, with command names canonicalized
     /// so a client matching on `split-window` also catches `splitw`.
     #[must_use]
-    pub fn prefix_bindings(&self) -> Vec<zz_protocol::PrefixBinding> {
-        self.list(Some("prefix"))
-            .map(|(_, key, binding)| zz_protocol::PrefixBinding {
-                key: key.to_owned(),
-                commands: binding
-                    .commands
+    pub fn snapshot(&self) -> Vec<KeyTableSnapshot> {
+        self.tables
+            .iter()
+            .map(|(name, bindings)| KeyTableSnapshot {
+                name: name.clone(),
+                bindings: bindings
                     .iter()
-                    .map(|command| {
-                        CommandInvocation::new(
-                            crate::catalog::canonical_command(&command.name),
-                            command.args.iter().cloned(),
-                        )
+                    .map(|(key, binding)| KeyBindingSnapshot {
+                        key: key.clone(),
+                        commands: binding
+                            .commands
+                            .iter()
+                            .map(|command| {
+                                CommandInvocation::new(
+                                    crate::catalog::canonical_command(&command.name),
+                                    command.args.iter().cloned(),
+                                )
+                            })
+                            .collect(),
+                        repeat: binding.repeat,
+                        note: binding.note.clone(),
                     })
                     .collect(),
             })
@@ -572,7 +637,11 @@ fn copy_jump_needs_target(command: &CommandInvocation) -> bool {
         .all(|argument| argument == "--")
 }
 
-fn canonical_key(value: &str) -> String {
+/// Fold a tmux key spelling into its canonical form: `Ctrl-`/`Alt-` become
+/// `C-`/`M-` and `Space` becomes a literal space, on both sides of any
+/// modifier chain.
+#[must_use]
+pub fn canonical_key(value: &str) -> String {
     let trimmed = value.trim();
     if value == " " || trimmed == "Space" {
         return " ".to_owned();
@@ -613,7 +682,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn published_prefix_bindings_canonicalize_command_names() {
+    fn published_tables_canonicalize_command_names_and_cover_every_table() {
         let mut tables = KeyTables::default();
         tables.bind(
             "prefix",
@@ -621,31 +690,48 @@ mod tests {
             Binding {
                 commands: vec![CommandInvocation::new("splitw", ["-h"])],
                 repeat: false,
+                note: Some("Split right".to_owned()),
+            },
+        );
+        tables.bind(
+            "root",
+            "F1",
+            Binding {
+                commands: vec![CommandInvocation::new("neww", [] as [&str; 0])],
+                repeat: false,
                 note: None,
             },
         );
-        let published = tables.prefix_bindings();
-        let pipe = published
+        let published = tables.snapshot();
+        let table = |name: &str| {
+            published
+                .iter()
+                .find(|table| table.name == name)
+                .unwrap_or_else(|| panic!("the {name} table is published"))
+        };
+        let pipe = table("prefix")
+            .bindings
             .iter()
             .find(|binding| binding.key == "|")
             .expect("the | binding is published");
         assert_eq!(pipe.commands[0].name, "split-window");
         assert_eq!(pipe.commands[0].args, vec!["-h".to_owned()]);
-        tables.bind(
-            "root",
-            "F1",
-            Binding {
-                commands: vec![CommandInvocation::new("new-window", [] as [&str; 0])],
-                repeat: false,
-                note: None,
-            },
-        );
-        assert!(
-            tables
-                .prefix_bindings()
-                .iter()
-                .all(|binding| binding.key != "F1")
-        );
+        assert_eq!(pipe.note.as_deref(), Some("Split right"));
+        let f1 = table("root")
+            .bindings
+            .iter()
+            .find(|binding| binding.key == "F1")
+            .expect("the root F1 binding is published");
+        assert_eq!(f1.commands[0].name, "new-window");
+        for name in ["copy-mode", "copy-mode-vi"] {
+            assert!(!table(name).bindings.is_empty(), "{name} bindings publish");
+        }
+        let repeatable = table("prefix")
+            .bindings
+            .iter()
+            .find(|binding| binding.key == "Left")
+            .expect("the arrow select binding is published");
+        assert!(repeatable.repeat);
     }
 
     #[test]

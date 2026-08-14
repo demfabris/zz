@@ -5,42 +5,6 @@ use std::collections::HashSet;
 use gpui::Keystroke;
 use zz_terminal::{KeyAction, KeyCode, KeyInput, Modifiers as TerminalModifiers};
 
-/// Fold the daemon-published prefix spelling into the form a keystroke is
-/// compared against: `Ctrl-`/`Alt-` become `C-`/`M-`, `Space` becomes a literal
-/// space, mirroring the daemon's `canonical_key`.
-pub(crate) fn canonical_prefix(value: &str) -> String {
-    let trimmed = value.trim();
-    if value == " " || trimmed == "Space" {
-        return " ".to_owned();
-    }
-    let mut modifiers = String::new();
-    let mut rest = trimmed;
-    loop {
-        if let Some(tail) = rest
-            .strip_prefix("Ctrl-")
-            .or_else(|| rest.strip_prefix("C-"))
-        {
-            modifiers.push_str("C-");
-            rest = tail;
-        } else if let Some(tail) = rest
-            .strip_prefix("Alt-")
-            .or_else(|| rest.strip_prefix("M-"))
-        {
-            modifiers.push_str("M-");
-            rest = tail;
-        } else {
-            break;
-        }
-    }
-    if modifiers.is_empty() {
-        return trimmed.to_owned();
-    }
-    if rest == "Space" {
-        rest = " ";
-    }
-    format!("{modifiers}{rest}")
-}
-
 /// Whether a GPUI keystroke spells the given canonical tmux key.
 pub(crate) fn keystroke_is(keystroke: &Keystroke, canonical: &str) -> bool {
     let mut want_control = false;
@@ -254,15 +218,6 @@ mod tests {
             key: key.to_owned(),
             key_char: None,
         }
-    }
-
-    #[test]
-    fn published_prefix_spellings_fold_to_keystroke_form() {
-        assert_eq!(canonical_prefix("C-b"), "C-b");
-        assert_eq!(canonical_prefix("Ctrl-a"), "C-a");
-        assert_eq!(canonical_prefix("C-Space"), "C- ");
-        assert_eq!(canonical_prefix("Space"), " ");
-        assert_eq!(canonical_prefix("M-Right"), "M-Right");
     }
 
     #[test]

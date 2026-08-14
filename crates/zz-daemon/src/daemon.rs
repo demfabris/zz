@@ -45,7 +45,7 @@ use zz_terminal::{
 
 use crate::{
     DaemonError, diagnostic_elapsed_us, diagnostic_timer,
-    keys::{input_key_name, send_tokens},
+    keys::{choose_buffer_key_action, choose_tree_key_action, input_key_name, send_tokens},
     lifecycle::DaemonIdentityGuard,
     paths::{default_mux_config, home_directory, is_default_mux_config},
     shell_process,
@@ -1712,7 +1712,7 @@ impl Shared {
             appearance_provenance: inner.appearance_provenance.clone(),
             mux_options: inner.mux_options.clone(),
             status: StatusLine::default(),
-            prefix_bindings: inner.engine.keys.prefix_bindings(),
+            key_tables: inner.engine.keys.snapshot(),
         };
         let attached = client_attached_session(&inner, client);
         let request = StatusRequest {
@@ -2584,21 +2584,21 @@ impl Shared {
         if reload_config {
             self.reload_user_config(client, context)?;
         }
-        self.publish_prefix_bindings_if_changed();
+        self.publish_key_tables_if_changed();
         Ok(execution)
     }
 
-    fn publish_prefix_bindings_if_changed(&self) {
-        let bindings = {
+    fn publish_key_tables_if_changed(&self) {
+        let tables = {
             let mut inner = self.inner.lock();
-            let bindings = inner.engine.keys.prefix_bindings();
-            if bindings == inner.prefix_bindings {
+            let tables = inner.engine.keys.snapshot();
+            if tables == inner.key_tables {
                 return;
             }
-            inner.prefix_bindings.clone_from(&bindings);
-            bindings
+            inner.key_tables.clone_from(&tables);
+            tables
         };
-        self.publish(EventPayload::PrefixBindingsChanged { bindings });
+        self.publish(EventPayload::KeyTablesChanged { tables });
     }
 
     fn capture_pane(
@@ -3878,6 +3878,19 @@ impl Shared {
             let Some(mut chooser) = inner.choose_trees.remove(&client) else {
                 return Ok(());
             };
+            let action = match action {
+                ChooseTreeAction::Key(input) => {
+                    let searching = chooser.search.is_some();
+                    let Some(action) =
+                        choose_tree_key_action(&inner.engine.keys, &input, searching)
+                    else {
+                        inner.choose_trees.insert(client, chooser);
+                        return Ok(());
+                    };
+                    action
+                }
+                action => action,
+            };
             let attached_session = client_attached_session(&inner, client);
             let result = match chooser.apply(action, &inner.engine.state, attached_session) {
                 Ok(result) => result,
@@ -3932,6 +3945,19 @@ impl Shared {
             let mut inner = self.inner.lock();
             let Some(mut chooser) = inner.choose_buffers.remove(&client) else {
                 return Ok(());
+            };
+            let action = match action {
+                ChooseBufferAction::Key(input) => {
+                    let searching = chooser.search.is_some();
+                    let Some(action) =
+                        choose_buffer_key_action(&inner.engine.keys, &input, searching)
+                    else {
+                        inner.choose_buffers.insert(client, chooser);
+                        return Ok(());
+                    };
+                    action
+                }
+                action => action,
             };
             let attached_session = client_attached_session(&inner, client);
             let source_session = inner
@@ -6678,7 +6704,7 @@ impl Shared {
                 text,
             },
         );
-        self.publish_prefix_bindings_if_changed();
+        self.publish_key_tables_if_changed();
         Ok(())
     }
 
@@ -6820,7 +6846,7 @@ struct ServerState {
     mux_config_overrides: Vec<ConfigOverrideEntry>,
     mux_options: MuxOptions,
     mux_option_underlay: MuxOptions,
-    prefix_bindings: Vec<zz_protocol::PrefixBinding>,
+    key_tables: Vec<zz_protocol::KeyTableSnapshot>,
     active_color_scheme: TerminalColorScheme,
     client_color_schemes: BTreeMap<ClientId, TerminalColorScheme>,
     client_names: BTreeMap<ClientId, String>,
@@ -7242,6 +7268,7 @@ impl ChooseBufferSession {
                 }
             }
             ChooseBufferAction::Close => return Ok(ChooseBufferResult::Close),
+            ChooseBufferAction::Key(_) => {}
         }
         Ok(ChooseBufferResult::Updated)
     }
@@ -7676,6 +7703,7 @@ impl ChooseTreeSession {
                 }
             }
             ChooseTreeAction::Close => return Ok(ChooseTreeResult::Close),
+            ChooseTreeAction::Key(_) => {}
         }
         Ok(ChooseTreeResult::Updated(update))
     }

@@ -83,7 +83,7 @@ use CommandValueKind::{
     Boolean, FreeForm, KeyTable, Layout, Pane, PaneKind, Session, SetOption, Window,
 };
 
-/// Every tmux-compatible command currently executable by [`crate::MuxEngine`].
+/// Every tmux-compatible command currently executable by the mux engine.
 pub static COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "new-session",

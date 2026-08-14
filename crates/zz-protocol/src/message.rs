@@ -14,8 +14,10 @@ use crate::{ClientId, MuxSnapshot, PaneId, SessionId, SplitId, WindowId};
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-/// v51 separates browser-surface input from tmux key-table input.
-pub const PROTOCOL_VERSION: u16 = 51;
+/// v52 publishes every key table instead of the prefix table alone, and
+/// routes chooser keys through the daemon's `choose-tree`/`choose-buffer`
+/// tables.
+pub const PROTOCOL_VERSION: u16 = 52;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
@@ -457,19 +459,33 @@ pub struct ServerHello {
     pub appearance_provenance: AppearanceProvenance,
     pub mux_options: MuxOptions,
     pub status: StatusLine,
-    /// The prefix key table at attach time, refreshed by
-    /// [`EventPayload::PrefixBindingsChanged`].
-    pub prefix_bindings: Vec<PrefixBinding>,
+    /// Every key table at attach time, refreshed by
+    /// [`EventPayload::KeyTablesChanged`].
+    pub key_tables: Vec<KeyTableSnapshot>,
 }
 
-/// One prefix-table binding, so clients label key hints with the daemon's
-/// real bindings.
+/// One key table flattened for the wire, so clients can label key hints,
+/// render binding help, and detect conflicts against the daemon's real
+/// bindings.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PrefixBinding {
+pub struct KeyTableSnapshot {
+    /// The table name: `root`, `prefix`, `copy-mode`, `copy-mode-vi`, or a
+    /// custom `-T` table.
+    pub name: String,
+    pub bindings: Vec<KeyBindingSnapshot>,
+}
+
+/// One binding in a published key table.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyBindingSnapshot {
     /// The key in tmux-grammar spelling (`|`, `C-o`, `M-1`). Convert before display.
     pub key: String,
     /// The bound command sequence, with canonical names rather than aliases.
     pub commands: Vec<CommandInvocation>,
+    /// Whether the binding repeats without leaving its table (`bind -r`).
+    pub repeat: bool,
+    /// The `bind -N` annotation, when one was given.
+    pub note: Option<String>,
 }
 
 struct BoundedCapability(String);
@@ -921,13 +937,20 @@ pub enum ChooseTreeAction {
     Activate,
     Select(u32),
     ActivateIndex(u32),
-    SearchStart { reverse: bool },
+    SearchStart {
+        reverse: bool,
+    },
     SearchAppend(String),
     SearchBackspace,
     SearchAccept,
     SearchCancel,
-    SearchNext { reverse: bool },
+    SearchNext {
+        reverse: bool,
+    },
     Close,
+    /// A raw key press the daemon resolves through the `choose-tree` key
+    /// table, so bindings stay rebindable and identical for every client.
+    Key(KeyInput),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -963,13 +986,20 @@ pub enum ChooseBufferAction {
     Delete,
     Select(u32),
     PasteIndex(u32),
-    SearchStart { reverse: bool },
+    SearchStart {
+        reverse: bool,
+    },
     SearchAppend(String),
     SearchBackspace,
     SearchAccept,
     SearchCancel,
-    SearchNext { reverse: bool },
+    SearchNext {
+        reverse: bool,
+    },
     Close,
+    /// A raw key press the daemon resolves through the `choose-buffer` key
+    /// table, so bindings stay rebindable and identical for every client.
+    Key(KeyInput),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1121,10 +1151,10 @@ pub enum EventPayload {
     Bell {
         pane: PaneId,
     },
-    /// The full replacement prefix key table, mirroring
-    /// [`ServerHello::prefix_bindings`].
-    PrefixBindingsChanged {
-        bindings: Vec<PrefixBinding>,
+    /// The full replacement key tables, mirroring
+    /// [`ServerHello::key_tables`].
+    KeyTablesChanged {
+        tables: Vec<KeyTableSnapshot>,
     },
     KittyImageBegin {
         pane: PaneId,

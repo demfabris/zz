@@ -1,10 +1,18 @@
 use std::{collections::BTreeSet, ops::Range};
 
-use zz_mux::{COMMAND_SPECS, CommandSpec, CommandValueKind, LayoutPreset, command_spec};
+use zz_mux::LayoutPreset;
 use zz_protocol::MuxSnapshot;
+use zz_protocol::{COMMAND_SPECS, CommandSpec, CommandValueKind, command_spec};
 
 const MAX_COMPLETIONS: usize = 64;
-const KEY_TABLES: &[&str] = &["prefix", "root", "copy-mode", "copy-mode-vi"];
+const KEY_TABLES: &[&str] = &[
+    "prefix",
+    "root",
+    "copy-mode",
+    "copy-mode-vi",
+    "choose-tree",
+    "choose-buffer",
+];
 const BROWSER_COMMANDS: &[&str] = &[
     "new-browser",
     "split-browser",

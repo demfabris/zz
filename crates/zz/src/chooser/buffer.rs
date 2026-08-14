@@ -1,7 +1,8 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use gpui::{AnyElement, Entity, Keystroke, MouseButton, prelude::*};
+use gpui::{AnyElement, Entity, MouseButton, prelude::*};
 use zz_protocol::{ChooseBufferAction, ChooseBufferItem, ChooseBufferState, InputMessage};
+use zz_terminal::KeyInput;
 
 use crate::{
     chooser::{Chooser, ChooserHint, ChooserRowTheme, ChooserSearch, ChooserSpec},
@@ -91,16 +92,8 @@ impl ChooserSpec for BufferChooser {
         buffer_row(item, index, selected, mux, theme)
     }
 
-    fn key_action(keystroke: &Keystroke, searching: bool) -> Option<Self::Action> {
-        choose_buffer_key_action(keystroke, searching)
-    }
-
-    fn search_active_after(action: &Self::Action) -> Option<bool> {
-        match action {
-            ChooseBufferAction::SearchStart { .. } => Some(true),
-            ChooseBufferAction::SearchAccept | ChooseBufferAction::SearchCancel => Some(false),
-            _ => None,
-        }
+    fn key(input: KeyInput) -> Self::Action {
+        ChooseBufferAction::Key(input)
     }
 
     fn search_append(text: String) -> Self::Action {
@@ -149,59 +142,6 @@ fn buffer_row(
     .into_any_element()
 }
 
-fn choose_buffer_key_action(keystroke: &Keystroke, searching: bool) -> Option<ChooseBufferAction> {
-    let modifiers = keystroke.modifiers;
-    let key = keystroke.key.as_str();
-    let character = keystroke.key_char.as_deref().unwrap_or(key);
-    if searching {
-        return match key {
-            "escape" => Some(ChooseBufferAction::SearchCancel),
-            "enter" => Some(ChooseBufferAction::SearchAccept),
-            "backspace" => Some(ChooseBufferAction::SearchBackspace),
-            "up" => Some(ChooseBufferAction::Previous),
-            "down" => Some(ChooseBufferAction::Next),
-            "g" if modifiers.control => Some(ChooseBufferAction::SearchCancel),
-            _ => None,
-        };
-    }
-
-    match key {
-        "escape" => Some(ChooseBufferAction::Close),
-        "enter" => Some(ChooseBufferAction::Paste),
-        "up" => Some(ChooseBufferAction::Previous),
-        "down" => Some(ChooseBufferAction::Next),
-        "pageup" => Some(ChooseBufferAction::PagePrevious),
-        "pagedown" => Some(ChooseBufferAction::PageNext),
-        "home" => Some(ChooseBufferAction::First),
-        "end" => Some(ChooseBufferAction::Last),
-        "p" if modifiers.control => Some(ChooseBufferAction::Previous),
-        "n" if modifiers.control => Some(ChooseBufferAction::Next),
-        "b" if modifiers.control => Some(ChooseBufferAction::PagePrevious),
-        "f" if modifiers.control => Some(ChooseBufferAction::PageNext),
-        "s" if modifiers.control => Some(ChooseBufferAction::SearchStart { reverse: false }),
-        "g" | "[" if modifiers.control => Some(ChooseBufferAction::Close),
-        "q" if no_command_modifiers(modifiers) => Some(ChooseBufferAction::Close),
-        "k" if no_command_modifiers(modifiers) => Some(ChooseBufferAction::Previous),
-        "j" if no_command_modifiers(modifiers) => Some(ChooseBufferAction::Next),
-        "p" if no_command_modifiers(modifiers) => Some(ChooseBufferAction::Paste),
-        "d" if no_command_modifiers(modifiers) => Some(ChooseBufferAction::Delete),
-        "g" if no_command_modifiers(modifiers) && character != "G" => {
-            Some(ChooseBufferAction::First)
-        }
-        "n" if no_command_modifiers(modifiers) => Some(ChooseBufferAction::SearchNext {
-            reverse: modifiers.shift,
-        }),
-        _ if character == "G" => Some(ChooseBufferAction::Last),
-        _ if character == "/" => Some(ChooseBufferAction::SearchStart { reverse: false }),
-        _ if character == "?" => Some(ChooseBufferAction::SearchStart { reverse: true }),
-        _ => None,
-    }
-}
-
-fn no_command_modifiers(modifiers: gpui::Modifiers) -> bool {
-    !modifiers.control && !modifiers.alt && !modifiers.platform
-}
-
 fn format_buffer_size(bytes: u64) -> String {
     const KIB: u64 = 1_024;
     const MIB: u64 = KIB * 1_024;
@@ -236,37 +176,7 @@ fn format_buffer_age(created_unix_seconds: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use gpui::Modifiers;
-
     use super::*;
-
-    fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
-        Keystroke {
-            key: key.to_owned(),
-            key_char: key_char.map(str::to_owned),
-            modifiers,
-        }
-    }
-
-    #[test]
-    fn tmux_buffer_keys_map_to_native_actions() {
-        assert_eq!(
-            choose_buffer_key_action(&key("j", Some("j"), Modifiers::default()), false),
-            Some(ChooseBufferAction::Next)
-        );
-        assert_eq!(
-            choose_buffer_key_action(&key("d", Some("d"), Modifiers::default()), false),
-            Some(ChooseBufferAction::Delete)
-        );
-        assert_eq!(
-            choose_buffer_key_action(&key("enter", None, Modifiers::default()), false),
-            Some(ChooseBufferAction::Paste)
-        );
-        assert_eq!(
-            choose_buffer_key_action(&key("escape", None, Modifiers::default()), true),
-            Some(ChooseBufferAction::SearchCancel)
-        );
-    }
 
     #[test]
     fn sizes_and_ages_are_compact() {

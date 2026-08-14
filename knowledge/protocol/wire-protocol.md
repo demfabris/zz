@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v51)
+title: zz wire protocol (v52)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 51`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 52`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (51) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (52) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -74,7 +74,7 @@ fields in declaration order.
 | Variant | Fields | Purpose |
 |---------|--------|---------|
 | `ClientHello(ClientHello)` | `protocol_version: u16`, `kind: ClientKind`, `device_name: Option<String>` (≤256 B), `capabilities: Vec<String>`, `color_scheme: Option<TerminalColorScheme>`, `origin: Option<PaneId>` | Client → daemon handshake. `device_name` labels this device in presence and eviction notices; `$ZZ_PANE` supplies `origin`, so an untargeted CLI command resolves against its invoking pane |
-| `ServerHello(ServerHello)` | `protocol_version: u16`, `server_id: u64`, `client_id: ClientId`, `capabilities: Vec<String>` (≤64 entries, ≤256 B each), `appearance: TerminalAppearance`, `appearance_provenance: AppearanceProvenance`, `mux_options: MuxOptions`, `status: StatusLine`, `prefix_bindings: Vec<PrefixBinding>` | Daemon → client handshake reply; the current prefix table lets clients label real configured key hints, while capabilities describe optional behavior |
+| `ServerHello(ServerHello)` | `protocol_version: u16`, `server_id: u64`, `client_id: ClientId`, `capabilities: Vec<String>` (≤64 entries, ≤256 B each), `appearance: TerminalAppearance`, `appearance_provenance: AppearanceProvenance`, `mux_options: MuxOptions`, `status: StatusLine`, `key_tables: Vec<KeyTableSnapshot>` | Daemon → client handshake reply; every key table (root, prefix, copy-mode, copy-mode-vi, custom) lets clients label key hints and render binding help, while capabilities describe optional behavior |
 | `CommandRequest(CommandRequest)` | `request_id: u64`, `command: CommandInvocation` | tmux-style command from any client |
 | `CommandResponse(CommandResponse)` | `Success { request_id, output }` / `Error { request_id, error: ServerError }` | Command result |
 | `Attach { session: String }` | target string | Interactive attach request. A session holds a set of attached clients, so a second device never collides with the first |
@@ -134,7 +134,7 @@ clears.
 `ChooseBufferUpdate { search, selected }`, `DisplayPanes { state }`,
 `ClientMessage { pane, kind: ClientMessageKind, text }`, `PaneRemoved(PaneId)`, `ServerStopping`,
 `OpenUri { pane, uri }`, `FocusSidebar`, `PrefixArmed { armed }`, `Bell { pane }`,
-`PrefixBindingsChanged { bindings }`,
+`KeyTablesChanged { tables }`,
 `Detached { session: SessionId, by: Option<String> }`, `HistoryChunk { pane, start: u32, total: u32,
 offset: u32, columns: u16, rows: Vec<Vec<PackedCell>>, dictionary: TerminalDictionary }`,
 `KittyImageBegin { pane, image_id, generation, width, height, total_bytes }`
@@ -289,7 +289,7 @@ unbounded `#()` script off the wire.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 51`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 52`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
 - **Any change that affects an already shipped encoding** (new enum variants, reordered fields,
@@ -328,20 +328,20 @@ unbounded `#()` script off the wire.
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 51, kind: Interactive, device_name: None, capabilities: [],
+`ClientHello { protocol_version: 52, kind: Interactive, device_name: None, capabilities: [],
 color_scheme: Some(Dark), origin: None }` is 16 bytes on the wire: an 8-byte envelope over an
 8-byte postcard payload.
 
 ```text
 byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15
-      0c 00 00 00  00     00      33 00         00 33 00 00 00 01 01 00
+      0c 00 00 00  00     00      34 00         00 34 00 00 00 01 01 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 12  Control        (= 51)
+      length = 12  Control        (= 52)
 ```
 
 - **length `12`** = `ENVELOPE_BYTES` (4) + payload (8); it counts the four envelope bytes, not itself.
-- **payload** `00 33 00 00 00 01 01 00`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x33` (= 51), `kind` variant `0` (`Interactive`), `device_name`
+- **payload** `00 34 00 00 00 01 01 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x34` (= 52), `kind` variant `0` (`Interactive`), `device_name`
   as the `Option::None` tag `00`, `capabilities` as the sequence length `00`, `Option::Some` tag
   `01`, `TerminalColorScheme` variant `1` (`Dark`), then `origin` as `Option::None` (`00`). Postcard
   writes multi-byte integers as LEB128 varints, so the version is one byte here and two in the
@@ -372,9 +372,9 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 51, kind: Interactive, device_name: Some("laptop"),
+client → ClientHello { protocol_version: 52, kind: Interactive, device_name: Some("laptop"),
                        capabilities: [], color_scheme: Some(Dark), origin: None }
-server → ServerHello { protocol_version: 51, server_id, client_id: c11,
+server → ServerHello { protocol_version: 52, server_id, client_id: c11,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],

@@ -5,7 +5,7 @@ use std::{
 };
 
 use smallvec::SmallVec;
-use zz_protocol::KeyToken;
+use zz_protocol::{ChooseBufferAction, ChooseTreeAction, KeyTables, KeyToken};
 use zz_terminal::{KeyAction, KeyCode, KeyInput, Modifiers, TerminalSession};
 
 const INLINE_KEY_NAME_BYTES: usize = 16;
@@ -95,6 +95,108 @@ pub(crate) fn input_key_name(input: &KeyInput) -> KeyName {
         KeyCode::Unidentified => name.push_str(input.text.as_deref().unwrap_or_default()),
     }
     name
+}
+
+/// The `send-keys -X <action>` name a chooser table binds `key` to, if any.
+fn bound_overlay_action<'a>(keys: &'a KeyTables, table: &str, key: &str) -> Option<&'a str> {
+    let binding = keys.get(table, key)?;
+    let [command] = binding.commands.as_slice() else {
+        return None;
+    };
+    if !matches!(command.name.as_str(), "send" | "send-keys") {
+        return None;
+    }
+    let mode_index = command.args.iter().position(|argument| argument == "-X")?;
+    command.args.get(mode_index + 1).map(String::as_str)
+}
+
+/// Resolve a key press against a chooser table, preferring the character the
+/// press typed (`?` from shift+`/`) over the folded physical key name.
+fn overlay_key_action<'a>(keys: &'a KeyTables, table: &str, input: &KeyInput) -> Option<&'a str> {
+    if let Some(text) = overlay_search_text(input)
+        && text.chars().count() == 1
+        && let Some(action) = bound_overlay_action(keys, table, &text)
+    {
+        return Some(action);
+    }
+    bound_overlay_action(keys, table, input_key_name(input).as_str())
+        .or_else(|| bound_overlay_action(keys, table, "Any"))
+}
+
+/// Printable text a key press contributes to an overlay search query.
+fn overlay_search_text(input: &KeyInput) -> Option<String> {
+    if input.modifiers.control() || input.modifiers.alt() || input.modifiers.platform() {
+        return None;
+    }
+    let text = input.text.as_deref()?;
+    (!text.is_empty() && !text.chars().any(char::is_control)).then(|| text.to_owned())
+}
+
+pub(crate) fn choose_tree_key_action(
+    keys: &KeyTables,
+    input: &KeyInput,
+    searching: bool,
+) -> Option<ChooseTreeAction> {
+    if searching {
+        return match input_key_name(input).as_str() {
+            "Escape" | "C-g" | "C-c" | "C-[" => Some(ChooseTreeAction::SearchCancel),
+            "Enter" => Some(ChooseTreeAction::SearchAccept),
+            "BSpace" => Some(ChooseTreeAction::SearchBackspace),
+            "Up" => Some(ChooseTreeAction::Previous),
+            "Down" => Some(ChooseTreeAction::Next),
+            _ => overlay_search_text(input).map(ChooseTreeAction::SearchAppend),
+        };
+    }
+    match overlay_key_action(keys, "choose-tree", input)? {
+        "cursor-up" => Some(ChooseTreeAction::Previous),
+        "cursor-down" => Some(ChooseTreeAction::Next),
+        "page-up" => Some(ChooseTreeAction::PagePrevious),
+        "page-down" => Some(ChooseTreeAction::PageNext),
+        "history-top" => Some(ChooseTreeAction::First),
+        "history-bottom" => Some(ChooseTreeAction::Last),
+        "collapse" => Some(ChooseTreeAction::Collapse),
+        "expand" => Some(ChooseTreeAction::Expand),
+        "accept" => Some(ChooseTreeAction::Activate),
+        "cancel" => Some(ChooseTreeAction::Close),
+        "search-forward" => Some(ChooseTreeAction::SearchStart { reverse: false }),
+        "search-backward" => Some(ChooseTreeAction::SearchStart { reverse: true }),
+        "search-again" => Some(ChooseTreeAction::SearchNext { reverse: false }),
+        "search-reverse" => Some(ChooseTreeAction::SearchNext { reverse: true }),
+        _ => None,
+    }
+}
+
+pub(crate) fn choose_buffer_key_action(
+    keys: &KeyTables,
+    input: &KeyInput,
+    searching: bool,
+) -> Option<ChooseBufferAction> {
+    if searching {
+        return match input_key_name(input).as_str() {
+            "Escape" | "C-g" | "C-c" | "C-[" => Some(ChooseBufferAction::SearchCancel),
+            "Enter" => Some(ChooseBufferAction::SearchAccept),
+            "BSpace" => Some(ChooseBufferAction::SearchBackspace),
+            "Up" => Some(ChooseBufferAction::Previous),
+            "Down" => Some(ChooseBufferAction::Next),
+            _ => overlay_search_text(input).map(ChooseBufferAction::SearchAppend),
+        };
+    }
+    match overlay_key_action(keys, "choose-buffer", input)? {
+        "cursor-up" => Some(ChooseBufferAction::Previous),
+        "cursor-down" => Some(ChooseBufferAction::Next),
+        "page-up" => Some(ChooseBufferAction::PagePrevious),
+        "page-down" => Some(ChooseBufferAction::PageNext),
+        "history-top" => Some(ChooseBufferAction::First),
+        "history-bottom" => Some(ChooseBufferAction::Last),
+        "accept" | "paste" => Some(ChooseBufferAction::Paste),
+        "delete" => Some(ChooseBufferAction::Delete),
+        "cancel" => Some(ChooseBufferAction::Close),
+        "search-forward" => Some(ChooseBufferAction::SearchStart { reverse: false }),
+        "search-backward" => Some(ChooseBufferAction::SearchStart { reverse: true }),
+        "search-again" => Some(ChooseBufferAction::SearchNext { reverse: false }),
+        "search-reverse" => Some(ChooseBufferAction::SearchNext { reverse: true }),
+        _ => None,
+    }
 }
 
 pub(crate) fn send_tokens(sessions: &[Arc<TerminalSession>], tokens: &[KeyToken]) {
@@ -271,5 +373,109 @@ mod tests {
             assert_eq!(rendered.as_str(), name);
             assert!(!rendered.bytes.spilled());
         }
+    }
+
+    fn character(value: char) -> KeyInput {
+        KeyInput {
+            action: KeyAction::Press,
+            key: KeyCode::Character(value),
+            modifiers: Modifiers::default(),
+            text: Some(value.to_string().into_boxed_str()),
+            unshifted_codepoint: Some(value),
+        }
+    }
+
+    fn named(value: KeyCode) -> KeyInput {
+        KeyInput {
+            action: KeyAction::Press,
+            key: value,
+            modifiers: Modifiers::default(),
+            text: None,
+            unshifted_codepoint: None,
+        }
+    }
+
+    #[test]
+    fn default_chooser_tables_resolve_navigation_keys() {
+        let keys = KeyTables::default();
+        assert_eq!(
+            choose_tree_key_action(&keys, &character('j'), false),
+            Some(ChooseTreeAction::Next)
+        );
+        assert_eq!(
+            choose_tree_key_action(&keys, &named(KeyCode::Enter), false),
+            Some(ChooseTreeAction::Activate)
+        );
+        assert_eq!(
+            choose_tree_key_action(&keys, &named(KeyCode::Escape), false),
+            Some(ChooseTreeAction::Close)
+        );
+        assert_eq!(
+            choose_buffer_key_action(&keys, &character('p'), false),
+            Some(ChooseBufferAction::Paste)
+        );
+        assert_eq!(
+            choose_buffer_key_action(&keys, &character('d'), false),
+            Some(ChooseBufferAction::Delete)
+        );
+        assert_eq!(choose_tree_key_action(&keys, &character('z'), false), None);
+    }
+
+    #[test]
+    fn shifted_punctuation_resolves_by_typed_character() {
+        let keys = KeyTables::default();
+        let mut question = character('?');
+        question.key = KeyCode::Character('/');
+        question.modifiers = Modifiers::new(true, false, false, false);
+        assert_eq!(
+            choose_tree_key_action(&keys, &question, false),
+            Some(ChooseTreeAction::SearchStart { reverse: true })
+        );
+    }
+
+    #[test]
+    fn chooser_search_mode_edits_and_navigates() {
+        let keys = KeyTables::default();
+        assert_eq!(
+            choose_tree_key_action(&keys, &named(KeyCode::Escape), true),
+            Some(ChooseTreeAction::SearchCancel)
+        );
+        assert_eq!(
+            choose_tree_key_action(&keys, &named(KeyCode::Backspace), true),
+            Some(ChooseTreeAction::SearchBackspace)
+        );
+        assert_eq!(
+            choose_tree_key_action(&keys, &character('j'), true),
+            Some(ChooseTreeAction::SearchAppend("j".to_owned()))
+        );
+        let mut control = character('g');
+        control.modifiers = Modifiers::new(false, true, false, false);
+        assert_eq!(
+            choose_buffer_key_action(&keys, &control, true),
+            Some(ChooseBufferAction::SearchCancel)
+        );
+    }
+
+    #[test]
+    fn chooser_bindings_are_rebindable_through_the_tables() {
+        let mut keys = KeyTables::default();
+        keys.bind(
+            "choose-tree",
+            "x",
+            zz_protocol::Binding {
+                commands: vec![zz_protocol::CommandInvocation::new(
+                    "send-keys",
+                    ["-X", "cancel"],
+                )],
+                repeat: false,
+                note: None,
+            },
+        );
+        assert_eq!(
+            choose_tree_key_action(&keys, &character('x'), false),
+            Some(ChooseTreeAction::Close)
+        );
+        assert!(keys.unbind("choose-tree", "j"));
+        assert_eq!(choose_tree_key_action(&keys, &character('j'), false), None);
     }
 }

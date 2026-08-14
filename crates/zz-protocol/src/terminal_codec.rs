@@ -1938,7 +1938,7 @@ mod tests {
             appearance_provenance,
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
-            prefix_bindings: Vec::new(),
+            key_tables: Vec::new(),
         });
 
         let frame = encode_protocol_message(&message).expect("encode ServerHello");
@@ -2018,7 +2018,7 @@ mod tests {
             appearance_provenance: AppearanceProvenance::default(),
             mux_options: options.clone(),
             status: crate::StatusLine::default(),
-            prefix_bindings: Vec::new(),
+            key_tables: Vec::new(),
         });
         let hello_frame = encode_protocol_message(&hello).expect("encode mux options in hello");
         assert_eq!(decode_protocol_frame(&hello_frame).unwrap(), hello);
@@ -2058,7 +2058,7 @@ mod tests {
                 left: "x".repeat(crate::MAX_STATUS_TEXT_BYTES + 1),
                 right: String::new(),
             },
-            prefix_bindings: Vec::new(),
+            key_tables: Vec::new(),
         };
         assert!(matches!(
             encode_protocol_message(&ProtocolMessage::ServerHello(oversized)),
@@ -2101,7 +2101,7 @@ mod tests {
             appearance_provenance: AppearanceProvenance::default(),
             mux_options: oversized,
             status: crate::StatusLine::default(),
-            prefix_bindings: Vec::new(),
+            key_tables: Vec::new(),
         });
         assert!(matches!(
             encode_protocol_message(&oversized_hello),
@@ -2131,7 +2131,7 @@ mod tests {
             appearance_provenance: AppearanceProvenance::default(),
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
-            prefix_bindings: Vec::new(),
+            key_tables: Vec::new(),
         });
 
         assert!(matches!(
@@ -2162,7 +2162,7 @@ mod tests {
             appearance_provenance: AppearanceProvenance::default(),
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
-            prefix_bindings: Vec::new(),
+            key_tables: Vec::new(),
         });
 
         assert!(matches!(
@@ -2189,7 +2189,7 @@ mod tests {
             appearance_provenance: AppearanceProvenance::default(),
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
-            prefix_bindings: Vec::new(),
+            key_tables: Vec::new(),
         });
 
         assert!(matches!(
@@ -2236,7 +2236,7 @@ mod tests {
                 appearance_provenance: AppearanceProvenance::default(),
                 mux_options: MuxOptions::default(),
                 status: crate::StatusLine::default(),
-                prefix_bindings: Vec::new(),
+                key_tables: Vec::new(),
             });
             let payload = postcard::to_stdvec(&message).expect("serialize malformed fixture");
             let frame = crate::framing::encode_enveloped(Lane::Control, &payload)
@@ -2263,7 +2263,7 @@ mod tests {
                 appearance_provenance: AppearanceProvenance::default(),
                 mux_options: MuxOptions::default(),
                 status: crate::StatusLine::default(),
-                prefix_bindings: Vec::new(),
+                key_tables: Vec::new(),
             });
             assert!(matches!(
                 encode_protocol_message(&message),
@@ -2320,7 +2320,7 @@ mod tests {
             appearance_provenance: AppearanceProvenance::default(),
             mux_options: MuxOptions::default(),
             status: crate::StatusLine::default(),
-            prefix_bindings: Vec::new(),
+            key_tables: Vec::new(),
         });
         let mut changed = message.clone();
         let ProtocolMessage::ServerHello(hello) = &mut changed else {

@@ -1294,7 +1294,7 @@ fn handle_event(
         EventPayload::Detached { .. }
         | EventPayload::TerminalPatch { .. }
         | EventPayload::MuxOptionsChanged { .. }
-        | EventPayload::PrefixBindingsChanged { .. }
+        | EventPayload::KeyTablesChanged { .. }
         | EventPayload::OpenUri { .. }
         | EventPayload::HistoryChunk { .. }
         | EventPayload::Bell { .. }

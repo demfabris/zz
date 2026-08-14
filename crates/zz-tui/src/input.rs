@@ -100,22 +100,22 @@ fn handle_key(
     if model.command_prompt.is_some() {
         return handle_command_prompt(model, client, event);
     }
-    if let Some(state) = &model.choose_tree {
-        if event.kind != KeyEventKind::Release
-            && let Some(action) = choose_tree_action(event, state.search.is_some())
-        {
+    if model.choose_tree.is_some() {
+        if event.kind != KeyEventKind::Release {
             client
-                .send_input(InputMessage::ChooseTree { action })
+                .send_input(InputMessage::ChooseTree {
+                    action: ChooseTreeAction::Key(key_input(event)),
+                })
                 .map_err(|error| error.to_string())?;
         }
         return Ok(InputOutcome::None);
     }
-    if let Some(state) = &model.choose_buffer {
-        if event.kind != KeyEventKind::Release
-            && let Some(action) = choose_buffer_action(event, state.search.is_some())
-        {
+    if model.choose_buffer.is_some() {
+        if event.kind != KeyEventKind::Release {
             client
-                .send_input(InputMessage::ChooseBuffer { action })
+                .send_input(InputMessage::ChooseBuffer {
+                    action: ChooseBufferAction::Key(key_input(event)),
+                })
                 .map_err(|error| error.to_string())?;
         }
         return Ok(InputOutcome::None);
@@ -921,67 +921,6 @@ const fn modifiers(value: KeyModifiers) -> Modifiers {
         value.contains(KeyModifiers::ALT),
         value.contains(KeyModifiers::SUPER),
     )
-}
-
-fn choose_tree_action(event: KeyEvent, searching: bool) -> Option<ChooseTreeAction> {
-    if searching {
-        return match event.code {
-            TerminalKeyCode::Esc => Some(ChooseTreeAction::SearchCancel),
-            TerminalKeyCode::Enter => Some(ChooseTreeAction::SearchAccept),
-            TerminalKeyCode::Backspace => Some(ChooseTreeAction::SearchBackspace),
-            TerminalKeyCode::Up => Some(ChooseTreeAction::Previous),
-            TerminalKeyCode::Down => Some(ChooseTreeAction::Next),
-            TerminalKeyCode::Char(character) => {
-                Some(ChooseTreeAction::SearchAppend(character.to_string()))
-            }
-            _ => None,
-        };
-    }
-    match event.code {
-        TerminalKeyCode::Esc | TerminalKeyCode::Char('q') => Some(ChooseTreeAction::Close),
-        TerminalKeyCode::Enter => Some(ChooseTreeAction::Activate),
-        TerminalKeyCode::Up | TerminalKeyCode::Char('k') => Some(ChooseTreeAction::Previous),
-        TerminalKeyCode::Down | TerminalKeyCode::Char('j') => Some(ChooseTreeAction::Next),
-        TerminalKeyCode::Left | TerminalKeyCode::Char('h') => Some(ChooseTreeAction::Collapse),
-        TerminalKeyCode::Right | TerminalKeyCode::Char('l') => Some(ChooseTreeAction::Expand),
-        TerminalKeyCode::PageUp => Some(ChooseTreeAction::PagePrevious),
-        TerminalKeyCode::PageDown => Some(ChooseTreeAction::PageNext),
-        TerminalKeyCode::Home => Some(ChooseTreeAction::First),
-        TerminalKeyCode::End => Some(ChooseTreeAction::Last),
-        TerminalKeyCode::Char('/') => Some(ChooseTreeAction::SearchStart { reverse: false }),
-        TerminalKeyCode::Char('?') => Some(ChooseTreeAction::SearchStart { reverse: true }),
-        _ => None,
-    }
-}
-
-fn choose_buffer_action(event: KeyEvent, searching: bool) -> Option<ChooseBufferAction> {
-    if searching {
-        return match event.code {
-            TerminalKeyCode::Esc => Some(ChooseBufferAction::SearchCancel),
-            TerminalKeyCode::Enter => Some(ChooseBufferAction::SearchAccept),
-            TerminalKeyCode::Backspace => Some(ChooseBufferAction::SearchBackspace),
-            TerminalKeyCode::Up => Some(ChooseBufferAction::Previous),
-            TerminalKeyCode::Down => Some(ChooseBufferAction::Next),
-            TerminalKeyCode::Char(character) => {
-                Some(ChooseBufferAction::SearchAppend(character.to_string()))
-            }
-            _ => None,
-        };
-    }
-    match event.code {
-        TerminalKeyCode::Esc | TerminalKeyCode::Char('q') => Some(ChooseBufferAction::Close),
-        TerminalKeyCode::Enter => Some(ChooseBufferAction::Paste),
-        TerminalKeyCode::Up | TerminalKeyCode::Char('k') => Some(ChooseBufferAction::Previous),
-        TerminalKeyCode::Down | TerminalKeyCode::Char('j') => Some(ChooseBufferAction::Next),
-        TerminalKeyCode::PageUp => Some(ChooseBufferAction::PagePrevious),
-        TerminalKeyCode::PageDown => Some(ChooseBufferAction::PageNext),
-        TerminalKeyCode::Home => Some(ChooseBufferAction::First),
-        TerminalKeyCode::End => Some(ChooseBufferAction::Last),
-        TerminalKeyCode::Char('d') => Some(ChooseBufferAction::Delete),
-        TerminalKeyCode::Char('/') => Some(ChooseBufferAction::SearchStart { reverse: false }),
-        TerminalKeyCode::Char('?') => Some(ChooseBufferAction::SearchStart { reverse: true }),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

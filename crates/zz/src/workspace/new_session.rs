@@ -7,7 +7,7 @@ use gpui::{
     App, Context, Div, FocusHandle, Focusable, KeyDownEvent, Keystroke, MouseButton,
     ParentElement as _, Render, Styled as _, Window, div, prelude::*, px,
 };
-use zz_protocol::{CommandInvocation, PrefixBinding};
+use zz_protocol::{CommandInvocation, KeyBindingSnapshot};
 use zz_ui::{
     ActiveTheme as _, Colorize as _, Sizable as _,
     button::{Button, ButtonVariants as _},
@@ -92,7 +92,10 @@ const BINDINGS: [BindingHint; 5] = [
     },
 ];
 
-fn resolve_binding_key(hint: &BindingHint, prefix_bindings: &[PrefixBinding]) -> Option<Keystroke> {
+fn resolve_binding_key(
+    hint: &BindingHint,
+    prefix_bindings: &[KeyBindingSnapshot],
+) -> Option<Keystroke> {
     let stock_key = || display_keystroke(hint.hint.key);
     if prefix_bindings.is_empty() {
         return stock_key();
@@ -396,21 +399,25 @@ mod tests {
     #[test]
     fn non_stock_binding_is_preferred_over_stock() {
         let bindings = [
-            PrefixBinding {
+            KeyBindingSnapshot {
                 key: "%".to_owned(),
                 commands: vec![CommandInvocation {
                     name: "split-window".to_owned(),
                     args: vec!["-h".to_owned()],
                     source: None,
                 }],
+                repeat: false,
+                note: None,
             },
-            PrefixBinding {
+            KeyBindingSnapshot {
                 key: "|".to_owned(),
                 commands: vec![CommandInvocation {
                     name: "split-window".to_owned(),
                     args: vec!["-h".to_owned()],
                     source: None,
                 }],
+                repeat: false,
+                note: None,
             },
         ];
 
@@ -430,13 +437,15 @@ mod tests {
 
     #[test]
     fn missing_binding_omits_the_row() {
-        let bindings = [PrefixBinding {
+        let bindings = [KeyBindingSnapshot {
             key: "c".to_owned(),
             commands: vec![CommandInvocation {
                 name: "new-window".to_owned(),
                 args: Vec::new(),
                 source: None,
             }],
+            repeat: false,
+            note: None,
         }];
 
         assert_eq!(resolve_binding_key(&BINDINGS[1], &bindings), None);
@@ -444,13 +453,15 @@ mod tests {
 
     #[test]
     fn unparseable_binding_uses_the_stock_key() {
-        let bindings = [PrefixBinding {
+        let bindings = [KeyBindingSnapshot {
             key: String::new(),
             commands: vec![CommandInvocation {
                 name: "split-window".to_owned(),
                 args: vec!["-h".to_owned()],
                 source: None,
             }],
+            repeat: false,
+            note: None,
         }];
 
         assert_eq!(

@@ -1,17 +1,20 @@
 ---
 type: Subsystem
 title: Key tables (key.rs)
-description: Root/prefix/copy-mode key resolution with the default C-b prefix, canonical and shifted key encoding, bind/unbind, send-prefix, numeric vi counts, and pending jump-key capture.
-resource: crates/zz-mux/src/key.rs
-tags: [tmux, keys, bindings, prefix, copy-mode]
-timestamp: 2026-08-10T00:00:00Z
+description: Root/prefix/copy-mode/chooser key resolution with the default C-b prefix, canonical and shifted key encoding, bind/unbind, send-prefix, numeric vi counts, pending jump-key capture, and wire publication of every table.
+resource: crates/zz-protocol/src/key.rs
+tags: [tmux, keys, bindings, prefix, copy-mode, choosers]
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
 
-`key.rs` owns tmux-compatible key binding storage and the per-client keypress state machine. Two
+`key.rs` owns tmux-compatible key binding storage and the per-client keypress state machine. Since
+2026-08-14 it lives in `zz-protocol` (the contract crate) so every client links the same data model
+and resolver; `zz-mux` re-exports it and the daemon remains the runtime authority. Two
 types cooperate: `KeyTables` is the shared, mutable set of named tables (`prefix`, `root`,
-`copy-mode`, `copy-mode-vi`, plus any custom `-T` table) mapping a canonical key string to a
+`copy-mode`, `copy-mode-vi`, `choose-tree`, `choose-buffer`, plus any custom `-T` table) mapping a
+canonical key string to a
 `Binding`; `KeyEngine` is the cheap per-client cursor that tracks whether the prefix has been pressed
 whether a "jump" binding is waiting for its target key, and a vi numeric prefix. `KeyEngine::handle` returns a
 `KeyDecision` telling the daemon to pass the key through to the surface, enter the prefix, ignore it,
@@ -20,7 +23,18 @@ or run a list of `CommandInvocation`s. Defaults are audited against the pinned t
 [the command layer](/tmux/commands.md) and from [`.tmux.conf`](/tmux/conf-parser.md).
 
 The daemon owns **one** cursor per client over these live tables; it carries both the one-shot
-prefix state and the client's active copy-mode table.
+prefix state and the client's active copy-mode table. `KeyTables::snapshot()` flattens every table
+(command names canonicalized) for `ServerHello.key_tables` and `EventPayload::KeyTablesChanged`, so
+clients label hints and render binding help from published truth instead of hardcoded guesses.
+
+The `choose-tree` and `choose-buffer` tables resolve daemon-side too: choosers forward raw key
+presses (`ChooseTreeAction::Key` / `ChooseBufferAction::Key`) and the daemon maps them through
+`send-keys -X`-style bindings (`cursor-up`, `accept`, `cancel`, `search-forward`, `paste`,
+`delete`, …) in `crates/zz-daemon/src/keys.rs` (`choose_tree_key_action`), preferring the typed
+character (`?` from shift+`/`) over the folded physical key name. Search-mode editing keys
+(Escape/Enter/BSpace/arrows, printable text append) stay fixed, like other search prompts. Chooser
+vim navigation is therefore rebindable with `bind-key -T choose-tree …` and identical in the GPUI
+app and the TUI, which contain no chooser key maps at all.
 
 # Data model
 

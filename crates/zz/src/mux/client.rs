@@ -20,10 +20,10 @@ use zz_daemon::{
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferState, ChooseTreeState, ClientMessageKind,
     CommandInvocation, CommandPromptState, DisplayPanesState, EventPayload, GuiResponse,
-    InputMessage, LayoutNode, MuxOptionKey, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY,
-    PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PastedImageFormat, PrefixBinding, ProtocolError,
-    ProtocolMessage, ServerError, ServerHello, SessionId, StatusLine, TerminalUiCommand,
-    WindowSnapshot,
+    InputMessage, KeyBindingSnapshot, KeyTableSnapshot, LayoutNode, MuxOptionKey, MuxOptions,
+    MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneKindSnapshot,
+    PastedImageFormat, ProtocolError, ProtocolMessage, ServerError, ServerHello, SessionId,
+    StatusLine, TerminalUiCommand, WindowSnapshot,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME,
@@ -857,7 +857,7 @@ pub struct MuxClient {
     color_scheme: TerminalColorScheme,
     appearance: Arc<TerminalAppearance>,
     mux_options: MuxOptions,
-    prefix_bindings: Vec<PrefixBinding>,
+    key_tables: Vec<KeyTableSnapshot>,
     status: StatusLine,
     status_revision: u64,
     prefix_armed: bool,
@@ -951,7 +951,7 @@ impl MuxClient {
             color_scheme,
             appearance: Arc::new(TerminalAppearance::default()),
             mux_options: MuxOptions::default(),
-            prefix_bindings: Vec::new(),
+            key_tables: Vec::new(),
             status: StatusLine::default(),
             status_revision: 0,
             prefix_armed: false,
@@ -1046,7 +1046,7 @@ impl MuxClient {
             apply_terminal_font_size_offset(&mut appearance, self.terminal_font_size_offset_points);
         self.appearance = Arc::new(appearance);
         self.mux_options.clone_from(&hello.mux_options);
-        self.prefix_bindings.clone_from(&hello.prefix_bindings);
+        self.key_tables.clone_from(&hello.key_tables);
         self.status.clone_from(&hello.status);
         log::info!(
             target: "zz::diagnostics::appearance",
@@ -1913,7 +1913,7 @@ impl MuxClient {
         self.attached_connection().client.as_ref()?;
         self.mux_options
             .get(zz_protocol::MuxOptionKey::Prefix)
-            .map(|option| crate::mux::prefix::canonical_prefix(&option.value))
+            .map(|option| zz_protocol::canonical_key(&option.value))
     }
 
     /// Whether the daemon reported this client's prefix sequence as armed.
@@ -1925,11 +1925,14 @@ impl MuxClient {
     /// The daemon-published prefix key table, or empty while disconnected.
     /// Keys are tmux-grammar strings; commands carry canonical names.
     #[must_use]
-    pub(crate) fn prefix_bindings(&self) -> &[PrefixBinding] {
+    pub(crate) fn prefix_bindings(&self) -> &[KeyBindingSnapshot] {
         if self.attached_connection().client.is_none() {
             return &[];
         }
-        &self.prefix_bindings
+        self.key_tables
+            .iter()
+            .find(|table| table.name == "prefix")
+            .map_or(&[], |table| table.bindings.as_slice())
     }
 
     #[must_use]
@@ -3078,8 +3081,8 @@ impl MuxClient {
                         self.request_history_backfill(pane);
                     }
                 }
-                EventPayload::PrefixBindingsChanged { bindings } => {
-                    self.prefix_bindings = bindings;
+                EventPayload::KeyTablesChanged { tables } => {
+                    self.key_tables = tables;
                 }
                 EventPayload::StatusChanged { status } => {
                     self.status = status;
@@ -3854,7 +3857,7 @@ mod tests {
             appearance_provenance: AppearanceProvenance::default(),
             mux_options: MuxOptions::default(),
             status: StatusLine::default(),
-            prefix_bindings: Vec::new(),
+            key_tables: Vec::new(),
         }
     }
 

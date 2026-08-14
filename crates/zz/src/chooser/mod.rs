@@ -3,7 +3,7 @@ use std::{ops::Range, sync::Arc};
 use gpui::{
     AnyElement, App, Bounds, Context, Element, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, FocusHandle, Focusable, GlobalElementId, InspectorElementId, IntoElement,
-    KeyDownEvent, Keystroke, LayoutId, MouseButton, Pixels, Point, Render, ScrollStrategy, Style,
+    KeyDownEvent, LayoutId, MouseButton, Pixels, Point, Render, ScrollStrategy, Style,
     UTF16Selection, UniformListScrollHandle, Window, div, prelude::*, uniform_list,
 };
 use zz_ui::chooser::{ChooserDimensions, ChooserModal, ChooserSearch as ChooserSearchView};
@@ -13,8 +13,12 @@ use zz_ui::{
     button::{Button, ButtonVariants as _},
 };
 
+use zz_terminal::{KeyAction, KeyInput};
+
 use crate::{
-    config::frame_content_corner_radius, mux::client::MuxClient, terminal::view::TERMINAL_FONT,
+    config::frame_content_corner_radius,
+    mux::{client::MuxClient, prefix::terminal_key_input},
+    terminal::view::TERMINAL_FONT,
     window::corners::WindowCorners,
 };
 
@@ -80,20 +84,10 @@ pub(crate) trait ChooserSpec: Default + 'static {
     ) -> AnyElement {
         Self::row(item, index, selected, mux, theme)
     }
-    fn key_action(keystroke: &Keystroke, searching: bool) -> Option<Self::Action>;
-    fn search_active_after(action: &Self::Action) -> Option<bool>;
+    fn key(input: KeyInput) -> Self::Action;
     fn search_append(text: String) -> Self::Action;
     fn close() -> Self::Action;
     fn send(mux: &MuxClient, action: Self::Action);
-    fn handle_action(
-        &mut self,
-        _: &Self::State,
-        action: Self::Action,
-        _: &Entity<MuxClient>,
-        _: &mut Context<Chooser<Self>>,
-    ) -> Option<Self::Action> {
-        Some(action)
-    }
 }
 
 pub(crate) struct Chooser<S: ChooserSpec> {
@@ -158,36 +152,20 @@ impl<S: ChooserSpec> Chooser<S> {
         true
     }
 
-    pub(crate) fn dispatch(&mut self, action: S::Action, cx: &mut Context<Self>) {
-        let Some(state) = S::state(self.mux.read(cx)) else {
-            return;
-        };
-        let mux = self.mux.clone();
-        if let Some(action) = self.spec.handle_action(&state, action, &mux, cx) {
-            S::send(mux.read(cx), action);
-        }
-        if let Some(state) = S::state(self.mux.read(cx))
-            && self.synchronize_selected(&state, cx)
-        {
-            cx.notify();
-        }
-    }
-
     fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let searching = self.search_active;
-        if let Some(action) = S::key_action(&event.keystroke, searching) {
-            if let Some(search_active) = S::search_active_after(&action) {
-                self.search_active = search_active;
-            }
-            self.dispatch(action, cx);
-            cx.stop_propagation();
+        let keystroke = &event.keystroke;
+        let modifiers = keystroke.modifiers;
+        if self.search_active
+            && keystroke.key_char.is_some()
+            && !modifiers.control
+            && !modifiers.platform
+            && !modifiers.alt
+        {
+            // The IME input handler owns typed search text.
             return;
         }
-
-        let modifiers = event.keystroke.modifiers;
-        if searching && !modifiers.control && !modifiers.platform && !modifiers.alt {
-            return;
-        }
+        let input = terminal_key_input(keystroke, KeyAction::Press);
+        self.send(S::key(input), cx);
         cx.stop_propagation();
     }
 }

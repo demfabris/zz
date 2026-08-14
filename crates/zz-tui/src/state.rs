@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
+use zz_client::ClientCore;
 use zz_daemon::{Endpoint, HostEntry};
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, CommandPromptState, DisplayPanesState, MuxSnapshot, PaneId,
-    PaneKindSnapshot, PaneSnapshot, ServerHello, SessionId, SessionSnapshot, StatusLine,
-    WindowSnapshot,
+    PaneKindSnapshot, PaneSnapshot, SessionId, SessionSnapshot, StatusLine, WindowSnapshot,
 };
 use zz_terminal::{TerminalAppearance, TerminalViewport};
 
@@ -24,15 +24,17 @@ pub(crate) struct HostSwitch {
     pub endpoint: Endpoint,
 }
 
+/// Presentation state plus cheap caches of the reduced protocol state that
+/// [`ClientCore`] owns. Caches are refreshed from the core when its events
+/// arrive so painting and input never take the core lock.
 pub(crate) struct Model {
     pub host_label: String,
     pub current_endpoint: Endpoint,
-    pub snapshot: MuxSnapshot,
+    pub snapshot: Arc<MuxSnapshot>,
     pub attached_session: Option<SessionId>,
     pub viewports: HashMap<PaneId, TerminalViewport>,
     pub appearance: TerminalAppearance,
     pub status: StatusLine,
-    pub capabilities: Vec<String>,
     pub prefix_armed: bool,
     pub command_prompt: Option<CommandPromptState>,
     pub command_output: Option<(PaneId, TerminalViewport)>,
@@ -55,7 +57,7 @@ pub(crate) struct Model {
 
 impl Model {
     pub fn new(
-        hello: &ServerHello,
+        core: &ClientCore,
         size: TerminalSize,
         host_label: String,
         local_host_label: String,
@@ -66,18 +68,17 @@ impl Model {
         Self {
             host_label,
             current_endpoint,
-            snapshot: MuxSnapshot::default(),
-            attached_session: None,
+            snapshot: Arc::clone(core.snapshot()),
+            attached_session: core.attached_session(),
             viewports: HashMap::new(),
-            appearance: hello.appearance.clone(),
-            status: hello.status.clone(),
-            capabilities: hello.capabilities.clone(),
-            prefix_armed: false,
-            command_prompt: None,
+            appearance: core.appearance().cloned().unwrap_or_default(),
+            status: core.status().clone(),
+            prefix_armed: core.prefix_armed(),
+            command_prompt: core.command_prompt().cloned(),
             command_output: None,
-            choose_tree: None,
-            choose_buffer: None,
-            display_panes: None,
+            choose_tree: core.choose_tree().cloned(),
+            choose_buffer: core.choose_buffer().cloned(),
+            display_panes: core.display_panes().cloned(),
             client_message: None,
             chrome: zz_client::ChromeKeymap::new(),
             sidebar: sidebar::State::default(),
@@ -93,19 +94,20 @@ impl Model {
         }
     }
 
-    pub fn reset_connection(&mut self, hello: &ServerHello) {
-        self.snapshot = MuxSnapshot::default();
-        self.attached_session = None;
+    /// Reseeds the caches from a freshly handshaken core and drops the
+    /// presentation state that belonged to the previous connection.
+    pub fn reset_connection(&mut self, core: &ClientCore) {
+        self.snapshot = Arc::clone(core.snapshot());
+        self.attached_session = core.attached_session();
         self.viewports.clear();
-        self.appearance = hello.appearance.clone();
-        self.status = hello.status.clone();
-        self.capabilities.clone_from(&hello.capabilities);
-        self.prefix_armed = false;
-        self.command_prompt = None;
+        self.appearance = core.appearance().cloned().unwrap_or_default();
+        self.status = core.status().clone();
+        self.prefix_armed = core.prefix_armed();
+        self.command_prompt = core.command_prompt().cloned();
         self.command_output = None;
-        self.choose_tree = None;
-        self.choose_buffer = None;
-        self.display_panes = None;
+        self.choose_tree = core.choose_tree().cloned();
+        self.choose_buffer = core.choose_buffer().cloned();
+        self.display_panes = core.display_panes().cloned();
         self.sidebar_edit = None;
         self.picker_pane = None;
         self.picker_selection = 0;
@@ -114,7 +116,7 @@ impl Model {
         self.clamp_sidebar();
     }
 
-    pub fn update_snapshot(&mut self, snapshot: MuxSnapshot) {
+    pub fn update_snapshot(&mut self, snapshot: Arc<MuxSnapshot>) {
         self.snapshot = snapshot;
         let active_picker = self.active_picker();
         if active_picker != self.picker_pane {
@@ -283,10 +285,10 @@ impl Model {
         (switch.endpoint != self.current_endpoint).then_some(switch)
     }
 
-    pub fn set_connected_host(&mut self, host: HostSwitch, hello: &ServerHello) {
+    pub fn set_connected_host(&mut self, host: HostSwitch, core: &ClientCore) {
         self.host_label = host.label;
         self.current_endpoint = host.endpoint;
-        self.reset_connection(hello);
+        self.reset_connection(core);
     }
 
     pub fn active_picker(&self) -> Option<PaneId> {

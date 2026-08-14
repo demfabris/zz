@@ -3,7 +3,7 @@ use std::{
     io::{self, Read as _},
     mem,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard,
         atomic::{AtomicBool, AtomicU8, Ordering},
         mpsc,
     },
@@ -11,13 +11,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+use zz_client::{ClientCore, CoreEvent, Outbound};
 use zz_daemon::{Endpoint, HostEntry, InteractiveClient};
 use zz_protocol::{
-    BrowserCommand, BrowserDescriptor, CommandInvocation, CommandResponse, Event, EventPayload,
-    GuiResponse, InputMessage, NEW_SESSION_ATTACH_CAPABILITY, PaneId, PaneKindSnapshot,
-    ProtocolMessage, ServerError, ServerHello,
+    BrowserCommand, BrowserDescriptor, CommandInvocation, CommandResponse, GuiResponse,
+    InputMessage, NEW_SESSION_ATTACH_CAPABILITY, PaneId, PaneKindSnapshot, ProtocolMessage,
+    ServerError, ServerHello,
 };
-use zz_terminal::{TerminalColorScheme, TerminalViewport, TerminalViewportPatch};
+use zz_terminal::{TerminalColorScheme, TerminalViewport};
 
 use crate::{
     browser::{BrowserFrameProvider, BrowserState, BrowserSurface, BrowserWait, SurfaceChanges},
@@ -26,16 +27,16 @@ use crate::{
     kitty::{
         FILE_PROBE_IMAGE_ID, FrameTransport, KittyImageAssembler, KittyImageData, PROBE_IMAGE_ID,
     },
-    render::{FrameDamage, Renderer},
+    render::{FrameDamage, Renderer, merge_damage},
     state::{HostSwitch, Model},
     terminal_event::{Event as TerminalEvent, EventParser},
     tty::{TerminalGuard, TerminalSize},
 };
 
 enum MainEvent {
-    Protocol {
+    Core {
         connection: u64,
-        message: Box<ProtocolMessage>,
+        event: Box<CoreEvent>,
     },
     Frames(u64),
     KittyImages(u64),
@@ -198,7 +199,7 @@ impl FrameInbox {
                 .entry(pane)
                 .and_modify(|pending| {
                     pending.viewport.clone_from(&viewport);
-                    pending.damage.merge(damage.clone());
+                    merge_damage(&mut pending.damage, damage.clone());
                 })
                 .or_insert(PendingFrame { viewport, damage });
             if state.wake_pending {
@@ -352,7 +353,7 @@ impl ProtocolReader {
 
 struct PreparedConnection {
     client: Arc<InteractiveClient>,
-    hello: ServerHello,
+    core: Arc<Mutex<ClientCore>>,
 }
 
 enum HostSwitchDecision<T> {
@@ -386,7 +387,7 @@ pub(crate) fn run(
     browser_provider: Option<Box<dyn BrowserFrameProvider>>,
 ) -> Result<(), String> {
     let size = TerminalSize::detect().map_err(|error| error.to_string())?;
-    let hello = initial.server_hello().clone();
+    let mut core = seeded_core(initial.server_hello().clone());
     let mut client = Arc::new(initial);
     let attach_target = target.unwrap_or_default().to_owned();
     client
@@ -396,7 +397,7 @@ pub(crate) fn run(
     let mut terminal = TerminalGuard::enter().map_err(|error| error.to_string())?;
     let pixel_mouse = terminal.pixel_mouse();
     let mut model = Model::new(
-        &hello,
+        &lock_core(&core),
         size,
         host_label,
         local_host_label,
@@ -417,6 +418,7 @@ pub(crate) fn run(
     let mut connection_id = 1;
     let mut protocol_reader = spawn_protocol_reader(
         Arc::clone(&client),
+        Arc::clone(&core),
         connection_id,
         events.clone(),
         Arc::clone(&frames),
@@ -573,6 +575,7 @@ pub(crate) fn run(
                                 let next_endpoint = host.endpoint.clone();
                                 let replacement = replace_connection(
                                     &mut client,
+                                    &mut core,
                                     &mut protocol_reader,
                                     &mut connection_id,
                                     connected,
@@ -581,30 +584,26 @@ pub(crate) fn run(
                                     &mut kitty_images,
                                     &kitty_gate,
                                 );
-                                match replacement {
-                                    Err(error) => {
-                                        model.client_message =
-                                            Some(format!("could not switch to {label}: {error}"));
-                                        renderer
-                                            .paint(&model, false)
-                                            .map_err(|paint| paint.to_string())?;
-                                    }
-                                    Ok(hello) => {
-                                        browser.reset_connection();
-                                        renderer.reset_kitty_images();
-                                        endpoint = next_endpoint;
-                                        model.set_connected_host(host, &hello);
-                                        model.client_message =
-                                            Some(format!("connected to {label}"));
-                                        attempt = AttachAttempt::Default;
-                                        creating_default = false;
-                                        remembered_session = None;
-                                        reconnect_available = true;
-                                        renderer.invalidate();
-                                        renderer
-                                            .paint(&model, true)
-                                            .map_err(|paint| paint.to_string())?;
-                                    }
+                                if let Err(error) = replacement {
+                                    model.client_message =
+                                        Some(format!("could not switch to {label}: {error}"));
+                                    renderer
+                                        .paint(&model, false)
+                                        .map_err(|paint| paint.to_string())?;
+                                } else {
+                                    browser.reset_connection();
+                                    renderer.reset_kitty_images();
+                                    endpoint = next_endpoint;
+                                    model.set_connected_host(host, &lock_core(&core));
+                                    model.client_message = Some(format!("connected to {label}"));
+                                    attempt = AttachAttempt::Default;
+                                    creating_default = false;
+                                    remembered_session = None;
+                                    reconnect_available = true;
+                                    renderer.invalidate();
+                                    renderer
+                                        .paint(&model, true)
+                                        .map_err(|paint| paint.to_string())?;
                                 }
                             }
                         }
@@ -613,31 +612,24 @@ pub(crate) fn run(
                 }
             }
             MainEvent::Terminal(Err(error)) => break Err(error),
-            MainEvent::Protocol {
-                connection,
-                message,
-            } => {
+            MainEvent::Core { connection, event } => {
                 if connection != connection_id {
                     continue;
                 }
-                if matches!(&*message, ProtocolMessage::Attached { .. }) {
-                    browser.reset_connection();
-                    renderer.reset_kitty_images();
+                match &*event {
+                    CoreEvent::Attached { .. } => {
+                        browser.reset_connection();
+                        renderer.reset_kitty_images();
+                        reconnect_available = true;
+                    }
+                    CoreEvent::PaneRemoved { pane } => renderer.remove_kitty_pane(*pane),
+                    _ => {}
                 }
-                if let ProtocolMessage::Event(Event {
-                    payload: EventPayload::PaneRemoved(pane),
-                    ..
-                }) = &*message
-                {
-                    renderer.remove_kitty_pane(*pane);
-                }
-                if matches!(*message, ProtocolMessage::Attached { .. }) {
-                    reconnect_available = true;
-                }
-                match handle_protocol(
+                match handle_core_event(
                     &mut model,
+                    &core,
                     &client,
-                    *message,
+                    *event,
                     &mut attempt,
                     &mut creating_default,
                     &mut browser,
@@ -690,8 +682,9 @@ pub(crate) fn run(
                     AttachAttempt::Default
                 };
                 creating_default = false;
-                let hello = replace_connection(
+                replace_connection(
                     &mut client,
+                    &mut core,
                     &mut protocol_reader,
                     &mut connection_id,
                     replacement,
@@ -702,7 +695,7 @@ pub(crate) fn run(
                 )?;
                 browser.reset_connection();
                 renderer.reset_kitty_images();
-                model.reset_connection(&hello);
+                model.reset_connection(&lock_core(&core));
                 model.client_message = Some("reconnected".to_owned());
                 renderer.invalidate();
                 renderer
@@ -750,12 +743,26 @@ fn prepare_connection(
     attach_target: String,
 ) -> Result<PreparedConnection, String> {
     let client = connect(endpoint)?;
-    let hello = client.server_hello().clone();
+    let core = seeded_core(client.server_hello().clone());
     let client = Arc::new(client);
     client
         .attach(attach_target)
         .map_err(|error| error.to_string())?;
-    Ok(PreparedConnection { client, hello })
+    Ok(PreparedConnection { client, core })
+}
+
+/// The handshake hello is consumed by [`InteractiveClient`] before the reader
+/// thread exists, so it is fed to the core by hand; draining the resulting
+/// events keeps the reader's first drain free of handshake leftovers.
+fn seeded_core(hello: ServerHello) -> Arc<Mutex<ClientCore>> {
+    let mut core = ClientCore::new();
+    core.handle_message(ProtocolMessage::ServerHello(hello));
+    while core.poll_event().is_some() {}
+    Arc::new(Mutex::new(core))
+}
+
+fn lock_core(core: &Mutex<ClientCore>) -> MutexGuard<'_, ClientCore> {
+    core.lock().expect("client core poisoned")
 }
 
 fn prepare_host_switch<T>(
@@ -772,6 +779,7 @@ fn prepare_host_switch<T>(
 
 fn replace_connection(
     client: &mut Arc<InteractiveClient>,
+    core: &mut Arc<Mutex<ClientCore>>,
     protocol_reader: &mut ProtocolReader,
     connection_id: &mut u64,
     connected: PreparedConnection,
@@ -779,12 +787,13 @@ fn replace_connection(
     frames: &mut Arc<FrameInbox>,
     kitty_images: &mut Arc<KittyImageInbox>,
     kitty_gate: &Arc<AtomicU8>,
-) -> Result<ServerHello, String> {
+) -> Result<(), String> {
     let next_connection_id = connection_id.wrapping_add(1).max(1);
     let next_frames = Arc::new(FrameInbox::default());
     let next_kitty_images = Arc::new(KittyImageInbox::default());
     let next_reader = spawn_protocol_reader(
         Arc::clone(&connected.client),
+        Arc::clone(&connected.core),
         next_connection_id,
         events.clone(),
         Arc::clone(&next_frames),
@@ -795,15 +804,20 @@ fn replace_connection(
     protocol_reader.cancel(client);
     kitty_images.clear();
     *client = connected.client;
+    *core = connected.core;
     *protocol_reader = next_reader;
     *connection_id = next_connection_id;
     *frames = next_frames;
     *kitty_images = next_kitty_images;
-    Ok(connected.hello)
+    Ok(())
 }
 
+/// Drives one connection's [`ClientCore`]: decoded messages in, wire requests
+/// straight back out, frames into the coalescing inbox, everything else to the
+/// main loop in stream order.
 fn spawn_protocol_reader(
     client: Arc<InteractiveClient>,
+    core: Arc<Mutex<ClientCore>>,
     connection: u64,
     events: mpsc::Sender<MainEvent>,
     frames: Arc<FrameInbox>,
@@ -815,9 +829,7 @@ fn spawn_protocol_reader(
     thread::Builder::new()
         .name("zz-tui-protocol".to_owned())
         .spawn(move || {
-            let mut retained = HashMap::<PaneId, TerminalViewport>::new();
-            let mut full_pending = HashSet::<PaneId>::new();
-            loop {
+            'reader: loop {
                 let message = match client.recv() {
                     Ok(message) => message,
                     Err(error) => {
@@ -833,166 +845,94 @@ fn spawn_protocol_reader(
                 if thread_cancelled.load(Ordering::Acquire) {
                     break;
                 }
-                match message {
-                    ProtocolMessage::Event(Event {
-                        payload: EventPayload::TerminalViewport { pane, viewport },
-                        ..
-                    }) => {
-                        full_pending.remove(&pane);
-                        retained.insert(pane, viewport.clone());
-                        frames.publish(pane, viewport, FrameDamage::All, connection, &events);
-                    }
-                    ProtocolMessage::Event(Event {
-                        payload: EventPayload::TerminalPatch { pane, patch },
-                        ..
-                    }) => {
-                        let damage = retained
-                            .get(&pane)
-                            .map_or(FrameDamage::All, |viewport| patch_damage(viewport, &patch));
-                        let applied = retained
-                            .get_mut(&pane)
-                            .is_some_and(|viewport| viewport.apply_patch(patch).is_ok());
-                        if applied {
-                            if let Some(viewport) = retained.get(&pane) {
-                                frames.publish(pane, viewport.clone(), damage, connection, &events);
-                            }
-                        } else if full_pending.insert(pane)
-                            && let Err(error) = client.request_full(pane)
-                        {
-                            full_pending.remove(&pane);
+                let forwarded = {
+                    let mut core = lock_core(&core);
+                    core.handle_message(message);
+                    while let Some(outbound) = core.poll_outbound() {
+                        let Outbound::RequestFull(pane) = outbound;
+                        if let Err(error) = client.request_full(pane) {
                             log::warn!("failed to request a full viewport for {pane}: {error}");
                         }
                     }
-                    ProtocolMessage::Attached { session, snapshot } => {
-                        full_pending.clear();
-                        retained.clear();
-                        frames.clear();
-                        kitty_images.clear();
-                        if events
-                            .send(MainEvent::Protocol {
-                                connection,
-                                message: Box::new(ProtocolMessage::Attached { session, snapshot }),
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                    ProtocolMessage::Event(Event {
-                        sequence,
-                        payload: EventPayload::Snapshot(snapshot),
-                    }) => {
-                        full_pending.clear();
-                        if events
-                            .send(MainEvent::Protocol {
-                                connection,
-                                message: Box::new(ProtocolMessage::Event(Event {
-                                    sequence,
-                                    payload: EventPayload::Snapshot(snapshot),
-                                })),
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                    ProtocolMessage::Event(Event {
-                        sequence,
-                        payload: EventPayload::PaneRemoved(pane),
-                    }) => {
-                        retained.remove(&pane);
-                        full_pending.remove(&pane);
-                        kitty_images.remove_pane(pane);
-                        if events
-                            .send(MainEvent::Protocol {
-                                connection,
-                                message: Box::new(ProtocolMessage::Event(Event {
-                                    sequence,
-                                    payload: EventPayload::PaneRemoved(pane),
-                                })),
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                    ProtocolMessage::Event(Event {
-                        payload:
-                            EventPayload::KittyImageBegin {
+                    let mut forwarded = Vec::new();
+                    while let Some(event) = core.poll_event() {
+                        match event {
+                            CoreEvent::ViewportChanged { pane, damage } => {
+                                if let Some(viewport) = core.viewport(pane) {
+                                    frames.publish(
+                                        pane,
+                                        viewport.clone(),
+                                        damage,
+                                        connection,
+                                        &events,
+                                    );
+                                }
+                            }
+                            CoreEvent::KittyImageBegin {
                                 pane,
                                 image_id,
                                 generation,
                                 width,
                                 height,
                                 total_bytes,
-                            },
-                        ..
-                    }) => {
-                        if kitty_gate.load(Ordering::Acquire) != KITTY_GATE_DISABLED {
-                            kitty_images.begin(
-                                pane,
-                                image_id,
-                                generation,
-                                width,
-                                height,
-                                total_bytes,
-                            );
-                        }
-                    }
-                    ProtocolMessage::Event(Event {
-                        payload:
-                            EventPayload::KittyImageChunk {
+                            } => {
+                                if kitty_gate.load(Ordering::Acquire) != KITTY_GATE_DISABLED {
+                                    kitty_images.begin(
+                                        pane,
+                                        image_id,
+                                        generation,
+                                        width,
+                                        height,
+                                        total_bytes,
+                                    );
+                                }
+                            }
+                            CoreEvent::KittyImageChunk {
                                 pane,
                                 image_id,
                                 generation,
                                 bytes,
-                            },
-                        ..
-                    }) => {
-                        if kitty_gate.load(Ordering::Acquire) != KITTY_GATE_DISABLED {
-                            kitty_images
-                                .push_chunk(pane, image_id, generation, bytes, connection, &events);
+                            } => {
+                                if kitty_gate.load(Ordering::Acquire) != KITTY_GATE_DISABLED {
+                                    kitty_images.push_chunk(
+                                        pane, image_id, generation, bytes, connection, &events,
+                                    );
+                                }
+                            }
+                            CoreEvent::KittyImagesRemoved { pane, image_ids } => {
+                                if kitty_gate.load(Ordering::Acquire) != KITTY_GATE_DISABLED {
+                                    kitty_images.remove(pane, image_ids, connection, &events);
+                                }
+                            }
+                            CoreEvent::Attached { session } => {
+                                frames.clear();
+                                kitty_images.clear();
+                                forwarded.push(CoreEvent::Attached { session });
+                            }
+                            CoreEvent::PaneRemoved { pane } => {
+                                kitty_images.remove_pane(pane);
+                                forwarded.push(CoreEvent::PaneRemoved { pane });
+                            }
+                            event => forwarded.push(event),
                         }
                     }
-                    ProtocolMessage::Event(Event {
-                        payload: EventPayload::KittyImagesRemoved { pane, image_ids },
-                        ..
-                    }) => {
-                        if kitty_gate.load(Ordering::Acquire) != KITTY_GATE_DISABLED {
-                            kitty_images.remove(pane, image_ids, connection, &events);
-                        }
-                    }
-                    message => {
-                        if events
-                            .send(MainEvent::Protocol {
-                                connection,
-                                message: Box::new(message),
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
+                    forwarded
+                };
+                for event in forwarded {
+                    if events
+                        .send(MainEvent::Core {
+                            connection,
+                            event: Box::new(event),
+                        })
+                        .is_err()
+                    {
+                        break 'reader;
                     }
                 }
             }
         })
         .map_err(|error| format!("failed to start protocol reader: {error}"))?;
     Ok(ProtocolReader { cancelled })
-}
-
-fn patch_damage(previous: &TerminalViewport, patch: &TerminalViewportPatch) -> FrameDamage {
-    if patch.scroll != 0
-        || patch.foreground != previous.foreground
-        || patch.background != previous.background
-    {
-        return FrameDamage::All;
-    }
-    let mut rows = patch.changed_rows.row_indices().to_vec();
-    rows.extend(previous.overlays.iter().map(|overlay| overlay.row));
-    rows.extend(patch.overlays.iter().map(|overlay| overlay.row));
-    rows.sort_unstable();
-    rows.dedup();
-    FrameDamage::Rows(rows)
 }
 
 fn spawn_terminal_reader(events: mpsc::Sender<MainEvent>) -> Result<(), String> {
@@ -1109,141 +1049,83 @@ fn spawn_signal_reader(events: mpsc::Sender<MainEvent>) -> Result<(), String> {
     Ok(())
 }
 
-fn handle_protocol(
+/// Refreshes the [`Model`] caches the event touched and decides how much of the
+/// screen that costs. State changes are notifications: the new value is read
+/// back from the core, side effects travel in the event itself.
+fn handle_core_event(
     model: &mut Model,
+    core: &Mutex<ClientCore>,
     client: &InteractiveClient,
-    message: ProtocolMessage,
+    event: CoreEvent,
     attempt: &mut AttachAttempt,
     creating_default: &mut bool,
     browser: &mut BrowserState,
 ) -> Result<ProtocolOutcome, String> {
-    match message {
-        ProtocolMessage::Attached { session, snapshot } => {
+    match event {
+        // `SnapshotChanged` is queued right behind this and does the repaint;
+        // adopting the snapshot here keeps the new session and the painted
+        // layout from ever disagreeing.
+        CoreEvent::Attached { session } => {
             model.attached_session = Some(session);
             model.viewports.clear();
             model.client_message = None;
-            model.update_snapshot(snapshot);
+            model.update_snapshot(Arc::clone(lock_core(core).snapshot()));
             *creating_default = false;
+            Ok(ProtocolOutcome::None)
+        }
+        CoreEvent::SnapshotChanged => {
+            model.update_snapshot(Arc::clone(lock_core(core).snapshot()));
             Ok(ProtocolOutcome::RepaintAll)
         }
-        ProtocolMessage::CommandResponse(CommandResponse::Error {
-            request_id: 0,
-            error: ServerError::MissingTarget(target),
-        }) => match attempt {
-            AttachAttempt::Remembered => {
-                *attempt = AttachAttempt::Default;
-                client.attach("").map_err(|error| error.to_string())?;
-                Ok(ProtocolOutcome::None)
-            }
-            AttachAttempt::Default if !*creating_default => {
-                *creating_default = true;
-                client.request_resync().map_err(|error| error.to_string())?;
-                client
-                    .execute(CommandInvocation::new("new-session", [] as [&str; 0]))
-                    .map_err(|error| error.to_string())?;
-                if !model
-                    .capabilities
-                    .iter()
-                    .any(|capability| capability == NEW_SESSION_ATTACH_CAPABILITY)
-                {
-                    client
-                        .execute(CommandInvocation::new("attach-session", [] as [&str; 0]))
-                        .map_err(|error| error.to_string())?;
-                }
-                Ok(ProtocolOutcome::Repaint)
-            }
-            AttachAttempt::Default => Ok(ProtocolOutcome::None),
-            AttachAttempt::Explicit => Err(format!("session `{target}` was not found")),
-        },
-        ProtocolMessage::CommandResponse(CommandResponse::Error {
-            request_id: 0,
-            error: ServerError::PaneExited(_) | ServerError::PaneNotAttached(_),
-        }) => Ok(ProtocolOutcome::None),
-        ProtocolMessage::CommandResponse(CommandResponse::Error { error, .. }) => {
-            model.client_message = Some(error.to_string());
-            Ok(ProtocolOutcome::Repaint)
-        }
-        ProtocolMessage::CommandResponse(CommandResponse::Success { .. }) => {
-            model.client_message = None;
-            Ok(ProtocolOutcome::Repaint)
-        }
-        ProtocolMessage::Event(event) => handle_event(model, client, browser, event),
-        _ => Ok(ProtocolOutcome::None),
-    }
-}
-
-fn handle_event(
-    model: &mut Model,
-    client: &InteractiveClient,
-    browser: &mut BrowserState,
-    event: Event,
-) -> Result<ProtocolOutcome, String> {
-    match event.payload {
-        EventPayload::Snapshot(snapshot) => {
-            model.update_snapshot(snapshot);
+        CoreEvent::AppearanceChanged => {
+            model.appearance = lock_core(core).appearance().cloned().unwrap_or_default();
             Ok(ProtocolOutcome::RepaintAll)
         }
-        EventPayload::AppearanceChanged { appearance, .. } => {
-            model.appearance = *appearance;
-            Ok(ProtocolOutcome::RepaintAll)
-        }
-        EventPayload::StatusChanged { status } => {
-            model.status = status;
+        CoreEvent::StatusChanged => {
+            model.status = lock_core(core).status().clone();
             Ok(ProtocolOutcome::Repaint)
         }
-        EventPayload::PrefixArmed { armed } => {
+        CoreEvent::PrefixArmed { armed } => {
             model.prefix_armed = armed;
             Ok(ProtocolOutcome::Repaint)
         }
-        EventPayload::CommandPrompt { state } => {
-            model.command_prompt = state;
+        CoreEvent::CommandPromptChanged => {
+            model.command_prompt = lock_core(core).command_prompt().cloned();
             Ok(ProtocolOutcome::Repaint)
         }
-        EventPayload::CommandOutput { pane, viewport } => {
-            model.command_output = viewport.map(|viewport| (pane, viewport));
+        CoreEvent::CommandOutputChanged => {
+            model.command_output = lock_core(core)
+                .command_output()
+                .map(|(pane, viewport)| (pane, viewport.clone()));
             Ok(ProtocolOutcome::RepaintAll)
         }
-        EventPayload::ChooseTree { state } => {
-            model.choose_tree = state;
+        CoreEvent::ChooseTreeChanged => {
+            model.choose_tree = lock_core(core).choose_tree().cloned();
             Ok(ProtocolOutcome::RepaintAll)
         }
-        EventPayload::ChooseTreeUpdate { search, selected } => {
-            if let Some(state) = &mut model.choose_tree {
-                state.search = search;
-                state.selected = selected;
-            }
+        CoreEvent::ChooseBufferChanged => {
+            model.choose_buffer = lock_core(core).choose_buffer().cloned();
             Ok(ProtocolOutcome::RepaintAll)
         }
-        EventPayload::ChooseBuffer { state } => {
-            model.choose_buffer = state;
+        CoreEvent::DisplayPanesChanged => {
+            model.display_panes = lock_core(core).display_panes().cloned();
             Ok(ProtocolOutcome::RepaintAll)
         }
-        EventPayload::ChooseBufferUpdate { search, selected } => {
-            if let Some(state) = &mut model.choose_buffer {
-                state.search = search;
-                state.selected = selected;
-            }
-            Ok(ProtocolOutcome::RepaintAll)
-        }
-        EventPayload::DisplayPanes { state } => {
-            model.display_panes = state;
-            Ok(ProtocolOutcome::RepaintAll)
-        }
-        EventPayload::ClientMessage { text, .. } => {
+        CoreEvent::ClientMessage { text, .. } => {
             model.client_message = Some(text);
             Ok(ProtocolOutcome::Repaint)
         }
-        EventPayload::PaneRemoved(pane) => {
+        CoreEvent::PaneRemoved { pane } => {
             model.viewports.remove(&pane);
             Ok(ProtocolOutcome::RepaintAll)
         }
-        EventPayload::Detached { session, by } if model.attached_session == Some(session) => Ok(
+        CoreEvent::Detached { session, by } if model.attached_session == Some(session) => Ok(
             ProtocolOutcome::Exit(
                 by.map_or_else(|| "detached".to_owned(), |by| format!("detached by {by}")),
             ),
         ),
-        EventPayload::ServerStopping => Ok(ProtocolOutcome::Exit("zz daemon stopped".to_owned())),
-        EventPayload::AgentCommand { request_id, .. } => {
+        CoreEvent::ServerStopping => Ok(ProtocolOutcome::Exit("zz daemon stopped".to_owned())),
+        CoreEvent::AgentCommand { request_id, .. } => {
             client
                 .send_gui_response(GuiResponse::Error {
                     request_id,
@@ -1252,7 +1134,7 @@ fn handle_event(
                 .map_err(|error| error.to_string())?;
             Ok(ProtocolOutcome::None)
         }
-        EventPayload::Clipboard { target, text, .. } => match clipboard::encode(target, &text) {
+        CoreEvent::Clipboard { target, text, .. } => match clipboard::encode(target, &text) {
             Osc52::Empty => Ok(ProtocolOutcome::None),
             Osc52::Encoded(output) => Ok(ProtocolOutcome::QueueControl(output)),
             Osc52::TooLarge => {
@@ -1260,14 +1142,14 @@ fn handle_event(
                 Ok(ProtocolOutcome::Repaint)
             }
         },
-        EventPayload::FocusSidebar => {
+        CoreEvent::FocusSidebar => {
             if model.focus_sidebar() {
                 Ok(ProtocolOutcome::RepaintAll)
             } else {
                 Ok(ProtocolOutcome::Repaint)
             }
         }
-        EventPayload::BrowserCommand {
+        CoreEvent::BrowserCommand {
             command: BrowserCommand::Screenshot { request_id, .. },
             ..
         } => {
@@ -1279,28 +1161,82 @@ fn handle_event(
                 .map_err(|error| error.to_string())?;
             Ok(ProtocolOutcome::None)
         }
-        EventPayload::BrowserCommand { pane, command } => {
+        CoreEvent::BrowserCommand { pane, command } => {
             browser.command(pane, &command);
             Ok(ProtocolOutcome::None)
         }
-        EventPayload::TerminalUiCommand { .. } => {
+        CoreEvent::TerminalUiCommand { .. } => {
             model.client_message = Some("terminal search is unsupported here".to_owned());
             Ok(ProtocolOutcome::Repaint)
         }
-        EventPayload::TerminalViewport { pane, viewport } => {
-            model.viewports.insert(pane, viewport);
+        CoreEvent::CommandResponse(response) => {
+            handle_command_response(model, core, client, response, attempt, creating_default)
+        }
+        CoreEvent::HelloReceived
+        | CoreEvent::Detached { .. }
+        | CoreEvent::ViewportChanged { .. }
+        | CoreEvent::MuxOptionsChanged
+        | CoreEvent::KeyTablesChanged
+        | CoreEvent::Bell { .. }
+        | CoreEvent::OpenUri { .. }
+        | CoreEvent::HistoryChunk { .. }
+        | CoreEvent::KittyImageBegin { .. }
+        | CoreEvent::KittyImageChunk { .. }
+        | CoreEvent::KittyImagesRemoved { .. }
+        | CoreEvent::Message(_) => Ok(ProtocolOutcome::None),
+    }
+}
+
+fn handle_command_response(
+    model: &mut Model,
+    core: &Mutex<ClientCore>,
+    client: &InteractiveClient,
+    response: CommandResponse,
+    attempt: &mut AttachAttempt,
+    creating_default: &mut bool,
+) -> Result<ProtocolOutcome, String> {
+    match response {
+        CommandResponse::Error {
+            request_id: 0,
+            error: ServerError::MissingTarget(target),
+        } => match attempt {
+            AttachAttempt::Remembered => {
+                *attempt = AttachAttempt::Default;
+                client.attach("").map_err(|error| error.to_string())?;
+                Ok(ProtocolOutcome::None)
+            }
+            AttachAttempt::Default if !*creating_default => {
+                *creating_default = true;
+                client.request_resync().map_err(|error| error.to_string())?;
+                client
+                    .execute(CommandInvocation::new("new-session", [] as [&str; 0]))
+                    .map_err(|error| error.to_string())?;
+                let attaches = lock_core(core)
+                    .capabilities()
+                    .iter()
+                    .any(|capability| capability == NEW_SESSION_ATTACH_CAPABILITY);
+                if !attaches {
+                    client
+                        .execute(CommandInvocation::new("attach-session", [] as [&str; 0]))
+                        .map_err(|error| error.to_string())?;
+                }
+                Ok(ProtocolOutcome::Repaint)
+            }
+            AttachAttempt::Default => Ok(ProtocolOutcome::None),
+            AttachAttempt::Explicit => Err(format!("session `{target}` was not found")),
+        },
+        CommandResponse::Error {
+            request_id: 0,
+            error: ServerError::PaneExited(_) | ServerError::PaneNotAttached(_),
+        } => Ok(ProtocolOutcome::None),
+        CommandResponse::Error { error, .. } => {
+            model.client_message = Some(error.to_string());
             Ok(ProtocolOutcome::Repaint)
         }
-        EventPayload::Detached { .. }
-        | EventPayload::TerminalPatch { .. }
-        | EventPayload::MuxOptionsChanged { .. }
-        | EventPayload::KeyTablesChanged { .. }
-        | EventPayload::OpenUri { .. }
-        | EventPayload::HistoryChunk { .. }
-        | EventPayload::Bell { .. }
-        | EventPayload::KittyImageBegin { .. }
-        | EventPayload::KittyImageChunk { .. }
-        | EventPayload::KittyImagesRemoved { .. } => Ok(ProtocolOutcome::None),
+        CommandResponse::Success { .. } => {
+            model.client_message = None;
+            Ok(ProtocolOutcome::Repaint)
+        }
     }
 }
 

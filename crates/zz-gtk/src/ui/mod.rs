@@ -5,7 +5,7 @@ mod overlay;
 pub mod palette;
 mod pane;
 mod panes;
-mod prefix;
+pub mod prefix;
 mod terminal;
 mod tray;
 mod window;

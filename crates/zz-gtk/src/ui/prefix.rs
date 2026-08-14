@@ -158,11 +158,14 @@ impl Interceptor {
     /// The claim covers exactly the prefix chord, and then every key until the
     /// daemon disarms. Super chords are left alone: the wire grammar cannot
     /// spell them, so no pane binding can ever want one.
+    /// Held keys deliberately do not widen the claim: a release pairs with its
+    /// press through the held set on its own, and letting a stranded entry
+    /// claim presses would send every later key to the pane.
     fn claims(&self, input: &KeyInput) -> bool {
         if input.modifiers.platform() {
             return false;
         }
-        if !self.claim.borrow().is_idle() || self.engine.prefix_armed() {
+        if self.engine.prefix_armed() {
             return true;
         }
         // `display-panes` owns the keyboard while its numbers are up, and the

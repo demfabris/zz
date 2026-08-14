@@ -418,8 +418,11 @@ fn scrollback_is_backfilled_on_request_and_answers_a_scrolled_window() {
         "the ring must start empty: no frame ever fills it"
     );
 
-    // One screen back is what a wheel notch would be reaching for.
+    // One screen back is what a wheel notch would be reaching for. Asking the
+    // ring where it stands is what anchors it, so a scroll always does that
+    // first; a request against an unanchored ring has nowhere to aim.
     let target = scrollbar.offset.saturating_sub(u32::from(ROWS));
+    engine.history_rows(pane, &engine.viewport(pane).expect("a viewport"));
     engine.request_history(pane, target);
     let retained = watch.poll(&engine, "the backfilled scrollback", |_| {
         let viewport = engine.viewport(pane)?;
@@ -464,6 +467,70 @@ fn scrollback_is_backfilled_on_request_and_answers_a_scrolled_window() {
         0,
         "output must retire the rows rather than leave them misaligned"
     );
+
+    daemon.shutdown();
+}
+
+/// The two surfaces the daemon opens on this client's behalf, driven by the
+/// same key path the widget uses. Neither is a chord the client resolves: the
+/// prefix table turns `?` into `list-keys`, and copy mode turns the search
+/// binding into a request that the client show a search prompt.
+#[test]
+fn the_daemon_opens_the_output_pager_and_asks_for_the_search_prompt() {
+    let daemon = Fixture::boot("surfaces", FIXTURE);
+    let engine = connect(&daemon);
+    let mut watch = Watch::default();
+
+    let pane = watch.poll(&engine, "the first pane", |_| first_terminal_pane(&engine));
+    engine.resize_terminal(pane, COLUMNS, ROWS, CELL_WIDTH_PX, CELL_HEIGHT_PX);
+    watch.poll(&engine, "the fixture banner", |_| {
+        contains(&engine, pane, "zz-gtk-ready")
+    });
+    assert!(engine.command_output().is_none());
+
+    engine.send_key(pane, control('b'), false);
+    engine.send_key(pane, typed('?'), false);
+    let (anchor, viewport) = watch.poll(&engine, "the command-output view", |_| {
+        engine.command_output()
+    });
+    assert_eq!(
+        anchor, pane,
+        "the pager is anchored to the pane it opened over"
+    );
+    assert!(
+        matches!(viewport.mode, zz_terminal::TerminalMode::View { .. }),
+        "the pager is a frozen view, which is what makes its keys copy-mode keys"
+    );
+
+    // The pager has geometry of its own, on a lane that carries no pane id.
+    engine.send(InputMessage::ResizeCommandOutput {
+        columns: COLUMNS,
+        rows: ROWS,
+        cell_width_px: CELL_WIDTH_PX,
+        cell_height_px: CELL_HEIGHT_PX,
+    });
+    watch.poll(&engine, "the key table the pager was opened for", |_| {
+        let (_, viewport) = engine.command_output()?;
+        (viewport.columns == COLUMNS
+            && viewport.rows == ROWS
+            && resolved_text(&viewport).contains("bind-key"))
+        .then_some(())
+    });
+
+    engine.send_key(pane, typed('q'), false);
+    watch.poll(&engine, "the pager to close", |_| {
+        engine.command_output().is_none().then_some(())
+    });
+
+    // `C-s` is the emacs copy-mode search binding, and `mode-keys` defaults to
+    // emacs; the vi table spells the same command `/`.
+    engine.send_key(pane, control('b'), false);
+    engine.send_key(pane, typed('['), false);
+    engine.send_key(pane, control('s'), false);
+    let opened = watch.poll(&engine, "the daemon's search prompt request", |watch| {
+        watch.search_prompt
+    });
+    assert_eq!(opened, pane);
 
     daemon.shutdown();
 }
@@ -697,6 +764,8 @@ struct Watch {
     seen: HashSet<&'static str>,
     frames: usize,
     widest_batch: usize,
+    /// The pane the daemon last asked to show a search prompt over.
+    search_prompt: Option<PaneId>,
     /// Leave the inbox alone, so a test can prove what a pending frame's pane
     /// removal does to it.
     hold_frames: bool,
@@ -751,6 +820,7 @@ impl Watch {
                 EngineEvent::Reconnected => {
                     self.seen.insert("reconnected");
                 }
+                EngineEvent::BeginSearch { pane, .. } => self.search_prompt = Some(pane),
                 EngineEvent::FramesReady if !self.hold_frames => {
                     let batch = engine.take_frames();
                     if !batch.is_empty() {
@@ -907,6 +977,18 @@ fn typed(character: char) -> KeyInput {
         key: KeyCode::Character(character),
         modifiers: Modifiers::default(),
         text: Some(character.to_string().into_boxed_str()),
+        unshifted_codepoint: Some(character),
+    }
+}
+
+/// The prefix chord. A control chord carries no typed text — that is what keeps
+/// it off a plain-character binding.
+fn control(character: char) -> KeyInput {
+    KeyInput {
+        action: KeyAction::Press,
+        key: KeyCode::Character(character),
+        modifiers: Modifiers::new(false, true, false, false),
+        text: None,
         unshifted_codepoint: Some(character),
     }
 }

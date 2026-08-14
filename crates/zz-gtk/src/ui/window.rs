@@ -36,7 +36,7 @@ const STYLE: &str = "
 .zz-placeholder { padding: 24px; }
 .zz-prompt { padding: 4px 8px; }
 .zz-chooser { padding: 12px; }
-.zz-badge { margin: 8px; padding: 2px 8px; border-radius: 6px; }
+.zz-badge { padding: 2px 8px; border-radius: 6px; }
 .zz-number { font-size: 2.4em; font-weight: bold; padding: 8px 20px; border-radius: 12px; }
 .zz-prefix {
     background-color: @accent_bg_color;
@@ -47,7 +47,6 @@ const STYLE: &str = "
 /* ── gtk-termux: terminal UX surfaces ── */
 .zz-search { padding: 4px 6px; }
 .zz-search entry.error { color: @error_color; }
-.zz-scrim { background-color: alpha(black, 0.22); }
 .zz-marks { margin: 8px; }
 .zz-picker { padding: 24px; }
 .zz-link label { padding: 2px 6px; font-size: 0.85em; }

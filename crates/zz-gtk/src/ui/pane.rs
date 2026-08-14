@@ -16,14 +16,15 @@ pub struct TerminalPane {
     view: TerminalView,
     badge: gtk::Label,
     number: gtk::Label,
-    marks: gtk::Box,
     sync: gtk::Label,
     unzoom: gtk::Button,
-    scrim: gtk::Box,
     search: Rc<SearchStrip>,
     shown: Cell<Indicator>,
     searching: Cell<Option<SearchStatus>>,
 }
+
+/// How much of itself a pane that is not focused keeps.
+const INACTIVE_OPACITY: f64 = 0.72;
 
 type Indicator = (TerminalMode, u32);
 
@@ -31,7 +32,6 @@ impl TerminalPane {
     pub fn new(view: TerminalView) -> Rc<Self> {
         let badge = gtk::Label::builder()
             .halign(gtk::Align::End)
-            .valign(gtk::Align::Start)
             .visible(false)
             .can_target(false)
             .build();
@@ -48,37 +48,38 @@ impl TerminalPane {
         number.add_css_class("osd");
         number.add_css_class("zz-number");
 
-        let sync = gtk::Label::builder().label("SYNC").visible(false).build();
+        let sync = gtk::Label::builder()
+            .label("SYNC")
+            .halign(gtk::Align::End)
+            .visible(false)
+            .build();
         sync.add_css_class("osd");
         sync.add_css_class("caption-heading");
         sync.add_css_class("zz-badge");
         let unzoom = gtk::Button::builder()
             .icon_name("view-restore-symbolic")
             .tooltip_text("Unzoom this pane")
+            .halign(gtk::Align::End)
             .visible(false)
             .has_frame(false)
             .build();
         unzoom.add_css_class("osd");
         unzoom.add_css_class("circular");
+        // One stack in the pane's top-right corner, the way the desktop stacks
+        // its tags — separate corners would fight over the same first row.
         let marks = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .halign(gtk::Align::Start)
+            .orientation(gtk::Orientation::Vertical)
+            .halign(gtk::Align::End)
             .valign(gtk::Align::Start)
-            .spacing(4)
+            .spacing(6)
             .build();
         marks.add_css_class("zz-marks");
+        marks.append(&badge);
         marks.append(&sync);
         marks.append(&unzoom);
 
-        // The scrim only shades; presses have to reach the terminal under it or
-        // clicking an inactive pane could never focus it.
-        let scrim = gtk::Box::builder().visible(false).can_target(false).build();
-        scrim.add_css_class("zz-scrim");
-
         let stack = gtk::Overlay::new();
         stack.set_child(Some(&view));
-        stack.add_overlay(&scrim);
-        stack.add_overlay(&badge);
         stack.add_overlay(&marks);
         stack.add_overlay(&number);
 
@@ -92,10 +93,8 @@ impl TerminalPane {
             view,
             badge,
             number,
-            marks,
             sync,
             unzoom,
-            scrim,
             search,
             shown: Cell::new((TerminalMode::Live, 0)),
             searching: Cell::new(None),
@@ -149,11 +148,15 @@ impl TerminalPane {
 
     /// Where this pane stands in its window: focused, zoomed over the others,
     /// and whether `synchronize-panes` is echoing input into it.
+    ///
+    /// An inactive terminal fades its own content rather than wearing a scrim,
+    /// the way the desktop does it: a translucent black panel over a terminal's
+    /// own black background shades nothing at all.
     pub fn set_marks(&self, active: bool, zoomed: bool, synchronized: bool) {
-        self.scrim.set_visible(!active);
+        self.view
+            .set_opacity(if active { 1.0 } else { INACTIVE_OPACITY });
         self.sync.set_visible(synchronized);
         self.unzoom.set_visible(zoomed);
-        self.marks.set_visible(synchronized || zoomed);
     }
 
     pub fn widget(&self) -> gtk::Widget {

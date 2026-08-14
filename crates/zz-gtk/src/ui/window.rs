@@ -21,6 +21,7 @@ use crate::{
         overlay::Overlays,
         pane::TerminalPane,
         panes::{PaneGrid, layout_panes},
+        sidebar::{Hooks, NewSessionPanel, Sidebar},
         terminal::TerminalView,
     },
 };
@@ -40,8 +41,25 @@ const STYLE: &str = "
     border-radius: 9999px;
     padding: 1px 8px;
 }
+.zz-sidebar-row { padding: 2px 4px; min-height: 28px; }
+.zz-sidebar-active label { font-weight: bold; }
+.zz-sidebar-disclosure, .zz-sidebar-action { min-width: 20px; min-height: 20px; padding: 0; }
+.zz-sidebar-grip { background-color: alpha(currentColor, 0.08); }
+.zz-bell { color: @warning_color; font-size: 0.7em; }
+.zz-newsession { padding: 24px; }
+.zz-newsession-section { margin-top: 12px; }
+.zz-newsession-keys { min-width: 92px; }
+.zz-kbd {
+    font-family: monospace;
+    font-size: 0.85em;
+    padding: 1px 6px;
+    border-radius: 6px;
+    background-color: alpha(currentColor, 0.1);
+}
 ";
 
+const WORKSPACE_PAGE: &str = "workspace";
+const EMPTY_PAGE: &str = "empty";
 const FONT_STEP_POINTS: f32 = 1.0;
 const MIN_FONT_POINTS: f32 = 1.0;
 const MAX_FONT_POINTS: f32 = 256.0;
@@ -79,10 +97,11 @@ pub struct Shell {
     title: adw::WindowTitle,
     toasts: adw::ToastOverlay,
     tabs: adw::TabView,
+    tab_bar: adw::TabBar,
+    workspace: gtk::Stack,
     prefix: gtk::Label,
-    status_bar: gtk::CenterBox,
-    status_left: gtk::Label,
-    status_right: gtk::Label,
+    sidebar: Rc<Sidebar>,
+    empty: Rc<NewSessionPanel>,
     overlays: Rc<Overlays>,
     grid: PaneGrid,
     widgets: RefCell<HashMap<PaneId, PaneWidget>>,
@@ -124,28 +143,22 @@ impl Shell {
                 .build(),
         ));
 
-        let status_left = gtk::Label::builder()
-            .xalign(0.0)
-            .ellipsize(gtk::pango::EllipsizeMode::End)
-            .build();
-        let status_right = gtk::Label::builder()
-            .xalign(1.0)
-            .ellipsize(gtk::pango::EllipsizeMode::End)
-            .build();
-        status_right.add_css_class("dim-label");
-        let status_bar = gtk::CenterBox::builder().visible(false).build();
-        status_bar.add_css_class("toolbar");
-        status_bar.add_css_class("zz-status");
-        status_bar.set_start_widget(Some(&status_left));
-        status_bar.set_end_widget(Some(&status_right));
+        let sidebar = Sidebar::build(Arc::clone(&engine));
+        header.pack_start(&sidebar.toggle_button());
+
+        let empty = NewSessionPanel::new(Arc::clone(&engine));
+        let workspace = gtk::Stack::new();
+        workspace.add_named(&tabs, Some(WORKSPACE_PAGE));
+        workspace.add_named(empty.widget(), Some(EMPTY_PAGE));
 
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.add_top_bar(&tab_bar);
-        toolbar.set_content(Some(&tabs));
+        toolbar.set_content(Some(&workspace));
 
+        sidebar.set_content(&toolbar);
         let toasts = adw::ToastOverlay::new();
-        toasts.set_child(Some(&toolbar));
+        toasts.set_child(Some(sidebar.widget()));
 
         let window = adw::ApplicationWindow::builder()
             .application(app)
@@ -158,7 +171,6 @@ impl Shell {
 
         let overlays = Overlays::new(Arc::clone(&engine), &window);
         toolbar.add_bottom_bar(overlays.prompt_bar());
-        toolbar.add_bottom_bar(&status_bar);
 
         let shell = Rc::new(Self {
             engine,
@@ -166,10 +178,11 @@ impl Shell {
             title,
             toasts,
             tabs,
+            tab_bar,
+            workspace,
             prefix,
-            status_bar,
-            status_left,
-            status_right,
+            sidebar,
+            empty,
             overlays,
             grid: PaneGrid::new(),
             widgets: RefCell::new(HashMap::new()),
@@ -182,10 +195,29 @@ impl Shell {
         });
         shell.install_actions();
         shell.connect_signals();
+        shell.connect_sidebar();
         shell.pump_events();
         shell.sync();
-        shell.refresh_status();
+        shell.sidebar.refresh_status();
         shell
+    }
+
+    /// The tree hands back the chrome it cannot answer, and asks for the
+    /// keyboard to go to the focused pane; both belong to the window.
+    fn connect_sidebar(self: &Rc<Self>) {
+        let target = Rc::downgrade(self);
+        let chrome: Rc<dyn Fn(ChromeAction)> = Rc::new(move |action| {
+            if let Some(shell) = target.upgrade() {
+                shell.perform(action);
+            }
+        });
+        let target = Rc::downgrade(self);
+        let focus_pane: Rc<dyn Fn()> = Rc::new(move || {
+            if let Some(shell) = target.upgrade() {
+                shell.refocus();
+            }
+        });
+        self.sidebar.connect(Hooks { chrome, focus_pane });
     }
 
     pub fn present(&self) {
@@ -335,6 +367,13 @@ impl Shell {
             let Some(shell) = target.upgrade() else {
                 return glib::Propagation::Proceed;
             };
+            // Rebuilding the strip closes its pages, and a close is a close as
+            // far as the tab view is concerned: without this the shell would
+            // ask the daemon to kill every window it was only re-listing.
+            if shell.syncing.get() {
+                tabs.close_page_finish(page, true);
+                return glib::Propagation::Stop;
+            }
             shell.request_close(page);
             tabs.close_page_finish(page, false);
             glib::Propagation::Stop
@@ -406,8 +445,9 @@ impl Shell {
     fn handle(self: &Rc<Self>, event: EngineEvent) {
         match event {
             EngineEvent::FramesReady => self.apply_frames(),
-            EngineEvent::StatusChanged => self.refresh_status(),
+            EngineEvent::StatusChanged => self.sidebar.refresh_status(),
             EngineEvent::SnapshotChanged | EngineEvent::Attached(_) => self.sync(),
+            EngineEvent::FocusSidebar => self.sidebar.focus(),
             EngineEvent::OverlaysChanged => self.refresh_overlays(),
             EngineEvent::AppearanceChanged => self.push_appearance(),
             EngineEvent::Clipboard { target, text } => self.write_clipboard(target, &text),
@@ -422,7 +462,16 @@ impl Shell {
             EngineEvent::Reconnected => {
                 self.toasts.add_toast(adw::Toast::new("Reconnected"));
             }
-            EngineEvent::Detached | EngineEvent::Disconnected(_) => {
+            // A session ending under the client is not the end of the client:
+            // the tree is still there to attach somewhere else, and a daemon
+            // with nothing left offers the new-session card. Quitting closes
+            // the window itself, before the daemon ever answers.
+            EngineEvent::Detached => {
+                self.overlays.dismiss();
+                self.toasts.add_toast(adw::Toast::new("Session ended"));
+                self.sync();
+            }
+            EngineEvent::Disconnected(_) => {
                 self.overlays.dismiss();
                 self.window.close();
             }
@@ -438,21 +487,11 @@ impl Shell {
         }
     }
 
-    /// The status line carries a clock and republishes about once a second, so
-    /// it may never reach the grid. An empty line is the daemon's default and
-    /// stays hidden rather than showing an empty bar.
-    fn refresh_status(&self) {
-        let status = self.engine.status();
-        self.status_bar.set_visible(!status.is_empty());
-        self.status_left.set_text(&status.left);
-        self.status_right.set_text(&status.right);
-    }
-
     fn refresh_overlays(self: &Rc<Self>) {
         self.prefix.set_visible(self.engine.prefix_armed());
         self.refresh_pane_numbers();
         self.overlays.sync();
-        if !self.overlays.is_open() {
+        if !self.overlays.is_open() && !self.sidebar.has_focus() {
             self.refocus();
         }
     }
@@ -487,14 +526,34 @@ impl Shell {
     }
 
     fn sync(self: &Rc<Self>) {
+        self.sidebar.sync();
         let Some(view) = self.engine.session_view() else {
+            self.sync_empty();
             return;
         };
+        self.workspace.set_visible_child_name(WORKSPACE_PAGE);
+        self.tab_bar.set_visible(true);
         self.title.set_title(&view.name);
         self.title.set_subtitle(&window_subtitle(&view));
         self.sync_panes(&view);
         self.sync_tabs(&view);
-        self.focus_active(view.active_pane);
+        if !self.sidebar.has_focus() {
+            self.focus_active(view.active_pane);
+        }
+    }
+
+    /// A daemon with no sessions left is not an error: the workspace becomes
+    /// the card that offers the one action available there. An attachment that
+    /// is merely in flight leaves the last workspace on screen.
+    fn sync_empty(&self) {
+        if !self.engine.snapshot().sessions.is_empty() {
+            return;
+        }
+        self.empty.refresh();
+        self.workspace.set_visible_child_name(EMPTY_PAGE);
+        self.tab_bar.set_visible(false);
+        self.title.set_title("zz");
+        self.title.set_subtitle("");
     }
 
     fn sync_tabs(&self, view: &SessionView) {
@@ -636,6 +695,7 @@ impl Shell {
                 self.font_offset.set(0.0);
                 self.push_appearance();
             }
+            ChromeAction::ToggleSidebar => self.sidebar.toggle(),
             other => log::debug!(
                 "zz-gtk has no handler for the {} chrome action",
                 other.name()

@@ -663,8 +663,6 @@ pub fn rename_prompt_command(target: TreeTarget, current: &str) -> Option<Comman
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use zz_protocol::{LayoutNode, SessionSnapshot, SplitId, WindowSnapshot};
 
     use super::*;

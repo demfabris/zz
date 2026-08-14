@@ -650,6 +650,19 @@ impl Engine {
         removed.link.close();
     }
 
+    /// Leave every session this client is attached to, on every host. A host
+    /// stays attached after the workspace moves off it, so quitting has more
+    /// than one connection to let go of politely.
+    pub fn detach_all(&self) {
+        for link in self.links() {
+            if let Some(client) = link.client()
+                && let Err(error) = client.detach()
+            {
+                log::warn!("zz-gtk failed to detach: {error}");
+            }
+        }
+    }
+
     /// Park a host because an ssh question was dismissed. Nothing dials it
     /// again until [`Self::reconnect_host`], which is what keeps a cancelled
     /// password prompt from reopening on the next rung of the ladder.

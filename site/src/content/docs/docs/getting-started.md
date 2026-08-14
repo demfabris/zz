@@ -304,7 +304,7 @@ mkdir -p ~/.config/zz && cp examples/config ~/.config/zz/config
 | Key | Default | Does |
 | --- | --- | --- |
 | `theme-mode` | `system` | `system`, `light`, or `dark` |
-| `chrome-preset` | unset | One of ten paired palettes: `tokyo-night`, `catppuccin`, `gruvbox`, `nord`, `breeze`, `adwaita`, `rose-pine`, `ayu`, `solarized`, `macos-classic` |
+| `chrome-preset` | unset | One of eleven paired palettes: `tokyo-night`, `catppuccin`, `gruvbox`, `nord`, `breeze`, `adwaita`, `ubuntu`, `rose-pine`, `ayu`, `solarized`, `macos-classic` |
 | `chrome-background` … `chrome-danger` | unset | Six palette roots. Everything else derives from them |
 | `pane-gaps` | `false` | The card treatment. Off pins the next three to zero |
 | `pane-margin` | `6` | Gap between panes and at the window edge, 0–32 |

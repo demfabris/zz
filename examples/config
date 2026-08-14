@@ -54,8 +54,8 @@ app-icon = automatic
 # Recolor the whole chrome with a built-in paired palette. Each preset ships a
 # light and a dark variant, so unlike the explicit chrome-* roots below it
 # composes with theme-mode = system. Unset means zz's own palette.
-# One of: tokyo-night, catppuccin, gruvbox, nord, breeze, adwaita, rose-pine,
-# ayu, solarized, macos-classic.
+# One of: tokyo-night, catppuccin, gruvbox, nord, breeze, adwaita, ubuntu,
+# rose-pine, ayu, solarized, macos-classic.
 #
 # chrome-preset = tokyo-night
 

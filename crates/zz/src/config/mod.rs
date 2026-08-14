@@ -1538,8 +1538,8 @@ fn apply_theme_key(
                     return None;
                 }
                 None => {
-                    "expected tokyo-night, catppuccin, gruvbox, nord, breeze, adwaita, rose-pine, \
-                     ayu, solarized or macos-classic"
+                    "expected tokyo-night, catppuccin, gruvbox, nord, breeze, adwaita, ubuntu, \
+                     rose-pine, ayu, solarized or macos-classic"
                         .to_owned()
                 }
             }

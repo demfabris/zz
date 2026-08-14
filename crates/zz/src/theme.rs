@@ -149,6 +149,7 @@ pub enum ChromePresetId {
     Nord,
     Breeze,
     Adwaita,
+    Ubuntu,
     RosePine,
     Ayu,
     Solarized,
@@ -156,13 +157,14 @@ pub enum ChromePresetId {
 }
 
 impl ChromePresetId {
-    pub(crate) const ALL: [Self; 10] = [
+    pub(crate) const ALL: [Self; 11] = [
         Self::TokyoNight,
         Self::Catppuccin,
         Self::Gruvbox,
         Self::Nord,
         Self::Breeze,
         Self::Adwaita,
+        Self::Ubuntu,
         Self::RosePine,
         Self::Ayu,
         Self::Solarized,
@@ -177,6 +179,7 @@ impl ChromePresetId {
             Self::Nord => "nord",
             Self::Breeze => "breeze",
             Self::Adwaita => "adwaita",
+            Self::Ubuntu => "ubuntu",
             Self::RosePine => "rose-pine",
             Self::Ayu => "ayu",
             Self::Solarized => "solarized",
@@ -217,9 +220,10 @@ impl ChromePreset {
 }
 
 /// The built-in presets, each carrying its family's own upstream light and dark
-/// palette: KDE `Breeze*.colors`, libadwaita CSS variables, `ayu-theme/ayu-colors`
-/// `ui.*`, Schoonover's Solarized base/accent table, `~/.files/colors`.
-pub const CHROME_PRESETS: [ChromePreset; 10] = [
+/// palette: KDE `Breeze*.colors`, libadwaita CSS variables, Yaru's GTK
+/// `@define-color` block, `ayu-theme/ayu-colors` `ui.*`, Schoonover's Solarized
+/// base/accent table, `~/.files/colors`.
+pub const CHROME_PRESETS: [ChromePreset; 11] = [
     ChromePreset {
         id: ChromePresetId::TokyoNight,
         name: "Tokyo Night",
@@ -278,6 +282,16 @@ pub const CHROME_PRESETS: [ChromePreset; 10] = [
         ],
         dark: [
             "#222226", "#ffffff", "#36363a", "#78e9ab", "#ffc252", "#ff938c",
+        ],
+    },
+    ChromePreset {
+        id: ChromePresetId::Ubuntu,
+        name: "Ubuntu",
+        light: [
+            "#fafafa", "#3d3d3d", "#cccccc", "#109b26", "#f99b11", "#c7162b",
+        ],
+        dark: [
+            "#2c2c2c", "#f7f7f7", "#4d4d4d", "#50c856", "#f99b11", "#ff5c5d",
         ],
     },
     ChromePreset {

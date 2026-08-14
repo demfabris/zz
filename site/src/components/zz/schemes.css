@@ -1,5 +1,5 @@
-/* zz chrome presets. The app ships ten paired light/dark palettes
-   (zz/src/theme.rs:222 CHROME_PRESETS); the demo is a dark capture, so only the
+/* zz chrome presets. The app ships eleven paired light/dark palettes
+   (zz/src/theme.rs:226 CHROME_PRESETS); the demo is a dark capture, so only the
    `dark` half of each pair is transcribed here.
 
    A preset only ever moves six roots — [background, foreground, border, success,
@@ -24,7 +24,7 @@
 .stage[data-scheme] {
 	/* Planes are background.raised(1..4): a 4% Oklab step toward the contrast
 	   pole per level (RAISE_STEP, color.rs:61). Every preset's dark background
-	   sits below l=0.5, so that pole is white for all ten. */
+	   sits below l=0.5, so that pole is white for all eleven. */
 	--zz-bg-1: color-mix(in oklab, var(--zz-bg) 96%, #fff);
 	--zz-bg-2: color-mix(in oklab, var(--zz-bg) 92%, #fff);
 	--zz-bg-3: color-mix(in oklab, var(--zz-bg) 88%, #fff);
@@ -72,7 +72,7 @@
 /* ── presets ─────────────────────────────────────────────────────────────── */
 /* Each block is theme.rs's `dark` array, in order. */
 
-/* theme.rs:229-231 */
+/* theme.rs:233-235 */
 .stage[data-scheme='tokyo-night'] {
 	--zz-bg: #1a1b26;
 	--zz-fg: #c0caf5;
@@ -82,7 +82,7 @@
 	--zz-danger: #f7768e;
 }
 
-/* theme.rs:239-241 */
+/* theme.rs:243-245 */
 .stage[data-scheme='catppuccin'] {
 	--zz-bg: #1e1e2e;
 	--zz-fg: #cdd6f4;
@@ -92,7 +92,7 @@
 	--zz-danger: #f38ba8;
 }
 
-/* theme.rs:249-251 */
+/* theme.rs:253-255 */
 .stage[data-scheme='gruvbox'] {
 	--zz-bg: #282828;
 	--zz-fg: #ebdbb2;
@@ -102,7 +102,7 @@
 	--zz-danger: #fb4934;
 }
 
-/* theme.rs:259-261 */
+/* theme.rs:263-265 */
 .stage[data-scheme='nord'] {
 	--zz-bg: #2e3440;
 	--zz-fg: #eceff4;
@@ -112,7 +112,7 @@
 	--zz-danger: #bf616a;
 }
 
-/* theme.rs:269-271 */
+/* theme.rs:273-275 */
 .stage[data-scheme='breeze'] {
 	--zz-bg: #202326;
 	--zz-fg: #fcfcfc;
@@ -122,7 +122,7 @@
 	--zz-danger: #da4453;
 }
 
-/* theme.rs:279-281 */
+/* theme.rs:283-285 */
 .stage[data-scheme='adwaita'] {
 	--zz-bg: #222226;
 	--zz-fg: #ffffff;
@@ -132,7 +132,17 @@
 	--zz-danger: #ff938c;
 }
 
-/* theme.rs:289-291 */
+/* theme.rs:293-295 */
+.stage[data-scheme='ubuntu'] {
+	--zz-bg: #2c2c2c;
+	--zz-fg: #f7f7f7;
+	--zz-border: #4d4d4d;
+	--zz-success: #50c856;
+	--zz-warning: #f99b11;
+	--zz-danger: #ff5c5d;
+}
+
+/* theme.rs:303-305 */
 .stage[data-scheme='rose-pine'] {
 	--zz-bg: #191724;
 	--zz-fg: #e0def4;
@@ -142,7 +152,7 @@
 	--zz-danger: #eb6f92;
 }
 
-/* theme.rs:299-301 */
+/* theme.rs:313-315 */
 .stage[data-scheme='ayu'] {
 	--zz-bg: #0d1017;
 	--zz-fg: #bfbdb6;
@@ -152,7 +162,7 @@
 	--zz-danger: #d95757;
 }
 
-/* theme.rs:309-311 */
+/* theme.rs:323-325 */
 .stage[data-scheme='solarized'] {
 	--zz-bg: #002b36;
 	--zz-fg: #93a1a1;
@@ -162,7 +172,7 @@
 	--zz-danger: #dc322f;
 }
 
-/* theme.rs:319-321 */
+/* theme.rs:333-335 */
 .stage[data-scheme='macos-classic'] {
 	--zz-bg: #131313;
 	--zz-fg: #caccca;

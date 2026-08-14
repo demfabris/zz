@@ -103,7 +103,7 @@ engine), one browser-local hotkey, and six chrome colors.**
 | `browser-egress` | `true` | `true` or `false` | Whether a Browser pane opened while attached to a remote ssh host routes its traffic through that host; panes already open keep the route they were created with |
 | `theme-mode` | `system` | `system`, `light`, `dark` | Follow the OS appearance, or pin one mode |
 | `app-icon` | `automatic` | `automatic`, `light`, `dark` | Which render of `assets/zz.icon` the macOS Dock tile wears; `automatic` defers to the bundle's compiled icon when packaged (so tinted/clear dock styles work) and follows the OS appearance in bare builds, independently of `theme-mode` |
-| `chrome-preset` | unset | `tokyo-night`, `catppuccin`, `gruvbox`, `nord`, `breeze`, `adwaita`, `rose-pine`, `ayu`, `solarized`, `macos-classic` | Select a paired light/dark chrome family; the active variant follows the effective `theme-mode` |
+| `chrome-preset` | unset | `tokyo-night`, `catppuccin`, `gruvbox`, `nord`, `breeze`, `adwaita`, `ubuntu`, `rose-pine`, `ayu`, `solarized`, `macos-classic` | Select a paired light/dark chrome family; the active variant follows the effective `theme-mode` |
 | `chrome-background` | unset | `#rgb`, `#rrggbb`, `#rrggbbaa` | zz-ui's `ThemeColor::background` . the window's base plane |
 | `chrome-foreground` | unset | same | `ThemeColor::foreground` . default text, and the source of muted text, rings, links |
 | `chrome-border` | unset | same | `ThemeColor::border` . every edge |

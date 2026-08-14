@@ -138,19 +138,27 @@ pub fn write_editor_source(path: &Path, source: &str, max_bytes: usize) -> io::R
 /// file has no continuation syntax, so an embedded newline would silently
 /// become a second, malformed entry.
 pub fn set_key(key: &str, value: &str) -> io::Result<()> {
+    set_key_at(&path_for_write()?, key, value)
+}
+
+/// Reset one key to its built-in default by deleting its line outright —
+/// key, value and trailing comment. Every other byte of the file survives.
+pub fn remove_key(key: &str) -> io::Result<()> {
+    remove_key_at(&path_for_write()?, key)
+}
+
+pub fn set_key_at(path: &Path, key: &str, value: &str) -> io::Result<()> {
     if value.bytes().any(|byte| matches!(byte, b'\r' | b'\n')) {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             "configuration values must fit on one line",
         ));
     }
-    write_edit_at(&path_for_write()?, key, Some(value)).map(drop)
+    write_edit_at(path, key, Some(value)).map(drop)
 }
 
-/// Reset one key to its built-in default by deleting its line outright —
-/// key, value and trailing comment. Every other byte of the file survives.
-pub fn remove_key(key: &str) -> io::Result<()> {
-    write_edit_at(&path_for_write()?, key, None).map(drop)
+pub fn remove_key_at(path: &Path, key: &str) -> io::Result<()> {
+    write_edit_at(path, key, None).map(drop)
 }
 
 fn write_edit_at(path: &Path, key: &str, value: Option<&str>) -> io::Result<bool> {

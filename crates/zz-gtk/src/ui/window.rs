@@ -24,9 +24,11 @@ use crate::{
         pane::TerminalPane,
         panes::{PaneGrid, layout_panes},
         picker::PanePicker,
+        prefix,
         settings::SettingsRoute,
         sidebar::{Hooks, NewSessionPanel, Sidebar},
         terminal::TerminalView,
+        tray,
     },
 };
 
@@ -176,7 +178,10 @@ impl Shell {
         let settings = SettingsRoute::new(Arc::clone(&engine));
         settings.install(&toolbar, &tab_bar, &tabs);
 
-        sidebar.set_content(&toolbar);
+        let floating = gtk::Overlay::new();
+        floating.set_child(Some(&toolbar));
+        sidebar.set_content(&floating);
+
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(sidebar.widget()));
 
@@ -190,7 +195,14 @@ impl Shell {
             .build();
 
         let overlays = Overlays::new(Arc::clone(&engine), &window);
-        toolbar.add_bottom_bar(overlays.prompt_bar());
+
+        // >>> palette agent: the prefix claim has to be installed before any
+        // other window controller so no widget can swallow the chord, and the
+        // tray's close hook before the shell's so hiding wins over detaching.
+        prefix::install(&window, Arc::clone(&engine));
+        tray::install(&window, Arc::clone(&engine));
+        floating.add_overlay(overlays.palette());
+        // <<< palette agent
 
         let shell = Rc::new(Self {
             engine,

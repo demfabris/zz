@@ -58,7 +58,10 @@ daemon plus its terminal sessions running. Rebuild and relaunch are native, so t
 client-side UI and Chromium renderer state reset; nothing hot-reloads in process.
 
 `just build linux` / `just build mac` produce the release bundle (`cargo xtask bundle-cef --release`)
-and must run on the target platform.
+and must run on the target platform. On Linux `bundle-cef` unlinks the bundle's executable before
+writing the new one: the daemon outlives the app and normally runs straight out of `dist/zz`, and
+copying over a running executable fails with `ETXTBSY`. Dropping the directory entry instead leaves
+that daemon on the inode it started from, so it keeps serving the previous build until restarted.
 
 macOS local bundles auto-select a sole valid Apple Development identity. This keeps TCC privacy
 grants for protected app data attached to `dev.zz.app` across rebuilds. With no unique candidate,

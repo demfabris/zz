@@ -274,6 +274,10 @@ fn bundle_cef(args: &[String]) -> Result<(), Box<dyn Error>> {
             .release_flag()
             .ok_or("named Cargo profiles are currently supported only for macOS CEF bundles")?;
         let target_path = build_linux_binary(release, options.features.as_deref())?;
+        let previous = options.output.join(APP_NAME);
+        if previous.exists() {
+            fs::remove_file(&previous)?;
+        }
         cef::build_util::linux::bundle(&options.output, &target_path, APP_NAME)?
     };
 

@@ -1,6 +1,7 @@
 # Update Log
 
 ## 2026-08-13
+* **Fix**: `cargo xtask bundle-cef` now unlinks the Linux bundle's executable before writing the new one. The daemon outlives the app and runs out of `dist/zz`, so every `just build linux` (and the packaging recipes built on it) failed with `ETXTBSY` while a session was alive; the running daemon now keeps the inode it started from and serves the previous build until restarted.
 * **Update**: Added the `ubuntu` chrome preset, an eleventh paired light/dark family taken from Yaru 26.04's GTK `@define-color` block (`#fafafa`/`#3d3d3d`/`#cccccc` light, `#2c2c2c`/`#f7f7f7`/`#4d4d4d` dark) with Vanilla's status trio; the dark success and danger are lifted in Oklab because Yaru declares one triplet for both modes and the crimson `#c7162b` falls under 3:1 on the dark plane.
 
 ## 2026-08-12

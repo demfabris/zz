@@ -9,7 +9,7 @@ use std::{
 };
 
 use adw::prelude::*;
-use gtk::{gdk, gio, glib};
+use gtk::{gdk, gio, glib, graphene};
 use zz_client::{ChromeAction, ChromeKeymap, SIDEBAR_TABLE, UI_TABLE};
 use zz_protocol::{Axis, CommandInvocation};
 use zz_terminal::{KeyAction, KeyInput};
@@ -48,6 +48,7 @@ pub struct Sidebar {
     host: String,
     split: adw::OverlaySplitView,
     root: gtk::Box,
+    scroller: gtk::ScrolledWindow,
     list: gtk::ListBox,
     menu: gtk::PopoverMenu,
     status_bar: gtk::Box,
@@ -114,14 +115,18 @@ impl Sidebar {
             .max_sidebar_width(DEFAULT_WIDTH)
             .build();
 
+        // The menu hangs off the scroller rather than the list: a popover
+        // parented to a `gtk::ListBox` is a child the list cannot remove, and
+        // `remove_all` spins on it forever.
         let menu = gtk::PopoverMenu::builder().has_arrow(false).build();
-        menu.set_parent(&list);
+        menu.set_parent(&scroller);
 
         let sidebar = Rc::new(Self {
             engine,
             host: host_name(),
             split,
             root,
+            scroller,
             list,
             menu,
             status_bar,
@@ -413,7 +418,7 @@ impl Sidebar {
         grip.add_controller(drag);
 
         let menu = self.menu.clone();
-        self.list.connect_destroy(move |_| menu.unparent());
+        self.scroller.connect_destroy(move |_| menu.unparent());
     }
 
     /// Chrome resolved from the `sidebar` table. Anything the tree does not own
@@ -668,8 +673,16 @@ impl Sidebar {
         self.select(Some(node));
         let menu = row_menu(node, &self.rows.borrow());
         self.menu.set_menu_model(Some(&menu));
-        self.menu
-            .set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+        let point = self
+            .list
+            .compute_point(&self.scroller, &graphene::Point::new(x as f32, y as f32))
+            .unwrap_or_else(|| graphene::Point::new(x as f32, y as f32));
+        self.menu.set_pointing_to(Some(&gdk::Rectangle::new(
+            point.x() as i32,
+            point.y() as i32,
+            1,
+            1,
+        )));
         self.menu.popup();
     }
 

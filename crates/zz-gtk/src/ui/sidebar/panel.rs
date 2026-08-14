@@ -92,6 +92,7 @@ impl NewSessionPanel {
         card.add_css_class("zz-newsession");
         card.set_halign(gtk::Align::Center);
         card.set_valign(gtk::Align::Center);
+        card.set_vexpand(true);
 
         let action = gtk::Button::builder()
             .child(&hint_row(&NEW_SESSION, None, Some(NEW_SESSION.key), true))

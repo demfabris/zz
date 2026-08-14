@@ -617,10 +617,7 @@ impl OutboundMailbox {
             return false;
         }
         if let Some(pane) = removed_pane {
-            if let Some(frame) = state.terminals.remove(&pane) {
-                state.queued_bytes = state.queued_bytes.saturating_sub(frame.encoded.len());
-                recycle_outbound_frame(&mut state, frame.encoded);
-            }
+            remove_pending_terminal(&mut state, pane);
             state.delivered_terminals.remove(&pane);
             state.delivered_images.remove(&pane);
             state.delivered_pasted_images.remove(&pane);
@@ -992,15 +989,19 @@ impl OutboundMailbox {
         self.ready.notify_all();
     }
 
+    #[cfg(test)]
     fn cancel_terminal(&self, pane: PaneId) {
         let mut state = self.state.lock();
-        if let Some(frame) = state.terminals.remove(&pane) {
-            state.queued_bytes = state.queued_bytes.saturating_sub(frame.encoded.len());
-            recycle_outbound_frame(&mut state, frame.encoded);
-        }
+        remove_pending_terminal(&mut state, pane);
         state.delivered_terminals.remove(&pane);
         state.delivered_images.remove(&pane);
         state.delivered_pasted_images.remove(&pane);
+    }
+
+    fn suspend_terminal(&self, pane: PaneId) {
+        let mut state = self.state.lock();
+        remove_pending_terminal(&mut state, pane);
+        state.delivered_terminals.remove(&pane);
     }
 
     fn reset_kitty_images(&self) {
@@ -1063,6 +1064,14 @@ fn recycle_outbound_frame(state: &mut OutboundState, mut frame: Vec<u8>) {
     frame.clear();
     state.recycled_capacity += capacity;
     state.recycled_frames.push(frame);
+}
+
+fn remove_pending_terminal(state: &mut OutboundState, pane: PaneId) {
+    if let Some(pending) = state.terminals.remove(&pane) {
+        state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
+        recycle_outbound_frame(state, pending.encoded);
+    }
+    state.terminal_order.retain(|queued| *queued != pane);
 }
 
 fn reserve_outbound_bytes(state: &mut OutboundState, incoming: usize, replaced: usize) -> bool {
@@ -5948,7 +5957,7 @@ impl Shared {
 
         for (subscriber, removed, newly_visible) in changes {
             for pane in removed {
-                subscriber.cancel_terminal(pane);
+                subscriber.suspend_terminal(pane);
             }
             for (pane, terminal, viewport) in newly_visible {
                 self.enqueue_kitty_images_for_viewport(&subscriber, pane, &terminal, &viewport);
@@ -12824,6 +12833,17 @@ bind - split-window -v -c "#{pane_current_path}"
             KittyImageEnqueue::Queued
         );
         assert_eq!(take_reliable_messages(&mailbox).len(), 2);
+
+        mailbox.suspend_terminal(pane);
+        assert_eq!(
+            mailbox.state.lock().delivered_images[&pane][&image_id],
+            generation
+        );
+        assert_eq!(
+            mailbox.enqueue_kitty_image(pane, image_id, generation, &frames),
+            KittyImageEnqueue::AlreadyDelivered
+        );
+        assert!(mailbox.state.lock().reliable.is_empty());
 
         mailbox.cancel_terminal(pane);
         assert!(!mailbox.state.lock().delivered_images.contains_key(&pane));

@@ -2,7 +2,7 @@
 type: Design Plan
 title: Client core & contract - one brain, every face
 description: Proposed plan to finish detaching zz's client from gpui - consolidate one exportable contract (command catalog + key grammar + key resolver) in zz-protocol, publish live key tables over the wire, extract a C-shaped sans-IO zz-client brain crate hardened by deterministic simulation, and export it over FFI so GTK, Qt, and Swift clients become thin skins.
-status: Rungs 1-3 landed 2026-08-14 (contract consolidation into zz-protocol; full key tables published over protocol v52 with PrefixBinding deleted; choose-tree/choose-buffer daemon tables with both client chooser keymaps deleted); rungs 4-6 proposed
+status: Rungs 1-6 landed 2026-08-14 - contract consolidated in zz-protocol (key tables, engine, fold, resolve_input, catalog); full key tables published over v52; chooser keymaps daemon-side; zz-client sans-IO core gated by a daemon-backed convergence simulator; ChromeKeymap engine with zz-tui as first consumer; zz-client-ffi C ABI proven by a from-scratch C smoke client. Remaining follow-ups - port zz-tui/MuxClient reduction onto ClientCore, convert desktop gpui KeyBinding sites to chrome actions with zz/config overrides, bench/run.sh gate before the desktop port ships
 tags:
 - client
 - ffi

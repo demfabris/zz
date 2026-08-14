@@ -1,0 +1,27 @@
+[package]
+name = "zz-client-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "C ABI over the zz-client core so GTK, Qt, and Swift skins link one shared brain"
+publish = false
+
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[dependencies]
+rustix.workspace = true
+zz-client = { path = "../zz-client" }
+zz-daemon = { path = "../zz-daemon", default-features = false }
+zz-protocol = { path = "../zz-protocol" }
+zz-terminal = { path = "../zz-terminal", default-features = false }
+
+[dev-dependencies]
+zz-daemon = { path = "../zz-daemon" }
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

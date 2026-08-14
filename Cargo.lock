@@ -10816,6 +10816,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "zz-client-ffi"
+version = "0.2.0-beta.1"
+dependencies = [
+ "rustix 1.1.4",
+ "zz-client",
+ "zz-daemon",
+ "zz-protocol",
+ "zz-terminal",
+]
+
+[[package]]
 name = "zz-daemon"
 version = "0.2.0-beta.1"
 dependencies = [

@@ -25,7 +25,7 @@ use crate::{
         panes::{PaneGrid, layout_panes},
         picker::PanePicker,
         prefix,
-        settings::SettingsRoute,
+        settings::Settings,
         sidebar::{Hooks, NewSessionPanel, Sidebar},
         ssh_prompt,
         terminal::TerminalView,
@@ -118,7 +118,7 @@ pub struct Shell {
     sidebar: Rc<Sidebar>,
     empty: Rc<NewSessionPanel>,
     overlays: Rc<Overlays>,
-    settings: Rc<SettingsRoute>,
+    settings: Rc<Settings>,
     grid: PaneGrid,
     widgets: RefCell<HashMap<PaneId, PaneWidget>>,
     focused_pane: Cell<Option<PaneId>>,
@@ -163,8 +163,7 @@ impl Shell {
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&workspace));
 
-        let settings = SettingsRoute::new(Arc::clone(&engine));
-        settings.install(&toolbar, &workspace);
+        let settings = Settings::new(Arc::clone(&engine));
 
         let floating = gtk::Overlay::new();
         floating.set_child(Some(&toolbar));
@@ -283,6 +282,20 @@ impl Shell {
             });
         });
         self.window.add_action(&focus);
+
+        // The deep link a menu item, another surface or a script uses to open
+        // preferences on one page, the way a desktop settings app does.
+        let page = gio::SimpleAction::new("settings-page", Some(glib::VariantTy::STRING));
+        let target = Rc::downgrade(self);
+        page.connect_activate(move |_, parameter| {
+            let (Some(shell), Some(name)) =
+                (target.upgrade(), parameter.and_then(glib::Variant::str))
+            else {
+                return;
+            };
+            shell.settings.open_at(&shell.window, name);
+        });
+        self.window.add_action(&page);
     }
 
     fn verbs() -> [(&'static str, fn(&Rc<Self>)); 11] {
@@ -329,7 +342,7 @@ impl Shell {
             }),
             ("detach", |shell| shell.detach()),
             ("about", |shell| shell.present_about()),
-            ("settings", |shell| shell.settings.toggle()),
+            ("settings", |shell| shell.settings.toggle(&shell.window)),
         ]
     }
 
@@ -386,6 +399,15 @@ impl Shell {
     }
 
     fn connect_signals(self: &Rc<Self>) {
+        // The one-time import offer needs a window to sit over, so it waits for
+        // the tree to be mapped rather than firing during construction.
+        let target = Rc::downgrade(self);
+        self.window.connect_map(move |window| {
+            if let Some(shell) = target.upgrade() {
+                shell.settings.prompt_import(window);
+            }
+        });
+
         let keyboard = gtk::EventControllerKey::new();
         keyboard.set_propagation_phase(gtk::PropagationPhase::Capture);
         let target = Rc::downgrade(self);
@@ -753,7 +775,7 @@ impl Shell {
     fn perform(&self, action: ChromeAction) {
         match action {
             ChromeAction::Detach => self.detach(),
-            ChromeAction::OpenSettings => self.settings.toggle(),
+            ChromeAction::OpenSettings => self.settings.toggle(&self.window),
             ChromeAction::TerminalFontIncrease => self.adjust_font(FONT_STEP_POINTS),
             ChromeAction::TerminalFontDecrease => self.adjust_font(-FONT_STEP_POINTS),
             zoom @ (ChromeAction::UiZoomIn

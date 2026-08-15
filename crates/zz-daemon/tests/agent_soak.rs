@@ -15,7 +15,7 @@ use std::{
     io::BufReader,
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -108,7 +108,7 @@ impl Soak {
 
         let adapter = format!(
             "{} -v items={items} -v text_bytes={text_bytes} -v blob_bytes={blob_bytes} -f {}",
-            awk_path().display(),
+            awk_invocation(),
             script.display(),
         );
         for command in [
@@ -376,6 +376,33 @@ fn awk_path() -> PathBuf {
         .chain(path.split(':').map(|entry| Path::new(entry).join("awk")))
         .find(|candidate| candidate.is_file())
         .expect("the soak adapter needs awk")
+}
+
+/// How to run that awk so it answers a request the moment one arrives.
+///
+/// mawk — Debian's and Ubuntu's `/usr/bin/awk` — fills its input buffer before
+/// it splits records, so a peer whose stdin stays open, which is every ACP
+/// connection, leaves a request sitting unread in the pipe until EOF. The
+/// adapter would never answer `initialize` and the daemon would fail the pane
+/// on the initialize timeout. `-W interactive` binds its reads to lines. The
+/// BSD awk that macOS ships and gawk are line-bound already, and neither
+/// reports itself as mawk here.
+fn awk_invocation() -> String {
+    let awk = awk_path();
+    let is_mawk = Command::new(&awk)
+        .args(["-W", "version"])
+        .stdin(Stdio::null())
+        .output()
+        .is_ok_and(|version| {
+            [version.stdout, version.stderr]
+                .iter()
+                .any(|stream| String::from_utf8_lossy(stream).starts_with("mawk"))
+        });
+    if is_mawk {
+        format!("{} -W interactive", awk.display())
+    } else {
+        awk.display().to_string()
+    }
 }
 
 /// Cumulative CPU time of this process, which hosts both the daemon and the

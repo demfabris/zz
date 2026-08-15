@@ -67,6 +67,16 @@ pub(crate) const MAX_CONFIG_OVERRIDE_KEY_BYTES: usize = 128;
 pub(crate) const MAX_CONFIG_OVERRIDE_VALUE_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_MUX_OPTION_VALUE_BYTES: usize = 64 * 1024;
 
+/// The adapter commands an agent pane spawns, version-pinned on purpose:
+/// `@latest` costs a registry round trip on every pane spawn, so bumps are
+/// deliberate edits.
+pub const DEFAULT_AGENT_COMMAND: &str = "npx -y @agentclientprotocol/codex-acp@1.1.7";
+pub const DEFAULT_AGENT_CLAUDE_CODE_COMMAND: &str =
+    "npx -y @agentclientprotocol/claude-agent-acp@0.63.0";
+pub const DEFAULT_AGENT_AUTO_APPROVE: bool = true;
+/// Longest adapter command line an agent mux option may carry.
+pub const MAX_AGENT_COMMAND_BYTES: usize = 4 * 1024;
+
 pub type ConfigOverrideEntry = (String, String);
 
 /// One daemon-owned mux option exposed through the native settings surface.
@@ -84,10 +94,13 @@ pub enum MuxOptionKey {
     ExperimentalAgentPane,
     ExperimentalEditorPane,
     HistoryTrickle,
+    AgentCommand,
+    AgentClaudeCodeCommand,
+    AgentAutoApprove,
 }
 
 impl MuxOptionKey {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 14] = [
         Self::Prefix,
         Self::ModeKeys,
         Self::HistoryLimit,
@@ -99,6 +112,9 @@ impl MuxOptionKey {
         Self::ExperimentalAgentPane,
         Self::ExperimentalEditorPane,
         Self::HistoryTrickle,
+        Self::AgentCommand,
+        Self::AgentClaudeCodeCommand,
+        Self::AgentAutoApprove,
     ];
 
     #[must_use]
@@ -115,6 +131,9 @@ impl MuxOptionKey {
             Self::ExperimentalAgentPane => "experimental-agent-pane",
             Self::ExperimentalEditorPane => "experimental-editor-pane",
             Self::HistoryTrickle => "history-trickle",
+            Self::AgentCommand => "agent-command",
+            Self::AgentClaudeCodeCommand => "agent-claude-code-command",
+            Self::AgentAutoApprove => "agent-auto-approve",
         }
     }
 
@@ -132,6 +151,9 @@ impl MuxOptionKey {
             "experimental-agent-pane" => Some(Self::ExperimentalAgentPane),
             "experimental-editor-pane" => Some(Self::ExperimentalEditorPane),
             "history-trickle" => Some(Self::HistoryTrickle),
+            "agent-command" => Some(Self::AgentCommand),
+            "agent-claude-code-command" => Some(Self::AgentClaudeCodeCommand),
+            "agent-auto-approve" => Some(Self::AgentAutoApprove),
             _ => None,
         }
     }
@@ -149,6 +171,14 @@ impl MuxOptionKey {
                 "off".to_owned()
             }
             Self::HistoryTrickle => "2000".to_owned(),
+            Self::AgentCommand => DEFAULT_AGENT_COMMAND.to_owned(),
+            Self::AgentClaudeCodeCommand => DEFAULT_AGENT_CLAUDE_CODE_COMMAND.to_owned(),
+            Self::AgentAutoApprove => if DEFAULT_AGENT_AUTO_APPROVE {
+                "on"
+            } else {
+                "off"
+            }
+            .to_owned(),
         }
     }
 }
@@ -1776,6 +1806,28 @@ mod tests {
                 .expect("history trickle default")
                 .value,
             "2000"
+        );
+        assert_eq!(
+            postcard::to_stdvec(&MuxOptionKey::AgentAutoApprove).expect("agent option"),
+            [13]
+        );
+        assert_eq!(
+            MuxOptionKey::from_config_key("agent-command"),
+            Some(MuxOptionKey::AgentCommand)
+        );
+        assert_eq!(
+            MuxOptions::default()
+                .get(MuxOptionKey::AgentCommand)
+                .expect("agent command default")
+                .value,
+            super::DEFAULT_AGENT_COMMAND
+        );
+        assert_eq!(
+            MuxOptions::default()
+                .get(MuxOptionKey::AgentAutoApprove)
+                .expect("agent auto-approve default")
+                .value,
+            "on"
         );
     }
 }

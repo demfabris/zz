@@ -1,14 +1,15 @@
 //! Daemon-owned agent runtime: adapter children, the session journal, and the
 //! stream the clients replay and tail. See knowledge/designs/agent-daemon-runtime.md.
 //!
-//! [`host::AgentHost`] is the only entry point: it opens panes, owns one thread
-//! per pane, and hands every item to the sink its caller supplied. The wiring
-//! phase of the campaign (daemon-side subscribe and fan-out) is that caller —
-//! until it lands, the module is reachable only from its own tests, which is
-//! why dead code is tolerated here and nowhere else.
-#![allow(dead_code)]
+//! [`host::AgentHost`] opens panes and owns one thread per pane;
+//! [`fanout::AgentRuntime`] is what the daemon holds, pairing that host with
+//! the coalescing lane, the replay ring, and the publisher the daemon
+//! implements.
 
 pub(crate) mod environment;
+pub(crate) mod fanout;
+#[cfg(test)]
+pub(crate) mod fixture;
 pub(crate) mod host;
 pub(crate) mod journal;
 pub(crate) mod paths;

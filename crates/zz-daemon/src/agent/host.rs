@@ -30,8 +30,7 @@ use crate::agent::{
     journal::AgentJournal,
     profile::SdkTaskEvent,
     runtime::{
-        AgentSpawnConfig, RuntimeCommand, load_persistent_journal, quiesce_window,
-        run_agent_runtime, should_park_turn,
+        AgentSpawnConfig, RuntimeCommand, quiesce_window, run_agent_runtime, should_park_turn,
     },
     stream::{
         AgentAuthMethod, AgentPrompt, AgentPromptOutcome, AgentSessionCapabilities,
@@ -45,9 +44,11 @@ use crate::agent::{
 /// parked outright whenever no pane is open.
 const PARK_TICK: Duration = Duration::from_secs(1);
 
-/// Where every item a pane produces goes. The wiring phase fans out from here;
-/// the host only guarantees order and the per-pane `seq`.
-pub(crate) type AgentStreamSink = Box<dyn Fn(PaneId, AgentStreamItem) + Send + Sync>;
+/// Where every item a pane produces goes, with the pane state it left behind.
+/// A call carrying no item is a state-only change — a queued prompt, say —
+/// which a badge still has to see.
+pub(crate) type AgentStreamSink =
+    Box<dyn Fn(PaneId, AgentPaneState, Option<AgentStreamItem>) + Send + Sync>;
 
 /// What the host is asked to do with an open pane. Everything a client can
 /// send lands here, plus the park the ticker injects.
@@ -129,7 +130,6 @@ pub(crate) struct AgentPendingPermission {
 /// badge, a status line, and a permission prompt.
 #[derive(Clone, Debug)]
 pub(crate) struct AgentPaneState {
-    pub(crate) provider: AgentProvider,
     pub(crate) phase: AgentConnectionPhase,
     pub(crate) agent_name: Option<String>,
     pub(crate) agent_key: Option<String>,
@@ -149,7 +149,6 @@ pub(crate) struct AgentPaneState {
 impl AgentPaneState {
     fn new(spec: &AgentPaneSpec) -> Self {
         Self {
-            provider: spec.provider,
             phase: AgentConnectionPhase::Starting,
             agent_name: None,
             agent_key: None,
@@ -165,6 +164,15 @@ impl AgentPaneState {
             live_tools: HashSet::new(),
             live_tasks: HashSet::new(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self::new(&AgentPaneSpec {
+            provider: AgentProvider::Codex,
+            cwd: PathBuf::from("/"),
+            resume_session: None,
+        })
     }
 
     /// What the quiesce watchdog refuses to park through: a permission the user
@@ -214,6 +222,8 @@ pub(crate) struct AgentHost {
     /// decision always read the same window.
     park_window: Arc<Mutex<Option<Duration>>>,
     ticker: Mutex<Option<JoinHandle<()>>>,
+    #[cfg(test)]
+    runner_factory: Mutex<Option<PaneRunnerFactory>>,
 }
 
 /// What a pane's runtime is handed when its thread starts. Boxed so tests can
@@ -225,17 +235,18 @@ pub(crate) struct RuntimeChannels {
     pub(crate) events: Sender<AgentStreamPayload>,
 }
 
-type PaneRunner = Box<
+pub(crate) type PaneRunner = Box<
     dyn FnOnce(RuntimeChannels) -> Pin<Box<dyn Future<Output = Result<(), String>>>>
         + Send
         + 'static,
 >;
 
-impl AgentHost {
-    pub(crate) fn new(config: AgentSpawnConfig, sink: AgentStreamSink) -> Self {
-        Self::with_journal(config, sink, load_persistent_journal())
-    }
+/// Builds the runner a pane's thread drives. Tests swap the adapter child for
+/// an in-process fixture through it; the daemon never sets one.
+#[cfg(test)]
+pub(crate) type PaneRunnerFactory = Box<dyn Fn(&AgentPaneSpec) -> PaneRunner + Send + Sync>;
 
+impl AgentHost {
     /// A host with an explicit journal, so tests never reach the daemon's data
     /// directory.
     pub(crate) fn with_journal(
@@ -251,7 +262,16 @@ impl AgentHost {
             permission_ids: Arc::new(AtomicU64::new(1)),
             park_window: Arc::new(Mutex::new(quiesce_window())),
             ticker: Mutex::new(None),
+            #[cfg(test)]
+            runner_factory: Mutex::new(None),
         }
+    }
+
+    /// Open every pane against an in-process fixture instead of an adapter
+    /// child.
+    #[cfg(test)]
+    pub(crate) fn set_runner_factory(&self, factory: PaneRunnerFactory) {
+        *self.runner_factory.lock() = Some(factory);
     }
 
     /// Snapshot the login shell's PATH and warm the adapter package cache off
@@ -266,7 +286,21 @@ impl AgentHost {
         *self.config.lock() = config;
     }
 
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> AgentSpawnConfig {
+        self.config.lock().clone()
+    }
+
     pub(crate) fn open(&self, pane: PaneId, spec: AgentPaneSpec) -> bool {
+        #[cfg(test)]
+        if let Some(runner) = self
+            .runner_factory
+            .lock()
+            .as_ref()
+            .map(|factory| factory(&spec))
+        {
+            return self.open_with(pane, spec, runner);
+        }
         let config = self.config.lock().clone();
         let provider = spec.provider;
         let runner: PaneRunner = Box::new(move |channels: RuntimeChannels| {
@@ -282,7 +316,7 @@ impl AgentHost {
         self.open_with(pane, spec, runner)
     }
 
-    fn open_with(&self, pane: PaneId, spec: AgentPaneSpec, runner: PaneRunner) -> bool {
+    pub(crate) fn open_with(&self, pane: PaneId, spec: AgentPaneSpec, runner: PaneRunner) -> bool {
         let mut panes = self.registry.panes.lock();
         if panes.contains_key(&pane) {
             return false;
@@ -351,10 +385,6 @@ impl AgentHost {
     pub(crate) fn snapshot_state(&self, pane: PaneId) -> Option<AgentPaneState> {
         let panes = self.registry.panes.lock();
         panes.get(&pane).map(|handle| handle.state.lock().clone())
-    }
-
-    pub(crate) fn open_panes(&self) -> Vec<PaneId> {
-        self.registry.panes.lock().keys().copied().collect()
     }
 
     pub(crate) fn shutdown(&self) {
@@ -861,18 +891,28 @@ impl PanePump {
     }
 
     fn publish_queue_depth(&self) {
-        self.state.lock().queued_prompts = self.queue.len();
+        let state = {
+            let mut state = self.state.lock();
+            state.queued_prompts = self.queue.len();
+            state.clone()
+        };
+        (self.sink)(self.pane, state, None);
     }
 
     fn emit(&mut self, payload: AgentStreamPayload) {
-        self.seq = self.seq.saturating_add(1);
-        self.state.lock().last_seq = self.seq;
+        let state = {
+            let mut state = self.state.lock();
+            self.seq = self.seq.saturating_add(1);
+            state.last_seq = self.seq;
+            state.clone()
+        };
         (self.sink)(
             self.pane,
-            AgentStreamItem {
+            state,
+            Some(AgentStreamItem {
                 seq: self.seq,
                 payload,
-            },
+            }),
         );
     }
 }
@@ -926,38 +966,19 @@ fn track_task(state: &mut AgentPaneState, event: &SdkTaskEvent) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicUsize;
-
-    use agent_client_protocol::{
-        Agent, Client as AcpClientRole, ConnectTo, ConnectionTo,
-        schema::v1::{
-            AgentCapabilities, ContentBlock, ContentChunk, InitializeRequest, InitializeResponse,
-            LoadSessionRequest, NewSessionRequest, NewSessionResponse, PermissionOption,
-            PermissionOptionId, PermissionOptionKind, PromptRequest, PromptResponse,
-            RequestPermissionRequest, SessionNotification, SessionUpdate, StopReason, TextContent,
-            ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
-        },
+    use agent_client_protocol::schema::v1::{
+        ContentBlock, ContentChunk, SessionUpdate, TextContent, ToolCall, ToolCallStatus,
+        ToolCallUpdate, ToolCallUpdateFields,
     };
 
     use super::*;
     use crate::agent::{
+        fixture::{Behavior, fixture_runner},
         journal::AgentJournal,
-        runtime::run_agent_connection,
         stream::{AgentImage, AgentStreamPayload},
     };
 
     const DEADLINE: Duration = Duration::from_secs(10);
-
-    /// What the fixture agent does when it is prompted.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    enum Behavior {
-        /// One message chunk, then the turn ends.
-        Chunk,
-        /// A tool call that asks permission before it settles.
-        AskPermission,
-        /// A turn that never answers, so the pane stays RUNNING.
-        Hang,
-    }
 
     #[derive(Clone, Default)]
     struct Recorder(Arc<Mutex<Vec<AgentStreamItem>>>);
@@ -965,7 +986,11 @@ mod tests {
     impl Recorder {
         fn sink(&self) -> AgentStreamSink {
             let items = Arc::clone(&self.0);
-            Box::new(move |_pane, item| items.lock().push(item))
+            Box::new(move |_pane, _state, item| {
+                if let Some(item) = item {
+                    items.lock().push(item);
+                }
+            })
         }
 
         fn items(&self) -> Vec<AgentStreamItem> {
@@ -992,90 +1017,6 @@ mod tests {
             }
             panic!("timed out waiting for {what}: {:?}", self.payloads());
         }
-    }
-
-    fn fixture_agent(behavior: Behavior, load: bool) -> impl ConnectTo<AcpClientRole> {
-        let prompts = Arc::new(AtomicUsize::new(0));
-        Agent
-            .builder()
-            .on_receive_request(
-                async move |initialize: InitializeRequest, responder, _| {
-                    responder.respond(
-                        InitializeResponse::new(initialize.protocol_version)
-                            .agent_capabilities(AgentCapabilities::new().load_session(load)),
-                    )
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async |_: LoadSessionRequest, responder, _| {
-                    responder.respond_with_error(
-                        agent_client_protocol::Error::invalid_params()
-                            .data("fixture session cannot be loaded"),
-                    )
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async |_: NewSessionRequest, responder, _| {
-                    responder.respond(NewSessionResponse::new("fixture-session"))
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async move |prompt: PromptRequest,
-                            responder,
-                            connection: ConnectionTo<AcpClientRole>| {
-                    let turn = prompts.fetch_add(1, Ordering::Relaxed);
-                    let session_id = prompt.session_id.clone();
-                    connection.send_notification(SessionNotification::new(
-                        session_id.clone(),
-                        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
-                            TextContent::new(format!("turn {turn}")),
-                        ))),
-                    ))?;
-                    match behavior {
-                        Behavior::Chunk => {
-                            responder.respond(PromptResponse::new(StopReason::EndTurn))
-                        }
-                        Behavior::Hang => Ok(()),
-                        // A real adapter answers the prompt from a task of its
-                        // own; awaiting the permission inline would wedge the
-                        // fixture's own dispatch loop.
-                        Behavior::AskPermission => {
-                            let tool = ToolCallUpdate::new(
-                                "tool-1",
-                                ToolCallUpdateFields::new()
-                                    .status(ToolCallStatus::Pending)
-                                    .title("run it".to_owned()),
-                            );
-                            let permission =
-                                connection.send_request(RequestPermissionRequest::new(
-                                    session_id,
-                                    tool,
-                                    vec![
-                                        PermissionOption::new(
-                                            PermissionOptionId::new("allow"),
-                                            "Allow",
-                                            PermissionOptionKind::AllowOnce,
-                                        ),
-                                        PermissionOption::new(
-                                            PermissionOptionId::new("deny"),
-                                            "Deny",
-                                            PermissionOptionKind::RejectOnce,
-                                        ),
-                                    ],
-                                ));
-                            connection.spawn(async move {
-                                permission.block_task().await?;
-                                responder.respond(PromptResponse::new(StopReason::EndTurn))?;
-                                Ok(())
-                            })
-                        }
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
     }
 
     struct Fixture {
@@ -1109,17 +1050,7 @@ mod tests {
                 cwd: cwd.unwrap_or_else(|| PathBuf::from("/")),
                 resume_session,
             };
-            let runner: PaneRunner = Box::new(move |channels: RuntimeChannels| {
-                Box::pin(run_agent_connection(
-                    AgentProvider::Codex,
-                    auto_approve,
-                    fixture_agent(behavior, load),
-                    channels.permission_ids,
-                    channels.journal,
-                    channels.commands,
-                    channels.events,
-                ))
-            });
+            let runner = fixture_runner(AgentProvider::Codex, behavior, auto_approve, load);
             assert!(host.open_with(pane, spec, runner));
             Self {
                 host,

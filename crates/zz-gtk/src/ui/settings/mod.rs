@@ -59,7 +59,6 @@ pub struct SettingsRoute {
     zoom: UiZoom,
     css: gtk::CssProvider,
     route: RefCell<Option<gtk::Stack>>,
-    tab_bar: RefCell<Option<adw::TabBar>>,
     prompted: Cell<bool>,
 }
 
@@ -97,7 +96,6 @@ impl SettingsRoute {
             zoom: UiZoom::default(),
             css: gtk::CssProvider::new(),
             route: RefCell::new(None),
-            tab_bar: RefCell::new(None),
             prompted: Cell::new(false),
         });
         route.build_surface();
@@ -199,19 +197,13 @@ impl SettingsRoute {
     /// this point, and adding a parented widget to the stack leaves GTK
     /// unable to reconcile the two, which it reports forever as a failure to
     /// remove a non-child.
-    pub fn install(
-        self: &Rc<Self>,
-        toolbar: &adw::ToolbarView,
-        tab_bar: &adw::TabBar,
-        panes: &impl IsA<gtk::Widget>,
-    ) {
+    pub fn install(self: &Rc<Self>, toolbar: &adw::ToolbarView, panes: &impl IsA<gtk::Widget>) {
         toolbar.set_content(gtk::Widget::NONE);
         let route = gtk::Stack::new();
         route.add_named(panes, Some("panes"));
         route.add_named(&self.split, Some("settings"));
         toolbar.set_content(Some(&route));
         self.route.replace(Some(route.clone()));
-        self.tab_bar.replace(Some(tab_bar.clone()));
 
         let target = Rc::downgrade(self);
         glib::timeout_add_local(POLL_INTERVAL, move || tick(&target));
@@ -311,9 +303,6 @@ impl SettingsRoute {
             return;
         };
         route.set_visible_child_name(name);
-        if let Some(tab_bar) = self.tab_bar.borrow().as_ref() {
-            tab_bar.set_visible(name == "panes");
-        }
     }
 
     /// Whether closing the window should stop the daemon. Read from the file

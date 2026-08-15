@@ -138,9 +138,10 @@ fn default_number(row: &Row) -> f64 {
     }
 }
 
-/// The subtitle carries the description plus, when this client cannot render a
-/// key, why. The key is still written: the file is shared with the zz app, so
-/// refusing the edit would be worse than admitting it does nothing here.
+/// The subtitle carries the description plus, when this client cannot draw what
+/// the daemon resolved, why. The value still reaches the daemon: the file is
+/// shared with the zz app, so refusing the edit would be worse than admitting
+/// the pane here does not paint it.
 fn subtitle(setting: &Setting) -> String {
     match setting.support {
         Support::Honored => setting.description.to_owned(),
@@ -150,18 +151,11 @@ fn subtitle(setting: &Setting) -> String {
                 setting.description
             )
         }
-        Support::Inapplicable(note) => {
-            format!("{}  ·  Not used here — {note}", setting.description)
-        }
     }
 }
 
 fn dress(row: &impl IsA<adw::PreferencesRow>, setting: &Setting) {
-    let row = row.as_ref();
-    row.set_title(setting.title);
-    if matches!(setting.support, Support::Inapplicable(_)) {
-        row.add_css_class("dim-label");
-    }
+    row.as_ref().set_title(setting.title);
 }
 
 fn toggle(
@@ -259,12 +253,6 @@ fn carries_alpha(setting: &Setting) -> bool {
             | "zz-search-match-color"
             | "zz-search-current-color"
             | "zz-copy-cursor-color"
-            | "chrome-background"
-            | "chrome-foreground"
-            | "chrome-border"
-            | "chrome-success"
-            | "chrome-warning"
-            | "chrome-danger"
     )
 }
 

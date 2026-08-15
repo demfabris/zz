@@ -55,7 +55,7 @@ impl OutputPager {
         let dialog = adw::Dialog::builder()
             .content_width(PAGER_WIDTH)
             .content_height(PAGER_HEIGHT)
-            .title("Command output")
+            .title("Command Output")
             .can_close(false)
             .child(&toolbar)
             .build();

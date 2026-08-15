@@ -25,7 +25,7 @@ use crate::{
         panes::{PaneGrid, layout_panes},
         picker::PanePicker,
         prefix,
-        settings::SettingsRoute,
+        settings::Settings,
         sidebar::{Hooks, NewSessionPanel, Sidebar},
         ssh_prompt,
         terminal::TerminalView,
@@ -38,7 +38,6 @@ const STYLE: &str = "
 .zz-status { padding: 2px 10px; }
 .zz-status label { font-size: 0.9em; }
 .zz-placeholder { padding: 24px; }
-.zz-prompt { padding: 4px 8px; }
 .zz-chooser { padding: 12px; }
 .zz-badge { padding: 2px 8px; border-radius: 6px; }
 .zz-number { font-size: 2.4em; font-weight: bold; padding: 8px 20px; border-radius: 12px; }
@@ -51,7 +50,6 @@ const STYLE: &str = "
 .zz-sidebar-row { padding: 2px 4px; min-height: 28px; }
 .zz-sidebar-active label { font-weight: bold; }
 .zz-sidebar-disclosure, .zz-sidebar-action { min-width: 20px; min-height: 20px; padding: 0; }
-.zz-sidebar-grip { background-color: alpha(currentColor, 0.08); }
 .zz-bell { color: @warning_color; font-size: 0.7em; }
 .zz-newsession { padding: 24px; }
 .zz-newsession-section { margin-top: 12px; }
@@ -105,33 +103,28 @@ impl PaneWidget {
     }
 }
 
-/// The libadwaita shell: one tab per zz window, the focused window's panes laid
-/// out underneath, and a status bar the daemon's clock drives without ever
-/// touching the grid.
+/// The libadwaita shell: the focused zz window's panes, the session tree beside
+/// them, and a status bar the daemon's clock drives without ever touching the
+/// grid. Windows are switched from the tree, so the workspace shows one grid.
 pub struct Shell {
     engine: Arc<Engine>,
     window: adw::ApplicationWindow,
     title: adw::WindowTitle,
     toasts: adw::ToastOverlay,
-    tabs: adw::TabView,
-    tab_bar: adw::TabBar,
     workspace: gtk::Stack,
     prefix: gtk::Label,
     sidebar: Rc<Sidebar>,
     empty: Rc<NewSessionPanel>,
     overlays: Rc<Overlays>,
-    settings: Rc<SettingsRoute>,
+    settings: Rc<Settings>,
     grid: PaneGrid,
     widgets: RefCell<HashMap<PaneId, PaneWidget>>,
-    pages: RefCell<Vec<(WindowId, adw::TabPage)>>,
-    grid_host: Cell<Option<WindowId>>,
     focused_pane: Cell<Option<PaneId>>,
     font_offset: Cell<f32>,
     numbering: Cell<bool>,
     /// The host the pane widgets belong to. Pane ids are per daemon, so a
     /// switch cannot reuse a single widget however well the ids line up.
     host: Cell<HostId>,
-    syncing: Cell<bool>,
     detaching: Cell<bool>,
     pager: RefCell<Option<OutputPager>>,
 }
@@ -155,32 +148,20 @@ impl Shell {
         );
         header.pack_end(&prefix);
 
-        let tabs = adw::TabView::new();
-        let tab_bar = adw::TabBar::builder().view(&tabs).autohide(false).build();
-        tab_bar.set_end_action_widget(Some(
-            &gtk::Button::builder()
-                .icon_name("tab-new-symbolic")
-                .tooltip_text("New Tab")
-                .action_name("win.new-window")
-                .has_frame(false)
-                .build(),
-        ));
-
         let sidebar = Sidebar::build(Arc::clone(&engine));
         header.pack_start(&sidebar.toggle_button());
 
+        let grid = PaneGrid::new();
         let empty = NewSessionPanel::new(Arc::clone(&engine));
         let workspace = gtk::Stack::new();
-        workspace.add_named(&tabs, Some(WORKSPACE_PAGE));
+        workspace.add_named(&grid, Some(WORKSPACE_PAGE));
         workspace.add_named(empty.widget(), Some(EMPTY_PAGE));
 
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
-        toolbar.add_top_bar(&tab_bar);
         toolbar.set_content(Some(&workspace));
 
-        let settings = SettingsRoute::new(Arc::clone(&engine));
-        settings.install(&toolbar, &tab_bar, &workspace);
+        let settings = Settings::new(Arc::clone(&engine));
 
         let floating = gtk::Overlay::new();
         floating.set_child(Some(&toolbar));
@@ -198,6 +179,7 @@ impl Shell {
             .content(&toasts)
             .build();
 
+        sidebar.install_breakpoint(&window);
         let overlays = Overlays::new(Arc::clone(&engine), &window);
 
         // >>> palette agent: the prefix claim has to be installed before any
@@ -213,23 +195,18 @@ impl Shell {
             window,
             title,
             toasts,
-            tabs,
-            tab_bar,
             workspace,
             prefix,
             sidebar,
             empty,
             overlays,
             settings,
-            grid: PaneGrid::new(),
+            grid,
             widgets: RefCell::new(HashMap::new()),
-            pages: RefCell::new(Vec::new()),
-            grid_host: Cell::new(None),
             focused_pane: Cell::new(None),
             font_offset: Cell::new(0.0),
             numbering: Cell::new(false),
             host: Cell::new(HostId::LOCAL),
-            syncing: Cell::new(false),
             detaching: Cell::new(false),
             pager: RefCell::new(None),
         });
@@ -304,6 +281,20 @@ impl Shell {
             });
         });
         self.window.add_action(&focus);
+
+        // The deep link a menu item, another surface or a script uses to open
+        // preferences on one page, the way a desktop settings app does.
+        let page = gio::SimpleAction::new("settings-page", Some(glib::VariantTy::STRING));
+        let target = Rc::downgrade(self);
+        page.connect_activate(move |_, parameter| {
+            let (Some(shell), Some(name)) =
+                (target.upgrade(), parameter.and_then(glib::Variant::str))
+            else {
+                return;
+            };
+            shell.settings.open_at(&shell.window, name);
+        });
+        self.window.add_action(&page);
     }
 
     fn verbs() -> [(&'static str, fn(&Rc<Self>)); 11] {
@@ -350,7 +341,7 @@ impl Shell {
             }),
             ("detach", |shell| shell.detach()),
             ("about", |shell| shell.present_about()),
-            ("settings", |shell| shell.settings.toggle()),
+            ("settings", |shell| shell.settings.toggle(&shell.window)),
         ]
     }
 
@@ -372,6 +363,10 @@ impl Shell {
         }
     }
 
+    /// About is the system dialog, as GNOME spells it. What a zz client is
+    /// actually asked about — which daemon it reached, on what protocol, with
+    /// what capabilities — rides along as the troubleshooting section rather
+    /// than as a settings page of its own.
     fn present_about(&self) {
         let about = adw::AboutDialog::builder()
             .application_name("zz")
@@ -381,48 +376,35 @@ impl Shell {
             .comments("A GNOME client for zz daemon sessions.")
             .website("https://zzmux.sh")
             .license_type(gtk::License::MitX11)
+            .debug_info(self.daemon_facts())
+            .debug_info_filename("zz-gtk.txt")
             .build();
         about.present(Some(&self.window));
     }
 
-    fn connect_signals(self: &Rc<Self>) {
-        let target = Rc::downgrade(self);
-        self.tabs.connect_selected_page_notify(move |tabs| {
-            let Some(shell) = target.upgrade() else {
-                return;
-            };
-            if shell.syncing.get() {
-                return;
-            }
-            let Some(page) = tabs.selected_page() else {
-                return;
-            };
-            let selected = shell
-                .pages
-                .borrow()
-                .iter()
-                .find(|(_, candidate)| *candidate == page)
-                .map(|(window, _)| *window);
-            if let Some(window) = selected {
-                shell.engine.select_window(window);
-            }
-        });
+    fn daemon_facts(&self) -> String {
+        let capabilities = self.engine.capabilities();
+        format!(
+            "zz-gtk {}\nendpoint: {}\nprotocol: {}\ncapabilities: {}\n",
+            env!("CARGO_PKG_VERSION"),
+            self.engine.endpoint(),
+            zz_protocol::PROTOCOL_VERSION,
+            if capabilities.is_empty() {
+                "none advertised".to_owned()
+            } else {
+                capabilities.join(", ")
+            },
+        )
+    }
 
+    fn connect_signals(self: &Rc<Self>) {
+        // The one-time import offer needs a window to sit over, so it waits for
+        // the tree to be mapped rather than firing during construction.
         let target = Rc::downgrade(self);
-        self.tabs.connect_close_page(move |tabs, page| {
-            let Some(shell) = target.upgrade() else {
-                return glib::Propagation::Proceed;
-            };
-            // Rebuilding the strip closes its pages, and a close is a close as
-            // far as the tab view is concerned: without this the shell would
-            // ask the daemon to kill every window it was only re-listing.
-            if shell.syncing.get() {
-                tabs.close_page_finish(page, true);
-                return glib::Propagation::Stop;
+        self.window.connect_map(move |window| {
+            if let Some(shell) = target.upgrade() {
+                shell.settings.prompt_import(window);
             }
-            shell.request_close(page);
-            tabs.close_page_finish(page, false);
-            glib::Propagation::Stop
         });
 
         let keyboard = gtk::EventControllerKey::new();
@@ -481,24 +463,6 @@ impl Shell {
             return;
         }
         self.engine.detach_all();
-    }
-
-    /// The daemon owns window lifetime, so the tab's close button asks it to
-    /// kill the window and lets the snapshot that comes back remove the tab.
-    /// Closing the page locally would leave the strip disagreeing with the mux.
-    fn request_close(&self, page: &adw::TabPage) {
-        let closing = self
-            .pages
-            .borrow()
-            .iter()
-            .find(|(_, candidate)| candidate == page)
-            .map(|(window, _)| *window);
-        if let Some(window) = closing {
-            self.engine.execute(CommandInvocation::new(
-                "kill-window",
-                ["-t", &window.to_string()],
-            ));
-        }
     }
 
     /// Engine events reach the main context through the channel the reader
@@ -699,18 +663,15 @@ impl Shell {
             // pane id that happens to match belongs to a different terminal.
             self.widgets.borrow_mut().clear();
             self.focused_pane.set(None);
-            self.grid_host.set(None);
         }
         let Some(view) = self.engine.session_view() else {
             self.sync_empty();
             return;
         };
         self.workspace.set_visible_child_name(WORKSPACE_PAGE);
-        self.tab_bar.set_visible(true);
         self.title.set_title(&view.name);
         self.title.set_subtitle(&window_subtitle(&view));
         self.sync_panes(&view);
-        self.sync_tabs(&view);
         if !self.sidebar.has_focus() {
             self.focus_active(view.active_pane);
         }
@@ -725,74 +686,8 @@ impl Shell {
         }
         self.empty.refresh();
         self.workspace.set_visible_child_name(EMPTY_PAGE);
-        self.tab_bar.set_visible(false);
         self.title.set_title("zz");
         self.title.set_subtitle("");
-    }
-
-    fn sync_tabs(&self, view: &SessionView) {
-        self.syncing.set(true);
-        let current: Vec<WindowId> = self
-            .pages
-            .borrow()
-            .iter()
-            .map(|(window, _)| *window)
-            .collect();
-        let desired: Vec<WindowId> = view.windows.iter().map(|window| window.id).collect();
-        if current == desired {
-            for ((_, page), tab) in self.pages.borrow().iter().zip(&view.windows) {
-                page.set_title(&tab_title(tab.index, &tab.name));
-            }
-        } else {
-            self.rebuild_tabs(view);
-        }
-        let selected = self
-            .pages
-            .borrow()
-            .iter()
-            .find(|(window, _)| *window == view.focused_window)
-            .map(|(_, page)| page.clone());
-        if let Some(page) = selected {
-            self.host_grid(view.focused_window, &page);
-            self.tabs.set_selected_page(&page);
-        }
-        self.syncing.set(false);
-    }
-
-    fn rebuild_tabs(&self, view: &SessionView) {
-        let stale: Vec<adw::TabPage> = self
-            .pages
-            .borrow()
-            .iter()
-            .map(|(_, page)| page.clone())
-            .collect();
-        self.grid_host.set(None);
-        detach_grid(&self.grid);
-        for page in stale {
-            self.tabs.close_page(&page);
-        }
-        let mut pages = self.pages.borrow_mut();
-        pages.clear();
-        for tab in &view.windows {
-            let host = adw::Bin::new();
-            let page = self.tabs.append(&host);
-            page.set_title(&tab_title(tab.index, &tab.name));
-            pages.push((tab.id, page));
-        }
-    }
-
-    /// The grid is a single widget moved between tab pages: only the focused
-    /// window renders panes, so building one grid per tab would cost frames for
-    /// windows nobody is looking at.
-    fn host_grid(&self, window: WindowId, page: &adw::TabPage) {
-        if self.grid_host.get() == Some(window) {
-            return;
-        }
-        detach_grid(&self.grid);
-        if let Ok(host) = page.child().downcast::<adw::Bin>() {
-            host.set_child(Some(&self.grid));
-            self.grid_host.set(Some(window));
-        }
     }
 
     fn sync_panes(self: &Rc<Self>, view: &SessionView) {
@@ -851,7 +746,7 @@ impl Shell {
             return PaneWidget::Picker(PanePicker::new(Arc::clone(&self.engine), pane));
         }
         // ── end gtk-termux ──
-        let label = gtk::Label::new(Some(&format!("{kind} panes need the zz app")));
+        let label = gtk::Label::new(Some(&format!("{} panes need the zz app", kind_title(kind))));
         label.add_css_class("dim-label");
         label.add_css_class("zz-placeholder");
         PaneWidget::Other {
@@ -879,7 +774,7 @@ impl Shell {
     fn perform(&self, action: ChromeAction) {
         match action {
             ChromeAction::Detach => self.detach(),
-            ChromeAction::OpenSettings => self.settings.toggle(),
+            ChromeAction::OpenSettings => self.settings.toggle(&self.window),
             ChromeAction::TerminalFontIncrease => self.adjust_font(FONT_STEP_POINTS),
             ChromeAction::TerminalFontDecrease => self.adjust_font(-FONT_STEP_POINTS),
             zoom @ (ChromeAction::UiZoomIn
@@ -1009,12 +904,14 @@ impl Shell {
 }
 // ── end gtk-termux ──
 
+/// The primary menu, in the order the HIG asks for: what this window can do,
+/// then what the session can do, and Preferences and About last.
 fn primary_menu() -> gio::Menu {
     let windows = gio::Menu::new();
-    windows.append(Some("New Tab"), Some("win.new-window"));
-    windows.append(Some("Next Tab"), Some("win.next-window"));
-    windows.append(Some("Previous Tab"), Some("win.previous-window"));
-    windows.append(Some("Close Tab"), Some("win.close-window"));
+    windows.append(Some("New Window"), Some("win.new-window"));
+    windows.append(Some("Next Window"), Some("win.next-window"));
+    windows.append(Some("Previous Window"), Some("win.previous-window"));
+    windows.append(Some("Close Window"), Some("win.close-window"));
 
     let focus = gio::Menu::new();
     for (label, direction) in [
@@ -1034,20 +931,28 @@ fn primary_menu() -> gio::Menu {
     panes.append(Some("Close Pane"), Some("win.close-pane"));
 
     let session = gio::Menu::new();
-    session.append(Some("Settings"), Some("win.settings"));
     session.append(Some("Detach"), Some("win.detach"));
-    session.append(Some("About zz"), Some("win.about"));
+
+    let app = gio::Menu::new();
+    app.append(Some("Preferences"), Some("win.settings"));
+    app.append(Some("About zz"), Some("win.about"));
 
     let menu = gio::Menu::new();
     menu.append_section(None, &windows);
     menu.append_section(None, &panes);
     menu.append_section(None, &session);
+    menu.append_section(None, &app);
     menu
 }
 
-fn detach_grid(grid: &PaneGrid) {
-    if let Some(host) = grid.parent().and_downcast::<adw::Bin>() {
-        host.set_child(gtk::Widget::NONE);
+/// The placeholder's wording. A pane kind is spelled in the file and on the
+/// wire in lower case; a sentence in the window is not.
+fn kind_title(kind: &'static str) -> &'static str {
+    match kind {
+        "browser" => "Browser",
+        "agent" => "Agent",
+        "editor" => "Editor",
+        other => other,
     }
 }
 
@@ -1061,19 +966,23 @@ fn kind_label(kind: &PaneKindSnapshot) -> &'static str {
     }
 }
 
+/// The header's second line: the focused window, the way the session tree names
+/// it. A window the daemon left unnamed is spelled by its index.
 fn window_subtitle(view: &SessionView) -> String {
     view.windows
         .iter()
         .find(|window| window.id == view.focused_window)
-        .map(|window| tab_title(window.index, &window.name))
+        .map(|window| window_label(window.index, &window.name))
         .unwrap_or_default()
 }
 
-fn tab_title(index: u32, name: &str) -> String {
-    if name.is_empty() {
-        index.to_string()
+/// A window the daemon never named carries its index as its name, and a header
+/// reading `0` under a session called `0` says nothing at all.
+fn window_label(index: u32, name: &str) -> String {
+    if name.is_empty() || name == index.to_string() {
+        format!("Window {index}")
     } else {
-        format!("{index}: {name}")
+        name.to_owned()
     }
 }
 
@@ -1096,7 +1005,8 @@ mod tests {
 
     #[test]
     fn a_nameless_window_is_titled_by_its_index() {
-        assert_eq!(tab_title(3, ""), "3");
-        assert_eq!(tab_title(3, "build"), "3: build");
+        assert_eq!(window_label(3, ""), "Window 3");
+        assert_eq!(window_label(3, "3"), "Window 3");
+        assert_eq!(window_label(3, "build"), "build");
     }
 }

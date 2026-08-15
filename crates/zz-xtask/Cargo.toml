@@ -16,7 +16,7 @@ plist.workspace = true
 # icon and DPI manifest cannot come from the compiler the way they do for a
 # binary this repository links; they are written into the copy's PE resources.
 [target.'cfg(target_os = "windows")'.dependencies]
-editpe = "0.2.3"
+editpe = "0.2.4"
 
 [lints]
 workspace = true

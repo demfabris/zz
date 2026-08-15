@@ -48,20 +48,20 @@ instant = { version = "0.1", features = ["wasm-bindgen"] }
 markdown = { version = "1.0", features = ["serde"] }
 # Grapheme-cluster boundaries, so backspace/delete/arrow in `widget/input` step
 # over an emoji or a combining sequence as one unit rather than splitting it.
-unicode-segmentation = "1.13"
+unicode-segmentation = "1.13.3"
 async-channel.workspace = true
 log.workspace = true
 parking_lot.workspace = true
 ropey = { version = "=2.0.0-beta.1", features = ["metric_lines_lf", "metric_utf16"] }
 sum-tree = { version = "0.2.0", package = "zed-sum-tree" }
-tracing = "0.1.41"
+tracing = "0.1.44"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-tree-sitter = { version = "0.26", optional = true }
+tree-sitter = { version = "0.26.12", optional = true }
 tree-sitter-json = { version = "0.24.8", optional = true }
-tree-sitter-md = { version = "0.5.1", optional = true }
-tree-sitter-rust = { version = "0.24.0", optional = true }
-tree-sitter-tmux = { version = "0.1", optional = true }
+tree-sitter-md = { version = "0.5.3", optional = true }
+tree-sitter-rust = { version = "0.24.2", optional = true }
+tree-sitter-tmux = { version = "0.1.4", optional = true }
 tree-sitter-toml-ng = { version = "0.7.0", optional = true }
 url.workspace = true
 

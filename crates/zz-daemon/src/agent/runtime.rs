@@ -50,8 +50,8 @@ use crate::agent::{
     environment::{
         AgentWorkspaceEnvironment, with_platform_environment, with_workspace_environment,
     },
-    journal::AgentJournal,
-    profile::{client_meta_caps, is_sdk_message_method, parse_sdk_task_event, session_meta},
+    journal::{AgentJournal, JournalEntry},
+    profile::{ProviderProfile, SdkMessage, SdkTaskEvent},
     stream::{
         AgentAuthMethod, AgentPrompt, AgentPromptOutcome, AgentSessionCapabilities,
         AgentSessionSummary, AgentStreamPayload,
@@ -375,19 +375,19 @@ fn exit_status_detail(error: &str) -> Option<String> {
     (!status.is_empty()).then_some(status)
 }
 
-fn new_session_request(provider: AgentProvider, cwd: PathBuf) -> NewSessionRequest {
+fn new_session_request(profile: &ProviderProfile, cwd: PathBuf) -> NewSessionRequest {
     let mut request = NewSessionRequest::new(cwd);
-    request.meta = session_meta(provider);
+    request.meta = profile.session_meta();
     request
 }
 
 fn load_session_request(
-    provider: AgentProvider,
+    profile: &ProviderProfile,
     session_id: AcpSessionId,
     cwd: PathBuf,
 ) -> LoadSessionRequest {
     let mut request = LoadSessionRequest::new(session_id, cwd);
-    request.meta = session_meta(provider);
+    request.meta = profile.session_meta();
     request
 }
 
@@ -456,13 +456,62 @@ fn record_update(
     }
 }
 
-/// The journalled transcript of `session_id`, as updates the reducer replays
-/// exactly like the ones an agent sends out of `session/load`.
+/// Record a task event in the position the stream put it. Heartbeats are not
+/// history, so only what [`SdkTaskEvent::is_history`] admits reaches the file.
+fn record_task(
+    journal: Option<&AgentJournal>,
+    provider: AgentProvider,
+    session_id: &str,
+    event: &SdkTaskEvent,
+) {
+    let Some(journal) = journal.filter(|_| event.is_history()) else {
+        return;
+    };
+    if let Err(error) = journal.append_task_for(provider, session_id, event) {
+        report_journal_error(session_id, &error.to_string());
+    }
+}
+
+/// One journalled item on its way back into a pane: a `session/update` the
+/// reducer applies like any other, or the background-task event that stood
+/// between two of them.
+enum ReplayItem {
+    /// Boxed because a `SessionUpdate` dwarfs a task event, and a restore holds
+    /// thousands of these at once.
+    Update(Box<SessionUpdate>),
+    Task(SdkTaskEvent),
+}
+
+impl ReplayItem {
+    fn payload(&self) -> Result<AgentStreamPayload, agent_client_protocol::Error> {
+        match self {
+            Self::Update(update) => update_payload(update),
+            Self::Task(event) => {
+                let payload = AgentStreamPayload::TaskEvent {
+                    event: event.clone(),
+                };
+                validate_payload(&payload)?;
+                Ok(payload)
+            }
+        }
+    }
+
+    fn record(&self, journal: Option<&AgentJournal>, provider: AgentProvider, session_id: &str) {
+        match self {
+            Self::Update(update) => record_update(journal, provider, session_id, update),
+            Self::Task(event) => record_task(journal, provider, session_id, event),
+        }
+    }
+}
+
+/// The journalled transcript of `session_id`, in the order it was recorded, as
+/// items the reducer replays exactly like the ones an agent sends out of
+/// `session/load`.
 fn journal_replay(
     journal: Option<&AgentJournal>,
     provider: AgentProvider,
     session_id: Option<&str>,
-) -> Vec<SessionUpdate> {
+) -> Vec<ReplayItem> {
     let (Some(journal), Some(session_id)) = (journal, session_id) else {
         return Vec::new();
     };
@@ -475,27 +524,33 @@ fn journal_replay(
     };
     records
         .into_iter()
-        .filter_map(
-            |(seq, update)| match serde_json::from_value::<SessionUpdate>(update) {
-                Ok(update) => match update_payload(&update) {
-                    Ok(_) => Some(update),
-                    Err(error) => {
-                        log::warn!(
-                            target: "zz::agent::journal",
-                            "skipping oversized journalled update {seq} of session {session_id}: {error}"
-                        );
-                        None
+        .filter_map(|(seq, entry)| {
+            let item = match entry {
+                JournalEntry::Update(update) => {
+                    match serde_json::from_value::<SessionUpdate>(update) {
+                        Ok(update) => ReplayItem::Update(Box::new(update)),
+                        Err(error) => {
+                            log::warn!(
+                                target: "zz::agent::journal",
+                                "skipping journalled update {seq} of session {session_id}: {error}"
+                            );
+                            return None;
+                        }
                     }
-                },
+                }
+                JournalEntry::Task(event) => ReplayItem::Task(event),
+            };
+            match item.payload() {
+                Ok(_) => Some(item),
                 Err(error) => {
                     log::warn!(
                         target: "zz::agent::journal",
-                        "skipping journalled update {seq} of session {session_id}: {error}"
+                        "skipping oversized journalled item {seq} of session {session_id}: {error}"
                     );
                     None
                 }
-            },
-        )
+            }
+        })
         .collect()
 }
 
@@ -506,16 +561,16 @@ async fn complete_staged_session(
     provider: AgentProvider,
     session_id: &str,
     previous_session: Option<&str>,
-    replay: Vec<SessionUpdate>,
+    replay: Vec<ReplayItem>,
     final_payload: AgentStreamPayload,
     record_replay: bool,
     remove_previous_journal: bool,
 ) -> Result<(), agent_client_protocol::Error> {
     validate_payload(&final_payload)?;
-    for update in replay {
-        let payload = update_payload(&update)?;
+    for item in replay {
+        let payload = item.payload()?;
         if record_replay {
-            record_update(journal, provider, session_id, &update);
+            item.record(journal, provider, session_id);
         }
         send_payload(event_tx, payload).await?;
     }
@@ -603,6 +658,7 @@ pub(crate) async fn run_agent_connection(
     control_rx: Receiver<RuntimeControl>,
     event_tx: Sender<AgentStreamPayload>,
 ) -> Result<(), String> {
+    let profile = ProviderProfile::of(provider);
     let routing = Arc::new(Mutex::new(RuntimeRouting::default()));
     let prompt_controls = Arc::new(Mutex::new(PromptControls::default()));
 
@@ -648,27 +704,49 @@ pub(crate) async fn run_agent_connection(
                         Ok(())
                     }
                     AgentNotification::ExtNotification(notification) => {
-                        if !is_sdk_message_method(notification.method.as_ref()) {
-                            return Ok(());
-                        }
-                        let Ok(params) =
-                            serde_json::from_str::<Value>(notification.params.get())
+                        let Some((session_id, message)) = profile
+                            .ext_message(notification.method.as_ref(), notification.params.get())
                         else {
                             return Ok(());
                         };
-                        let Some((session_id, event)) = parse_sdk_task_event(&params) else {
-                            return Ok(());
-                        };
-                        let live = {
+                        let (live, staged, journaled) = {
                             let routing = ext_routing.lock();
-                            if routing.staged_updates.contains_key(&session_id) {
-                                return Ok(());
-                            }
-                            routing.live_sessions.contains(&session_id)
+                            (
+                                routing.live_sessions.contains(&session_id),
+                                routing.staged_updates.contains_key(&session_id),
+                                routing.journaled.contains(&session_id),
+                            )
                         };
+                        log::debug!(
+                            target: "zz::agent",
+                            "sdk passthrough {} for session {session_id}: live={live} staged={staged}",
+                            message.kind()
+                        );
+                        if staged {
+                            return Ok(());
+                        }
                         if live {
-                            send_payload(&ext_events, AgentStreamPayload::TaskEvent { event })
-                                .await?;
+                            // A turn the agent continued on its own never
+                            // reaches a prompt reply, so its turn-over signal
+                            // is what settles the pane.
+                            let payload = match message {
+                                SdkMessage::Task(event) => {
+                                    // The bookends only mean anything where the
+                                    // transcript put them, so they are recorded
+                                    // in line with the updates around them.
+                                    if journaled {
+                                        record_task(
+                                            notification_journal.as_deref(),
+                                            provider,
+                                            &session_id,
+                                            &event,
+                                        );
+                                    }
+                                    AgentStreamPayload::TaskEvent { event }
+                                }
+                                SdkMessage::TurnIdle => AgentStreamPayload::Parked,
+                            };
+                            send_payload(&ext_events, payload).await?;
                         }
                         Ok(())
                     }
@@ -774,7 +852,7 @@ pub(crate) async fn run_agent_connection(
                             ClientSessionCapabilities::new()
                                 .config_options(SessionConfigOptionsCapabilities::new()),
                         )
-                        .meta(client_meta_caps(provider)),
+                        .meta(profile.client_meta_caps()),
                 )
                 .client_info(Implementation::new("zz", env!("CARGO_PKG_VERSION")).title("zz"));
             let response = await_rpc(
@@ -956,7 +1034,7 @@ pub(crate) async fn run_agent_connection(
                             routing.lock().begin_staging(session_id.0.as_ref());
                             match await_rpc(
                                 connection.send_request(load_session_request(
-                                    provider,
+                                    profile,
                                     session_id.clone(),
                                     cwd.clone(),
                                 ))
@@ -988,7 +1066,7 @@ pub(crate) async fn run_agent_connection(
                                     let response = await_rpc(
                                         connection
                                             .send_request(new_session_request(
-                                                provider,
+                                                profile,
                                                 cwd.clone(),
                                             ))
                                             .block_task(),
@@ -1012,7 +1090,7 @@ pub(crate) async fn run_agent_connection(
                             routing.lock().begin_new_session();
                             let response = await_rpc(
                                 connection
-                                    .send_request(new_session_request(provider, cwd.clone()))
+                                    .send_request(new_session_request(profile, cwd.clone()))
                                     .block_task(),
                                 RPC_TIMEOUT,
                                 "ACP session creation",
@@ -1169,7 +1247,7 @@ pub(crate) async fn run_agent_connection(
                         let session_id = AcpSessionId::new(target.session_id.clone());
                         routing.lock().begin_staging(&target.session_id);
                         let mut request =
-                            load_session_request(provider, session_id.clone(), target.cwd.clone());
+                            load_session_request(profile, session_id.clone(), target.cwd.clone());
                         if capabilities.additional_directories {
                             request = request
                                 .additional_directories(target.additional_directories.clone());
@@ -1251,7 +1329,7 @@ pub(crate) async fn run_agent_connection(
                         routing.lock().begin_new_session();
                         match await_rpc(
                             connection
-                                .send_request(new_session_request(provider, cwd.clone()))
+                                .send_request(new_session_request(profile, cwd.clone()))
                                 .block_task(),
                             RPC_TIMEOUT,
                             "ACP session creation",
@@ -2006,6 +2084,79 @@ mod tests {
             runtime_failure_message("Codex", "the pipe broke\nand then some", None),
             "Codex exited unexpectedly (the pipe broke)"
         );
+    }
+
+    #[test]
+    fn only_task_events_that_are_history_are_journalled_and_they_keep_their_place() {
+        use agent_client_protocol::schema::v1::{ContentBlock, ContentChunk, TextContent};
+
+        let directory = tempfile::tempdir().expect("journal directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+        let provider = AgentProvider::ClaudeCode;
+        let chunk = |text: &str| {
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                TextContent::new(text),
+            )))
+        };
+        let started = SdkTaskEvent::Started {
+            task_id: "t-1".to_owned(),
+            tool_use_id: "toolu_1".to_owned(),
+            is_agent: true,
+        };
+        let settled = SdkTaskEvent::Settled {
+            task_id: "t-1".to_owned(),
+            status: "completed".to_owned(),
+        };
+
+        record_update(Some(&journal), provider, "s-1", &chunk("spawning"));
+        record_task(
+            Some(&journal),
+            provider,
+            "s-1",
+            &SdkTaskEvent::ToolProgress {
+                tool_use_id: "toolu_1".to_owned(),
+                parent_tool_use_id: None,
+                elapsed_seconds: 3.0,
+                subagent_type: Some("Explore".to_owned()),
+            },
+        );
+        record_task(Some(&journal), provider, "s-1", &started);
+        record_task(
+            Some(&journal),
+            provider,
+            "s-1",
+            &SdkTaskEvent::TaskProgress {
+                task_id: "t-1".to_owned(),
+                tool_use_id: Some("toolu_1".to_owned()),
+                description: "exploring".to_owned(),
+                last_tool_name: Some("Grep".to_owned()),
+                subagent_type: Some("Explore".to_owned()),
+            },
+        );
+        record_update(Some(&journal), provider, "s-1", &chunk("waiting"));
+        record_task(Some(&journal), provider, "s-1", &settled);
+
+        let replayed = journal_replay(Some(&journal), provider, Some("s-1"));
+        let shapes = replayed
+            .iter()
+            .map(|item| match item {
+                ReplayItem::Update(_) => "update".to_owned(),
+                ReplayItem::Task(event) => event.kind().to_owned(),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            shapes,
+            ["update", "task-started", "update", "task-settled"],
+            "heartbeats are liveness; the bookends keep the place the stream gave them"
+        );
+        assert!(matches!(
+            replayed.get(1),
+            Some(ReplayItem::Task(event)) if *event == started
+        ));
+        assert!(matches!(
+            replayed[1].payload().expect("payload"),
+            AgentStreamPayload::TaskEvent { event } if event == started
+        ));
     }
 
     #[test]

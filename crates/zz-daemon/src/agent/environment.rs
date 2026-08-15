@@ -12,10 +12,7 @@ use std::{
     thread,
 };
 
-use agent_client_protocol::{
-    AcpAgent,
-    schema::v1::{EnvVariable, McpServer},
-};
+use agent_client_protocol::AcpAgent;
 
 pub(crate) fn with_platform_environment(agent: AcpAgent) -> AcpAgent {
     with_executable_path(agent, executable_path())
@@ -113,16 +110,14 @@ pub(crate) fn with_workspace_environment(
     agent: AcpAgent,
     workspace: &AgentWorkspaceEnvironment,
 ) -> AcpAgent {
-    let mut server = agent.into_server();
-    if let McpServer::Stdio(stdio) = &mut server {
-        for (name, value) in workspace.entries() {
-            if stdio.env.iter().any(|variable| variable.name == name) {
-                continue;
-            }
-            stdio.env.push(EnvVariable::new(name, value));
+    let mut config = agent.into_config();
+    for (name, value) in workspace.entries() {
+        if config.environment().contains_key(name) {
+            continue;
         }
+        config = config.env(name, value);
     }
-    AcpAgent::new(server)
+    AcpAgent::new(config)
 }
 
 fn with_executable_path(agent: AcpAgent, path: Option<&str>) -> AcpAgent {
@@ -130,18 +125,12 @@ fn with_executable_path(agent: AcpAgent, path: Option<&str>) -> AcpAgent {
         return agent;
     };
 
-    let mut server = agent.into_server();
-    let mut injected = false;
-    if let McpServer::Stdio(stdio) = &mut server
-        && !stdio.env.iter().any(|variable| variable.name == "PATH")
-    {
-        stdio.env.push(EnvVariable::new("PATH", path));
-        injected = true;
-    }
-    if injected {
+    let mut config = agent.into_config();
+    if !config.environment().contains_key("PATH") {
+        config = config.env("PATH", path);
         log::debug!(target: "zz::agent", "using the repaired PATH for the ACP process");
     }
-    AcpAgent::new(server)
+    AcpAgent::new(config)
 }
 
 #[cfg(unix)]
@@ -161,6 +150,7 @@ mod login_shell {
         ffi::OsStr,
         fs::{self, File},
         io::{Read as _, Seek as _, SeekFrom},
+        os::unix::process::CommandExt as _,
         path::{Path, PathBuf},
         process::{Command, Stdio},
         sync::OnceLock,
@@ -242,6 +232,10 @@ mod login_shell {
             })
     }
 
+    #[allow(
+        unsafe_code,
+        reason = "Command::pre_exec is the only way to detach the probe's session"
+    )]
     fn capture_path_from_shell(shell: &Path, flags: &[&str]) -> Option<String> {
         let mut capture = tempfile::tempfile().ok()?;
         let child_stdout = capture.try_clone().ok()?;
@@ -253,6 +247,17 @@ mod login_shell {
             .stdout(Stdio::from(child_stdout))
             .stderr(Stdio::null())
             .env("ZZ_RESOLVING_ENVIRONMENT", "1");
+        // An interactive shell that inherits a controlling tty does job
+        // control against it, and a stop signal aimed at a background probe
+        // lands on the daemon's whole process group. A new session gives the
+        // probe no tty to fight over.
+        // SAFETY: the hook only calls setsid, which is async-signal-safe.
+        unsafe {
+            command.pre_exec(|| {
+                let _ = rustix::process::setsid();
+                Ok(())
+            });
+        }
         if let Some(home) = home() {
             command.current_dir(home);
         }
@@ -573,7 +578,7 @@ mod warm_tests {
 mod workspace_tests {
     use std::str::FromStr as _;
 
-    use agent_client_protocol::{AcpAgent, schema::v1::McpServer};
+    use agent_client_protocol::AcpAgent;
 
     use super::{AgentWorkspaceEnvironment, with_executable_path, with_workspace_environment};
 
@@ -607,13 +612,11 @@ mod workspace_tests {
     }
 
     fn environment(agent: &AcpAgent) -> Vec<(String, String)> {
-        let McpServer::Stdio(stdio) = agent.server() else {
-            panic!("expected stdio agent");
-        };
-        stdio
-            .env
+        agent
+            .config()
+            .environment()
             .iter()
-            .map(|variable| (variable.name.clone(), variable.value.clone()))
+            .map(|(name, value)| (name.clone(), value.clone()))
             .collect()
     }
 

@@ -577,11 +577,7 @@ fn spawn_daemon(path: &Path, color_scheme: Option<TerminalColorScheme>) -> Resul
     }
     diagnostics::configure_spawned_process(&mut command);
     #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt as _;
-
-        command.process_group(0);
-    }
+    detach_daemon_session(&mut command);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -594,6 +590,27 @@ fn spawn_daemon(path: &Path, color_scheme: Option<TerminalColorScheme>) -> Resul
         diagnostics::enabled(),
     );
     Ok(())
+}
+
+/// A new process group alone is not enough: it stays in the launching
+/// terminal's session with a controlling tty, and the daemon's own children
+/// (the interactive login-shell PATH probe) can then stop the daemon's whole
+/// process group through tty job control. A new session drops the tty.
+#[cfg(unix)]
+#[allow(
+    unsafe_code,
+    reason = "Command::pre_exec is the only way to give the daemon its own session"
+)]
+fn detach_daemon_session(command: &mut Command) {
+    use std::os::unix::process::CommandExt as _;
+
+    // SAFETY: the hook only calls setsid, which is async-signal-safe.
+    unsafe {
+        command.pre_exec(|| {
+            let _ = rustix::process::setsid();
+            Ok(())
+        });
+    }
 }
 
 #[cfg(not(target_os = "ios"))]

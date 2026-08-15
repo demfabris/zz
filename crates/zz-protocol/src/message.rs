@@ -77,9 +77,9 @@ pub(crate) const MAX_MUX_OPTION_VALUE_BYTES: usize = 64 * 1024;
 /// The adapter commands an agent pane spawns, version-pinned on purpose:
 /// `@latest` costs a registry round trip on every pane spawn, so bumps are
 /// deliberate edits.
-pub const DEFAULT_AGENT_COMMAND: &str = "npx -y @agentclientprotocol/codex-acp@1.1.7";
+pub const DEFAULT_AGENT_COMMAND: &str = "npx -y @agentclientprotocol/codex-acp@1.3.0";
 pub const DEFAULT_AGENT_CLAUDE_CODE_COMMAND: &str =
-    "npx -y @agentclientprotocol/claude-agent-acp@0.63.0";
+    "npx -y @agentclientprotocol/claude-agent-acp@0.68.0";
 pub const DEFAULT_AGENT_AUTO_APPROVE: bool = true;
 /// Longest adapter command line an agent mux option may carry.
 pub const MAX_AGENT_COMMAND_BYTES: usize = 4 * 1024;

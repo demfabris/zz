@@ -1,19 +1,22 @@
-use serde_json::{Map, Value};
-use zz_protocol::AgentProvider;
+//! Provider quirks the transcript has to know about, one declaration per
+//! adapter: the harness envelopes its stream inlines into prose, and the tool
+//! metadata only it emits.
+//!
+//! A new provider is one artifact table and the arm that resolves it. Nothing
+//! shared here knows an adapter by name — a table row carries how its envelope
+//! opens, how it closes, and what it becomes.
 
-const CLAUDE_TASK_OPEN: &str = "<task-notification>";
-const CLAUDE_TASK_CLOSE: &str = "</task-notification>";
-const CLAUDE_REMINDER_OPEN: &str = "<system-reminder>";
-const CLAUDE_REMINDER_CLOSE: &str = "</system-reminder>";
-const CODEX_MEMORY_OPEN: &str = "<oai-mem-citation>";
-const CODEX_MEMORY_CLOSE: &str = "</oai-mem-citation>";
-const CODEX_STAGE_OPEN: &str = "::git-stage{";
-const CODEX_COMMIT_OPEN: &str = "::git-commit{";
+use zz_protocol::AgentProvider;
 
 /// The daemon defines the task vocabulary — it parses the adapter's SDK
 /// passthrough on its own side of the wire — and the transcript's
 /// `<task-notification>` scrubbing produces the same shape.
 pub use zz_daemon::TaskNotification;
+
+pub use codex::{
+    CodexCollaboration, codex_collab_label, codex_collaboration, codex_subagent_activity,
+    codex_tool_subagent, format_codex_collaboration,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MemoryCitation {
@@ -33,60 +36,29 @@ pub enum Segment {
     },
 }
 
-#[derive(Clone, Copy)]
-enum Artifact {
-    TaskNotification,
-    SystemReminder,
-    MemoryCitation,
-    GitDirective,
-}
-
+/// One harness envelope: how it opens, how it closes, and what the matched
+/// span — markers included — becomes.
 #[derive(Clone, Copy)]
 struct Pattern {
     open: &'static str,
     close: &'static str,
-    artifact: Artifact,
+    segment: fn(&str) -> Segment,
 }
 
-const CLAUDE_PATTERNS: &[Pattern] = &[
-    Pattern {
-        open: CLAUDE_TASK_OPEN,
-        close: CLAUDE_TASK_CLOSE,
-        artifact: Artifact::TaskNotification,
-    },
-    Pattern {
-        open: CLAUDE_REMINDER_OPEN,
-        close: CLAUDE_REMINDER_CLOSE,
-        artifact: Artifact::SystemReminder,
-    },
-];
-
-const CODEX_PATTERNS: &[Pattern] = &[
-    Pattern {
-        open: CODEX_MEMORY_OPEN,
-        close: CODEX_MEMORY_CLOSE,
-        artifact: Artifact::MemoryCitation,
-    },
-    Pattern {
-        open: CODEX_STAGE_OPEN,
-        close: "}",
-        artifact: Artifact::GitDirective,
-    },
-    Pattern {
-        open: CODEX_COMMIT_OPEN,
-        close: "}",
-        artifact: Artifact::GitDirective,
-    },
-];
+/// The envelopes one provider's stream can carry. Table order breaks ties
+/// between two markers opening at the same offset.
+const fn artifacts(provider: AgentProvider) -> &'static [Pattern] {
+    match provider {
+        AgentProvider::Codex => codex::ARTIFACTS,
+        AgentProvider::ClaudeCode => claude_code::ARTIFACTS,
+    }
+}
 
 /// Split provider-specific harness artifacts out of a streamed text chunk.
 ///
 /// `carry` retains only the suffixes that could still open a marker.
 pub fn scan_text(provider: AgentProvider, text: &str, carry: &mut String) -> Vec<Segment> {
-    let patterns = match provider {
-        AgentProvider::Codex => CODEX_PATTERNS,
-        AgentProvider::ClaudeCode => CLAUDE_PATTERNS,
-    };
+    let patterns = artifacts(provider);
     let mut input = std::mem::take(carry);
     input.push_str(text);
     let mut segments = Vec::new();
@@ -116,196 +88,11 @@ pub fn scan_text(provider: AgentProvider, text: &str, carry: &mut String) -> Vec
             break;
         };
         let end = content_start + close_offset + pattern.close.len();
-        let raw = &input[start..end];
-        segments.push(match pattern.artifact {
-            Artifact::TaskNotification => Segment::Notification(parse_task_notification(raw)),
-            Artifact::SystemReminder => Segment::Stripped {
-                kind: "system-reminder",
-                memory_citations: Vec::new(),
-            },
-            Artifact::MemoryCitation => Segment::Stripped {
-                kind: "oai-mem-citation",
-                memory_citations: parse_memory_citations(raw),
-            },
-            Artifact::GitDirective => Segment::Stripped {
-                kind: "git-directive",
-                memory_citations: Vec::new(),
-            },
-        });
+        segments.push((pattern.segment)(&input[start..end]));
         cursor = end;
     }
 
     segments
-}
-
-/// Codex collaboration tool call (`_meta.codex.collaboration`), merged with
-/// the per-thread agent states the adapter mirrors into the tool's raw input.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct CodexCollaboration {
-    pub tool: String,
-    pub receiver_thread_ids: Vec<String>,
-    pub prompt: Option<String>,
-    pub agents_states: Vec<(String, CodexAgentState)>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CodexAgentState {
-    pub status: String,
-    pub message: Option<String>,
-}
-
-pub fn codex_collaboration(
-    meta: Option<&Map<String, Value>>,
-    raw_input: Option<&Value>,
-) -> Option<CodexCollaboration> {
-    let collaboration = meta?
-        .get("codex")?
-        .as_object()?
-        .get("collaboration")?
-        .as_object()?;
-    let tool = collaboration.get("tool")?.as_str()?.to_owned();
-    let receiver_thread_ids = collaboration
-        .get("receiverThreadIds")
-        .and_then(Value::as_array)
-        .map(|ids| {
-            ids.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
-    let prompt = raw_input
-        .and_then(|input| input.get("prompt"))
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let agents_states = raw_input
-        .and_then(|input| input.get("agentsStates"))
-        .and_then(Value::as_object)
-        .map(|states| {
-            states
-                .iter()
-                .filter_map(|(thread, state)| {
-                    Some((
-                        thread.clone(),
-                        CodexAgentState {
-                            status: state.get("status")?.as_str()?.to_owned(),
-                            message: state
-                                .get("message")
-                                .and_then(Value::as_str)
-                                .map(str::to_owned),
-                        },
-                    ))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    Some(CodexCollaboration {
-        tool,
-        receiver_thread_ids,
-        prompt,
-        agents_states,
-    })
-}
-
-/// Whether a codex tool call represents a subagent: a subagent activity item,
-/// or a collab tool that puts an agent to work (spawn/resume).
-pub fn codex_tool_subagent(meta: Option<&Map<String, Value>>) -> bool {
-    let Some(codex) = meta
-        .and_then(|meta| meta.get("codex"))
-        .and_then(Value::as_object)
-    else {
-        return false;
-    };
-    if codex.contains_key("subagent") {
-        return true;
-    }
-    codex
-        .get("collaboration")
-        .and_then(Value::as_object)
-        .and_then(|collaboration| collaboration.get("tool"))
-        .and_then(Value::as_str)
-        .is_some_and(|tool| matches!(tool, "spawnAgent" | "resumeAgent"))
-}
-
-/// A codex subagent activity item (`_meta.codex.subagent`): a named agent
-/// starting, being messaged, or interrupted.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CodexSubagentActivity {
-    pub thread_id: String,
-    pub name: String,
-}
-
-pub fn codex_subagent_activity(meta: Option<&Map<String, Value>>) -> Option<CodexSubagentActivity> {
-    let subagent = meta?
-        .get("codex")?
-        .as_object()?
-        .get("subagent")?
-        .as_object()?;
-    let thread_id = subagent.get("threadId")?.as_str()?.to_owned();
-    let name = subagent
-        .get("path")
-        .and_then(Value::as_str)
-        .and_then(|path| path.split('/').rfind(|part| !part.is_empty()))
-        .unwrap_or("subagent")
-        .to_owned();
-    Some(CodexSubagentActivity { thread_id, name })
-}
-
-/// Human label for a collab tool row, in place of the raw tool name.
-pub fn codex_collab_label(collab: &CodexCollaboration) -> Option<String> {
-    let name = match collab.tool.as_str() {
-        "spawnAgent" => "Spawn subagent",
-        "resumeAgent" => "Resume subagent",
-        "sendInput" => "Message subagent",
-        "wait" => "Wait for subagents",
-        "closeAgent" => "Close subagent",
-        _ => return None,
-    };
-    let prompt = collab
-        .prompt
-        .as_deref()
-        .map(str::trim)
-        .filter(|prompt| !prompt.is_empty());
-    Some(match prompt {
-        Some(prompt) => {
-            let snippet: String = prompt
-                .lines()
-                .next()
-                .unwrap_or_default()
-                .chars()
-                .take(60)
-                .collect();
-            format!("{name} \u{2014} {snippet}")
-        }
-        None => name.to_owned(),
-    })
-}
-
-/// One line per tracked agent thread for a collab tool's payload.
-pub fn format_codex_collaboration(collab: &CodexCollaboration) -> Option<String> {
-    if collab.agents_states.is_empty() {
-        return None;
-    }
-    Some(
-        collab
-            .agents_states
-            .iter()
-            .map(|(thread, state)| {
-                let short: String = thread.chars().take(8).collect();
-                match state
-                    .message
-                    .as_deref()
-                    .filter(|message| !message.is_empty())
-                {
-                    Some(message) => {
-                        format!("agent {short}\u{2026} {}: {message}", state.status)
-                    }
-                    None => format!("agent {short}\u{2026} {}", state.status),
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-    )
 }
 
 fn push_clean(segments: &mut Vec<Segment>, text: &str) {
@@ -333,36 +120,12 @@ fn partial_open_suffix(text: &str, patterns: &[Pattern]) -> usize {
         .unwrap_or(0)
 }
 
-fn parse_task_notification(raw: &str) -> TaskNotification {
-    TaskNotification {
-        task_id: tag_text(raw, "task-id").unwrap_or_default(),
-        tool_use_id: tag_text(raw, "tool-use-id").unwrap_or_default(),
-        agent_task: tag_text(raw, "output-file").is_some_and(|file| !file.is_empty()),
-        status: tag_text(raw, "status").unwrap_or_default(),
-        summary: tag_text(raw, "summary").unwrap_or_default(),
-        result_markdown: tag_text(raw, "result").unwrap_or_default(),
+/// An envelope the transcript drops whole, carrying nothing back out.
+fn stripped(kind: &'static str) -> Segment {
+    Segment::Stripped {
+        kind,
+        memory_citations: Vec::new(),
     }
-}
-
-fn parse_memory_citations(raw: &str) -> Vec<MemoryCitation> {
-    let Some(entries) = tag_text(raw, "citation_entries") else {
-        return Vec::new();
-    };
-    entries.lines().filter_map(parse_memory_citation).collect()
-}
-
-fn parse_memory_citation(line: &str) -> Option<MemoryCitation> {
-    let line = line.trim();
-    let (location, note) = line.split_once("|note=[")?;
-    let note = note.strip_suffix(']')?;
-    let (path, range) = location.rsplit_once(':')?;
-    let (line_start, line_end) = range.split_once('-')?;
-    Some(MemoryCitation {
-        path: path.to_owned(),
-        line_start: line_start.parse().ok()?,
-        line_end: line_end.parse().ok()?,
-        note: note.to_owned(),
-    })
 }
 
 fn tag_text(raw: &str, tag: &str) -> Option<String> {
@@ -371,6 +134,271 @@ fn tag_text(raw: &str, tag: &str) -> Option<String> {
     let start = raw.find(&open)? + open.len();
     let end = raw[start..].find(&close)? + start;
     Some(raw[start..end].trim().to_owned())
+}
+
+/// The claude harness inlines its own bookkeeping into assistant prose: a
+/// settled background task, and the reminders the CLI injects mid-conversation.
+mod claude_code {
+    use super::{Pattern, Segment, TaskNotification, stripped, tag_text};
+
+    pub(super) const ARTIFACTS: &[Pattern] = &[
+        Pattern {
+            open: "<task-notification>",
+            close: "</task-notification>",
+            segment: task_notification,
+        },
+        Pattern {
+            open: "<system-reminder>",
+            close: "</system-reminder>",
+            segment: system_reminder,
+        },
+    ];
+
+    fn task_notification(raw: &str) -> Segment {
+        Segment::Notification(TaskNotification {
+            task_id: tag_text(raw, "task-id").unwrap_or_default(),
+            tool_use_id: tag_text(raw, "tool-use-id").unwrap_or_default(),
+            agent_task: tag_text(raw, "output-file").is_some_and(|file| !file.is_empty()),
+            status: tag_text(raw, "status").unwrap_or_default(),
+            summary: tag_text(raw, "summary").unwrap_or_default(),
+            result_markdown: tag_text(raw, "result").unwrap_or_default(),
+        })
+    }
+
+    fn system_reminder(_: &str) -> Segment {
+        stripped("system-reminder")
+    }
+}
+
+/// Codex marks up its own stream — the memories it cited, the git actions it
+/// asked the composer for — and reports its subagents through tool `_meta`.
+mod codex {
+    use serde_json::{Map, Value};
+
+    use super::{MemoryCitation, Pattern, Segment, stripped, tag_text};
+
+    pub(super) const ARTIFACTS: &[Pattern] = &[
+        Pattern {
+            open: "<oai-mem-citation>",
+            close: "</oai-mem-citation>",
+            segment: memory_citation,
+        },
+        Pattern {
+            open: "::git-stage{",
+            close: "}",
+            segment: git_directive,
+        },
+        Pattern {
+            open: "::git-commit{",
+            close: "}",
+            segment: git_directive,
+        },
+    ];
+
+    fn memory_citation(raw: &str) -> Segment {
+        Segment::Stripped {
+            kind: "oai-mem-citation",
+            memory_citations: parse_memory_citations(raw),
+        }
+    }
+
+    fn git_directive(_: &str) -> Segment {
+        stripped("git-directive")
+    }
+
+    fn parse_memory_citations(raw: &str) -> Vec<MemoryCitation> {
+        let Some(entries) = tag_text(raw, "citation_entries") else {
+            return Vec::new();
+        };
+        entries.lines().filter_map(parse_memory_citation).collect()
+    }
+
+    fn parse_memory_citation(line: &str) -> Option<MemoryCitation> {
+        let line = line.trim();
+        let (location, note) = line.split_once("|note=[")?;
+        let note = note.strip_suffix(']')?;
+        let (path, range) = location.rsplit_once(':')?;
+        let (line_start, line_end) = range.split_once('-')?;
+        Some(MemoryCitation {
+            path: path.to_owned(),
+            line_start: line_start.parse().ok()?,
+            line_end: line_end.parse().ok()?,
+            note: note.to_owned(),
+        })
+    }
+
+    /// Codex collaboration tool call (`_meta.codex.collaboration`), merged with
+    /// the per-thread agent states the adapter mirrors into the tool's raw
+    /// input.
+    #[derive(Clone, Debug, Default, Eq, PartialEq)]
+    pub struct CodexCollaboration {
+        pub tool: String,
+        pub receiver_thread_ids: Vec<String>,
+        pub prompt: Option<String>,
+        pub agents_states: Vec<(String, CodexAgentState)>,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct CodexAgentState {
+        pub status: String,
+        pub message: Option<String>,
+    }
+
+    pub fn codex_collaboration(
+        meta: Option<&Map<String, Value>>,
+        raw_input: Option<&Value>,
+    ) -> Option<CodexCollaboration> {
+        let collaboration = meta?
+            .get("codex")?
+            .as_object()?
+            .get("collaboration")?
+            .as_object()?;
+        let tool = collaboration.get("tool")?.as_str()?.to_owned();
+        let receiver_thread_ids = collaboration
+            .get("receiverThreadIds")
+            .and_then(Value::as_array)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let prompt = raw_input
+            .and_then(|input| input.get("prompt"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let agents_states = raw_input
+            .and_then(|input| input.get("agentsStates"))
+            .and_then(Value::as_object)
+            .map(|states| {
+                states
+                    .iter()
+                    .filter_map(|(thread, state)| {
+                        Some((
+                            thread.clone(),
+                            CodexAgentState {
+                                status: state.get("status")?.as_str()?.to_owned(),
+                                message: state
+                                    .get("message")
+                                    .and_then(Value::as_str)
+                                    .map(str::to_owned),
+                            },
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(CodexCollaboration {
+            tool,
+            receiver_thread_ids,
+            prompt,
+            agents_states,
+        })
+    }
+
+    /// Whether a codex tool call represents a subagent: a subagent activity
+    /// item, or a collab tool that puts an agent to work (spawn/resume).
+    pub fn codex_tool_subagent(meta: Option<&Map<String, Value>>) -> bool {
+        let Some(codex) = meta
+            .and_then(|meta| meta.get("codex"))
+            .and_then(Value::as_object)
+        else {
+            return false;
+        };
+        if codex.contains_key("subagent") {
+            return true;
+        }
+        codex
+            .get("collaboration")
+            .and_then(Value::as_object)
+            .and_then(|collaboration| collaboration.get("tool"))
+            .and_then(Value::as_str)
+            .is_some_and(|tool| matches!(tool, "spawnAgent" | "resumeAgent"))
+    }
+
+    /// A codex subagent activity item (`_meta.codex.subagent`): a named agent
+    /// starting, being messaged, or interrupted.
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct CodexSubagentActivity {
+        pub thread_id: String,
+        pub name: String,
+    }
+
+    pub fn codex_subagent_activity(
+        meta: Option<&Map<String, Value>>,
+    ) -> Option<CodexSubagentActivity> {
+        let subagent = meta?
+            .get("codex")?
+            .as_object()?
+            .get("subagent")?
+            .as_object()?;
+        let thread_id = subagent.get("threadId")?.as_str()?.to_owned();
+        let name = subagent
+            .get("path")
+            .and_then(Value::as_str)
+            .and_then(|path| path.split('/').rfind(|part| !part.is_empty()))
+            .unwrap_or("subagent")
+            .to_owned();
+        Some(CodexSubagentActivity { thread_id, name })
+    }
+
+    /// Human label for a collab tool row, in place of the raw tool name.
+    pub fn codex_collab_label(collab: &CodexCollaboration) -> Option<String> {
+        let name = match collab.tool.as_str() {
+            "spawnAgent" => "Spawn subagent",
+            "resumeAgent" => "Resume subagent",
+            "sendInput" => "Message subagent",
+            "wait" => "Wait for subagents",
+            "closeAgent" => "Close subagent",
+            _ => return None,
+        };
+        let prompt = collab
+            .prompt
+            .as_deref()
+            .map(str::trim)
+            .filter(|prompt| !prompt.is_empty());
+        Some(match prompt {
+            Some(prompt) => {
+                let snippet: String = prompt
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(60)
+                    .collect();
+                format!("{name} \u{2014} {snippet}")
+            }
+            None => name.to_owned(),
+        })
+    }
+
+    /// One line per tracked agent thread for a collab tool's payload.
+    pub fn format_codex_collaboration(collab: &CodexCollaboration) -> Option<String> {
+        if collab.agents_states.is_empty() {
+            return None;
+        }
+        Some(
+            collab
+                .agents_states
+                .iter()
+                .map(|(thread, state)| {
+                    let short: String = thread.chars().take(8).collect();
+                    match state
+                        .message
+                        .as_deref()
+                        .filter(|message| !message.is_empty())
+                    {
+                        Some(message) => {
+                            format!("agent {short}\u{2026} {}: {message}", state.status)
+                        }
+                        None => format!("agent {short}\u{2026} {}", state.status),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -427,7 +455,7 @@ MEMORY.md:899-904|note=[used explicit and partial staging guidance]
             collab.agents_states,
             [(
                 "019fa615-87ad-7a10-ad7b-13ef2eb87235".to_owned(),
-                CodexAgentState {
+                codex::CodexAgentState {
                     status: "completed".to_owned(),
                     message: Some("done".to_owned()),
                 }

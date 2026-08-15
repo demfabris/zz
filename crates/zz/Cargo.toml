@@ -66,6 +66,9 @@ zz-mux = { path = "../zz-mux" }
 zz-protocol = { path = "../zz-protocol" }
 zz-ui = { path = "../zz-ui", features = ["editor", "tree-sitter"] }
 
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 gpui_platform.workspace = true
 mimalloc.workspace = true

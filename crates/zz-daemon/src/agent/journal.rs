@@ -1,12 +1,25 @@
 //! Append-only per-pane JSONL journal of ACP session traffic, for replay when
 //! `session/load` is unavailable.
 //!
-//! One file per ACP session id under a caller-supplied directory; every line is
-//! `{"seq": n, "update": <session/update payload>}` with `seq` counting from 1
-//! and flushed before the append returns. Adapters own the session-id string,
-//! so it is jailed into a file stem before it reaches the filesystem, and a
-//! crash mid-write leaves a torn trailing line that readers skip and the next
-//! append isolates behind a fresh newline.
+//! One file per ACP session id under a caller-supplied directory. A line is
+//! either `{"seq": n, "update": <session/update payload>}` or
+//! `{"seq": n, "task": <background-task event>}`, with `seq` counting from 1
+//! across both: the two shapes share one stream order, because a task bookend
+//! only means anything in the position the transcript put it. The key names the
+//! shape, so a journal written before task events existed reads exactly as it
+//! always did.
+//!
+//! Adapters own the session-id string, so it is jailed into a file stem before
+//! it reaches the filesystem, and a crash mid-write leaves a torn trailing line
+//! that readers skip and the next append isolates behind a fresh newline.
+//!
+//! Agents stream token by token, so one assistant message arrives as hundreds
+//! of chunk updates. Adjacent chunks of the same logical stream are coalesced
+//! into a single record before it reaches the file, which keeps the journal
+//! O(messages) instead of O(tokens) in records, bytes and replay cost. Only the
+//! shapes proven equivalent under the client reducer are merged; everything
+//! else is still written verbatim, one record per update, so old journals
+//! replay byte-identically.
 
 use std::{
     collections::{HashMap, hash_map::Entry},
@@ -23,7 +36,10 @@ use serde_json::Value;
 use thiserror::Error;
 use zz_protocol::AgentProvider;
 
-use crate::user_data::{restrict_directory_to_current_user, restrict_to_current_user};
+use crate::{
+    agent::profile::SdkTaskEvent,
+    user_data::{restrict_directory_to_current_user, restrict_to_current_user},
+};
 
 const JOURNAL_EXTENSION: &str = "jsonl";
 
@@ -40,6 +56,16 @@ const MAX_OPEN_JOURNALS: usize = 16;
 /// Longest file stem taken from a session id before it is truncated and tagged.
 const MAX_STEM_BYTES: usize = 96;
 
+/// Ceiling on one coalesced record, flushed the moment it is reached whatever
+/// arrives next. It bounds the memory a runaway single message can hold, and
+/// keeps the merged record clear of the 1 MiB per-update payload cap the replay
+/// path enforces even when every byte of the text escapes to six.
+const MAX_PENDING_RECORD_BYTES: u64 = 256 * 1024;
+
+/// The `session/update` kinds that arrive token by token and are worth merging.
+/// Everything else, `user_message_chunk` included, is one record per update.
+const COALESCED_KINDS: [&str; 2] = ["agent_message_chunk", "agent_thought_chunk"];
+
 const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
 
 #[derive(Debug, Error)]
@@ -54,16 +80,62 @@ pub(crate) enum JournalError {
     Full { bytes: u64, records: usize },
 }
 
+/// What one record holds, once it is back off disk. Both shapes count as
+/// records and share one seq line, so their relative order is the order they
+/// arrived in.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum JournalEntry {
+    Update(Value),
+    Task(SdkTaskEvent),
+}
+
 #[derive(Serialize)]
 struct JournalRecord<'a> {
     seq: u64,
-    update: &'a Value,
+    #[serde(flatten)]
+    body: RecordBody<'a>,
+}
+
+/// The record's payload and, through the variant name, the key that tags it.
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum RecordBody<'a> {
+    Update(&'a Value),
+    Task(&'a Value),
 }
 
 #[derive(Deserialize)]
 struct StoredRecord {
     seq: u64,
+    #[serde(flatten)]
+    body: StoredBody,
+}
+
+/// A record is read shape-first and typed second: an event kind this build does
+/// not know about costs its own record, never the seq of the ones around it.
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum StoredBody {
+    Update(Value),
+    Task(Value),
+}
+
+/// A record whose seq, record slot and byte budget are already reserved but
+/// whose line is not on disk yet, because the next update may still be another
+/// chunk of the same message.
+///
+/// Constraint: a daemon killed while a record is pending loses it. That is the
+/// same loss class as the torn trailing line every reader already skips - the
+/// tail of one message goes missing, never the head of a conversation - and it
+/// is what buys the O(messages) journal. Everything that can observe the file
+/// flushes first, so the loss window is a hard kill and nothing else.
+struct PendingRecord {
+    seq: u64,
     update: Value,
+    /// Exact bytes this record will occupy once written, leading and trailing
+    /// newline included, tracked incrementally so a merge stays O(added text)
+    /// instead of re-encoding the whole message per chunk.
+    line_len: u64,
 }
 
 struct OpenJournal {
@@ -72,6 +144,269 @@ struct OpenJournal {
     bytes: u64,
     records: usize,
     needs_newline: bool,
+    pending: Option<PendingRecord>,
+}
+
+impl OpenJournal {
+    /// Take one update into the journal and answer the seq of the record it
+    /// belongs to, writing whatever that forces out first.
+    fn record(&mut self, update: &Value) -> Result<u64, JournalError> {
+        let Some(chunk) = text_chunk(update) else {
+            self.flush_pending()?;
+            return self.write_verbatim(RecordBody::Update(update));
+        };
+        if let Some(seq) = self.extend_pending(&chunk)? {
+            self.settle_pending()?;
+            return Ok(seq);
+        }
+        self.flush_pending()?;
+        let seq = self.open_pending(update)?;
+        self.settle_pending()?;
+        Ok(seq)
+    }
+
+    /// Take one task event into the journal. It never coalesces, and it must
+    /// never overtake the text it followed, so whatever is still being merged
+    /// goes to disk before this record is appended.
+    fn record_task(&mut self, task: &Value) -> Result<u64, JournalError> {
+        self.flush_pending()?;
+        self.write_verbatim(RecordBody::Task(task))
+    }
+
+    /// Merge `next` into the open record when it continues the same stream.
+    /// `None` means it does not and the caller must start a fresh record; the
+    /// byte cap is charged here so a merge can be refused before it is taken,
+    /// never after.
+    fn extend_pending(&mut self, next: &TextChunk<'_>) -> Result<Option<u64>, JournalError> {
+        let committed = self.bytes;
+        let records = self.records;
+        let Some(pending) = self.pending.as_mut() else {
+            return Ok(None);
+        };
+        if !text_chunk(&pending.update).is_some_and(|open| open.continues(next)) {
+            return Ok(None);
+        }
+        let growth = escaped_length(next.text);
+        if committed
+            .saturating_add(pending.line_len)
+            .saturating_add(growth)
+            > MAX_JOURNAL_BYTES
+        {
+            return Err(JournalError::Full {
+                bytes: committed,
+                records,
+            });
+        }
+        let Some(Value::String(text)) = pending.update.pointer_mut("/content/text") else {
+            return Ok(None);
+        };
+        text.push_str(next.text);
+        pending.line_len = pending.line_len.saturating_add(growth);
+        Ok(Some(pending.seq))
+    }
+
+    /// Reserve a seq, a record slot and the byte budget for a new coalescable
+    /// record. Reserving up front is what lets the flush be infallible against
+    /// the caps: a buffered record can never be refused after `append` already
+    /// answered `Ok`, so it can never overshoot `MAX_JOURNAL_BYTES`.
+    fn open_pending(&mut self, update: &Value) -> Result<u64, JournalError> {
+        let seq = self.next_seq;
+        let line_len = self.line_length(seq, update)?;
+        if self.bytes.saturating_add(line_len) > MAX_JOURNAL_BYTES
+            || self.records >= MAX_JOURNAL_RECORDS
+        {
+            return Err(JournalError::Full {
+                bytes: self.bytes,
+                records: self.records,
+            });
+        }
+        self.records = self.records.saturating_add(1);
+        self.next_seq = seq.saturating_add(1);
+        self.pending = Some(PendingRecord {
+            seq,
+            update: update.clone(),
+            line_len,
+        });
+        Ok(seq)
+    }
+
+    fn settle_pending(&mut self) -> Result<(), JournalError> {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.line_len >= MAX_PENDING_RECORD_BYTES)
+        {
+            self.flush_pending()?;
+        }
+        Ok(())
+    }
+
+    /// Put the open record on disk. Every path that lets an outsider observe
+    /// the file - replay, handle eviction, drop - goes through here first.
+    fn flush_pending(&mut self) -> Result<(), JournalError> {
+        let Some(pending) = self.pending.take() else {
+            return Ok(());
+        };
+        let line = self.encode(pending.seq, RecordBody::Update(&pending.update))?;
+        self.commit(&line)
+    }
+
+    /// Forget the open record without writing it, for the two callers that are
+    /// about to delete the file underneath it.
+    fn discard_pending(&mut self) {
+        self.pending = None;
+    }
+
+    fn write_verbatim(&mut self, body: RecordBody<'_>) -> Result<u64, JournalError> {
+        let seq = self.next_seq;
+        let line = self.encode(seq, body)?;
+        let written = u64::try_from(line.len()).unwrap_or(u64::MAX);
+        if self.bytes.saturating_add(written) > MAX_JOURNAL_BYTES
+            || self.records >= MAX_JOURNAL_RECORDS
+        {
+            return Err(JournalError::Full {
+                bytes: self.bytes,
+                records: self.records,
+            });
+        }
+        self.commit(&line)?;
+        self.records = self.records.saturating_add(1);
+        self.next_seq = seq.saturating_add(1);
+        Ok(seq)
+    }
+
+    fn encode(&self, seq: u64, body: RecordBody<'_>) -> Result<Vec<u8>, JournalError> {
+        let record = serde_json::to_vec(&JournalRecord { seq, body })?;
+        let mut line = Vec::with_capacity(record.len() + 2);
+        if self.needs_newline {
+            line.push(b'\n');
+        }
+        line.extend_from_slice(&record);
+        line.push(b'\n');
+        Ok(line)
+    }
+
+    /// Reserved through `encode` rather than alongside it, so the budget a
+    /// record claims is by construction the length the flush will write.
+    fn line_length(&self, seq: u64, update: &Value) -> Result<u64, JournalError> {
+        Ok(u64::try_from(self.encode(seq, RecordBody::Update(update))?.len()).unwrap_or(u64::MAX))
+    }
+
+    /// A half-written line leaves the cached seq, length and newline state
+    /// wrong, so an error here costs the caller its handle and the next append
+    /// rescans the tail.
+    fn commit(&mut self, line: &[u8]) -> Result<(), JournalError> {
+        self.file.write_all(line)?;
+        self.file.flush()?;
+        self.needs_newline = false;
+        self.bytes = self
+            .bytes
+            .saturating_add(u64::try_from(line.len()).unwrap_or(u64::MAX));
+        Ok(())
+    }
+}
+
+/// Losing a handle must not lose the record it was holding, so eviction, prune
+/// and the journal's own drop all land here.
+impl Drop for OpenJournal {
+    fn drop(&mut self) {
+        if self.pending.is_none() {
+            return;
+        }
+        if let Err(error) = self.flush_pending() {
+            log::warn!(
+                target: "zz::agent::journal",
+                "could not flush a coalesced journal record: {error}",
+            );
+        }
+    }
+}
+
+/// The pieces of a chunk update that decide whether it may be merged into the
+/// record before it.
+struct TextChunk<'a> {
+    kind: &'a str,
+    message_id: Option<&'a str>,
+    meta: Option<&'a Value>,
+    typed: bool,
+    text: &'a str,
+}
+
+impl TextChunk<'_> {
+    /// The client reducer keys a message on `(role, messageId)`, and an id-less
+    /// chunk extends whatever entry the same role last wrote. Merging is
+    /// allowed exactly where both rules agree the two chunks already land in
+    /// one entry, so a concatenated record reduces to what it replaced.
+    fn continues(&self, next: &TextChunk<'_>) -> bool {
+        self.kind == next.kind
+            && self.message_id == next.message_id
+            && self.meta == next.meta
+            && self.typed == next.typed
+    }
+}
+
+/// The one update shape safe to merge: a streamed agent message or thought
+/// carrying a plain text content block and nothing the reducer reads
+/// positionally.
+///
+/// Anything else - a tool call, an image or annotated block, a non-string id,
+/// an unknown top-level key - answers `None` and is journalled verbatim. The
+/// bar is deliberately low: a shape this does not recognise costs records, a
+/// shape it merges wrongly costs a transcript.
+fn text_chunk(update: &Value) -> Option<TextChunk<'_>> {
+    let object = update.as_object()?;
+    let kind = object.get("sessionUpdate")?.as_str()?;
+    if !COALESCED_KINDS.contains(&kind) {
+        return None;
+    }
+    if object.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "sessionUpdate" | "content" | "messageId" | "_meta"
+        )
+    }) {
+        return None;
+    }
+    let message_id = match object.get("messageId") {
+        Some(value) => Some(value.as_str()?),
+        None => None,
+    };
+    let content = object.get("content")?.as_object()?;
+    if content
+        .keys()
+        .any(|key| !matches!(key.as_str(), "type" | "text"))
+    {
+        return None;
+    }
+    let typed = match content.get("type") {
+        Some(value) => {
+            if value.as_str()? != "text" {
+                return None;
+            }
+            true
+        }
+        None => false,
+    };
+    Some(TextChunk {
+        kind,
+        message_id,
+        meta: object.get("_meta"),
+        typed,
+        text: content.get("text")?.as_str()?,
+    })
+}
+
+/// Bytes `text` adds to an encoded record when appended to a JSON string,
+/// mirroring `serde_json`'s escape table so the reserved budget is exact rather
+/// than merely safe.
+fn escaped_length(text: &str) -> u64 {
+    text.bytes()
+        .map(|byte| match byte {
+            b'"' | b'\\' | 0x08 | 0x09 | 0x0a | 0x0c | 0x0d => 2,
+            0x00..=0x1f => 6,
+            _ => 1,
+        })
+        .sum()
 }
 
 struct JournalTail {
@@ -97,12 +432,37 @@ impl AgentJournal {
         })
     }
 
-    /// Record one `session/update` payload; returns the seq it was written as.
+    /// Record one `session/update` payload; returns the seq of the record it
+    /// landed in. A chunk merged into the record already open answers that
+    /// record's seq, so the value stays the answer to "where does replay find
+    /// this update" rather than a count of calls.
     pub(crate) fn append_for(
         &self,
         provider: AgentProvider,
         session_id: &str,
         update: &Value,
+    ) -> Result<u64, JournalError> {
+        self.record_into(provider, session_id, |journal| journal.record(update))
+    }
+
+    /// Record one background-task event in the position the stream put it, and
+    /// answer the seq of its record. Task events never coalesce, so this is
+    /// always a record of its own.
+    pub(crate) fn append_task_for(
+        &self,
+        provider: AgentProvider,
+        session_id: &str,
+        event: &SdkTaskEvent,
+    ) -> Result<u64, JournalError> {
+        let task = serde_json::to_value(event)?;
+        self.record_into(provider, session_id, |journal| journal.record_task(&task))
+    }
+
+    fn record_into(
+        &self,
+        provider: AgentProvider,
+        session_id: &str,
+        record: impl FnOnce(&mut OpenJournal) -> Result<u64, JournalError>,
     ) -> Result<u64, JournalError> {
         let key = journal_key(provider, session_id);
         let mut handles = self.handles.lock();
@@ -122,56 +482,43 @@ impl AgentJournal {
                     bytes: tail.bytes,
                     records: tail.records,
                     needs_newline: tail.needs_newline,
+                    pending: None,
                 })
             }
         };
 
-        let seq = journal.next_seq;
-        let record = serde_json::to_vec(&JournalRecord { seq, update })?;
-        let mut line = Vec::with_capacity(record.len() + 2);
-        if journal.needs_newline {
-            line.push(b'\n');
+        match record(journal) {
+            Ok(seq) => Ok(seq),
+            Err(error) => {
+                if matches!(error, JournalError::Io(_)) {
+                    handles.remove(&key);
+                }
+                Err(error)
+            }
         }
-        line.extend_from_slice(&record);
-        line.push(b'\n');
-        let written = u64::try_from(line.len()).unwrap_or(u64::MAX);
-        if journal.bytes.saturating_add(written) > MAX_JOURNAL_BYTES
-            || journal.records >= MAX_JOURNAL_RECORDS
-        {
-            return Err(JournalError::Full {
-                bytes: journal.bytes,
-                records: journal.records,
-            });
-        }
-
-        // A half-written line leaves the cached seq, length and newline state
-        // wrong, so the handle is dropped and the next append rescans the tail.
-        if let Err(error) = journal
-            .file
-            .write_all(&line)
-            .and_then(|()| journal.file.flush())
-        {
-            handles.remove(&key);
-            return Err(error.into());
-        }
-        journal.needs_newline = false;
-        journal.bytes = journal.bytes.saturating_add(written);
-        journal.records = journal.records.saturating_add(1);
-        journal.next_seq = seq.saturating_add(1);
-        Ok(seq)
     }
 
-    /// Every recorded update in order, torn or malformed lines skipped.
+    /// Every recorded entry in order, torn or malformed lines skipped. A
+    /// reader sees everything appended so far, so the record still being
+    /// coalesced is written out before the file is read.
     pub(crate) fn replay_for(
         &self,
         provider: AgentProvider,
         session_id: &str,
-    ) -> Result<Vec<(u64, Value)>, JournalError> {
-        read_records(
-            &self
-                .directory
-                .join(journal_file_name(&journal_key(provider, session_id))),
-        )
+    ) -> Result<Vec<(u64, JournalEntry)>, JournalError> {
+        let key = journal_key(provider, session_id);
+        {
+            let mut handles = self.handles.lock();
+            let flushed = handles
+                .get_mut(&key)
+                .map(OpenJournal::flush_pending)
+                .transpose();
+            if let Err(error) = flushed {
+                handles.remove(&key);
+                return Err(error);
+            }
+        }
+        read_records(&self.directory.join(journal_file_name(&key)))
     }
 
     /// Seq of the last recorded update, 0 when nothing is journalled.
@@ -195,7 +542,9 @@ impl AgentJournal {
         session_id: &str,
     ) -> Result<(), JournalError> {
         let key = journal_key(provider, session_id);
-        self.handles.lock().remove(&key);
+        if let Some(mut journal) = self.handles.lock().remove(&key) {
+            journal.discard_pending();
+        }
         match fs::remove_file(self.directory.join(journal_file_name(&key))) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -209,7 +558,19 @@ impl AgentJournal {
     }
 
     #[cfg(test)]
-    pub(crate) fn replay(&self, session_id: &str) -> Result<Vec<(u64, Value)>, JournalError> {
+    pub(crate) fn append_task(
+        &self,
+        session_id: &str,
+        event: &SdkTaskEvent,
+    ) -> Result<u64, JournalError> {
+        self.append_task_for(AgentProvider::Codex, session_id, event)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn replay(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<(u64, JournalEntry)>, JournalError> {
         self.replay_for(AgentProvider::Codex, session_id)
     }
 
@@ -232,6 +593,7 @@ impl AgentJournal {
         };
         let mut handles = self.handles.lock();
         let mut removed = 0;
+        let mut pruned = Vec::new();
         for entry in fs::read_dir(&self.directory)? {
             let path = entry?.path();
             if path.extension().and_then(OsStr::to_str) != Some(JOURNAL_EXTENSION) {
@@ -250,9 +612,17 @@ impl AgentJournal {
                 );
                 continue;
             }
+            if let Some(name) = path.file_name().and_then(OsStr::to_str) {
+                pruned.push(name.to_owned());
+            }
             removed += 1;
         }
         if removed > 0 {
+            for (key, journal) in handles.iter_mut() {
+                if pruned.contains(&journal_file_name(key)) {
+                    journal.discard_pending();
+                }
+            }
             handles.clear();
         }
         Ok(removed)
@@ -331,7 +701,7 @@ fn scan(path: &Path) -> Result<JournalTail, JournalError> {
     })
 }
 
-fn read_records(path: &Path) -> Result<Vec<(u64, Value)>, JournalError> {
+fn read_records(path: &Path) -> Result<Vec<(u64, JournalEntry)>, JournalError> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -345,14 +715,33 @@ fn read_records(path: &Path) -> Result<Vec<(u64, Value)>, JournalError> {
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        match serde_json::from_slice::<StoredRecord>(line) {
-            Ok(record) => records.push((record.seq, record.update)),
-            Err(error) => log::warn!(
-                target: "zz::agent::journal",
-                "skipping malformed journal line path={} error={error}",
-                path.display(),
-            ),
-        }
+        let record = match serde_json::from_slice::<StoredRecord>(line) {
+            Ok(record) => record,
+            Err(error) => {
+                log::warn!(
+                    target: "zz::agent::journal",
+                    "skipping malformed journal line path={} error={error}",
+                    path.display(),
+                );
+                continue;
+            }
+        };
+        let entry = match record.body {
+            StoredBody::Update(update) => JournalEntry::Update(update),
+            StoredBody::Task(task) => match serde_json::from_value::<SdkTaskEvent>(task) {
+                Ok(event) => JournalEntry::Task(event),
+                Err(error) => {
+                    log::warn!(
+                        target: "zz::agent::journal",
+                        "skipping unreadable journalled task {} path={} error={error}",
+                        record.seq,
+                        path.display(),
+                    );
+                    continue;
+                }
+            },
+        };
+        records.push((record.seq, entry));
     }
     Ok(records)
 }
@@ -363,9 +752,80 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+    use crate::agent::profile::TaskNotification;
 
+    /// The update a record holds. Every record is an update unless the test
+    /// journalled a task event, so anything else is that test's own bug.
+    fn journaled(entry: &JournalEntry) -> &Value {
+        match entry {
+            JournalEntry::Update(update) => update,
+            JournalEntry::Task(event) => panic!("expected an update record, got {event:?}"),
+        }
+    }
+
+    fn started(task_id: &str) -> SdkTaskEvent {
+        SdkTaskEvent::Started {
+            task_id: task_id.to_owned(),
+            tool_use_id: format!("toolu_{task_id}"),
+            is_agent: true,
+        }
+    }
+
+    fn notification(task_id: &str) -> SdkTaskEvent {
+        SdkTaskEvent::Notification(TaskNotification {
+            task_id: task_id.to_owned(),
+            tool_use_id: format!("toolu_{task_id}"),
+            agent_task: true,
+            status: "completed".to_owned(),
+            summary: "done".to_owned(),
+            result_markdown: String::new(),
+        })
+    }
+
+    /// A chunk that never coalesces with another, because its id is its text.
     fn update(text: &str) -> Value {
-        json!({ "sessionUpdate": "agent_message_chunk", "content": { "text": text } })
+        json!({
+            "sessionUpdate": "agent_message_chunk",
+            "messageId": text,
+            "content": { "type": "text", "text": text }
+        })
+    }
+
+    fn chunk(message_id: &str, text: &str) -> Value {
+        json!({
+            "sessionUpdate": "agent_message_chunk",
+            "messageId": message_id,
+            "content": { "type": "text", "text": text }
+        })
+    }
+
+    fn thought(message_id: &str, text: &str) -> Value {
+        json!({
+            "sessionUpdate": "agent_thought_chunk",
+            "messageId": message_id,
+            "content": { "type": "text", "text": text }
+        })
+    }
+
+    fn anonymous(text: &str) -> Value {
+        json!({ "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": text } })
+    }
+
+    fn tool_call(id: &str) -> Value {
+        json!({ "sessionUpdate": "tool_call", "toolCallId": id, "status": "pending" })
+    }
+
+    fn texts(records: &[(u64, JournalEntry)]) -> Vec<String> {
+        records
+            .iter()
+            .map(|(_, entry)| {
+                journaled(entry)
+                    .pointer("/content/text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            })
+            .collect()
     }
 
     fn journal_entries(directory: &Path) -> Vec<PathBuf> {
@@ -374,6 +834,62 @@ mod tests {
             .map(|entry| entry.expect("directory entry").path())
             .collect();
         entries.sort();
+        entries
+    }
+
+    fn journal_path(directory: &Path, session_id: &str) -> PathBuf {
+        directory.join(journal_file_name(&journal_key(
+            AgentProvider::Codex,
+            session_id,
+        )))
+    }
+
+    /// What is on disk right now, read past `replay_for` so a test can tell a
+    /// record that was flushed from one a reader would have flushed for it.
+    fn stored(directory: &Path, session_id: &str) -> Vec<(u64, JournalEntry)> {
+        read_records(&journal_path(directory, session_id)).expect("read records")
+    }
+
+    /// The client reducer's grouping, at the JSON level: a chunk with an id
+    /// joins the entry that id already owns, an id-less chunk extends the entry
+    /// the same kind last wrote, and anything else ends the run.
+    fn reduce(records: &[(u64, JournalEntry)]) -> Vec<(String, Option<String>, String)> {
+        let mut entries: Vec<(String, Option<String>, String)> = Vec::new();
+        let mut by_id: HashMap<(String, String), usize> = HashMap::new();
+        let mut active: Option<usize> = None;
+        for (_, entry) in records {
+            let update = journaled(entry);
+            let kind = update
+                .get("sessionUpdate")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let text = update
+                .pointer("/content/text")
+                .and_then(Value::as_str)
+                .filter(|_| matches!(kind, "agent_message_chunk" | "agent_thought_chunk"));
+            let Some(text) = text else {
+                active = None;
+                continue;
+            };
+            let message_id = update.get("messageId").and_then(Value::as_str);
+            let index = match message_id {
+                Some(message_id) => *by_id
+                    .entry((kind.to_owned(), message_id.to_owned()))
+                    .or_insert_with(|| {
+                        entries.push((kind.to_owned(), Some(message_id.to_owned()), String::new()));
+                        entries.len() - 1
+                    }),
+                None => match active {
+                    Some(index) if entries[index].0 == kind && entries[index].1.is_none() => index,
+                    _ => {
+                        entries.push((kind.to_owned(), None, String::new()));
+                        entries.len() - 1
+                    }
+                },
+            };
+            entries[index].2.push_str(text);
+            active = Some(index);
+        }
         entries
     }
 
@@ -391,8 +907,8 @@ mod tests {
 
         let replayed = journal.replay("sess-1").expect("replay");
         assert_eq!(replayed.len(), 2);
-        assert_eq!(replayed[0], (1, update("a")));
-        assert_eq!(replayed[1], (2, update("b")));
+        assert_eq!(replayed[0], (1, JournalEntry::Update(update("a"))));
+        assert_eq!(replayed[1], (2, JournalEntry::Update(update("b"))));
         assert_eq!(journal.last_seq("sess-1").expect("last seq"), 2);
         assert_eq!(journal.last_seq("sess-2").expect("last seq"), 1);
         assert_eq!(journal.last_seq("sess-missing").expect("last seq"), 0);
@@ -470,7 +986,7 @@ mod tests {
 
         let replayed = journal.replay("sess-1").expect("replay");
         assert_eq!(replayed.len(), 2);
-        assert_eq!(replayed[1], (2, update("b")));
+        assert_eq!(replayed[1], (2, JournalEntry::Update(update("b"))));
         let contents = fs::read_to_string(&path).expect("read journal");
         assert!(contents.ends_with('\n'));
         assert_eq!(contents.lines().count(), 3);
@@ -500,10 +1016,13 @@ mod tests {
             assert!(!name.contains('/') && !name.contains('\\') && !name.starts_with('.'));
             assert!(name.len() <= MAX_STEM_BYTES + JOURNAL_EXTENSION.len() + 18);
         }
-        assert_eq!(journal.replay("a/b").expect("replay")[0].1, update("slash"));
         assert_eq!(
-            journal.replay("a_b").expect("replay")[0].1,
-            update("underscore")
+            journaled(&journal.replay("a/b").expect("replay")[0].1),
+            &update("slash")
+        );
+        assert_eq!(
+            journaled(&journal.replay("a_b").expect("replay")[0].1),
+            &update("underscore")
         );
         assert_eq!(file_stem("plain-id_9"), "plain-id_9");
     }
@@ -541,7 +1060,9 @@ mod tests {
         let journal = AgentJournal::open(directory.path()).expect("open journal");
         for index in 0..MAX_JOURNAL_RECORDS {
             assert_eq!(
-                journal.append("sess-1", &update("x")).expect("append"),
+                journal
+                    .append("sess-1", &update(&index.to_string()))
+                    .expect("append"),
                 u64::try_from(index).expect("index") + 1
             );
         }
@@ -570,18 +1091,22 @@ mod tests {
             .expect("append claude");
 
         assert_eq!(
-            journal
-                .replay_for(AgentProvider::Codex, "same")
-                .expect("replay codex")[0]
-                .1,
-            update("codex")
+            journaled(
+                &journal
+                    .replay_for(AgentProvider::Codex, "same")
+                    .expect("replay codex")[0]
+                    .1
+            ),
+            &update("codex")
         );
         assert_eq!(
-            journal
-                .replay_for(AgentProvider::ClaudeCode, "same")
-                .expect("replay claude")[0]
-                .1,
-            update("claude")
+            journaled(
+                &journal
+                    .replay_for(AgentProvider::ClaudeCode, "same")
+                    .expect("replay claude")[0]
+                    .1
+            ),
+            &update("claude")
         );
         assert_eq!(journal_entries(directory.path()).len(), 2);
     }
@@ -601,5 +1126,662 @@ mod tests {
         assert!(journal.replay("sess-1").expect("replay").is_empty());
         assert_eq!(journal.append("sess-1", &update("b")).expect("append"), 1);
         assert!(directory.path().join("unrelated.json").exists());
+    }
+
+    #[test]
+    fn adjacent_chunks_of_one_message_become_one_record() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+
+        for piece in ["Hel", "lo, ", "wor", "ld"] {
+            journal
+                .append("sess-1", &chunk("msg-1", piece))
+                .expect("append");
+        }
+        journal
+            .append("sess-1", &thought("think-1", "one "))
+            .expect("append");
+        journal
+            .append("sess-1", &thought("think-1", "two"))
+            .expect("append");
+
+        let replayed = journal.replay("sess-1").expect("replay");
+        assert_eq!(texts(&replayed), vec!["Hello, world", "one two"]);
+        assert_eq!(journaled(&replayed[0].1), &chunk("msg-1", "Hello, world"));
+        assert_eq!(journaled(&replayed[1].1), &thought("think-1", "one two"));
+        assert_eq!(
+            replayed.iter().map(|(seq, _)| *seq).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+    }
+
+    #[test]
+    fn a_coalesced_record_consumes_one_seq() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+
+        assert_eq!(
+            journal.append("sess-1", &chunk("msg-1", "a")).expect("a"),
+            1
+        );
+        assert_eq!(
+            journal.append("sess-1", &chunk("msg-1", "b")).expect("b"),
+            1,
+            "a merged chunk answers the seq of the record it joined"
+        );
+        assert_eq!(
+            journal.append("sess-1", &chunk("msg-1", "c")).expect("c"),
+            1
+        );
+        assert_eq!(journal.last_seq("sess-1").expect("last seq"), 1);
+        assert_eq!(
+            journal.append("sess-1", &tool_call("t-1")).expect("tool"),
+            2
+        );
+        assert_eq!(
+            journal.append("sess-1", &chunk("msg-2", "d")).expect("d"),
+            3
+        );
+        assert_eq!(journal.last_seq("sess-1").expect("last seq"), 3);
+
+        let replayed = journal.replay("sess-1").expect("replay");
+        assert_eq!(
+            replayed.iter().map(|(seq, _)| *seq).collect::<Vec<_>>(),
+            vec![1, 2, 3],
+            "seqs stay gapless and monotonic across a coalesced run"
+        );
+        assert_eq!(journal.last_seq("sess-1").expect("last seq"), 3);
+    }
+
+    #[test]
+    fn chunks_merge_only_within_one_coalescing_identity() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+
+        let sequence = [
+            chunk("msg-1", "a"),
+            chunk("msg-1", "b"),
+            chunk("msg-2", "c"),
+            thought("msg-2", "d"),
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "msg-3",
+                "content": { "type": "image", "data": "AA==", "mimeType": "image/png" }
+            }),
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "msg-3",
+                "content": { "type": "text", "text": "e", "annotations": { "audience": [] } }
+            }),
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": 7,
+                "content": { "type": "text", "text": "f" }
+            }),
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "msg-4",
+                "content": { "text": "g" }
+            }),
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "msg-4",
+                "content": { "type": "text", "text": "h" }
+            }),
+            json!({
+                "sessionUpdate": "user_message_chunk",
+                "messageId": "msg-5",
+                "content": { "type": "text", "text": "i" }
+            }),
+            json!({
+                "sessionUpdate": "user_message_chunk",
+                "messageId": "msg-5",
+                "content": { "type": "text", "text": "j" }
+            }),
+        ];
+        for update in &sequence {
+            journal.append("sess-1", update).expect("append");
+        }
+
+        let replayed = journal.replay("sess-1").expect("replay");
+        assert_eq!(
+            replayed.len(),
+            sequence.len() - 1,
+            "only the two chunks sharing every identity field merged"
+        );
+        assert_eq!(journaled(&replayed[0].1), &chunk("msg-1", "ab"));
+        for (index, (_, entry)) in replayed.iter().enumerate().skip(1) {
+            assert_eq!(
+                journaled(entry),
+                &sequence[index + 1],
+                "record {index} is verbatim"
+            );
+        }
+    }
+
+    #[test]
+    fn id_less_chunks_merge_only_while_their_run_lasts() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+
+        journal
+            .append("sess-1", &anonymous("one "))
+            .expect("append");
+        journal.append("sess-1", &anonymous("two")).expect("append");
+        journal
+            .append("sess-1", &tool_call("t-1"))
+            .expect("interrupt");
+        journal
+            .append("sess-1", &anonymous("three"))
+            .expect("append");
+        journal
+            .append("sess-1", &chunk("msg-1", "four"))
+            .expect("append");
+        journal
+            .append("sess-1", &anonymous("five"))
+            .expect("append");
+
+        let replayed = journal.replay("sess-1").expect("replay");
+        assert_eq!(
+            texts(&replayed),
+            vec!["one two", "", "three", "four", "five"],
+            "a tool call and an id change both end an id-less run"
+        );
+    }
+
+    #[test]
+    fn matching_metadata_merges_and_differing_metadata_does_not() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+
+        let with_meta = |parent: &str, text: &str| {
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "msg-1",
+                "_meta": { "claudeCode": { "parentToolUseId": parent } },
+                "content": { "type": "text", "text": text }
+            })
+        };
+        journal
+            .append("sess-1", &with_meta("child-a", "a"))
+            .expect("append");
+        journal
+            .append("sess-1", &with_meta("child-a", "b"))
+            .expect("append");
+        journal
+            .append("sess-1", &with_meta("child-b", "c"))
+            .expect("append");
+        journal
+            .append("sess-1", &chunk("msg-1", "d"))
+            .expect("append");
+
+        let replayed = journal.replay("sess-1").expect("replay");
+        assert_eq!(texts(&replayed), vec!["ab", "c", "d"]);
+        assert_eq!(journaled(&replayed[0].1), &with_meta("child-a", "ab"));
+    }
+
+    #[test]
+    fn replay_flushes_the_open_record() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+        journal.append("sess-1", &chunk("msg-1", "a")).expect("a");
+        journal.append("sess-1", &chunk("msg-1", "b")).expect("b");
+
+        assert!(
+            stored(directory.path(), "sess-1").is_empty(),
+            "the record is still being coalesced"
+        );
+        assert_eq!(
+            texts(&journal.replay("sess-1").expect("replay")),
+            vec!["ab"]
+        );
+        assert_eq!(
+            texts(&stored(directory.path(), "sess-1")),
+            vec!["ab"],
+            "replay put it on disk before reading"
+        );
+
+        journal.append("sess-1", &chunk("msg-1", "c")).expect("c");
+        assert_eq!(
+            texts(&journal.replay("sess-1").expect("replay")),
+            vec!["ab", "c"],
+            "a flushed record never reopens for later chunks of the same message"
+        );
+    }
+
+    #[test]
+    fn dropping_the_journal_flushes_the_open_record() {
+        let directory = tempdir().expect("temporary directory");
+        {
+            let journal = AgentJournal::open(directory.path()).expect("open journal");
+            journal.append("sess-1", &chunk("msg-1", "a")).expect("a");
+            journal.append("sess-1", &chunk("msg-1", "b")).expect("b");
+            assert!(stored(directory.path(), "sess-1").is_empty());
+        }
+        assert_eq!(texts(&stored(directory.path(), "sess-1")), vec!["ab"]);
+
+        let journal = AgentJournal::open(directory.path()).expect("reopen journal");
+        assert_eq!(
+            journal.append("sess-1", &chunk("msg-1", "c")).expect("c"),
+            2
+        );
+    }
+
+    #[test]
+    fn evicting_a_handle_flushes_its_open_record() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+        for index in 0..=MAX_OPEN_JOURNALS {
+            let session = format!("sess-{index}");
+            journal
+                .append(&session, &chunk("msg-1", "a"))
+                .expect("append");
+        }
+
+        assert_eq!(
+            texts(&stored(directory.path(), "sess-0")),
+            vec!["a"],
+            "eviction wrote the record out instead of dropping it"
+        );
+        assert_eq!(
+            journal.last_seq("sess-0").expect("last seq"),
+            1,
+            "the evicted journal resumes from what eviction wrote"
+        );
+    }
+
+    #[test]
+    fn removal_and_prune_drop_the_open_record_with_its_file() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+        journal
+            .append("sess-1", &chunk("msg-1", "a"))
+            .expect("append");
+        journal.remove("sess-1").expect("remove");
+        assert!(!journal_path(directory.path(), "sess-1").exists());
+        assert!(journal.replay("sess-1").expect("replay").is_empty());
+
+        journal
+            .append("sess-2", &chunk("msg-1", "b"))
+            .expect("append");
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(journal.prune(0).expect("prune"), 1);
+        drop(journal);
+        assert!(
+            !journal_path(directory.path(), "sess-2").exists(),
+            "a pruned journal must not be recreated by its own open record"
+        );
+    }
+
+    #[test]
+    fn a_runaway_message_is_flushed_at_the_pending_bound() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+        let piece = "z".repeat(4096);
+        for _ in 0..200 {
+            journal
+                .append("sess-1", &chunk("msg-1", &piece))
+                .expect("append");
+        }
+
+        let on_disk = stored(directory.path(), "sess-1");
+        assert!(
+            on_disk.len() >= 3,
+            "800 KiB of one message must not sit in memory as one record, got {} records",
+            on_disk.len()
+        );
+        let replayed = journal.replay("sess-1").expect("replay");
+        let bound = usize::try_from(MAX_PENDING_RECORD_BYTES).expect("bound") + piece.len();
+        for (_, entry) in &replayed {
+            let length = serde_json::to_vec(journaled(entry)).expect("encode").len();
+            assert!(length < bound, "record of {length} bytes past the bound");
+        }
+        assert_eq!(
+            texts(&replayed).concat().len(),
+            200 * piece.len(),
+            "splitting a runaway message loses nothing"
+        );
+    }
+
+    #[test]
+    fn coalesced_length_accounting_matches_the_encoder() {
+        let addition = "\"\\ \n\r\t\u{0b}\u{7f} café 🙂 \u{1}\u{1f}";
+        let before = serde_json::to_vec(&JournalRecord {
+            seq: 4_096,
+            body: RecordBody::Update(&chunk("msg-1", "plain")),
+        })
+        .expect("encode");
+        let after = serde_json::to_vec(&JournalRecord {
+            seq: 4_096,
+            body: RecordBody::Update(&chunk("msg-1", &format!("plain{addition}"))),
+        })
+        .expect("encode");
+
+        assert_eq!(
+            u64::try_from(after.len() - before.len()).expect("growth"),
+            escaped_length(addition),
+            "the reserved byte budget has to be exact, not merely close"
+        );
+    }
+
+    #[test]
+    fn coalescing_never_overshoots_the_size_cap() {
+        let directory = tempdir().expect("temporary directory");
+        let path = journal_path(directory.path(), "sess-1");
+        File::create(&path)
+            .expect("create journal")
+            .set_len(MAX_JOURNAL_BYTES - 256)
+            .expect("grow journal");
+
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+        journal
+            .append("sess-1", &chunk("msg-1", "seed"))
+            .expect("the first chunk still fits");
+        let refused = (0..64).any(|_| {
+            matches!(
+                journal.append("sess-1", &chunk("msg-1", "0123456789")),
+                Err(JournalError::Full { .. })
+            )
+        });
+
+        assert!(
+            refused,
+            "a merge past the cap is refused before it is taken"
+        );
+        journal.replay("sess-1").expect("replay");
+        assert!(
+            fs::metadata(&path).expect("metadata").len() <= MAX_JOURNAL_BYTES,
+            "flushing a reserved record can never cross the cap"
+        );
+    }
+
+    #[test]
+    fn an_open_record_holds_its_slot_against_the_record_cap() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+        for index in 0..MAX_JOURNAL_RECORDS - 1 {
+            journal
+                .append("sess-1", &update(&index.to_string()))
+                .expect("append");
+        }
+
+        let seq = u64::try_from(MAX_JOURNAL_RECORDS).expect("cap");
+        assert_eq!(
+            journal.append("sess-1", &chunk("live", "a")).expect("a"),
+            seq
+        );
+        assert_eq!(
+            journal.append("sess-1", &chunk("live", "b")).expect("b"),
+            seq,
+            "merging into the open record does not claim another slot"
+        );
+        assert!(matches!(
+            journal.append("sess-1", &tool_call("t-1")),
+            Err(JournalError::Full { records, .. }) if records == MAX_JOURNAL_RECORDS
+        ));
+
+        let replayed = journal.replay("sess-1").expect("replay");
+        assert_eq!(replayed.len(), MAX_JOURNAL_RECORDS);
+        assert_eq!(texts(&replayed).last().map(String::as_str), Some("ab"));
+    }
+
+    #[test]
+    fn a_coalesced_journal_reduces_like_the_chunks_it_replaced() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+
+        let mut sequence = Vec::new();
+        for index in 0..3 {
+            let message = format!("msg-{index}");
+            for token in 0..40 {
+                sequence.push(thought(&message, &format!("t{token} ")));
+            }
+            for token in 0..120 {
+                sequence.push(chunk(&message, &format!("w{token} ")));
+            }
+            sequence.push(tool_call(&format!("tool-{index}")));
+            sequence.push(anonymous("trailing "));
+            sequence.push(anonymous("prose"));
+            sequence.push(chunk(&message, " reopened"));
+        }
+        for update in &sequence {
+            journal.append("sess-1", update).expect("append");
+        }
+
+        let verbatim: Vec<(u64, JournalEntry)> = sequence
+            .iter()
+            .enumerate()
+            .map(|(index, update)| {
+                (
+                    u64::try_from(index).expect("index") + 1,
+                    JournalEntry::Update(update.clone()),
+                )
+            })
+            .collect();
+        let replayed = journal.replay("sess-1").expect("replay");
+
+        assert_eq!(
+            reduce(&replayed),
+            reduce(&verbatim),
+            "a coalesced journal must reduce to exactly what the chunk stream did"
+        );
+        assert!(
+            replayed.len() < verbatim.len() / 20,
+            "{} records for {} updates is not a coalesced journal",
+            replayed.len(),
+            verbatim.len()
+        );
+    }
+
+    #[test]
+    fn a_token_stream_collapses_to_one_record_per_message() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+
+        let mut updates = 0;
+        for turn in 0..8 {
+            let message = format!("msg-{turn}");
+            for token in 0..50 {
+                journal
+                    .append("sess-1", &thought(&message, &format!("r{token} ")))
+                    .expect("append");
+                updates += 1;
+            }
+            for token in 0..200 {
+                journal
+                    .append("sess-1", &chunk(&message, &format!("t{token} ")))
+                    .expect("append");
+                updates += 1;
+            }
+            for call in 0..3 {
+                journal
+                    .append("sess-1", &tool_call(&format!("tool-{turn}-{call}")))
+                    .expect("append");
+                updates += 1;
+            }
+        }
+
+        let replayed = journal.replay("sess-1").expect("replay");
+        assert_eq!(updates, 2_024);
+        assert_eq!(
+            replayed.len(),
+            40,
+            "8 turns of thought, prose and three tool calls each"
+        );
+        assert!(
+            fs::metadata(journal_path(directory.path(), "sess-1"))
+                .expect("metadata")
+                .len()
+                < 16 * 1024,
+            "one record per chunk would be 245 KiB of journal for this session"
+        );
+    }
+
+    #[test]
+    fn task_records_round_trip_beside_updates_in_stream_order() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+
+        assert_eq!(journal.append("sess-1", &update("a")).expect("update"), 1);
+        assert_eq!(
+            journal
+                .append_task("sess-1", &started("t-1"))
+                .expect("started"),
+            2
+        );
+        assert_eq!(journal.append("sess-1", &update("b")).expect("update"), 3);
+        assert_eq!(
+            journal
+                .append_task("sess-1", &notification("t-1"))
+                .expect("notification"),
+            4
+        );
+
+        assert_eq!(
+            journal.replay("sess-1").expect("replay"),
+            vec![
+                (1, JournalEntry::Update(update("a"))),
+                (2, JournalEntry::Task(started("t-1"))),
+                (3, JournalEntry::Update(update("b"))),
+                (4, JournalEntry::Task(notification("t-1"))),
+            ]
+        );
+        assert_eq!(journal.last_seq("sess-1").expect("last seq"), 4);
+
+        let lines = fs::read_to_string(journal_path(directory.path(), "sess-1"))
+            .expect("read journal")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("record"))
+            .collect::<Vec<_>>();
+        assert!(lines[0].get("update").is_some() && lines[0].get("task").is_none());
+        assert!(lines[1].get("task").is_some() && lines[1].get("update").is_none());
+        assert_eq!(lines[1]["task"]["kind"], json!("started"));
+    }
+
+    #[test]
+    fn a_journal_of_updates_alone_reads_exactly_as_it_did() {
+        let directory = tempdir().expect("temporary directory");
+        let path = journal_path(directory.path(), "sess-1");
+        fs::write(
+            &path,
+            format!(
+                "{}\n{}\n",
+                json!({"seq": 1, "update": update("a")}),
+                json!({"seq": 2, "update": tool_call("t-1")}),
+            ),
+        )
+        .expect("write a journal from before task records");
+
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+        assert_eq!(
+            journal.replay("sess-1").expect("replay"),
+            vec![
+                (1, JournalEntry::Update(update("a"))),
+                (2, JournalEntry::Update(tool_call("t-1"))),
+            ]
+        );
+        assert_eq!(journal.last_seq("sess-1").expect("last seq"), 2);
+        assert_eq!(
+            journal
+                .append_task("sess-1", &started("t-1"))
+                .expect("task"),
+            3,
+            "an old journal keeps counting where it left off"
+        );
+    }
+
+    #[test]
+    fn a_task_record_flushes_the_message_it_followed() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+
+        journal
+            .append("sess-1", &chunk("msg-1", "spawning "))
+            .expect("a");
+        journal
+            .append("sess-1", &chunk("msg-1", "a task"))
+            .expect("b");
+        assert!(
+            stored(directory.path(), "sess-1").is_empty(),
+            "the message is still being coalesced"
+        );
+
+        assert_eq!(
+            journal
+                .append_task("sess-1", &started("t-1"))
+                .expect("task"),
+            2
+        );
+        assert_eq!(
+            stored(directory.path(), "sess-1"),
+            vec![
+                (1, JournalEntry::Update(chunk("msg-1", "spawning a task"))),
+                (2, JournalEntry::Task(started("t-1"))),
+            ],
+            "a task event can never be reordered ahead of the text it followed"
+        );
+
+        journal.append("sess-1", &chunk("msg-1", "!")).expect("c");
+        assert_eq!(
+            journal.replay("sess-1").expect("replay").last(),
+            Some(&(3, JournalEntry::Update(chunk("msg-1", "!")))),
+            "the flushed message never reopens across the task record"
+        );
+    }
+
+    #[test]
+    fn a_task_record_counts_against_the_record_cap() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+        for index in 0..MAX_JOURNAL_RECORDS - 1 {
+            journal
+                .append("sess-1", &update(&index.to_string()))
+                .expect("append");
+        }
+
+        assert_eq!(
+            journal
+                .append_task("sess-1", &started("t-1"))
+                .expect("task"),
+            u64::try_from(MAX_JOURNAL_RECORDS).expect("cap")
+        );
+        assert!(matches!(
+            journal.append_task("sess-1", &notification("t-1")),
+            Err(JournalError::Full { records, .. }) if records == MAX_JOURNAL_RECORDS
+        ));
+        assert_eq!(
+            journal.replay("sess-1").expect("replay").len(),
+            MAX_JOURNAL_RECORDS
+        );
+    }
+
+    #[test]
+    fn a_task_record_this_build_cannot_read_costs_only_itself() {
+        let directory = tempdir().expect("temporary directory");
+        let path = journal_path(directory.path(), "sess-1");
+        fs::write(
+            &path,
+            format!(
+                "{}\n{}\n{}\n",
+                json!({"seq": 1, "update": update("a")}),
+                json!({"seq": 2, "task": {"kind": "invented-later", "task_id": "t-1"}}),
+                json!({"seq": 3, "update": update("b")}),
+            ),
+        )
+        .expect("write journal");
+
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+        assert_eq!(
+            journal.replay("sess-1").expect("replay"),
+            vec![
+                (1, JournalEntry::Update(update("a"))),
+                (3, JournalEntry::Update(update("b"))),
+            ]
+        );
+        assert_eq!(
+            journal.last_seq("sess-1").expect("last seq"),
+            3,
+            "an unreadable record still holds its place in the sequence"
+        );
     }
 }

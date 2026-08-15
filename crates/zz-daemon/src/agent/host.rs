@@ -865,6 +865,9 @@ impl PanePump {
         {
             return;
         }
+        if matches!(&payload, AgentStreamPayload::Parked) && !self.settleable_out_of_turn() {
+            return;
+        }
         if matches!(
             &payload,
             AgentStreamPayload::AuthenticationFailed { .. } | AgentStreamPayload::PaneFailed { .. }
@@ -981,13 +984,16 @@ impl PanePump {
                 }
                 AgentStreamPayload::ConfigOptionsChanged { .. }
                 | AgentStreamPayload::ModeChanged { .. } => state.error = None,
+                AgentStreamPayload::Parked => {
+                    settle_turn(&mut state);
+                    follow = FollowUp::DrainQueue;
+                }
                 AgentStreamPayload::StateSynced { .. }
                 | AgentStreamPayload::TurnStarted { .. }
                 | AgentStreamPayload::SessionsListed { .. }
                 | AgentStreamPayload::SessionListFailed { .. }
                 | AgentStreamPayload::SessionDeleted { .. }
                 | AgentStreamPayload::SessionDeleteFailed { .. }
-                | AgentStreamPayload::Parked
                 | AgentStreamPayload::PromptsReclaimed { .. }
                 | AgentStreamPayload::PromptsRestored { .. }
                 | AgentStreamPayload::TurnDiff { .. } => {}
@@ -1085,6 +1091,18 @@ impl PanePump {
                 self.reclaim_queue();
             }
         }
+    }
+
+    /// Whether a turn-over signal arriving outside a prompt has anything to
+    /// settle. A prompt in flight owns its own turn boundary and its response
+    /// is authoritative; a pane with nothing outstanding would only be
+    /// publishing noise, which also dedupes the SDK's per-cycle idles.
+    fn settleable_out_of_turn(&self) -> bool {
+        if self.active_turn.is_some() {
+            return false;
+        }
+        let state = self.state.lock();
+        state.phase == AgentConnectionPhase::Ready && state.turn_in_flight()
     }
 
     /// Start the next queued prompt now that the pane accepts prompts again.
@@ -1362,20 +1380,34 @@ fn track_task(state: &mut AgentPaneState, event: &SdkTaskEvent) {
         SdkTaskEvent::Settled { task_id, .. } => {
             settle_live_operation(state, task_id, true);
         }
+        // The reconciled set carries no attribution, so it may only retire
+        // tasks the pane already tracks, never introduce new ones.
+        SdkTaskEvent::Reconcile { task_ids } => {
+            let ended = state
+                .live_tasks
+                .iter()
+                .filter(|task_id| !task_ids.contains(task_id))
+                .cloned()
+                .collect::<Vec<_>>();
+            for task_id in ended {
+                settle_live_operation(state, &task_id, true);
+            }
+        }
+        SdkTaskEvent::ToolProgress { .. } | SdkTaskEvent::TaskProgress { .. } => {}
     }
 }
 
 #[cfg(test)]
 mod tests {
     use agent_client_protocol::schema::v1::{
-        ContentBlock, ContentChunk, SessionUpdate, TextContent, ToolCall, ToolCallStatus,
-        ToolCallUpdate, ToolCallUpdateFields,
+        ContentBlock, ContentChunk, MessageId, SessionUpdate, TextContent, ToolCall,
+        ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
     };
 
     use super::*;
     use crate::agent::{
         fixture::{Behavior, fixture_runner, fixture_runner_with_cancellations},
-        journal::AgentJournal,
+        journal::{AgentJournal, JournalEntry},
         stream::{AgentImage, AgentStreamPayload},
     };
 
@@ -1530,6 +1562,38 @@ mod tests {
         payloads
             .iter()
             .filter_map(|payload| chunk_text(payload).map(ToOwned::to_owned))
+            .collect()
+    }
+
+    /// The transcript a restore produced, in order: the message chunks and the
+    /// task bookends between them, with the session scaffolding left out.
+    fn restored_transcript(payloads: &[AgentStreamPayload]) -> Vec<String> {
+        payloads
+            .iter()
+            .filter_map(|payload| match payload {
+                AgentStreamPayload::Update { .. } => {
+                    chunk_text(payload).map(|text| format!("update:{text}"))
+                }
+                AgentStreamPayload::TaskEvent { event } => Some(format!("task:{}", event.kind())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The same description, read back off the journal.
+    fn journalled_transcript(records: &[(u64, JournalEntry)]) -> Vec<String> {
+        records
+            .iter()
+            .map(|(_, entry)| match entry {
+                JournalEntry::Update(update) => format!(
+                    "update:{}",
+                    update
+                        .pointer("/content/text")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                ),
+                JournalEntry::Task(event) => format!("task:{}", event.kind()),
+            })
             .collect()
     }
 
@@ -2146,11 +2210,14 @@ mod tests {
     fn a_session_the_agent_cannot_load_is_replayed_out_of_the_journal() {
         let directory = tempfile::tempdir().expect("journal directory");
         let journal = Arc::new(AgentJournal::open(directory.path()).expect("open journal"));
-        for text in ["first restored", "second restored"] {
-            let update = serde_json::to_value(SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                ContentBlock::Text(TextContent::new(text)),
-            )))
-            .expect("encode update");
+        for (index, text) in ["first restored", "second restored"]
+            .into_iter()
+            .enumerate()
+        {
+            let mut chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(text)));
+            chunk.message_id = Some(MessageId::new(format!("restored-{index}")));
+            let update = serde_json::to_value(SessionUpdate::AgentMessageChunk(chunk))
+                .expect("encode update");
             journal.append("stale-session", &update).expect("append");
         }
 
@@ -2188,6 +2255,69 @@ mod tests {
             "the superseded journal is not left behind to be restored twice"
         );
         assert_eq!(fixture.state().phase, AgentConnectionPhase::Ready);
+        fixture.close();
+    }
+
+    #[test]
+    fn a_restored_session_replays_its_task_bookends_and_journals_them_again() {
+        let directory = tempfile::tempdir().expect("journal directory");
+        let journal = Arc::new(AgentJournal::open(directory.path()).expect("open journal"));
+        let started = SdkTaskEvent::Started {
+            task_id: "t-1".to_owned(),
+            tool_use_id: "toolu_1".to_owned(),
+            is_agent: true,
+        };
+        let settled = SdkTaskEvent::Settled {
+            task_id: "t-1".to_owned(),
+            status: "completed".to_owned(),
+        };
+        let chunk = |index: usize, text: &str| {
+            let mut chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(text)));
+            chunk.message_id = Some(MessageId::new(format!("restored-{index}")));
+            serde_json::to_value(SessionUpdate::AgentMessageChunk(chunk)).expect("encode update")
+        };
+        journal
+            .append("stale-session", &chunk(0, "spawning"))
+            .expect("append");
+        journal
+            .append_task("stale-session", &started)
+            .expect("append task");
+        journal
+            .append("stale-session", &chunk(1, "waiting"))
+            .expect("append");
+        journal
+            .append_task("stale-session", &settled)
+            .expect("append task");
+
+        let fixture = Fixture::build(
+            Behavior::Chunk,
+            false,
+            false,
+            Some(&journal),
+            Some("stale-session".to_owned()),
+            None,
+        );
+        let payloads = fixture.recorder.wait("the restored session", |payload| {
+            matches!(payload, AgentStreamPayload::SessionReady { .. })
+        });
+
+        let expected = [
+            "update:spawning",
+            "task:task-started",
+            "update:waiting",
+            "task:task-settled",
+        ];
+        assert_eq!(
+            restored_transcript(&payloads),
+            expected,
+            "the bookends replay in the places the transcript gave them"
+        );
+        assert_eq!(
+            journalled_transcript(&journal.replay("fixture-session").expect("replay")),
+            expected,
+            "and are journalled again under the session that took over"
+        );
+        assert!(journal.replay("stale-session").expect("replay").is_empty());
         fixture.close();
     }
 
@@ -2307,6 +2437,144 @@ mod tests {
             },
         );
         assert!(!state.turn_in_flight());
+    }
+
+    #[test]
+    fn a_reconciled_set_retires_the_tasks_it_leaves_out_and_adopts_none() {
+        let mut state = AgentPaneState::for_test();
+        for task_id in ["a5ee", "bc5s"] {
+            track_task(
+                &mut state,
+                &SdkTaskEvent::Started {
+                    task_id: task_id.to_owned(),
+                    tool_use_id: format!("toolu_{task_id}"),
+                    is_agent: true,
+                },
+            );
+        }
+
+        track_task(
+            &mut state,
+            &SdkTaskEvent::Reconcile {
+                task_ids: vec!["a5ee".to_owned(), "never-started".to_owned()],
+            },
+        );
+        assert_eq!(
+            state.live_tasks,
+            HashSet::from(["a5ee".to_owned()]),
+            "the set retires what it omits and adopts nothing it invents"
+        );
+        assert!(state.turn_in_flight());
+
+        track_task(
+            &mut state,
+            &SdkTaskEvent::Reconcile {
+                task_ids: Vec::new(),
+            },
+        );
+        assert!(state.live_tasks.is_empty());
+        assert!(!state.turn_in_flight());
+    }
+
+    #[test]
+    fn progress_heartbeats_leave_the_tracked_operations_alone() {
+        let mut state = AgentPaneState::for_test();
+
+        track_task(
+            &mut state,
+            &SdkTaskEvent::ToolProgress {
+                tool_use_id: "toolu_01BashRun".to_owned(),
+                parent_tool_use_id: None,
+                elapsed_seconds: 30.0,
+                subagent_type: None,
+            },
+        );
+        track_task(
+            &mut state,
+            &SdkTaskEvent::TaskProgress {
+                task_id: "a5ee".to_owned(),
+                tool_use_id: None,
+                description: "explore".to_owned(),
+                last_tool_name: Some("Grep".to_owned()),
+                subagent_type: Some("Explore".to_owned()),
+            },
+        );
+
+        assert!(
+            !state.turn_in_flight(),
+            "liveness alone must not open a turn: {:?}",
+            state.live_tasks
+        );
+    }
+
+    #[test]
+    fn an_autonomous_turn_settles_at_the_idle_signal_but_a_prompt_owns_its_own() {
+        let fixture = Fixture::open(Behavior::Hang, false);
+        fixture.wait_for_session();
+
+        // Nothing outstanding: the pane has no reason to publish a park.
+        fixture.inject(AgentStreamPayload::Parked);
+        fixture.inject(AgentStreamPayload::Update {
+            update: serde_json::json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tool-1",
+                "status": "pending",
+            }),
+        });
+        let payloads = fixture
+            .recorder
+            .wait("the autonomous tool call", |payload| {
+                matches!(payload, AgentStreamPayload::Update { .. })
+            });
+        assert!(
+            !payloads
+                .iter()
+                .any(|payload| matches!(payload, AgentStreamPayload::Parked)),
+            "an idle with nothing to settle is noise: {payloads:?}"
+        );
+
+        fixture.inject(AgentStreamPayload::Parked);
+        fixture
+            .recorder
+            .wait("the settled autonomous turn", |payload| {
+                matches!(payload, AgentStreamPayload::Parked)
+            });
+        assert_eq!(fixture.state().phase, AgentConnectionPhase::Ready);
+        assert!(!fixture.state().turn_in_flight());
+
+        // A prompt owns its turn boundary: its response is authoritative, so a
+        // racing idle cannot settle it early.
+        fixture.prompt("running");
+        fixture.recorder.wait("the turn to start", |payload| {
+            chunk_text(payload) == Some("turn 0")
+        });
+        fixture.inject(AgentStreamPayload::Parked);
+        fixture.inject(AgentStreamPayload::Update {
+            update: serde_json::json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tool-2",
+                "status": "pending",
+            }),
+        });
+        fixture.recorder.wait("the in-turn tool call", |payload| {
+            matches!(
+                payload,
+                AgentStreamPayload::Update { update }
+                    if update.get("toolCallId").and_then(Value::as_str) == Some("tool-2")
+            )
+        });
+        assert_eq!(fixture.state().phase, AgentConnectionPhase::Running);
+        assert_eq!(
+            fixture
+                .recorder
+                .payloads()
+                .iter()
+                .filter(|payload| matches!(payload, AgentStreamPayload::Parked))
+                .count(),
+            1,
+            "the racing idle must not park a running turn"
+        );
+        fixture.close();
     }
 
     #[test]

@@ -334,6 +334,28 @@ mod tests {
                     result_markdown: String::new(),
                 }),
             },
+            AgentStreamPayload::TaskEvent {
+                event: SdkTaskEvent::ToolProgress {
+                    tool_use_id: "u".to_owned(),
+                    parent_tool_use_id: Some("parent".to_owned()),
+                    elapsed_seconds: 30.5,
+                    subagent_type: None,
+                },
+            },
+            AgentStreamPayload::TaskEvent {
+                event: SdkTaskEvent::TaskProgress {
+                    task_id: "t".to_owned(),
+                    tool_use_id: None,
+                    description: "explore".to_owned(),
+                    last_tool_name: Some("Grep".to_owned()),
+                    subagent_type: Some("Explore".to_owned()),
+                },
+            },
+            AgentStreamPayload::TaskEvent {
+                event: SdkTaskEvent::Reconcile {
+                    task_ids: vec!["t".to_owned()],
+                },
+            },
             AgentStreamPayload::PermissionRequested {
                 request_id: 7,
                 tool_call: serde_json::json!({"toolCallId": "call-1"}),
@@ -414,6 +436,33 @@ mod tests {
         assert_eq!(encoded["seq"], serde_json::json!(42));
         assert_eq!(encoded["item"], serde_json::json!("sessionReset"));
         assert_eq!(encoded["restoring"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn a_journal_written_before_the_progress_variants_still_decodes() {
+        let legacy = serde_json::json!({
+            "seq": 9,
+            "item": "taskEvent",
+            "event": {
+                "kind": "started",
+                "task_id": "a5ee3d5032432ddf6",
+                "tool_use_id": "toolu_018pqsELs6Roip3xWKU1ZhtF",
+                "is_agent": true,
+            },
+        });
+        let item: AgentStreamItem = serde_json::from_value(legacy).expect("decode legacy item");
+
+        assert_eq!(item.seq, 9);
+        assert_eq!(
+            item.payload,
+            AgentStreamPayload::TaskEvent {
+                event: SdkTaskEvent::Started {
+                    task_id: "a5ee3d5032432ddf6".to_owned(),
+                    tool_use_id: "toolu_018pqsELs6Roip3xWKU1ZhtF".to_owned(),
+                    is_agent: true,
+                }
+            }
+        );
     }
 
     #[test]

@@ -18,12 +18,12 @@ use zz_protocol::{AgentDescriptor, AgentProvider, CommandInvocation, PaneId};
 #[cfg(all(test, not(target_os = "macos")))]
 use zz_ui::agent::DisclosureKind;
 use zz_ui::agent::{
-    AGENT_CHROME_CONTROL_HEIGHT, AGENT_CONTENT_MAX_WIDTH, AgentEntry, AgentMarkdown, AgentPatch,
-    AgentTimeline, AgentTimelineStore, AgentToolEntry, AgentToolKind, AgentToolPayload,
-    AgentToolStatus, AgentToolText, COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot,
-    TimelineRow, TimelineStick, agent_attachment_thumbnail, agent_jump_to_bottom_button,
-    agent_pane_header, agent_patch, agent_patch_block, append_timeline_row, fold_timeline_rows,
-    timeline_group_kind,
+    AGENT_CHROME_CONTROL_HEIGHT, AGENT_CONTENT_MAX_WIDTH, AGENT_STICKY_ROW_HEIGHT, AgentEntry,
+    AgentMarkdown, AgentPatch, AgentStickyRow, AgentTimeline, AgentTimelineStore, AgentToolEntry,
+    AgentToolKind, AgentToolPayload, AgentToolStatus, AgentToolText, COMPOSER_ATTACHMENT,
+    FoldedTimelineRows, MarkdownSlot, TimelineRow, TimelineStick, agent_attachment_thumbnail,
+    agent_jump_to_bottom_button, agent_pane_header, agent_patch, agent_patch_block,
+    agent_sticky_strip, append_timeline_row, fold_timeline_rows, timeline_group_kind,
 };
 use zz_ui::command::palette_shortcut_hint;
 use zz_ui::{
@@ -64,7 +64,6 @@ const COMPOSER_MIN_HEIGHT: f32 = 86.0;
 const COMPOSER_MAX_WIDTH: f32 = AGENT_CONTENT_MAX_WIDTH + 2.0;
 const COMPOSER_OCCLUSION_HEIGHT: f32 = COMPOSER_MIN_HEIGHT / 2.0;
 const TIMELINE_COMPOSER_CLEARANCE: f32 = (COMPOSER_MIN_HEIGHT + 12.0) * 1.5;
-const STICKY_ROW_HEIGHT: f32 = 32.0;
 const CHROME_BUTTON_HEIGHT: f32 = AGENT_CHROME_CONTROL_HEIGHT;
 const SPINNER_PERIOD: Duration = Duration::from_millis(800);
 const MAX_RENDERED_ERROR_BYTES: usize = 1024;
@@ -76,6 +75,20 @@ fn agent_spinner(size: Size, color: Hsla, view: EntityId, cx: &mut gpui::App) ->
         .text_color(color)
         .transform(Transformation::rotate(percentage(phase)))
         .into_any_element()
+}
+
+/// Whether the pane shows busy chrome. This reads the connection phase and
+/// nothing else: an adapter that never sends a final tool update leaves rows
+/// unsettled forever, so tool statuses cannot be allowed to decide whether the
+/// pane looks alive.
+const fn pane_is_busy(connection: AgentConnectionState) -> bool {
+    matches!(
+        connection,
+        AgentConnectionState::Starting
+            | AgentConnectionState::Restoring
+            | AgentConnectionState::Running
+            | AgentConnectionState::Cancelling
+    )
 }
 
 const fn directory_picker_enabled(
@@ -107,20 +120,6 @@ enum TimelineModelUpdate {
         remeasure_rows: Vec<usize>,
         splice_start: usize,
         added_rows: usize,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum StickyAgentRow {
-    Subagent {
-        id: u64,
-        status: AgentToolStatus,
-        label: SharedString,
-    },
-    Notification {
-        id: u64,
-        status: SharedString,
-        label: SharedString,
     },
 }
 
@@ -500,10 +499,8 @@ pub(crate) struct AgentView {
     stick: TimelineStick,
     completion_scroll: UniformListScrollHandle,
     submission_error: Option<Arc<str>>,
-    dismissed_notifications: BTreeSet<u64>,
-    sticky_rows: Arc<[StickyAgentRow]>,
+    sticky_rows: Arc<[AgentStickyRow]>,
     sticky_timeline_revision: u64,
-    sticky_dismissed_notifications: BTreeSet<u64>,
     permission_wizard: PermissionWizard,
     attachments: Vec<Arc<Image>>,
     completions: Arc<[CommandCompletion]>,
@@ -637,10 +634,8 @@ impl AgentView {
             stick,
             completion_scroll: UniformListScrollHandle::new(),
             submission_error: None,
-            dismissed_notifications: BTreeSet::new(),
             sticky_rows: Arc::from([]),
             sticky_timeline_revision: 0,
-            sticky_dismissed_notifications: BTreeSet::new(),
             permission_wizard: PermissionWizard::default(),
             attachments: Vec::new(),
             completions: Arc::from([]),
@@ -818,9 +813,6 @@ impl AgentView {
             self.changes_task = None;
         }
         self.changes_turn_generation = next_turn_generation;
-        if conversation_changed {
-            self.dismissed_notifications.clear();
-        }
         if state_changed {
             self.pane_state = next_state;
         }
@@ -843,7 +835,6 @@ impl AgentView {
             if !self.timeline.rows.is_empty() {
                 self.timeline.clear();
                 self.timeline_next_revision = 0;
-                self.dismissed_notifications.clear();
                 self.timeline_scroll.reset(0);
                 self.stick.engage_now(&self.timeline_scroll, reduce_motion);
                 return (true, TimelineStoreUpdate::Clear);
@@ -858,11 +849,8 @@ impl AgentView {
             self.timeline_next_revision = next_revision;
             self.timeline_scroll.reset(self.timeline.rows.len());
             self.stick.engage_now(&self.timeline_scroll, reduce_motion);
-            self.sticky_rows =
-                sticky_agent_rows(&self.timeline.rows, &self.dismissed_notifications).into();
+            self.sticky_rows = sticky_agent_rows(&self.timeline.rows).into();
             self.sticky_timeline_revision = self.timeline.sticky_revision;
-            self.sticky_dismissed_notifications
-                .clone_from(&self.dismissed_notifications);
             return (true, TimelineStoreUpdate::Clear);
         }
         if self.timeline.entry_ids.len() == entries.len()
@@ -896,15 +884,10 @@ impl AgentView {
         )
     }
 
-    fn cached_sticky_rows(&mut self) -> Arc<[StickyAgentRow]> {
-        if self.sticky_timeline_revision != self.timeline.sticky_revision
-            || self.sticky_dismissed_notifications != self.dismissed_notifications
-        {
-            self.sticky_rows =
-                sticky_agent_rows(&self.timeline.rows, &self.dismissed_notifications).into();
+    fn cached_sticky_rows(&mut self) -> Arc<[AgentStickyRow]> {
+        if self.sticky_timeline_revision != self.timeline.sticky_revision {
+            self.sticky_rows = sticky_agent_rows(&self.timeline.rows).into();
             self.sticky_timeline_revision = self.timeline.sticky_revision;
-            self.sticky_dismissed_notifications
-                .clone_from(&self.dismissed_notifications);
         }
         Arc::clone(&self.sticky_rows)
     }
@@ -1514,12 +1497,6 @@ impl AgentView {
         cx.notify();
     }
 
-    fn dismiss_notification(&mut self, id: u64, cx: &mut Context<Self>) {
-        if self.dismissed_notifications.insert(id) {
-            cx.notify();
-        }
-    }
-
     fn render_attachments(&self, view: &Entity<Self>, cx: &gpui::App) -> Option<impl IntoElement> {
         if self.attachments.is_empty() {
             return None;
@@ -1581,13 +1558,7 @@ impl AgentView {
             AgentConnectionState::Failed => "The agent could not start this session.".into(),
             AgentConnectionState::Disconnected => "The ACP agent is offline.".into(),
         };
-        let busy = matches!(
-            state.connection,
-            AgentConnectionState::Starting
-                | AgentConnectionState::Restoring
-                | AgentConnectionState::Running
-                | AgentConnectionState::Cancelling
-        );
+        let busy = pane_is_busy(state.connection);
         v_flex()
             .w_full()
             .py(px(48.0))
@@ -3046,107 +3017,11 @@ impl AgentView {
         )
     }
 
-    fn render_sticky_strip(
-        rows: &[StickyAgentRow],
-        view: &Entity<Self>,
-        cx: &mut gpui::App,
-    ) -> Option<AnyElement> {
-        if rows.is_empty() {
-            return None;
-        }
-        Some(
-            v_flex()
-                .w_full()
-                .gap_1()
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(cx.theme().border)
-                .bg(cx.theme().background.raised(1))
-                .p_1()
-                .children(rows.iter().map(|row| match row {
-                    StickyAgentRow::Subagent { id, status, label } => {
-                        let spinner_color = if *status == AgentToolStatus::NeedsApproval {
-                            cx.theme().warning
-                        } else {
-                            cx.theme().foreground.muted()
-                        };
-                        h_flex()
-                            .id(("agent-sticky-subagent", *id))
-                            .w_full()
-                            .h(px(STICKY_ROW_HEIGHT))
-                            .items_center()
-                            .gap_2()
-                            .px_2()
-                            .child(div().flex_none().child(agent_spinner(
-                                Size::XSmall,
-                                spinner_color,
-                                view.entity_id(),
-                                cx,
-                            )))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .flex_1()
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .whitespace_nowrap()
-                                    .text_size(zz_ui::rems_from_px(12.0))
-                                    .text_color(cx.theme().foreground.muted())
-                                    .child(label.clone()),
-                            )
-                            .into_any_element()
-                    }
-                    StickyAgentRow::Notification { id, status, label } => {
-                        let id = *id;
-                        let dismiss = view.clone();
-                        h_flex()
-                            .id(("agent-sticky-notification", id))
-                            .w_full()
-                            .h(px(STICKY_ROW_HEIGHT))
-                            .items_center()
-                            .gap_2()
-                            .px_2()
-                            .child(
-                                Icon::new(notification_icon(status))
-                                    .small()
-                                    .flex_none()
-                                    .text_color(cx.theme().foreground.muted()),
-                            )
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .flex_1()
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .whitespace_nowrap()
-                                    .text_size(zz_ui::rems_from_px(12.0))
-                                    .text_color(cx.theme().foreground.muted())
-                                    .child(label.clone()),
-                            )
-                            .child(
-                                Button::new(("agent-dismiss-notification", id))
-                                    .ghost()
-                                    .xsmall()
-                                    .icon(IconName::Close)
-                                    .tooltip("Dismiss")
-                                    .on_click(move |_, _, cx| {
-                                        dismiss.update(cx, |view, cx| {
-                                            view.dismiss_notification(id, cx);
-                                        });
-                                    }),
-                            )
-                            .into_any_element()
-                    }
-                }))
-                .into_any_element(),
-        )
-    }
-
     #[allow(clippy::redundant_closure_for_method_calls)]
     fn render_composer(
         &self,
         state: &AgentPaneState,
-        sticky_rows: &[StickyAgentRow],
+        sticky_rows: &[AgentStickyRow],
         view: &Entity<Self>,
         cx: &mut gpui::App,
     ) -> impl IntoElement {
@@ -3237,7 +3112,7 @@ impl AgentView {
         let command_hint =
             active_command_hint(&self.last_input, state.provider, &state.available_commands);
         let completions = self.render_completions(view, cx);
-        let sticky_strip = Self::render_sticky_strip(sticky_rows, view, cx);
+        let sticky_strip = agent_sticky_strip(sticky_rows, view.entity_id(), cx);
 
         v_flex()
             .absolute()
@@ -3502,28 +3377,24 @@ impl Render for AgentView {
     }
 }
 
-fn sticky_agent_rows(rows: &[TimelineRow], dismissed: &BTreeSet<u64>) -> Vec<StickyAgentRow> {
-    let entries: Vec<&AgentEntry> = rows
-        .iter()
-        .flat_map(|row| match row {
-            TimelineRow::Single(entry) => std::slice::from_ref(entry),
-            TimelineRow::Group { entries, .. } => entries.as_slice(),
-        })
-        .collect();
-    let last_user = entries
-        .iter()
-        .rposition(|entry| matches!(entry, AgentEntry::User { .. }));
+fn sticky_agent_rows(rows: &[TimelineRow]) -> Vec<AgentStickyRow> {
     let mut sticky = Vec::new();
-    for (index, entry) in entries.iter().enumerate() {
-        let acknowledged = last_user.is_some_and(|user| index < user);
-        append_sticky_agent_entry(&mut sticky, entry, acknowledged, dismissed);
+    for row in rows {
+        match row {
+            TimelineRow::Single(entry) => append_sticky_agent_entry(&mut sticky, entry),
+            TimelineRow::Group { entries, .. } => {
+                for entry in entries.iter() {
+                    append_sticky_agent_entry(&mut sticky, entry);
+                }
+            }
+        }
     }
     sticky
 }
 
-fn sticky_entry_rows(entry: &AgentEntry) -> Vec<StickyAgentRow> {
+fn sticky_entry_rows(entry: &AgentEntry) -> Vec<AgentStickyRow> {
     let mut sticky = Vec::new();
-    append_sticky_agent_entry(&mut sticky, entry, false, &BTreeSet::new());
+    append_sticky_agent_entry(&mut sticky, entry);
     sticky
 }
 
@@ -3548,50 +3419,27 @@ fn rendered_error(error: &str) -> String {
     rendered
 }
 
-fn append_sticky_agent_entry(
-    sticky: &mut Vec<StickyAgentRow>,
-    entry: &AgentEntry,
-    acknowledged: bool,
-    dismissed: &BTreeSet<u64>,
-) {
-    match entry {
-        AgentEntry::Tool(tool) => {
-            if tool.subagent
-                && matches!(
-                    tool.status,
-                    AgentToolStatus::Pending
-                        | AgentToolStatus::Running
-                        | AgentToolStatus::NeedsApproval
-                )
-            {
-                sticky.push(StickyAgentRow::Subagent {
-                    id: tool.id,
-                    status: tool.status,
-                    label: tool.label.clone(),
-                });
-            }
-            for child in tool.children.iter() {
-                append_sticky_agent_entry(sticky, child, acknowledged, dismissed);
-            }
-        }
-        AgentEntry::Notification {
-            id,
-            task_id,
-            status,
-            summary,
-            ..
-        } if !acknowledged && !dismissed.contains(id) => {
-            sticky.push(StickyAgentRow::Notification {
-                id: *id,
-                status: status.clone(),
-                label: if summary.is_empty() {
-                    task_id.clone()
-                } else {
-                    summary.clone()
-                },
+/// Only a live subagent earns a strip row: settled work already reads off the
+/// transcript, so mirroring it above the composer would only restate it.
+fn append_sticky_agent_entry(sticky: &mut Vec<AgentStickyRow>, entry: &AgentEntry) {
+    if let AgentEntry::Tool(tool) = entry {
+        if tool.subagent
+            && matches!(
+                tool.status,
+                AgentToolStatus::Pending
+                    | AgentToolStatus::Running
+                    | AgentToolStatus::NeedsApproval
+            )
+        {
+            sticky.push(AgentStickyRow::Subagent {
+                id: tool.id,
+                status: tool.status,
+                label: tool.label.clone(),
             });
         }
-        _ => {}
+        for child in tool.children.iter() {
+            append_sticky_agent_entry(sticky, child);
+        }
     }
 }
 
@@ -3601,15 +3449,7 @@ fn sticky_strip_clearance(row_count: usize) -> f32 {
     } else {
         let row_count = u16::try_from(row_count).unwrap_or(u16::MAX);
         let row_gaps = f32::from(row_count.saturating_sub(1)) * 4.0;
-        f32::from(row_count) * STICKY_ROW_HEIGHT + row_gaps + 16.0
-    }
-}
-
-fn notification_icon(status: &str) -> IconName {
-    match status.trim().to_ascii_lowercase().as_str() {
-        "completed" | "succeeded" | "success" => IconName::Check,
-        "failed" | "error" | "cancelled" | "canceled" => IconName::Close,
-        _ => IconName::Asterisk,
+        f32::from(row_count) * AGENT_STICKY_ROW_HEIGHT + row_gaps + 16.0
     }
 }
 
@@ -4657,10 +4497,8 @@ mod completion_tests {
                 timeline_scroll,
                 completion_scroll: UniformListScrollHandle::new(),
                 submission_error: None,
-                dismissed_notifications: BTreeSet::new(),
                 sticky_rows: Arc::from([]),
                 sticky_timeline_revision: 0,
-                sticky_dismissed_notifications: BTreeSet::new(),
                 permission_wizard: PermissionWizard::default(),
                 attachments: Vec::new(),
                 completions: Arc::from([]),
@@ -4696,7 +4534,8 @@ mod completion_tests {
         }];
         let (changed, cleared) = cx.update(|_, cx| {
             view.update(cx, |view, cx| {
-                let (changed, store_update) = view.synchronize_timeline(&replacement, &[3], false);
+                let (changed, store_update) =
+                    view.synchronize_timeline(&replacement, &[3], &HashMap::new(), &[], false);
                 let cleared = view.update_timeline_store(store_update, cx);
                 (changed, cleared)
             })
@@ -4756,10 +4595,8 @@ mod completion_tests {
                 timeline_scroll,
                 completion_scroll: UniformListScrollHandle::new(),
                 submission_error: None,
-                dismissed_notifications: BTreeSet::new(),
                 sticky_rows: Arc::from([]),
                 sticky_timeline_revision: 0,
-                sticky_dismissed_notifications: BTreeSet::new(),
                 permission_wizard: PermissionWizard::default(),
                 attachments: Vec::new(),
                 completions: vec![
@@ -4840,6 +4677,25 @@ mod completion_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn busy_chrome_follows_the_connection_and_not_a_tool_row() {
+        for connection in [
+            AgentConnectionState::Starting,
+            AgentConnectionState::Restoring,
+            AgentConnectionState::Running,
+            AgentConnectionState::Cancelling,
+        ] {
+            assert!(pane_is_busy(connection));
+        }
+        for connection in [
+            AgentConnectionState::Ready,
+            AgentConnectionState::Failed,
+            AgentConnectionState::Disconnected,
+        ] {
+            assert!(!pane_is_busy(connection));
+        }
+    }
 
     #[test]
     fn directory_picker_requires_a_ready_local_pane_without_a_permission() {
@@ -5009,7 +4865,7 @@ mod tests {
     }
 
     #[test]
-    fn sticky_notifications_follow_prompt_position_and_per_row_dismissal() {
+    fn notifications_never_reach_the_sticky_strip() {
         let entries = [
             thread_notification(1, "first completed"),
             AgentThreadEntry::Assistant {
@@ -5020,29 +4876,10 @@ mod tests {
             thread_notification(3, "second completed"),
         ];
         let timeline = TimelineModel::new(&entries, &[1, 1, 1], &HashMap::new());
-        let mut dismissed = BTreeSet::new();
-
-        assert_eq!(sticky_agent_rows(&timeline.rows, &dismissed).len(), 2);
-        dismissed.insert(1);
-        assert!(matches!(
-            sticky_agent_rows(&timeline.rows, &dismissed).as_slice(),
-            [StickyAgentRow::Notification { id: 3, .. }]
-        ));
-
-        let with_prompt = [
-            thread_notification(1, "first completed"),
-            AgentThreadEntry::User {
-                id: 2,
-                markdown: "next prompt".to_owned(),
-                images: Vec::new(),
-            },
-            thread_notification(3, "second completed"),
-        ];
-        let timeline = TimelineModel::new(&with_prompt, &[1, 1, 1], &HashMap::new());
-        assert!(matches!(
-            sticky_agent_rows(&timeline.rows, &BTreeSet::new()).as_slice(),
-            [StickyAgentRow::Notification { id: 3, .. }]
-        ));
+        assert!(
+            sticky_agent_rows(&timeline.rows).is_empty(),
+            "settled work reads off the transcript, not the strip"
+        );
         assert!(sticky_strip_clearance(0).abs() < f32::EPSILON);
         assert!(sticky_strip_clearance(2) > sticky_strip_clearance(1));
     }
@@ -5056,8 +4893,8 @@ mod tests {
         *subagent = true;
         let running = TimelineModel::new(&[task.clone()], &[1], &HashMap::new());
         assert!(matches!(
-            sticky_agent_rows(&running.rows, &BTreeSet::new()).as_slice(),
-            [StickyAgentRow::Subagent {
+            sticky_agent_rows(&running.rows).as_slice(),
+            [AgentStickyRow::Subagent {
                 id: 1,
                 status: AgentToolStatus::Running,
                 ..
@@ -5069,7 +4906,20 @@ mod tests {
         };
         *status = AgentToolStatusModel::Completed;
         let completed = TimelineModel::new(&[task], &[2], &HashMap::new());
-        assert!(sticky_agent_rows(&completed.rows, &BTreeSet::new()).is_empty());
+        assert!(sticky_agent_rows(&completed.rows).is_empty());
+    }
+
+    #[test]
+    fn a_dangling_generic_tool_leaves_the_sticky_strip_quiet() {
+        let stuck = TimelineModel::new(
+            &[thread_tool(1, "Ran command", AgentToolStatusModel::Running)],
+            &[1],
+            &HashMap::new(),
+        );
+        assert!(
+            sticky_agent_rows(&stuck.rows).is_empty(),
+            "only a subagent earns a strip row, so an unsettled generic tool cannot pin one"
+        );
     }
 
     #[test]

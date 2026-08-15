@@ -945,6 +945,11 @@ pub struct MuxClient {
     /// the stream idempotent.
     #[cfg(feature = "agent-pane")]
     agent_cursors: BTreeMap<PaneId, u64>,
+    /// Panes with a replay asked for and not yet landed. A hole is re-requested
+    /// once rather than once per batch: every batch that arrives across the
+    /// hole before the replay lands is another sighting of the same gap.
+    #[cfg(feature = "agent-pane")]
+    agent_replays_pending: BTreeSet<PaneId>,
     #[cfg(feature = "agent-pane")]
     agent_events: AgentEvents,
     screenshot_requests: Vec<(PaneId, u64, String)>,
@@ -1038,6 +1043,8 @@ impl MuxClient {
             agent_commands: BTreeMap::new(),
             #[cfg(feature = "agent-pane")]
             agent_cursors: BTreeMap::new(),
+            #[cfg(feature = "agent-pane")]
+            agent_replays_pending: BTreeSet::new(),
             #[cfg(feature = "agent-pane")]
             agent_events: AgentEvents::default(),
             screenshot_requests: Vec::new(),
@@ -2902,7 +2909,10 @@ impl MuxClient {
     /// applied: a replay deliberately overlaps the live tail, so the per-pane
     /// cursor is what makes the stream idempotent. A batch that starts past the
     /// cursor is a hole in the journal the shell cannot fill by waiting, so the
-    /// pane re-requests from where it is instead of buffering across it.
+    /// pane re-requests from where it is instead of buffering across it — once,
+    /// because the batches that keep arriving across the hole are the same gap
+    /// seen again, and the outstanding replay is what closes it. A batch that
+    /// reaches the cursor without a gap is the proof it closed.
     #[cfg(feature = "agent-pane")]
     fn apply_agent_updates(&mut self, pane: PaneId, first_seq: u64, items: Vec<Vec<u8>>) {
         let cursor = self.agent_cursors.entry(pane).or_default();
@@ -2943,7 +2953,11 @@ impl MuxClient {
             self.agent_events.items.push((pane, accepted));
         }
         if gapped {
-            self.request_agent_replay_from_cursor(pane);
+            if !self.agent_replays_pending.contains(&pane) {
+                self.request_agent_replay_from_cursor(pane);
+            }
+        } else {
+            self.agent_replays_pending.remove(&pane);
         }
     }
 
@@ -2952,14 +2966,23 @@ impl MuxClient {
 
     /// Ask the daemon to replay this pane's stream from where the shell is.
     /// Sent on a lane overflow, a journal gap, and when a pane's view goes live.
+    /// The daemon serves `from_seq` inclusively, so asking from the cursor
+    /// re-sends one applied item rather than risking a skipped one. An ask that
+    /// reaches the wire is recorded as outstanding, which is what keeps a hole
+    /// from asking again on every batch until the replay lands; a caller that
+    /// asks explicitly is a lifecycle event, not a hole, so it always sends.
     #[cfg(feature = "agent-pane")]
-    pub(crate) fn request_agent_replay_from_cursor(&self, pane: PaneId) -> bool {
+    pub(crate) fn request_agent_replay_from_cursor(&mut self, pane: PaneId) -> bool {
         let from_seq = self.agent_cursors.get(&pane).copied().unwrap_or_default();
-        self.send_agent_request(pane, AgentRequest::Replay { from_seq })
+        let sent = self.send_agent_request(pane, AgentRequest::Replay { from_seq });
+        if sent {
+            self.agent_replays_pending.insert(pane);
+        }
+        sent
     }
 
     #[cfg(not(feature = "agent-pane"))]
-    fn request_agent_replay_from_cursor(&self, _pane: PaneId) {}
+    fn request_agent_replay_from_cursor(&mut self, _pane: PaneId) {}
 
     /// Forget every pane's replay cursor. The core clears its agent state at
     /// the same two moments, so the next attach replays from seq 0 rather than
@@ -2967,6 +2990,7 @@ impl MuxClient {
     #[cfg(feature = "agent-pane")]
     fn clear_agent_streams(&mut self) {
         self.agent_cursors.clear();
+        self.agent_replays_pending.clear();
         self.agent_events = AgentEvents::default();
     }
 
@@ -3508,12 +3532,15 @@ impl MuxClient {
                 #[cfg(not(feature = "agent-pane"))]
                 let _ = pane;
             }
+            // An overflow is a hole the daemon reports rather than one the shell
+            // infers, so it recovers the same way: from the shell's own cursor,
+            // which is at or behind the sequence the daemon dropped from.
             CoreEvent::AgentLagged { pane, next_seq } => {
                 log::warn!(
                     target: "zz::diagnostics::mux",
-                    "agent lane cleared for {pane}; replaying from {next_seq}"
+                    "agent lane cleared for {pane} from {next_seq}; replaying from the shell's cursor"
                 );
-                self.send_agent_request(pane, AgentRequest::Replay { from_seq: next_seq });
+                self.request_agent_replay_from_cursor(pane);
             }
             CoreEvent::AgentSessions {
                 pane,
@@ -3623,6 +3650,8 @@ impl MuxClient {
         self.terminal_commands.remove(&pane);
         #[cfg(feature = "agent-pane")]
         self.agent_cursors.remove(&pane);
+        #[cfg(feature = "agent-pane")]
+        self.agent_replays_pending.remove(&pane);
         self.pane_images.remove(&pane);
         self.pasted_image_assemblies
             .retain(|(target, _), _| *target != pane);
@@ -6172,6 +6201,33 @@ mod tests {
     }
 
     #[cfg(feature = "agent-pane")]
+    fn agent_blob(seq: u64) -> Vec<u8> {
+        serde_json::to_vec(&zz_daemon::AgentStreamItem {
+            seq,
+            payload: zz_daemon::AgentStreamPayload::Parked,
+        })
+        .expect("a stream item encodes")
+    }
+
+    #[cfg(feature = "agent-pane")]
+    fn agent_reset(seq: u64) -> Vec<u8> {
+        serde_json::to_vec(&zz_daemon::AgentStreamItem {
+            seq,
+            payload: zz_daemon::AgentStreamPayload::SessionReset { restoring: true },
+        })
+        .expect("a reset item encodes")
+    }
+
+    #[cfg(feature = "agent-pane")]
+    fn applied_agent_seqs(mux: &mut MuxClient, pane: PaneId) -> Vec<u64> {
+        mux.take_agent_events_for(&BTreeSet::from([pane]))
+            .items
+            .into_iter()
+            .flat_map(|(_, items)| items.into_iter().map(|item| item.seq))
+            .collect()
+    }
+
+    #[cfg(feature = "agent-pane")]
     #[gpui::test]
     fn the_agent_stream_is_filtered_by_seq_and_a_gap_asks_for_a_replay(cx: &mut TestAppContext) {
         cx.update(|cx| {
@@ -6186,27 +6242,9 @@ mod tests {
             mux.update(cx, |mux, cx| {
                 let pane = PaneId(3);
                 let sink = mux.record_agent_requests_for_test();
-                let blob = |seq: u64| {
-                    serde_json::to_vec(&zz_daemon::AgentStreamItem {
-                        seq,
-                        payload: zz_daemon::AgentStreamPayload::Parked,
-                    })
-                    .expect("a stream item encodes")
-                };
-                let reset = |seq: u64| {
-                    serde_json::to_vec(&zz_daemon::AgentStreamItem {
-                        seq,
-                        payload: zz_daemon::AgentStreamPayload::SessionReset { restoring: true },
-                    })
-                    .expect("a reset item encodes")
-                };
-                let applied = |mux: &mut MuxClient| {
-                    mux.take_agent_events_for(&BTreeSet::from([pane]))
-                        .items
-                        .into_iter()
-                        .flat_map(|(_, items)| items.into_iter().map(|item| item.seq))
-                        .collect::<Vec<_>>()
-                };
+                let blob = agent_blob;
+                let reset = agent_reset;
+                let applied = |mux: &mut MuxClient| applied_agent_seqs(mux, pane);
 
                 mux.apply_agent_updates(pane, 1, vec![blob(1), blob(2)]);
                 assert_eq!(applied(mux), [1, 2]);
@@ -6261,7 +6299,183 @@ mod tests {
                 );
                 assert_eq!(
                     &*sink.borrow(),
-                    &[(pane, AgentRequest::Replay { from_seq: 42 })]
+                    &[(pane, AgentRequest::Replay { from_seq: 41 })],
+                    "an overflow replays from the shell's cursor, not the daemon's drop point"
+                );
+            });
+        });
+    }
+
+    #[cfg(feature = "agent-pane")]
+    #[gpui::test]
+    fn a_hole_asks_for_one_replay_until_the_stream_lands_again(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("fixture".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            mux.update(cx, |mux, _| {
+                let pane = PaneId(3);
+                let sink = mux.record_agent_requests_for_test();
+                let applied = |mux: &mut MuxClient| applied_agent_seqs(mux, pane);
+
+                mux.apply_agent_updates(pane, 1, vec![agent_blob(1), agent_blob(2)]);
+                assert_eq!(applied(mux), [1, 2]);
+
+                mux.apply_agent_updates(pane, 7, vec![agent_blob(7)]);
+                mux.apply_agent_updates(pane, 8, vec![agent_blob(8)]);
+                mux.apply_agent_updates(pane, 9, vec![agent_blob(9), agent_blob(10)]);
+                assert!(
+                    applied(mux).is_empty(),
+                    "nothing across the hole is applied while the replay is outstanding"
+                );
+                assert_eq!(
+                    &*sink.borrow(),
+                    &[(pane, AgentRequest::Replay { from_seq: 2 })],
+                    "three sightings of one hole are one ask"
+                );
+
+                mux.apply_agent_updates(pane, 2, vec![agent_blob(2), agent_blob(3)]);
+                assert_eq!(
+                    applied(mux),
+                    [3],
+                    "the replay overlaps the cursor and lands the item the hole hid"
+                );
+                assert_eq!(
+                    sink.borrow().len(),
+                    1,
+                    "landing the replay is not itself a reason to ask again"
+                );
+
+                mux.apply_agent_updates(pane, 20, vec![agent_blob(20)]);
+                assert!(applied(mux).is_empty());
+                assert_eq!(
+                    &*sink.borrow(),
+                    &[
+                        (pane, AgentRequest::Replay { from_seq: 2 }),
+                        (pane, AgentRequest::Replay { from_seq: 3 })
+                    ],
+                    "a hole after the replay landed is a new hole, asked from the new cursor"
+                );
+            });
+        });
+    }
+
+    #[cfg(feature = "agent-pane")]
+    #[gpui::test]
+    fn a_journal_floor_replay_clears_the_outstanding_ask(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("fixture".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            mux.update(cx, |mux, _| {
+                let pane = PaneId(3);
+                let sink = mux.record_agent_requests_for_test();
+
+                mux.apply_agent_updates(pane, 1, vec![agent_blob(1), agent_blob(2)]);
+                mux.apply_agent_updates(pane, 7, vec![agent_blob(7)]);
+                assert_eq!(sink.borrow().len(), 1);
+                let _ = applied_agent_seqs(mux, pane);
+
+                mux.apply_agent_updates(pane, 40, vec![agent_reset(40), agent_blob(41)]);
+                assert_eq!(
+                    applied_agent_seqs(mux, pane),
+                    [40, 41],
+                    "the daemon's journal-floor replay is stamped past the hole and still applies"
+                );
+                assert!(!mux.agent_replays_pending.contains(&pane));
+
+                mux.apply_agent_updates(pane, 50, vec![agent_blob(50)]);
+                assert_eq!(
+                    sink.borrow().last(),
+                    Some(&(pane, AgentRequest::Replay { from_seq: 41 })),
+                    "the next hole asks again once the reset landed"
+                );
+            });
+        });
+    }
+
+    #[cfg(feature = "agent-pane")]
+    #[gpui::test]
+    fn a_reattach_forgets_that_a_pane_was_waiting_on_a_replay(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("fixture".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            mux.update(cx, |mux, _| {
+                let pane = PaneId(3);
+                let sink = mux.record_agent_requests_for_test();
+
+                mux.apply_agent_updates(pane, 1, vec![agent_blob(1)]);
+                mux.apply_agent_updates(pane, 5, vec![agent_blob(5)]);
+                assert!(mux.agent_replays_pending.contains(&pane));
+
+                mux.clear_agent_streams();
+                assert!(mux.agent_replays_pending.is_empty());
+
+                sink.borrow_mut().clear();
+                mux.apply_agent_updates(pane, 5, vec![agent_blob(5)]);
+                assert_eq!(
+                    &*sink.borrow(),
+                    &[(pane, AgentRequest::Replay { from_seq: 0 })],
+                    "a fresh connection asks from the top rather than staying silent"
+                );
+
+                mux.forget_pane(pane);
+                assert!(mux.agent_replays_pending.is_empty());
+            });
+        });
+    }
+
+    #[cfg(feature = "agent-pane")]
+    #[gpui::test]
+    fn an_undecodable_agent_item_is_consumed_rather_than_left_as_a_hole(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("fixture".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            mux.update(cx, |mux, _| {
+                let pane = PaneId(3);
+                let sink = mux.record_agent_requests_for_test();
+
+                mux.apply_agent_updates(
+                    pane,
+                    1,
+                    vec![
+                        agent_blob(1),
+                        b"{\"seq\":2,\"payload\":{}}".to_vec(),
+                        agent_blob(3),
+                    ],
+                );
+
+                assert_eq!(
+                    applied_agent_seqs(mux, pane),
+                    [1, 3],
+                    "the item after the undecodable one is still applied"
+                );
+                assert_eq!(mux.agent_cursors.get(&pane), Some(&3));
+                assert!(
+                    sink.borrow().is_empty(),
+                    "a skipped seq counts as consumed, so it is not a gap to replay"
                 );
             });
         });

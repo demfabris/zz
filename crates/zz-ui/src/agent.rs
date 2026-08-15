@@ -203,6 +203,10 @@ pub enum AgentToolPayload {
 }
 
 impl AgentToolPayload {
+    const fn is_terminal(&self) -> bool {
+        matches!(self, Self::Terminal(_))
+    }
+
     fn revisions(&self) -> ((u64, u64), (u64, u64)) {
         match self {
             Self::Diff { old, new, .. } => (
@@ -1450,7 +1454,12 @@ fn render_group(
                     .unwrap_or(AgentToolKind::Other),
             ),
             tool_group_label(members),
-            Some(aggregate_tool_status(members)),
+            tool_status(
+                aggregate_tool_status(members),
+                tool_group_animates(members),
+                view,
+                cx,
+            ),
         ),
         TimelineGroupKind::Reasoning => (
             IconName::Cpu,
@@ -1499,21 +1508,15 @@ fn render_group(
                         ),
                 )
                 .child(
-                    h_flex()
-                        .flex_none()
-                        .gap_1()
-                        .when_some(status, |this, status| {
-                            this.child(tool_status(status, view, cx))
+                    h_flex().flex_none().gap_1().children(status).child(
+                        Icon::new(if expanded {
+                            IconName::ChevronUp
+                        } else {
+                            IconName::ChevronDown
                         })
-                        .child(
-                            Icon::new(if expanded {
-                                IconName::ChevronUp
-                            } else {
-                                IconName::ChevronDown
-                            })
-                            .xsmall()
-                            .text_color(cx.theme().foreground.muted()),
-                        ),
+                        .xsmall()
+                        .text_color(cx.theme().foreground.muted()),
+                    ),
                 )
                 .on_click(move |_, _, cx| {
                     toggle.update(cx, |store, cx| {
@@ -1614,6 +1617,38 @@ fn single_line(text: SharedString) -> SharedString {
         .collect::<Vec<_>>()
         .join(" · ")
         .into()
+}
+
+/// Whether an unsettled tool row earns motion. An adapter that omits a final
+/// tool update leaves a row Pending or Running for the life of the pane, so a
+/// spinner is reserved for the rows where it reports something real: a
+/// subagent, a live terminal stream, and an approval the user has to answer.
+/// Every other in-flight tool rides on the static kind icon it already carries.
+fn tool_animates(tool: &AgentToolEntry) -> bool {
+    match tool.status {
+        AgentToolStatus::NeedsApproval => true,
+        AgentToolStatus::Pending | AgentToolStatus::Running => {
+            tool.subagent
+                || tool
+                    .input
+                    .as_ref()
+                    .is_some_and(AgentToolPayload::is_terminal)
+                || tool.output.iter().any(AgentToolPayload::is_terminal)
+        }
+        AgentToolStatus::Completed | AgentToolStatus::Failed | AgentToolStatus::Canceled => false,
+    }
+}
+
+/// A folded group animates only where one of its members would, so a run of
+/// generic tools stays still no matter how its aggregate status reads.
+fn tool_group_animates(tools: &[AgentEntry]) -> bool {
+    tools
+        .iter()
+        .filter_map(|entry| match entry {
+            AgentEntry::Tool(tool) => Some(tool),
+            _ => None,
+        })
+        .any(tool_animates)
 }
 
 fn aggregate_tool_status(tools: &[AgentEntry]) -> AgentToolStatus {
@@ -1825,7 +1860,7 @@ fn render_entry(
                                 .flex_1()
                                 .gap_2()
                                 .overflow_hidden()
-                                .child(tool_status(notification_status(&status), view, cx))
+                                .children(tool_status(notification_status(&status), true, view, cx))
                                 .child(
                                     div()
                                         .min_w_0()
@@ -1886,6 +1921,7 @@ fn render_tool_entry(
     tool: AgentToolEntry,
     cx: &mut App,
 ) -> AnyElement {
+    let animated = tool_animates(&tool);
     let AgentToolEntry {
         id,
         kind,
@@ -1974,7 +2010,7 @@ fn render_tool_entry(
                     h_flex()
                         .flex_none()
                         .gap_1()
-                        .child(tool_status(status, view, cx))
+                        .children(tool_status(status, animated, view, cx))
                         .when(expandable, |this| {
                             this.child(
                                 Icon::new(if expanded {
@@ -2523,33 +2559,55 @@ fn tool_spinner(color: Hsla, view: EntityId, cx: &mut App) -> AnyElement {
         .into_any_element()
 }
 
-fn tool_status(status: AgentToolStatus, view: EntityId, cx: &mut App) -> AnyElement {
+/// The status column for one row, empty where an in-flight status has no
+/// motion to earn: a frozen spinner would read as a stall, so a static
+/// Pending or Running row shows nothing and takes no pulse lease. An approval
+/// always animates — asking for the user is the whole point of the state.
+fn tool_status(
+    status: AgentToolStatus,
+    animated: bool,
+    view: EntityId,
+    cx: &mut App,
+) -> Option<AnyElement> {
     match status {
-        AgentToolStatus::Pending => tool_spinner(cx.theme().foreground.muted(), view, cx),
-        AgentToolStatus::Running => tool_spinner(cx.theme().foreground, view, cx),
-        AgentToolStatus::NeedsApproval => tool_spinner(cx.theme().warning, view, cx),
-        AgentToolStatus::Completed => Icon::new(IconName::Check)
-            .xsmall()
-            .text_color(cx.theme().foreground.muted())
-            .into_any_element(),
-        AgentToolStatus::Failed => Icon::new(IconName::Close)
-            .xsmall()
-            .text_color(cx.theme().danger)
-            .into_any_element(),
-        AgentToolStatus::Canceled => Icon::new(IconName::Close)
-            .xsmall()
-            .text_color(cx.theme().foreground.muted())
-            .into_any_element(),
+        AgentToolStatus::Pending => {
+            animated.then(|| tool_spinner(cx.theme().foreground.muted(), view, cx))
+        }
+        AgentToolStatus::Running => animated.then(|| tool_spinner(cx.theme().foreground, view, cx)),
+        AgentToolStatus::NeedsApproval => Some(tool_spinner(cx.theme().warning, view, cx)),
+        AgentToolStatus::Completed => Some(
+            Icon::new(IconName::Check)
+                .xsmall()
+                .text_color(cx.theme().foreground.muted())
+                .into_any_element(),
+        ),
+        AgentToolStatus::Failed => Some(
+            Icon::new(IconName::Close)
+                .xsmall()
+                .text_color(cx.theme().danger)
+                .into_any_element(),
+        ),
+        AgentToolStatus::Canceled => Some(
+            Icon::new(IconName::Close)
+                .xsmall()
+                .text_color(cx.theme().foreground.muted())
+                .into_any_element(),
+        ),
     }
 }
 
+/// Settled unless the status says otherwise. A notification card is written
+/// when a task reports, and only the handful of values below mean it is still
+/// working — a string this does not know is a card nothing will ever come back
+/// to settle, so it takes the static presentation rather than a permanent
+/// spinner.
 fn notification_status(status: &str) -> AgentToolStatus {
     match status.trim().to_ascii_lowercase().as_str() {
-        "completed" | "succeeded" | "success" => AgentToolStatus::Completed,
-        "failed" | "error" => AgentToolStatus::Failed,
-        "cancelled" | "canceled" => AgentToolStatus::Canceled,
+        "failed" | "error" | "killed" => AgentToolStatus::Failed,
+        "cancelled" | "canceled" | "interrupted" => AgentToolStatus::Canceled,
         "running" | "in_progress" | "in-progress" => AgentToolStatus::Running,
-        _ => AgentToolStatus::Pending,
+        "pending" => AgentToolStatus::Pending,
+        _ => AgentToolStatus::Completed,
     }
 }
 
@@ -3726,6 +3784,80 @@ pub fn agent_pane_header(
         .child(div().flex_none().child(trailing))
 }
 
+/// Height of one row in the strip pinned above the composer.
+pub const AGENT_STICKY_ROW_HEIGHT: f32 = 32.0;
+
+/// One row of the sticky strip. The caller derives the rows from its thread and
+/// owns derivation; the strip only draws what it is handed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AgentStickyRow {
+    Subagent {
+        id: u64,
+        status: AgentToolStatus,
+        label: SharedString,
+    },
+}
+
+/// The strip above the composer: a spinning row per live subagent, nothing
+/// else — settled work already reads off the transcript, so the strip empties
+/// itself the moment nothing is running. `view` is the entity whose notify
+/// repaints the strip, which the spinner leases on the shared pulse clock.
+/// No rows, no strip.
+#[must_use]
+pub fn agent_sticky_strip(
+    rows: &[AgentStickyRow],
+    view: EntityId,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    if rows.is_empty() {
+        return None;
+    }
+    Some(
+        v_flex()
+            .w_full()
+            .gap_1()
+            .rounded(cx.theme().radius)
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().background.raised(1))
+            .p_1()
+            .children(rows.iter().map(|row| match row {
+                AgentStickyRow::Subagent { id, status, label } => {
+                    let spinner_color = if *status == AgentToolStatus::NeedsApproval {
+                        cx.theme().warning
+                    } else {
+                        cx.theme().foreground.muted()
+                    };
+                    h_flex()
+                        .id(("agent-sticky-subagent", *id))
+                        .w_full()
+                        .h(px(AGENT_STICKY_ROW_HEIGHT))
+                        .items_center()
+                        .gap_2()
+                        .px_2()
+                        .child(
+                            div()
+                                .flex_none()
+                                .child(tool_spinner(spinner_color, view, cx)),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .text_size(crate::rems_from_px(12.0))
+                                .text_color(cx.theme().foreground.muted())
+                                .child(single_line(label.clone())),
+                        )
+                        .into_any_element()
+                }
+            }))
+            .into_any_element(),
+    )
+}
+
 #[cfg(test)]
 mod workspace_link_tests {
     use super::{INERT_LINK_URL, PENDING_LINK_URL, file_url, resolve_workspace_link};
@@ -3921,7 +4053,16 @@ mod tests {
         kind: AgentToolKind,
         status: AgentToolStatus,
     ) -> AgentEntry {
-        AgentEntry::Tool(AgentToolEntry {
+        AgentEntry::Tool(test_tool_entry(id, label, kind, status))
+    }
+
+    fn test_tool_entry(
+        id: u64,
+        label: &str,
+        kind: AgentToolKind,
+        status: AgentToolStatus,
+    ) -> AgentToolEntry {
+        AgentToolEntry {
             id,
             kind,
             status,
@@ -3932,7 +4073,7 @@ mod tests {
             default_expanded: false,
             subagent: false,
             children: Arc::from([]),
-        })
+        }
     }
 
     #[test]
@@ -4085,6 +4226,116 @@ mod tests {
             ])),
             AgentToolStatus::Canceled
         );
+    }
+
+    #[test]
+    fn a_generic_in_flight_tool_never_animates() {
+        for status in [AgentToolStatus::Pending, AgentToolStatus::Running] {
+            let tool = test_tool_entry(1, "Ran command", AgentToolKind::Execute, status);
+            assert!(
+                !tool_animates(&tool),
+                "a generic {status:?} tool an adapter may never settle must stay still"
+            );
+        }
+    }
+
+    #[test]
+    fn subagents_terminals_and_approvals_keep_their_spinner() {
+        let mut subagent = test_tool_entry(
+            1,
+            "Research",
+            AgentToolKind::Other,
+            AgentToolStatus::Running,
+        );
+        subagent.subagent = true;
+        assert!(tool_animates(&subagent));
+
+        let mut terminal = test_tool_entry(
+            2,
+            "Ran command",
+            AgentToolKind::Execute,
+            AgentToolStatus::Running,
+        );
+        terminal.output = Arc::from([AgentToolPayload::Terminal("$ cargo test".into())]);
+        assert!(tool_animates(&terminal));
+
+        assert!(tool_animates(&test_tool_entry(
+            3,
+            "Write file",
+            AgentToolKind::Edit,
+            AgentToolStatus::NeedsApproval,
+        )));
+    }
+
+    #[test]
+    fn a_settled_tool_never_animates() {
+        for status in [
+            AgentToolStatus::Completed,
+            AgentToolStatus::Failed,
+            AgentToolStatus::Canceled,
+        ] {
+            let mut tool = test_tool_entry(1, "Research", AgentToolKind::Other, status);
+            tool.subagent = true;
+            tool.output = Arc::from([AgentToolPayload::Terminal("$ cargo test".into())]);
+            assert!(!tool_animates(&tool), "{status:?} is an outcome, not work");
+        }
+    }
+
+    #[test]
+    fn a_notification_animates_only_while_its_status_says_it_is_working() {
+        for status in ["pending", "running", "in_progress", "IN-PROGRESS"] {
+            assert!(
+                matches!(
+                    notification_status(status),
+                    AgentToolStatus::Pending | AgentToolStatus::Running
+                ),
+                "{status} is work in flight"
+            );
+        }
+
+        assert_eq!(
+            notification_status(" Completed "),
+            AgentToolStatus::Completed
+        );
+        assert_eq!(notification_status("killed"), AgentToolStatus::Failed);
+        assert_eq!(
+            notification_status("interrupted"),
+            AgentToolStatus::Canceled
+        );
+
+        for status in ["", "queued", "task_notification"] {
+            assert_eq!(
+                notification_status(status),
+                AgentToolStatus::Completed,
+                "a status nothing will come back to settle must not spin"
+            );
+        }
+    }
+
+    #[test]
+    fn a_group_animates_only_where_one_of_its_members_would() {
+        let generic = vec![
+            test_tool(1, "Editing files", AgentToolStatus::Completed),
+            test_tool(2, "Editing files", AgentToolStatus::Running),
+        ];
+        assert_eq!(aggregate_tool_status(&generic), AgentToolStatus::Running);
+        assert!(
+            !tool_group_animates(&generic),
+            "a running aggregate over generic members is not observable work"
+        );
+
+        let mut subagent = test_tool_entry(
+            3,
+            "Research",
+            AgentToolKind::Other,
+            AgentToolStatus::Running,
+        );
+        subagent.subagent = true;
+        let live = vec![
+            test_tool(1, "Editing files", AgentToolStatus::Completed),
+            AgentEntry::Tool(subagent),
+        ];
+        assert!(tool_group_animates(&live));
     }
 
     #[gpui::test]

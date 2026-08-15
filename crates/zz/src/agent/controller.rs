@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -48,9 +48,16 @@ const MAX_SESSION_ID_BYTES: usize = 16 * 1024;
 const MAX_SESSION_TITLE_BYTES: usize = 4 * 1024;
 const MAX_SESSION_TIMESTAMP_BYTES: usize = 256;
 const MAX_SESSION_CURSOR_BYTES: usize = 16 * 1024;
+/// A skipped update is described by its `sessionUpdate` tag and nothing else:
+/// the payload behind it is adapter-supplied and can be megabytes of tool
+/// output, so neither it nor the serde error quoting it belongs in a log line.
+const MAX_SESSION_UPDATE_TAG_BYTES: usize = 64;
+const MAX_DECODE_ERROR_BYTES: usize = 256;
+const UNTAGGED_SESSION_UPDATE: &str = "<untagged>";
 /// Tool payloads live in the thread for as long as the pane does, so the
 /// reducer caps what it keeps: agents happily emit multi-megabyte outputs.
 const MAX_TOOL_PAYLOAD_BYTES: usize = 512 * 1024;
+const MAX_SETTLED_TASK_TOMBSTONES: usize = 256;
 const MAX_DIFF_SIDE_BYTES: usize = 1024 * 1024;
 const TRUNCATION_MARKER: &str = "… [truncated]";
 /// A derived pane title is the opening words of the first prompt: enough to
@@ -400,6 +407,7 @@ struct AgentThread {
     child_structured_tool_outputs: BTreeSet<String>,
     child_plan_entries: HashMap<String, u64>,
     live_task_tools: HashMap<String, String>,
+    settled_tasks: HashSet<String>,
     task_labels: HashMap<String, String>,
     active_context_compaction: Option<String>,
     suppress_user_echo: bool,
@@ -409,6 +417,12 @@ struct AgentThread {
     /// When the pane last heard from the agent. Stamped by the reducer, which
     /// sees every runtime event, so the quiesce watchdog only ever reads it.
     last_activity: Instant,
+    /// How many `session/update`s this build could not read. ACP reserves
+    /// unknown `sessionUpdate` values for future variants, so skipping one is
+    /// forward compatibility rather than a fault — the running count is what
+    /// keeps a silent skip diagnosable. Survives a session reset: it describes
+    /// the adapter zz is talking to, not the conversation.
+    unknown_updates: u64,
 }
 
 impl AgentThread {
@@ -458,11 +472,13 @@ impl AgentThread {
             child_structured_tool_outputs: BTreeSet::new(),
             child_plan_entries: HashMap::new(),
             live_task_tools: HashMap::new(),
+            settled_tasks: HashSet::new(),
             task_labels: HashMap::new(),
             active_context_compaction: None,
             suppress_user_echo: false,
             auto_titled: false,
             last_activity: Instant::now(),
+            unknown_updates: 0,
         }
     }
 
@@ -531,6 +547,7 @@ impl AgentThread {
         self.child_structured_tool_outputs.clear();
         self.child_plan_entries.clear();
         self.live_task_tools.clear();
+        self.settled_tasks.clear();
         self.task_labels.clear();
         self.active_context_compaction = None;
         self.suppress_user_echo = false;
@@ -795,13 +812,19 @@ impl AgentThread {
     }
 
     fn apply_task_event(&mut self, event: SdkTaskEvent) {
+        log::debug!(
+            target: "zz::agent",
+            "task event {} for task {}",
+            event.kind(),
+            event.task_id().unwrap_or("-")
+        );
         match event {
             SdkTaskEvent::Started {
                 task_id,
                 tool_use_id,
                 is_agent,
             } => {
-                if !is_agent {
+                if !is_agent || !self.registrable_task(&task_id, &tool_use_id) {
                     return;
                 }
                 self.live_task_tools.insert(task_id, tool_use_id.clone());
@@ -814,6 +837,79 @@ impl AgentThread {
             SdkTaskEvent::Settled { task_id, status } => {
                 self.settle_task(&task_id, &status);
             }
+            SdkTaskEvent::TaskProgress {
+                task_id,
+                tool_use_id,
+                ..
+            } => {
+                self.apply_task_progress(&task_id, tool_use_id.as_deref());
+            }
+            SdkTaskEvent::ToolProgress {
+                tool_use_id,
+                subagent_type,
+                ..
+            } => {
+                if subagent_type.is_some() {
+                    self.hold_progressing_tool(&tool_use_id);
+                }
+            }
+            SdkTaskEvent::Reconcile { task_ids } => self.retire_absent_tasks(&task_ids),
+        }
+    }
+
+    /// A task heartbeat, which is also the only repair for a `task_started`
+    /// that never arrived: it may adopt the tool the task names, but never one
+    /// this turn has already settled.
+    fn apply_task_progress(&mut self, task_id: &str, tool_use_id: Option<&str>) {
+        if let Some(registered) = self.live_task_tools.get(task_id).cloned() {
+            self.hold_progressing_tool(&registered);
+            return;
+        }
+        let Some(tool_use_id) = tool_use_id else {
+            return;
+        };
+        if !self.adoptable_task_tool(tool_use_id) {
+            return;
+        }
+        self.live_task_tools
+            .insert(task_id.to_owned(), tool_use_id.to_owned());
+        self.hold_progressing_tool(tool_use_id);
+    }
+
+    /// Whether a lost `task_started` may be repaired against this tool. A
+    /// settled row is never reopened, and a heartbeat that arrives after the
+    /// pane returned to ready is the same late echo the tool-update path
+    /// already treats as finished.
+    fn adoptable_task_tool(&self, protocol_id: &str) -> bool {
+        !self.connection.accepts_prompt()
+            && matches!(
+                self.task_tool_status(protocol_id),
+                Some(AgentToolStatusModel::Pending | AgentToolStatusModel::Running)
+            )
+    }
+
+    /// The one status change a progress event may make. Progress is liveness,
+    /// not state: it lifts a tool out of Pending and says nothing else.
+    fn hold_progressing_tool(&mut self, protocol_id: &str) {
+        if self.connection.accepts_prompt()
+            || self.task_tool_status(protocol_id) != Some(AgentToolStatusModel::Pending)
+        {
+            return;
+        }
+        self.set_task_tool_status(protocol_id, AgentToolStatusModel::Running);
+    }
+
+    /// REPLACE semantics over the whole live set. The payload carries no
+    /// attribution, so it may only retire tasks this thread already tracks.
+    fn retire_absent_tasks(&mut self, task_ids: &[String]) {
+        let ended = self
+            .live_task_tools
+            .keys()
+            .filter(|task_id| !task_ids.contains(task_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        for task_id in ended {
+            self.settle_task(&task_id, "completed");
         }
     }
 
@@ -846,15 +942,7 @@ impl AgentThread {
             match state.status.as_str() {
                 "completed" | "errored" => {
                     self.settle_task(thread, &state.status);
-                    let verb = if state.status == "errored" {
-                        "failed"
-                    } else {
-                        "finished"
-                    };
-                    let subject = self.task_labels.get(thread).map_or_else(
-                        || format!("Subagent {verb}"),
-                        |label| format!("Agent \"{label}\" {verb}"),
-                    );
+                    let subject = self.subagent_outcome(thread, &state.status);
                     let summary = match state
                         .message
                         .as_deref()
@@ -885,7 +973,36 @@ impl AgentThread {
         }
     }
 
+    /// A `task_started` fires again when an existing task re-attaches, and a
+    /// fast task's notification can outrun its own start. Registering in
+    /// either case would re-hold a tool no later event will ever release, so
+    /// a task that has already settled — or names a tool already showing an
+    /// outcome, or arrives after the pane returned to ready — never registers.
+    fn registrable_task(&self, task_id: &str, tool_use_id: &str) -> bool {
+        !self.settled_tasks.contains(task_id)
+            && !self.connection.accepts_prompt()
+            && !matches!(
+                self.task_tool_status(tool_use_id),
+                Some(
+                    AgentToolStatusModel::Completed
+                        | AgentToolStatusModel::Failed
+                        | AgentToolStatusModel::Canceled
+                )
+            )
+    }
+
+    /// The tombstone is recorded even when the task was never registered:
+    /// that is exactly the notification-before-start race the tombstone
+    /// exists to close.
+    fn remember_settled_task(&mut self, task_id: &str) {
+        if self.settled_tasks.len() >= MAX_SETTLED_TASK_TOMBSTONES {
+            self.settled_tasks.clear();
+        }
+        self.settled_tasks.insert(task_id.to_owned());
+    }
+
     fn settle_task(&mut self, task_id: &str, status: &str) {
+        self.remember_settled_task(task_id);
         let Some(tool_use_id) = self.live_task_tools.remove(task_id) else {
             return;
         };
@@ -923,6 +1040,65 @@ impl AgentThread {
             .any(|tool| tool == protocol_id)
     }
 
+    fn task_tool_status(&self, protocol_id: &str) -> Option<AgentToolStatusModel> {
+        let entry_id = self.tool_entries.get(protocol_id).copied()?;
+        let index = self.entry_index(entry_id)?;
+        match self.entries.get(index)? {
+            AgentThreadEntry::Tool { status, .. } => Some(*status),
+            _ => None,
+        }
+    }
+
+    /// The card title for a notification whose source supplied none: the label
+    /// the spawn taught us when there is one, and the outcome either way. An
+    /// empty summary would otherwise render a card that says nothing.
+    fn subagent_outcome(&self, task_id: &str, status: &str) -> String {
+        let verb = if matches!(status.trim(), "failed" | "errored" | "killed") {
+            "failed"
+        } else {
+            "finished"
+        };
+        self.task_labels.get(task_id).map_or_else(
+            || format!("Subagent {verb}"),
+            |label| format!("Agent \"{label}\" {verb}"),
+        )
+    }
+
+    /// The card this notification belongs to. A task reports from two sources
+    /// — the daemon's structural SDK event and the prose envelope a replay
+    /// carries — so either key joins them: `tool_use_id` when both sides have
+    /// one, `task_id` when one side does not.
+    fn notification_index(&self, task_id: &str, tool_use_id: &str) -> Option<usize> {
+        self.entries
+            .iter()
+            .position(|entry| {
+                matches!(
+                    entry,
+                    AgentThreadEntry::Notification { tool_use_id: existing, .. }
+                        if !existing.is_empty() && *existing == *tool_use_id
+                )
+            })
+            .or_else(|| {
+                if task_id.is_empty() {
+                    return None;
+                }
+                self.entries.iter().position(|entry| {
+                    matches!(
+                        entry,
+                        AgentThreadEntry::Notification {
+                            task_id: existing,
+                            tool_use_id: existing_tool,
+                            ..
+                        } if *existing == *task_id
+                            && (existing_tool.is_empty() || tool_use_id.is_empty())
+                    )
+                })
+            })
+    }
+
+    /// Upsert one notification card. Its two sources merge rather than
+    /// overwrite: neither may blank a field the other filled, and a summary
+    /// synthesized here never displaces one the harness wrote.
     fn push_notification(&mut self, notification: TaskNotification) {
         if !notification.agent_task {
             log::trace!(
@@ -932,28 +1108,35 @@ impl AgentThread {
             );
             return;
         }
-        let existing = (!notification.tool_use_id.is_empty()).then(|| {
-            self.entries.iter().position(|entry| {
-                matches!(
-                    entry,
-                    AgentThreadEntry::Notification { tool_use_id, .. }
-                        if *tool_use_id == notification.tool_use_id
-                )
-            })
-        });
-        if let Some(Some(index)) = existing {
+        let synthesized = notification.summary.trim().is_empty();
+        let summary = if synthesized {
+            self.subagent_outcome(&notification.task_id, &notification.status)
+        } else {
+            notification.summary
+        };
+        if let Some(index) =
+            self.notification_index(&notification.task_id, &notification.tool_use_id)
+        {
             if let AgentThreadEntry::Notification {
                 task_id,
+                tool_use_id,
                 status,
-                summary,
+                summary: existing_summary,
                 result_markdown,
                 ..
             } = &mut self.entries[index]
             {
-                *task_id = notification.task_id;
-                *status = notification.status;
-                if !notification.summary.is_empty() {
-                    *summary = notification.summary;
+                if !notification.task_id.is_empty() {
+                    *task_id = notification.task_id;
+                }
+                if !notification.tool_use_id.is_empty() {
+                    *tool_use_id = notification.tool_use_id;
+                }
+                if !notification.status.is_empty() {
+                    *status = notification.status;
+                }
+                if !synthesized || existing_summary.trim().is_empty() {
+                    *existing_summary = summary;
                 }
                 if !notification.result_markdown.is_empty() {
                     *result_markdown = notification.result_markdown;
@@ -968,7 +1151,7 @@ impl AgentThread {
             task_id: notification.task_id,
             tool_use_id: notification.tool_use_id,
             status: notification.status,
-            summary: notification.summary,
+            summary,
             result_markdown: notification.result_markdown,
         });
     }
@@ -1681,6 +1864,11 @@ impl AgentThread {
 
     fn push_child_notification(&mut self, root_tool_id: &str, notification: TaskNotification) {
         let id = self.allocate_entry_id();
+        let summary = if notification.summary.trim().is_empty() {
+            self.subagent_outcome(&notification.task_id, &notification.status)
+        } else {
+            notification.summary
+        };
         self.push_child_entry(
             root_tool_id,
             AgentThreadEntry::Notification {
@@ -1688,7 +1876,7 @@ impl AgentThread {
                 task_id: notification.task_id,
                 tool_use_id: notification.tool_use_id,
                 status: notification.status,
-                summary: notification.summary,
+                summary,
                 result_markdown: notification.result_markdown,
             },
         );
@@ -2154,6 +2342,7 @@ impl AgentThread {
         self.pending_permissions = Arc::from([]);
         self.suppress_user_echo = false;
         self.active_stream = None;
+        self.settle_notifications();
         let held: std::collections::HashSet<String> =
             self.live_task_tools.values().cloned().collect();
         for index in 0..self.entries.len() {
@@ -2202,6 +2391,22 @@ impl AgentThread {
             if changed {
                 self.touch_entry(index);
             }
+        }
+    }
+
+    /// A notification whose status the row presentation cannot read as an
+    /// outcome would keep its spinner for the life of the pane, so the turn
+    /// boundary settles it the way it settles an unresolved tool.
+    fn settle_notifications(&mut self) {
+        for index in 0..self.entries.len() {
+            let AgentThreadEntry::Notification { status, .. } = &mut self.entries[index] else {
+                continue;
+            };
+            if terminal_notification_status(status) {
+                continue;
+            }
+            "completed".clone_into(status);
+            self.touch_entry(index);
         }
     }
 
@@ -2423,8 +2628,10 @@ struct AgentSettingRequest {
 /// applied to, and the request bookkeeping the reducer's inputs need answered.
 #[derive(Default)]
 struct PaneViewport {
-    /// Highest stream seq handed to the reducer. The replay cursor, and the
-    /// signal that this pane has anything at all to resume from.
+    /// Highest stream seq reduced into this pane's transcript. Not the replay
+    /// cursor — `MuxClient::agent_cursors` is what the daemon is asked from —
+    /// but the receipt that keeps reduction idempotent when that cursor is
+    /// cleared and the stream replays over entries this pane still holds.
     last_applied: u64,
     /// The setting request in flight, so the acknowledgement can be paired with
     /// the origin that asked for it: a user's pick reports failures, a sticky
@@ -3398,6 +3605,10 @@ impl AgentController {
     }
 
     /// Apply one batch of stream items, in seq order, to the pane's reducer.
+    /// A pane's viewport and its transcript are dropped together, so an item at
+    /// or below the applied cursor is one this transcript already holds: an
+    /// attach clears the mux client's cursor and replays from the top, and the
+    /// pane it replays into may be the same one that reduced those items.
     pub(crate) fn apply_stream_items(
         &mut self,
         pane: PaneId,
@@ -3409,6 +3620,9 @@ impl AgentController {
         }
         let mut changed = false;
         for item in items {
+            if item.seq <= self.viewport_mut(pane).last_applied {
+                continue;
+            }
             self.viewport_mut(pane).last_applied = item.seq;
             if let AgentStreamPayload::StateSynced { state } = &item.payload {
                 self.apply_pane_state(pane, state, cx);
@@ -3669,7 +3883,10 @@ impl AgentController {
                 cwd,
                 modes: decode_json(modes),
                 config_options: decode_json(config_options),
-                replay: replay.into_iter().filter_map(decode_value).collect(),
+                replay: replay
+                    .into_iter()
+                    .filter_map(|update| self.decode_session_update(pane, update))
+                    .collect(),
             },
             AgentStreamPayload::SessionSwitchFailed { message } => {
                 RuntimeEvent::SessionSwitchFailed { pane, message }
@@ -3682,7 +3899,7 @@ impl AgentController {
             }
             AgentStreamPayload::Update { update } => RuntimeEvent::SessionUpdate {
                 pane,
-                update: decode_value(update)?,
+                update: self.decode_session_update(pane, update)?,
             },
             AgentStreamPayload::TaskEvent { event } => RuntimeEvent::TaskEvent { pane, event },
             AgentStreamPayload::PermissionRequested {
@@ -3834,6 +4051,36 @@ impl AgentController {
                 return None;
             }
         })
+    }
+
+    /// Re-type one `session/update`, skipping what this build cannot read.
+    /// ACP reserves unknown `sessionUpdate` values for future variants and
+    /// `_`-prefixed ones for adapter extensions, so a shape zz does not know is
+    /// forward compatibility, not a fault: the item is counted on the pane and
+    /// dropped on its own, leaving the rest of its batch — and any message it
+    /// interrupts mid-coalesce — untouched. Only the discriminant and a clipped
+    /// error reach the log; the payload can be megabytes of tool output.
+    fn decode_session_update(
+        &mut self,
+        pane: PaneId,
+        update: serde_json::Value,
+    ) -> Option<SessionUpdate> {
+        let tag = session_update_tag(&update);
+        match serde_json::from_value(update) {
+            Ok(update) => Some(update),
+            Err(error) => {
+                let skipped = self.panes.get_mut(&pane).map_or(0, |thread| {
+                    thread.unknown_updates = thread.unknown_updates.saturating_add(1);
+                    thread.unknown_updates
+                });
+                log::debug!(
+                    target: "zz::agent",
+                    "skipping a session update zz cannot read pane={pane} tag={tag} skipped={skipped}: {}",
+                    log_excerpt(&error.to_string(), MAX_DECODE_ERROR_BYTES)
+                );
+                None
+            }
+        }
     }
 
     fn handle_runtime_event(
@@ -4348,13 +4595,40 @@ fn preferred_setting_command(
 fn decode_value<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Option<T> {
     serde_json::from_value(value)
         .map_err(|error| {
-            log::warn!(target: "zz::agent", "dropping an agent payload zz could not re-type: {error}");
+            log::warn!(
+                target: "zz::agent",
+                "dropping an agent payload zz could not re-type: {}",
+                log_excerpt(&error.to_string(), MAX_DECODE_ERROR_BYTES)
+            );
         })
         .ok()
 }
 
 fn decode_json<T: serde::de::DeserializeOwned>(value: Option<serde_json::Value>) -> Option<T> {
     value.and_then(decode_value)
+}
+
+/// The `sessionUpdate` discriminant an update declares, ready for a log line.
+fn session_update_tag(update: &serde_json::Value) -> String {
+    log_excerpt(
+        update
+            .get("sessionUpdate")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(UNTAGGED_SESSION_UPDATE),
+        MAX_SESSION_UPDATE_TAG_BYTES,
+    )
+}
+
+/// One log line's worth of adapter-supplied text: control characters dropped so
+/// a payload cannot forge log lines, then cut to `max_bytes` so a serde error
+/// that quotes what it choked on cannot carry the payload into the log.
+fn log_excerpt(text: &str, max_bytes: usize) -> String {
+    capped(
+        text.chars()
+            .filter(|character| !character.is_control())
+            .collect(),
+        max_bytes,
+    )
 }
 
 /// Read one of [`AgentPaneWire`]'s JSON blobs. Empty means "not published".
@@ -4788,6 +5062,29 @@ fn map_tool_kind(kind: ToolKind) -> AgentToolKindModel {
         ToolKind::SwitchMode => AgentToolKindModel::SwitchMode,
         _ => AgentToolKindModel::Other,
     }
+}
+
+/// The notification statuses the row presentation reads as an outcome, paired
+/// with `zz_ui::agent::notification_status`. Everything else is in flight or
+/// unrecognized, and a turn boundary rewrites it rather than leaving a card
+/// the reducer can never settle.
+const TERMINAL_NOTIFICATION_STATUSES: [&str; 9] = [
+    "completed",
+    "succeeded",
+    "success",
+    "failed",
+    "error",
+    "killed",
+    "cancelled",
+    "canceled",
+    "interrupted",
+];
+
+fn terminal_notification_status(status: &str) -> bool {
+    let status = status.trim();
+    TERMINAL_NOTIFICATION_STATUSES
+        .iter()
+        .any(|terminal| status.eq_ignore_ascii_case(terminal))
 }
 
 fn map_tool_status(status: ToolCallStatus) -> AgentToolStatusModel {
@@ -5264,6 +5561,194 @@ mod tests {
         assert_eq!(thread.entries.len(), 2);
     }
 
+    /// What the daemon publishes for a settled task: never a result body, and
+    /// often no summary either.
+    fn structural_notification(task_id: &str, tool_use_id: &str, status: &str) -> SdkTaskEvent {
+        SdkTaskEvent::Notification(TaskNotification {
+            task_id: task_id.to_owned(),
+            tool_use_id: tool_use_id.to_owned(),
+            agent_task: true,
+            status: status.to_owned(),
+            summary: String::new(),
+            result_markdown: String::new(),
+        })
+    }
+
+    /// The prose envelope a replayed transcript carries, which is the only
+    /// source of a notification's result body.
+    fn prose_notification(
+        task_id: &str,
+        tool_use_id: &str,
+        summary: &str,
+        result: &str,
+    ) -> SessionUpdate {
+        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
+            format!(
+                "<task-notification>\n\
+                 <task-id>{task_id}</task-id>\n\
+                 <tool-use-id>{tool_use_id}</tool-use-id>\n\
+                 <output-file>/tmp/tasks/{task_id}.output</output-file>\n\
+                 <status>completed</status>\n\
+                 <summary>{summary}</summary>\n\
+                 <result>{result}</result>\n\
+                 </task-notification>"
+            ),
+        ))))
+    }
+
+    fn notification_card(thread: &AgentThread, index: usize) -> (&str, &str, &str, &str) {
+        match &thread.entries[index] {
+            AgentThreadEntry::Notification {
+                tool_use_id,
+                status,
+                summary,
+                result_markdown,
+                ..
+            } => (tool_use_id, status, summary, result_markdown),
+            other => panic!("expected a notification entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_summaryless_notification_names_the_subagent_instead_of_nothing() {
+        let mut thread =
+            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
+        thread.apply_task_event(structural_notification("a5ee", "toolu_a", "completed"));
+        let (.., summary, _) = notification_card(&thread, 0);
+        assert_eq!(summary, "Subagent finished");
+
+        thread
+            .task_labels
+            .insert("bc5s".to_owned(), "Pauli".to_owned());
+        thread.apply_task_event(structural_notification("bc5s", "toolu_b", "failed"));
+        let (.., summary, _) = notification_card(&thread, 1);
+        assert_eq!(summary, "Agent \"Pauli\" failed");
+    }
+
+    #[test]
+    fn a_prose_envelope_after_the_sdk_event_fills_the_same_card() {
+        let mut thread =
+            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
+        thread.apply_task_event(structural_notification("a5ee", "toolu_a", "completed"));
+        thread.apply_update(prose_notification(
+            "a5ee",
+            "toolu_a",
+            "Agent \"Fix findings\" finished",
+            "All 12 findings addressed.",
+        ));
+
+        assert_eq!(thread.entries.len(), 1);
+        assert_eq!(
+            notification_card(&thread, 0),
+            (
+                "toolu_a",
+                "completed",
+                "Agent \"Fix findings\" finished",
+                "All 12 findings addressed."
+            )
+        );
+    }
+
+    #[test]
+    fn a_late_sdk_event_keeps_what_the_prose_envelope_filled() {
+        let mut thread =
+            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
+        thread.apply_update(prose_notification(
+            "a5ee",
+            "toolu_a",
+            "Agent \"Fix findings\" finished",
+            "All 12 findings addressed.",
+        ));
+        thread.apply_task_event(structural_notification("a5ee", "toolu_a", "completed"));
+
+        assert_eq!(thread.entries.len(), 1);
+        assert_eq!(
+            notification_card(&thread, 0),
+            (
+                "toolu_a",
+                "completed",
+                "Agent \"Fix findings\" finished",
+                "All 12 findings addressed."
+            ),
+            "a structural echo may not blank a result or downgrade a real summary"
+        );
+    }
+
+    #[test]
+    fn a_notification_missing_one_key_still_joins_its_card_by_the_other() {
+        let mut thread =
+            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
+        thread.apply_task_event(structural_notification("a5ee", "", "completed"));
+        thread.apply_update(prose_notification("a5ee", "toolu_a", "Agent done", "body"));
+
+        assert_eq!(thread.entries.len(), 1);
+        assert_eq!(
+            notification_card(&thread, 0),
+            ("toolu_a", "completed", "Agent done", "body"),
+            "the tool use id the second source knew joins and lands on the card"
+        );
+
+        let mut reversed =
+            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
+        reversed.apply_update(prose_notification("a5ee", "toolu_a", "Agent done", "body"));
+        reversed.apply_task_event(structural_notification("a5ee", "", "failed"));
+
+        assert_eq!(reversed.entries.len(), 1);
+        assert_eq!(
+            notification_card(&reversed, 0),
+            ("toolu_a", "failed", "Agent done", "body")
+        );
+    }
+
+    #[test]
+    fn only_an_outcome_counts_as_a_settled_notification_status() {
+        for status in [
+            "completed",
+            "Succeeded",
+            " success ",
+            "failed",
+            "error",
+            "killed",
+            "cancelled",
+            "canceled",
+            "interrupted",
+        ] {
+            assert!(terminal_notification_status(status), "{status} is settled");
+        }
+        for status in ["", "  ", "pending", "running", "in_progress", "queued"] {
+            assert!(
+                !terminal_notification_status(status),
+                "{status} is not an outcome"
+            );
+        }
+    }
+
+    #[test]
+    fn a_settled_turn_makes_an_unreadable_notification_status_static() {
+        let mut thread =
+            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
+        for (task_id, status) in [("a5ee", "queued"), ("bc5s", "failed")] {
+            thread.push_notification(TaskNotification {
+                task_id: task_id.to_owned(),
+                tool_use_id: format!("toolu_{task_id}"),
+                agent_task: true,
+                status: status.to_owned(),
+                summary: "Agent finished".to_owned(),
+                result_markdown: String::new(),
+            });
+        }
+
+        thread.settle_inflight(AgentToolStatusModel::Completed);
+
+        let (_, unreadable, ..) = notification_card(&thread, 0);
+        assert_eq!(unreadable, "completed");
+        let (_, outcome, ..) = notification_card(&thread, 1);
+        assert_eq!(
+            outcome, "failed",
+            "an outcome the presentation already reads is left alone"
+        );
+    }
+
     #[test]
     fn codex_spawned_agent_holds_the_spawn_row_and_cards_on_completion() {
         let mut thread = AgentThread::new(AgentProvider::Codex, PathBuf::from("/workspace"), None);
@@ -5485,6 +5970,541 @@ mod tests {
             is_agent: false,
         });
         assert!(thread.live_task_tools.is_empty());
+    }
+
+    /// A mid-turn claude pane holding one pending subagent Task tool.
+    fn claude_task_thread(protocol_id: &'static str) -> AgentThread {
+        let mut thread =
+            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
+        thread.connection = AgentConnectionState::Running;
+        thread.apply_update(SessionUpdate::ToolCall(
+            ToolCall::new(protocol_id, "Research")
+                .kind(ToolKind::Think)
+                .status(ToolCallStatus::Pending)
+                .meta(claude_meta(&serde_json::json!({
+                    "claudeCode": {"subagent": true}
+                }))),
+        ));
+        thread
+    }
+
+    fn task_progress(task_id: &str, tool_use_id: Option<&str>) -> SdkTaskEvent {
+        SdkTaskEvent::TaskProgress {
+            task_id: task_id.to_owned(),
+            tool_use_id: tool_use_id.map(ToOwned::to_owned),
+            description: "Explore the project".to_owned(),
+            last_tool_name: Some("Grep".to_owned()),
+            subagent_type: Some("Explore".to_owned()),
+        }
+    }
+
+    fn tool_progress(tool_use_id: &str, subagent_type: Option<&str>) -> SdkTaskEvent {
+        SdkTaskEvent::ToolProgress {
+            tool_use_id: tool_use_id.to_owned(),
+            parent_tool_use_id: None,
+            elapsed_seconds: 30.0,
+            subagent_type: subagent_type.map(ToOwned::to_owned),
+        }
+    }
+
+    fn tool_status(thread: &AgentThread, index: usize) -> AgentToolStatusModel {
+        match &thread.entries[index] {
+            AgentThreadEntry::Tool { status, .. } => *status,
+            other => panic!("expected a tool entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_notification_that_outruns_its_task_started_leaves_no_hold() {
+        let mut thread = claude_task_thread("task-one");
+        thread.apply_task_event(SdkTaskEvent::Notification(TaskNotification {
+            task_id: "a5ee".to_owned(),
+            tool_use_id: "task-one".to_owned(),
+            agent_task: true,
+            status: "completed".to_owned(),
+            summary: "noop-1 done".to_owned(),
+            result_markdown: String::new(),
+        }));
+        thread.apply_task_event(SdkTaskEvent::Started {
+            task_id: "a5ee".to_owned(),
+            tool_use_id: "task-one".to_owned(),
+            is_agent: true,
+        });
+        assert!(
+            thread.live_task_tools.is_empty(),
+            "a start arriving after its own settle must not re-hold the tool"
+        );
+        thread.apply_update(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "task-one",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+        )));
+        assert_eq!(tool_status(&thread, 0), AgentToolStatusModel::Completed);
+    }
+
+    #[test]
+    fn a_reattach_task_started_never_resurrects_a_settled_tool() {
+        let mut thread = claude_task_thread("task-one");
+        thread.apply_task_event(SdkTaskEvent::Started {
+            task_id: "a5ee".to_owned(),
+            tool_use_id: "task-one".to_owned(),
+            is_agent: true,
+        });
+        thread.apply_task_event(SdkTaskEvent::Settled {
+            task_id: "a5ee".to_owned(),
+            status: "completed".to_owned(),
+        });
+        thread.apply_task_event(SdkTaskEvent::Started {
+            task_id: "a5ee".to_owned(),
+            tool_use_id: "task-one".to_owned(),
+            is_agent: true,
+        });
+        assert!(thread.live_task_tools.is_empty());
+        assert_eq!(
+            tool_status(&thread, 0),
+            AgentToolStatusModel::Completed,
+            "a re-attach start for a settled task must not flip its tool back to running"
+        );
+    }
+
+    #[test]
+    fn a_task_started_after_the_pane_returned_to_ready_holds_nothing() {
+        let mut thread = claude_task_thread("task-one");
+        thread.connection = AgentConnectionState::Ready;
+        thread.apply_task_event(SdkTaskEvent::Started {
+            task_id: "a5ee".to_owned(),
+            tool_use_id: "task-one".to_owned(),
+            is_agent: true,
+        });
+        assert!(
+            thread.live_task_tools.is_empty(),
+            "a start echo after ready is late replay, not a live task"
+        );
+    }
+
+    #[test]
+    fn a_reconciled_set_retires_the_tasks_it_omits_and_adopts_none() {
+        let mut thread = claude_task_thread("task-one");
+        thread.apply_update(SessionUpdate::ToolCall(
+            ToolCall::new("task-two", "Research")
+                .status(ToolCallStatus::InProgress)
+                .meta(claude_meta(&serde_json::json!({
+                    "claudeCode": {"subagent": true}
+                }))),
+        ));
+        for (task_id, tool_use_id) in [("a5ee", "task-one"), ("bc5s", "task-two")] {
+            thread.apply_task_event(SdkTaskEvent::Started {
+                task_id: task_id.to_owned(),
+                tool_use_id: tool_use_id.to_owned(),
+                is_agent: true,
+            });
+        }
+
+        thread.apply_task_event(SdkTaskEvent::Reconcile {
+            task_ids: vec!["a5ee".to_owned(), "never-started".to_owned()],
+        });
+
+        assert_eq!(
+            thread.live_task_tools,
+            HashMap::from([("a5ee".to_owned(), "task-one".to_owned())]),
+            "the set retires what it omits and introduces nothing it names"
+        );
+        assert_eq!(tool_status(&thread, 0), AgentToolStatusModel::Running);
+        assert_eq!(tool_status(&thread, 1), AgentToolStatusModel::Completed);
+    }
+
+    #[test]
+    fn task_progress_repairs_a_task_start_that_never_arrived() {
+        let mut thread = claude_task_thread("task-tool");
+        thread.apply_task_event(task_progress("a5ee", Some("task-tool")));
+
+        assert_eq!(
+            thread.live_task_tools.get("a5ee").map(String::as_str),
+            Some("task-tool")
+        );
+        assert_eq!(tool_status(&thread, 0), AgentToolStatusModel::Running);
+
+        thread.settle_inflight(AgentToolStatusModel::Completed);
+        assert_eq!(
+            tool_status(&thread, 0),
+            AgentToolStatusModel::Running,
+            "an adopted task holds its row through the turn boundary"
+        );
+
+        thread.apply_task_event(task_progress("bc5s", None));
+        thread.apply_task_event(task_progress("bc5s", Some("never-called")));
+        assert!(
+            !thread.live_task_tools.contains_key("bc5s"),
+            "a task with no reachable tool entry registers nothing"
+        );
+    }
+
+    #[test]
+    fn progress_never_resurrects_a_settled_tool() {
+        for settled in [
+            AgentToolStatusModel::Completed,
+            AgentToolStatusModel::Failed,
+            AgentToolStatusModel::Canceled,
+        ] {
+            let mut thread = claude_task_thread("task-tool");
+            thread.set_task_tool_status("task-tool", settled);
+
+            thread.apply_task_event(task_progress("a5ee", Some("task-tool")));
+            thread.apply_task_event(tool_progress("task-tool", Some("Explore")));
+
+            assert!(
+                thread.live_task_tools.is_empty(),
+                "{settled:?} is an outcome, so no task may be registered against it"
+            );
+            assert_eq!(tool_status(&thread, 0), settled);
+        }
+    }
+
+    #[test]
+    fn progress_after_the_pane_returns_to_ready_holds_nothing() {
+        let mut thread = claude_task_thread("task-tool");
+        thread.connection = AgentConnectionState::Ready;
+
+        thread.apply_task_event(task_progress("a5ee", Some("task-tool")));
+        thread.apply_task_event(tool_progress("task-tool", Some("Explore")));
+
+        assert!(thread.live_task_tools.is_empty());
+        assert_eq!(
+            tool_status(&thread, 0),
+            AgentToolStatusModel::Pending,
+            "a heartbeat after the turn ended is late replay, not work"
+        );
+    }
+
+    #[test]
+    fn tool_progress_only_lifts_a_pending_subagent_tool_to_running() {
+        let mut thread = claude_task_thread("task-tool");
+
+        thread.apply_task_event(tool_progress("task-tool", None));
+        assert_eq!(tool_status(&thread, 0), AgentToolStatusModel::Pending);
+
+        thread.apply_task_event(tool_progress("missing-tool", Some("Explore")));
+        assert_eq!(thread.entries.len(), 1);
+
+        thread.apply_task_event(tool_progress("task-tool", Some("Explore")));
+        assert_eq!(tool_status(&thread, 0), AgentToolStatusModel::Running);
+        assert!(
+            thread.live_task_tools.is_empty(),
+            "liveness alone never registers a task"
+        );
+    }
+
+    /// One item of the captured turn: either an ACP `session/update` the
+    /// adapter emitted, or the raw SDK message a `_claude/sdkMessage`
+    /// passthrough carried.
+    enum ReplayStep {
+        Acp(Box<SessionUpdate>),
+        Sdk(serde_json::Value),
+    }
+
+    const REPLAY_SESSION: &str = "6e1e630a-b654-468b-98ac-cc2afb6fad25";
+    const NOOP1_TOOL: &str = "toolu_01UPTSiDoNMRa34eD3uGi6Ds";
+    const NOOP2_TOOL: &str = "toolu_018UFVtfmc5ynnQCd31vAe1C";
+    const NOOP3_TOOL: &str = "toolu_01DELDKBT2EbqkTTX25mqUjq";
+    const NOOP1_TASK: &str = "a5f23bb8527ea0680";
+    const NOOP2_TASK: &str = "a0fbb51f33f8bf4a0";
+    const NOOP3_TASK: &str = "ade2b0e099b1b7d10";
+    const BASH1_TOOL: &str = "toolu_016Kx7g8QM5YJta9Ys1tShTf";
+    const BASH2_TOOL: &str = "toolu_01CVhyXZYmZPUPqVJD3LHN8H";
+    const BASH3_TOOL: &str = "toolu_01EP6WGuSDKo5tiB1vk8uVen";
+    const BASH1_TASK: &str = "b714txtc1";
+    const BASH2_TASK: &str = "bzq48vxw3";
+    const BASH3_TASK: &str = "b2a2tqak4";
+
+    /// A captured passthrough, classified by the daemon's own parser rather
+    /// than a transcription of what it would decide.
+    fn replay_sdk_event(message: &serde_json::Value) -> SdkTaskEvent {
+        let params =
+            serde_json::json!({"sessionId": REPLAY_SESSION, "message": message}).to_string();
+        let (session_id, parsed) = zz_daemon::ProviderProfile::of(AgentProvider::ClaudeCode)
+            .ext_message("_claude/sdkMessage", &params)
+            .expect("the daemon classifies every opted-in passthrough");
+        assert_eq!(session_id, REPLAY_SESSION);
+        match parsed {
+            zz_daemon::SdkMessage::Task(event) => event,
+            zz_daemon::SdkMessage::TurnIdle => panic!("this capture carries no idle marker"),
+        }
+    }
+
+    fn agent_tool_meta(extra: &serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        claude_meta(&serde_json::json!({"claudeCode": extra}))
+    }
+
+    fn task_tool_call(tool_use_id: &'static str) -> ReplayStep {
+        ReplayStep::Acp(Box::new(SessionUpdate::ToolCall(
+            ToolCall::new(tool_use_id, "Task")
+                .kind(ToolKind::Think)
+                .meta(agent_tool_meta(
+                    &serde_json::json!({"toolName": "Agent", "subagent": true}),
+                )),
+        )))
+    }
+
+    fn task_tool_title(tool_use_id: &'static str, title: &str) -> ReplayStep {
+        ReplayStep::Acp(Box::new(SessionUpdate::ToolCallUpdate(
+            ToolCallUpdate::new(
+                tool_use_id,
+                ToolCallUpdateFields::new()
+                    .kind(ToolKind::Think)
+                    .title(title.to_owned()),
+            )
+            .meta(agent_tool_meta(
+                &serde_json::json!({"toolName": "Agent", "subagent": true}),
+            )),
+        )))
+    }
+
+    /// The async launch acknowledgement. It is a terminal wire status that
+    /// lands while the subagent it launched is still running, which is why the
+    /// registered task rather than the wire owns the row's outcome.
+    fn task_tool_completed(tool_use_id: &'static str) -> ReplayStep {
+        ReplayStep::Acp(Box::new(SessionUpdate::ToolCallUpdate(
+            ToolCallUpdate::new(
+                tool_use_id,
+                ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+            )
+            .meta(agent_tool_meta(&serde_json::json!({"toolName": "Agent"}))),
+        )))
+    }
+
+    fn bash_tool_call(tool_use_id: &'static str, parent: &str) -> ReplayStep {
+        ReplayStep::Acp(Box::new(SessionUpdate::ToolCall(
+            ToolCall::new(tool_use_id, "sleep 5")
+                .kind(ToolKind::Execute)
+                .meta(agent_tool_meta(
+                    &serde_json::json!({"toolName": "Bash", "parentToolUseId": parent}),
+                )),
+        )))
+    }
+
+    fn bash_tool_completed(tool_use_id: &'static str, parent: &str) -> ReplayStep {
+        ReplayStep::Acp(Box::new(SessionUpdate::ToolCallUpdate(
+            ToolCallUpdate::new(
+                tool_use_id,
+                ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+            )
+            .meta(agent_tool_meta(
+                &serde_json::json!({"toolName": "Bash", "parentToolUseId": parent}),
+            )),
+        )))
+    }
+
+    fn sdk_agent_started(task_id: &str, tool_use_id: &str, description: &str) -> ReplayStep {
+        ReplayStep::Sdk(serde_json::json!({
+            "type": "system",
+            "subtype": "task_started",
+            "task_id": task_id,
+            "tool_use_id": tool_use_id,
+            "description": description,
+            "subagent_type": "general-purpose",
+            "task_type": "local_agent",
+            "session_id": REPLAY_SESSION,
+        }))
+    }
+
+    fn sdk_bash_started(task_id: &str, tool_use_id: &str) -> ReplayStep {
+        ReplayStep::Sdk(serde_json::json!({
+            "type": "system",
+            "subtype": "task_started",
+            "task_id": task_id,
+            "owned_by_subagent": true,
+            "tool_use_id": tool_use_id,
+            "description": "Sleep for 5 seconds",
+            "task_type": "local_bash",
+            "session_id": REPLAY_SESSION,
+        }))
+    }
+
+    fn sdk_task_progress(task_id: &str, tool_use_id: &str) -> ReplayStep {
+        ReplayStep::Sdk(serde_json::json!({
+            "type": "system",
+            "subtype": "task_progress",
+            "task_id": task_id,
+            "tool_use_id": tool_use_id,
+            "description": "Running Sleep for 5 seconds",
+            "subagent_type": "general-purpose",
+            "usage": {"total_tokens": 16_170, "tool_uses": 1, "duration_ms": 4_101},
+            "last_tool_name": "Bash",
+            "session_id": REPLAY_SESSION,
+        }))
+    }
+
+    fn sdk_task_updated(task_id: &str) -> ReplayStep {
+        ReplayStep::Sdk(serde_json::json!({
+            "type": "system",
+            "subtype": "task_updated",
+            "task_id": task_id,
+            "patch": {"status": "completed", "end_time": 1_786_826_068_890u64},
+            "session_id": REPLAY_SESSION,
+        }))
+    }
+
+    fn sdk_agent_notification(task_id: &str, tool_use_id: &str, summary: &str) -> ReplayStep {
+        ReplayStep::Sdk(serde_json::json!({
+            "type": "system",
+            "subtype": "task_notification",
+            "task_id": task_id,
+            "tool_use_id": tool_use_id,
+            "status": "completed",
+            "output_file": format!("/tmp/tasks/{task_id}.output"),
+            "summary": summary,
+            "usage": {"total_tokens": 18_004, "tool_uses": 1, "duration_ms": 11_931},
+            "session_id": REPLAY_SESSION,
+        }))
+    }
+
+    fn sdk_bash_notification(task_id: &str, tool_use_id: &str) -> ReplayStep {
+        ReplayStep::Sdk(serde_json::json!({
+            "type": "system",
+            "subtype": "task_notification",
+            "task_id": task_id,
+            "tool_use_id": tool_use_id,
+            "status": "completed",
+            "output_file": "",
+            "summary": "Sleep for 5 seconds",
+            "session_id": REPLAY_SESSION,
+        }))
+    }
+
+    /// One real turn that launched three subagents, each of which ran one
+    /// background shell, in the order the wire delivered it: the async launch
+    /// acknowledgement is a terminal wire status that precedes every task
+    /// bookend, the shell notifications precede the agent ones, and a task
+    /// heartbeat lands between registration and the tool updates it describes.
+    fn captured_subagent_turn() -> Vec<ReplayStep> {
+        vec![
+            task_tool_call(NOOP1_TOOL),
+            task_tool_title(NOOP1_TOOL, "noop-1"),
+            task_tool_call(NOOP2_TOOL),
+            task_tool_title(NOOP2_TOOL, "noop-2"),
+            sdk_agent_started(NOOP1_TASK, NOOP1_TOOL, "noop-1 sleep 5s"),
+            task_tool_completed(NOOP1_TOOL),
+            task_tool_call(NOOP3_TOOL),
+            task_tool_title(NOOP3_TOOL, "noop-3"),
+            sdk_agent_started(NOOP2_TASK, NOOP2_TOOL, "noop-2 sleep 5s"),
+            task_tool_completed(NOOP2_TOOL),
+            sdk_agent_started(NOOP3_TASK, NOOP3_TOOL, "noop-3 sleep 5s"),
+            task_tool_completed(NOOP3_TOOL),
+            sdk_task_progress(NOOP1_TASK, NOOP1_TOOL),
+            bash_tool_call(BASH1_TOOL, NOOP1_TOOL),
+            sdk_task_progress(NOOP2_TASK, NOOP2_TOOL),
+            bash_tool_call(BASH2_TOOL, NOOP2_TOOL),
+            sdk_bash_started(BASH1_TASK, BASH1_TOOL),
+            sdk_bash_started(BASH2_TASK, BASH2_TOOL),
+            sdk_task_progress(NOOP3_TASK, NOOP3_TOOL),
+            bash_tool_call(BASH3_TOOL, NOOP3_TOOL),
+            sdk_bash_notification(BASH1_TASK, BASH1_TOOL),
+            bash_tool_completed(BASH1_TOOL, NOOP1_TOOL),
+            sdk_bash_notification(BASH2_TASK, BASH2_TOOL),
+            bash_tool_completed(BASH2_TOOL, NOOP2_TOOL),
+            sdk_bash_started(BASH3_TASK, BASH3_TOOL),
+            sdk_task_updated(NOOP1_TASK),
+            sdk_agent_notification(NOOP1_TASK, NOOP1_TOOL, "noop-1 done"),
+            sdk_bash_notification(BASH3_TASK, BASH3_TOOL),
+            bash_tool_completed(BASH3_TOOL, NOOP3_TOOL),
+            sdk_task_updated(NOOP2_TASK),
+            sdk_agent_notification(NOOP2_TASK, NOOP2_TOOL, "noop-2 done"),
+            sdk_task_updated(NOOP3_TASK),
+            sdk_agent_notification(NOOP3_TASK, NOOP3_TOOL, "noop-3 done"),
+        ]
+    }
+
+    fn replay_captured_subagent_turn() -> AgentThread {
+        let mut thread =
+            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
+        thread.connection = AgentConnectionState::Running;
+        for step in captured_subagent_turn() {
+            match step {
+                ReplayStep::Acp(update) => thread.apply_runtime_update(*update),
+                ReplayStep::Sdk(message) => thread.apply_task_event(replay_sdk_event(&message)),
+            }
+        }
+        thread
+    }
+
+    /// What the sticky strip gates on: a subagent tool row that has not
+    /// reached an outcome still renders a spinner.
+    fn spinning_subagent_tools(thread: &AgentThread) -> Vec<&str> {
+        thread
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                AgentThreadEntry::Tool {
+                    protocol_id,
+                    status:
+                        AgentToolStatusModel::Pending
+                        | AgentToolStatusModel::Running
+                        | AgentToolStatusModel::NeedsApproval,
+                    subagent: true,
+                    ..
+                } => Some(protocol_id.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn notification_summaries(thread: &AgentThread) -> Vec<&str> {
+        thread
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                AgentThreadEntry::Notification { summary, .. } => Some(summary.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn captured_subagent_turn_settles_its_task_tools_before_the_turn_ends() {
+        let thread = replay_captured_subagent_turn();
+
+        assert!(
+            thread.live_task_tools.is_empty(),
+            "every task reported terminal, so none is still held: {:?}",
+            thread.live_task_tools
+        );
+        for tool_use_id in [NOOP1_TOOL, NOOP2_TOOL, NOOP3_TOOL] {
+            assert_eq!(
+                thread.task_tool_status(tool_use_id),
+                Some(AgentToolStatusModel::Completed),
+                "{tool_use_id} is still spinning after its notification arrived"
+            );
+        }
+        assert_eq!(
+            spinning_subagent_tools(&thread),
+            Vec::<&str>::new(),
+            "the sticky strip renders a row for every unsettled subagent tool"
+        );
+        assert_eq!(
+            notification_summaries(&thread),
+            vec!["noop-1 done", "noop-2 done", "noop-3 done"],
+            "shell tasks notify too, and none of them is a card"
+        );
+    }
+
+    #[test]
+    fn captured_subagent_turn_leaves_no_spinner_once_the_turn_settles() {
+        let mut thread = replay_captured_subagent_turn();
+        thread.settle_inflight(AgentToolStatusModel::Completed);
+        thread.connection = AgentConnectionState::Ready;
+
+        assert!(thread.live_task_tools.is_empty());
+        for tool_use_id in [NOOP1_TOOL, NOOP2_TOOL, NOOP3_TOOL] {
+            assert_eq!(
+                thread.task_tool_status(tool_use_id),
+                Some(AgentToolStatusModel::Completed),
+                "{tool_use_id} outlived the turn boundary as a spinner"
+            );
+        }
+        assert_eq!(spinning_subagent_tools(&thread), Vec::<&str>::new());
+        assert_eq!(
+            notification_summaries(&thread),
+            vec!["noop-1 done", "noop-2 done", "noop-3 done"]
+        );
     }
 
     #[test]
@@ -6510,6 +7530,23 @@ mod tests {
         serde_json::to_value(value).expect("the ACP schema encodes")
     }
 
+    /// One `session/update` carrying a `sessionUpdate` this build has no
+    /// variant for: a future ACP addition, or an `_`-prefixed extension.
+    fn unknown_update(tag: &str) -> AgentStreamPayload {
+        AgentStreamPayload::Update {
+            update: serde_json::json!({"sessionUpdate": tag, "payload": {"opaque": true}}),
+        }
+    }
+
+    fn chunk_update(text: &str, message_id: &str) -> AgentStreamPayload {
+        AgentStreamPayload::Update {
+            update: json(&SessionUpdate::AgentMessageChunk(
+                ContentChunk::new(ContentBlock::Text(TextContent::new(text)))
+                    .message_id(MessageId::new(message_id)),
+            )),
+        }
+    }
+
     fn turn_finished(reason: StopReason) -> AgentStreamPayload {
         AgentStreamPayload::PromptFinished {
             turn_id: 1,
@@ -6714,8 +7751,224 @@ mod tests {
                 let (entries, ..) = controller.pane_entries(pane).expect("entries");
                 assert_eq!(entries.len(), 1);
                 assert_eq!(controller.viewports[&pane].last_applied, 2);
+                assert_eq!(controller.panes[&pane].unknown_updates, 1);
             });
         });
+    }
+
+    #[gpui::test]
+    fn an_unknown_update_between_two_known_ones_only_skips_itself(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(40);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                controller.apply_stream_items(
+                    pane,
+                    vec![
+                        item(1, chunk_update("first", "message-1")),
+                        item(2, unknown_update("terminal_output_chunk")),
+                        item(3, chunk_update("second", "message-2")),
+                    ],
+                    cx,
+                );
+
+                let (entries, ..) = controller.pane_entries(pane).expect("entries");
+                assert_eq!(entries.len(), 2, "an unknown item poisons nothing after it");
+                assert!(matches!(
+                    (&entries[0], &entries[1]),
+                    (
+                        AgentThreadEntry::Assistant { markdown: first, .. },
+                        AgentThreadEntry::Assistant { markdown: second, .. },
+                    ) if first == "first" && second == "second"
+                ));
+                assert_eq!(controller.viewports[&pane].last_applied, 3);
+                assert_eq!(controller.panes[&pane].unknown_updates, 1);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn a_replay_over_a_surviving_transcript_reduces_each_item_once(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(44);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                controller.apply_stream_items(
+                    pane,
+                    vec![
+                        item(1, chunk_update("first", "message-1")),
+                        item(2, chunk_update("second", "message-2")),
+                    ],
+                    cx,
+                );
+
+                controller.apply_stream_items(
+                    pane,
+                    vec![
+                        item(1, chunk_update("first", "message-1")),
+                        item(2, chunk_update("second", "message-2")),
+                        item(3, chunk_update("third", "message-3")),
+                    ],
+                    cx,
+                );
+
+                let (entries, ..) = controller.pane_entries(pane).expect("entries");
+                assert_eq!(
+                    entries.len(),
+                    3,
+                    "an attach replays over the transcript it already reduced"
+                );
+                assert_eq!(controller.viewports[&pane].last_applied, 3);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn an_unknown_update_mid_message_does_not_break_its_coalescing(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(41);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                controller.apply_stream_items(
+                    pane,
+                    vec![
+                        item(1, chunk_update("hello ", "message-1")),
+                        item(2, unknown_update("_zz_private_extension")),
+                        item(3, chunk_update("world", "message-1")),
+                    ],
+                    cx,
+                );
+
+                let (entries, ..) = controller.pane_entries(pane).expect("entries");
+                assert_eq!(entries.len(), 1, "the message stays one entry");
+                assert!(matches!(
+                    &entries[0],
+                    AgentThreadEntry::Assistant { markdown, .. } if markdown == "hello world"
+                ));
+                assert_eq!(controller.panes[&pane].unknown_updates, 1);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn a_batch_of_only_unknown_updates_advances_the_cursor(cx: &mut TestAppContext) {
+        let (controller, sink) = proxy_controller(cx);
+        let pane = PaneId(42);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                controller.apply_stream_items(
+                    pane,
+                    vec![
+                        item(5, unknown_update("state_update")),
+                        item(6, unknown_update("_vendor_thing")),
+                        item(
+                            7,
+                            AgentStreamPayload::Update {
+                                update: serde_json::json!({
+                                    "sessionUpdate": "agent_message_chunk",
+                                    "content": 42,
+                                }),
+                            },
+                        ),
+                    ],
+                    cx,
+                );
+
+                assert!(
+                    controller
+                        .pane_entries(pane)
+                        .is_some_and(|(entries, ..)| entries.is_empty())
+                );
+                assert_eq!(
+                    controller.viewports[&pane].last_applied, 7,
+                    "every seq counts as consumed, so nothing asks to be replayed"
+                );
+                assert_eq!(controller.panes[&pane].unknown_updates, 3);
+            });
+        });
+        assert!(
+            sink.borrow().is_empty(),
+            "a batch zz skipped whole is not a hole in the journal"
+        );
+    }
+
+    #[gpui::test]
+    fn a_restored_session_replays_around_updates_this_build_cannot_read(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(43);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                controller.apply_stream_items(
+                    pane,
+                    vec![item(
+                        1,
+                        AgentStreamPayload::SessionSwitched {
+                            session_id: "s-2".to_owned(),
+                            cwd: PathBuf::from("/workspace"),
+                            modes: None,
+                            config_options: None,
+                            replay: vec![
+                                json(&SessionUpdate::AgentMessageChunk(
+                                    ContentChunk::new(ContentBlock::Text(TextContent::new(
+                                        "restored",
+                                    )))
+                                    .message_id(MessageId::new("message-1")),
+                                )),
+                                serde_json::json!({"sessionUpdate": "plan_update", "planId": "p1"}),
+                                json(&SessionUpdate::AgentMessageChunk(
+                                    ContentChunk::new(ContentBlock::Text(TextContent::new(
+                                        " and whole",
+                                    )))
+                                    .message_id(MessageId::new("message-1")),
+                                )),
+                            ],
+                        },
+                    )],
+                    cx,
+                );
+
+                let state = controller.pane_state(pane).expect("pane state");
+                assert_eq!(state.session_id.as_deref(), Some("s-2"));
+                assert_eq!(state.connection, AgentConnectionState::Ready);
+                let (entries, ..) = controller.pane_entries(pane).expect("entries");
+                assert_eq!(entries.len(), 1);
+                assert!(matches!(
+                    &entries[0],
+                    AgentThreadEntry::Assistant { markdown, .. } if markdown == "restored and whole"
+                ));
+                assert_eq!(controller.panes[&pane].unknown_updates, 1);
+            });
+        });
+    }
+
+    #[test]
+    fn a_skipped_update_is_logged_by_tag_and_never_by_payload() {
+        let payload = "x".repeat(4 * 1024);
+        let update = serde_json::json!({
+            "sessionUpdate": format!("_evil\n{payload}"),
+            "content": payload,
+        });
+
+        let tag = session_update_tag(&update);
+        assert!(tag.len() <= MAX_SESSION_UPDATE_TAG_BYTES);
+        assert!(tag.starts_with("_evil"));
+        assert!(!tag.contains('\n'), "a tag cannot forge a second log line");
+        assert!(!tag.contains(&payload));
+
+        let error = serde_json::from_value::<SessionUpdate>(update)
+            .expect_err("an unknown discriminant does not decode");
+        let excerpt = log_excerpt(&error.to_string(), MAX_DECODE_ERROR_BYTES);
+        assert!(excerpt.len() <= MAX_DECODE_ERROR_BYTES);
+
+        assert_eq!(
+            session_update_tag(&serde_json::json!({"content": "no tag"})),
+            UNTAGGED_SESSION_UPDATE
+        );
     }
 
     #[gpui::test]

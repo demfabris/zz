@@ -169,8 +169,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol"
-version = "1.2.0"
-source = "git+https://github.com/agentclientprotocol/rust-sdk?rev=112a85e6e4a2e9bad2a79af640c61f97b8afff94#112a85e6e4a2e9bad2a79af640c61f97b8afff94"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d87bc7769eba641753ba5dc52f73ec3765d51022c6753bf040967125ddc86a8"
 dependencies = [
  "agent-client-protocol-derive",
  "agent-client-protocol-schema",
@@ -192,18 +193,19 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol-derive"
-version = "1.2.0"
-source = "git+https://github.com/agentclientprotocol/rust-sdk?rev=112a85e6e4a2e9bad2a79af640c61f97b8afff94#112a85e6e4a2e9bad2a79af640c61f97b8afff94"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3abd4080f51e4f24f5042beb7fb7a66ede29a2dc1c2582c329532e1c27264ddc"
 dependencies = [
  "quote",
- "syn 2.0.119",
+ "syn 3.0.3",
 ]
 
 [[package]]
 name = "agent-client-protocol-schema"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06679e1542356341f4550ccfb16338b64f37f6af70de2105446ef6fbb078234c"
+checksum = "d5c231915b4ab578c722eca2d1bd7df4d300bfd6cac3b8e9f0d1e3ddc95b187c"
 dependencies = [
  "anyhow",
  "derive_more",
@@ -2571,7 +2573,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3810,7 +3812,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.57.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -7171,7 +7173,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7184,7 +7186,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8370,10 +8372,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9614,7 +9616,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10739,6 +10741,7 @@ dependencies = [
  "parking_lot",
  "pollster 0.4.0",
  "raw-window-handle",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "smallvec",

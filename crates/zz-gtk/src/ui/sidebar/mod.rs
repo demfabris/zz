@@ -860,7 +860,7 @@ fn build_gutter(row: &Row, target: &glib::Variant, tree: &Tree) -> gtk::Box {
             gutter.append(
                 &gtk::MenuButton::builder()
                     .icon_name("view-more-symbolic")
-                    .tooltip_text("Host actions")
+                    .tooltip_text("Host Actions")
                     .menu_model(&host_menu(row.node, tree))
                     .has_frame(false)
                     .build(),
@@ -869,13 +869,13 @@ fn build_gutter(row: &Row, target: &glib::Variant, tree: &Tree) -> gtk::Box {
         }
         RowKind::Session => gutter.append(&gutter_button(
             "tab-new-symbolic",
-            "New window",
+            "New Window",
             "sidebar.new-window",
             target,
         )),
         RowKind::Window { .. } => gutter.append(&gutter_button(
             "list-add-symbolic",
-            "Add pane",
+            "Add Pane",
             "sidebar.new-pane",
             target,
         )),
@@ -911,8 +911,8 @@ fn host_menu(node: TreeNode, tree: &Tree) -> gio::Menu {
     let host = node.host();
     let menu = gio::Menu::new();
     if host == HostId::LOCAL {
-        menu.append(Some("New session"), Some("sidebar.new-session"));
-        menu.append(Some("Add host…"), Some("sidebar.add-host"));
+        menu.append(Some("New Session"), Some("sidebar.new-session"));
+        menu.append(Some("Add Host…"), Some("sidebar.add-host"));
         return menu;
     }
     let value = node.to_string().to_variant();
@@ -920,11 +920,11 @@ fn host_menu(node: TreeNode, tree: &Tree) -> gio::Menu {
         .host(host)
         .is_some_and(|host| host.state.is_connected());
     if connected {
-        menu.append_item(&item("New session", "sidebar.host-new-session", &value));
+        menu.append_item(&item("New Session", "sidebar.host-new-session", &value));
     } else {
         menu.append_item(&item("Reconnect", "sidebar.reconnect-host", &value));
     }
-    menu.append_item(&item("Close host", "sidebar.close-host", &value));
+    menu.append_item(&item("Close Host", "sidebar.close-host", &value));
     menu
 }
 
@@ -948,8 +948,8 @@ fn row_menu(node: TreeNode, rows: &[Row], tree: &Tree) -> gio::Menu {
         &value,
     ));
     match kind {
-        RowKind::Session => menu.append_item(&item("New window", "sidebar.new-window", &value)),
-        RowKind::Window { .. } => menu.append_item(&item("Add pane", "sidebar.new-pane", &value)),
+        RowKind::Session => menu.append_item(&item("New Window", "sidebar.new-window", &value)),
+        RowKind::Window { .. } => menu.append_item(&item("Add Pane", "sidebar.new-pane", &value)),
         _ => {}
     }
     menu.append_item(&item(delete_label(kind), "sidebar.kill", &value));
@@ -966,9 +966,9 @@ fn item(label: &str, action: &str, target: &glib::Variant) -> gio::MenuItem {
 
 const fn delete_label(kind: RowKind) -> &'static str {
     match kind {
-        RowKind::Session => "Delete session",
-        RowKind::Window { .. } => "Delete window",
-        _ => "Delete pane",
+        RowKind::Session => "Delete Session",
+        RowKind::Window { .. } => "Delete Window",
+        _ => "Delete Pane",
     }
 }
 

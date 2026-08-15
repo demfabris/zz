@@ -43,7 +43,7 @@ impl MuxEditor {
         status.add_css_class("dim-label");
         status.add_css_class("caption");
 
-        let button = gtk::Button::with_label("Save and reload");
+        let button = gtk::Button::with_label("Save and Reload");
         button.add_css_class("suggested-action");
         button.set_valign(gtk::Align::Center);
         button.set_sensitive(path.is_some());

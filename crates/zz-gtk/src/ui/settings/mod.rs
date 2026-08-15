@@ -451,7 +451,7 @@ impl Settings {
                 "zz found a Ghostty or tmux configuration. zz reads only its own files: the \
                  Ghostty appearance keys are copied into zz/config and your tmux configuration \
                  into zz/mux.conf. The originals are never modified, and you can import later \
-                 from Settings.",
+                 from Preferences.",
             ),
         );
         dialog.add_response("skip", "Not now");

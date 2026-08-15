@@ -38,7 +38,6 @@ const STYLE: &str = "
 .zz-status { padding: 2px 10px; }
 .zz-status label { font-size: 0.9em; }
 .zz-placeholder { padding: 24px; }
-.zz-prompt { padding: 4px 8px; }
 .zz-chooser { padding: 12px; }
 .zz-badge { padding: 2px 8px; border-radius: 6px; }
 .zz-number { font-size: 2.4em; font-weight: bold; padding: 8px 20px; border-radius: 12px; }
@@ -51,7 +50,6 @@ const STYLE: &str = "
 .zz-sidebar-row { padding: 2px 4px; min-height: 28px; }
 .zz-sidebar-active label { font-weight: bold; }
 .zz-sidebar-disclosure, .zz-sidebar-action { min-width: 20px; min-height: 20px; padding: 0; }
-.zz-sidebar-grip { background-color: alpha(currentColor, 0.08); }
 .zz-bell { color: @warning_color; font-size: 0.7em; }
 .zz-newsession { padding: 24px; }
 .zz-newsession-section { margin-top: 12px; }
@@ -181,6 +179,7 @@ impl Shell {
             .content(&toasts)
             .build();
 
+        sidebar.install_breakpoint(&window);
         let overlays = Overlays::new(Arc::clone(&engine), &window);
 
         // >>> palette agent: the prefix claim has to be installed before any

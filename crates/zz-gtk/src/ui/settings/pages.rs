@@ -1,10 +1,9 @@
 //! The two pages the key table cannot generate: a whole-file editor, and the
-//! client's own identity.
+//! fleet.
 
 use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 use adw::prelude::*;
-use zz_protocol::PROTOCOL_VERSION;
 
 use crate::config::{file, import};
 
@@ -44,7 +43,7 @@ impl MuxEditor {
         status.add_css_class("dim-label");
         status.add_css_class("caption");
 
-        let button = gtk::Button::with_label("Save and reload");
+        let button = gtk::Button::with_label("Save and Reload");
         button.add_css_class("suggested-action");
         button.set_valign(gtk::Align::Center);
         button.set_sensitive(path.is_some());
@@ -261,97 +260,4 @@ impl HostsPage {
             add(&typed);
         }
     }
-}
-
-/// The client's own identity. The window's About action still owns the GNOME
-/// dialog; this page adds what a zz client is actually asked about — which
-/// daemon it reached and on what protocol.
-pub fn about(
-    socket: &str,
-    capabilities: &[String],
-    config: Option<&std::path::Path>,
-) -> adw::PreferencesPage {
-    let page = adw::PreferencesPage::new();
-
-    let heading = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    heading.set_margin_bottom(12);
-    let icon = gtk::Image::from_icon_name(crate::ui::APP_ID);
-    icon.set_pixel_size(96);
-    let name = gtk::Label::new(Some("zz"));
-    name.add_css_class("title-1");
-    let version = gtk::Label::new(Some(env!("CARGO_PKG_VERSION")));
-    version.add_css_class("dim-label");
-    heading.append(&icon);
-    heading.append(&name);
-    heading.append(&version);
-
-    let identity = adw::PreferencesGroup::new();
-    identity.add(&heading);
-    identity.add(&link_row("Website", "https://zzmux.sh"));
-    identity.add(&value_row("Client", "zz-gtk, a GTK4 and libadwaita shell"));
-    identity.add(&value_row(
-        "Configuration",
-        &config.map_or_else(
-            || "no zz/config yet; the first edit creates one".to_owned(),
-            |path| path.display().to_string(),
-        ),
-    ));
-    page.add(&identity);
-
-    let connection = adw::PreferencesGroup::builder().title("Daemon").build();
-    connection.add(&value_row("Endpoint", socket));
-    connection.add(&value_row(
-        "Protocol version",
-        &PROTOCOL_VERSION.to_string(),
-    ));
-    connection.add(&value_row(
-        "Capabilities",
-        &if capabilities.is_empty() {
-            "none advertised".to_owned()
-        } else {
-            capabilities.join(", ")
-        },
-    ));
-    page.add(&connection);
-
-    let legal = adw::PreferencesGroup::new();
-    let dialog = adw::ActionRow::builder()
-        .title("About zz")
-        .subtitle("Credits, licence and the rest, in the system dialog")
-        .activatable(true)
-        .action_name("win.about")
-        .build();
-    dialog.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
-    legal.add(&dialog);
-    page.add(&legal);
-
-    page
-}
-
-fn value_row(title: &str, value: &str) -> adw::ActionRow {
-    let row = adw::ActionRow::builder()
-        .title(title)
-        .subtitle(value)
-        .build();
-    row.set_subtitle_selectable(true);
-    row.set_subtitle_lines(0);
-    row
-}
-
-fn link_row(title: &str, uri: &str) -> adw::ActionRow {
-    let row = adw::ActionRow::builder()
-        .title(title)
-        .subtitle(uri)
-        .activatable(true)
-        .build();
-    row.add_suffix(&gtk::Image::from_icon_name("adw-external-link-symbolic"));
-    let target = uri.to_owned();
-    row.connect_activated(move |row| {
-        gtk::UriLauncher::new(&target).launch(
-            row.root().and_downcast::<gtk::Window>().as_ref(),
-            gtk::gio::Cancellable::NONE,
-            |_| (),
-        );
-    });
-    row
 }

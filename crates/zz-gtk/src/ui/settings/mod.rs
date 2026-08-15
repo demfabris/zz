@@ -1,7 +1,6 @@
-//! The settings route.
-//!
-//! Not a dialog: like the desktop's `WorkspaceRoute::Settings`, this replaces
-//! the pane area inside the same window, and the `ClosePane` chord closes it.
+//! Preferences, as GNOME presents them: an `AdwPreferencesDialog` over the
+//! window, one page per subject, closed by Escape like every other dialog on
+//! the desktop.
 //!
 //! The apply path is the poller and only the poller. A row writes `zz/config`
 //! and the 500 ms poll reads it back, so an edit made here and an edit made in
@@ -16,16 +15,15 @@ mod zoom;
 
 use std::{
     cell::{Cell, RefCell},
-    fmt::Write as _,
     rc::{Rc, Weak},
     sync::Arc,
 };
 
 use adw::prelude::*;
-use gtk::{gio, glib};
-use zz_client::{ChromeAction, ChromeKeymap};
+use gtk::glib;
+use zz_client::ChromeAction;
 use zz_protocol::{CommandInvocation, MuxOptionSource};
-use zz_terminal::{AppearanceProvenance, AppearanceSource, KeyAction, TerminalAppearance};
+use zz_terminal::{AppearanceProvenance, AppearanceSource, TerminalAppearance};
 
 use crate::{
     config::{
@@ -33,79 +31,77 @@ use crate::{
         schema::{self, Kind, Owner, Page, Setting},
     },
     engine::Engine,
-    ui::keys,
 };
 
 use pages::{HostsPage, MuxEditor};
 use rows::{Row, Syncing, Write};
 pub use zoom::UiZoom;
 
-const SIDEBAR_WIDTH: f64 = 220.0;
-
-/// The whole settings surface, plus the file plumbing behind it.
-pub struct SettingsRoute {
+/// The preferences dialog, plus the file plumbing behind it.
+pub struct Settings {
     engine: Arc<Engine>,
     chrome: RefCell<Option<Rc<dyn Fn(ChromeAction)>>>,
     store: RefCell<Store>,
     rows: RefCell<Vec<Row>>,
     syncing: Syncing,
-    split: adw::NavigationSplitView,
-    stack: gtk::Stack,
-    list: gtk::ListBox,
-    banner: adw::Banner,
+    dialog: adw::PreferencesDialog,
     zoom_row: adw::ActionRow,
     mux: Rc<MuxEditor>,
     hosts: Rc<HostsPage>,
     zoom: UiZoom,
+    config_group: adw::PreferencesGroup,
     css: gtk::CssProvider,
-    route: RefCell<Option<gtk::Stack>>,
-    tab_bar: RefCell<Option<adw::TabBar>>,
+    open: Cell<bool>,
     prompted: Cell<bool>,
 }
 
-impl SettingsRoute {
+impl Settings {
     pub fn new(engine: Arc<Engine>) -> Rc<Self> {
         let syncing: Syncing = Rc::new(Cell::new(false));
-        let banner = adw::Banner::new("");
-        let stack = gtk::Stack::builder()
-            .transition_type(gtk::StackTransitionType::Crossfade)
-            .build();
-        let list = gtk::ListBox::builder()
-            .selection_mode(gtk::SelectionMode::Single)
-            .build();
-        list.add_css_class("navigation-sidebar");
-
         let mux = MuxEditor::new();
         let zoom_row = adw::ActionRow::builder()
             .title("Interface zoom")
             .subtitle("100%  ·  transient, never written to the file")
             .build();
 
-        let route = Rc::new(Self {
+        let settings = Rc::new(Self {
             engine,
             chrome: RefCell::new(None),
             store: RefCell::new(Store::load()),
             rows: RefCell::new(Vec::new()),
             syncing,
-            split: adw::NavigationSplitView::new(),
-            stack,
-            list,
-            banner,
+            dialog: adw::PreferencesDialog::builder()
+                .title("Preferences")
+                .build(),
             zoom_row,
             mux,
             hosts: HostsPage::new(),
             zoom: UiZoom::default(),
+            config_group: adw::PreferencesGroup::builder()
+                .title("Configuration")
+                .build(),
             css: gtk::CssProvider::new(),
-            route: RefCell::new(None),
-            tab_bar: RefCell::new(None),
+            open: Cell::new(false),
             prompted: Cell::new(false),
         });
-        route.build_surface();
-        route.connect_mux_save();
-        route.connect_host_edits();
-        route.install_css();
-        route.apply_file();
-        route
+        settings.build_pages();
+        settings.connect_mux_save();
+        settings.connect_host_edits();
+        settings.install_css();
+        settings.apply_file();
+
+        let target = Rc::downgrade(&settings);
+        settings.dialog.connect_closed(move |_| {
+            if let Some(settings) = target.upgrade() {
+                settings.open.set(false);
+            }
+        });
+        // The poll is the apply path for everything in the file, dialog open or
+        // not: the theme, the fleet, and the daemon's overrides all arrive
+        // through it.
+        let target = Rc::downgrade(&settings);
+        glib::timeout_add_local(POLL_INTERVAL, move || tick(&target));
+        settings
     }
 
     fn connect_mux_save(self: &Rc<Self>) {
@@ -191,62 +187,6 @@ impl SettingsRoute {
         self.chrome.replace(Some(chrome));
     }
 
-    /// Put the route in front of the pane area. The pane widget and this
-    /// surface become the two children of one stack, so opening settings hides
-    /// the panes exactly the way the desktop's route swap does.
-    ///
-    /// The toolbar's content is cleared first: `panes` is already its child at
-    /// this point, and adding a parented widget to the stack leaves GTK
-    /// unable to reconcile the two, which it reports forever as a failure to
-    /// remove a non-child.
-    pub fn install(
-        self: &Rc<Self>,
-        toolbar: &adw::ToolbarView,
-        tab_bar: &adw::TabBar,
-        panes: &impl IsA<gtk::Widget>,
-    ) {
-        toolbar.set_content(gtk::Widget::NONE);
-        let route = gtk::Stack::new();
-        route.add_named(panes, Some("panes"));
-        route.add_named(&self.split, Some("settings"));
-        toolbar.set_content(Some(&route));
-        self.route.replace(Some(route.clone()));
-        self.tab_bar.replace(Some(tab_bar.clone()));
-
-        let target = Rc::downgrade(self);
-        glib::timeout_add_local(POLL_INTERVAL, move || tick(&target));
-
-        let target = Rc::downgrade(self);
-        route.connect_map(move |_| {
-            if let Some(route) = target.upgrade() {
-                route.install_window_action();
-                route.prompt_import();
-            }
-        });
-    }
-
-    /// The window only exists once the tree is mapped, so the deep-link action
-    /// is registered then rather than at construction.
-    fn install_window_action(self: &Rc<Self>) {
-        let Some(window) = self.split.root().and_downcast::<adw::ApplicationWindow>() else {
-            return;
-        };
-        if window.lookup_action("settings-page").is_some() {
-            return;
-        }
-        let action = gio::SimpleAction::new("settings-page", Some(glib::VariantTy::STRING));
-        let target = Rc::downgrade(self);
-        action.connect_activate(move |_, parameter| {
-            let (Some(route), Some(name)) =
-                (target.upgrade(), parameter.and_then(glib::Variant::str))
-            else {
-                return;
-            };
-            route.open_at(name);
-        });
-        window.add_action(&action);
-    }
-
     pub fn zoom(&self) -> &UiZoom {
         &self.zoom
     }
@@ -268,51 +208,32 @@ impl SettingsRoute {
     }
 
     pub fn is_open(&self) -> bool {
-        self.route
-            .borrow()
-            .as_ref()
-            .is_some_and(|route| route.visible_child_name().as_deref() == Some("settings"))
+        self.open.get()
     }
 
-    pub fn open(&self) {
-        self.open_at(Page::Interface.name());
-    }
-
-    /// Open the route on a named page. `win.settings-page` reaches this, which
-    /// is how a menu item, another surface, or a script deep-links into one
-    /// page the way a desktop settings app does.
-    pub fn open_at(&self, name: &str) {
-        let page = Page::ALL
-            .iter()
-            .position(|page| page.name() == name)
-            .unwrap_or(0);
-        self.show("settings");
+    /// Present the dialog over the window, on a named page. `win.settings-page`
+    /// reaches this, which is how a menu item, another surface, or a script
+    /// deep-links into one page the way a desktop settings app does.
+    pub fn open_at(&self, parent: &impl IsA<gtk::Widget>, name: &str) {
+        if !self.open.replace(true) {
+            self.dialog.present(Some(parent));
+        }
         self.mux.reload();
         self.refresh_rows();
-        self.list
-            .select_row(self.list.row_at_index(page as i32).as_ref());
-        self.split.grab_focus();
-    }
-
-    pub fn close(&self) {
-        self.show("panes");
-    }
-
-    pub fn toggle(&self) {
-        if self.is_open() {
-            self.close();
-        } else {
-            self.open();
+        if Page::ALL.iter().any(|page| page.name() == name) {
+            self.dialog.set_visible_page_name(name);
         }
     }
 
-    fn show(&self, name: &str) {
-        let Some(route) = self.route.borrow().clone() else {
-            return;
-        };
-        route.set_visible_child_name(name);
-        if let Some(tab_bar) = self.tab_bar.borrow().as_ref() {
-            tab_bar.set_visible(name == "panes");
+    pub fn close(&self) {
+        self.dialog.close();
+    }
+
+    pub fn toggle(&self, parent: &impl IsA<gtk::Widget>) {
+        if self.is_open() {
+            self.close();
+        } else {
+            self.open_at(parent, Page::Interface.name());
         }
     }
 
@@ -338,11 +259,20 @@ impl SettingsRoute {
         self.refresh_rows();
     }
 
-    fn build_surface(self: &Rc<Self>) {
+    /// One `AdwPreferencesPage` per subject, every row generated from the key
+    /// table. The dialog's own view switcher is the navigation, so there is no
+    /// list of pages to keep in step with anything.
+    fn build_pages(self: &Rc<Self>) {
         let write = self.writer();
         let mut rows = Vec::new();
         for page in Page::ALL {
-            let content = adw::PreferencesPage::new();
+            let content = match page {
+                Page::Hosts => self.hosts.widget().clone(),
+                _ => adw::PreferencesPage::new(),
+            };
+            content.set_title(page.title());
+            content.set_icon_name(Some(page.icon()));
+            content.set_name(Some(page.name()));
             for group in schema::groups(page) {
                 let section = adw::PreferencesGroup::builder().title(group).build();
                 for setting in schema::for_page(page).filter(|s| s.group == group) {
@@ -352,77 +282,44 @@ impl SettingsRoute {
                 }
                 content.add(&section);
             }
-            let child: gtk::Widget = match page {
+            match page {
                 Page::Interface => {
                     let zoom = adw::PreferencesGroup::builder().title("Zoom").build();
                     self.zoom_row.add_suffix(&self.zoom_buttons());
                     zoom.add(&self.zoom_row);
                     content.add(&zoom);
-                    content.upcast()
                 }
-                Page::Multiplexer => {
-                    content.add(self.mux.group());
-                    content.upcast()
-                }
-                Page::Hosts => self.hosts.widget().clone().upcast(),
-                Page::About => pages::about(
-                    &self.engine.endpoint(),
-                    &self.engine.capabilities(),
-                    self.store.borrow().path(),
-                )
-                .upcast(),
-                _ => content.upcast(),
-            };
-            self.stack.add_named(&child, Some(page.name()));
-            self.list.append(&sidebar_row(page));
+                Page::Multiplexer => content.add(self.mux.group()),
+                Page::System => content.add(&self.import_group()),
+                _ => {}
+            }
+            self.dialog.add(&content);
         }
         self.rows.replace(rows);
-
-        let target = Rc::downgrade(self);
-        self.list.connect_row_selected(move |_, row| {
-            let (Some(route), Some(row)) = (target.upgrade(), row) else {
-                return;
-            };
-            let Some(page) = Page::ALL.get(row.index().max(0) as usize) else {
-                return;
-            };
-            route.stack.set_visible_child_name(page.name());
-        });
-
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        content.append(&self.banner);
-        content.append(&self.stack);
-        self.stack.set_vexpand(true);
-        self.split
-            .set_sidebar(Some(&adw::NavigationPage::new(&self.sidebar(), "Settings")));
-        self.split
-            .set_content(Some(&adw::NavigationPage::new(&content, "Settings")));
-        self.split.set_min_sidebar_width(SIDEBAR_WIDTH);
-        self.split.set_max_sidebar_width(SIDEBAR_WIDTH);
-        self.install_keys();
     }
 
-    fn sidebar(self: &Rc<Self>) -> gtk::Box {
-        let scroller = gtk::ScrolledWindow::builder()
-            .child(&self.list)
-            .vexpand(true)
-            .hscrollbar_policy(gtk::PolicyType::Never)
+    /// The offer the first-run prompt says can be taken later. Its group also
+    /// carries the file every row on every page writes to, which is the one
+    /// fact a config-file application is always asked for.
+    fn import_group(self: &Rc<Self>) -> adw::PreferencesGroup {
+        let row = adw::ActionRow::builder()
+            .title("Import from Ghostty and tmux")
+            .subtitle(
+                "Copies the Ghostty appearance keys into zz/config and your tmux configuration \
+                 into zz/mux.conf. The originals are never modified.",
+            )
+            .activatable(true)
             .build();
-        let done = gtk::Button::with_label("Done");
-        done.set_margin_top(6);
-        done.set_margin_bottom(6);
-        done.set_margin_start(6);
-        done.set_margin_end(6);
+        row.set_subtitle_lines(0);
+        row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
         let target = Rc::downgrade(self);
-        done.connect_clicked(move |_| {
-            if let Some(route) = target.upgrade() {
-                route.close();
+        row.connect_activated(move |_| {
+            if let Some(settings) = target.upgrade() {
+                settings.run_import();
             }
         });
-        let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        column.append(&scroller);
-        column.append(&done);
-        column
+        self.config_group.add(&row);
+        self.config_group.clone()
     }
 
     fn zoom_buttons(self: &Rc<Self>) -> gtk::Box {
@@ -448,41 +345,6 @@ impl SettingsRoute {
         controls
     }
 
-    /// Escape and the `ClosePane` chord both leave, matching the desktop's route
-    /// semantics; every other chrome chord is handed to the window so zoom and
-    /// detach keep working while settings holds the keyboard.
-    fn install_keys(self: &Rc<Self>) {
-        let keyboard = gtk::EventControllerKey::new();
-        keyboard.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let target = Rc::downgrade(self);
-        keyboard.connect_key_pressed(move |_, keyval, _, modifiers| {
-            let Some(route) = target.upgrade() else {
-                return glib::Propagation::Proceed;
-            };
-            if keyval == gtk::gdk::Key::Escape {
-                route.close();
-                return glib::Propagation::Stop;
-            }
-            if keys::is_modifier(keyval) {
-                return glib::Propagation::Proceed;
-            }
-            let input = keys::key_input(KeyAction::Press, keyval, modifiers, None);
-            let Some(action) = resolve(route.engine.chrome(), &input) else {
-                return glib::Propagation::Proceed;
-            };
-            match action {
-                ChromeAction::ClosePane | ChromeAction::OpenSettings => route.close(),
-                other => {
-                    if let Some(chrome) = route.chrome.borrow().as_ref() {
-                        chrome(other);
-                    }
-                }
-            }
-            glib::Propagation::Stop
-        });
-        self.split.add_controller(keyboard);
-    }
-
     /// Every control writes through here: file first, apply second. Nothing in
     /// the surface mutates live state on its own.
     fn writer(self: &Rc<Self>) -> Write {
@@ -491,20 +353,33 @@ impl SettingsRoute {
             let Some(route) = target.upgrade() else {
                 return;
             };
-            match crate::config::write(setting.key, value.as_deref()) {
-                Ok(()) => route.banner.set_revealed(false),
-                Err(error) => {
-                    log::warn!("zz-gtk could not write {}: {error}", setting.key);
-                    route
-                        .banner
-                        .set_title(&format!("Could not write {}: {error}", setting.key));
-                    route.banner.set_revealed(true);
-                    return;
-                }
+            if let Err(error) = crate::config::write(setting.key, value.as_deref()) {
+                log::warn!("zz-gtk could not write {}: {error}", setting.key);
+                route.report(&format!("Could not write {}: {error}", setting.key));
+                return;
             }
             route.store.borrow_mut().invalidate();
             route.tick();
         })
+    }
+
+    /// Where every row on every page writes.
+    fn config_path(&self) -> String {
+        self.store.borrow().path().map_or_else(
+            || "No zz/config yet; the first edit creates one.".to_owned(),
+            |path| path.display().to_string(),
+        )
+    }
+
+    /// Where a write failure or an import result is said. The dialog carries it
+    /// while it is up; otherwise it is the window's own toast, because a
+    /// message nobody can see is a message nobody gets.
+    fn report(&self, message: &str) {
+        if self.open.get() {
+            self.dialog.add_toast(adw::Toast::new(message));
+        } else {
+            self.engine.notify(message.to_owned());
+        }
     }
 
     fn tick(self: &Rc<Self>) {
@@ -520,7 +395,6 @@ impl SettingsRoute {
         let store = self.store.borrow();
         let state = store.state();
         apply_theme_mode(state);
-        apply_animations(state);
         // The fleet is a config value like any other: the poll is what adds and
         // removes hosts, so a hand edit and this surface cannot disagree.
         self.engine.set_fleet_hosts(state.fleet_hosts());
@@ -531,6 +405,7 @@ impl SettingsRoute {
             .collect();
         drop(store);
         self.hosts.refresh(&listed);
+        self.config_group.set_description(Some(&self.config_path()));
         self.restyle();
         self.send_overrides(self.store.borrow().state());
         self.refresh_rows();
@@ -560,11 +435,7 @@ impl SettingsRoute {
     }
 
     fn restyle(&self) {
-        let store = self.store.borrow();
-        let mut sheet = self.zoom.css();
-        sheet.push_str(&chrome_variables(store.state()));
-        drop(store);
-        self.css.load_from_string(&sheet);
+        self.css.load_from_string(&self.zoom.css());
     }
 
     /// Re-read every row from the file and from what the daemon published. The
@@ -608,7 +479,7 @@ impl SettingsRoute {
 
     /// The one-time offer to adopt an existing Ghostty or tmux configuration.
     /// The marker is written on either answer, so declining is remembered.
-    fn prompt_import(self: &Rc<Self>) {
+    pub fn prompt_import(self: &Rc<Self>, parent: &impl IsA<gtk::Widget>) {
         if self.prompted.replace(true) || !import::prompt_pending() {
             return;
         }
@@ -618,7 +489,7 @@ impl SettingsRoute {
                 "zz found a Ghostty or tmux configuration. zz reads only its own files: the \
                  Ghostty appearance keys are copied into zz/config and your tmux configuration \
                  into zz/mux.conf. The originals are never modified, and you can import later \
-                 from Settings.",
+                 from Preferences.",
             ),
         );
         dialog.add_response("skip", "Not now");
@@ -635,7 +506,7 @@ impl SettingsRoute {
                 route.run_import();
             }
         });
-        dialog.present(Some(&self.split));
+        dialog.present(Some(parent));
     }
 
     fn run_import(self: &Rc<Self>) {
@@ -648,41 +519,23 @@ impl SettingsRoute {
                 }
                 self.store.borrow_mut().invalidate();
                 self.tick();
-                self.banner.set_title(if report.imported_anything() {
+                self.report(if report.imported_anything() {
                     "Imported. Your Ghostty and tmux originals were not touched."
                 } else {
                     "Nothing to import."
                 });
-                self.banner.set_revealed(true);
             }
-            Err(error) => {
-                self.banner.set_title(&format!("Import failed: {error}"));
-                self.banner.set_revealed(true);
-            }
+            Err(error) => self.report(&format!("Import failed: {error}")),
         }
     }
 }
 
-fn tick(target: &Weak<SettingsRoute>) -> glib::ControlFlow {
+fn tick(target: &Weak<Settings>) -> glib::ControlFlow {
     let Some(route) = target.upgrade() else {
         return glib::ControlFlow::Break;
     };
     route.tick();
     glib::ControlFlow::Continue
-}
-
-/// The same two tables a terminal surface consults, so a `chrome-bind` of
-/// `ClosePane` in either of them still closes the route.
-fn resolve(chrome: &ChromeKeymap, input: &zz_terminal::KeyInput) -> Option<ChromeAction> {
-    chrome
-        .resolve(zz_client::UI_TABLE, input)
-        .or_else(|| chrome.resolve(zz_client::TERMINAL_TABLE, input))
-}
-
-fn sidebar_row(page: Page) -> adw::ActionRow {
-    let row = adw::ActionRow::builder().title(page.title()).build();
-    row.add_prefix(&gtk::Image::from_icon_name(page.icon()));
-    row
 }
 
 fn client_default(setting: &Setting) -> String {
@@ -736,114 +589,36 @@ fn apply_theme_mode(state: &State) {
     });
 }
 
-fn apply_animations(state: &State) {
-    if let Some(settings) = gtk::Settings::default() {
-        settings.set_gtk_enable_animations(state.boolean("animations", true));
-    }
-}
-
-/// The six chrome roots, mapped onto libadwaita's palette variables. The
-/// desktop derives its elevations from these roots; here the stylesheet does,
-/// so only the roots have to be named.
-const CHROME_VARIABLES: [(&str, &[&str]); 6] = [
-    (
-        "chrome-background",
-        &[
-            "--window-bg-color",
-            "--view-bg-color",
-            "--headerbar-bg-color",
-            "--sidebar-bg-color",
-            "--secondary-sidebar-bg-color",
-            "--popover-bg-color",
-            "--dialog-bg-color",
-            "--card-bg-color",
-        ],
-    ),
-    (
-        "chrome-foreground",
-        &[
-            "--window-fg-color",
-            "--view-fg-color",
-            "--headerbar-fg-color",
-            "--sidebar-fg-color",
-            "--secondary-sidebar-fg-color",
-            "--popover-fg-color",
-            "--dialog-fg-color",
-            "--card-fg-color",
-        ],
-    ),
-    (
-        "chrome-border",
-        &["--border-color", "--headerbar-border-color"],
-    ),
-    ("chrome-success", &["--success-color", "--success-bg-color"]),
-    ("chrome-warning", &["--warning-color", "--warning-bg-color"]),
-    (
-        "chrome-danger",
-        &[
-            "--error-color",
-            "--error-bg-color",
-            "--destructive-bg-color",
-        ],
-    ),
-];
-
-fn chrome_variables(state: &State) -> String {
-    let mut declarations = String::new();
-    for (key, variables) in CHROME_VARIABLES {
-        let Some(value) = state.value(key).filter(|value| !value.is_empty()) else {
-            continue;
-        };
-        if gtk::gdk::RGBA::parse(value).is_err() {
-            log::warn!("zz-gtk ignored an unreadable {key}: {value:?}");
-            continue;
-        }
-        for variable in variables {
-            let _ = writeln!(declarations, "  {variable}: {value};");
-        }
-    }
-    if declarations.is_empty() {
-        return String::new();
-    }
-    format!(":root {{\n{declarations}}}\n")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn no_chrome_root_means_no_rule_at_all() {
-        assert!(chrome_variables(&crate::config::parse("pane-gaps = true\n")).is_empty());
-    }
-
-    #[test]
-    fn a_chrome_root_paints_every_libadwaita_surface_it_owns() {
-        let sheet = chrome_variables(&crate::config::parse("chrome-background = #101418\n"));
-
-        assert!(sheet.starts_with(":root {"));
-        assert!(sheet.contains("--window-bg-color: #101418;"));
-        assert!(sheet.contains("--popover-bg-color: #101418;"));
-        assert!(!sheet.contains("--window-fg-color"));
-    }
-
-    #[test]
-    fn an_unreadable_color_is_dropped_rather_than_emitted() {
-        assert!(chrome_variables(&crate::config::parse("chrome-border = nonsense\n")).is_empty());
-    }
-
-    #[test]
     fn client_defaults_are_spelled_the_way_the_file_spells_them() {
-        let animations = schema::SETTINGS
-            .iter()
-            .find(|setting| setting.key == "animations")
-            .expect("animations is in the table");
-        let margin = schema::SETTINGS
-            .iter()
-            .find(|setting| setting.key == "pane-margin")
-            .expect("pane-margin is in the table");
+        let theme = setting("theme-mode");
+        let quit = setting("quit-daemon-on-exit");
 
-        assert_eq!(client_default(animations), "true");
-        assert_eq!(client_default(margin), "6");
+        assert_eq!(client_default(theme), "system");
+        assert_eq!(client_default(quit), "false");
+    }
+
+    /// Every row the surface still offers is one this client or the daemon
+    /// behind it acts on: a key nobody reads has no business being drawn.
+    #[test]
+    fn the_table_offers_no_key_this_shell_ignores() {
+        let client_keys: Vec<&str> = schema::SETTINGS
+            .iter()
+            .filter(|setting| setting.owner == Owner::Client)
+            .map(|setting| setting.key)
+            .collect();
+
+        assert_eq!(client_keys, ["theme-mode", "quit-daemon-on-exit"]);
+    }
+
+    fn setting(key: &str) -> &'static Setting {
+        schema::SETTINGS
+            .iter()
+            .find(|setting| setting.key == key)
+            .expect("the key is in the table")
     }
 }

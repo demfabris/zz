@@ -53,44 +53,55 @@ GTK shell code; read `pitfalls.md` first for the protocol-level rules.
     itself desyncs the daemon, which still believes the chooser is open.
 13. **`gtk::Window::set_default_icon_name` before `app.run()` panics** ("GTK
     has not been initialized"). It belongs in `connect_startup`.
+14. **A drag handle that moves with what it resizes oscillates.**
+    `GtkGestureDrag` reports its offset in the coordinate space of the widget
+    it is attached to, so a handle that the drag itself translates reports
+    `physical − applied`, and the width flips between two values on every
+    motion event. Measure in root coordinates (`compute_point`) — or, for
+    `AdwOverlaySplitView`, do not: it deliberately ships no resize handle, its
+    width is a fraction clamped by min/max (writing both per drag tick
+    allocates a third width in between), and a pinned sidebar is part of the
+    window's minimum width, so the frame stops early and fights the pointer.
+    A fixed sidebar plus an `AdwBreakpoint` that collapses it is the GNOME
+    answer to all of it.
 
 ## Rendering and appearance
 
-14. **Pango's `FontMetrics::height()` includes the family line gap.** Terminal
+15. **Pango's `FontMetrics::height()` includes the family line gap.** Terminal
     cell height is ascent + descent; the line gap costs a grid row and opens
     the rows apart.
-15. **Style runs beat one-layout-per-row.** Font fallback (emoji, CJK) shifts
+16. **Style runs beat one-layout-per-row.** Font fallback (emoji, CJK) shifts
     advances mid-row and the drift persists to end of line; runs keyed on the
     resolved `PackedStyle` re-sync at every boundary. `CellWidth::SpacerTail`/
     `SpacerHead` must break runs and emit nothing, or every glyph after a wide
     character is one column left.
-16. **Don't drive terminal font size through GTK's DPI/text scaling.** The
+17. **Don't drive terminal font size through GTK's DPI/text scaling.** The
     viewport widget caches cell metrics keyed on the appearance value; a Pango
     resolution change scales glyphs under a stale grid. Scale chrome with CSS
     and the grid through the point size the pane is handed.
-17. **Follow dark/light by republishing the color scheme to the daemon** (it
+18. **Follow dark/light by republishing the color scheme to the daemon** (it
     re-resolves the palette) rather than recoloring client-side — one source
     of truth, and remember the choice so reconnect dials with the current
     scheme.
 
 ## Desktop integration
 
-18. **The `tray-icon` crate is unusable from GTK4** — its Linux backend is
+19. **The `tray-icon` crate is unusable from GTK4** — its Linux backend is
     libappindicator/GTK3, unlinkable in the same process. Use ksni
     (StatusNotifierItem over D-Bus); GNOME needs the AppIndicator extension,
     so degrade gracefully. Install the tray's close-request hook before the
     shell's, or closing detaches instead of hiding.
-19. **`org.gtk.Actions` over D-Bus drives a GTK client headlessly and
+20. **`org.gtk.Actions` over D-Bus drives a GTK client headlessly and
     legitimately.** Even with `NON_UNIQUE`, the app exports its window action
     group at `/<app-path>/window/1` under its unique bus name — activate
     actions from a test harness instead of ever synthesizing input. A
     parameterised action doubles as a real deep-link feature.
-20. **Screenshots on GNOME Wayland:** the Shell's D-Bus screenshot API is
+21. **Screenshots on GNOME Wayland:** the Shell's D-Bus screenshot API is
     `AccessDenied` to unsandboxed callers. Run the app under
     `GDK_BACKEND=x11` and capture with `import -window <xid>`, finding the
     xid via `xwininfo -root -tree` (xdotool/wmctrl may not exist). And
     `_NET_ACTIVE_WINDOW` from XWayland does NOT reflect compositor keyboard
     focus — never use it to justify anything, least of all input injection.
-21. **Cap log capture when smoke-testing a GUI.** A widget-parenting mistake
+22. **Cap log capture when smoke-testing a GUI.** A widget-parenting mistake
     logs at full speed forever (hundreds of MB per minute); redirect to a file
     on a size budget or a tmpfs you truncate.

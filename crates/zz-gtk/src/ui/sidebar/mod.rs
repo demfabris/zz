@@ -25,11 +25,14 @@ use model::{
     kill_target_command, new_pane_command, new_window_command,
 };
 
-/// The desktop's drag limits, so a window narrow enough to matter cannot be
-/// filled by the tree.
-const MIN_WIDTH: f64 = 160.0;
-const MAX_WIDTH: f64 = 640.0;
-const DEFAULT_WIDTH: f64 = 256.0;
+/// A utility pane's width, the way GNOME sizes one: fixed, and the same at
+/// every window size. `AdwOverlaySplitView` lays its sidebar out as a fraction
+/// of the window and offers no handle; pinning both bounds is what makes the
+/// width a constant rather than something that drifts as the window moves.
+const SIDEBAR_WIDTH: f64 = 280.0;
+/// Under this, the sidebar stops taking width from the panes and overlays them
+/// instead — a window can then be dragged as narrow as the terminal allows.
+const COLLAPSE_WIDTH: f64 = 640.0;
 /// How far each level of the tree is inset, in pixels.
 const INDENT: i32 = 16;
 
@@ -49,7 +52,7 @@ pub struct Sidebar {
     engine: Arc<Engine>,
     host: String,
     split: adw::OverlaySplitView,
-    root: gtk::Box,
+    root: adw::ToolbarView,
     scroller: gtk::ScrolledWindow,
     list: gtk::ListBox,
     menu: gtk::PopoverMenu,
@@ -66,7 +69,6 @@ pub struct Sidebar {
     revealed: Cell<Option<TreeNode>>,
     seeded: Cell<bool>,
     focused: Cell<bool>,
-    width: Cell<f64>,
     syncing: Cell<bool>,
     hooks: RefCell<Option<Hooks>>,
 }
@@ -99,25 +101,17 @@ impl Sidebar {
                 .build(),
         );
 
-        let toolbar = adw::ToolbarView::new();
-        toolbar.set_hexpand(true);
-        toolbar.add_top_bar(&header);
-        toolbar.set_content(Some(&scroller));
-        toolbar.add_bottom_bar(&status_bar);
-
-        let grip = gtk::Box::builder().width_request(4).build();
-        grip.add_css_class("zz-sidebar-grip");
-        grip.set_cursor_from_name(Some("col-resize"));
-
-        let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        root.append(&toolbar);
-        root.append(&grip);
+        let root = adw::ToolbarView::new();
+        root.set_hexpand(true);
+        root.add_top_bar(&header);
+        root.set_content(Some(&scroller));
+        root.add_bottom_bar(&status_bar);
 
         let split = adw::OverlaySplitView::builder()
             .sidebar(&root)
             .sidebar_width_unit(adw::LengthUnit::Px)
-            .min_sidebar_width(DEFAULT_WIDTH)
-            .max_sidebar_width(DEFAULT_WIDTH)
+            .min_sidebar_width(SIDEBAR_WIDTH)
+            .max_sidebar_width(SIDEBAR_WIDTH)
             .build();
 
         // The menu hangs off the scroller rather than the list: a popover
@@ -145,12 +139,11 @@ impl Sidebar {
             revealed: Cell::new(None),
             seeded: Cell::new(false),
             focused: Cell::new(false),
-            width: Cell::new(DEFAULT_WIDTH),
             syncing: Cell::new(false),
             hooks: RefCell::new(None),
         });
         sidebar.install_actions();
-        sidebar.connect_signals(&grip);
+        sidebar.connect_signals();
         sidebar.sync();
         sidebar.refresh_status();
         sidebar
@@ -159,6 +152,22 @@ impl Sidebar {
     /// The split view, for the window to hang its workspace in.
     pub fn widget(&self) -> &gtk::Widget {
         self.split.upcast_ref()
+    }
+
+    /// Below `COLLAPSE_WIDTH` the tree becomes an overlay. Without this the
+    /// sidebar's width is part of the window's minimum, so dragging the frame
+    /// narrower hits a floor the compositor keeps fighting, and the tree jitters
+    /// against the panes at every size near it. The breakpoint restores both
+    /// properties on the way back out, so widening returns the pinned sidebar.
+    pub fn install_breakpoint(&self, window: &adw::ApplicationWindow) {
+        let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
+            adw::BreakpointConditionLengthType::MaxWidth,
+            COLLAPSE_WIDTH,
+            adw::LengthUnit::Px,
+        ));
+        breakpoint.add_setter(&self.split, "collapsed", Some(&true.into()));
+        breakpoint.add_setter(&self.split, "show-sidebar", Some(&false.into()));
+        window.add_breakpoint(breakpoint);
     }
 
     pub fn set_content(&self, content: &impl IsA<gtk::Widget>) {
@@ -381,7 +390,7 @@ impl Sidebar {
         self.sync();
     }
 
-    fn connect_signals(self: &Rc<Self>, grip: &gtk::Box) {
+    fn connect_signals(self: &Rc<Self>) {
         let target = Rc::downgrade(self);
         self.list.connect_row_activated(move |_, row| {
             let Some(sidebar) = target.upgrade() else {
@@ -452,23 +461,6 @@ impl Sidebar {
             }
         });
         self.list.add_controller(gesture);
-
-        let drag = gtk::GestureDrag::new();
-        let anchor = Rc::new(Cell::new(DEFAULT_WIDTH));
-        let target = Rc::downgrade(self);
-        let start = Rc::clone(&anchor);
-        drag.connect_drag_begin(move |_, _, _| {
-            if let Some(sidebar) = target.upgrade() {
-                start.set(sidebar.width.get());
-            }
-        });
-        let target = Rc::downgrade(self);
-        drag.connect_drag_update(move |_, offset, _| {
-            if let Some(sidebar) = target.upgrade() {
-                sidebar.set_width(anchor.get() + offset);
-            }
-        });
-        grip.add_controller(drag);
 
         let menu = self.menu.clone();
         self.scroller.connect_destroy(move |_| menu.unparent());
@@ -751,16 +743,6 @@ impl Sidebar {
         )));
         self.menu.popup();
     }
-
-    fn set_width(&self, width: f64) {
-        let width = width.clamp(MIN_WIDTH, MAX_WIDTH);
-        if width == self.width.get() {
-            return;
-        }
-        self.width.set(width);
-        self.split.set_min_sidebar_width(width);
-        self.split.set_max_sidebar_width(width);
-    }
 }
 
 fn resolve_chrome(chrome: &ChromeKeymap, input: &KeyInput) -> Option<ChromeAction> {
@@ -878,7 +860,7 @@ fn build_gutter(row: &Row, target: &glib::Variant, tree: &Tree) -> gtk::Box {
             gutter.append(
                 &gtk::MenuButton::builder()
                     .icon_name("view-more-symbolic")
-                    .tooltip_text("Host actions")
+                    .tooltip_text("Host Actions")
                     .menu_model(&host_menu(row.node, tree))
                     .has_frame(false)
                     .build(),
@@ -886,14 +868,14 @@ fn build_gutter(row: &Row, target: &glib::Variant, tree: &Tree) -> gtk::Box {
             return gutter;
         }
         RowKind::Session => gutter.append(&gutter_button(
-            "tab-new-symbolic",
-            "New window",
+            "list-add-symbolic",
+            "New Window",
             "sidebar.new-window",
             target,
         )),
         RowKind::Window { .. } => gutter.append(&gutter_button(
             "list-add-symbolic",
-            "Add pane",
+            "Add Pane",
             "sidebar.new-pane",
             target,
         )),
@@ -929,8 +911,8 @@ fn host_menu(node: TreeNode, tree: &Tree) -> gio::Menu {
     let host = node.host();
     let menu = gio::Menu::new();
     if host == HostId::LOCAL {
-        menu.append(Some("New session"), Some("sidebar.new-session"));
-        menu.append(Some("Add host…"), Some("sidebar.add-host"));
+        menu.append(Some("New Session"), Some("sidebar.new-session"));
+        menu.append(Some("Add Host…"), Some("sidebar.add-host"));
         return menu;
     }
     let value = node.to_string().to_variant();
@@ -938,11 +920,11 @@ fn host_menu(node: TreeNode, tree: &Tree) -> gio::Menu {
         .host(host)
         .is_some_and(|host| host.state.is_connected());
     if connected {
-        menu.append_item(&item("New session", "sidebar.host-new-session", &value));
+        menu.append_item(&item("New Session", "sidebar.host-new-session", &value));
     } else {
         menu.append_item(&item("Reconnect", "sidebar.reconnect-host", &value));
     }
-    menu.append_item(&item("Close host", "sidebar.close-host", &value));
+    menu.append_item(&item("Close Host", "sidebar.close-host", &value));
     menu
 }
 
@@ -966,8 +948,8 @@ fn row_menu(node: TreeNode, rows: &[Row], tree: &Tree) -> gio::Menu {
         &value,
     ));
     match kind {
-        RowKind::Session => menu.append_item(&item("New window", "sidebar.new-window", &value)),
-        RowKind::Window { .. } => menu.append_item(&item("Add pane", "sidebar.new-pane", &value)),
+        RowKind::Session => menu.append_item(&item("New Window", "sidebar.new-window", &value)),
+        RowKind::Window { .. } => menu.append_item(&item("Add Pane", "sidebar.new-pane", &value)),
         _ => {}
     }
     menu.append_item(&item(delete_label(kind), "sidebar.kill", &value));
@@ -984,9 +966,9 @@ fn item(label: &str, action: &str, target: &glib::Variant) -> gio::MenuItem {
 
 const fn delete_label(kind: RowKind) -> &'static str {
     match kind {
-        RowKind::Session => "Delete session",
-        RowKind::Window { .. } => "Delete window",
-        _ => "Delete pane",
+        RowKind::Session => "Delete Session",
+        RowKind::Window { .. } => "Delete Window",
+        _ => "Delete Pane",
     }
 }
 

@@ -31,10 +31,14 @@ distilled lessons live in the `new-client` skill
   re-attach with `MissingTarget` fallback, and geometry replay.
 - `src/ui/` is the libadwaita shell: a custom `TerminalView` widget painting
   resolved cells with per-row cached render nodes and style-run Pango
-  layouts, IM handled via manual `filter_keypress`; `AdwOverlaySplitView`
-  sidebar (session tree ported from the desktop's `MuxTreeModel`); an
-  in-window settings route sharing the desktop's `zz/config` file through a
-  comment-preserving writer and a 500ms poller as the single apply path;
+  layouts, IM handled via manual `filter_keypress`; a fixed-width
+  `AdwOverlaySplitView` sidebar (session tree ported from the desktop's
+  `MuxTreeModel`) that an `AdwBreakpoint` collapses to an overlay under 640px;
+  the focused zz window's `PaneGrid` alone as the workspace, with no tab strip
+  — windows are switched from the tree; an `AdwPreferencesDialog` sharing the
+  desktop's `zz/config` file through a comment-preserving writer and a 500ms
+  poller as the single apply path, offering only the keys this shell or the
+  daemon behind it acts on;
   daemon-driven overlays (choosers, display-panes, command palette with the
   desktop's completion ranker); prefix-claim capture interceptor
   (`EventControllerLegacy`, hardware-keycode pairing); search strip, output

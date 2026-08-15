@@ -278,3 +278,12 @@ to a variable before iterating, or any re-entrant lock deadlocks.
 A `host-<name> = unix:///tmp/…` config line pointing at a second local daemon
 is a complete fleet fixture — every layer above the transport (host rows,
 per-host reconnect, frozen frames, host removal) is testable without ssh.
+
+## 29. An "isolated" XDG_CONFIG_HOME is not isolated until you seed it
+
+`zz`'s config candidate resolution falls back to the real
+`~/.config/zz/config` when the isolated directory holds no config file — so a
+scratch `XDG_CONFIG_HOME` sandbox silently reads (and side-effect files like
+the first-run `import-prompted` marker land in) the user's real profile on
+first launch. Always write a config file into the scratch dir before the
+first run.

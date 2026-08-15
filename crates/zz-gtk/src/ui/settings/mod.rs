@@ -49,6 +49,7 @@ pub struct Settings {
     mux: Rc<MuxEditor>,
     hosts: Rc<HostsPage>,
     zoom: UiZoom,
+    config_group: adw::PreferencesGroup,
     css: gtk::CssProvider,
     open: Cell<bool>,
     prompted: Cell<bool>,
@@ -76,6 +77,9 @@ impl Settings {
             mux,
             hosts: HostsPage::new(),
             zoom: UiZoom::default(),
+            config_group: adw::PreferencesGroup::builder()
+                .title("Configuration")
+                .build(),
             css: gtk::CssProvider::new(),
             open: Cell::new(false),
             prompted: Cell::new(false),
@@ -286,11 +290,36 @@ impl Settings {
                     content.add(&zoom);
                 }
                 Page::Multiplexer => content.add(self.mux.group()),
+                Page::System => content.add(&self.import_group()),
                 _ => {}
             }
             self.dialog.add(&content);
         }
         self.rows.replace(rows);
+    }
+
+    /// The offer the first-run prompt says can be taken later. Its group also
+    /// carries the file every row on every page writes to, which is the one
+    /// fact a config-file application is always asked for.
+    fn import_group(self: &Rc<Self>) -> adw::PreferencesGroup {
+        let row = adw::ActionRow::builder()
+            .title("Import from Ghostty and tmux")
+            .subtitle(
+                "Copies the Ghostty appearance keys into zz/config and your tmux configuration \
+                 into zz/mux.conf. The originals are never modified.",
+            )
+            .activatable(true)
+            .build();
+        row.set_subtitle_lines(0);
+        row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+        let target = Rc::downgrade(self);
+        row.connect_activated(move |_| {
+            if let Some(settings) = target.upgrade() {
+                settings.run_import();
+            }
+        });
+        self.config_group.add(&row);
+        self.config_group.clone()
     }
 
     fn zoom_buttons(self: &Rc<Self>) -> gtk::Box {
@@ -334,6 +363,14 @@ impl Settings {
         })
     }
 
+    /// Where every row on every page writes.
+    fn config_path(&self) -> String {
+        self.store.borrow().path().map_or_else(
+            || "No zz/config yet; the first edit creates one.".to_owned(),
+            |path| path.display().to_string(),
+        )
+    }
+
     /// Where a write failure or an import result is said. The dialog carries it
     /// while it is up; otherwise it is the window's own toast, because a
     /// message nobody can see is a message nobody gets.
@@ -368,6 +405,7 @@ impl Settings {
             .collect();
         drop(store);
         self.hosts.refresh(&listed);
+        self.config_group.set_description(Some(&self.config_path()));
         self.restyle();
         self.send_overrides(self.store.borrow().state());
         self.refresh_rows();

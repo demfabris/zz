@@ -2386,17 +2386,9 @@ impl EntityInputHandler for TerminalView {
                 self.send_view_action(cx, TerminalViewAction::SearchUpdate(query));
             } else {
                 self.cancel_local_scroll(cx);
-                // The iPad key strip's sticky ctrl/alt must modify the next character.
-                #[cfg(target_os = "ios")]
-                let handled =
-                    crate::ios_input::send_with_sticky_modifiers(&self.mux, self.pane, text, cx);
-                #[cfg(not(target_os = "ios"))]
-                let handled = false;
-                if !handled {
-                    self.mux
-                        .read(cx)
-                        .send_input(terminal_text_input(self.pane, text));
-                }
+                self.mux
+                    .read(cx)
+                    .send_input(terminal_text_input(self.pane, text));
             }
         }
         window.invalidate_character_coordinates();

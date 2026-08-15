@@ -3,7 +3,6 @@ use std::{
     error::Error,
     fs,
     path::{Path, PathBuf},
-    process,
     process::ExitCode,
 };
 
@@ -187,10 +186,9 @@ fn run() -> Result<(), Box<dyn Error>> {
             }
             verify_bundle(&PathBuf::from(path))
         }
-        Some("ios-sim") => ios_sim(&args.collect::<Vec<_>>()),
         _ => Err(
             "usage: cargo xtask <bundle-cef [--release | --profile NAME] [--output DIR] \
-             [--features LIST] | verify-cef-bundle PATH | ios-sim [--run]>"
+             [--features LIST] | verify-cef-bundle PATH>"
                 .into(),
         ),
     }
@@ -198,69 +196,6 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn product_version(version: &str) -> &str {
     version.split(['-', '+']).next().unwrap_or(version)
-}
-
-fn ios_sim(args: &[String]) -> Result<(), Box<dyn Error>> {
-    const TARGET: &str = "aarch64-apple-ios-sim";
-    const BUNDLE_ID: &str = "dev.zz.ios";
-    let run = match args {
-        [] => false,
-        [flag] if flag == "--run" => true,
-        _ => return Err("usage: cargo xtask ios-sim [--run]".into()),
-    };
-
-    let status = process::Command::new("cargo")
-        .args(["build", "-p", "zz-ios", "--target", TARGET])
-        .status()?;
-    if !status.success() {
-        return Err("cargo build for zz-ios failed".into());
-    }
-
-    let bundle = PathBuf::from("target/ios-app/ZZ.app");
-    fs::create_dir_all(&bundle)?;
-    let info_path = bundle.join("Info.plist");
-    fs::copy("crates/zz-ios/ios/Info.plist", &info_path)?;
-    configure_ios_info_plist(&info_path)?;
-    fs::copy(
-        PathBuf::from("target").join(TARGET).join("debug/zz-ios"),
-        bundle.join("ZZ"),
-    )?;
-    println!("bundled {}", bundle.display());
-
-    if run {
-        let status = process::Command::new("xcrun")
-            .args(["simctl", "install", "booted"])
-            .arg(&bundle)
-            .status()?;
-        if !status.success() {
-            return Err("simctl install failed — is a simulator booted?".into());
-        }
-        let status = process::Command::new("xcrun")
-            .args(["simctl", "launch", "booted", BUNDLE_ID])
-            .status()?;
-        if !status.success() {
-            return Err("simctl launch failed".into());
-        }
-    }
-    Ok(())
-}
-
-fn configure_ios_info_plist(info_path: &Path) -> Result<(), Box<dyn Error>> {
-    let mut info = plist::Value::from_file(info_path)?;
-    configure_ios_info(&mut info)?;
-    info.to_file_xml(info_path)?;
-    Ok(())
-}
-
-fn configure_ios_info(info: &mut plist::Value) -> Result<(), Box<dyn Error>> {
-    let dictionary = info
-        .as_dictionary_mut()
-        .ok_or("iOS Info.plist is not a dictionary")?;
-    dictionary.insert(
-        BUNDLE_SHORT_VERSION_KEY.to_owned(),
-        plist::Value::String(product_version(env!("CARGO_PKG_VERSION")).to_owned()),
-    );
-    Ok(())
 }
 
 fn bundle_cef(args: &[String]) -> Result<(), Box<dyn Error>> {
@@ -1228,10 +1163,7 @@ fn macos_helper_apps(app: &Path) -> Vec<PathBuf> {
 mod option_tests {
     use std::path::PathBuf;
 
-    use super::{
-        BUNDLE_SHORT_VERSION_KEY, BuildProfile, BundleOptions, configure_ios_info,
-        parse_bundle_options, product_version,
-    };
+    use super::{BuildProfile, BundleOptions, parse_bundle_options, product_version};
 
     fn arguments(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
@@ -1243,20 +1175,6 @@ mod option_tests {
         assert_eq!(product_version("0.2.0-beta.1"), "0.2.0");
         assert_eq!(product_version("0.2.0+build.7"), "0.2.0");
         assert_eq!(product_version("0.2.0-beta.1+build.7"), "0.2.0");
-    }
-
-    #[test]
-    fn ios_bundle_uses_the_workspace_product_version() {
-        let mut info = plist::Value::Dictionary(plist::Dictionary::new());
-        configure_ios_info(&mut info).unwrap();
-
-        assert_eq!(
-            info.as_dictionary()
-                .unwrap()
-                .get(BUNDLE_SHORT_VERSION_KEY)
-                .and_then(plist::Value::as_string),
-            Some(product_version(env!("CARGO_PKG_VERSION")))
-        );
     }
 
     #[test]

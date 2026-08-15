@@ -2,7 +2,7 @@
 type: Design Plan
 title: Client core & contract - one brain, every face
 description: Decision record for the shared client contract - command and key ownership moved to zz-protocol, v52 publishes live tables, zz-client provides sans-IO reduction and chrome actions, and a narrow C ABI proves the integration shape.
-status: Contract consolidation, v52 key-table publication, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The desktop keeps its retained terminal hot path. zz-client-ffi ships a hand-maintained proof ABI for connect, events, commands, and basic viewports; the original full graphical ABI and the broader connection, layout, history, and Kitty extraction remain open. GPUI cross-surface rebinding still needs a restart
+status: Contract consolidation, v52 key-table publication, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The native iPhone client extended zz-client-ffi with mux snapshots, styled terminal planes, raw keys, focus, scroll, damage, and disconnect events on 2026-08-15. Broader connection, history, Kitty, and non-terminal viewport extraction remain open. GPUI cross-surface rebinding still needs a restart
 tags:
 - client
 - ffi
@@ -24,9 +24,10 @@ uses both directly. The GPUI `MuxClient` sends non-frame messages through the co
 frames in `RetainedTerminalViewport`, avoiding a second patch application on the paint hot path.
 
 `zz-client-ffi` proves the C integration shape with a pollable wake fd and a from-scratch smoke
-client. Its current hand-maintained header is narrower than the original Pillar 6 target: it lacks
-raw key forwarding, style/grapheme tables, generation counters, catalog/table access, and chrome
-action events. GTK, Qt, or Swift work must extend that contract first.
+client. The native iPhone client extended the hand-maintained header with raw key forwarding,
+style/grapheme tables, generation counters, mux/session/pane snapshots, damage rows, terminal focus
+and scrolling, appearance, and disconnect events. Catalog/table access, chrome actions, history,
+Kitty images, and non-terminal viewport models remain outside the ABI.
 
 The sections below retain the original proposal and its acceptance criteria. The rung ladder marks
 the parts that shipped and the parts that remain design intent.
@@ -48,11 +49,10 @@ the parts that shipped and the parts that remain design intent.
 - **Commands travel tokenized-but-unparsed** (`CommandInvocation`); parsing,
   aliases, flags, and target resolution are daemon-side
   (`crates/zz-mux/src/command.rs`).
-- **Two composition seams exist**: `zz::engine` + `AppProfile`
-  (`crates/zz/src/engine.rs`, `crates/zz/src/profile.rs`) let
-  [zz-ios](/designs/ios-client.md) recompile the desktop client on another gpui
-  backend, and `zz-daemon` with `default-features = false` is already a pure
-  client SDK (`InteractiveClient`, `Endpoint`, fleet hosts).
+- **Two composition seams existed**: `zz::engine` + `AppProfile` let the former GPUI iPad app
+  recompile the desktop client on another backend, while `zz-daemon` with
+  `default-features = false` supplied a pure client SDK. The GPUI iOS seam was deleted when the
+  [native iPhone client](/designs/ios-client.md) moved onto `zz-client-ffi`.
 
 # The gap - what every new client re-hand-rolls today
 
@@ -137,8 +137,8 @@ The API discipline is the load-bearing decision: **a handle, messages in, events
 surface**. Desktop and TUI consume this same C-shaped API natively — if the
 desktop grows a Rust-only convenience layer the core does not export, the
 GTK/Qt/Swift clients become second-class again, so the FFI shim doubles as the
-API's conformance test. `zz-ios` keeps riding the desktop through `zz::engine`
-unchanged.
+API's conformance test. The native iPhone app consumes that same surface through
+`zz-client-ffi`; it does not import desktop GPUI modules.
 
 ## Pillar 5 - chrome bindings are data, resolved by the same engine
 
@@ -162,7 +162,8 @@ is not chrome and not part of the contract.
 
 The shipped proof is a thin `#[no_mangle]` shim with a hand-maintained header. It covers connection,
 event wake/drain, attach, text, command execution, resize, pane IDs, basic cells, and decoded row
-text. The C smoke test compiles and links that contract, then frees and reconnects in one process.
+text. The C smoke test compiles and links that contract, creates a session and pane through it, then
+frees and reconnects in one process.
 The fuller target below has not shipped:
 
 - **Render contract**: the packed viewport *is* the FFI render type — flat cell
@@ -276,8 +277,8 @@ API emit identical event sequences.
 5. **Chrome keymap: shipped.** Desktop and TUI resolve client-owned actions through profile tables;
    desktop config supports `chrome-keybind` and `chrome-unbind`.
 6. **`zz-client-ffi`: proof surface shipped.** The C smoke client attaches, reads rows, types,
-   frees, and reconnects. The full render/key/catalog/action contract above remains open, and the
-   header is hand-maintained rather than generated by cbindgen.
+   creates a session and pane, frees, and reconnects. The full catalog/action contract above remains
+   open, and the header is hand-maintained rather than generated by cbindgen.
 
 # Hard parts
 

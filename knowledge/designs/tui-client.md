@@ -68,9 +68,7 @@ Ship each rung independently; never let a higher rung block a lower one.
 
 # Packaging (settled 2026-08-09)
 
-Separate package `crates/zz-tui`, mirroring `crates/zz-ios` in workspace shape but
-inverting the dependency direction: zz-ios depends on the `zz` lib (it IS the gpui
-app on another backend); zz-tui must NOT. It depends on `zz-client` for reduction and
+Separate package `crates/zz-tui`, independent from presentation shells. It depends on `zz-client` for reduction and
 chrome tables, the client-only `zz-daemon` transport, `zz-protocol`, model-only
 `zz-terminal`, and small runtime/encoding crates. Lib + thin `[[bin]]` in one crate: `crates/zz` links the lib for
 `zz attach`, the standalone binary serves headless boxes. One forced extraction:
@@ -139,7 +137,7 @@ compromise).
 # Sequencing
 
 Rung 1 after the Tier 2 review lands — it hardens the same "non-GUI client of the
-daemon" seams the [iOS client](/designs/ios-client.md) needs, so it is not a detour.
+daemon" seams the [native iPhone client](/designs/ios-client.md) now consumes.
 Kitty graphics in the VT landed 2026-08-09 (protocol 48), so rung 3 now waits only
 on rung 1 plus the CEF-headless decision.
 

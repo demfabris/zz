@@ -659,7 +659,7 @@ fn write_public_half(path: &Path, key: &PrivateKey) -> io::Result<()> {
         .public_key()
         .to_openssh()
         .map_err(|error| io::Error::other(format!("encoding the public half: {error}")))?;
-    let line = format!("{public} zz-ios\n");
+    let line = format!("{public} zz-iphone\n");
     let path = path.with_extension("pub");
     if std::fs::read_to_string(&path).is_ok_and(|current| current == line) {
         return Ok(());

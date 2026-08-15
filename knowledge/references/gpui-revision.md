@@ -14,13 +14,12 @@ published crate. Both `gpui` and `gpui_platform` resolve through it; there is no
 entry. On Linux, `gpui_platform` is built with `font-kit`, Wayland, and X11 enabled; the same crate
 selects the native macOS and Windows backends automatically.
 
-**Do not read a revision out of this document.** The pin lives in three manifests and two lockfiles,
+**Do not read a revision out of this document.** The pin lives in two manifests and two lockfiles,
 and they must agree:
 
 | Place | Role |
 | --- | --- |
 | `Cargo.toml`, `[patch."https://github.com/zed-industries/zed"]` | The `rev = "…"` on `gpui` and `gpui_platform`. This is the authority . editing it is how the pin moves. |
-| `crates/zz-gpui-ios/Cargo.toml` | Direct `collections` and `gpui_util` pins for the out-of-tree iOS backend. Move them with the workspace patch so Cargo uses one fork snapshot. |
 | `examples/ui-showcase/Cargo.toml` | The gallery's independent workspace patch. Keep it on the desktop revision so stories use the same GPUI behavior. |
 | `Cargo.lock` and `examples/ui-showcase/Cargo.lock` | The resolved `source = "git+https://github.com/demfabris/zed?rev=…"`. Regenerated, never hand-edited. |
 
@@ -30,7 +29,7 @@ The appearance diagnostics log line no longer holds a third copy to keep in sync
 trust this document:
 
 ```bash
-rg 'demfabris/zed' Cargo.toml crates/zz-gpui-ios/Cargo.toml examples/ui-showcase/{Cargo.toml,Cargo.lock} Cargo.lock
+rg 'demfabris/zed' Cargo.toml examples/ui-showcase/{Cargo.toml,Cargo.lock} Cargo.lock
 ```
 
 The fork itself is declared in `scripts/forks.conf` (`zed  zed-industries/zed  demfabris/zed
@@ -136,9 +135,8 @@ Adding a carried patch (no rebase; the lock is already at the branch tip):
 just forks   # confirm LOCK is "in sync" before appending a commit
 ```
 
-Bumping upstream means rebasing `zz-patches`, then moving the `rev` in `Cargo.toml`,
-`crates/zz-gpui-ios/Cargo.toml`, and `examples/ui-showcase/Cargo.toml` before regenerating
-both lockfiles.
+Bumping upstream means rebasing `zz-patches`, then moving the `rev` in `Cargo.toml` and
+`examples/ui-showcase/Cargo.toml` before regenerating both lockfiles.
 
 # Related
 

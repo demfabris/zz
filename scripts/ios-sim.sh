@@ -4,27 +4,47 @@ set -euo pipefail
 die() { echo "error: $*" >&2; exit 1; }
 
 [[ "$(uname -s)" == "Darwin" ]] || die "the iOS simulator requires macOS"
+command -v xcodegen >/dev/null 2>&1 || die "xcodegen not found (brew install xcodegen)"
 command -v xcrun >/dev/null 2>&1 || die "xcrun not found (install Xcode)"
 
-bundle_id="dev.zz.ios"
+mode="${1:-run}"
+[[ "$mode" == "run" || "$mode" == "--build-only" ]] || die "usage: scripts/ios-sim.sh [--build-only]"
 
-# Boot an iPad if nothing is booted; the Simulator app must be open either
-# way, or a booted device has no window to show.
-if ! xcrun simctl list devices booted | grep -q "(Booted)"; then
-    # Device names carry their own parentheses ("iPad Pro 11-inch (M5)"), so
-    # take the UDID by shape, not by position.
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+spec="$repo_root/clients/ios/project.yml"
+project_dir="$repo_root/clients/ios"
+project="$project_dir/ZZMobile.xcodeproj"
+derived="$repo_root/target/ios-sim"
+app="$derived/Build/Products/Debug-iphonesimulator/ZZ.app"
+bundle_id="dev.zz.ios"
+workspace_version="$(sed -nE 's/^version = "([^"]+)"$/\1/p' "$repo_root/Cargo.toml" | head -1)"
+marketing_version="${workspace_version%%[-+]*}"
+
+xcodegen generate --spec "$spec" --project "$project_dir" >/dev/null
+xcodebuild \
+    -project "$project" \
+    -scheme ZZMobile \
+    -configuration Debug \
+    -destination "generic/platform=iOS Simulator" \
+    -derivedDataPath "$derived" \
+    MARKETING_VERSION="$marketing_version" \
+    CODE_SIGNING_ALLOWED=NO \
+    build
+
+[[ -d "$app" ]] || die "build finished but $app is missing"
+[[ "$mode" == "run" ]] || exit 0
+
+udid="$(xcrun simctl list devices booted | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -1 || true)"
+if [[ -z "$udid" ]]; then
     udid="$(xcrun simctl list devices available \
-        | grep iPad \
+        | grep 'iPhone' \
         | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' \
         | head -1)"
-    [[ -n "$udid" ]] || die "no available iPad simulator (create one in Xcode > Devices and Simulators)"
-    echo "booting iPad simulator $udid..."
+    [[ -n "$udid" ]] || die "no iPhone simulator is available"
     xcrun simctl boot "$udid"
 fi
 open -a Simulator
 
-# The host daemon's socket, derived the way zz derives it, so the sim app
-# attaches to the same daemon the desktop does.
 socket="${ZZ_SOCKET:-}"
 if [[ -z "$socket" ]]; then
     if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
@@ -33,19 +53,8 @@ if [[ -z "$socket" ]]; then
         socket="${TMPDIR:-/tmp}/zz-${USER}/default.sock"
     fi
 fi
-[[ -S "$socket" ]] || echo "warning: no daemon socket at $socket — start zz (or \`zz daemon\`) to give the app something to attach to" >&2
+[[ -S "$socket" ]] || echo "warning: no daemon socket at $socket; start zz first" >&2
 
-cargo xtask ios-sim
-
-xcrun simctl terminate booted "$bundle_id" 2>/dev/null || true
-xcrun simctl install booted target/ios-app/ZZ.app
-
-# The real config, so fleet hosts and settings match the desktop; ssh state
-# stays in the app container unless ZZ_IOS_SSH_DIR overrides it. Remote hosts
-# authenticate with the app's own generated key, so they read as unreachable
-# until its .pub is installed on them.
-echo "launching $bundle_id (socket: $socket) — ctrl-c detaches the console, the app keeps running"
-exec env \
-    SIMCTL_CHILD_ZZ_SOCKET="$socket" \
-    SIMCTL_CHILD_XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}" \
-    xcrun simctl launch --console-pty booted "$bundle_id"
+xcrun simctl terminate "$udid" "$bundle_id" 2>/dev/null || true
+xcrun simctl install "$udid" "$app"
+exec env SIMCTL_CHILD_ZZ_SOCKET="$socket" xcrun simctl launch --console-pty "$udid" "$bundle_id"

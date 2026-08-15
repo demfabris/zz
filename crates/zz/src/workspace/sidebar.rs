@@ -364,15 +364,6 @@ impl WorkspaceSidebar {
         cx.notify();
     }
 
-    /// Enter the Settings route without building the desktop `SettingsView`, for
-    /// shells that present their own settings surface.
-    pub fn open_settings_route(&mut self, cx: &mut Context<Self>) {
-        self.route = WorkspaceRoute::Settings;
-        self.slideover = false;
-        cx.emit(SidebarRouteChanged);
-        cx.notify();
-    }
-
     pub fn close_settings(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         if self.route == WorkspaceRoute::App {
             return;
@@ -408,11 +399,6 @@ impl WorkspaceSidebar {
             cx.emit(SidebarReleaseFocus);
             cx.notify();
         }
-    }
-
-    /// Lets a non-sidebar navigator hand keyboard focus back to the active pane.
-    pub fn release_focus(&mut self, cx: &mut Context<Self>) {
-        cx.emit(SidebarReleaseFocus);
     }
 
     pub(crate) fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2074,7 +2060,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn settings_route_is_lazy_and_retains_its_view(cx: &mut TestAppContext) {
+    fn settings_view_is_lazy_and_retained(cx: &mut TestAppContext) {
         cx.update(zz_ui::init);
         let captured = Rc::new(RefCell::new(None));
         let captured_for_window = Rc::clone(&captured);
@@ -2101,22 +2087,6 @@ mod tests {
                 .read_with(cx, |sidebar, _| sidebar.settings_view())
                 .is_none()
         );
-
-        cx.update(|_, cx| {
-            sidebar.update(cx, super::WorkspaceSidebar::open_settings_route);
-        });
-        assert_eq!(
-            sidebar.read_with(cx, |sidebar, _| sidebar.route()),
-            WorkspaceRoute::Settings
-        );
-        assert!(
-            sidebar
-                .read_with(cx, |sidebar, _| sidebar.settings_view())
-                .is_none()
-        );
-        cx.update(|window, cx| {
-            sidebar.update(cx, |sidebar, cx| sidebar.close_settings(window, cx));
-        });
 
         let first = cx.update(|window, cx| {
             sidebar.update(cx, |sidebar, cx| {

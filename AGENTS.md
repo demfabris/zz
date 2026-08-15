@@ -1,6 +1,6 @@
 # AGENTS.md
 
-zz is a tmux-superset terminal multiplexer that ships as a native GPU app: a Rust workspace built on gpui (Zed's UI framework, consumed through a patched fork), a persistent daemon that owns sessions and PTYs, Chromium browser panes (CEF off-screen rendering), agent panes (ACP), and remote hosts over plain ssh. Targets macOS and Linux (Wayland), with experimental Windows/WSL, an iPad client, and a raw-terminal attach client.
+zz is a tmux-superset terminal multiplexer that ships as a native GPU desktop app: a Rust workspace built on gpui (Zed's UI framework, consumed through a patched fork), a persistent daemon that owns sessions and PTYs, Chromium browser panes (CEF off-screen rendering), agent panes (ACP), and remote hosts over plain ssh. Targets macOS and Linux (Wayland), with experimental Windows/WSL, a native Swift iPhone client, and a raw-terminal attach client.
 
 Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (see `mise.toml`).
 
@@ -17,7 +17,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zz-chrome-import` — Chrome profile, cookie, and history import
 - `crates/zz-ui` — widget layer: a maintained full fork of gpui-component
 - `crates/zz-tui` — raw-terminal attach client
-- `crates/zz-ios` + `crates/zz-gpui-ios` — iPad app and its gpui backend
+- `clients/ios` — native SwiftUI/UIKit iPhone app over `zz-client-ffi`
 - `crates/zz-xtask` — build tooling: CEF bundling, packaging (`cargo xtask`)
 - `knowledge/` — OKF knowledge bundle for the whole system (start at `index.md`)
 - `scripts/` — build, packaging, profiling, and fork-maintenance scripts (`forks.conf`)
@@ -44,7 +44,7 @@ Run `just` recipes from the repo root; `just --list` shows everything.
 | `just watch <platform>` | Rebuild and relaunch on source change |
 | `just build <platform>` | Release bundle into `dist/zz` (wraps `cargo xtask bundle-cef`) |
 | `just install mac` | Build and swap `/Applications/zz.app`; the daemon survives the swap |
-| `just ios` / `just ios-device [name]` | iPad client on simulator / physical device |
+| `just ios` / `just ios-build` / `just ios-device [name]` | Native iPhone client on simulator / build only / physical device |
 | `just forks` / `just fork-rebase <name>` | Carried-patch fork status / rebase |
 | `just site` | Docs site dev server with live reload |
 | `just showcase` / `showcase-setup` / `showcase-build[-release]` | wasm UI showcase dev loop / toolchain / assets |

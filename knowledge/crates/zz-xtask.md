@@ -1,7 +1,7 @@
 ---
 type: Rust Crate
 title: zz-xtask crate
-description: Workspace build task that assembles and validates desktop CEF bundles and the iOS simulator app bundle.
+description: Workspace build task that assembles and validates desktop CEF bundles across Linux, macOS, and Windows.
 resource: crates/zz-xtask/src/main.rs
 tags: [xtask, cef, build-tooling, cli, bundling, profiling, dsym]
 timestamp: 2026-08-12T00:00:00Z
@@ -15,8 +15,6 @@ the `cef` crate's `build_util` helpers (the code that downloads,
 SHA-1-verifies, extracts, and compiles the CEF C++ wrapper against the `Cargo.lock` pin), then copies
 license/credit artifacts and checks the resulting layout. It is a thin CLI. The heavy lifting
 (download, hash check, wrapper compilation) lives in the upstream `cef` crate itself.
-The third command, `ios-sim`, builds `zz-ios`, creates its simulator app bundle, and optionally
-installs and launches it on the booted simulator.
 On macOS it additionally disables automatic file quarantine on the
 terminal-hosting main app, signs nested code from the inside out, and strictly verifies both the
 bundle setting and signature. Its named macOS profile path also preserves and UUID-validates dSYMs
@@ -32,7 +30,6 @@ Subcommands are parsed by `run()` and `parse_bundle_options()` in `crates/zz-xta
 | --- | --- | --- |
 | `bundle-cef` | `[--release \| --profile NAME]` `[--output DIR]` (default `dist/zz`) | Builds the platform CEF bundle, installs notices, locally signs macOS nested code, then validates it; named profiles currently apply to macOS |
 | `verify-cef-bundle` | `<bundle path>` (exactly one) | Checks required paths; on macOS also requires `LSFileQuarantineEnabled = false` on the main app and performs strict recursive signature verification; does not rebuild anything |
-| `ios-sim` | `[--run]` | Builds `zz-ios` for `aarch64-apple-ios-sim`, assembles `target/ios-app/ZZ.app`, and optionally installs and launches it on the booted simulator |
 
 `bundle-cef` output layout per OS:
 
@@ -65,8 +62,7 @@ app to other Macs still requires the separate Developer ID identity and Apple no
 
 For prereleases, the macOS product version stays numeric: `0.2.0-beta.1` is written as
 `CFBundleShortVersionString = 0.2.0`. `CFBundleVersion` is also numeric and uses
-`ZZ_MACOS_BUILD_VERSION` when set; release CI supplies its monotonic workflow run number. The iOS
-simulator bundle derives the same numeric product version from the workspace manifest.
+`ZZ_MACOS_BUILD_VERSION` when set; release CI supplies its monotonic workflow run number.
 
 # Examples
 
@@ -84,8 +80,6 @@ open dist/zz/zz.app
 cargo xtask verify-cef-bundle dist/zz/zz
 cargo xtask verify-cef-bundle dist/zz/zz.app
 
-# Build the iOS simulator app bundle
-cargo xtask ios-sim
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same task on every matrix OS to exercise the full

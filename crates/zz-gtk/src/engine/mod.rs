@@ -106,7 +106,7 @@ pub enum EngineEvent {
     FleetChanged,
 }
 
-/// One zz window, as the tab strip needs it.
+/// One zz window, as the sidebar tree lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WindowTab {
     pub id: WindowId,
@@ -464,13 +464,6 @@ impl Engine {
     /// than assumed.
     pub fn new_session(&self) {
         self.new_session_on(self.active_host());
-    }
-
-    pub fn select_window(&self, window: WindowId) {
-        self.execute(CommandInvocation::new(
-            "select-window",
-            ["-t", &window.to_string()],
-        ));
     }
 
     pub fn select_pane(&self, pane: PaneId) {

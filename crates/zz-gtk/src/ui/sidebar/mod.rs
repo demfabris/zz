@@ -868,7 +868,7 @@ fn build_gutter(row: &Row, target: &glib::Variant, tree: &Tree) -> gtk::Box {
             return gutter;
         }
         RowKind::Session => gutter.append(&gutter_button(
-            "tab-new-symbolic",
+            "list-add-symbolic",
             "New Window",
             "sidebar.new-window",
             target,

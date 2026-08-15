@@ -85,6 +85,17 @@ pub(crate) struct AgentWorkspaceEnvironment {
 }
 
 impl AgentWorkspaceEnvironment {
+    /// Adopt the identity of the pane being spawned, keeping the daemon-wide
+    /// socket: the spawn config is one-per-daemon, the child is one-per-pane.
+    pub(crate) fn adopt_pane_identity(&mut self, pane: &Self) {
+        if pane.pane.is_some() {
+            self.pane.clone_from(&pane.pane);
+        }
+        if pane.session.is_some() {
+            self.session.clone_from(&pane.session);
+        }
+    }
+
     fn entries(&self) -> impl Iterator<Item = (&'static str, &str)> {
         [
             ("ZZ_PANE", self.pane.as_deref()),
@@ -565,6 +576,27 @@ mod workspace_tests {
     use agent_client_protocol::{AcpAgent, schema::v1::McpServer};
 
     use super::{AgentWorkspaceEnvironment, with_executable_path, with_workspace_environment};
+
+    #[test]
+    fn pane_identity_is_adopted_without_touching_the_socket() {
+        let mut config = AgentWorkspaceEnvironment {
+            pane: None,
+            session: None,
+            socket: Some("/tmp/zz.sock".to_owned()),
+        };
+        config.adopt_pane_identity(&AgentWorkspaceEnvironment {
+            pane: Some("%4".to_owned()),
+            session: Some("work".to_owned()),
+            socket: None,
+        });
+        assert_eq!(config.pane.as_deref(), Some("%4"));
+        assert_eq!(config.session.as_deref(), Some("work"));
+        assert_eq!(config.socket.as_deref(), Some("/tmp/zz.sock"));
+
+        config.adopt_pane_identity(&AgentWorkspaceEnvironment::default());
+        assert_eq!(config.pane.as_deref(), Some("%4"));
+        assert_eq!(config.session.as_deref(), Some("work"));
+    }
 
     fn workspace() -> AgentWorkspaceEnvironment {
         AgentWorkspaceEnvironment {

@@ -4,15 +4,16 @@ title: End-to-end data flow
 description: How terminal frames, browser pixels, ACP updates, and user input move among the daemon, GUI, PTY workers, CEF, and agents.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [architecture, data-flow, frames, input, rendering]
-timestamp: 2026-08-01T00:00:00Z
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
 
 Three rendering paths coexist in a GUI client. The daemon produces terminal content and streams it
-as renderer-neutral frames; CEF produces browser content locally; the GUI reduces Agent conversation
-entries from ACP notifications. Browser pixels and ACP conversation payloads never cross the zz
-daemon protocol.
+as renderer-neutral frames; CEF produces browser content locally; the daemon also runs the ACP
+adapter and streams its raw items, which the GUI reduces into Agent conversation entries. Browser
+pixels never cross the zz daemon protocol; ACP payloads do, since v53, as opaque JSON blobs on their
+own lane.
 
 # Terminal path (daemon → client)
 
@@ -59,25 +60,37 @@ CEF renderer ──shared GPU texture or BGRA──▶ one-slot mailbox (latest 
 - The daemon never transports browser video frames; the browser lives entirely in the
   GUI process. The daemon only persists a browser pane's tab list + [profile](/browser/profile.md).
 
-# Agent path (local to the GUI process)
+# Agent path (through the daemon, since v53)
 
 ```text
-composer ──session/prompt──────────────▶ pane-local ACP child
-   ▲                                         │
-   │ session/update / commands / config      ▼
-AgentController reducer ─────────────▶ AgentTimeline + controls
+composer ──AgentPrompt───────▶ daemon agent host ──session/prompt──▶ ACP child   [daemon]
+   ▲                                  │
+   │                                  ├──journal append (JSONL, per ACP session)
+   │                                  ▼
+   │                          fanout: 25 ms coalesce, wire seq, 16 MiB replay ring
+   │                                  │
+   │  AgentUpdates (JSON items) + AgentState                                     [agent lane]
+   ▼                                  ▼
+AgentController reducer ──────▶ AgentTimeline + controls                         [client]
 ```
 
-- `AgentController` owns one provider process per daemon-stable `PaneId`, routes its agent-owned
-  session ID, and reduces streamed messages, thoughts, plans, tool calls, usage, title, available
-  command, and configuration updates.
+- The daemon owns one adapter child per `PaneId`, on its own thread, and reduces nothing: it
+  journals the raw items and fans them out. `AgentController` is the reducer, rebuilding messages,
+  thoughts, plans, tool calls, usage, title, available commands, and configuration from the stream
+  it replays and tails.
+- A replay deliberately overlaps the live tail; the client's per-pane sequence cursor is what makes
+  that idempotent. A lane overflow sends `AgentLagged` rather than closing the connection, and the
+  client answers with `AgentReplay` from its cursor.
 - Slash completion consumes `AvailableCommandsUpdate`; `$`-prefixed entries are presented as skills.
-  Permission mode, model, and effort controls send the agent's exact config-option IDs and values,
-  falling back to legacy ACP session modes when generic config options are unavailable.
-- Permission requests flow back to native option buttons, which return the exact ACP option ID;
-  Cancel sends `session/cancel` and cancels pending responders.
-- The daemon carries only `AgentDescriptor { provider, cwd, session_id }`. A replacement GUI asks
-  that provider to replay history through `session/load`; see [Agent pane](/concepts/agent-pane.md).
+  Permission mode, model, and effort controls send the agent's exact config-option IDs and values as
+  `AgentSetConfigOption`/`AgentSetMode`, falling back to legacy ACP session modes when generic config
+  options are unavailable.
+- Permission requests park in the daemon and ride `AgentState` out to every client on the session,
+  so a late-attaching client sees the same prompt. The answer returns the exact ACP option ID through
+  `AgentRespondPermission`; first answer wins. Cancel sends `AgentCancel`.
+- The daemon carries `AgentDescriptor { provider, cwd, session_id }` in mux state and the transcript
+  in its journal. A respawned adapter replays through `session/load` where supported and out of the
+  journal where not; see [Agent pane](/concepts/agent-pane.md).
 
 # Input path (client → target)
 
@@ -113,9 +126,10 @@ GPUI event ─┬─ prefix chord (any focus) ─▶ window-root claim ─▶ mu
 
 At GUI startup, the app independently resolves the first platform-appropriate
 [`zz/config`](/configuration/app-config.md) file into client-local GPUI globals used by native
-window rendering and ACP launch configuration. A 500 ms watcher hot-reloads it; daemon-owned
-appearance/mux entries cross the override channel, while Agent command/cwd changes restart each
-retained pane's app-owned ACP process and reload its session.
+window rendering. A 500 ms watcher hot-reloads it; daemon-owned appearance and mux entries cross the
+override channel, and the three agent adapter keys are among them . the daemon reconfigures what the
+*next* pane spawns without disturbing the children already running. Only `agent-working-directory`
+stays client-side.
 
 zz's own configuration is authoritative: the daemon reads no external configs. It resolves
 [appearance](/terminal/appearance.md) as built-in defaults plus the client-pushed `zz/config`

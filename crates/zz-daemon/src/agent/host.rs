@@ -26,7 +26,7 @@ use serde_json::Value;
 use zz_protocol::{AgentProvider, PaneId};
 
 use crate::agent::{
-    environment::warm_adapter_cache,
+    environment::{AgentWorkspaceEnvironment, warm_adapter_cache},
     journal::AgentJournal,
     profile::SdkTaskEvent,
     runtime::{
@@ -96,6 +96,7 @@ pub(crate) struct AgentPaneSpec {
     pub(crate) provider: AgentProvider,
     pub(crate) cwd: PathBuf,
     pub(crate) resume_session: Option<String>,
+    pub(crate) workspace: AgentWorkspaceEnvironment,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -172,6 +173,7 @@ impl AgentPaneState {
             provider: AgentProvider::Codex,
             cwd: PathBuf::from("/"),
             resume_session: None,
+            workspace: AgentWorkspaceEnvironment::default(),
         })
     }
 
@@ -301,7 +303,8 @@ impl AgentHost {
         {
             return self.open_with(pane, spec, runner);
         }
-        let config = self.config.lock().clone();
+        let mut config = self.config.lock().clone();
+        config.workspace.adopt_pane_identity(&spec.workspace);
         let provider = spec.provider;
         let runner: PaneRunner = Box::new(move |channels: RuntimeChannels| {
             Box::pin(run_agent_runtime(
@@ -1049,6 +1052,7 @@ mod tests {
                 provider: AgentProvider::Codex,
                 cwd: cwd.unwrap_or_else(|| PathBuf::from("/")),
                 resume_session,
+                workspace: AgentWorkspaceEnvironment::default(),
             };
             let runner = fixture_runner(AgentProvider::Codex, behavior, auto_approve, load);
             assert!(host.open_with(pane, spec, runner));
@@ -1507,6 +1511,7 @@ mod tests {
             provider: AgentProvider::Codex,
             cwd: PathBuf::from("/"),
             resume_session: None,
+            workspace: AgentWorkspaceEnvironment::default(),
         });
         let call = serde_json::to_value(SessionUpdate::ToolCall(
             ToolCall::new("tool-1", "run it").status(ToolCallStatus::Pending),

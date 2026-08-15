@@ -7053,6 +7053,11 @@ impl Shared {
         let PaneKind::Agent(descriptor) = &inner.engine.state.pane(pane)?.kind else {
             return None;
         };
+        let session = inner
+            .engine
+            .state
+            .window_for_pane(pane)
+            .map(|window| inner.engine.state.windows[&window].session.to_string());
         Some(AgentPaneSpec {
             provider: descriptor.provider,
             cwd: descriptor
@@ -7061,6 +7066,11 @@ impl Shared {
                 .or_else(|| std::env::current_dir().ok())
                 .unwrap_or_else(|| PathBuf::from("/")),
             resume_session: descriptor.session_id.clone(),
+            workspace: AgentWorkspaceEnvironment {
+                pane: Some(pane.to_string()),
+                session,
+                socket: None,
+            },
         })
     }
 

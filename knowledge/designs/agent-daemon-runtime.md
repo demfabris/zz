@@ -1,14 +1,15 @@
 ---
 type: Design Plan
 title: Daemon-owned agent runtime
-description: The plan that moves the agent pane's ACP adapter runtime from the GUI into the daemon — daemon-spawned adapter children, a daemon-side journal with replay-then-tail attach, a dedicated coalescing outbound lane, and clients reduced to viewports — so agent runs survive client detach and every client kind can render them.
-status: In progress
+description: The agent pane's ACP adapter runtime moved from the GUI into the daemon — daemon-spawned adapter children, a daemon-side journal with replay-then-tail attach, a dedicated coalescing outbound lane, and clients reduced to viewports — so agent runs survive client detach and every client kind can render them.
+status: Shipped
 tags:
 - agent
 - acp
 - daemon
 - protocol
 - persistence
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Goal
@@ -34,6 +35,7 @@ runs on the daemon's machine, which is the correct machine).
 | Transcript reducer (`AgentThread`), view, composer, wizard, badges, mend, spring | GUI | GUI, unchanged |
 | Adapter command strings, auto-approve flag | GUI config keys (`agent-*`) | mux options (flow via `mux.conf` + `SetConfigOverrides`, like `experimental-agent-pane`) |
 | `agent-send --submit` | daemon → GUI round-trip (`request_from_gui`) | daemon dispatches directly into the host; `ComposerAppend` keeps the GUI round-trip |
+| Adopting the ACP session ID, naming a pane after its first prompt | GUI, via `set-agent-session` / `select-pane -T` round trips | daemon (`adopt_agent_session`, `title_agent_pane`); the GUI keeps its own titling for the pane it drives |
 
 # Wire surface (v53)
 
@@ -64,13 +66,18 @@ Daemon → client (`EventPayload`, appended):
   batch ≤ 1 MiB (split into multiple frames when larger), per-pane monotonic `seq`.
 - `AgentState { pane, state: AgentPaneWire }` — small typed struct: connection phase, queued
   count, active session id, title, auth methods, pending permission
-  `(request_id, payload_json ≤ 64 KiB)`, config options as one JSON blob. Published on change to
-  every client attached to the pane's session (feeds badges without the heavy stream).
+  `(request_id, payload ≤ 64 KiB)`, and the adapter's config options and modes as one JSON blob
+  each (≤ 256 KiB). Published on change to every client attached to the pane's session (feeds
+  badges without the heavy stream). A payload that fails `AgentPaneWire::validate` is trimmed
+  down to the fields that fit rather than dropped.
 - `AgentLagged { pane, next_seq }` — the client's agent lane overflowed and was cleared; the
   client answers with `AgentReplay`.
-- `AgentSessions { pane, request_id, result_json }` and
-  `AgentTurnDiffResult { pane, request_id, result_json }` — replies to `AgentSessionOp::List`
-  and `AgentTurnDiff` (the `HistoryRequest → HistoryChunk` precedent).
+- `AgentSessions { pane, request_id, result }` and
+  `AgentTurnDiffResult { pane, request_id, result }` — JSON replies to `AgentSessionOp::List`
+  and `AgentTurnDiff` (the `HistoryRequest → HistoryChunk` precedent), each ≤ 1 MiB. Both are
+  published to the whole pane rather than answered to one caller. A turn diff carries the
+  requester's `request_id`; a session listing has none on the ACP side, so it rides
+  `request_id` 0 and every client on the pane takes it.
 
 Every new payload gets an explicit bound in `validate_control_message`, and
 `knowledge/protocol/wire-protocol.md` gets the variant list plus its byte-level example updated
@@ -83,27 +90,47 @@ hundreds of updates, so agent streams get their own `OutboundState` lane, preced
 `terminals` slot:
 
 - `agent: BTreeMap<PaneId, PendingAgent>` where `PendingAgent` accumulates encoded
-  `AgentUpdates` batches with a per-pane cap (4 MiB). The daemon-side host already coalesces
-  items into ≤ 25 ms windows before enqueueing, so a healthy client sees a few frames per
-  second, not one per token.
+  `AgentUpdates` batches with a per-pane cap (`MAX_PENDING_AGENT_BYTES`, 4 MiB). The fanout
+  coalesces items into 25 ms windows (`BATCH_WINDOW`) before enqueueing, on one shared flush
+  thread that parks whenever no pane has anything gathered, so a healthy client sees a few
+  frames per second, not one per token.
+- Each pane also keeps a `MAX_REPLAY_RING_BYTES` (16 MiB) in-memory ring of encoded items. A
+  replay inside the ring is served straight to the asking client and nothing else moves. A
+  replay older than the ring falls back to the journal, and that path is a *reset*, not a
+  splice: the lane emits `SessionReset { restoring: true }` followed by the journalled updates
+  as freshly numbered items, so the client rebuilds the transcript instead of trying to graft
+  onto a sequence memory no longer has.
 - Drain order: `reliable` → `command_output` → `agent` (round-robin) → `terminals`.
 - Overflow does NOT close the connection: the pane's lane is cleared and a tiny
   `AgentLagged { pane, next_seq }` marker queued; the client re-requests `AgentReplay` from its
   last applied seq. The journal makes the stream recoverable, so slow clients degrade to
   replay instead of dying.
 - Visibility: the heavy stream flows only to clients for whom the pane is in the derived
-  visible set (same derivation as terminal frames: attached session + focused window, zoom
-  rules). `AgentState` flows to all clients attached to the session. A pane entering the
-  visible set triggers an implicit replay-then-tail (`send_resync` sends `AgentState`; the
-  client issues `AgentReplay { from_seq: 0 }` or from its cached seq).
+  visible set (`visible_agent_panes`: attached session + that client's focused window, honoring
+  zoom — the same shape as terminal visibility). `AgentState` flows to all clients attached to
+  the session. Attach pushes `AgentState` for every agent pane in the session
+  (`send_agent_resync`) and a pane entering the visible set pushes its state
+  (`refresh_agent_visibility`); in both cases the client, not the daemon, decides where to
+  replay from and issues `AgentReplay { from_seq }` off its own cursor. A pane leaving the
+  visible set has its queued frames dropped (`cancel_agent`), which the cursor makes safe.
 
-`Event.sequence` stays advisory (pitfall 1); the agent stream's own per-pane `seq` — which is
-the journal seq — is the replay cursor.
+`Event.sequence` stays advisory (pitfall 1); the agent stream's own per-pane `seq` is the
+replay cursor.
+
+Two things about that sequence deviate from the sketch above. **The fanout mints it, not the
+host.** The host stamps its own per-pane counter for its internal bookkeeping, but request
+replies leave the stream entirely without spending a wire sequence, and a journal replay
+synthesizes fresh items, so only the fanout can promise a client a gapless run. It is therefore
+not literally the journal's seq. **An item too large for one frame is dropped, not stamped**: a
+single encoded `AgentStreamItem` over `MAX_AGENT_UPDATES_BYTES` is logged and skipped, because
+the wire cannot carry it and a sequence spent on it would read as loss to every client.
 
 # Daemon host (`zz-daemon/src/agent/`)
 
-Behind a new `agent` cargo feature (`default = ["daemon", "agent"]`; `zz-tui`/`zz-client-ffi`
-build with `default-features = false` and never inherit `agent-client-protocol`).
+Behind an `agent` cargo feature (`default = ["daemon", "agent"]`; `zz-tui`/`zz-client-ffi`
+depend on `zz-daemon` with `default-features = false` and never inherit
+`agent-client-protocol`, while the desktop takes the default and consumes the stream vocabulary
+`zz-daemon`'s crate root re-exports).
 
 - One `std::thread` per agent pane running
   `futures_lite::future::block_on(run_agent_connection(..))` — the crate is runtime-agnostic
@@ -114,9 +141,19 @@ build with `default-features = false` and never inherit `agent-client-protocol`)
   `crates/zz/src/agent/controller.rs`: `run_agent_runtime` / `run_agent_connection`,
   `RuntimeCommand`/`RuntimeEvent` (becoming `AgentStreamItem`), `RuntimeRouting`, `StderrTail`,
   auto-approve (`is_user_question` + preferred allow), queued prompts with reclaim, quiesce
-  park (`ZZ_AGENT_QUIESCE_MS`; ticked from a small shared deadline thread, not a runtime),
-  session-id validation, journal, and `environment.rs`'s PATH repair (pure-std `login_shell`
-  module moves wholesale; `warm_agent_adapter_cache` prewarms at daemon start).
+  park (`ZZ_AGENT_QUIESCE_MS`, read once per daemon process), session-id validation, journal,
+  and `environment.rs`'s PATH repair (the pure-std `login_shell` module moved wholesale).
+  The park is one shared `PARK_TICK` ticker at second resolution — the window is minutes — and
+  it parks outright while no pane is open.
+- The runtime is built lazily, on the first agent pane the daemon opens rather than at daemon
+  start; building it opens and prunes the journal and calls `prewarm`, which takes the
+  login-shell PATH snapshot and warms the npx cache for the configured adapter packages off the
+  spawn path.
+- A prompt that arrives while the pane is not `Ready` **queues**; it is never rejected. The
+  host dispatches the queue head as each turn settles — on completion and after a quiesce park
+  — and hands the whole queue back through `PromptsReclaimed` on cancel, on a lost runtime, and
+  on a failed dispatch. That is the same at-least-once rule the GUI had, now enforced
+  daemon-side, so a prompt survives the client that typed it.
 - Prompt images arrive as bytes+format on the wire and convert to ACP `ContentBlock`s
   daemon-side; `gpui::Image` never crosses.
 - Permissions: the live SDK responder parks in the host with NO timeout (a human decides).
@@ -124,25 +161,36 @@ build with `default-features = false` and never inherit `agent-client-protocol`)
   first-answer-wins; pane close or adapter death resolves it cancelled.
 - Turn snapshots run at dispatch on the pane thread (blocking git is fine there);
   `AgentTurnDiff` captures against the stored base.
-- The journal moves file-for-file (`agent-journal/<session>.jsonl`, 32 MiB cap, 30-day prune,
-  torn-tail tolerance) under a new daemon data dir, with the `user_data.rs`
-  permission-hardening helpers moving into `zz-daemon` and re-exported for the GUI's
-  preferences file.
+- The journal moved file-for-file (`agent-journal/<session>.jsonl`, 32 MiB cap, 30-day prune,
+  torn-tail tolerance) under `<data>/zz/daemon/`, with the `user_data.rs`
+  permission-hardening helpers now living in `zz-daemon::user_data` and re-exported for the
+  GUI's preferences file.
 - `experimental-agent-pane` flipping off with live children: existing panes keep running
   (option gates materialization, not execution), matching browser-pane behavior.
+- The workspace identity survives the move: the spawn config is built once per daemon
+  (`agent_spawn_config`, socket only), and the per-pane `ZZ_PANE`/`ZZ_SESSION` identity rides
+  `AgentPaneSpec.workspace`, merged over the config at spawn
+  (`AgentWorkspaceEnvironment::adopt_pane_identity`), so an agent can still address itself.
 
 # Client changes
 
-- `zz-client` core: pure pass-through `CoreEvent`s for the new payloads (the core stores
-  nothing, per the contract); `zz-tui`'s exhaustive matches gain arms that keep its current
-  "renders a card, no transcript" behavior; `zz-client-ffi` ignores them.
-- `MuxClient` buffers agent events per pane beside `agent_commands`; `WorkspaceView` drains
-  them into `AgentController`.
-- `AgentController` loses its runtime half: `ensure_runtime` becomes wire subscription
-  bookkeeping; `prompt`/`cancel`/wizard answers/settings become protocol sends; incoming
-  `AgentStreamItem`s deserialize into the existing `handle_runtime_event` input, so the
-  reducer, view, wizard, badges, mend, and spring are untouched. The client-side journal,
-  stdio runtime, and PATH-repair usage are deleted.
+- `zz-client` core: pass-through `CoreEvent`s for the stream payloads (the core stores no
+  transcript, per the contract). The one exception is `AgentState`, which the core does retain
+  — it is small, typed, and last-writer-wins — so a shell reads it through
+  `ClientCore::agent_state` after a `CoreEvent::AgentStateChanged`, and it is cleared on
+  attachment reset. `zz-tui`'s exhaustive match gained arms that keep its current "renders a
+  card, no transcript" behavior; `zz-client-ffi` ignores them.
+- `MuxClient` buffers agent events per pane beside `agent_commands` and keeps a per-pane
+  `agent_cursors` map; `AppView::drain_agent_events` hands the drain to `AgentController`. The
+  cursor is what makes the stream idempotent: a replay deliberately overlaps the live tail, so
+  items at or below the cursor are dropped, and a batch that starts *past* the cursor is a hole
+  the client cannot wait out, so it re-requests a replay from where it stands.
+- `AgentController` loses its runtime half: `ensure_pane` becomes viewport bookkeeping that
+  asks for a replay when a pane goes live; `prompt`/`cancel`/wizard answers/settings become
+  protocol sends through `AgentRequest`; incoming `AgentStreamItem`s land in
+  `apply_stream_items` and feed the existing reducer, so the view, wizard, badges, mend, and
+  spring are untouched. The client-side journal, stdio runtime, turn snapshots, and PATH repair
+  are deleted, along with the `set-agent-session` round trip the daemon now does itself.
 - Agent config keys (`agent-command`, `agent-claude-code-command`, `agent-auto-approve`)
   become mux options; the settings UI writes them through the existing option machinery.
   `agent-working-directory` stays client-side (it feeds pane creation, which is already a
@@ -154,13 +202,37 @@ build with `default-features = false` and never inherit `agent-client-protocol`)
    release bundle built from main and from this branch, same machine, frontmost window, AC
    power. The mailbox drain-order change is the only shared-path touch and must show inside
    run-to-run noise.
-2. Agent streaming soak: an ignored integration test drives a fake ACP adapter emitting
-   50k-token turns through the daemon into a headless `InteractiveClient`, asserting
-   convergence and printing throughput, daemon CPU time, and max lane depth. Run before merge;
-   numbers land in this document.
-3. `just profile-system mac 20s` during a soak to confirm the added threads (1 per pane +
-   `async-process` reaper + `blocking` pool) idle correctly (the parked-clock lesson: nothing
-   polls while no agent runs).
+2. Agent streaming soak: `crates/zz-daemon/tests/agent_soak.rs` drives a fake ACP adapter
+   through the daemon into a headless `InteractiveClient`, asserting convergence and printing
+   throughput and daemon CPU time; `agent_stream_soak` is `#[ignore]`d (it runs for minutes)
+   and `agent_stream_soak_slow_client` covers the lag-and-replay path. Numbers land here.
+3. `just profile-system mac 20s` during a soak to confirm the added threads (1 per pane + the
+   shared park ticker + the shared flush thread + `async-process` reaper + `blocking` pool)
+   idle correctly (the parked-clock lesson: nothing polls while no agent runs).
+
+Measured 2026-08-14 (M-series mac, AC power, back-to-back):
+
+Gate 1 — release bundles, same 158×106 grid, 3 runs per lane:
+
+| test | main | this branch | delta |
+| --- | ---: | ---: | ---: |
+| cat 150 MiB ASCII | 198.32 MB/s | 196.51 MB/s | −0.9% |
+| cat 150 MiB mixed UTF-8 | 93.55 MB/s | 91.33 MB/s | −2.4% |
+| doom-fire | 243.21 fps | 239.71 fps | −1.4% |
+
+Every delta sits inside the lanes' own run-to-run spread (main's three ASCII runs alone span
+3.6%, unicode 4.0%; the run ranges overlap): no regression.
+
+Gate 2 — 50k-item turn, three release runs, 1.2% wall-clock spread:
+`SOAK items=50001 secs=5.19 items_per_sec≈9600 frames≈192 ratio≈260 bytes=20853809`,
+zero `AgentLagged` for a draining client; the `--ignore`d debug run holds ratio ≈112 at
+≈3860 items/sec. The slow-client test trips the 4 MiB lane cap into exactly one
+`AgentLagged`, replays to a gapless transcript, and the terminal lane keeps delivering
+throughout. The batcher's binding constraint at release speed is `MAX_AGENT_UPDATES_BYTES`
+(1 MiB frames), not the 25 ms window.
+
+Gate 3 was replaced by construction evidence: the flush thread and park ticker both park on
+condvars when no pane has work (pinned by host tests), so an idle daemon schedules nothing.
 
 # Risks accepted
 

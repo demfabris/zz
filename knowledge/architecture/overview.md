@@ -4,7 +4,7 @@ title: zz system overview
 description: zz is a cross-platform GPUI workspace that multiplexes native terminal, Chromium browser, and Agent panes over a persistent daemon that several of the user's devices attach to at once.
 resource: crates/zz/src/lib.rs
 tags: [architecture, overview, gpui, multiplexer, daemon]
-timestamp: 2026-08-12T00:00:00Z
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
@@ -16,9 +16,9 @@ tmux-style model:
   (see [zz-terminal](/crates/zz-terminal.md));
 - a **Chromium browser** powered by CEF Alloy off-screen rendering (OSR), composited as a GPUI image
   (see [zz-browser](/crates/zz-browser.md));
-- a native **Agent pane** backed by a pane-local Codex or Claude Code ACP process, with streaming
-  Markdown, Mermaid, reasoning, plans, structured tool activity, slash skills/commands, dynamic
-  permission, model, and effort controls, cancellation, and agent-owned session replay (see
+- a native **Agent pane** backed by a **daemon-owned** Codex or Claude Code ACP process, with
+  streaming Markdown, Mermaid, reasoning, plans, structured tool activity, slash skills/commands,
+  dynamic permission, model, and effort controls, cancellation, and agent-owned session replay (see
   [Agent pane](/concepts/agent-pane.md)). The Agent pane is compiled into default builds and gated
   at runtime by `experimental-agent-pane`; the Editor pane is still compiled out behind the
   `editor-pane` cargo feature as well as `experimental-editor-pane`.
@@ -36,10 +36,11 @@ at the same time, each with its
 own viewport, scroll position, and focused window, while the layout tree, pane focus, and PTYs stay
 shared. Closing every GPUI window detaches that client without stopping
 terminal processes; see [session persistence](/concepts/session-persistence.md). Browser panes
-restore their last URL and zz [profile](/browser/profile.md) when a GUI reattaches; Agent panes
-restore their provider, working directory, and opaque ACP session ID, then rely on that provider's
-`session/load` support to replay history. Neither transient Chromium state nor ACP children remain
-alive without a GUI.
+restore their last URL and zz [profile](/browser/profile.md) when a GUI reattaches, and transient
+Chromium state does not survive without a GUI. Agent panes are the other way round: the daemon owns
+the ACP adapter child the same way it owns a PTY, so a turn keeps running with every window closed,
+and a reattaching client replays the transcript out of the daemon's journal and tails the live
+stream.
 
 # Design pillars
 
@@ -58,12 +59,12 @@ alive without a GUI.
 |-------|------|
 | [zz-protocol](/crates/zz-protocol.md) | stable IDs, versioned length-prefixed control protocol, packed terminal lanes |
 | [zz-mux](/crates/zz-mux.md) | renderer-free state machine: layouts, targets, commands, key tables, `.tmux.conf` |
-| [zz-daemon](/crates/zz-daemon.md) | persistent daemon: mux state, PTYs, frame fanout, sockets, attachment, CLI |
+| [zz-daemon](/crates/zz-daemon.md) | persistent daemon: mux state, PTYs, ACP adapter children, frame and agent-stream fanout, sockets, attachment, CLI |
 | [zz-terminal](/crates/zz-terminal.md) | per-PTY child + libghostty on a worker thread; publishes terminal frames |
 | [zz-browser](/crates/zz-browser.md) | CEF init, subprocess dispatch, request context, input translation, frame mailboxes |
 | [zz-client](/crates/zz-client.md) | sans-IO protocol reduction and client-local chrome key tables shared by client shells |
 | [zz-client-ffi](/crates/zz-client-ffi.md) | Unix C ABI proof surface over the shared client core |
-| [zz](/crates/zz.md) | long-lived GPUI mux client; reconciles layouts; hosts terminal, CEF, and Agent views |
+| [zz](/crates/zz.md) | long-lived GPUI mux client; reconciles layouts; hosts terminal and CEF runtimes and the Agent pane's viewport |
 | [zz-chrome-import](/crates/zz-chrome-import.md) | Chrome profile discovery, cookie decryption, read-only history extraction |
 | [zz-xtask](/crates/zz-xtask.md) | builds and validates platform CEF bundles |
 

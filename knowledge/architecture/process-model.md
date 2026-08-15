@@ -4,7 +4,7 @@ title: Process & threading model
 description: How zz splits work across the persistent daemon, GUI and CLI clients, CEF subprocesses, ACP agents, and per-PTY worker threads.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [architecture, process-model, daemon, threading, ipc]
-timestamp: 2026-08-01T00:00:00Z
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
@@ -75,13 +75,20 @@ legacy setuid sandbox layer is disabled (no `--no-sandbox`).
 
 # ACP process model
 
-The daemon never launches an AI provider. `AgentController` in the GUI starts one ACP v1 child per
-daemon-owned Agent `PaneId`, using `agent-command` for Codex or `agent-claude-code-command` for Claude
-Code. The daemon snapshot stores the selected provider, session's absolute cwd, and opaque ID. On GUI
-reattach, the replacement controller uses `session/load` against that same provider when supported;
-the agent remains the authority for conversation history. Switching providers deliberately clears
-the old session ID and starts a fresh thread. Pane removal and GUI shutdown cancel active turns and
-permission responders before that pane's child is reaped.
+The daemon launches the AI provider. `agent::host::AgentHost` starts one ACP v1 child per Agent
+`PaneId`, on its own `zz-agent-{n}` thread, using the `agent-command` mux option for Codex or
+`agent-claude-code-command` for Claude Code. The daemon snapshot stores the selected provider, the
+session's absolute cwd, and its opaque ID, and the daemon adopts that ID itself when the adapter
+returns one. On reattach, the client asks for a replay from where its reducer stands and then tails;
+daemon-side, a respawned adapter uses `session/load` against the same provider when supported and
+falls back to the journal when it does not. Switching providers deliberately clears the old session
+ID and starts a fresh thread. Pane removal and **daemon** shutdown cancel active turns and permission
+responders before that pane's child is reaped . a GUI quit does neither, which is the point.
+
+The desktop client keeps only the rendering half: the reducer, view, composer draft, permission
+wizard, and sticky selector preferences. `zz-tui` and `zz-client-ffi` link `zz-daemon` with
+`default-features = false`, so a build that never renders a transcript does not pull
+`agent-client-protocol` in at all.
 
 # Threading inside the daemon
 
@@ -92,6 +99,12 @@ each rendered against that view's own scroll, selection, copy-mode, and search s
 `zz-pane-{id}` thread per pane diffs each view stream separately and fans the patch or full viewport
 to that view's client. See [PTY worker](/concepts/pty-worker.md) for the ownership boundary between
 server and zz-terminal.
+
+Agent panes follow the same shape with three threads of their own: one `zz-agent-{n}` per pane
+blocking on that pane's ACP connection, one shared `zz-agent-park` ticker for the quiesce watchdog,
+and one shared `zz-agent-flush` closing the fanout's 25 ms coalescing windows. Both shared threads
+park outright when nothing is open or nothing is gathered, and the whole runtime is built lazily on
+the first agent pane, so a daemon that never runs an agent spawns none of them.
 
 # Related
 

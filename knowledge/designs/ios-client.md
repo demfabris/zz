@@ -62,7 +62,7 @@ packaging. One attached host at a time, same as desktop.
 6. **React Native rejected** (byte-stream widget vs cell-patch protocol
    mismatch; see knowledge on the copy-mode single-writer redesign).
 
-# Reuse map (verified 2026-08-07 against protocol v44; live wire is v52)
+# Reuse map (verified 2026-08-07 against protocol v44; live wire is v53)
 
 Clean on iOS as-is:
 

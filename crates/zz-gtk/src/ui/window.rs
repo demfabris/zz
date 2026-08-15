@@ -746,7 +746,7 @@ impl Shell {
             return PaneWidget::Picker(PanePicker::new(Arc::clone(&self.engine), pane));
         }
         // ── end gtk-termux ──
-        let label = gtk::Label::new(Some(&format!("{kind} panes need the zz app")));
+        let label = gtk::Label::new(Some(&format!("{} panes need the zz app", kind_title(kind))));
         label.add_css_class("dim-label");
         label.add_css_class("zz-placeholder");
         PaneWidget::Other {
@@ -904,12 +904,14 @@ impl Shell {
 }
 // ── end gtk-termux ──
 
+/// The primary menu, in the order the HIG asks for: what this window can do,
+/// then what the session can do, and Preferences and About last.
 fn primary_menu() -> gio::Menu {
     let windows = gio::Menu::new();
-    windows.append(Some("New Tab"), Some("win.new-window"));
-    windows.append(Some("Next Tab"), Some("win.next-window"));
-    windows.append(Some("Previous Tab"), Some("win.previous-window"));
-    windows.append(Some("Close Tab"), Some("win.close-window"));
+    windows.append(Some("New Window"), Some("win.new-window"));
+    windows.append(Some("Next Window"), Some("win.next-window"));
+    windows.append(Some("Previous Window"), Some("win.previous-window"));
+    windows.append(Some("Close Window"), Some("win.close-window"));
 
     let focus = gio::Menu::new();
     for (label, direction) in [
@@ -929,15 +931,29 @@ fn primary_menu() -> gio::Menu {
     panes.append(Some("Close Pane"), Some("win.close-pane"));
 
     let session = gio::Menu::new();
-    session.append(Some("Settings"), Some("win.settings"));
     session.append(Some("Detach"), Some("win.detach"));
-    session.append(Some("About zz"), Some("win.about"));
+
+    let app = gio::Menu::new();
+    app.append(Some("Preferences"), Some("win.settings"));
+    app.append(Some("About zz"), Some("win.about"));
 
     let menu = gio::Menu::new();
     menu.append_section(None, &windows);
     menu.append_section(None, &panes);
     menu.append_section(None, &session);
+    menu.append_section(None, &app);
     menu
+}
+
+/// The placeholder's wording. A pane kind is spelled in the file and on the
+/// wire in lower case; a sentence in the window is not.
+fn kind_title(kind: &'static str) -> &'static str {
+    match kind {
+        "browser" => "Browser",
+        "agent" => "Agent",
+        "editor" => "Editor",
+        other => other,
+    }
 }
 
 fn kind_label(kind: &PaneKindSnapshot) -> &'static str {

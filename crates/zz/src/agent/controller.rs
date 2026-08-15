@@ -1,8 +1,8 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use agent_client_protocol::schema::{
@@ -23,7 +23,11 @@ use zz_daemon::{
     AgentTurnDiffOutcome, SdkTaskEvent, TurnDiff,
 };
 use zz_protocol::{
-    AgentConnectionPhase, AgentDescriptor, AgentPaneWire, AgentProvider, AgentSessionOpKind, PaneId,
+    AgentConnectionPhase, AgentDescriptor, AgentPaneWire, AgentProvider, AgentSessionOpKind,
+    MAX_AGENT_AUTH_METHODS, MAX_AGENT_AVAILABLE_COMMANDS, MAX_AGENT_CONFIG_CHOICES,
+    MAX_AGENT_CONFIG_OPTIONS, MAX_AGENT_MODES, MAX_AGENT_PERMISSION_OPTIONS,
+    MAX_AGENT_QUEUED_PROMPTS, MAX_AGENT_SESSION_DIRECTORIES, MAX_AGENT_TOOL_CONTENT_ITEMS,
+    MAX_GUI_TEXT_BYTES, PaneId,
 };
 
 use crate::{
@@ -53,6 +57,9 @@ const TRUNCATION_MARKER: &str = "… [truncated]";
 /// tell agent panes apart in the tree without wrapping the pane header.
 const MAX_TITLE_WORDS: usize = 7;
 const MAX_TITLE_CHARS: usize = 48;
+const TURN_DIFF_TIMEOUT: Duration = Duration::from_secs(30);
+const LIFECYCLE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const ENTRY_CHANGE_LOG_CAPACITY: usize = 4_096;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AgentConnectionState {
@@ -313,6 +320,7 @@ pub(crate) struct AgentPaneState {
     pub(crate) session_capabilities: AgentSessionCapabilities,
     pub(crate) session_history: AgentSessionHistoryState,
     pub(crate) settings_busy: bool,
+    pub(crate) lifecycle_pending: bool,
     pub(crate) mode: Option<Arc<str>>,
     pub(crate) modes: Arc<[AgentMode]>,
     pub(crate) config_options: Arc<[AgentConfigOption]>,
@@ -353,6 +361,9 @@ struct AgentThread {
     entries: Vec<AgentThreadEntry>,
     entry_revisions: Vec<u64>,
     entry_indices: HashMap<u64, usize>,
+    entry_changes: VecDeque<(u64, usize)>,
+    entry_change_floor: u64,
+    child_entry_revisions: HashMap<u64, u64>,
     pending_permissions: Arc<[AgentPermissionRequest]>,
     auth_methods: Arc<[AgentAuthMethod]>,
     error: Option<Arc<str>>,
@@ -369,6 +380,7 @@ struct AgentThread {
     session_capabilities: AgentSessionCapabilities,
     session_history: AgentSessionHistoryState,
     settings_busy: bool,
+    session_reset: bool,
     preference_reconcile_skips: BTreeSet<(AgentPreferenceKind, String)>,
     next_entry_id: u64,
     next_entry_revision: u64,
@@ -389,6 +401,7 @@ struct AgentThread {
     child_plan_entries: HashMap<String, u64>,
     live_task_tools: HashMap<String, String>,
     task_labels: HashMap<String, String>,
+    active_context_compaction: Option<String>,
     suppress_user_echo: bool,
     /// Set once the session's first prompt named the pane. A title is derived
     /// exactly once per session, so a later rename is never overwritten.
@@ -406,6 +419,9 @@ impl AgentThread {
             entries: Vec::new(),
             entry_revisions: Vec::new(),
             entry_indices: HashMap::new(),
+            entry_changes: VecDeque::new(),
+            entry_change_floor: 1,
+            child_entry_revisions: HashMap::new(),
             pending_permissions: Arc::from([]),
             auth_methods: Arc::from([]),
             error: None,
@@ -422,6 +438,7 @@ impl AgentThread {
             session_capabilities: AgentSessionCapabilities::default(),
             session_history: AgentSessionHistoryState::default(),
             settings_busy: false,
+            session_reset: false,
             preference_reconcile_skips: BTreeSet::new(),
             next_entry_id: 1,
             next_entry_revision: 1,
@@ -442,6 +459,7 @@ impl AgentThread {
             child_plan_entries: HashMap::new(),
             live_task_tools: HashMap::new(),
             task_labels: HashMap::new(),
+            active_context_compaction: None,
             suppress_user_echo: false,
             auto_titled: false,
             last_activity: Instant::now(),
@@ -461,6 +479,7 @@ impl AgentThread {
             session_capabilities: self.session_capabilities,
             session_history: self.session_history.clone(),
             settings_busy: self.settings_busy,
+            lifecycle_pending: false,
             mode: self.mode.clone(),
             modes: self.modes.clone(),
             config_options: self.config_options.clone(),
@@ -472,6 +491,7 @@ impl AgentThread {
     }
 
     fn reset_for_open(&mut self, restoring: bool) {
+        self.session_reset = true;
         self.connection = if restoring {
             AgentConnectionState::Restoring
         } else {
@@ -480,6 +500,9 @@ impl AgentThread {
         self.entries.clear();
         self.entry_revisions.clear();
         self.entry_indices.clear();
+        self.entry_changes.clear();
+        self.entry_change_floor = self.next_entry_revision;
+        self.child_entry_revisions.clear();
         self.pending_permissions = Arc::from([]);
         self.error = None;
         self.title = None;
@@ -488,6 +511,7 @@ impl AgentThread {
         self.config_options = Arc::from([]);
         self.available_commands = Arc::from([]);
         self.usage = None;
+        self.session_history.loading = false;
         self.settings_busy = false;
         self.preference_reconcile_skips.clear();
         self.next_entry_id = 1;
@@ -508,6 +532,7 @@ impl AgentThread {
         self.child_plan_entries.clear();
         self.live_task_tools.clear();
         self.task_labels.clear();
+        self.active_context_compaction = None;
         self.suppress_user_echo = false;
         self.auto_titled = false;
         self.last_activity = Instant::now();
@@ -530,6 +555,7 @@ impl AgentThread {
             self.modes = modes
                 .available_modes
                 .into_iter()
+                .take(MAX_AGENT_MODES)
                 .map(|mode| AgentMode {
                     id: mode.id.0.to_string(),
                     name: mode.name,
@@ -554,9 +580,11 @@ impl AgentThread {
 
     fn push_entry(&mut self, entry: AgentThreadEntry) {
         let revision = self.allocate_entry_revision();
-        self.entry_indices.insert(entry.id(), self.entries.len());
+        let index = self.entries.len();
+        self.entry_indices.insert(entry.id(), index);
         self.entries.push(entry);
         self.entry_revisions.push(revision);
+        self.record_entry_change(revision, index);
     }
 
     fn entry_index(&self, id: u64) -> Option<usize> {
@@ -567,7 +595,22 @@ impl AgentThread {
         let revision = self.allocate_entry_revision();
         if let Some(entry_revision) = self.entry_revisions.get_mut(index) {
             *entry_revision = revision;
+            self.record_entry_change(revision, index);
         }
+    }
+
+    fn record_entry_change(&mut self, revision: u64, index: usize) {
+        if self.entry_changes.len() == ENTRY_CHANGE_LOG_CAPACITY
+            && let Some((discarded, _)) = self.entry_changes.pop_front()
+        {
+            self.entry_change_floor = discarded.saturating_add(1);
+        }
+        self.entry_changes.push_back((revision, index));
+    }
+
+    fn touch_child_entry(&mut self, id: u64) {
+        let revision = self.allocate_entry_revision();
+        self.child_entry_revisions.insert(id, revision);
     }
 
     fn prompt_refusal(&self, has_images: bool) -> Option<Arc<str>> {
@@ -623,6 +666,7 @@ impl AgentThread {
                 self.apply_profiled_chunk(StreamRole::User, chunk);
             }
             SessionUpdate::AgentMessageChunk(chunk) => {
+                self.settle_context_compaction();
                 self.apply_profiled_chunk(StreamRole::Assistant, chunk);
             }
             SessionUpdate::AgentThoughtChunk(chunk) => {
@@ -651,6 +695,7 @@ impl AgentThread {
                 self.available_commands = update
                     .available_commands
                     .into_iter()
+                    .take(MAX_AGENT_AVAILABLE_COMMANDS)
                     .map(agent_command_model)
                     .collect::<Vec<_>>()
                     .into();
@@ -1043,13 +1088,13 @@ impl AgentThread {
         if markdown.is_empty() && images.is_empty() {
             return;
         }
-        let entry_id = if let Some(message_id) = message_id {
-            let key = (role, message_id);
-            if let Some(id) = self.message_entries.get(&key).copied() {
+        let message_key = message_id.map(|message_id| (role, message_id));
+        let entry_id = if let Some(key) = message_key.as_ref() {
+            if let Some(id) = self.message_entries.get(key).copied() {
                 id
             } else {
                 let id = self.push_stream_entry(role);
-                self.message_entries.insert(key, id);
+                self.message_entries.insert(key.clone(), id);
                 id
             }
         } else if let Some((active_role, id)) = self.active_stream {
@@ -1114,6 +1159,17 @@ impl AgentThread {
 
     fn upsert_tool(&mut self, tool: ToolCall) {
         let protocol_id = tool.tool_call_id.0.to_string();
+        let context_compaction = context_compaction(tool.meta.as_ref());
+        if context_compaction {
+            self.active_context_compaction = if matches!(
+                tool.status,
+                ToolCallStatus::Completed | ToolCallStatus::Failed
+            ) {
+                None
+            } else {
+                Some(protocol_id.clone())
+            };
+        }
         let subagent = match self.provider {
             AgentProvider::ClaudeCode => claude_tool_subagent(tool.meta.as_ref()).unwrap_or(false),
             AgentProvider::Codex => codex_tool_subagent(tool.meta.as_ref()),
@@ -1212,6 +1268,12 @@ impl AgentThread {
 
     fn apply_tool_update(&mut self, update: ToolCallUpdate) {
         let protocol_id = update.tool_call_id.0.to_string();
+        let context_compaction = context_compaction(update.meta.as_ref())
+            || self.active_context_compaction.as_deref() == Some(protocol_id.as_str());
+        let context_compaction_finished = context_compaction
+            && update.fields.status.as_ref().is_some_and(|status| {
+                matches!(status, ToolCallStatus::Completed | ToolCallStatus::Failed)
+            });
         let subagent = match self.provider {
             AgentProvider::ClaudeCode => claude_tool_subagent(update.meta.as_ref()),
             AgentProvider::Codex => codex_tool_subagent(update.meta.as_ref()).then_some(true),
@@ -1331,6 +1393,11 @@ impl AgentThread {
         }
         if changed {
             self.touch_entry(index);
+        }
+        if context_compaction_finished {
+            self.active_context_compaction = None;
+        } else if context_compaction {
+            self.active_context_compaction = Some(protocol_id.clone());
         }
         if subagent == Some(true) {
             self.child_tool_roots
@@ -1524,16 +1591,17 @@ impl AgentThread {
         if markdown.is_empty() && images.is_empty() {
             return;
         }
-        let entry_id = if let Some(message_id) = message_id {
-            let key = (parent_tool_use_id.to_owned(), role, message_id);
-            if let Some(id) = self.child_message_entries.get(&key).copied() {
+        let message_key =
+            message_id.map(|message_id| (parent_tool_use_id.to_owned(), role, message_id));
+        let entry_id = if let Some(key) = message_key.as_ref() {
+            if let Some(id) = self.child_message_entries.get(key).copied() {
                 id
             } else {
                 let id = self.push_child_stream_entry(root_tool_id, role);
                 if id == 0 {
                     return;
                 }
-                self.child_message_entries.insert(key, id);
+                self.child_message_entries.insert(key.clone(), id);
                 id
             }
         } else if let Some((active_role, id)) =
@@ -1579,6 +1647,7 @@ impl AgentThread {
             _ => false,
         };
         if changed {
+            self.touch_child_entry(entry_id);
             self.touch_entry(root_index);
         }
     }
@@ -1737,6 +1806,7 @@ impl AgentThread {
             *entry_input = input;
             *entry_output = output;
             *entry_subagent = subagent;
+            self.touch_child_entry(entry_id);
             self.touch_entry(root_index);
             self.child_tool_roots
                 .insert(protocol_id, root_tool_id.to_owned());
@@ -1868,6 +1938,7 @@ impl AgentThread {
             changed = true;
         }
         if changed {
+            self.touch_child_entry(entry_id);
             self.touch_entry(root_index);
         }
         self.child_tool_roots
@@ -1897,6 +1968,7 @@ impl AgentThread {
         {
             if *current != markdown {
                 *current = markdown;
+                self.touch_child_entry(id);
                 self.touch_entry(root_index);
             }
             return;
@@ -1910,10 +1982,12 @@ impl AgentThread {
         let Some(root_index) = self.root_tool_index(root_tool_id) else {
             return false;
         };
+        let entry_id = entry.id();
         let AgentThreadEntry::Tool { children, .. } = &mut self.entries[root_index] else {
             return false;
         };
         children.push(entry);
+        self.touch_child_entry(entry_id);
         self.touch_entry(root_index);
         true
     }
@@ -1962,20 +2036,29 @@ impl AgentThread {
             *status = AgentToolStatusModel::NeedsApproval;
             self.touch_entry(index);
         }
-        let mut pending_permissions = self.pending_permissions.to_vec();
-        pending_permissions.push(AgentPermissionRequest {
+        let request = AgentPermissionRequest {
             request_id,
             tool_call_id,
             title,
             options: options
                 .into_iter()
+                .take(MAX_AGENT_PERMISSION_OPTIONS)
                 .map(|option| AgentPermissionOption {
                     id: option.option_id.0.to_string(),
                     name: option.name,
                     kind: map_permission_kind(option.kind),
                 })
                 .collect(),
-        });
+        };
+        let mut pending_permissions = self.pending_permissions.to_vec();
+        if let Some(existing) = pending_permissions
+            .iter_mut()
+            .find(|pending| pending.request_id == request_id)
+        {
+            *existing = request;
+        } else {
+            pending_permissions.push(request);
+        }
         self.pending_permissions = pending_permissions.into();
     }
 
@@ -2010,6 +2093,39 @@ impl AgentThread {
         self.settle_inflight(AgentToolStatusModel::Canceled);
     }
 
+    fn settle_context_compaction(&mut self) {
+        let Some(protocol_id) = self.active_context_compaction.take() else {
+            return;
+        };
+        let Some(entry_id) = self.tool_entries.get(&protocol_id).copied() else {
+            return;
+        };
+        let Some(index) = self.entry_index(entry_id) else {
+            return;
+        };
+        let changed = if let AgentThreadEntry::Tool { status, label, .. } = &mut self.entries[index]
+        {
+            let mut changed = false;
+            if matches!(
+                status,
+                AgentToolStatusModel::Pending | AgentToolStatusModel::Running
+            ) {
+                *status = AgentToolStatusModel::Completed;
+                changed = true;
+            }
+            if label == "Context compacting" {
+                "Context compacted".clone_into(label);
+                changed = true;
+            }
+            changed
+        } else {
+            false
+        };
+        if changed {
+            self.touch_entry(index);
+        }
+    }
+
     /// What the quiesce watchdog refuses to park through: a permission the user
     /// still owes an answer to (a question is one), a subagent task still
     /// reporting, or any tool call the agent has not resolved.
@@ -2030,12 +2146,18 @@ impl AgentThread {
         ));
         self.finish_text_streams();
         self.finish_child_text_streams();
+        if settled_status == AgentToolStatusModel::Completed {
+            self.settle_context_compaction();
+        } else {
+            self.active_context_compaction = None;
+        }
         self.pending_permissions = Arc::from([]);
         self.suppress_user_echo = false;
         self.active_stream = None;
         let held: std::collections::HashSet<String> =
             self.live_task_tools.values().cloned().collect();
         for index in 0..self.entries.len() {
+            let mut changed_children = Vec::new();
             let changed = if let AgentThreadEntry::Tool {
                 protocol_id,
                 status,
@@ -2057,7 +2179,7 @@ impl AgentThread {
                     changed = true;
                 }
                 for child in children {
-                    if let AgentThreadEntry::Tool { status, .. } = child
+                    if let AgentThreadEntry::Tool { id, status, .. } = child
                         && matches!(
                             status,
                             AgentToolStatusModel::Pending
@@ -2066,6 +2188,7 @@ impl AgentThread {
                         )
                     {
                         *status = settled_status;
+                        changed_children.push(*id);
                         changed = true;
                     }
                 }
@@ -2073,10 +2196,18 @@ impl AgentThread {
             } else {
                 false
             };
+            for id in changed_children {
+                self.touch_child_entry(id);
+            }
             if changed {
                 self.touch_entry(index);
             }
         }
+    }
+
+    fn fail_inflight(&mut self) {
+        self.live_task_tools.clear();
+        self.settle_inflight(AgentToolStatusModel::Failed);
     }
 
     fn finish_replay(&mut self) {
@@ -2120,6 +2251,8 @@ impl AgentThread {
             }
             self.entries.remove(index);
             self.entry_revisions.remove(index);
+            self.entry_changes.clear();
+            self.entry_change_floor = self.next_entry_revision;
         }
 
         self.entry_indices.clear();
@@ -2131,12 +2264,12 @@ impl AgentThread {
 
 #[derive(Clone, Debug)]
 pub(crate) enum AgentControllerEvent {
-    Pane {
-        pane: PaneId,
-    },
     Provider {
         pane: PaneId,
         provider: AgentProvider,
+    },
+    Restart {
+        pane: PaneId,
     },
     Title {
         pane: PaneId,
@@ -2219,6 +2352,10 @@ enum RuntimeEvent {
         pane: PaneId,
         result: Result<StopReason, String>,
     },
+    TurnStarted {
+        pane: PaneId,
+        turn_id: u64,
+    },
     Authenticated,
     AuthenticationFailed {
         message: String,
@@ -2250,6 +2387,7 @@ enum RuntimeEvent {
     /// Prompts the daemon queued and is handing back, so the composer refills.
     PromptsReclaimed {
         pane: PaneId,
+        count: usize,
         text: String,
         images: Vec<Arc<Image>>,
     },
@@ -2297,6 +2435,20 @@ struct PaneViewport {
     /// Whether a turn has been dispatched, which is when the daemon takes the
     /// worktree snapshot the turn diff is measured against.
     turn_dispatched: bool,
+    turn_generation: u64,
+    last_turn_id: Option<u64>,
+    conversation_epoch: u64,
+    last_reclaim_id: u64,
+    lifecycle_pending: Option<LifecycleRequest>,
+    lifecycle_token: u64,
+    pending_provider_state: Option<AgentPaneWire>,
+    session_change_pending: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LifecycleRequest {
+    Retry,
+    Provider(AgentProvider),
 }
 
 pub struct AgentController {
@@ -2314,7 +2466,7 @@ pub struct AgentController {
     pending_images: BTreeMap<PaneId, Vec<Arc<Image>>>,
     retained_panes: BTreeSet<PaneId>,
     /// Turn-diff captures waiting on the daemon's answer, keyed by request.
-    turn_diffs: BTreeMap<u64, Sender<Result<TurnDiff, String>>>,
+    turn_diffs: BTreeMap<u64, (PaneId, u64, Sender<Result<TurnDiff, String>>)>,
     next_turn_diff_request: u64,
     shutting_down: bool,
 }
@@ -2360,6 +2512,10 @@ impl AgentController {
                 .get(&pane)
                 .map(|text| Arc::from(text.as_str()));
             state.queued_prompts = self.queued_count(pane);
+            state.lifecycle_pending = self
+                .viewports
+                .get(&pane)
+                .is_some_and(|viewport| viewport.lifecycle_pending.is_some());
             state
         })
     }
@@ -2381,6 +2537,18 @@ impl AgentController {
             .is_some_and(|viewport| viewport.turn_dispatched)
     }
 
+    pub(crate) fn turn_generation(&self, pane: PaneId) -> u64 {
+        self.viewports
+            .get(&pane)
+            .map_or(0, |viewport| viewport.turn_generation)
+    }
+
+    pub(crate) fn conversation_epoch(&self, pane: PaneId) -> u64 {
+        self.viewports
+            .get(&pane)
+            .map_or(0, |viewport| viewport.conversation_epoch)
+    }
+
     /// Ask the daemon to diff the pane's worktree against the base its turn
     /// started from. Git runs on the daemon's machine — which is the machine
     /// the worktree is on — and the task carries the answer back.
@@ -2392,26 +2560,74 @@ impl AgentController {
         if !self.has_turn_base(pane) {
             return None;
         }
+        self.turn_diffs
+            .retain(|_, (_, _, sender)| !sender.is_closed());
         self.next_turn_diff_request = self.next_turn_diff_request.saturating_add(1);
         let request_id = self.next_turn_diff_request;
         if !self.send(pane, AgentRequest::TurnDiff { request_id }, cx) {
             return Some(Task::ready(Err("agent daemon is not connected".to_owned())));
         }
         let (sender, receiver) = async_channel::bounded(1);
-        self.turn_diffs.insert(request_id, sender);
+        let generation = self.turn_generation(pane);
+        self.turn_diffs
+            .insert(request_id, (pane, generation, sender));
+        let timer = cx.background_executor().timer(TURN_DIFF_TIMEOUT);
         Some(cx.background_executor().spawn(async move {
-            receiver
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err("the turn diff was abandoned".to_owned()))
+            futures_lite::future::race(
+                async {
+                    receiver
+                        .recv()
+                        .await
+                        .unwrap_or_else(|_| Err("the turn diff was abandoned".to_owned()))
+                },
+                async {
+                    timer.await;
+                    Err("the turn diff timed out".to_owned())
+                },
+            )
+            .await
         }))
     }
 
     /// Answer one outstanding turn-diff capture.
-    fn resolve_turn_diff(&mut self, request_id: u64, outcome: Result<TurnDiff, String>) {
-        if let Some(sender) = self.turn_diffs.remove(&request_id) {
+    fn resolve_turn_diff(
+        &mut self,
+        pane: PaneId,
+        request_id: u64,
+        outcome: Result<TurnDiff, String>,
+    ) -> Option<u64> {
+        if self
+            .turn_diffs
+            .get(&request_id)
+            .is_some_and(|(request_pane, _, _)| *request_pane == pane)
+            && let Some((_, generation, sender)) = self.turn_diffs.remove(&request_id)
+        {
             let _ = sender.try_send(outcome);
+            return Some(generation);
         }
+        None
+    }
+
+    fn abandon_turn(&mut self, pane: PaneId) -> bool {
+        let mut changed = false;
+        if let Some(viewport) = self.viewports.get_mut(&pane) {
+            changed |= viewport.turn_dispatched;
+            viewport.turn_dispatched = false;
+        }
+        let requests = self
+            .turn_diffs
+            .iter()
+            .filter_map(|(request, (request_pane, _, _))| {
+                (*request_pane == pane).then_some(*request)
+            })
+            .collect::<Vec<_>>();
+        for request in requests {
+            if let Some((_, _, sender)) = self.turn_diffs.remove(&request) {
+                changed = true;
+                let _ = sender.try_send(Err("the agent session changed".to_owned()));
+            }
+        }
+        changed
     }
 
     /// Which bucket one pane lands in, in the same order the fleet rollup uses.
@@ -2446,14 +2662,37 @@ impl AgentController {
         attention
     }
 
-    pub(crate) fn pane_entries(&self, pane: PaneId) -> Option<(&[AgentThreadEntry], &[u64], u64)> {
+    pub(crate) fn pane_entries(
+        &self,
+        pane: PaneId,
+    ) -> Option<(&[AgentThreadEntry], &[u64], &HashMap<u64, u64>, u64)> {
         self.panes.get(&pane).map(|thread| {
             (
                 thread.entries.as_slice(),
                 thread.entry_revisions.as_slice(),
+                &thread.child_entry_revisions,
                 thread.next_entry_revision,
             )
         })
+    }
+
+    pub(crate) fn pane_entry_changes(&self, pane: PaneId, since: u64) -> Option<Vec<usize>> {
+        let thread = self.panes.get(&pane)?;
+        if since < thread.entry_change_floor {
+            return None;
+        }
+        let mut changes = thread
+            .entry_changes
+            .iter()
+            .filter_map(|(revision, index)| (*revision >= since).then_some(*index))
+            .collect::<Vec<_>>();
+        changes.sort_unstable();
+        changes.dedup();
+        Some(changes)
+    }
+
+    pub(crate) fn registered_panes(&self) -> BTreeSet<PaneId> {
+        self.panes.keys().copied().collect()
     }
 
     pub(crate) fn ensure_pane(
@@ -2463,56 +2702,53 @@ impl AgentController {
         cx: &mut Context<Self>,
     ) {
         let configured_cwd = self.config.working_directory.clone();
-        let cwd = if descriptor.session_id.is_some() {
-            descriptor.cwd.clone().or(configured_cwd)
-        } else {
-            configured_cwd.or_else(|| descriptor.cwd.clone())
-        }
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("/"));
+        let cwd = descriptor
+            .cwd
+            .clone()
+            .or(configured_cwd)
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("/"));
         let session_id = descriptor.session_id.clone();
         let provider_changed = self
             .panes
             .get(&pane)
             .is_some_and(|thread| thread.provider != descriptor.provider);
+        if provider_changed {
+            self.abandon_turn(pane);
+        }
+        let descriptor_changed = provider_changed;
         let thread = self.panes.entry(pane).or_insert_with(|| {
             AgentThread::new(descriptor.provider, cwd.clone(), session_id.clone())
         });
         if provider_changed {
             *thread = AgentThread::new(descriptor.provider, cwd.clone(), session_id.clone());
         }
-        if thread.cwd != cwd {
-            thread.cwd.clone_from(&cwd);
+        self.retained_panes.insert(pane);
+        let viewport = self.viewports.entry(pane).or_default();
+        let mut pending_provider_state = None;
+        if provider_changed {
+            viewport.conversation_epoch = viewport.conversation_epoch.saturating_add(1);
+            viewport.last_turn_id = None;
+            viewport.lifecycle_pending = None;
+            viewport.session_change_pending = false;
+            pending_provider_state = viewport.pending_provider_state.take();
         }
-        if session_id.is_some() && thread.session_id.as_deref() != session_id.as_deref() {
-            thread.session_id = session_id.clone().map(Arc::from);
+        if descriptor_changed {
+            cx.notify();
         }
-        let opened = self.retained_panes.insert(pane);
-        self.viewports.entry(pane).or_default();
-        // A pane going live asks for its stream: from the top when it is new,
-        // from its cursor when it is coming back. `ensure_pane` runs on every
-        // snapshot, so only the open — not every pass — asks.
-        if opened || provider_changed {
-            self.request_replay(pane, cx);
+        if let Some(state) = pending_provider_state {
+            self.apply_pane_state(pane, &state, cx);
         }
     }
 
-    /// Ask the daemon for this pane's stream from where the reducer stands.
-    fn request_replay(&mut self, pane: PaneId, cx: &App) {
-        let from_seq = self
-            .viewports
-            .get(&pane)
-            .map_or(0, |viewport| viewport.last_applied);
-        self.send(pane, AgentRequest::Replay { from_seq }, cx);
-    }
-
-    pub(crate) fn retain_panes(&mut self, retained: &BTreeSet<PaneId>) {
+    pub(crate) fn retain_panes(&mut self, retained: &BTreeSet<PaneId>, cx: &mut Context<Self>) {
         let removed = self
             .retained_panes
             .difference(retained)
             .copied()
             .collect::<Vec<_>>();
         for pane in removed {
+            self.abandon_turn(pane);
             self.panes.remove(&pane);
         }
         self.viewports.retain(|pane, _| retained.contains(pane));
@@ -2520,7 +2756,11 @@ impl AgentController {
             .retain(|pane, _| retained.contains(pane));
         self.pending_images
             .retain(|pane, _| retained.contains(pane));
+        let changed = self.retained_panes != *retained;
         self.retained_panes.clone_from(retained);
+        if changed {
+            cx.notify();
+        }
     }
 
     pub(crate) fn synchronize_config(&mut self, config: AgentConfig, cx: &mut Context<Self>) {
@@ -2551,10 +2791,9 @@ impl AgentController {
                 "finish or cancel the current turn before switching agents",
             ));
         }
-        let cwd = thread.cwd.clone();
-        self.panes
-            .insert(pane, AgentThread::new(provider, cwd, None));
-        self.viewports.insert(pane, PaneViewport::default());
+        if !self.begin_lifecycle_request(pane, LifecycleRequest::Provider(provider), cx) {
+            return Ok(());
+        }
         cx.emit(AgentControllerEvent::Provider { pane, provider });
         cx.notify();
         Ok(())
@@ -2567,7 +2806,7 @@ impl AgentController {
         append: bool,
         cx: &mut Context<Self>,
     ) -> Result<(), Arc<str>> {
-        {
+        let (cwd, cursor, replace) = {
             let Some(thread) = self.panes.get(&pane) else {
                 return Err(Arc::from("agent pane is not registered"));
             };
@@ -2577,28 +2816,39 @@ impl AgentController {
             if thread.session_history.loading {
                 return Ok(());
             }
-            // The daemon lists a pane's own project in one shot, so there is no
-            // cursor to follow and an append has nothing left to fetch.
-            if append {
-                return Ok(());
-            }
-        }
+            let cursor = if append {
+                let Some(cursor) = thread.session_history.next_cursor.as_deref() else {
+                    return Ok(());
+                };
+                Some(cursor.to_owned())
+            } else {
+                None
+            };
+            ((!all_projects).then(|| thread.cwd.clone()), cursor, !append)
+        };
         if !self.send(
             pane,
             AgentRequest::SessionOp {
-                op: AgentSessionOpKind::List,
+                op: AgentSessionOpKind::List {
+                    cwd: cwd.clone(),
+                    cursor,
+                    replace,
+                },
             },
             cx,
         ) {
             return Err(Arc::from("agent daemon is not connected"));
         }
         if let Some(thread) = self.panes.get_mut(&pane) {
-            let cwd = (!all_projects).then(|| thread.cwd.clone());
             thread.session_history.loading = true;
             thread.session_history.error = None;
-            thread.session_history.sessions = Arc::from([]);
+            if replace {
+                thread.session_history.sessions = Arc::from([]);
+            }
             thread.session_history.cwd_filter = cwd;
-            thread.session_history.next_cursor = None;
+            if replace {
+                thread.session_history.next_cursor = None;
+            }
         }
         cx.notify();
         Ok(())
@@ -2643,6 +2893,8 @@ impl AgentController {
             AgentRequest::SessionOp {
                 op: AgentSessionOpKind::Switch {
                     session_id: session.session_id,
+                    cwd: session.cwd,
+                    additional_directories: session.additional_directories,
                 },
             },
             cx,
@@ -2653,6 +2905,7 @@ impl AgentController {
             thread.connection = AgentConnectionState::Restoring;
             thread.error = None;
         }
+        self.viewport_mut(pane).session_change_pending = true;
         cx.notify();
         Ok(())
     }
@@ -2670,10 +2923,11 @@ impl AgentController {
                 "finish or cancel the current turn before starting a new session",
             ));
         }
+        let cwd = thread.cwd.clone();
         if !self.send(
             pane,
             AgentRequest::SessionOp {
-                op: AgentSessionOpKind::New,
+                op: AgentSessionOpKind::New { cwd },
             },
             cx,
         ) {
@@ -2683,33 +2937,51 @@ impl AgentController {
             thread.connection = AgentConnectionState::Starting;
             thread.error = None;
         }
+        self.viewport_mut(pane).session_change_pending = true;
         cx.notify();
         Ok(())
     }
 
-    /// Point the pane at another workspace. An ACP session is bound to the
-    /// directory it was created in and the daemon captured that directory when
-    /// it opened the pane's adapter, so a live pane cannot be moved: the wire
-    /// carries no "new session over there". A pane opened in the directory
-    /// does what this used to.
     pub(crate) fn set_working_directory(
         &mut self,
         pane: PaneId,
         cwd: &Path,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Result<(), Arc<str>> {
         let Some(thread) = self.panes.get(&pane) else {
             return Err(Arc::from("agent pane is not registered"));
         };
-        if !cwd.is_absolute() {
-            return Err(Arc::from("the working directory must be an absolute path"));
+        if !cwd.is_absolute() || !valid_session_directory(cwd) {
+            return Err(Arc::from(
+                "the working directory must be an absolute path within the wire limit",
+            ));
         }
         if thread.cwd == cwd {
             return Ok(());
         }
-        Err(Arc::from(
-            "the daemon owns this agent's working directory; open a new agent pane there instead",
-        ))
+        if !thread.connection.accepts_prompt() || !thread.pending_permissions.is_empty() {
+            return Err(Arc::from(
+                "finish or cancel the current turn before changing workspaces",
+            ));
+        }
+        if !self.send(
+            pane,
+            AgentRequest::SessionOp {
+                op: AgentSessionOpKind::New {
+                    cwd: cwd.to_path_buf(),
+                },
+            },
+            cx,
+        ) {
+            return Err(Arc::from("agent daemon is not connected"));
+        }
+        if let Some(thread) = self.panes.get_mut(&pane) {
+            thread.connection = AgentConnectionState::Starting;
+            thread.error = None;
+        }
+        self.viewport_mut(pane).session_change_pending = true;
+        cx.notify();
+        Ok(())
     }
 
     pub(crate) fn delete_session(
@@ -2778,6 +3050,11 @@ impl AgentController {
         if !queueing && let Some(refusal) = thread.prompt_refusal(!images.is_empty()) {
             return Err(refusal);
         }
+        if queueing && self.queued_count(pane) >= MAX_AGENT_QUEUED_PROMPTS {
+            return Err(Arc::from(
+                "finish or unqueue one of the four queued prompts first",
+            ));
+        }
         let wire_images = attachment::wire_images(&images);
         if !self.send(
             pane,
@@ -2801,11 +3078,11 @@ impl AgentController {
             cx.notify();
             return Ok(());
         }
+        self.abandon_turn(pane);
         let title = derive_pane_title(&text);
         if let Some(thread) = self.panes.get_mut(&pane) {
             thread.begin_prompt(text, images);
         }
-        self.viewport_mut(pane).turn_dispatched = true;
         self.name_pane_after_prompt(pane, title, cx);
         cx.notify();
         Ok(())
@@ -2853,7 +3130,6 @@ impl AgentController {
         if !self.queue_composer_text(pane, text) {
             return;
         }
-        cx.emit(AgentControllerEvent::Pane { pane });
         cx.notify();
     }
 
@@ -2883,14 +3159,20 @@ impl AgentController {
     }
 
     pub(crate) fn cancel(&mut self, pane: PaneId, cx: &mut Context<Self>) {
-        let Some(thread) = self.panes.get_mut(&pane) else {
+        let Some(thread) = self.panes.get(&pane) else {
             return;
         };
         if !thread.connection.has_active_turn() {
             return;
         }
-        thread.connection = AgentConnectionState::Cancelling;
-        self.send(pane, AgentRequest::Cancel, cx);
+        if self.send(pane, AgentRequest::Cancel, cx) {
+            self.panes
+                .get_mut(&pane)
+                .expect("pane checked above")
+                .connection = AgentConnectionState::Cancelling;
+        } else if let Some(thread) = self.panes.get_mut(&pane) {
+            thread.error = Some(Arc::from("agent daemon is not connected"));
+        }
         cx.notify();
     }
 
@@ -2900,7 +3182,7 @@ impl AgentController {
         request_id: u64,
         option_id: Option<String>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let canceled = option_id.is_none();
         if self.send(
             pane,
@@ -2914,7 +3196,9 @@ impl AgentController {
                 thread.resolve_permission(request_id, canceled);
             }
             cx.notify();
+            return true;
         }
+        false
     }
 
     pub(crate) fn authenticate(&mut self, pane: PaneId, method_id: String, cx: &mut Context<Self>) {
@@ -3043,15 +3327,53 @@ impl AgentController {
         }
     }
 
-    /// Re-ask the daemon for everything about this pane. The adapter is the
-    /// daemon's to restart, so retrying is a resubscribe.
     pub(crate) fn retry(&mut self, pane: PaneId, cx: &mut Context<Self>) {
-        if let Some(thread) = self.panes.get_mut(&pane) {
-            thread.error = None;
-            thread.connection = AgentConnectionState::Starting;
+        if !self.panes.contains_key(&pane) {
+            return;
         }
-        self.request_replay(pane, cx);
+        if !self.begin_lifecycle_request(pane, LifecycleRequest::Retry, cx) {
+            return;
+        }
+        let thread = self.panes.get_mut(&pane).expect("pane checked above");
+        thread.session_history.loading = false;
+        thread.settings_busy = false;
+        self.abandon_turn(pane);
+        let viewport = self.viewport_mut(pane);
+        viewport.pending_setting = None;
+        viewport.session_change_pending = false;
+        cx.emit(AgentControllerEvent::Restart { pane });
         cx.notify();
+    }
+
+    fn begin_lifecycle_request(
+        &mut self,
+        pane: PaneId,
+        request: LifecycleRequest,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let viewport = self.viewport_mut(pane);
+        if viewport.lifecycle_pending.is_some() {
+            return false;
+        }
+        viewport.lifecycle_pending = Some(request);
+        viewport.lifecycle_token = viewport.lifecycle_token.saturating_add(1);
+        let token = viewport.lifecycle_token;
+        cx.spawn(async move |controller, cx| {
+            cx.background_executor()
+                .timer(LIFECYCLE_REQUEST_TIMEOUT)
+                .await;
+            controller
+                .update(cx, |controller, cx| {
+                    let viewport = controller.viewport_mut(pane);
+                    if viewport.lifecycle_pending.is_some() && viewport.lifecycle_token == token {
+                        viewport.lifecycle_pending = None;
+                        cx.notify();
+                    }
+                })
+                .ok();
+        })
+        .detach();
+        true
     }
 
     pub(crate) fn is_shutting_down(&self) -> bool {
@@ -3082,16 +3404,22 @@ impl AgentController {
         items: Vec<AgentStreamItem>,
         cx: &mut Context<Self>,
     ) {
+        if !self.panes.contains_key(&pane) {
+            return;
+        }
         let mut changed = false;
         for item in items {
             self.viewport_mut(pane).last_applied = item.seq;
-            let Some(event) = self.translate_stream_payload(pane, item.payload) else {
+            if let AgentStreamPayload::StateSynced { state } = &item.payload {
+                self.apply_pane_state(pane, state, cx);
+                continue;
+            }
+            let Some(event) = self.translate_stream_payload(pane, item.payload, cx) else {
                 continue;
             };
             changed |= self.handle_runtime_event(pane, event, cx);
         }
         if changed {
-            cx.emit(AgentControllerEvent::Pane { pane });
             cx.notify();
         }
     }
@@ -3104,47 +3432,71 @@ impl AgentController {
         state: &AgentPaneWire,
         cx: &mut Context<Self>,
     ) {
-        self.viewport_mut(pane).queued_prompts = state.queued_prompts as usize;
-        let Some(thread) = self.panes.get_mut(&pane) else {
+        let Some(before) = self.pane_state(pane) else {
             return;
         };
+        let turn_changed =
+            matches!(state.phase, AgentConnectionPhase::Failed { .. }) && self.abandon_turn(pane);
+        let viewport = self.viewport_mut(pane);
+        viewport.queued_prompts = state.queued_prompts as usize;
+        if matches!(
+            viewport.lifecycle_pending,
+            Some(LifecycleRequest::Provider(_))
+        ) {
+            viewport.pending_provider_state = Some(state.clone());
+            return;
+        }
+        if matches!(viewport.lifecycle_pending, Some(LifecycleRequest::Retry))
+            && !matches!(state.phase, AgentConnectionPhase::Failed { .. })
+        {
+            viewport.lifecycle_pending = None;
+        }
+        let session_change_pending = viewport.session_change_pending;
+        if matches!(state.phase, AgentConnectionPhase::Failed { .. }) {
+            viewport.session_change_pending = false;
+        }
+        let thread = self.panes.get_mut(&pane).expect("pane checked above");
+        let was_failed = thread.connection == AgentConnectionState::Failed;
         match &state.phase {
             AgentConnectionPhase::Starting => {
-                if !matches!(
-                    thread.connection,
-                    AgentConnectionState::Restoring | AgentConnectionState::Starting
-                ) {
-                    thread.connection = AgentConnectionState::Starting;
-                }
+                thread.connection = AgentConnectionState::Starting;
+                thread.error = state.error.as_deref().map(Arc::from);
             }
-            AgentConnectionPhase::Ready | AgentConnectionPhase::AwaitingPermission => {
-                if thread.connection == AgentConnectionState::Starting {
+            AgentConnectionPhase::Ready => {
+                if matches!(
+                    thread.connection,
+                    AgentConnectionState::Starting
+                        | AgentConnectionState::Failed
+                        | AgentConnectionState::Disconnected
+                ) && !session_change_pending
+                {
                     thread.connection = AgentConnectionState::Ready;
                 }
+                if was_failed || state.error.is_some() {
+                    thread.error = state.error.as_deref().map(Arc::from);
+                }
             }
-            AgentConnectionPhase::Running => {
+            AgentConnectionPhase::Running | AgentConnectionPhase::AwaitingPermission => {
                 if !thread.connection.has_active_turn() {
                     thread.connection = AgentConnectionState::Running;
                 }
+                thread.error = state.error.as_deref().map(Arc::from);
             }
             AgentConnectionPhase::Failed { message } => {
                 thread.connection = AgentConnectionState::Failed;
                 thread.error = Some(Arc::from(message.as_str()));
+                thread.fail_inflight();
             }
         }
-        if let Some(session_id) = &state.session_id
-            && thread.session_id.as_deref() != Some(session_id.as_str())
+        thread.title = state.title.as_deref().map(Arc::from);
+        if state.auth_methods.is_empty() {
+            thread.auth_methods = Arc::from([]);
+        } else if let Some(methods) =
+            decode_state_blob::<Vec<StreamAuthMethod>>(&state.auth_methods)
         {
-            thread.session_id = Some(Arc::from(session_id.as_str()));
-        }
-        if let Some(title) = &state.title
-            && thread.title.as_deref() != Some(title.as_str())
-        {
-            thread.title = Some(Arc::from(title.as_str()));
-        }
-        if let Some(methods) = decode_state_blob::<Vec<StreamAuthMethod>>(&state.auth_methods) {
             thread.auth_methods = methods
                 .into_iter()
+                .take(MAX_AGENT_AUTH_METHODS)
                 .map(|method| AgentAuthMethod {
                     id: method.id,
                     name: method.name,
@@ -3153,17 +3505,28 @@ impl AgentController {
                 .collect::<Vec<_>>()
                 .into();
         }
+        thread.pending_permissions = Arc::from([]);
         if let Some(permission) = &state.pending_permission
-            && !thread
-                .pending_permissions
-                .iter()
-                .any(|pending| pending.request_id == permission.request_id)
             && let Some((tool_call, options)) = decode_permission_payload(&permission.payload)
         {
             thread.request_permission(permission.request_id, tool_call, options);
         }
-        cx.emit(AgentControllerEvent::Pane { pane });
-        cx.notify();
+        if state.config_options.is_empty() && state.modes.is_empty() {
+            thread.config_options = Arc::from([]);
+            thread.mode = None;
+            thread.modes = Arc::from([]);
+        } else if !state.config_options.is_empty() {
+            if let Some(config_options) =
+                decode_state_blob::<Vec<SessionConfigOption>>(&state.config_options)
+            {
+                thread.set_session_configuration(None, Some(config_options));
+            }
+        } else if let Some(modes) = decode_state_blob::<SessionModeState>(&state.modes) {
+            thread.set_session_configuration(Some(modes), None);
+        }
+        if turn_changed || self.pane_state(pane).as_ref() != Some(&before) {
+            cx.notify();
+        }
     }
 
     /// Reduce the answer to `AgentSessionOp::List`. It arrives pane-wide, so it
@@ -3177,32 +3540,43 @@ impl AgentController {
         let Some(payload) = decode_state_blob::<AgentStreamPayload>(result) else {
             return;
         };
-        let Some(event) = self.translate_stream_payload(pane, payload) else {
+        let Some(event) = self.translate_stream_payload(pane, payload, cx) else {
             return;
         };
         if self.handle_runtime_event(pane, event, cx) {
-            cx.emit(AgentControllerEvent::Pane { pane });
             cx.notify();
         }
     }
 
     /// Reduce the answer to one `AgentTurnDiff` request.
-    pub(crate) fn apply_turn_diff_result(&mut self, result: &str) {
+    pub(crate) fn apply_turn_diff_result(
+        &mut self,
+        pane: PaneId,
+        result: &str,
+        cx: &mut Context<Self>,
+    ) {
         let Some(payload) = decode_state_blob::<AgentStreamPayload>(result) else {
             return;
         };
         if let AgentStreamPayload::TurnDiff {
             request_id,
             outcome,
+            ..
         } = payload
         {
-            self.resolve_turn_diff(
-                request_id,
-                match outcome {
-                    AgentTurnDiffOutcome::Captured { diff } => Ok(diff),
-                    AgentTurnDiffOutcome::Failed { message } => Err(message),
-                },
-            );
+            let (outcome, unavailable) = match outcome {
+                AgentTurnDiffOutcome::Captured { diff } => (Ok(diff), false),
+                AgentTurnDiffOutcome::Unavailable { message } => (Err(message), true),
+                AgentTurnDiffOutcome::Failed { message } => (Err(message), false),
+            };
+            let generation = self.resolve_turn_diff(pane, request_id, outcome);
+            if unavailable
+                && generation == Some(self.turn_generation(pane))
+                && let Some(viewport) = self.viewports.get_mut(&pane)
+                && std::mem::take(&mut viewport.turn_dispatched)
+            {
+                cx.notify();
+            }
         }
     }
 
@@ -3213,6 +3587,7 @@ impl AgentController {
         &mut self,
         pane: PaneId,
         payload: AgentStreamPayload,
+        cx: &App,
     ) -> Option<RuntimeEvent> {
         Some(match payload {
             AgentStreamPayload::Ready {
@@ -3225,6 +3600,7 @@ impl AgentController {
                 agent_key,
                 auth_methods: auth_methods
                     .into_iter()
+                    .take(MAX_AGENT_AUTH_METHODS)
                     .map(|method| AgentAuthMethod {
                         id: method.id,
                         name: method.name,
@@ -3253,11 +3629,15 @@ impl AgentController {
                 modes: decode_json(modes),
                 config_options: decode_json(config_options),
             },
+            AgentStreamPayload::StateSynced { .. }
+            | AgentStreamPayload::TurnAbandoned { .. }
+            | AgentStreamPayload::PromptAccepted { .. } => return None,
             AgentStreamPayload::SessionsListed {
                 sessions,
                 next_cursor,
                 cwd_filter,
                 replace,
+                ..
             } => RuntimeEvent::SessionsListed {
                 pane,
                 sessions: sessions
@@ -3274,7 +3654,7 @@ impl AgentController {
                 cwd_filter,
                 replace,
             },
-            AgentStreamPayload::SessionListFailed { message } => {
+            AgentStreamPayload::SessionListFailed { message, .. } => {
                 RuntimeEvent::SessionListFailed { pane, message }
             }
             AgentStreamPayload::SessionSwitched {
@@ -3294,10 +3674,10 @@ impl AgentController {
             AgentStreamPayload::SessionSwitchFailed { message } => {
                 RuntimeEvent::SessionSwitchFailed { pane, message }
             }
-            AgentStreamPayload::SessionDeleted { session_id } => {
+            AgentStreamPayload::SessionDeleted { session_id, .. } => {
                 RuntimeEvent::SessionDeleted { pane, session_id }
             }
-            AgentStreamPayload::SessionDeleteFailed { message } => {
+            AgentStreamPayload::SessionDeleteFailed { message, .. } => {
                 RuntimeEvent::SessionDeleteFailed { pane, message }
             }
             AgentStreamPayload::Update { update } => RuntimeEvent::SessionUpdate {
@@ -3323,13 +3703,16 @@ impl AgentController {
                 request_id,
                 canceled,
             },
-            AgentStreamPayload::PromptFinished { outcome } => RuntimeEvent::PromptFinished {
+            AgentStreamPayload::PromptFinished { outcome, .. } => RuntimeEvent::PromptFinished {
                 pane,
                 result: match outcome {
                     AgentPromptOutcome::Finished { stop_reason } => Ok(decode_value(stop_reason)?),
                     AgentPromptOutcome::Failed { message } => Err(message),
                 },
             },
+            AgentStreamPayload::TurnStarted { turn_id } => {
+                RuntimeEvent::TurnStarted { pane, turn_id }
+            }
             AgentStreamPayload::Authenticated => RuntimeEvent::Authenticated,
             AgentStreamPayload::AuthenticationFailed { message } => {
                 RuntimeEvent::AuthenticationFailed { message }
@@ -3369,6 +3752,7 @@ impl AgentController {
             }
             AgentStreamPayload::Parked => RuntimeEvent::Parked { pane },
             AgentStreamPayload::PromptsReclaimed { prompts } => {
+                let count = prompts.len();
                 let mut text = String::new();
                 let mut images = Vec::new();
                 for prompt in prompts {
@@ -3380,17 +3764,71 @@ impl AgentController {
                     }
                     images.extend(prompt.images.iter().filter_map(attachment::inbound_image));
                 }
-                RuntimeEvent::PromptsReclaimed { pane, text, images }
+                RuntimeEvent::PromptsReclaimed {
+                    pane,
+                    count,
+                    text,
+                    images,
+                }
+            }
+            AgentStreamPayload::PromptsRestored {
+                reclaim_id,
+                prompts,
+            } => {
+                let client = self
+                    .mux
+                    .as_ref()
+                    .and_then(|mux| mux.read(cx).client_instance_id());
+                let prompts = prompts
+                    .into_iter()
+                    .filter(|prompt| prompt.owner.0 == 0 || Some(prompt.owner) == client)
+                    .collect::<Vec<_>>();
+                if prompts.is_empty() {
+                    return None;
+                }
+                {
+                    let viewport = self.viewport_mut(pane);
+                    if reclaim_id <= viewport.last_reclaim_id {
+                        return None;
+                    }
+                    viewport.last_reclaim_id = reclaim_id;
+                }
+                _ = self.send(
+                    pane,
+                    AgentRequest::AcknowledgePromptRestore { reclaim_id },
+                    cx,
+                );
+                let count = prompts.len();
+                let mut text = String::new();
+                let mut images = Vec::new();
+                for prompt in prompts {
+                    if !prompt.text.trim().is_empty() {
+                        if !text.is_empty() {
+                            text.push('\n');
+                        }
+                        text.push_str(&prompt.text);
+                    }
+                    images.extend(prompt.images.iter().filter_map(attachment::inbound_image));
+                }
+                RuntimeEvent::PromptsReclaimed {
+                    pane,
+                    count,
+                    text,
+                    images,
+                }
             }
             AgentStreamPayload::TurnDiff {
                 request_id,
                 outcome,
+                ..
             } => {
                 self.resolve_turn_diff(
+                    pane,
                     request_id,
                     match outcome {
                         AgentTurnDiffOutcome::Captured { diff } => Ok(diff),
-                        AgentTurnDiffOutcome::Failed { message } => Err(message),
+                        AgentTurnDiffOutcome::Unavailable { message }
+                        | AgentTurnDiffOutcome::Failed { message } => Err(message),
                     },
                 );
                 return None;
@@ -3417,12 +3855,20 @@ impl AgentController {
                 if let Some(thread) = self.panes.get_mut(&runtime_pane) {
                     thread.agent_name = Some(Arc::from(agent_name));
                     thread.agent_key = Arc::from(agent_key);
-                    thread.auth_methods = auth_methods.into();
+                    thread.auth_methods = auth_methods
+                        .into_iter()
+                        .take(MAX_AGENT_AUTH_METHODS)
+                        .collect::<Vec<_>>()
+                        .into();
                     thread.session_capabilities = session_capabilities;
                     changed_pane = Some(runtime_pane);
                 }
             }
             RuntimeEvent::SessionReset { pane, restoring } => {
+                self.abandon_turn(pane);
+                let viewport = self.viewport_mut(pane);
+                viewport.conversation_epoch = viewport.conversation_epoch.saturating_add(1);
+                viewport.last_turn_id = None;
                 if let Some(thread) = self.panes.get_mut(&pane) {
                     thread.reset_for_open(restoring);
                     changed_pane = Some(pane);
@@ -3434,6 +3880,7 @@ impl AgentController {
                 modes,
                 config_options,
             } => {
+                self.viewport_mut(pane).session_change_pending = false;
                 if let Some(thread) = self.panes.get_mut(&pane) {
                     let session_id: Arc<str> = Arc::from(session_id);
                     thread.session_id = Some(session_id.clone());
@@ -3441,6 +3888,7 @@ impl AgentController {
                     if thread.connection == AgentConnectionState::Restoring {
                         thread.finish_replay();
                     }
+                    thread.session_reset = false;
                     thread.settle_inflight(AgentToolStatusModel::Completed);
                     thread.connection = AgentConnectionState::Ready;
                     thread.error = None;
@@ -3495,14 +3943,28 @@ impl AgentController {
                 config_options,
                 replay,
             } => {
+                self.abandon_turn(pane);
+                self.viewport_mut(pane).session_change_pending = false;
+                if self
+                    .panes
+                    .get(&pane)
+                    .is_some_and(|thread| !thread.session_reset)
+                {
+                    let viewport = self.viewport_mut(pane);
+                    viewport.conversation_epoch = viewport.conversation_epoch.saturating_add(1);
+                }
+                self.viewport_mut(pane).last_turn_id = None;
                 if let Some(thread) = self.panes.get_mut(&pane) {
                     let previous_title = thread.title.clone();
-                    thread.reset_for_open(true);
+                    if !thread.session_reset {
+                        thread.reset_for_open(true);
+                    }
                     thread.cwd = cwd;
                     for update in replay {
                         thread.apply_update(update);
                     }
                     thread.finish_replay();
+                    thread.session_reset = false;
                     thread.settle_inflight(AgentToolStatusModel::Completed);
                     let session_id: Arc<str> = Arc::from(session_id);
                     thread.session_id = Some(session_id.clone());
@@ -3518,9 +3980,17 @@ impl AgentController {
                 }
             }
             RuntimeEvent::SessionSwitchFailed { pane, message } => {
+                self.viewport_mut(pane).session_change_pending = false;
                 if let Some(thread) = self.panes.get_mut(&pane) {
-                    thread.connection = AgentConnectionState::Ready;
-                    thread.error = Some(Arc::from(message));
+                    if matches!(
+                        thread.connection,
+                        AgentConnectionState::Starting | AgentConnectionState::Restoring
+                    ) {
+                        thread.connection = AgentConnectionState::Ready;
+                    }
+                    if thread.connection != AgentConnectionState::Failed {
+                        thread.error = Some(Arc::from(message));
+                    }
                     changed_pane = Some(pane);
                 }
             }
@@ -3585,6 +4055,7 @@ impl AgentController {
                 }
             }
             RuntimeEvent::PromptFinished { pane, result } => {
+                let mut failed = false;
                 if let Some(thread) = self.panes.get_mut(&pane) {
                     thread.finish_text_streams();
                     thread.suppress_user_echo = false;
@@ -3592,22 +4063,41 @@ impl AgentController {
                     match result {
                         Ok(StopReason::Cancelled) => {
                             thread.connection = AgentConnectionState::Ready;
+                            thread.error = None;
                             thread.cancel_inflight();
                         }
                         Ok(_) => {
                             thread.connection = AgentConnectionState::Ready;
+                            thread.error = None;
                             thread.settle_inflight(AgentToolStatusModel::Completed);
                         }
                         Err(error) => {
                             thread.connection = AgentConnectionState::Failed;
                             thread.error = Some(Arc::from(error));
-                            thread.settle_inflight(AgentToolStatusModel::Failed);
+                            thread.fail_inflight();
+                            failed = true;
                         }
                     }
                     changed_pane = Some(pane);
                     if thread.connection.accepts_prompt() {
                         reconcile_pane = Some(pane);
                     }
+                }
+                if failed {
+                    self.abandon_turn(pane);
+                }
+            }
+            RuntimeEvent::TurnStarted { pane, turn_id } => {
+                let viewport = self.viewport_mut(pane);
+                let started = viewport.last_turn_id != Some(turn_id);
+                if started {
+                    viewport.last_turn_id = Some(turn_id);
+                    viewport.turn_generation = viewport.turn_generation.saturating_add(1);
+                }
+                let had_base = viewport.turn_dispatched;
+                viewport.turn_dispatched = true;
+                if started || !had_base {
+                    changed_pane = Some(pane);
                 }
             }
             RuntimeEvent::Authenticated => {
@@ -3723,9 +4213,14 @@ impl AgentController {
                 }
             }
             RuntimeEvent::PaneFailed { pane, message } => {
+                self.abandon_turn(pane);
+                self.viewport_mut(pane).session_change_pending = false;
                 if let Some(thread) = self.panes.get_mut(&pane) {
                     thread.connection = AgentConnectionState::Failed;
                     thread.error = Some(Arc::from(message));
+                    thread.fail_inflight();
+                    thread.session_history.loading = false;
+                    thread.settings_busy = false;
                     changed_pane = Some(pane);
                 }
             }
@@ -3736,7 +4231,14 @@ impl AgentController {
                     reconcile_pane = Some(pane);
                 }
             }
-            RuntimeEvent::PromptsReclaimed { pane, text, images } => {
+            RuntimeEvent::PromptsReclaimed {
+                pane,
+                count,
+                text,
+                images,
+            } => {
+                let viewport = self.viewport_mut(pane);
+                viewport.queued_prompts = viewport.queued_prompts.saturating_sub(count);
                 self.queue_composer_text(pane, &text);
                 if !images.is_empty() {
                     self.pending_images.entry(pane).or_default().extend(images);
@@ -3892,11 +4394,12 @@ fn valid_session_cursor(cursor: &str) -> bool {
 
 fn valid_session_summary(session: &AgentSessionSummary) -> bool {
     valid_session_id(&session.session_id)
-        && session.cwd.is_absolute()
+        && valid_session_directory(&session.cwd)
+        && session.additional_directories.len() <= MAX_AGENT_SESSION_DIRECTORIES
         && session
             .additional_directories
             .iter()
-            .all(|directory| directory.is_absolute())
+            .all(|directory| valid_session_directory(directory))
         && session.title.as_deref().is_none_or(|title| {
             title.len() <= MAX_SESSION_TITLE_BYTES && !title.chars().any(char::is_control)
         })
@@ -3904,6 +4407,10 @@ fn valid_session_summary(session: &AgentSessionSummary) -> bool {
             timestamp.len() <= MAX_SESSION_TIMESTAMP_BYTES
                 && !timestamp.chars().any(char::is_control)
         })
+}
+
+fn valid_session_directory(path: &Path) -> bool {
+    !path.as_os_str().is_empty() && path.as_os_str().as_encoded_bytes().len() <= MAX_GUI_TEXT_BYTES
 }
 
 const fn preference_kind_for_category(
@@ -3938,6 +4445,7 @@ fn agent_command_model(command: AvailableCommand) -> AgentCommand {
 fn config_option_models(options: Vec<SessionConfigOption>) -> Vec<AgentConfigOption> {
     options
         .into_iter()
+        .take(MAX_AGENT_CONFIG_OPTIONS)
         .filter_map(config_option_model)
         .collect()
 }
@@ -3956,6 +4464,7 @@ fn config_option_model(option: SessionConfigOption) -> Option<AgentConfigOption>
         _ => Vec::new(),
     }
     .into_iter()
+    .take(MAX_AGENT_CONFIG_CHOICES)
     .map(|choice| AgentConfigChoice {
         value: choice.value.0.to_string(),
         name: choice.name,
@@ -4007,6 +4516,12 @@ fn session_update_parent_tool_use_id(update: &SessionUpdate) -> Option<&str> {
         .as_object()?
         .get("parentToolUseId")?
         .as_str()
+}
+
+fn context_compaction(meta: Option<&serde_json::Map<String, serde_json::Value>>) -> bool {
+    meta.and_then(|meta| meta.get("contextCompaction"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn claude_tool_subagent(meta: Option<&serde_json::Map<String, serde_json::Value>>) -> Option<bool> {
@@ -4380,7 +4895,11 @@ fn tool_output(tool: &ToolCall) -> Vec<ToolPayload> {
 }
 
 fn tool_content_payloads(content: &[ToolCallContent]) -> Vec<ToolPayload> {
-    content.iter().map(tool_content_payload).collect()
+    content
+        .iter()
+        .take(MAX_AGENT_TOOL_CONTENT_ITEMS)
+        .map(tool_content_payload)
+        .collect()
 }
 
 fn tool_content_payload(content: &ToolCallContent) -> ToolPayload {
@@ -4586,6 +5105,83 @@ mod tests {
         assert!(matches!(
             &thread.entries[0],
             AgentThreadEntry::Assistant { markdown, .. } if markdown == "hello world"
+        ));
+    }
+
+    #[test]
+    fn context_compaction_completion_stops_its_spinner() {
+        let mut thread = thread();
+        let meta = claude_meta(&serde_json::json!({"contextCompaction": true}));
+        thread.apply_update(SessionUpdate::ToolCall(
+            ToolCall::new("compact-1", "Context compacting")
+                .status(ToolCallStatus::InProgress)
+                .meta(meta.clone()),
+        ));
+        thread.apply_update(SessionUpdate::ToolCallUpdate(
+            ToolCallUpdate::new(
+                "compact-1",
+                ToolCallUpdateFields::new()
+                    .title("Context compacted")
+                    .status(ToolCallStatus::Completed),
+            )
+            .meta(meta),
+        ));
+
+        assert!(matches!(
+            &thread.entries[0],
+            AgentThreadEntry::Tool {
+                status: AgentToolStatusModel::Completed,
+                label,
+                ..
+            } if label == "Context compacted"
+        ));
+        assert!(thread.active_context_compaction.is_none());
+    }
+
+    #[test]
+    fn following_answer_settles_a_compaction_with_a_lost_completion() {
+        let mut thread = thread();
+        thread.apply_update(SessionUpdate::ToolCall(
+            ToolCall::new("compact-1", "Context compacting")
+                .status(ToolCallStatus::InProgress)
+                .meta(claude_meta(&serde_json::json!({"contextCompaction": true}))),
+        ));
+        thread.apply_update(SessionUpdate::AgentMessageChunk(ContentChunk::new(
+            ContentBlock::Text(TextContent::new("The answer")),
+        )));
+
+        assert!(matches!(
+            &thread.entries[0],
+            AgentThreadEntry::Tool {
+                status: AgentToolStatusModel::Completed,
+                label,
+                ..
+            } if label == "Context compacted"
+        ));
+        assert!(matches!(
+            &thread.entries[1],
+            AgentThreadEntry::Assistant { markdown, .. } if markdown == "The answer"
+        ));
+    }
+
+    #[test]
+    fn reducer_keeps_large_markdown_blocks_in_one_protocol_message() {
+        let mut thread = thread();
+        let opening = format!("```text\n{}", "long line\n".repeat(8_000));
+        thread.apply_update(SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new(opening.clone())))
+                .message_id(MessageId::new("large-message")),
+        ));
+        thread.apply_update(SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("```")))
+                .message_id(MessageId::new("large-message")),
+        ));
+
+        assert_eq!(thread.entries.len(), 1);
+        assert!(matches!(
+            &thread.entries[0],
+            AgentThreadEntry::Assistant { markdown, .. }
+                if markdown == &format!("{opening}```")
         ));
     }
 
@@ -5067,6 +5663,77 @@ mod tests {
         ));
         thread.set_session_configuration(None, None);
         assert_eq!(thread.config_options.len(), 2);
+    }
+
+    #[test]
+    fn adapter_controlled_ui_collections_are_bounded() {
+        let mut thread = thread();
+        let commands = (0..MAX_AGENT_AVAILABLE_COMMANDS + 8)
+            .map(|index| AvailableCommand::new(format!("command-{index}"), "run it"))
+            .collect();
+        thread.apply_update(SessionUpdate::AvailableCommandsUpdate(
+            AvailableCommandsUpdate::new(commands),
+        ));
+        assert_eq!(
+            thread.available_commands.len(),
+            MAX_AGENT_AVAILABLE_COMMANDS
+        );
+
+        let choices = (0..MAX_AGENT_CONFIG_CHOICES + 8)
+            .map(|index| {
+                SessionConfigSelectOption::new(format!("value-{index}"), format!("Value {index}"))
+            })
+            .collect::<Vec<_>>();
+        let options = (0..MAX_AGENT_CONFIG_OPTIONS + 8)
+            .map(|index| {
+                SessionConfigOption::select(
+                    format!("option-{index}"),
+                    format!("Option {index}"),
+                    "value-0",
+                    choices.clone(),
+                )
+            })
+            .collect();
+        thread.apply_update(SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(
+            options,
+        )));
+        assert_eq!(thread.config_options.len(), MAX_AGENT_CONFIG_OPTIONS);
+        assert!(
+            thread
+                .config_options
+                .iter()
+                .all(|option| option.choices.len() == MAX_AGENT_CONFIG_CHOICES)
+        );
+
+        let content = (0..MAX_AGENT_TOOL_CONTENT_ITEMS + 8)
+            .map(|index| ContentBlock::Text(TextContent::new(index.to_string())).into())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tool_content_payloads(&content).len(),
+            MAX_AGENT_TOOL_CONTENT_ITEMS
+        );
+
+        let permission_options = (0..MAX_AGENT_PERMISSION_OPTIONS + 8)
+            .map(|index| {
+                PermissionOption::new(
+                    format!("allow-{index}"),
+                    format!("Allow {index}"),
+                    PermissionOptionKind::AllowOnce,
+                )
+            })
+            .collect();
+        thread.request_permission(
+            42,
+            ToolCallUpdate::new(
+                "tool-cap",
+                ToolCallUpdateFields::new().title("Bound choices"),
+            ),
+            permission_options,
+        );
+        assert_eq!(
+            thread.pending_permissions[0].options.len(),
+            MAX_AGENT_PERMISSION_OPTIONS
+        );
     }
 
     #[test]
@@ -5583,6 +6250,9 @@ mod tests {
         assert!(!valid_session_cursor(
             &"x".repeat(MAX_SESSION_CURSOR_BYTES + 1)
         ));
+        assert!(valid_session_directory(Path::new("/srv/work")));
+        assert!(valid_session_directory(Path::new(r"C:\work")));
+        assert!(!valid_session_directory(Path::new("")));
     }
 
     /// The question branch is unreachable while zz speaks ACP v1: the schema
@@ -5812,7 +6482,10 @@ mod tests {
                     cx,
                 )
             });
-            let sink = mux.update(cx, |mux, _| mux.record_agent_requests_for_test());
+            let sink = mux.update(cx, |mux, _| {
+                mux.set_agent_client_instance_id_for_test(zz_protocol::ClientInstanceId(1));
+                mux.record_agent_requests_for_test()
+            });
             let controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             controller.update(cx, |controller, _| controller.attach_mux(mux));
             (controller, sink)
@@ -5839,6 +6512,7 @@ mod tests {
 
     fn turn_finished(reason: StopReason) -> AgentStreamPayload {
         AgentStreamPayload::PromptFinished {
+            turn_id: 1,
             outcome: AgentPromptOutcome::Finished {
                 stop_reason: json(&reason),
             },
@@ -5852,6 +6526,11 @@ mod tests {
         cx.update(|cx| {
             controller.update(cx, |controller, cx| {
                 ready_pane(controller, pane);
+                controller
+                    .viewports
+                    .get_mut(&pane)
+                    .expect("viewport")
+                    .queued_prompts = 1;
                 controller.apply_stream_items(
                     pane,
                     vec![
@@ -5915,6 +6594,7 @@ mod tests {
                             7,
                             AgentStreamPayload::PromptsReclaimed {
                                 prompts: vec![zz_daemon::AgentPrompt {
+                                    owner: zz_protocol::ClientInstanceId::default(),
                                     text: "retry that".to_owned(),
                                     images: Vec::new(),
                                 }],
@@ -5931,6 +6611,7 @@ mod tests {
                 assert_eq!(state.auth_methods.len(), 1);
                 assert_eq!(state.connection, AgentConnectionState::Ready);
                 assert!(state.pending_permissions.is_empty());
+                assert_eq!(state.queued_prompts, 0);
                 let (entries, ..) = controller.pane_entries(pane).expect("entries");
                 assert!(matches!(
                     entries.first(),
@@ -5947,6 +6628,57 @@ mod tests {
                 );
             });
         });
+    }
+
+    #[gpui::test]
+    fn restored_prompts_only_refill_their_owners_composer(cx: &mut TestAppContext) {
+        let (controller, sink) = proxy_controller(cx);
+        let pane = PaneId(4);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                controller.apply_stream_items(
+                    pane,
+                    vec![
+                        item(
+                            1,
+                            AgentStreamPayload::PromptsRestored {
+                                reclaim_id: 1,
+                                prompts: vec![zz_daemon::AgentPrompt {
+                                    owner: zz_protocol::ClientInstanceId(2),
+                                    text: "someone else's draft".to_owned(),
+                                    images: Vec::new(),
+                                }],
+                            },
+                        ),
+                        item(
+                            2,
+                            AgentStreamPayload::PromptsRestored {
+                                reclaim_id: 2,
+                                prompts: vec![zz_daemon::AgentPrompt {
+                                    owner: zz_protocol::ClientInstanceId(1),
+                                    text: "my draft".to_owned(),
+                                    images: Vec::new(),
+                                }],
+                            },
+                        ),
+                    ],
+                    cx,
+                );
+
+                assert_eq!(
+                    controller.take_pending_composer(pane).as_deref(),
+                    Some("my draft")
+                );
+            });
+        });
+        assert_eq!(
+            &*sink.borrow(),
+            &[(
+                pane,
+                AgentRequest::AcknowledgePromptRestore { reclaim_id: 2 }
+            )]
+        );
     }
 
     #[gpui::test]
@@ -5993,18 +6725,26 @@ mod tests {
         cx.update(|cx| {
             controller.update(cx, |controller, cx| {
                 ready_pane(controller, pane);
+                controller.panes.get_mut(&pane).expect("pane").session_id = Some(Arc::from("s-9"));
                 let state = AgentPaneWire {
                     phase: AgentConnectionPhase::AwaitingPermission,
                     queued_prompts: 2,
                     session_id: Some("s-9".to_owned()),
                     title: Some("ship it".to_owned()),
+                    error: None,
                     auth_methods: serde_json::to_string(&vec![zz_daemon::AgentAuthMethod {
                         id: "api".to_owned(),
                         name: "API key".to_owned(),
                         description: None,
                     }])
                     .expect("auth methods encode"),
-                    config_options: String::new(),
+                    config_options: serde_json::to_string(&vec![SessionConfigOption::select(
+                        "model",
+                        "Model",
+                        "gpt-5",
+                        vec![SessionConfigSelectOption::new("gpt-5", "GPT-5")],
+                    )])
+                    .expect("config options encode"),
                     modes: String::new(),
                     pending_permission: Some(zz_protocol::AgentPermissionWire {
                         request_id: 11,
@@ -6030,6 +6770,7 @@ mod tests {
                 assert_eq!(pane_state.queued_prompts, 2);
                 assert_eq!(pane_state.session_id.as_deref(), Some("s-9"));
                 assert_eq!(pane_state.auth_methods.len(), 1);
+                assert_eq!(pane_state.config_options.len(), 1);
                 assert_eq!(
                     pane_state
                         .pending_permissions
@@ -6038,8 +6779,446 @@ mod tests {
                     Some(11),
                     "a client that attaches mid-question still sees the wizard"
                 );
+
+                controller.apply_pane_state(
+                    pane,
+                    &AgentPaneWire {
+                        phase: AgentConnectionPhase::Ready,
+                        queued_prompts: 0,
+                        session_id: None,
+                        title: None,
+                        error: None,
+                        auth_methods: String::new(),
+                        config_options: String::new(),
+                        modes: String::new(),
+                        pending_permission: None,
+                    },
+                    cx,
+                );
+                let pane_state = controller.pane_state(pane).expect("the pane is registered");
+                assert_eq!(pane_state.queued_prompts, 0);
+                assert_eq!(pane_state.session_id.as_deref(), Some("s-9"));
+                assert!(pane_state.auth_methods.is_empty());
+                assert!(pane_state.config_options.is_empty());
+                assert!(pane_state.pending_permissions.is_empty());
             });
         });
+    }
+
+    #[gpui::test]
+    fn ordered_state_sync_wins_after_a_synthesized_replay(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(16);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                controller.apply_stream_items(
+                    pane,
+                    vec![
+                        item(1, AgentStreamPayload::SessionReset { restoring: true }),
+                        item(
+                            2,
+                            AgentStreamPayload::SessionReady {
+                                session_id: "s-1".to_owned(),
+                                modes: None,
+                                config_options: None,
+                            },
+                        ),
+                        item(
+                            3,
+                            AgentStreamPayload::StateSynced {
+                                state: AgentPaneWire {
+                                    phase: AgentConnectionPhase::Failed {
+                                        message: "adapter exited".to_owned(),
+                                    },
+                                    session_id: Some("s-1".to_owned()),
+                                    ..AgentPaneWire::default()
+                                },
+                            },
+                        ),
+                    ],
+                    cx,
+                );
+
+                let state = controller.pane_state(pane).expect("pane state");
+                assert_eq!(state.connection, AgentConnectionState::Failed);
+                assert_eq!(state.error.as_deref(), Some("adapter exited"));
+                assert_eq!(controller.viewports[&pane].last_applied, 3);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn retry_preserves_the_failure_until_the_daemon_acknowledges_restart(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(17);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        cx.update(|cx| {
+            let seen = Arc::clone(&events);
+            cx.subscribe(&controller, move |_, event: &AgentControllerEvent, _| {
+                if let AgentControllerEvent::Restart { pane } = event {
+                    seen.lock().push(*pane);
+                }
+            })
+            .detach();
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                let thread = controller.panes.get_mut(&pane).expect("pane");
+                thread.connection = AgentConnectionState::Failed;
+                thread.error = Some(Arc::from("could not spawn adapter"));
+                thread.session_history.loading = true;
+                controller
+                    .viewports
+                    .get_mut(&pane)
+                    .expect("viewport")
+                    .turn_dispatched = true;
+
+                controller.retry(pane, cx);
+                controller.retry(pane, cx);
+
+                let state = controller.pane_state(pane).expect("pane state");
+                assert_eq!(state.connection, AgentConnectionState::Failed);
+                assert_eq!(state.error.as_deref(), Some("could not spawn adapter"));
+                assert!(!state.session_history.loading);
+                assert!(state.lifecycle_pending);
+                assert!(!controller.has_turn_base(pane));
+            });
+        });
+        assert_eq!(&*events.lock(), &[pane]);
+    }
+
+    #[gpui::test]
+    fn provider_switch_waits_for_the_daemon_descriptor(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(20);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        cx.update(|cx| {
+            let seen = Arc::clone(&events);
+            cx.subscribe(&controller, move |_, event: &AgentControllerEvent, _| {
+                if let AgentControllerEvent::Provider { pane, provider } = event {
+                    seen.lock().push((*pane, *provider));
+                }
+            })
+            .detach();
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                let thread = controller.panes.get_mut(&pane).expect("pane");
+                thread.connection = AgentConnectionState::Failed;
+                thread.error = Some(Arc::from("codex failed"));
+
+                controller
+                    .select_provider(pane, AgentProvider::ClaudeCode, cx)
+                    .expect("provider request");
+                controller
+                    .select_provider(pane, AgentProvider::ClaudeCode, cx)
+                    .expect("duplicate provider request");
+                let pending = controller.pane_state(pane).expect("pane state");
+                assert_eq!(pending.provider, AgentProvider::Codex);
+                assert_eq!(pending.connection, AgentConnectionState::Failed);
+                assert_eq!(pending.error.as_deref(), Some("codex failed"));
+                assert!(pending.lifecycle_pending);
+
+                controller.ensure_pane(
+                    pane,
+                    &AgentDescriptor {
+                        provider: AgentProvider::ClaudeCode,
+                        cwd: Some(PathBuf::from("/workspace")),
+                        session_id: None,
+                    },
+                    cx,
+                );
+                let acknowledged = controller.pane_state(pane).expect("pane state");
+                assert_eq!(acknowledged.provider, AgentProvider::ClaudeCode);
+                assert_eq!(acknowledged.connection, AgentConnectionState::Starting);
+                assert!(acknowledged.error.is_none());
+                assert!(!acknowledged.lifecycle_pending);
+            });
+        });
+        assert_eq!(&*events.lock(), &[(pane, AgentProvider::ClaudeCode)]);
+    }
+
+    #[gpui::test]
+    fn session_descriptor_waits_for_the_ordered_switch_boundary(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(24);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                let thread = controller.panes.get_mut(&pane).expect("pane");
+                thread.session_id = Some(Arc::from("old-session"));
+                thread.cwd = PathBuf::from("/old");
+                thread.apply_update(SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                    ContentBlock::Text(TextContent::new("old transcript")),
+                )));
+
+                controller.ensure_pane(
+                    pane,
+                    &AgentDescriptor {
+                        provider: AgentProvider::Codex,
+                        cwd: Some(PathBuf::from("/new")),
+                        session_id: Some("new-session".to_owned()),
+                    },
+                    cx,
+                );
+
+                let thread = controller.panes.get(&pane).expect("pane");
+                assert_eq!(thread.session_id.as_deref(), Some("old-session"));
+                assert_eq!(thread.cwd, PathBuf::from("/old"));
+                assert_eq!(thread.entries.len(), 1);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn new_session_waits_for_the_ordered_switch_boundary(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(25);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                controller.panes.get_mut(&pane).expect("pane").session_id =
+                    Some(Arc::from("old-session"));
+
+                controller.new_session(pane, cx).expect("session request");
+                controller.apply_pane_state(
+                    pane,
+                    &AgentPaneWire {
+                        phase: AgentConnectionPhase::Ready,
+                        session_id: Some("new-session".to_owned()),
+                        ..AgentPaneWire::default()
+                    },
+                    cx,
+                );
+
+                let pending = controller.pane_state(pane).expect("pane state");
+                assert_eq!(pending.connection, AgentConnectionState::Starting);
+                assert_eq!(pending.session_id.as_deref(), Some("old-session"));
+
+                controller.handle_runtime_event(
+                    pane,
+                    RuntimeEvent::SessionSwitched {
+                        pane,
+                        session_id: "new-session".to_owned(),
+                        cwd: PathBuf::from("/workspace"),
+                        modes: None,
+                        config_options: None,
+                        replay: Vec::new(),
+                    },
+                    cx,
+                );
+
+                let ready = controller.pane_state(pane).expect("pane state");
+                assert_eq!(ready.connection, AgentConnectionState::Ready);
+                assert_eq!(ready.session_id.as_deref(), Some("new-session"));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn nonfatal_wire_error_survives_the_ordered_ready_state(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(21);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                controller.handle_runtime_event(
+                    pane,
+                    RuntimeEvent::SessionSwitchFailed {
+                        pane,
+                        message: "could not restore".to_owned(),
+                    },
+                    cx,
+                );
+                controller.apply_pane_state(
+                    pane,
+                    &AgentPaneWire {
+                        phase: AgentConnectionPhase::Ready,
+                        error: Some("could not restore".to_owned()),
+                        ..AgentPaneWire::default()
+                    },
+                    cx,
+                );
+                assert_eq!(
+                    controller.pane_state(pane).and_then(|state| state.error),
+                    Some(Arc::from("could not restore"))
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn a_rejected_session_change_keeps_the_previous_turn_diff(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(24);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                let thread = controller.panes.get_mut(&pane).expect("pane");
+                thread.session_id = Some(Arc::from("current"));
+                thread.session_capabilities.load = true;
+                controller
+                    .viewports
+                    .get_mut(&pane)
+                    .expect("viewport")
+                    .turn_dispatched = true;
+
+                controller
+                    .switch_session(
+                        pane,
+                        AgentSessionSummary {
+                            session_id: "rejected".to_owned(),
+                            cwd: PathBuf::from("/workspace"),
+                            additional_directories: Vec::new(),
+                            title: None,
+                            updated_at: None,
+                        },
+                        cx,
+                    )
+                    .expect("session request");
+                assert!(controller.has_turn_base(pane));
+
+                controller.handle_runtime_event(
+                    pane,
+                    RuntimeEvent::SessionSwitchFailed {
+                        pane,
+                        message: "could not restore".to_owned(),
+                    },
+                    cx,
+                );
+                assert!(controller.has_turn_base(pane));
+
+                controller.handle_runtime_event(
+                    pane,
+                    RuntimeEvent::SessionReset {
+                        pane,
+                        restoring: false,
+                    },
+                    cx,
+                );
+                assert!(!controller.has_turn_base(pane));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn fatal_state_settles_subagent_spinners(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(22);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                let thread = controller.panes.get_mut(&pane).expect("pane");
+                thread.apply_update(SessionUpdate::ToolCall(
+                    ToolCall::new("task-tool", "Research")
+                        .kind(ToolKind::Think)
+                        .status(ToolCallStatus::InProgress)
+                        .meta(claude_meta(&serde_json::json!({
+                            "claudeCode": {"subagent": true}
+                        }))),
+                ));
+                thread.apply_task_event(SdkTaskEvent::Started {
+                    task_id: "task-1".to_owned(),
+                    tool_use_id: "task-tool".to_owned(),
+                    is_agent: true,
+                });
+                controller.apply_pane_state(
+                    pane,
+                    &AgentPaneWire {
+                        phase: AgentConnectionPhase::Failed {
+                            message: "adapter exited".to_owned(),
+                        },
+                        ..AgentPaneWire::default()
+                    },
+                    cx,
+                );
+                let thread = controller.panes.get(&pane).expect("pane");
+                assert!(thread.live_task_tools.is_empty());
+                assert!(matches!(
+                    thread.entries.first(),
+                    Some(AgentThreadEntry::Tool {
+                        status: AgentToolStatusModel::Failed,
+                        ..
+                    })
+                ));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn unavailable_turn_diff_clears_only_its_live_turn_base(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(23);
+        let (sender, receiver) = async_channel::bounded(1);
+        let result = serde_json::to_string(&AgentStreamPayload::TurnDiff {
+            client: zz_protocol::ClientId(1),
+            request_id: 9,
+            outcome: AgentTurnDiffOutcome::Unavailable {
+                message: "this pane has no turn to diff".to_owned(),
+            },
+        })
+        .expect("turn diff encodes");
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                controller
+                    .viewports
+                    .get_mut(&pane)
+                    .expect("viewport")
+                    .turn_dispatched = true;
+                let generation = controller.turn_generation(pane);
+                controller.turn_diffs.insert(9, (pane, generation, sender));
+                controller.apply_turn_diff_result(pane, &result, cx);
+                assert!(!controller.has_turn_base(pane));
+                controller
+                    .viewports
+                    .get_mut(&pane)
+                    .expect("viewport")
+                    .turn_dispatched = true;
+                controller.apply_turn_diff_result(pane, &result, cx);
+                assert!(controller.has_turn_base(pane));
+            });
+        });
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(Err(message)) if message == "this pane has no turn to diff"
+        ));
+    }
+
+    #[gpui::test]
+    fn turn_diff_replies_are_correlated_by_pane_and_abandoned_on_failure(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(18);
+        let other = PaneId(19);
+        let (sender, receiver) = async_channel::bounded(1);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                controller
+                    .viewports
+                    .get_mut(&pane)
+                    .expect("viewport")
+                    .turn_dispatched = true;
+                let generation = controller.turn_generation(pane);
+                controller.turn_diffs.insert(7, (pane, generation, sender));
+                controller.resolve_turn_diff(other, 7, Err("wrong pane".to_owned()));
+                assert!(controller.turn_diffs.contains_key(&7));
+
+                controller.handle_runtime_event(
+                    pane,
+                    RuntimeEvent::PaneFailed {
+                        pane,
+                        message: "adapter exited".to_owned(),
+                    },
+                    cx,
+                );
+                assert!(!controller.turn_diffs.contains_key(&7));
+                assert!(!controller.has_turn_base(pane));
+            });
+        });
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(Err(message)) if message == "the agent session changed"
+        ));
     }
 
     #[gpui::test]
@@ -6110,43 +7289,45 @@ mod tests {
     }
 
     #[gpui::test]
-    fn a_pane_going_live_asks_for_the_stream_from_where_it_stopped(cx: &mut TestAppContext) {
+    fn session_controls_send_the_daemon_every_filter_and_restore_path(cx: &mut TestAppContext) {
         let (controller, sink) = proxy_controller(cx);
-        let pane = PaneId(8);
-        let descriptor = AgentDescriptor {
-            provider: AgentProvider::Codex,
-            cwd: Some(PathBuf::from("/workspace")),
-            session_id: None,
-        };
+        let pane = PaneId(15);
         cx.update(|cx| {
             controller.update(cx, |controller, cx| {
-                controller.ensure_pane(pane, &descriptor, cx);
-                controller.ensure_pane(pane, &descriptor, cx);
-                controller.apply_stream_items(
-                    pane,
-                    vec![item(
-                        1,
-                        AgentStreamPayload::SessionReset { restoring: false },
-                    )],
-                    cx,
-                );
-                controller.ensure_pane(pane, &descriptor, cx);
-            });
-        });
+                ready_pane(controller, pane);
+                let thread = controller.panes.get_mut(&pane).expect("pane");
+                thread.cwd = PathBuf::from("/workspace");
+                thread.session_capabilities.list = true;
+                thread.session_capabilities.load = true;
 
-        assert_eq!(
-            sink.borrow()
-                .iter()
-                .map(|(_, request)| request.clone())
-                .collect::<Vec<_>>(),
-            vec![AgentRequest::Replay { from_seq: 0 }],
-            "a pane asks for its stream once per open, not once per snapshot"
-        );
+                controller
+                    .list_sessions(pane, false, false, cx)
+                    .expect("list this workspace");
+                let thread = controller.panes.get_mut(&pane).expect("pane");
+                thread.session_history.loading = false;
+                thread.session_history.next_cursor = Some(Arc::from("page-2"));
+                controller
+                    .list_sessions(pane, true, true, cx)
+                    .expect("continue all workspaces");
 
-        cx.update(|cx| {
-            controller.update(cx, |controller, cx| {
-                controller.retain_panes(&BTreeSet::new());
-                controller.ensure_pane(pane, &descriptor, cx);
+                controller
+                    .switch_session(
+                        pane,
+                        AgentSessionSummary {
+                            session_id: "restored".to_owned(),
+                            cwd: PathBuf::from("/other"),
+                            additional_directories: vec![PathBuf::from("/shared")],
+                            title: None,
+                            updated_at: None,
+                        },
+                        cx,
+                    )
+                    .expect("restore session");
+                controller.panes.get_mut(&pane).expect("pane").connection =
+                    AgentConnectionState::Ready;
+                controller
+                    .set_working_directory(pane, Path::new("/new-workspace"), cx)
+                    .expect("start in another workspace");
             });
         });
 
@@ -6156,10 +7337,33 @@ mod tests {
                 .map(|(_, request)| request.clone())
                 .collect::<Vec<_>>(),
             vec![
-                AgentRequest::Replay { from_seq: 0 },
-                AgentRequest::Replay { from_seq: 0 },
-            ],
-            "a pane that left the tree and came back replays from the top"
+                AgentRequest::SessionOp {
+                    op: AgentSessionOpKind::List {
+                        cwd: Some(PathBuf::from("/workspace")),
+                        cursor: None,
+                        replace: true,
+                    },
+                },
+                AgentRequest::SessionOp {
+                    op: AgentSessionOpKind::List {
+                        cwd: None,
+                        cursor: Some("page-2".to_owned()),
+                        replace: false,
+                    },
+                },
+                AgentRequest::SessionOp {
+                    op: AgentSessionOpKind::Switch {
+                        session_id: "restored".to_owned(),
+                        cwd: PathBuf::from("/other"),
+                        additional_directories: vec![PathBuf::from("/shared")],
+                    },
+                },
+                AgentRequest::SessionOp {
+                    op: AgentSessionOpKind::New {
+                        cwd: PathBuf::from("/new-workspace"),
+                    },
+                },
+            ]
         );
     }
 

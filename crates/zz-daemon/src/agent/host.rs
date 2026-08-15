@@ -23,14 +23,19 @@ use std::{
 use async_channel::{Receiver, Sender};
 use parking_lot::{Condvar, Mutex};
 use serde_json::Value;
-use zz_protocol::{AgentProvider, PaneId};
+#[cfg(test)]
+use zz_protocol::ClientInstanceId;
+use zz_protocol::{
+    AgentProvider, ClientId, MAX_AGENT_PROMPT_BYTES, MAX_AGENT_QUEUED_PROMPTS, PaneId,
+};
 
 use crate::agent::{
     environment::{AgentWorkspaceEnvironment, warm_adapter_cache},
     journal::AgentJournal,
     profile::SdkTaskEvent,
     runtime::{
-        AgentSpawnConfig, RuntimeCommand, quiesce_window, run_agent_runtime, should_park_turn,
+        AgentSpawnConfig, RuntimeCommand, RuntimeControl, quiesce_window, run_agent_runtime,
+        should_park_turn,
     },
     stream::{
         AgentAuthMethod, AgentPrompt, AgentPromptOutcome, AgentSessionCapabilities,
@@ -43,12 +48,18 @@ use crate::agent::{
 /// measured in minutes, so second resolution is plenty and the thread is
 /// parked outright whenever no pane is open.
 const PARK_TICK: Duration = Duration::from_secs(1);
+const PANE_INBOX_CAPACITY: usize = 64;
+const RUNTIME_COMMAND_CAPACITY: usize = 32;
+const RUNTIME_CONTROL_CAPACITY: usize = 32;
+const RUNTIME_EVENT_CAPACITY: usize = 64;
+const MAX_LIVE_OPERATION_IDS: usize = 256;
+const MAX_LIVE_OPERATION_ID_BYTES: usize = 256 * 1024;
 
 /// Where every item a pane produces goes, with the pane state it left behind.
 /// A call carrying no item is a state-only change — a queued prompt, say —
 /// which a badge still has to see.
 pub(crate) type AgentStreamSink =
-    Box<dyn Fn(PaneId, AgentPaneState, Option<AgentStreamItem>) + Send + Sync>;
+    Box<dyn Fn(PaneId, u64, AgentPaneState, Option<AgentStreamItem>) + Send + Sync>;
 
 /// What the host is asked to do with an open pane. Everything a client can
 /// send lands here, plus the park the ticker injects.
@@ -73,18 +84,23 @@ pub(crate) enum HostCommand {
         mode_id: String,
     },
     ListSessions {
+        client: ClientId,
         cwd: Option<PathBuf>,
         cursor: Option<String>,
         replace: bool,
     },
-    NewSession,
+    NewSession {
+        cwd: PathBuf,
+    },
     SwitchSession {
         session: AgentSessionSummary,
     },
     DeleteSession {
+        client: ClientId,
         session_id: String,
     },
     TurnDiff {
+        client: ClientId,
         request_id: u64,
     },
     Park,
@@ -145,6 +161,8 @@ pub(crate) struct AgentPaneState {
     last_activity: Instant,
     live_tools: HashSet<String>,
     live_tasks: HashSet<String>,
+    live_operation_bytes: usize,
+    live_operations_overflowed: bool,
 }
 
 impl AgentPaneState {
@@ -164,6 +182,8 @@ impl AgentPaneState {
             last_activity: Instant::now(),
             live_tools: HashSet::new(),
             live_tasks: HashSet::new(),
+            live_operation_bytes: 0,
+            live_operations_overflowed: false,
         }
     }
 
@@ -184,6 +204,7 @@ impl AgentPaneState {
         !self.pending_permissions.is_empty()
             || !self.live_tasks.is_empty()
             || !self.live_tools.is_empty()
+            || self.live_operations_overflowed
     }
 
     fn park_due(&self, window: Option<Duration>) -> bool {
@@ -195,12 +216,14 @@ impl AgentPaneState {
 enum PaneInput {
     Command(HostCommand),
     Event(AgentStreamPayload),
-    Close,
     Finished(Result<(), String>),
 }
 
 struct PaneHandle {
     inbox: Sender<PaneInput>,
+    control: Sender<HostCommand>,
+    prompts: Sender<AgentPrompt>,
+    close: Sender<()>,
     state: Arc<Mutex<AgentPaneState>>,
     thread: JoinHandle<()>,
 }
@@ -234,6 +257,7 @@ pub(crate) struct RuntimeChannels {
     pub(crate) permission_ids: Arc<AtomicU64>,
     pub(crate) journal: Option<Arc<AgentJournal>>,
     pub(crate) commands: Receiver<RuntimeCommand>,
+    pub(crate) controls: Receiver<RuntimeControl>,
     pub(crate) events: Sender<AgentStreamPayload>,
 }
 
@@ -293,7 +317,16 @@ impl AgentHost {
         self.config.lock().clone()
     }
 
-    pub(crate) fn open(&self, pane: PaneId, spec: AgentPaneSpec) -> bool {
+    #[cfg(test)]
+    pub(crate) fn pane_count(&self) -> usize {
+        self.registry.panes.lock().len()
+    }
+
+    pub(crate) fn contains(&self, pane: PaneId) -> bool {
+        self.registry.panes.lock().contains_key(&pane)
+    }
+
+    pub(crate) fn open(&self, pane: PaneId, generation: u64, spec: AgentPaneSpec) -> bool {
         #[cfg(test)]
         if let Some(runner) = self
             .runner_factory
@@ -301,7 +334,7 @@ impl AgentHost {
             .as_ref()
             .map(|factory| factory(&spec))
         {
-            return self.open_with(pane, spec, runner);
+            return self.open_with(pane, generation, spec, runner);
         }
         let mut config = self.config.lock().clone();
         config.workspace.adopt_pane_identity(&spec.workspace);
@@ -313,13 +346,20 @@ impl AgentHost {
                 channels.permission_ids,
                 channels.journal,
                 channels.commands,
+                channels.controls,
                 channels.events,
             ))
         });
-        self.open_with(pane, spec, runner)
+        self.open_with(pane, generation, spec, runner)
     }
 
-    pub(crate) fn open_with(&self, pane: PaneId, spec: AgentPaneSpec, runner: PaneRunner) -> bool {
+    pub(crate) fn open_with(
+        &self,
+        pane: PaneId,
+        generation: u64,
+        spec: AgentPaneSpec,
+        runner: PaneRunner,
+    ) -> bool {
         let mut panes = self.registry.panes.lock();
         if panes.contains_key(&pane) {
             return false;
@@ -330,13 +370,18 @@ impl AgentHost {
         let permission_ids = Arc::clone(&self.permission_ids);
         let journal = self.journal.clone();
         let park_window = Arc::clone(&self.park_window);
-        let (inbox_tx, inbox_rx) = async_channel::unbounded();
+        let (inbox_tx, inbox_rx) = async_channel::bounded(PANE_INBOX_CAPACITY);
+        let (control_tx, control_rx) = async_channel::bounded(RUNTIME_CONTROL_CAPACITY);
+        let (prompt_tx, prompt_rx) = async_channel::bounded(MAX_AGENT_QUEUED_PROMPTS);
+        let (close_tx, close_rx) = async_channel::bounded::<()>(1);
         let inbox = inbox_tx.clone();
+        let pane_close = close_tx.clone();
         let thread = std::thread::Builder::new()
             .name(format!("zz-agent-{}", pane.0))
             .spawn(move || {
                 futures_lite::future::block_on(run_pane(
                     pane,
+                    generation,
                     spec,
                     pane_state,
                     sink,
@@ -346,6 +391,10 @@ impl AgentHost {
                     journal,
                     inbox,
                     inbox_rx,
+                    control_rx,
+                    prompt_rx,
+                    pane_close,
+                    close_rx,
                 ));
             });
         let thread = match thread {
@@ -359,6 +408,9 @@ impl AgentHost {
             pane,
             PaneHandle {
                 inbox: inbox_tx,
+                control: control_tx,
+                prompts: prompt_tx,
+                close: close_tx,
                 state,
                 thread,
             },
@@ -369,11 +421,33 @@ impl AgentHost {
         true
     }
 
-    pub(crate) fn command(&self, pane: PaneId, command: HostCommand) -> bool {
+    pub(crate) fn command(&self, pane: PaneId, command: HostCommand) -> Result<(), HostCommand> {
         let panes = self.registry.panes.lock();
-        panes
-            .get(&pane)
-            .is_some_and(|handle| handle.inbox.try_send(PaneInput::Command(command)).is_ok())
+        let Some(handle) = panes.get(&pane) else {
+            return Err(command);
+        };
+        if let HostCommand::Prompt(prompt) = command {
+            return handle
+                .prompts
+                .try_send(prompt)
+                .map_err(|error| HostCommand::Prompt(error.into_inner()));
+        }
+        if matches!(
+            &command,
+            HostCommand::Cancel | HostCommand::RespondPermission { .. }
+        ) {
+            return handle
+                .control
+                .try_send(command)
+                .map_err(async_channel::TrySendError::into_inner);
+        }
+        handle
+            .inbox
+            .try_send(PaneInput::Command(command))
+            .map_err(|error| match error.into_inner() {
+                PaneInput::Command(command) => command,
+                PaneInput::Event(_) | PaneInput::Finished(_) => unreachable!(),
+            })
     }
 
     /// Stop a pane's runtime. The returned handle is the pane's thread, which
@@ -381,7 +455,7 @@ impl AgentHost {
     /// it, the daemon's own teardown does not.
     pub(crate) fn close(&self, pane: PaneId) -> Option<JoinHandle<()>> {
         let handle = self.registry.panes.lock().remove(&pane)?;
-        let _ = handle.inbox.try_send(PaneInput::Close);
+        handle.close.close();
         Some(handle.thread)
     }
 
@@ -392,8 +466,10 @@ impl AgentHost {
 
     pub(crate) fn shutdown(&self) {
         let handles = std::mem::take(&mut *self.registry.panes.lock());
+        for handle in handles.values() {
+            handle.close.close();
+        }
         for handle in handles.into_values() {
-            let _ = handle.inbox.try_send(PaneInput::Close);
             let _ = handle.thread.join();
         }
         self.registry.stopped.store(true, Ordering::Release);
@@ -469,6 +545,7 @@ fn run_park_ticker(registry: &Arc<PaneRegistry>, window: &Mutex<Option<Duration>
 /// hands its payloads to the pump, and the pump itself.
 async fn run_pane(
     pane: PaneId,
+    generation: u64,
     spec: AgentPaneSpec,
     state: Arc<Mutex<AgentPaneState>>,
     sink: Arc<AgentStreamSink>,
@@ -478,20 +555,33 @@ async fn run_pane(
     journal: Option<Arc<AgentJournal>>,
     inbox_tx: Sender<PaneInput>,
     inbox_rx: Receiver<PaneInput>,
+    host_control_rx: Receiver<HostCommand>,
+    prompt_rx: Receiver<AgentPrompt>,
+    close_tx: Sender<()>,
+    close_rx: Receiver<()>,
 ) {
-    let (command_tx, command_rx) = async_channel::unbounded();
-    let (event_tx, event_rx) = async_channel::unbounded();
+    let (command_tx, command_rx) = async_channel::bounded(RUNTIME_COMMAND_CAPACITY);
+    let (runtime_control_tx, runtime_control_rx) = async_channel::bounded(RUNTIME_CONTROL_CAPACITY);
+    let (event_tx, event_rx) = async_channel::bounded(RUNTIME_EVENT_CAPACITY);
+    let runtime_close = close_rx.clone();
     let closer = event_tx.clone();
     let outcome = Arc::new(Mutex::new(None));
 
     let runtime_outcome = Arc::clone(&outcome);
     let runtime = async move {
-        let result = runner(RuntimeChannels {
-            permission_ids,
-            journal,
-            commands: command_rx,
-            events: event_tx,
-        })
+        let result = futures_lite::future::race(
+            runner(RuntimeChannels {
+                permission_ids,
+                journal,
+                commands: command_rx,
+                controls: runtime_control_rx,
+                events: event_tx,
+            }),
+            async move {
+                let _ = runtime_close.recv().await;
+                Ok(())
+            },
+        )
         .await;
         *runtime_outcome.lock() = Some(result);
         // The runtime is done, so nothing may keep the payload channel open:
@@ -513,20 +603,27 @@ async fn run_pane(
 
     let pump = PanePump {
         pane,
+        generation,
         spec,
         state,
         sink,
         commands: command_tx,
+        controls: runtime_control_tx,
+        close: close_tx,
         park_window,
         seq: 0,
         queue: VecDeque::new(),
         turn_base: None,
+        next_turn_id: 0,
+        active_turn: None,
+        parking_turn: None,
+        dispatched_prompt: None,
         closing: false,
     };
 
     futures_lite::future::zip(
         futures_lite::future::zip(runtime, forward),
-        pump.run(inbox_rx),
+        pump.run(inbox_rx, host_control_rx, prompt_rx, close_rx),
     )
     .await;
 }
@@ -535,14 +632,21 @@ async fn run_pane(
 /// runtime and its reducer.
 struct PanePump {
     pane: PaneId,
+    generation: u64,
     spec: AgentPaneSpec,
     state: Arc<Mutex<AgentPaneState>>,
     sink: Arc<AgentStreamSink>,
     commands: Sender<RuntimeCommand>,
+    controls: Sender<RuntimeControl>,
+    close: Sender<()>,
     park_window: Arc<Mutex<Option<Duration>>>,
     seq: u64,
     queue: VecDeque<AgentPrompt>,
     turn_base: Option<TurnTree>,
+    next_turn_id: u64,
+    active_turn: Option<u64>,
+    parking_turn: Option<u64>,
+    dispatched_prompt: Option<(u64, AgentPrompt)>,
     closing: bool,
 }
 
@@ -555,20 +659,71 @@ enum FollowUp {
 }
 
 impl PanePump {
-    async fn run(mut self, inbox: Receiver<PaneInput>) {
+    async fn run(
+        mut self,
+        inbox: Receiver<PaneInput>,
+        control: Receiver<HostCommand>,
+        prompts: Receiver<AgentPrompt>,
+        close: Receiver<()>,
+    ) {
         self.send(RuntimeCommand::Open {
             cwd: self.spec.cwd.clone(),
             resume_session: self.spec.resume_session.clone(),
         });
-        while let Ok(input) = inbox.recv().await {
+        loop {
+            let input = futures_lite::future::race(
+                async {
+                    let _ = close.recv().await;
+                    None
+                },
+                futures_lite::future::race(
+                    async { control.recv().await.ok().map(PaneInput::Command) },
+                    futures_lite::future::race(
+                        async {
+                            prompts
+                                .recv()
+                                .await
+                                .ok()
+                                .map(HostCommand::Prompt)
+                                .map(PaneInput::Command)
+                        },
+                        async { inbox.recv().await.ok() },
+                    ),
+                ),
+            )
+            .await;
+            let Some(input) = input else {
+                self.close();
+                self.reclaim_accepted_inputs(&prompts, &inbox);
+                break;
+            };
             match input {
                 PaneInput::Event(payload) => self.observe(payload),
                 PaneInput::Command(command) => self.command(command),
-                PaneInput::Close => self.close(),
                 PaneInput::Finished(result) => {
                     self.finish(&result);
+                    self.reclaim_accepted_inputs(&prompts, &inbox);
                     break;
                 }
+            }
+        }
+    }
+
+    fn reclaim_accepted_inputs(
+        &mut self,
+        prompts: &Receiver<AgentPrompt>,
+        inbox: &Receiver<PaneInput>,
+    ) {
+        while let Ok(prompt) = prompts.try_recv() {
+            self.emit(AgentStreamPayload::PromptsReclaimed {
+                prompts: vec![prompt],
+            });
+        }
+        while let Ok(input) = inbox.try_recv() {
+            if let PaneInput::Command(HostCommand::Prompt(prompt)) = input {
+                self.emit(AgentStreamPayload::PromptsReclaimed {
+                    prompts: vec![prompt],
+                });
             }
         }
     }
@@ -581,43 +736,151 @@ impl PanePump {
             HostCommand::RespondPermission {
                 request_id,
                 option_id,
-            } => self.send(RuntimeCommand::RespondPermission {
-                request_id,
-                option_id,
-            }),
+            } => {
+                if !self.send_control(RuntimeControl::RespondPermission {
+                    request_id,
+                    option_id,
+                }) {
+                    self.fail_control();
+                }
+            }
             HostCommand::Authenticate { method_id } => {
-                self.send(RuntimeCommand::Authenticate { method_id });
+                if !self.send(RuntimeCommand::Authenticate { method_id }) {
+                    self.observe(AgentStreamPayload::AuthenticationFailed {
+                        message: "agent runtime is busy".to_owned(),
+                    });
+                }
             }
             HostCommand::SetConfigOption { option_id, value } => {
-                self.send(RuntimeCommand::SetConfigOption { option_id, value });
+                if !self.send(RuntimeCommand::SetConfigOption {
+                    option_id: option_id.clone(),
+                    value,
+                }) {
+                    self.observe(AgentStreamPayload::SettingFailed {
+                        option_id,
+                        message: "agent runtime is busy".to_owned(),
+                    });
+                }
             }
-            HostCommand::SetMode { mode_id } => self.send(RuntimeCommand::SetMode { mode_id }),
+            HostCommand::SetMode { mode_id } => {
+                if !self.send(RuntimeCommand::SetMode { mode_id }) {
+                    self.observe(AgentStreamPayload::SettingFailed {
+                        option_id: "legacy-session-mode".to_owned(),
+                        message: "agent runtime is busy".to_owned(),
+                    });
+                }
+            }
             HostCommand::ListSessions {
+                client,
                 cwd,
                 cursor,
                 replace,
-            } => self.send(RuntimeCommand::ListSessions {
-                cwd,
-                cursor,
-                replace,
-            }),
-            HostCommand::NewSession => {
-                let cwd = self.state.lock().cwd.clone();
-                self.send(RuntimeCommand::NewSession { cwd });
+            } => {
+                if !self.send(RuntimeCommand::ListSessions {
+                    client,
+                    cwd,
+                    cursor,
+                    replace,
+                }) {
+                    self.observe(AgentStreamPayload::SessionListFailed {
+                        client,
+                        message: "agent runtime is busy".to_owned(),
+                    });
+                }
             }
+            HostCommand::NewSession { cwd } => self.begin_session_change(
+                RuntimeCommand::NewSession { cwd },
+                AgentConnectionPhase::Starting,
+            ),
             HostCommand::SwitchSession { session } => {
-                self.send(RuntimeCommand::SwitchSession { session });
+                self.begin_session_change(
+                    RuntimeCommand::SwitchSession { session },
+                    AgentConnectionPhase::Restoring,
+                );
             }
-            HostCommand::DeleteSession { session_id } => {
-                self.send(RuntimeCommand::DeleteSession { session_id });
+            HostCommand::DeleteSession { client, session_id } => {
+                if !self.send(RuntimeCommand::DeleteSession { client, session_id }) {
+                    self.observe(AgentStreamPayload::SessionDeleteFailed {
+                        client,
+                        message: "agent runtime is busy".to_owned(),
+                    });
+                }
             }
-            HostCommand::TurnDiff { request_id } => self.turn_diff(request_id),
+            HostCommand::TurnDiff { client, request_id } => self.turn_diff(client, request_id),
             HostCommand::Park => self.park(),
         }
     }
 
+    fn begin_session_change(&mut self, command: RuntimeCommand, phase: AgentConnectionPhase) {
+        let accepted = {
+            let mut state = self.state.lock();
+            if state.phase != AgentConnectionPhase::Ready
+                || !state.pending_permissions.is_empty()
+                || self.active_turn.is_some()
+            {
+                false
+            } else {
+                state.phase = phase;
+                state.error = None;
+                true
+            }
+        };
+        if !accepted {
+            self.emit(AgentStreamPayload::SessionSwitchFailed {
+                message: "finish or cancel the current turn before changing sessions".to_owned(),
+            });
+            return;
+        }
+        let state = self.state.lock().clone();
+        (self.sink)(self.pane, self.generation, state, None);
+        if !self.send(command) {
+            self.observe(AgentStreamPayload::SessionSwitchFailed {
+                message: "agent runtime is unavailable".to_owned(),
+            });
+        }
+    }
+
     fn observe(&mut self, payload: AgentStreamPayload) {
+        if matches!(&payload, AgentStreamPayload::PromptAccepted { .. }) {
+            return;
+        }
+        if let AgentStreamPayload::TurnAbandoned { turn_id } = &payload {
+            if self.parking_turn != Some(*turn_id) || self.active_turn != Some(*turn_id) {
+                return;
+            }
+            self.parking_turn = None;
+            self.active_turn = None;
+            self.dispatched_prompt = None;
+            {
+                let mut state = self.state.lock();
+                state.phase = AgentConnectionPhase::Ready;
+                settle_turn(&mut state);
+            }
+            self.emit(AgentStreamPayload::Parked);
+            self.dispatch_next();
+            return;
+        }
+        if let AgentStreamPayload::PromptFinished { turn_id, .. } = &payload
+            && self.active_turn != Some(*turn_id)
+        {
+            return;
+        }
+        if matches!(
+            &payload,
+            AgentStreamPayload::AuthenticationFailed { .. } | AgentStreamPayload::PaneFailed { .. }
+        ) {
+            self.reclaim_dispatched_prompt();
+        }
         let mut follow = FollowUp::None;
+        if matches!(
+            &payload,
+            AgentStreamPayload::SessionReset { .. } | AgentStreamPayload::SessionSwitched { .. }
+        ) {
+            self.turn_base = None;
+            self.active_turn = None;
+            self.parking_turn = None;
+            self.reclaim_dispatched_prompt();
+        }
         {
             let mut state = self.state.lock();
             state.last_activity = Instant::now();
@@ -658,10 +921,14 @@ impl PanePump {
                     settle_turn(&mut state);
                     follow = FollowUp::DrainQueue;
                 }
-                AgentStreamPayload::SessionListFailed { message }
-                | AgentStreamPayload::SessionSwitchFailed { message }
-                | AgentStreamPayload::SessionDeleteFailed { message }
-                | AgentStreamPayload::SettingFailed { message, .. } => {
+                AgentStreamPayload::PromptAccepted { .. }
+                | AgentStreamPayload::TurnAbandoned { .. } => unreachable!(),
+                AgentStreamPayload::SessionSwitchFailed { message } => {
+                    state.phase = AgentConnectionPhase::Ready;
+                    state.error = Some(message.clone());
+                    follow = FollowUp::DrainQueue;
+                }
+                AgentStreamPayload::SettingFailed { message, .. } => {
                     state.error = Some(message.clone());
                 }
                 AgentStreamPayload::Update { update } => track_tool_call(&mut state, update),
@@ -678,29 +945,35 @@ impl PanePump {
                 AgentStreamPayload::PermissionResolved { request_id, .. } => state
                     .pending_permissions
                     .retain(|pending| pending.request_id != *request_id),
-                AgentStreamPayload::PromptFinished { outcome } => match outcome {
-                    AgentPromptOutcome::Finished { stop_reason } => {
-                        state.phase = AgentConnectionPhase::Ready;
-                        settle_turn(&mut state);
-                        follow = if stop_reason.as_str() == Some("cancelled") {
-                            FollowUp::ReclaimQueue
-                        } else {
-                            FollowUp::DrainQueue
-                        };
+                AgentStreamPayload::PromptFinished { outcome, .. } => {
+                    self.active_turn = None;
+                    self.parking_turn = None;
+                    self.dispatched_prompt = None;
+                    match outcome {
+                        AgentPromptOutcome::Finished { stop_reason } => {
+                            state.phase = AgentConnectionPhase::Ready;
+                            settle_turn(&mut state);
+                            follow = if stop_reason.as_str() == Some("cancelled") {
+                                FollowUp::ReclaimQueue
+                            } else {
+                                FollowUp::DrainQueue
+                            };
+                        }
+                        AgentPromptOutcome::Failed { message } => {
+                            state.phase = AgentConnectionPhase::Failed;
+                            state.error = Some(message.clone());
+                            settle_turn(&mut state);
+                            follow = FollowUp::ReclaimQueue;
+                        }
                     }
-                    AgentPromptOutcome::Failed { message } => {
-                        state.phase = AgentConnectionPhase::Failed;
-                        state.error = Some(message.clone());
-                        settle_turn(&mut state);
-                        follow = FollowUp::ReclaimQueue;
-                    }
-                },
+                }
                 AgentStreamPayload::Authenticated => {
                     state.error = None;
                     follow = FollowUp::Reopen;
                 }
                 AgentStreamPayload::AuthenticationFailed { message }
                 | AgentStreamPayload::PaneFailed { message } => {
+                    self.active_turn = None;
                     state.phase = AgentConnectionPhase::Failed;
                     state.error = Some(message.clone());
                     settle_turn(&mut state);
@@ -708,10 +981,15 @@ impl PanePump {
                 }
                 AgentStreamPayload::ConfigOptionsChanged { .. }
                 | AgentStreamPayload::ModeChanged { .. } => state.error = None,
-                AgentStreamPayload::SessionsListed { .. }
+                AgentStreamPayload::StateSynced { .. }
+                | AgentStreamPayload::TurnStarted { .. }
+                | AgentStreamPayload::SessionsListed { .. }
+                | AgentStreamPayload::SessionListFailed { .. }
                 | AgentStreamPayload::SessionDeleted { .. }
+                | AgentStreamPayload::SessionDeleteFailed { .. }
                 | AgentStreamPayload::Parked
                 | AgentStreamPayload::PromptsReclaimed { .. }
+                | AgentStreamPayload::PromptsRestored { .. }
                 | AgentStreamPayload::TurnDiff { .. } => {}
             }
         }
@@ -744,11 +1022,25 @@ impl PanePump {
             self.dispatch(prompt);
             return;
         }
+        let queued_bytes = self.queue.iter().fold(0usize, |total, queued| {
+            total.saturating_add(queued.byte_len())
+        });
+        if self.queue.len() >= MAX_AGENT_QUEUED_PROMPTS
+            || queued_bytes.saturating_add(prompt.byte_len()) > MAX_AGENT_PROMPT_BYTES
+        {
+            self.emit(AgentStreamPayload::PromptsReclaimed {
+                prompts: vec![prompt],
+            });
+            return;
+        }
         self.queue.push_back(prompt);
         self.publish_queue_depth();
     }
 
     fn dispatch(&mut self, prompt: AgentPrompt) {
+        self.next_turn_id = self.next_turn_id.saturating_add(1).max(1);
+        let turn_id = self.next_turn_id;
+        self.active_turn = Some(turn_id);
         let cwd = self.state.lock().cwd.clone();
         // Blocking git is fine here: the pane's own thread is the only thing
         // it stalls, and a pane outside a worktree simply keeps no base.
@@ -769,12 +1061,29 @@ impl PanePump {
             state.error = None;
             state.last_activity = Instant::now();
         }
-        if let Err(error) = self.commands.try_send(RuntimeCommand::Prompt { prompt }) {
-            let RuntimeCommand::Prompt { prompt } = error.into_inner() else {
-                return;
-            };
-            self.queue.push_front(prompt);
-            self.reclaim_queue();
+        let retained = prompt.clone();
+        match self
+            .commands
+            .try_send(RuntimeCommand::Prompt { turn_id, prompt })
+        {
+            Ok(()) => {
+                self.dispatched_prompt = Some((turn_id, retained));
+                self.emit(AgentStreamPayload::TurnStarted { turn_id });
+            }
+            Err(error) => {
+                self.active_turn = None;
+                self.turn_base = None;
+                {
+                    let mut state = self.state.lock();
+                    state.phase = AgentConnectionPhase::Ready;
+                    settle_turn(&mut state);
+                }
+                let RuntimeCommand::Prompt { prompt, .. } = error.into_inner() else {
+                    return;
+                };
+                self.queue.push_front(prompt);
+                self.reclaim_queue();
+            }
         }
     }
 
@@ -803,8 +1112,18 @@ impl PanePump {
         if !self.state.lock().phase.has_active_turn() {
             return;
         }
+        let session_id = self.state.lock().session_id.clone();
+        let Some(turn_id) = self.active_turn else {
+            return;
+        };
+        if !self.send_control(RuntimeControl::Cancel {
+            turn_id,
+            session_id,
+        }) {
+            self.fail_control();
+            return;
+        }
         self.state.lock().phase = AgentConnectionPhase::Cancelling;
-        self.send(RuntimeCommand::Cancel);
         self.reclaim_queue();
     }
 
@@ -815,32 +1134,36 @@ impl PanePump {
         if !self.state.lock().park_due(window) {
             return;
         }
+        if self.parking_turn.is_some() {
+            return;
+        }
+        if let Some(turn_id) = self.active_turn
+            && !self.send_control(RuntimeControl::AbandonTurn { turn_id })
+        {
+            self.fail_control();
+            return;
+        }
+        self.parking_turn = self.active_turn;
         log::info!(
             target: "zz::agent",
             "parking quiet turn for pane {}; agent process left alone",
             self.pane
         );
-        {
-            let mut state = self.state.lock();
-            state.phase = AgentConnectionPhase::Ready;
-            settle_turn(&mut state);
-        }
-        self.emit(AgentStreamPayload::Parked);
-        self.dispatch_next();
     }
 
-    fn turn_diff(&mut self, request_id: u64) {
+    fn turn_diff(&mut self, client: ClientId, request_id: u64) {
         let cwd = self.state.lock().cwd.clone();
         let outcome = match self.turn_base.as_ref() {
             Some(base) => match turn_snapshot::capture_turn_diff(&cwd, base) {
                 Ok(diff) => AgentTurnDiffOutcome::Captured { diff },
                 Err(message) => AgentTurnDiffOutcome::Failed { message },
             },
-            None => AgentTurnDiffOutcome::Failed {
+            None => AgentTurnDiffOutcome::Unavailable {
                 message: "this pane has no turn to diff".to_owned(),
             },
         };
         self.emit(AgentStreamPayload::TurnDiff {
+            client,
             request_id,
             outcome,
         });
@@ -851,13 +1174,14 @@ impl PanePump {
             return;
         }
         self.closing = true;
+        self.resolve_pending_permissions();
+        self.reclaim_dispatched_prompt();
         self.reclaim_queue();
         self.send(RuntimeCommand::Shutdown);
+        self.close.close();
     }
 
-    /// The adapter is gone. Outstanding permissions resolve cancelled, the
-    /// queue comes back, and an exit nobody asked for is reported as a failure.
-    fn finish(&mut self, result: &Result<(), String>) {
+    fn resolve_pending_permissions(&mut self) {
         let pending = std::mem::take(&mut self.state.lock().pending_permissions);
         for permission in pending {
             self.emit(AgentStreamPayload::PermissionResolved {
@@ -865,8 +1189,22 @@ impl PanePump {
                 canceled: true,
             });
         }
+    }
+
+    fn reclaim_dispatched_prompt(&mut self) {
+        let Some((_, prompt)) = self.dispatched_prompt.take() else {
+            return;
+        };
+        self.emit(AgentStreamPayload::PromptsReclaimed {
+            prompts: vec![prompt],
+        });
+    }
+
+    fn finish(&mut self, result: &Result<(), String>) {
+        self.resolve_pending_permissions();
+        self.reclaim_dispatched_prompt();
         self.reclaim_queue();
-        if self.closing {
+        if self.closing || self.close.is_closed() {
             self.state.lock().phase = AgentConnectionPhase::Disconnected;
             return;
         }
@@ -883,14 +1221,33 @@ impl PanePump {
         self.emit(AgentStreamPayload::PaneFailed { message });
     }
 
-    fn send(&self, command: RuntimeCommand) {
+    fn send(&self, command: RuntimeCommand) -> bool {
         if self.commands.try_send(command).is_err() {
             log::debug!(
                 target: "zz::agent",
                 "dropping a command for pane {}: its runtime is gone",
                 self.pane
             );
+            return false;
         }
+        true
+    }
+
+    fn send_control(&self, control: RuntimeControl) -> bool {
+        self.controls.try_send(control).is_ok()
+    }
+
+    fn fail_control(&mut self) {
+        let message = "agent runtime control queue is unavailable".to_owned();
+        {
+            let mut state = self.state.lock();
+            state.phase = AgentConnectionPhase::Failed;
+            state.error = Some(message.clone());
+            settle_turn(&mut state);
+        }
+        self.active_turn = None;
+        self.emit(AgentStreamPayload::PaneFailed { message });
+        self.close.close();
     }
 
     fn publish_queue_depth(&self) {
@@ -899,7 +1256,7 @@ impl PanePump {
             state.queued_prompts = self.queue.len();
             state.clone()
         };
-        (self.sink)(self.pane, state, None);
+        (self.sink)(self.pane, self.generation, state, None);
     }
 
     fn emit(&mut self, payload: AgentStreamPayload) {
@@ -911,6 +1268,7 @@ impl PanePump {
         };
         (self.sink)(
             self.pane,
+            self.generation,
             state,
             Some(AgentStreamItem {
                 seq: self.seq,
@@ -925,6 +1283,46 @@ fn settle_turn(state: &mut AgentPaneState) {
     state.pending_permissions.clear();
     state.live_tools.clear();
     state.live_tasks.clear();
+    state.live_operation_bytes = 0;
+    state.live_operations_overflowed = false;
+}
+
+fn track_live_operation(state: &mut AgentPaneState, id: &str, task: bool) {
+    let already_tracked = if task {
+        state.live_tasks.contains(id)
+    } else {
+        state.live_tools.contains(id)
+    };
+    if already_tracked {
+        return;
+    }
+    if state
+        .live_tools
+        .len()
+        .saturating_add(state.live_tasks.len())
+        >= MAX_LIVE_OPERATION_IDS
+        || state.live_operation_bytes.saturating_add(id.len()) > MAX_LIVE_OPERATION_ID_BYTES
+    {
+        state.live_operations_overflowed = true;
+        return;
+    }
+    if task {
+        state.live_tasks.insert(id.to_owned());
+    } else {
+        state.live_tools.insert(id.to_owned());
+    }
+    state.live_operation_bytes += id.len();
+}
+
+fn settle_live_operation(state: &mut AgentPaneState, id: &str, task: bool) {
+    let removed = if task {
+        state.live_tasks.remove(id)
+    } else {
+        state.live_tools.remove(id)
+    };
+    if removed {
+        state.live_operation_bytes = state.live_operation_bytes.saturating_sub(id.len());
+    }
 }
 
 fn track_tool_call(state: &mut AgentPaneState, update: &Value) {
@@ -939,15 +1337,15 @@ fn track_tool_call(state: &mut AgentPaneState, update: &Value) {
     };
     match update.get("status").and_then(Value::as_str) {
         Some("pending" | "in_progress") => {
-            state.live_tools.insert(id.to_owned());
+            track_live_operation(state, id, false);
         }
         Some(_) => {
-            state.live_tools.remove(id);
+            settle_live_operation(state, id, false);
         }
         // A tool call announced without a status is pending by definition; an
         // update without one only carries output.
         None if kind == "tool_call" => {
-            state.live_tools.insert(id.to_owned());
+            track_live_operation(state, id, false);
         }
         None => {}
     }
@@ -956,13 +1354,13 @@ fn track_tool_call(state: &mut AgentPaneState, update: &Value) {
 fn track_task(state: &mut AgentPaneState, event: &SdkTaskEvent) {
     match event {
         SdkTaskEvent::Started { task_id, .. } => {
-            state.live_tasks.insert(task_id.clone());
+            track_live_operation(state, task_id, true);
         }
         SdkTaskEvent::Notification(notification) => {
-            state.live_tasks.remove(&notification.task_id);
+            settle_live_operation(state, &notification.task_id, true);
         }
         SdkTaskEvent::Settled { task_id, .. } => {
-            state.live_tasks.remove(task_id);
+            settle_live_operation(state, task_id, true);
         }
     }
 }
@@ -976,7 +1374,7 @@ mod tests {
 
     use super::*;
     use crate::agent::{
-        fixture::{Behavior, fixture_runner},
+        fixture::{Behavior, fixture_runner, fixture_runner_with_cancellations},
         journal::AgentJournal,
         stream::{AgentImage, AgentStreamPayload},
     };
@@ -984,12 +1382,17 @@ mod tests {
     const DEADLINE: Duration = Duration::from_secs(10);
 
     #[derive(Clone, Default)]
-    struct Recorder(Arc<Mutex<Vec<AgentStreamItem>>>);
+    struct Recorder {
+        items: Arc<Mutex<Vec<AgentStreamItem>>>,
+        states: Arc<Mutex<Vec<(AgentPaneState, bool)>>>,
+    }
 
     impl Recorder {
         fn sink(&self) -> AgentStreamSink {
-            let items = Arc::clone(&self.0);
-            Box::new(move |_pane, _state, item| {
+            let items = Arc::clone(&self.items);
+            let states = Arc::clone(&self.states);
+            Box::new(move |_pane, _generation, state, item| {
+                states.lock().push((state, item.is_some()));
                 if let Some(item) = item {
                     items.lock().push(item);
                 }
@@ -997,7 +1400,7 @@ mod tests {
         }
 
         fn items(&self) -> Vec<AgentStreamItem> {
-            self.0.lock().clone()
+            self.items.lock().clone()
         }
 
         fn payloads(&self) -> Vec<AgentStreamPayload> {
@@ -1033,6 +1436,28 @@ mod tests {
             Self::build(behavior, auto_approve, true, None, None, None)
         }
 
+        fn open_with_runner(runner: PaneRunner) -> Self {
+            let recorder = Recorder::default();
+            let host = AgentHost::with_journal(AgentSpawnConfig::default(), recorder.sink(), None);
+            let pane = PaneId(8);
+            assert!(host.open_with(
+                pane,
+                1,
+                AgentPaneSpec {
+                    provider: AgentProvider::Codex,
+                    cwd: PathBuf::from("/"),
+                    resume_session: None,
+                    workspace: AgentWorkspaceEnvironment::default(),
+                },
+                runner,
+            ));
+            Self {
+                host,
+                recorder,
+                pane,
+            }
+        }
+
         fn build(
             behavior: Behavior,
             auto_approve: bool,
@@ -1055,7 +1480,7 @@ mod tests {
                 workspace: AgentWorkspaceEnvironment::default(),
             };
             let runner = fixture_runner(AgentProvider::Codex, behavior, auto_approve, load);
-            assert!(host.open_with(pane, spec, runner));
+            assert!(host.open_with(pane, 1, spec, runner));
             Self {
                 host,
                 recorder,
@@ -1064,11 +1489,21 @@ mod tests {
         }
 
         fn command(&self, command: HostCommand) {
-            assert!(self.host.command(self.pane, command));
+            assert!(self.host.command(self.pane, command).is_ok());
+        }
+
+        fn inject(&self, payload: AgentStreamPayload) {
+            let panes = self.host.registry.panes.lock();
+            let handle = panes.get(&self.pane).expect("pane handle");
+            handle
+                .inbox
+                .try_send(PaneInput::Event(payload))
+                .expect("inject runtime event");
         }
 
         fn prompt(&self, text: &str) {
             self.command(HostCommand::Prompt(AgentPrompt {
+                owner: ClientInstanceId::default(),
                 text: text.to_owned(),
                 images: Vec::new(),
             }));
@@ -1094,15 +1529,18 @@ mod tests {
     fn chunk_texts(payloads: &[AgentStreamPayload]) -> Vec<String> {
         payloads
             .iter()
-            .filter_map(|payload| match payload {
-                AgentStreamPayload::Update { update } => update
-                    .get("content")
-                    .and_then(|content| content.get("text"))
-                    .and_then(Value::as_str)
-                    .map(ToOwned::to_owned),
-                _ => None,
-            })
+            .filter_map(|payload| chunk_text(payload).map(ToOwned::to_owned))
             .collect()
+    }
+
+    fn chunk_text(payload: &AgentStreamPayload) -> Option<&str> {
+        let AgentStreamPayload::Update { update } = payload else {
+            return None;
+        };
+        update
+            .get("content")
+            .and_then(|content| content.get("text"))
+            .and_then(Value::as_str)
     }
 
     fn queued_prompt_texts(payloads: &[AgentStreamPayload]) -> Vec<String> {
@@ -1149,6 +1587,35 @@ mod tests {
         assert_eq!(state.session_id.as_deref(), Some("fixture-session"));
         assert_eq!(state.last_seq, seqs.len() as u64);
         assert_eq!(state.queued_prompts, 0);
+        fixture.close();
+    }
+
+    #[test]
+    fn dispatch_publishes_running_with_a_turn_boundary_before_the_agent_speaks() {
+        let fixture = Fixture::open(Behavior::Hang, false);
+        fixture.wait_for_session();
+        fixture.prompt("think quietly");
+        let deadline = Instant::now() + DEADLINE;
+        while !fixture
+            .recorder
+            .states
+            .lock()
+            .iter()
+            .any(|(state, has_item)| state.phase == AgentConnectionPhase::Running && *has_item)
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(
+            fixture
+                .recorder
+                .states
+                .lock()
+                .iter()
+                .any(|(state, has_item)| {
+                    state.phase == AgentConnectionPhase::Running && *has_item
+                })
+        );
         fixture.close();
     }
 
@@ -1272,11 +1739,244 @@ mod tests {
     }
 
     #[test]
+    fn a_late_parked_turn_finish_cannot_settle_the_next_turn() {
+        let fixture = Fixture::open(Behavior::Hang, false);
+        fixture.host.set_park_window(Some(Duration::ZERO));
+        fixture.wait_for_session();
+        fixture.prompt("first");
+        fixture.recorder.wait("the first turn", |payload| {
+            chunk_text(payload) == Some("turn 0")
+        });
+        fixture.prompt("second");
+        fixture.command(HostCommand::Park);
+        fixture.recorder.wait("the second turn", |payload| {
+            chunk_text(payload) == Some("turn 1")
+        });
+        fixture.prompt("third");
+
+        let deadline = Instant::now() + DEADLINE;
+        while fixture.state().queued_prompts == 0 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        fixture.inject(AgentStreamPayload::PromptFinished {
+            turn_id: 1,
+            outcome: AgentPromptOutcome::Finished {
+                stop_reason: serde_json::json!("end_turn"),
+            },
+        });
+        fixture.command(HostCommand::Unqueue);
+        let payloads = fixture
+            .recorder
+            .wait("the third prompt to be reclaimed", |payload| {
+                matches!(payload, AgentStreamPayload::PromptsReclaimed { .. })
+            });
+        assert_eq!(queued_prompt_texts(&payloads), ["third"]);
+        assert_eq!(fixture.state().phase, AgentConnectionPhase::Running);
+
+        fixture.inject(AgentStreamPayload::PromptFinished {
+            turn_id: 2,
+            outcome: AgentPromptOutcome::Finished {
+                stop_reason: serde_json::json!("end_turn"),
+            },
+        });
+        fixture
+            .recorder
+            .wait("the current turn to finish", |payload| {
+                matches!(
+                    payload,
+                    AgentStreamPayload::PromptFinished { turn_id: 2, .. }
+                )
+            });
+        assert_eq!(fixture.state().phase, AgentConnectionPhase::Ready);
+        fixture.close();
+    }
+
+    #[test]
+    fn a_session_change_cannot_cross_an_active_turn() {
+        let fixture = Fixture::open(Behavior::Hang, false);
+        fixture.wait_for_session();
+        fixture.prompt("running");
+        fixture
+            .recorder
+            .wait("the turn", |payload| chunk_text(payload) == Some("turn 0"));
+        fixture.command(HostCommand::NewSession {
+            cwd: PathBuf::from("/other"),
+        });
+        fixture.command(HostCommand::SwitchSession {
+            session: AgentSessionSummary {
+                session_id: "other".to_owned(),
+                cwd: PathBuf::from("/other"),
+                additional_directories: Vec::new(),
+                title: None,
+                updated_at: None,
+            },
+        });
+        let deadline = Instant::now() + DEADLINE;
+        loop {
+            let payloads = fixture.recorder.payloads();
+            if payloads
+                .iter()
+                .filter(|payload| matches!(payload, AgentStreamPayload::SessionSwitchFailed { .. }))
+                .count()
+                == 2
+            {
+                assert!(!payloads.iter().any(|payload| {
+                    matches!(payload, AgentStreamPayload::SessionSwitched { .. })
+                }));
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "session commands were not rejected"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(fixture.state().phase, AgentConnectionPhase::Running);
+        fixture.close();
+    }
+
+    #[test]
+    fn close_preempts_a_runner_that_never_reads_shutdown() {
+        let recorder = Recorder::default();
+        let host = AgentHost::with_journal(AgentSpawnConfig::default(), recorder.sink(), None);
+        let pane = PaneId(30);
+        let runner: PaneRunner = Box::new(|_| Box::pin(std::future::pending()));
+        assert!(host.open_with(
+            pane,
+            1,
+            AgentPaneSpec {
+                provider: AgentProvider::Codex,
+                cwd: PathBuf::from("/"),
+                resume_session: None,
+                workspace: AgentWorkspaceEnvironment::default(),
+            },
+            runner,
+        ));
+        let thread = host.close(pane).expect("pane thread");
+        let (finished, wait) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = finished.send(thread.join().is_ok());
+        });
+        assert_eq!(wait.recv_timeout(Duration::from_secs(1)), Ok(true));
+    }
+
+    #[test]
+    fn close_reclaims_a_prompt_the_runtime_has_not_accepted() {
+        let runner: PaneRunner = Box::new(|channels| {
+            Box::pin(async move {
+                channels
+                    .events
+                    .send(AgentStreamPayload::Ready {
+                        agent_name: "fixture".to_owned(),
+                        agent_key: "fixture".to_owned(),
+                        auth_methods: Vec::new(),
+                        capabilities: AgentSessionCapabilities::default(),
+                    })
+                    .await
+                    .map_err(|error| error.to_string())?;
+                channels
+                    .events
+                    .send(AgentStreamPayload::SessionReady {
+                        session_id: "fixture-session".to_owned(),
+                        modes: None,
+                        config_options: None,
+                    })
+                    .await
+                    .map_err(|error| error.to_string())?;
+                std::future::pending::<Result<(), String>>().await
+            })
+        });
+        let fixture = Fixture::open_with_runner(runner);
+        fixture.wait_for_session();
+        fixture.prompt("keep me");
+        let deadline = Instant::now() + DEADLINE;
+        while fixture.state().phase != AgentConnectionPhase::Running && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+
+        let recorder = fixture.recorder.clone();
+        let thread = fixture.host.close(fixture.pane).expect("the pane thread");
+        thread.join().expect("the pane thread should settle");
+        assert_eq!(queued_prompt_texts(&recorder.payloads()), ["keep me"]);
+    }
+
+    #[test]
+    fn a_pane_rejects_commands_beyond_its_bounded_backlog() {
+        let recorder = Recorder::default();
+        let host = AgentHost::with_journal(AgentSpawnConfig::default(), recorder.sink(), None);
+        let pane = PaneId(31);
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let runner: PaneRunner = Box::new(move |_| {
+            Box::pin(async move {
+                let _ = entered_tx.send(());
+                let _ = release_rx.recv();
+                std::future::pending().await
+            })
+        });
+        assert!(host.open_with(
+            pane,
+            1,
+            AgentPaneSpec {
+                provider: AgentProvider::Codex,
+                cwd: PathBuf::from("/"),
+                resume_session: None,
+                workspace: AgentWorkspaceEnvironment::default(),
+            },
+            runner,
+        ));
+        entered_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("runner entered");
+        for text in ["first", "second"] {
+            assert!(
+                host.command(
+                    pane,
+                    HostCommand::Prompt(AgentPrompt {
+                        owner: ClientInstanceId::default(),
+                        text: text.to_owned(),
+                        images: Vec::new(),
+                    })
+                )
+                .is_ok()
+            );
+        }
+        for _ in 0..PANE_INBOX_CAPACITY {
+            assert!(host.command(pane, HostCommand::Park).is_ok());
+        }
+        assert!(host.command(pane, HostCommand::Park).is_err());
+        assert!(host.command(pane, HostCommand::Cancel).is_ok());
+        assert!(
+            host.command(
+                pane,
+                HostCommand::RespondPermission {
+                    request_id: 9,
+                    option_id: None,
+                },
+            )
+            .is_ok()
+        );
+
+        let thread = host.close(pane).expect("pane thread");
+        release_tx.send(()).expect("release runner");
+        let (finished, wait) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = finished.send(thread.join().is_ok());
+        });
+        assert_eq!(wait.recv_timeout(Duration::from_secs(1)), Ok(true));
+        assert_eq!(
+            queued_prompt_texts(&recorder.payloads()),
+            ["first", "second"]
+        );
+    }
+
+    #[test]
     fn unqueueing_hands_the_queued_prompts_back_with_their_images() {
         let fixture = Fixture::open(Behavior::Hang, false);
         fixture.wait_for_session();
         fixture.prompt("running");
         fixture.command(HostCommand::Prompt(AgentPrompt {
+            owner: ClientInstanceId::default(),
             text: "queued".to_owned(),
             images: vec![AgentImage {
                 format: "image/png".to_owned(),
@@ -1303,6 +2003,41 @@ mod tests {
         };
         assert_eq!(prompts[0].images[0].data, b"zz");
         assert_eq!(fixture.state().queued_prompts, 0);
+        fixture.close();
+    }
+
+    #[test]
+    fn queued_prompts_stay_inside_one_reclaim_frame() {
+        let fixture = Fixture::open(Behavior::Hang, false);
+        fixture.wait_for_session();
+        fixture.prompt("running");
+        fixture.command(HostCommand::Prompt(AgentPrompt {
+            owner: ClientInstanceId::default(),
+            text: "queued".to_owned(),
+            images: vec![AgentImage {
+                format: "image/png".to_owned(),
+                data: vec![0; MAX_AGENT_PROMPT_BYTES - 1024],
+            }],
+        }));
+        let deadline = Instant::now() + DEADLINE;
+        while fixture.state().queued_prompts == 0 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+
+        fixture.command(HostCommand::Prompt(AgentPrompt {
+            owner: ClientInstanceId::default(),
+            text: "returned".to_owned(),
+            images: vec![AgentImage {
+                format: "image/png".to_owned(),
+                data: vec![0; 2048],
+            }],
+        }));
+        let payloads = fixture.recorder.wait("the overflow prompt", |payload| {
+            matches!(payload, AgentStreamPayload::PromptsReclaimed { .. })
+        });
+        assert_eq!(queued_prompt_texts(&payloads), ["returned"]);
+        assert_eq!(fixture.state().queued_prompts, 1);
+        fixture.command(HostCommand::Unqueue);
         fixture.close();
     }
 
@@ -1347,6 +2082,36 @@ mod tests {
             )
         });
         assert_eq!(chunk_texts(&payloads), ["turn 0", "turn 1"]);
+        fixture.close();
+    }
+
+    #[test]
+    fn parking_cancels_each_retired_acp_request() {
+        let cancellations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let fixture = Fixture::open_with_runner(fixture_runner_with_cancellations(
+            AgentProvider::Codex,
+            Behavior::Hang,
+            Arc::clone(&cancellations),
+        ));
+        fixture.host.set_park_window(Some(Duration::ZERO));
+        fixture.wait_for_session();
+        fixture.prompt("first");
+        fixture.recorder.wait("the first turn", |payload| {
+            chunk_text(payload) == Some("turn 0")
+        });
+        fixture.prompt("second");
+        fixture.command(HostCommand::Park);
+        fixture.recorder.wait("the second turn", |payload| {
+            chunk_text(payload) == Some("turn 1")
+        });
+        assert_eq!(cancellations.load(Ordering::Relaxed), 1);
+
+        fixture.prompt("third");
+        fixture.command(HostCommand::Park);
+        fixture.recorder.wait("the third turn", |payload| {
+            chunk_text(payload) == Some("turn 2")
+        });
+        assert_eq!(cancellations.load(Ordering::Relaxed), 2);
         fixture.close();
     }
 
@@ -1398,18 +2163,16 @@ mod tests {
             None,
         );
         let payloads = fixture.recorder.wait("the restored session", |payload| {
-            matches!(payload, AgentStreamPayload::SessionSwitched { .. })
+            matches!(payload, AgentStreamPayload::SessionReady { .. })
         });
 
         assert!(matches!(
             payloads[1],
             AgentStreamPayload::SessionReset { restoring: true }
         ));
-        let AgentStreamPayload::SessionSwitched {
-            session_id, replay, ..
-        } = payloads
+        let AgentStreamPayload::SessionReady { session_id, .. } = payloads
             .iter()
-            .find(|payload| matches!(payload, AgentStreamPayload::SessionSwitched { .. }))
+            .find(|payload| matches!(payload, AgentStreamPayload::SessionReady { .. }))
             .expect("restored session")
             .clone()
         else {
@@ -1417,13 +2180,7 @@ mod tests {
         };
         assert_eq!(session_id, "fixture-session");
         assert_eq!(
-            replay
-                .iter()
-                .filter_map(|update| update
-                    .get("content")
-                    .and_then(|content| content.get("text"))
-                    .and_then(Value::as_str))
-                .collect::<Vec<_>>(),
+            chunk_texts(&payloads),
             ["first restored", "second restored"]
         );
         assert!(
@@ -1451,15 +2208,19 @@ mod tests {
             matches!(payload, AgentStreamPayload::PromptFinished { .. })
         });
 
-        fixture.command(HostCommand::TurnDiff { request_id: 3 });
+        fixture.command(HostCommand::TurnDiff {
+            client: ClientId(4),
+            request_id: 3,
+        });
         let payloads = fixture.recorder.wait("the turn diff", |payload| {
             matches!(payload, AgentStreamPayload::TurnDiff { .. })
         });
         assert!(payloads.iter().any(|payload| matches!(
             payload,
             AgentStreamPayload::TurnDiff {
+                client: ClientId(4),
                 request_id: 3,
-                outcome: AgentTurnDiffOutcome::Failed { .. }
+                outcome: AgentTurnDiffOutcome::Unavailable { .. }
             }
         )));
         fixture.close();
@@ -1474,6 +2235,7 @@ mod tests {
             matches!(payload, AgentStreamPayload::PermissionRequested { .. })
         });
         fixture.command(HostCommand::Prompt(AgentPrompt {
+            owner: ClientInstanceId::default(),
             text: "queued".to_owned(),
             images: Vec::new(),
         }));
@@ -1488,7 +2250,7 @@ mod tests {
         thread.join().expect("the pane thread should settle");
 
         let payloads = recorder.payloads();
-        assert_eq!(queued_prompt_texts(&payloads), ["queued"]);
+        assert_eq!(queued_prompt_texts(&payloads), ["go", "queued"]);
         assert!(
             payloads.iter().any(|payload| matches!(
                 payload,
@@ -1544,6 +2306,35 @@ mod tests {
                 status: "completed".to_owned(),
             },
         );
+        assert!(!state.turn_in_flight());
+    }
+
+    #[test]
+    fn excess_live_operations_stay_bounded_and_keep_the_turn_open() {
+        let mut state = AgentPaneState::new(&AgentPaneSpec {
+            provider: AgentProvider::Codex,
+            cwd: PathBuf::from("/"),
+            resume_session: None,
+            workspace: AgentWorkspaceEnvironment::default(),
+        });
+        for index in 0..=MAX_LIVE_OPERATION_IDS {
+            track_task(
+                &mut state,
+                &SdkTaskEvent::Started {
+                    task_id: format!("task-{index}"),
+                    tool_use_id: format!("tool-{index}"),
+                    is_agent: true,
+                },
+            );
+        }
+
+        assert_eq!(state.live_tasks.len(), MAX_LIVE_OPERATION_IDS);
+        assert!(state.live_operations_overflowed);
+        assert!(state.turn_in_flight());
+
+        settle_turn(&mut state);
+        assert!(state.live_tasks.is_empty());
+        assert!(!state.live_operations_overflowed);
         assert!(!state.turn_in_flight());
     }
 }

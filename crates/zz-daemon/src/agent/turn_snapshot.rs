@@ -9,7 +9,10 @@
 use std::{
     io::Read,
     path::{Path, PathBuf},
-    process::{Command, Output, Stdio},
+    process::{Child, Command, Output, Stdio},
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
@@ -19,6 +22,8 @@ const MAX_PATCH_BYTES: usize = 3 * 1024 * 1024;
 
 /// Ceiling on the per-file summaries, which are a fraction of the patch.
 const MAX_SUMMARY_BYTES: usize = 2 * 1024 * 1024;
+const MAX_STDERR_BYTES: usize = 256 * 1024;
+const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 const TRUNCATION_NOTICE: &str = "\n[diff truncated]\n";
 
@@ -94,13 +99,13 @@ pub(crate) fn capture_turn_diff(cwd: &Path, base: &TurnTree) -> Result<TurnDiff,
 }
 
 fn repo_root(cwd: &Path) -> Result<PathBuf, String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .arg("-C")
         .arg(cwd)
         .args(["rev-parse", "--show-toplevel"])
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|error| format!("git could not start: {error}"))?;
+        .stdin(Stdio::null());
+    let output = run_output(command, MAX_SUMMARY_BYTES)?;
     let root = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     if !output.status.success() || root.is_empty() {
         return Err(format!("{} is not inside a git worktree", cwd.display()));
@@ -234,14 +239,14 @@ fn diff_trees(
 }
 
 fn run_with_index(root: &Path, args: &[&str], index: &Path) -> Result<Output, String> {
-    Command::new("git")
+    let mut command = Command::new("git");
+    command
         .arg("-C")
         .arg(root)
         .args(args)
         .env("GIT_INDEX_FILE", index)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|error| format!("git could not start: {error}"))
+        .stdin(Stdio::null());
+    run_output(command, MAX_SUMMARY_BYTES)
 }
 
 fn stderr_of(output: &Output) -> String {
@@ -256,47 +261,9 @@ struct Capture {
 /// Run git under a hard byte ceiling, killing the child once the cap is hit so
 /// a repository-sized diff never buffers in full.
 fn capture_git(root: &Path, args: &[&str], max_bytes: usize) -> Result<Capture, String> {
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("git could not start: {error}"))?;
-    let mut pipe = child
-        .stdout
-        .take()
-        .ok_or_else(|| "git offered no output pipe".to_owned())?;
-
-    let mut stdout: Vec<u8> = Vec::new();
-    let mut buffer = [0u8; 16 * 1024];
-    let mut truncated = false;
-    loop {
-        let filled = match pipe.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(filled) => filled,
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("git output could not be read: {error}"));
-            }
-        };
-        let remaining = max_bytes.saturating_sub(stdout.len());
-        if filled > remaining {
-            stdout.extend_from_slice(&buffer[..remaining]);
-            truncated = true;
-            let _ = child.kill();
-            break;
-        }
-        stdout.extend_from_slice(&buffer[..filled]);
-    }
-    drop(pipe);
-
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("git did not exit: {error}"))?;
+    let mut command = Command::new("git");
+    command.arg("-C").arg(root).args(args).stdin(Stdio::null());
+    let (output, truncated) = run_output_truncated(command, max_bytes)?;
     if !output.status.success() && !truncated {
         let stderr = stderr_of(&output);
         return Err(if stderr.is_empty() {
@@ -305,7 +272,168 @@ fn capture_git(root: &Path, args: &[&str], max_bytes: usize) -> Result<Capture, 
             format!("git: {stderr}")
         });
     }
-    Ok(Capture { stdout, truncated })
+    Ok(Capture {
+        stdout: output.stdout,
+        truncated,
+    })
+}
+
+fn run_output(mut command: Command, max_stdout: usize) -> Result<Output, String> {
+    let (output, truncated) = collect_output(spawn_output(&mut command)?, max_stdout, GIT_TIMEOUT)?;
+    if truncated {
+        return Err(format!("git output exceeded {max_stdout} bytes"));
+    }
+    Ok(output)
+}
+
+fn run_output_truncated(mut command: Command, max_stdout: usize) -> Result<(Output, bool), String> {
+    collect_output(spawn_output(&mut command)?, max_stdout, GIT_TIMEOUT)
+}
+
+fn spawn_output(command: &mut Command) -> Result<Child, String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+
+        command.process_group(0);
+    }
+    command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("git could not start: {error}"))
+}
+
+fn collect_output(
+    mut child: Child,
+    max_stdout: usize,
+    timeout: Duration,
+) -> Result<(Output, bool), String> {
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "git offered no output pipe".to_owned())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "git offered no error pipe".to_owned())?;
+    let (overflow_tx, overflow_rx) = mpsc::sync_channel(1);
+    let (stdout_tx, stdout_rx) = mpsc::sync_channel(1);
+    let (stderr_tx, stderr_rx) = mpsc::sync_channel(1);
+    let stdout_reader = thread::spawn(move || {
+        let _ = stdout_tx.send(read_limited(stdout, max_stdout, Some(&overflow_tx)));
+    });
+    let stderr_reader = thread::spawn(move || {
+        let _ = stderr_tx.send(read_limited(stderr, MAX_STDERR_BYTES, None));
+    });
+    let deadline = Instant::now() + timeout;
+    let mut truncated = false;
+    let mut status = None;
+    let mut stdout = None;
+    let mut stderr = None;
+    loop {
+        if overflow_rx.try_recv().is_ok() {
+            truncated = true;
+            status = Some(terminate_output(&mut child)?);
+        }
+        if stdout.is_none() {
+            match stdout_rx.try_recv() {
+                Ok(value) => stdout = Some(value),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err("git output reader stopped".to_owned());
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if stderr.is_none() {
+            match stderr_rx.try_recv() {
+                Ok(value) => stderr = Some(value),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err("git error reader stopped".to_owned());
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if status.is_none()
+            && child
+                .try_wait()
+                .map_err(|error| format!("git could not be polled: {error}"))?
+                .is_some()
+        {
+            status = Some(terminate_output(&mut child)?);
+        }
+        if status.is_some() && stdout.is_some() && stderr.is_some() {
+            break;
+        }
+        if Instant::now() >= deadline {
+            let _ = terminate_output(&mut child);
+            return Err(format!("git timed out after {} seconds", timeout.as_secs()));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    stdout_reader
+        .join()
+        .map_err(|_| "git output reader panicked".to_owned())?;
+    stderr_reader
+        .join()
+        .map_err(|_| "git error reader panicked".to_owned())?;
+    Ok((
+        Output {
+            status: status.expect("git status set before output completes"),
+            stdout: stdout.expect("git output set before completion")?,
+            stderr: stderr.expect("git error set before completion")?,
+        },
+        truncated,
+    ))
+}
+
+fn terminate_output(child: &mut Child) -> Result<std::process::ExitStatus, String> {
+    #[cfg(unix)]
+    let _ = rustix::process::kill_process_group(
+        rustix::process::Pid::from_child(&*child),
+        rustix::process::Signal::KILL,
+    );
+    #[cfg(windows)]
+    {
+        let pid = child.id().to_string();
+        let _ = Command::new("taskkill")
+            .args(["/PID", pid.as_str(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+    child
+        .wait()
+        .map_err(|error| format!("git did not exit: {error}"))
+}
+
+fn read_limited(
+    mut pipe: impl Read,
+    limit: usize,
+    overflow: Option<&mpsc::SyncSender<()>>,
+) -> Result<Vec<u8>, String> {
+    let mut output = Vec::new();
+    let mut buffer = [0u8; 16 * 1024];
+    let mut reported = false;
+    loop {
+        let filled = pipe
+            .read(&mut buffer)
+            .map_err(|error| format!("git output could not be read: {error}"))?;
+        if filled == 0 {
+            break;
+        }
+        let remaining = limit.saturating_sub(output.len());
+        output.extend_from_slice(&buffer[..filled.min(remaining)]);
+        if filled > remaining && !reported {
+            if let Some(overflow) = overflow {
+                let _ = overflow.try_send(());
+            }
+            reported = true;
+        }
+    }
+    Ok(output)
 }
 
 fn parse_name_status(value: &[u8]) -> Vec<TurnFile> {
@@ -602,5 +730,53 @@ mod tests {
             "the summaries stay intact when only the patch overflows"
         );
         assert_eq!(diff.additions, 2000);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_output_drains_stderr_without_blocking_stdout() {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg(
+            "i=0; while [ $i -lt 20000 ]; do echo error-output-line >&2; i=$((i + 1)); done; printf ok",
+        );
+        let output = run_output(command, 1024).expect("command should finish");
+        assert_eq!(output.stdout, b"ok");
+        assert!(output.stderr.len() <= MAX_STDERR_BYTES);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_output_has_a_hard_deadline() {
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("(trap '' TERM; while :; do sleep 1; done >&2) & while :; do sleep 1; done");
+        let started = Instant::now();
+        let error = collect_output(
+            spawn_output(&mut command).expect("command should start"),
+            1024,
+            Duration::from_millis(50),
+        )
+        .expect_err("command should time out");
+        assert!(error.contains("timed out"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_output_stops_descendants_after_the_parent_exits() {
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("(trap '' TERM; while :; do sleep 1; done >&2) & exit 0");
+        let started = Instant::now();
+        let output = collect_output(
+            spawn_output(&mut command).expect("command should start"),
+            1024,
+            Duration::from_millis(100),
+        )
+        .expect("the descendant should be stopped");
+        assert!(output.0.status.success());
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

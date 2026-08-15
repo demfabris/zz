@@ -5,8 +5,8 @@ use std::{
 
 use zz_protocol::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, EditorDescriptor, LayoutNode,
-    MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, ServerError, SessionId, SessionSnapshot,
-    SplitId, WindowId, WindowSnapshot, normalize_browser_profile_name,
+    MAX_GUI_TEXT_BYTES, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, ServerError,
+    SessionId, SessionSnapshot, SplitId, WindowId, WindowSnapshot, normalize_browser_profile_name,
 };
 
 const MIN_SPLIT_RATIO: f32 = 0.1;
@@ -805,6 +805,14 @@ impl MuxState {
         pane: PaneId,
         cwd: Option<PathBuf>,
     ) -> Result<(), ServerError> {
+        if cwd.as_ref().is_some_and(|cwd| {
+            !cwd.is_absolute() || cwd.as_os_str().as_encoded_bytes().len() > MAX_GUI_TEXT_BYTES
+        }) {
+            return Err(ServerError::InvalidCommand(
+                "agent working directory must be absolute and stay inside the wire limit"
+                    .to_owned(),
+            ));
+        }
         let pane_state = self
             .pane_mut(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
@@ -835,9 +843,12 @@ impl MuxState {
                 "agent session ID must be 1..={MAX_AGENT_SESSION_ID_BYTES} non-control bytes"
             )));
         }
-        if cwd.as_ref().is_some_and(|cwd| !cwd.is_absolute()) {
+        if cwd.as_ref().is_some_and(|cwd| {
+            !cwd.is_absolute() || cwd.as_os_str().as_encoded_bytes().len() > MAX_GUI_TEXT_BYTES
+        }) {
             return Err(ServerError::InvalidCommand(
-                "agent working directory must be absolute".to_owned(),
+                "agent working directory must be absolute and stay inside the wire limit"
+                    .to_owned(),
             ));
         }
         let pane_state = self
@@ -866,7 +877,7 @@ impl MuxState {
         &mut self,
         pane: PaneId,
         provider: AgentProvider,
-    ) -> Result<(), ServerError> {
+    ) -> Result<bool, ServerError> {
         let pane_state = self
             .pane_mut(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
@@ -876,12 +887,12 @@ impl MuxState {
             )));
         };
         if agent.provider == provider {
-            return Ok(());
+            return Ok(false);
         }
         agent.provider = provider;
         agent.session_id = None;
         self.bump_generation();
-        Ok(())
+        Ok(true)
     }
 
     pub fn update_editor_cwd(&mut self, pane: PaneId, cwd: String) -> Result<(), ServerError> {

@@ -11,7 +11,7 @@ use std::{
 
 use crate::{
     ActiveTheme as _, CHROME_GAP, Colorize as _, Icon, IconName, Sizable as _, WindowExt as _,
-    attachment::open_attachment_preview,
+    attachment::{open_attachment_preview, open_render_image_preview},
     button::{Button, ButtonVariants as _},
     control_shadow, h_flex,
     mend::{PENDING_LINK_URL, mend},
@@ -31,16 +31,26 @@ use gpui::{
     Transformation, UniformListScrollHandle, Window, canvas, div, ease_in_out, img, list,
     percentage, prelude::*, px, relative, uniform_list,
 };
+use parking_lot::RwLock;
 use similar::{ChangeTag, TextDiff};
 
 const MERMAID_NODE_NAME: &str = "zz-mermaid";
 const RICH_MARKDOWN_NODE_NAME: &str = "zz-rich-markdown";
 const INLINE_CODE_PARAGRAPH_NODE_NAME: &str = "zz-inline-code-paragraph";
 const MERMAID_MAX_HEIGHT: f32 = 560.0;
+const MERMAID_MAX_SOURCE_BYTES: usize = 32 * 1024;
+const MERMAID_RENDER_DEBOUNCE: Duration = Duration::from_millis(250);
 const TOOL_CONTENT_MAX_HEIGHT: f32 = 360.0;
-const TOOL_CONTENT_MAX_LINES: usize = 10_000;
+const TOOL_CONTENT_MAX_LINES: usize = 2_000;
+const TOOL_CONTENT_MAX_BYTES: usize = 64 * 1024;
 const TOOL_CONTENT_ROW_HEIGHT: f32 = 20.0;
 const MERMAID_CACHE_CAPACITY: usize = 16;
+const MAX_STREAMING_MEND_BYTES: usize = 64 * 1024;
+const MARKDOWN_PREVIEW_MAX_BYTES: usize = 32 * 1024;
+const MARKDOWN_PREVIEW_MAX_LINES: usize = 512;
+const MARKDOWN_PREVIEW_HEIGHT: f32 = 420.0;
+const MARKDOWN_PREVIEW_MARKER: &str =
+    "\n\n… [large message preview stopped; copy the full message below]";
 /// One rotation of the in-flight tool indicator.
 const TOOL_SPINNER_PERIOD: Duration = Duration::from_millis(800);
 /// Where a link whose URL is still streaming is pointed. The renderer refuses
@@ -73,16 +83,166 @@ pub enum AgentToolStatus {
     Canceled,
 }
 
+#[derive(Clone, Default)]
+pub struct AgentToolText(Arc<RwLock<AgentMarkdownBuffer>>);
+
+impl AgentToolText {
+    #[must_use]
+    pub fn new(source: impl Into<String>) -> Self {
+        Self(Arc::new(RwLock::new(AgentMarkdownBuffer {
+            source: source.into(),
+            rendered: String::new(),
+            revision: 0,
+            replaced_at: 0,
+            line_breaks: 0,
+            truncated: false,
+        })))
+    }
+
+    pub fn synchronize(&self, source: &str) {
+        let mut buffer = self.0.write();
+        let len = buffer.source.len();
+        if buffer.source == source {
+            return;
+        }
+        buffer.revision = buffer.revision.wrapping_add(1);
+        if len < source.len()
+            && source.is_char_boundary(len)
+            && buffer.source.as_bytes() == &source.as_bytes()[..len]
+        {
+            buffer.source.push_str(&source[len..]);
+        } else {
+            buffer.source.clear();
+            buffer.source.push_str(source);
+            buffer.replaced_at = buffer.revision;
+        }
+    }
+
+    #[must_use]
+    pub fn contains(&self, pattern: &str) -> bool {
+        self.0.read().source.contains(pattern)
+    }
+
+    fn revisions(&self) -> (u64, u64) {
+        let buffer = self.0.read();
+        (buffer.revision, buffer.replaced_at)
+    }
+
+    fn is_same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    fn inspect<R>(&self, inspect: impl FnOnce(&str) -> R) -> R {
+        inspect(&self.0.read().source)
+    }
+}
+
+impl std::fmt::Debug for AgentToolText {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.inspect(|source| {
+            formatter
+                .debug_tuple("AgentToolText")
+                .field(&source)
+                .finish()
+        })
+    }
+}
+
+impl std::fmt::Display for AgentToolText {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.inspect(|source| formatter.write_str(source))
+    }
+}
+
+impl PartialEq for AgentToolText {
+    fn eq(&self, other: &Self) -> bool {
+        if Arc::ptr_eq(&self.0, &other.0) {
+            return true;
+        }
+        let source = self.0.read().source.clone();
+        source == other.0.read().source
+    }
+}
+
+impl Eq for AgentToolText {}
+
+impl PartialEq<str> for AgentToolText {
+    fn eq(&self, other: &str) -> bool {
+        self.0.read().source == other
+    }
+}
+
+impl From<String> for AgentToolText {
+    fn from(source: String) -> Self {
+        Self::new(source)
+    }
+}
+
+impl From<&str> for AgentToolText {
+    fn from(source: &str) -> Self {
+        Self::new(source)
+    }
+}
+
+impl From<SharedString> for AgentToolText {
+    fn from(source: SharedString) -> Self {
+        Self::new(String::from(source))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AgentToolPayload {
     Diff {
         path: SharedString,
-        old: Option<SharedString>,
-        new: SharedString,
+        old: Option<AgentToolText>,
+        new: AgentToolText,
     },
-    Text(SharedString),
-    Json(SharedString),
-    Terminal(SharedString),
+    Text(AgentToolText),
+    Json(AgentToolText),
+    Terminal(AgentToolText),
+}
+
+impl AgentToolPayload {
+    fn revisions(&self) -> ((u64, u64), (u64, u64)) {
+        match self {
+            Self::Diff { old, new, .. } => (
+                old.as_ref().map_or((0, 0), AgentToolText::revisions),
+                new.revisions(),
+            ),
+            Self::Text(text) | Self::Json(text) | Self::Terminal(text) => {
+                (text.revisions(), (0, 0))
+            }
+        }
+    }
+
+    fn is_same_source(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Diff {
+                    path: left_path,
+                    old: left_old,
+                    new: left_new,
+                },
+                Self::Diff {
+                    path: right_path,
+                    old: right_old,
+                    new: right_new,
+                },
+            ) => {
+                left_path == right_path
+                    && match (left_old, right_old) {
+                        (Some(left), Some(right)) => left.is_same(right),
+                        (None, None) => true,
+                        _ => false,
+                    }
+                    && left_new.is_same(right_new)
+            }
+            (Self::Text(left), Self::Text(right))
+            | (Self::Json(left), Self::Json(right))
+            | (Self::Terminal(left), Self::Terminal(right)) => left.is_same(right),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -104,13 +264,197 @@ enum ToolContentSlot {
 }
 
 struct MarkdownState {
-    /// The raw text as the thread holds it. Streaming appends are diffed
-    /// against this, never against a mended display copy.
-    source: SharedString,
-    /// The state currently renders a mended copy, so the next update has to
-    /// replace the whole text instead of appending to it.
+    source: AgentMarkdown,
+    revision: u64,
+    len: usize,
     mended: bool,
     state: Entity<TextViewState>,
+}
+
+#[derive(Default)]
+struct AgentMarkdownBuffer {
+    source: String,
+    rendered: String,
+    revision: u64,
+    replaced_at: u64,
+    line_breaks: usize,
+    truncated: bool,
+}
+
+#[derive(Clone, Default)]
+pub struct AgentMarkdown(Arc<RwLock<AgentMarkdownBuffer>>);
+
+impl AgentMarkdown {
+    #[must_use]
+    pub fn new(source: impl Into<String>) -> Self {
+        let source = source.into();
+        let line_breaks = source.bytes().filter(|byte| *byte == b'\n').count();
+        let (rendered, truncated) = markdown_preview(&source, line_breaks);
+        Self(Arc::new(RwLock::new(AgentMarkdownBuffer {
+            source,
+            rendered,
+            revision: 0,
+            replaced_at: 0,
+            line_breaks,
+            truncated,
+        })))
+    }
+
+    pub fn synchronize_append(&self, source: &str) {
+        let mut buffer = self.0.write();
+        let len = buffer.source.len();
+        if buffer.source == source {
+            return;
+        }
+        if len < source.len()
+            && source.is_char_boundary(len)
+            && buffer.source.as_bytes() == &source.as_bytes()[..len]
+        {
+            let appended = &source[len..];
+            buffer.source.push_str(appended);
+            buffer.line_breaks = buffer
+                .line_breaks
+                .saturating_add(appended.bytes().filter(|byte| *byte == b'\n').count());
+            if buffer.truncated {
+                return;
+            }
+            if markdown_preview_end(&buffer.source, buffer.line_breaks).is_none() {
+                buffer.rendered.push_str(appended);
+                buffer.revision = buffer.revision.wrapping_add(1);
+                return;
+            }
+        }
+        replace_markdown_buffer(&mut buffer, source);
+    }
+
+    pub fn replace(&self, source: &str) {
+        let mut buffer = self.0.write();
+        if buffer.source == source {
+            return;
+        }
+        replace_markdown_buffer(&mut buffer, source);
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.read().source.is_empty()
+    }
+
+    #[must_use]
+    pub fn trim_is_empty(&self) -> bool {
+        self.0.read().source.trim().is_empty()
+    }
+
+    #[must_use]
+    pub fn is_truncated(&self) -> bool {
+        self.0.read().truncated
+    }
+
+    #[must_use]
+    pub fn full_text(&self) -> String {
+        self.0.read().source.clone()
+    }
+
+    fn is_same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    fn inspect<R>(&self, inspect: impl FnOnce(&str, u64, u64) -> R) -> R {
+        let buffer = self.0.read();
+        inspect(&buffer.rendered, buffer.revision, buffer.replaced_at)
+    }
+}
+
+fn replace_markdown_buffer(buffer: &mut AgentMarkdownBuffer, source: &str) {
+    let line_breaks = source.bytes().filter(|byte| *byte == b'\n').count();
+    let (rendered, truncated) = markdown_preview(source, line_breaks);
+    buffer.source.clear();
+    buffer.source.push_str(source);
+    buffer.line_breaks = line_breaks;
+    buffer.truncated = truncated;
+    if buffer.rendered != rendered {
+        buffer.revision = buffer.revision.wrapping_add(1);
+        buffer.replaced_at = buffer.revision;
+        buffer.rendered = rendered;
+    }
+}
+
+fn markdown_preview(source: &str, line_breaks: usize) -> (String, bool) {
+    let Some(end) = markdown_preview_end(source, line_breaks) else {
+        return (source.to_owned(), false);
+    };
+    let prefix = &source[..end];
+    let mut rendered = mend(prefix).unwrap_or_else(|| prefix.to_owned());
+    rendered.push_str(MARKDOWN_PREVIEW_MARKER);
+    (rendered, true)
+}
+
+fn markdown_preview_end(source: &str, line_breaks: usize) -> Option<usize> {
+    let mut end = source.len().min(MARKDOWN_PREVIEW_MAX_BYTES);
+    while !source.is_char_boundary(end) {
+        end -= 1;
+    }
+    if line_breaks >= MARKDOWN_PREVIEW_MAX_LINES
+        && let Some((newline, _)) = source[..end]
+            .match_indices('\n')
+            .nth(MARKDOWN_PREVIEW_MAX_LINES - 1)
+    {
+        end = newline + 1;
+    }
+    (end < source.len()).then_some(end)
+}
+
+impl std::fmt::Debug for AgentMarkdown {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.inspect(|source, _, _| {
+            formatter
+                .debug_tuple("AgentMarkdown")
+                .field(&source)
+                .finish()
+        })
+    }
+}
+
+impl PartialEq for AgentMarkdown {
+    fn eq(&self, other: &Self) -> bool {
+        if self.is_same(other) {
+            return true;
+        }
+        let source = self.0.read().source.clone();
+        source == other.0.read().source
+    }
+}
+
+impl Eq for AgentMarkdown {}
+
+impl PartialEq<str> for AgentMarkdown {
+    fn eq(&self, other: &str) -> bool {
+        self.0.read().source == other
+    }
+}
+
+impl PartialEq<&str> for AgentMarkdown {
+    fn eq(&self, other: &&str) -> bool {
+        self == *other
+    }
+}
+
+impl From<String> for AgentMarkdown {
+    fn from(source: String) -> Self {
+        Self::new(source)
+    }
+}
+
+impl From<&str> for AgentMarkdown {
+    fn from(source: &str) -> Self {
+        Self::new(source)
+    }
+}
+
+impl From<SharedString> for AgentMarkdown {
+    fn from(source: SharedString) -> Self {
+        Self::new(String::from(source))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,12 +462,65 @@ struct ToolContentSource {
     location: Option<SharedString>,
     input: Option<AgentToolPayload>,
     output: Arc<[AgentToolPayload]>,
+    revisions: Arc<[((u64, u64), (u64, u64))]>,
+}
+
+impl ToolContentSource {
+    fn is_same_snapshot(&self, other: &Self) -> bool {
+        self.location == other.location
+            && self.revisions == other.revisions
+            && match (&self.input, &other.input) {
+                (Some(left), Some(right)) => left.is_same_source(right),
+                (None, None) => true,
+                _ => false,
+            }
+            && self.output.len() == other.output.len()
+            && self
+                .output
+                .iter()
+                .zip(other.output.iter())
+                .all(|(left, right)| left.is_same_source(right))
+    }
 }
 
 #[derive(Clone, Debug)]
 struct ToolContentState {
     source: ToolContentSource,
     rows: Arc<[ToolContentRow]>,
+}
+
+#[derive(Clone, Debug)]
+enum CachedToolContent {
+    Source(ToolContentSource),
+    Materialized(Arc<ToolContentState>),
+}
+
+impl CachedToolContent {
+    fn source(&self) -> &ToolContentSource {
+        match self {
+            Self::Source(source) => source,
+            Self::Materialized(content) => &content.source,
+        }
+    }
+}
+
+fn tool_content_source(
+    location: Option<SharedString>,
+    input: Option<AgentToolPayload>,
+    output: Arc<[AgentToolPayload]>,
+) -> ToolContentSource {
+    let revisions = input
+        .iter()
+        .chain(output.iter())
+        .map(AgentToolPayload::revisions)
+        .collect::<Vec<_>>()
+        .into();
+    ToolContentSource {
+        location,
+        input,
+        output,
+        revisions,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -152,7 +549,7 @@ enum DiffLineKind {
 #[derive(Default)]
 pub struct AgentTimelineStore {
     markdown: HashMap<(u64, MarkdownSlot), MarkdownState>,
-    tool_content: HashMap<(u64, ToolContentSlot), Arc<ToolContentState>>,
+    tool_content: HashMap<(u64, ToolContentSlot), CachedToolContent>,
     expanded: HashMap<(u64, DisclosureKind), bool>,
     tool_scrolls: HashMap<u64, UniformListScrollHandle>,
     cwd: Option<PathBuf>,
@@ -181,27 +578,42 @@ impl AgentTimelineStore {
         &mut self,
         id: u64,
         slot: MarkdownSlot,
-        source: SharedString,
+        source: AgentMarkdown,
         cx: &mut Context<Self>,
     ) -> Entity<TextViewState> {
+        if let Some(markdown) = self.markdown.get(&(id, slot)) {
+            return markdown.state.clone();
+        }
         let streaming = self.streaming == Some(id);
-        self.markdown
-            .entry((id, slot))
-            .or_insert_with(|| {
-                let repair = streaming.then(|| mend(source.as_str())).flatten();
-                MarkdownState {
-                    state: cx.new(|cx| {
-                        TextViewState::markdown(
-                            repair.as_deref().unwrap_or_else(|| source.as_str()),
-                            cx,
-                        )
-                    }),
-                    mended: repair.is_some(),
-                    source,
-                }
-            })
-            .state
-            .clone()
+        let (state, revision, len, mended) = source.inspect(|text, revision, _| {
+            let repair = (streaming && text.len() <= MAX_STREAMING_MEND_BYTES)
+                .then(|| mend(text))
+                .flatten();
+            (
+                cx.new(|cx| {
+                    let display = repair.as_deref().unwrap_or(text);
+                    if repair.is_some() || display.len() > MAX_STREAMING_MEND_BYTES {
+                        TextViewState::markdown_deferred(display, cx)
+                    } else {
+                        TextViewState::markdown(display, cx)
+                    }
+                }),
+                revision,
+                text.len(),
+                repair.is_some(),
+            )
+        });
+        self.markdown.insert(
+            (id, slot),
+            MarkdownState {
+                source,
+                revision,
+                len,
+                mended,
+                state: state.clone(),
+            },
+        );
+        state
     }
 
     /// Name the entry that is still streaming, so its display copy is mended
@@ -225,10 +637,13 @@ impl AgentTimelineStore {
                 continue;
             }
             markdown.mended = false;
-            let raw = markdown.source.clone();
-            markdown
-                .state
-                .update(cx, |state, cx| state.set_text(raw.as_str(), cx));
+            markdown.source.inspect(|source, revision, _| {
+                markdown.state.update(cx, |state, cx| {
+                    state.replace_markdown(source, source.len() > MAX_STREAMING_MEND_BYTES, cx);
+                });
+                markdown.revision = revision;
+                markdown.len = source.len();
+            });
             settled = true;
         }
         if settled {
@@ -240,7 +655,7 @@ impl AgentTimelineStore {
         &mut self,
         id: u64,
         slot: MarkdownSlot,
-        source: SharedString,
+        source: AgentMarkdown,
         cx: &mut Context<Self>,
     ) {
         _ = self.update_markdown(id, slot, source, cx);
@@ -250,48 +665,53 @@ impl AgentTimelineStore {
         &mut self,
         id: u64,
         slot: MarkdownSlot,
-        source: SharedString,
+        source: AgentMarkdown,
         cx: &mut Context<Self>,
     ) -> MarkdownUpdate {
         let streaming = self.streaming == Some(id);
         let Some(markdown) = self.markdown.get_mut(&(id, slot)) else {
             return MarkdownUpdate::Missing;
         };
-        let same_source = markdown.source == source;
-        if same_source && !markdown.mended {
-            return MarkdownUpdate::Unchanged;
-        }
-        let repair = streaming.then(|| mend(source.as_str())).flatten();
-        if same_source && repair.is_some() {
-            return MarkdownUpdate::Unchanged;
-        }
-
-        // A mended state holds a display copy, so an appended delta would land
-        // behind synthetic closers: only a raw state can take the fast path.
-        let mended = repair.is_some();
-        let update = match repair {
-            Some(display) => {
-                markdown
-                    .state
-                    .update(cx, |state, cx| state.set_text(&display, cx));
-                MarkdownUpdate::Replaced
+        let same_source = markdown.source.is_same(&source);
+        let update = source.inspect(|text, revision, replaced_at| {
+            if same_source && revision == markdown.revision && !markdown.mended {
+                return MarkdownUpdate::Unchanged;
             }
-            None => match source.as_str().strip_prefix(markdown.source.as_str()) {
-                Some(delta) if !markdown.mended => {
-                    markdown
-                        .state
-                        .update(cx, |state, cx| state.push_str(delta, cx));
-                    MarkdownUpdate::Appended
-                }
-                _ => {
-                    markdown
-                        .state
-                        .update(cx, |state, cx| state.set_text(source.as_str(), cx));
+            let repair = (streaming && text.len() <= MAX_STREAMING_MEND_BYTES)
+                .then(|| mend(text))
+                .flatten();
+            if same_source && revision == markdown.revision && repair.is_some() {
+                return MarkdownUpdate::Unchanged;
+            }
+            let update = match repair.as_deref() {
+                Some(display) => {
+                    markdown.state.update(cx, |state, cx| {
+                        state.replace_markdown(display, true, cx);
+                    });
                     MarkdownUpdate::Replaced
                 }
-            },
-        };
-        markdown.mended = mended;
+                None if same_source
+                    && !markdown.mended
+                    && markdown.revision >= replaced_at
+                    && markdown.len <= text.len() =>
+                {
+                    markdown
+                        .state
+                        .update(cx, |state, cx| state.push_str(&text[markdown.len..], cx));
+                    MarkdownUpdate::Appended
+                }
+                None => {
+                    markdown.state.update(cx, |state, cx| {
+                        state.replace_markdown(text, text.len() > MAX_STREAMING_MEND_BYTES, cx);
+                    });
+                    MarkdownUpdate::Replaced
+                }
+            };
+            markdown.revision = revision;
+            markdown.len = text.len();
+            markdown.mended = repair.is_some();
+            update
+        });
         markdown.source = source;
         cx.notify();
         update
@@ -346,15 +766,28 @@ impl AgentTimelineStore {
         input: Option<AgentToolPayload>,
         output: Arc<[AgentToolPayload]>,
     ) -> Arc<ToolContentState> {
-        let source = ToolContentSource {
-            location,
-            input,
-            output,
-        };
+        let source = tool_content_source(location, input, output);
+        let key = (id, ToolContentSlot::Combined);
+        if let Some(CachedToolContent::Materialized(content)) = self.tool_content.get(&key)
+            && content.source.is_same_snapshot(&source)
+        {
+            return content.clone();
+        }
+
+        let tail_terminal = source
+            .output
+            .iter()
+            .any(|payload| matches!(payload, AgentToolPayload::Terminal(_)));
+        let content = Arc::new(materialize_tool_content(source));
+        if tail_terminal {
+            self.tool_scrolls
+                .entry(id)
+                .or_default()
+                .scroll_to_item(content.rows.len().saturating_sub(1), ScrollStrategy::Bottom);
+        }
         self.tool_content
-            .entry((id, ToolContentSlot::Combined))
-            .or_insert_with(|| Arc::new(materialize_tool_content(source)))
-            .clone()
+            .insert(key, CachedToolContent::Materialized(content.clone()));
+        content
     }
 
     pub fn synchronize_tool_content(
@@ -376,31 +809,18 @@ impl AgentTimelineStore {
         output: Arc<[AgentToolPayload]>,
         cx: &mut Context<Self>,
     ) -> ToolContentUpdate {
-        let Some(content) = self.tool_content.get_mut(&(id, ToolContentSlot::Combined)) else {
+        let source = tool_content_source(location, input, output);
+        let key = (id, ToolContentSlot::Combined);
+        let Some(content) = self.tool_content.get_mut(&key) else {
+            self.tool_content
+                .insert(key, CachedToolContent::Source(source));
             return ToolContentUpdate::Missing;
         };
-        let source = ToolContentSource {
-            location,
-            input,
-            output,
-        };
-        if content.source == source {
+        if content.source().is_same_snapshot(&source) {
             return ToolContentUpdate::Unchanged;
         }
 
-        let tail_terminal = source
-            .output
-            .iter()
-            .any(|payload| matches!(payload, AgentToolPayload::Terminal(_)));
-        let next = Arc::new(materialize_tool_content(source));
-        let last_row = next.rows.len().saturating_sub(1);
-        *content = next;
-        if tail_terminal {
-            self.tool_scrolls
-                .entry(id)
-                .or_default()
-                .scroll_to_item(last_row, ScrollStrategy::Bottom);
-        }
+        *content = CachedToolContent::Source(source);
         cx.notify();
         ToolContentUpdate::Replaced
     }
@@ -431,30 +851,30 @@ impl AgentTimelineStore {
 pub enum AgentEntry {
     User {
         id: u64,
-        markdown: SharedString,
+        markdown: AgentMarkdown,
         /// Images sent with the message, shown above its text as tiles.
         images: Arc<[Arc<Image>]>,
     },
     Assistant {
         id: u64,
-        markdown: SharedString,
+        markdown: AgentMarkdown,
     },
     Reasoning {
         id: u64,
         label: SharedString,
-        markdown: SharedString,
+        markdown: AgentMarkdown,
         default_expanded: bool,
     },
     Plan {
         id: u64,
-        markdown: SharedString,
+        markdown: AgentMarkdown,
     },
     Notification {
         id: u64,
         task_id: SharedString,
         status: SharedString,
         summary: SharedString,
-        result_markdown: SharedString,
+        result_markdown: AgentMarkdown,
     },
     Tool(AgentToolEntry),
 }
@@ -1374,7 +1794,7 @@ fn render_entry(
             result_markdown,
         } => {
             let view = store.entity_id();
-            let expandable = !result_markdown.as_str().trim().is_empty();
+            let expandable = !result_markdown.trim_is_empty();
             let expanded = expandable
                 && store.update(cx, |store, _| {
                     store.expanded(id, DisclosureKind::Notification, false)
@@ -1481,13 +1901,15 @@ fn render_tool_entry(
     let view = store.entity_id();
     let expandable =
         location.is_some() || input.is_some() || !output.is_empty() || !children.is_empty();
-    let content = store.update(cx, |store, _| {
-        store.tool_content(id, location, input, output)
-    });
     let expanded = expandable
         && store.update(cx, |store, _| {
             store.expanded(id, DisclosureKind::Tool, default_expanded)
         });
+    let content = expanded.then(|| {
+        store.update(cx, |store, _| {
+            store.tool_content(id, location, input, output)
+        })
+    });
     let nested_timeline = (expanded && !children.is_empty()).then(|| {
         v_flex()
             .w_full()
@@ -1573,15 +1995,18 @@ fn render_tool_entry(
                     })
                 }),
         )
-        .when(expanded && !content.rows.is_empty(), |this| {
-            this.child(render_tool_content(
-                timeline_scroll,
-                store,
-                id,
-                content.as_ref(),
-                cx,
-            ))
-        })
+        .when_some(
+            content.filter(|content| !content.rows.is_empty()),
+            |this, content| {
+                this.child(render_tool_content(
+                    timeline_scroll,
+                    store,
+                    id,
+                    &content,
+                    cx,
+                ))
+            },
+        )
         .when_some(nested_timeline, |this, nested_timeline| {
             this.child(nested_timeline)
         })
@@ -1642,8 +2067,12 @@ struct MaterializedToolPayload {
 fn materialize_tool_payload(payload: &AgentToolPayload) -> MaterializedToolPayload {
     match payload {
         AgentToolPayload::Diff { path, old, new } => {
-            let old = old.as_ref().map_or("", SharedString::as_str);
-            let diff = TextDiff::from_lines(old, new.as_str());
+            let old = old.as_ref().map(|old| old.0.read());
+            let new = new.0.read();
+            let (old, old_truncated) =
+                bounded_tool_diff_prefix(old.as_ref().map_or("", |old| old.source.as_str()));
+            let (new, new_truncated) = bounded_tool_diff_prefix(new.source.as_str());
+            let diff = TextDiff::from_lines(old, new);
             let mut rows = Vec::new();
             let mut total_lines = 0;
             rows.push(ToolContentRow::Path(path.clone()));
@@ -1663,43 +2092,81 @@ fn materialize_tool_payload(payload: &AgentToolPayload) -> MaterializedToolPaylo
                     });
                 }
             }
-            append_line_truncation_footer(&mut rows, total_lines);
+            append_line_truncation_footer(&mut rows, total_lines, old_truncated || new_truncated);
             MaterializedToolPayload { rows }
         }
         AgentToolPayload::Text(text) | AgentToolPayload::Json(text) => {
             let mut rows = Vec::new();
             let mut total_lines = 0;
-            for line in text.split('\n') {
-                total_lines += 1;
-                if total_lines <= TOOL_CONTENT_MAX_LINES {
-                    rows.push(ToolContentRow::Plain(
-                        line.strip_suffix('\r').unwrap_or(line).to_owned().into(),
-                    ));
+            text.inspect(|text| {
+                let (text, bytes_truncated) = bounded_tool_prefix(text);
+                for line in text.split('\n').take(TOOL_CONTENT_MAX_LINES + 1) {
+                    total_lines += 1;
+                    if total_lines <= TOOL_CONTENT_MAX_LINES {
+                        rows.push(ToolContentRow::Plain(
+                            line.strip_suffix('\r').unwrap_or(line).to_owned().into(),
+                        ));
+                    }
                 }
-            }
-            append_line_truncation_footer(&mut rows, total_lines);
+                append_line_truncation_footer(&mut rows, total_lines, bytes_truncated);
+            });
             MaterializedToolPayload { rows }
         }
-        AgentToolPayload::Terminal(text) => {
-            let lines = text.split('\n').collect::<Vec<_>>();
-            let first_visible = lines.len().saturating_sub(TOOL_CONTENT_MAX_LINES);
+        AgentToolPayload::Terminal(text) => text.inspect(|text| {
+            let (text, bytes_truncated) = bounded_tool_suffix(text);
+            let mut lines = text
+                .rsplit('\n')
+                .take(TOOL_CONTENT_MAX_LINES + 1)
+                .collect::<Vec<_>>();
+            let lines_truncated = lines.len() > TOOL_CONTENT_MAX_LINES;
+            if lines_truncated {
+                lines.pop();
+            }
+            lines.reverse();
             let mut rows =
-                Vec::with_capacity(lines.len() - first_visible + usize::from(first_visible > 0));
-            if first_visible > 0 {
+                Vec::with_capacity(lines.len() + usize::from(bytes_truncated || lines_truncated));
+            if bytes_truncated || lines_truncated {
                 rows.push(ToolContentRow::Footer(
-                    format!(
-                        "truncated: showing last {TOOL_CONTENT_MAX_LINES} of {} lines",
-                        lines.len()
-                    )
-                    .into(),
+                    "truncated: showing the latest output; copy to view it all".into(),
                 ));
             }
-            rows.extend(lines[first_visible..].iter().map(|line| {
+            rows.extend(lines.iter().map(|line| {
                 ToolContentRow::Plain(line.strip_suffix('\r').unwrap_or(line).to_string().into())
             }));
             MaterializedToolPayload { rows }
-        }
+        }),
     }
+}
+
+fn bounded_tool_prefix(text: &str) -> (&str, bool) {
+    if text.len() <= TOOL_CONTENT_MAX_BYTES {
+        return (text, false);
+    }
+    let mut end = TOOL_CONTENT_MAX_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    (&text[..end], true)
+}
+
+fn bounded_tool_diff_prefix(text: &str) -> (&str, bool) {
+    let (text, bytes_truncated) = bounded_tool_prefix(text);
+    let Some((newline, _)) = text.match_indices('\n').nth(TOOL_CONTENT_MAX_LINES - 1) else {
+        return (text, bytes_truncated);
+    };
+    let end = newline + 1;
+    (&text[..end], bytes_truncated || end < text.len())
+}
+
+fn bounded_tool_suffix(text: &str) -> (&str, bool) {
+    if text.len() <= TOOL_CONTENT_MAX_BYTES {
+        return (text, false);
+    }
+    let mut start = text.len() - TOOL_CONTENT_MAX_BYTES;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    (&text[start..], true)
 }
 
 /// Classify the lines of a unified patch into the timeline's diff rows. git has
@@ -1731,19 +2198,30 @@ fn materialize_patch(patch: &str) -> Vec<ToolContentRow> {
             },
         });
     }
-    append_line_truncation_footer(&mut rows, total_lines);
+    append_line_truncation_footer(&mut rows, total_lines, false);
     rows
+}
+
+#[derive(Clone)]
+pub struct AgentPatch {
+    rows: Arc<[ToolContentRow]>,
+}
+
+pub fn agent_patch(patch: &str) -> AgentPatch {
+    AgentPatch {
+        rows: materialize_patch(patch).into(),
+    }
 }
 
 /// A unified patch drawn as the monospace, gutter-marked block the timeline
 /// uses for tool diffs. `key` namespaces the element ids.
 pub fn agent_patch_block(
     key: u64,
-    patch: &str,
+    patch: &AgentPatch,
     scroll: &UniformListScrollHandle,
     cx: &App,
 ) -> impl IntoElement {
-    let rows: Arc<[ToolContentRow]> = materialize_patch(patch).into();
+    let rows = Arc::clone(&patch.rows);
     let scrollbar_handle = scroll.0.borrow().base_handle.clone();
     let lines = uniform_list(
         ("agent-patch-lines", key),
@@ -1777,8 +2255,16 @@ pub fn agent_patch_block(
         .vertical_scrollbar(&scrollbar_handle)
 }
 
-fn append_line_truncation_footer(rows: &mut Vec<ToolContentRow>, total_lines: usize) {
-    if total_lines > TOOL_CONTENT_MAX_LINES {
+fn append_line_truncation_footer(
+    rows: &mut Vec<ToolContentRow>,
+    total_lines: usize,
+    bytes_truncated: bool,
+) {
+    if bytes_truncated {
+        rows.push(ToolContentRow::Footer(
+            "truncated: copy to view the full output".into(),
+        ));
+    } else if total_lines > TOOL_CONTENT_MAX_LINES {
         rows.push(ToolContentRow::Footer(
             format!("truncated: showing first {TOOL_CONTENT_MAX_LINES} of {total_lines} lines")
                 .into(),
@@ -1996,18 +2482,18 @@ fn tool_payload_copy_text(payloads: &[AgentToolPayload]) -> String {
         match payload {
             AgentToolPayload::Text(text)
             | AgentToolPayload::Json(text)
-            | AgentToolPayload::Terminal(text) => copied.push_str(text),
+            | AgentToolPayload::Terminal(text) => text.inspect(|text| copied.push_str(text)),
             AgentToolPayload::Diff { path, old, new } => {
                 copied.push_str("Path: ");
                 copied.push_str(path);
                 copied.push_str("\n\nOld:\n");
                 if let Some(old) = old {
-                    copied.push_str(old);
+                    old.inspect(|old| copied.push_str(old));
                 } else {
                     copied.push_str("<new file>");
                 }
                 copied.push_str("\n\nNew:\n");
-                copied.push_str(new);
+                new.inspect(|new| copied.push_str(new));
             }
         }
     }
@@ -2071,7 +2557,7 @@ fn markdown_view(
     store: &Entity<AgentTimelineStore>,
     id: u64,
     slot: MarkdownSlot,
-    markdown: SharedString,
+    markdown: AgentMarkdown,
     cx: &mut App,
 ) -> AgentMarkdownView {
     markdown_view_with_extensions(store, id, slot, markdown, false, cx)
@@ -2080,7 +2566,7 @@ fn markdown_view(
 fn assistant_markdown_view(
     store: &Entity<AgentTimelineStore>,
     id: u64,
-    markdown: SharedString,
+    markdown: AgentMarkdown,
     cx: &mut App,
 ) -> AgentMarkdownView {
     markdown_view_with_extensions(store, id, MarkdownSlot::Body, markdown, true, cx)
@@ -2090,10 +2576,12 @@ fn markdown_view_with_extensions(
     store: &Entity<AgentTimelineStore>,
     id: u64,
     slot: MarkdownSlot,
-    markdown: SharedString,
+    markdown: AgentMarkdown,
     assistant: bool,
     cx: &mut App,
 ) -> AgentMarkdownView {
+    let truncated = markdown.is_truncated();
+    let full_source = markdown.clone();
     let style = TextViewStyle {
         highlight_theme: Arc::clone(&cx.theme().highlight_theme),
         is_dark: cx.theme().is_dark(),
@@ -2110,6 +2598,8 @@ fn markdown_view_with_extensions(
         state,
         extensions,
         style,
+        full_source: Some(full_source),
+        truncated,
     }
 }
 
@@ -2138,9 +2628,6 @@ fn resolve_workspace_link(cwd: Option<&Path>, url: &str) -> Option<String> {
         }
         cwd?.join(link)
     };
-    if !path.exists() {
-        return None;
-    }
     file_url(&path)
 }
 
@@ -2159,16 +2646,41 @@ struct AgentMarkdownView {
     state: Entity<TextViewState>,
     extensions: MarkdownExtensions,
     style: TextViewStyle,
+    full_source: Option<AgentMarkdown>,
+    truncated: bool,
 }
 
 impl gpui::RenderOnce for AgentMarkdownView {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        TextView::new(&self.state)
+        let text = TextView::new(&self.state)
             .style(self.style)
             .max_w_full()
             .min_w_0()
             .selectable(true)
             .markdown_extensions(self.extensions)
+            .when(self.truncated, |text| {
+                text.scrollable(true).h(px(MARKDOWN_PREVIEW_HEIGHT))
+            });
+        let state_id = self.state.entity_id();
+        v_flex().w_full().min_w_0().gap_2().child(text).when_some(
+            self.truncated.then_some(self.full_source).flatten(),
+            move |this, source| {
+                this.child(
+                    h_flex().w_full().justify_end().child(
+                        Button::new(("agent-copy-full-markdown", state_id))
+                            .secondary()
+                            .small()
+                            .icon(IconName::Copy)
+                            .label("Copy full message")
+                            .on_click(move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                    source.full_text(),
+                                ));
+                            }),
+                    ),
+                )
+            },
+        )
     }
 }
 
@@ -2461,6 +2973,9 @@ impl MarkdownPlugin for RichMarkdownPlugin {
         if !code.lang.as_deref().is_some_and(is_markdown_language) {
             return None;
         }
+        if code.value.len() > MAX_STREAMING_MEND_BYTES {
+            return None;
+        }
         let source_offset = cx.offset()
             + code
                 .position
@@ -2483,15 +2998,15 @@ impl MarkdownPlugin for RichMarkdownPlugin {
         let source = node
             .data::<RichMarkdownSource>()
             .expect("rich markdown node data");
-        let mut hasher = DefaultHasher::new();
-        source.source.hash(&mut hasher);
-        source.source_offset.hash(&mut hasher);
-        let key = SharedString::from(format!("zz-rich-markdown/{:016x}", hasher.finish()));
+        let key = SharedString::from(format!("zz-rich-markdown/{}", source.source_offset));
         let initial_source = source.source.clone();
         let retained = window.use_keyed_state(key, cx, move |_, cx| {
             cx.new(|cx| TextViewState::markdown(&initial_source, cx))
         });
         let state = retained.read(cx).clone();
+        state.update(cx, |state, cx| {
+            state.synchronize_markdown(&source.source, false, cx);
+        });
         let style = TextViewStyle {
             highlight_theme: Arc::clone(&cx.theme().highlight_theme),
             is_dark: cx.theme().is_dark(),
@@ -2502,6 +3017,8 @@ impl MarkdownPlugin for RichMarkdownPlugin {
             state,
             extensions: standard_markdown_extensions(),
             style,
+            full_source: None,
+            truncated: false,
         })
     }
 }
@@ -2541,6 +3058,7 @@ impl MarkdownPlugin for MermaidPlugin {
             .lang
             .as_deref()
             .is_some_and(|language| language.eq_ignore_ascii_case("mermaid"))
+            || code.value.len() > MERMAID_MAX_SOURCE_BYTES
         {
             return None;
         }
@@ -2580,13 +3098,17 @@ impl MarkdownPlugin for MermaidPlugin {
         source.scale.to_bits().hash(&mut hasher);
         theme_key.hash(&mut hasher);
         let render_key = hasher.finish();
-        let mut state_hasher = DefaultHasher::new();
-        render_key.hash(&mut state_hasher);
-        source.source_offset.hash(&mut state_hasher);
-        let key = SharedString::from(format!("zz-mermaid/{:016x}", state_hasher.finish()));
+        let key = SharedString::from(format!(
+            "zz-mermaid/{}/{theme_key}/{}",
+            source.source_offset,
+            source.scale.to_bits()
+        ));
         let render_state = window.use_keyed_state(key, cx, {
             let source = source.clone();
             move |_, cx| MermaidRenderState::new(source, render_key, cx)
+        });
+        render_state.update(cx, |state, cx| {
+            state.synchronize(source.clone(), render_key, cx);
         });
 
         let content = match &render_state.read(cx).result {
@@ -2606,16 +3128,35 @@ impl MarkdownPlugin for MermaidPlugin {
                 .child("Rendering Mermaid…")
                 .into_any_element(),
             MermaidRenderResult::Ready(image) => div()
-                .id(("agent-mermaid-scroll", source.source_offset))
+                .id(("agent-mermaid", source.source_offset))
+                .relative()
                 .w_full()
                 .min_w_0()
                 .max_h(px(MERMAID_MAX_HEIGHT))
-                .overflow_scroll()
+                .overflow_hidden()
                 .child(
-                    div().flex().min_w_full().child(
+                    div().flex().w_full().justify_center().child(
                         img(ImageSource::Render(image.clone()))
-                            .flex_none()
+                            .max_w_full()
+                            .max_h(px(MERMAID_MAX_HEIGHT))
                             .mx_auto(),
+                    ),
+                )
+                .child(
+                    div().absolute().top_2().right_2().child(
+                        Button::new(("agent-mermaid-preview", source.source_offset))
+                            .secondary()
+                            .xsmall()
+                            .compact()
+                            .icon(IconName::WindowMaximize)
+                            .label("Full diagram")
+                            .tooltip("Open full diagram")
+                            .on_click({
+                                let image = Arc::clone(image);
+                                move |_, window, cx| {
+                                    open_render_image_preview(Arc::clone(&image), window, cx);
+                                }
+                            }),
                     ),
                 )
                 .into_any_element(),
@@ -3049,23 +3590,41 @@ enum MermaidRenderResult {
 
 struct MermaidRenderState {
     result: MermaidRenderResult,
+    render_key: Option<u64>,
     _task: Option<Task<()>>,
 }
 
 impl MermaidRenderState {
     fn new(source: MermaidSource, render_key: u64, cx: &mut Context<Self>) -> Self {
+        let mut state = Self {
+            result: MermaidRenderResult::Pending,
+            render_key: None,
+            _task: None,
+        };
+        state.synchronize(source, render_key, cx);
+        state
+    }
+
+    fn synchronize(&mut self, source: MermaidSource, render_key: u64, cx: &mut Context<Self>) {
+        if self.render_key == Some(render_key) {
+            return;
+        }
+        self.render_key = Some(render_key);
         if let Some(image) = cx
             .try_global::<MermaidImageCache>()
             .and_then(|cache| cache.get(render_key))
         {
-            return Self {
-                result: MermaidRenderResult::Ready(image),
-                _task: None,
-            };
+            self.result = MermaidRenderResult::Ready(image);
+            self._task = None;
+            cx.notify();
+            return;
         }
+        self.result = MermaidRenderResult::Pending;
         let theme = MermaidTheme::from_app(cx);
         let svg_renderer = cx.svg_renderer();
+        let delay = cx.background_executor().timer(MERMAID_RENDER_DEBOUNCE);
         let task = cx.spawn(async move |this: gpui::WeakEntity<Self>, cx| {
+            delay.await;
             let result = cx
                 .background_spawn(async move {
                     let svg = render_mermaid_svg(&source.source, &theme)?;
@@ -3075,6 +3634,9 @@ impl MermaidRenderState {
                 })
                 .await;
             let _ = this.update(cx, |state, cx| {
+                if state.render_key != Some(render_key) {
+                    return;
+                }
                 state.result = match result {
                     Ok(image) => {
                         if cx.try_global::<MermaidImageCache>().is_none() {
@@ -3089,10 +3651,8 @@ impl MermaidRenderState {
                 cx.notify();
             });
         });
-        Self {
-            result: MermaidRenderResult::Pending,
-            _task: Some(task),
-        }
+        self._task = Some(task);
+        cx.notify();
     }
 }
 
@@ -3203,13 +3763,12 @@ mod workspace_link_tests {
     }
 
     #[test]
-    fn relative_and_absolute_existing_paths_become_file_urls() {
+    fn relative_and_absolute_paths_become_file_urls() {
         let cwd = Path::new(CRATE_DIR);
         let expected = cwd.join("Cargo.toml");
         let absolute = expected.to_string_lossy();
         for link in ["Cargo.toml", absolute.as_ref()] {
-            let resolved =
-                resolve_workspace_link(Some(cwd), link).expect("existing workspace link");
+            let resolved = resolve_workspace_link(Some(cwd), link).expect("workspace link");
             let url = Url::parse(&resolved).expect("file URL");
             assert_eq!(url.scheme(), "file");
             assert_eq!(url.to_file_path().expect("absolute file URL"), expected);
@@ -3217,11 +3776,14 @@ mod workspace_link_tests {
     }
 
     #[test]
-    fn a_missing_path_is_left_alone() {
+    fn a_missing_path_is_still_resolved_without_io() {
         let cwd = Path::new(CRATE_DIR);
+        let resolved =
+            resolve_workspace_link(Some(cwd), "definitely-not-here.md").expect("workspace link");
+        let url = Url::parse(&resolved).expect("file URL");
         assert_eq!(
-            resolve_workspace_link(Some(cwd), "definitely-not-here.md"),
-            None
+            url.to_file_path().expect("absolute file URL"),
+            cwd.join("definitely-not-here.md")
         );
     }
 
@@ -3840,12 +4402,14 @@ mod tests {
     fn timeline_store_sync_uses_append_and_replacement_paths(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let store = cx.new(|_| AgentTimelineStore::default());
+        let source = AgentMarkdown::new("hé");
         let markdown = store.update(cx, |store, cx| {
-            store.markdown(9, MarkdownSlot::Body, "hé".into(), cx)
+            store.markdown(9, MarkdownSlot::Body, source.clone(), cx)
         });
 
+        source.synchronize_append("héllo");
         let append = store.update(cx, |store, cx| {
-            store.update_markdown(9, MarkdownSlot::Body, "héllo".into(), cx)
+            store.update_markdown(9, MarkdownSlot::Body, source.clone(), cx)
         });
         assert_eq!(append, MarkdownUpdate::Appended);
         cx.read(|cx| {
@@ -3859,8 +4423,9 @@ mod tests {
             );
         });
 
+        source.replace("help");
         let replacement = store.update(cx, |store, cx| {
-            store.update_markdown(9, MarkdownSlot::Body, "help".into(), cx)
+            store.update_markdown(9, MarkdownSlot::Body, source, cx)
         });
         assert_eq!(replacement, MarkdownUpdate::Replaced);
         cx.read(|cx| {
@@ -3875,6 +4440,31 @@ mod tests {
         });
     }
 
+    #[test]
+    fn large_markdown_keeps_a_bounded_preview_and_full_copy() {
+        let original = format!("# Result\n\n{}", "long response line\n".repeat(4_000));
+        let source = AgentMarkdown::new(original.clone());
+
+        assert!(source.is_truncated());
+        source.inspect(|preview, _, _| {
+            assert!(preview.len() <= MARKDOWN_PREVIEW_MAX_BYTES + MARKDOWN_PREVIEW_MARKER.len());
+            assert!(preview.ends_with(MARKDOWN_PREVIEW_MARKER));
+        });
+        assert_eq!(source.full_text(), original);
+
+        let appended = format!("{original}tail that remains available to copy");
+        source.synchronize_append(&appended);
+        assert_eq!(source.full_text(), appended);
+        source.inspect(|preview, _, _| {
+            assert!(preview.ends_with(MARKDOWN_PREVIEW_MARKER));
+        });
+
+        source.replace("short again");
+        assert!(!source.is_truncated());
+        assert_eq!(source.full_text(), "short again");
+        source.inspect(|preview, _, _| assert_eq!(preview, "short again"));
+    }
+
     /// A hanging marker is closed for the reader while the entry streams, and
     /// the settle hands back exactly the bytes the thread holds.
     #[gpui::test]
@@ -3882,8 +4472,9 @@ mod tests {
         cx.update(crate::init);
         let store = cx.new(|_| AgentTimelineStore::default());
         store.update(cx, |store, cx| store.set_streaming(Some(3), cx));
+        let source = AgentMarkdown::new("a **partly");
         let state = store.update(cx, |store, cx| {
-            store.markdown(3, MarkdownSlot::Body, "a **partly".into(), cx)
+            store.markdown(3, MarkdownSlot::Body, source.clone(), cx)
         });
         cx.run_until_parked();
         assert_eq!(
@@ -3891,8 +4482,9 @@ mod tests {
             "a **partly**"
         );
 
+        source.synchronize_append("a **partly bold");
         let appended = store.update(cx, |store, cx| {
-            store.update_markdown(3, MarkdownSlot::Body, "a **partly bold".into(), cx)
+            store.update_markdown(3, MarkdownSlot::Body, source.clone(), cx)
         });
         cx.run_until_parked();
         assert_eq!(appended, MarkdownUpdate::Replaced);
@@ -3901,8 +4493,9 @@ mod tests {
             "a **partly bold**"
         );
 
+        source.synchronize_append("a **partly bold** run");
         let closed = store.update(cx, |store, cx| {
-            store.update_markdown(3, MarkdownSlot::Body, "a **partly bold** run".into(), cx)
+            store.update_markdown(3, MarkdownSlot::Body, source.clone(), cx)
         });
         cx.run_until_parked();
         assert_eq!(closed, MarkdownUpdate::Replaced);
@@ -3915,8 +4508,9 @@ mod tests {
         }));
 
         let raw = "a **partly bold** run, then *more";
+        source.synchronize_append(raw);
         store.update(cx, |store, cx| {
-            store.update_markdown(3, MarkdownSlot::Body, raw.into(), cx);
+            store.update_markdown(3, MarkdownSlot::Body, source, cx);
         });
         cx.run_until_parked();
         assert_eq!(
@@ -3929,6 +4523,35 @@ mod tests {
         assert_eq!(state.read_with(cx, |state, _| state.source()), raw);
     }
 
+    #[gpui::test]
+    fn a_large_hanging_inline_marker_is_repaired_off_the_ui_thread(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let store = cx.new(|_| AgentTimelineStore::default());
+        store.update(cx, |store, cx| store.set_streaming(Some(8), cx));
+        let raw = format!("{}**partly", "word ".repeat(4_000));
+        assert!(raw.len() < MARKDOWN_PREVIEW_MAX_BYTES);
+        let source = AgentMarkdown::new(raw.clone());
+        let state = store.update(cx, |store, cx| {
+            store.markdown(8, MarkdownSlot::Body, source.clone(), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            state.read_with(cx, |state, _| state.source()),
+            format!("{raw}**")
+        );
+
+        let next = format!("{raw} bold");
+        source.synchronize_append(&next);
+        store.update(cx, |store, cx| {
+            store.update_markdown(8, MarkdownSlot::Body, source, cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            state.read_with(cx, |state, _| state.source()),
+            format!("{next}**")
+        );
+    }
+
     /// The prefix fast path survives the mend: appends are diffed against the
     /// raw text, so an entry that never hangs a marker never reparses.
     #[gpui::test]
@@ -3936,12 +4559,14 @@ mod tests {
         cx.update(crate::init);
         let store = cx.new(|_| AgentTimelineStore::default());
         store.update(cx, |store, cx| store.set_streaming(Some(4), cx));
+        let source = AgentMarkdown::new("plain");
         store.update(cx, |store, cx| {
-            store.markdown(4, MarkdownSlot::Body, "plain".into(), cx)
+            store.markdown(4, MarkdownSlot::Body, source.clone(), cx)
         });
 
+        source.synchronize_append("plain text");
         let appended = store.update(cx, |store, cx| {
-            store.update_markdown(4, MarkdownSlot::Body, "plain text".into(), cx)
+            store.update_markdown(4, MarkdownSlot::Body, source, cx)
         });
 
         assert_eq!(appended, MarkdownUpdate::Appended);
@@ -3954,14 +4579,16 @@ mod tests {
     fn a_settled_entry_is_never_mended(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let store = cx.new(|_| AgentTimelineStore::default());
+        let source = AgentMarkdown::new("a **partly");
         let state = store.update(cx, |store, cx| {
-            store.markdown(5, MarkdownSlot::Body, "a **partly".into(), cx)
+            store.markdown(5, MarkdownSlot::Body, source.clone(), cx)
         });
         cx.run_until_parked();
         assert_eq!(state.read_with(cx, |state, _| state.source()), "a **partly");
 
+        source.synchronize_append("a **partly bold");
         let update = store.update(cx, |store, cx| {
-            store.update_markdown(5, MarkdownSlot::Body, "a **partly bold".into(), cx)
+            store.update_markdown(5, MarkdownSlot::Body, source, cx)
         });
         cx.run_until_parked();
         assert_eq!(update, MarkdownUpdate::Appended);
@@ -4059,6 +4686,35 @@ mod tests {
     }
 
     #[test]
+    fn diff_materialization_caps_inputs_before_myers() {
+        use std::fmt::Write as _;
+
+        let mut old = String::new();
+        let mut new = String::new();
+        for line in 0..TOOL_CONTENT_MAX_LINES * 2 {
+            writeln!(&mut old, "old-{line}").expect("write old diff fixture");
+            writeln!(&mut new, "new-{line}").expect("write new diff fixture");
+        }
+        let (bounded_old, old_truncated) = bounded_tool_diff_prefix(&old);
+        let (bounded_new, new_truncated) = bounded_tool_diff_prefix(&new);
+
+        assert_eq!(bounded_old.lines().count(), TOOL_CONTENT_MAX_LINES);
+        assert_eq!(bounded_new.lines().count(), TOOL_CONTENT_MAX_LINES);
+        assert!(old_truncated && new_truncated);
+
+        let materialized = materialize_tool_payload(&AgentToolPayload::Diff {
+            path: "/workspace/src/lib.rs".into(),
+            old: Some(old.into()),
+            new: new.into(),
+        });
+        assert!(materialized.rows.len() <= TOOL_CONTENT_MAX_LINES + 2);
+        assert!(matches!(
+            materialized.rows.last(),
+            Some(ToolContentRow::Footer(note)) if note.contains("truncated")
+        ));
+    }
+
+    #[test]
     fn tool_content_line_cap_adds_a_truncation_footer() {
         let text = (0..TOOL_CONTENT_MAX_LINES + 2)
             .map(|line| line.to_string())
@@ -4071,7 +4727,7 @@ mod tests {
         assert!(matches!(
             materialized.rows.last(),
             Some(ToolContentRow::Footer(note))
-                if note == "truncated: showing first 10000 of 10002 lines"
+                if note.contains("truncated")
         ));
         assert_eq!(tool_payload_copy_text(std::slice::from_ref(&payload)), text);
     }
@@ -4087,7 +4743,7 @@ mod tests {
         assert_eq!(materialized.rows.len(), TOOL_CONTENT_MAX_LINES + 1);
         assert!(matches!(
             &materialized.rows[0],
-            ToolContentRow::Footer(label) if label.contains("showing last")
+            ToolContentRow::Footer(label) if label.contains("latest output")
         ));
         assert!(matches!(
             &materialized.rows[1],

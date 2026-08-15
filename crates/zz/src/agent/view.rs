@@ -1,37 +1,40 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, Timelike as _};
 use gpui::{
-    Anchor, AnyElement, Context, ElementId, Entity, FocusHandle, Focusable, Image, IntoElement,
-    KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, Render, ScrollStrategy,
-    SharedString, Subscription, Task, UniformListScrollHandle, Window, div, prelude::*, px,
-    relative, uniform_list,
+    Anchor, AnyElement, Context, ElementId, Entity, EntityId, FocusHandle, Focusable, Hsla, Image,
+    IntoElement, KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, Render,
+    ScrollStrategy, SharedString, Subscription, Task, Transformation, UniformListScrollHandle,
+    Window, div, ease_in_out, percentage, prelude::*, px, relative, uniform_list,
 };
 use zz_daemon::{TurnDiff, TurnFile, TurnFileStatus};
 use zz_protocol::{AgentDescriptor, AgentProvider, CommandInvocation, PaneId};
 #[cfg(all(test, not(target_os = "macos")))]
 use zz_ui::agent::DisclosureKind;
 use zz_ui::agent::{
-    AGENT_CHROME_CONTROL_HEIGHT, AGENT_CONTENT_MAX_WIDTH, AgentEntry, AgentTimeline,
-    AgentTimelineStore, AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus,
-    COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot, TimelineRow, TimelineStick,
-    agent_attachment_thumbnail, agent_jump_to_bottom_button, agent_pane_header, agent_patch_block,
-    append_timeline_row, fold_timeline_rows, timeline_group_kind,
+    AGENT_CHROME_CONTROL_HEIGHT, AGENT_CONTENT_MAX_WIDTH, AgentEntry, AgentMarkdown, AgentPatch,
+    AgentTimeline, AgentTimelineStore, AgentToolEntry, AgentToolKind, AgentToolPayload,
+    AgentToolStatus, AgentToolText, COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot,
+    TimelineRow, TimelineStick, agent_attachment_thumbnail, agent_jump_to_bottom_button,
+    agent_pane_header, agent_patch, agent_patch_block, append_timeline_row, fold_timeline_rows,
+    timeline_group_kind,
 };
 use zz_ui::command::palette_shortcut_hint;
 use zz_ui::{
     ActiveTheme as _, CHROME_GAP, Colorize as _, Disableable as _, Icon, IconName, Sizable as _,
+    Size,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp},
     menu::{DropdownMenu as _, PopupMenuItem},
+    pulse::pulse_phase,
     scroll::Scrollbar,
-    spinner::Spinner,
     tag::Tag,
     v_flex,
 };
@@ -40,20 +43,21 @@ use crate::{
     agent::attachment as agent_attachment,
     agent::controller::{
         AgentCommand, AgentCommandKind, AgentConfigCategory, AgentConfigOption,
-        AgentConnectionState, AgentController, AgentControllerEvent, AgentPaneState,
-        AgentPermissionKind, AgentPermissionRequest, AgentSessionCapabilities,
-        AgentSessionHistoryState, AgentSessionSummary, AgentThreadEntry, AgentToolKindModel,
-        AgentToolStatusModel, ToolPayload,
+        AgentConnectionState, AgentController, AgentPaneState, AgentPermissionKind,
+        AgentPermissionRequest, AgentSessionCapabilities, AgentSessionHistoryState,
+        AgentSessionSummary, AgentThreadEntry, AgentToolKindModel, AgentToolStatusModel,
+        ToolPayload,
     },
     config::pane_content_radii,
     file_picker::{FilePickerEvent, FilePickerMode, FilePickerView, directory_picker_root},
-    mux::client::MuxClient,
+    mux::{client::MuxClient, hosts::HostId},
     window::corners::{WindowCorners, round_div_radii},
 };
 
 const AGENT_KEY_CONTEXT: &str = "Agent";
 const COMPLETION_ROW_HEIGHT: f32 = 52.0;
 const MAX_VISIBLE_COMPLETION_ROWS: u8 = 6;
+const MAX_COMPLETION_RESULTS: usize = 64;
 const HISTORY_ROW_HEIGHT: f32 = 52.0;
 const CHANGES_ROW_HEIGHT: f32 = 40.0;
 const COMPOSER_MIN_HEIGHT: f32 = 86.0;
@@ -62,6 +66,25 @@ const COMPOSER_OCCLUSION_HEIGHT: f32 = COMPOSER_MIN_HEIGHT / 2.0;
 const TIMELINE_COMPOSER_CLEARANCE: f32 = (COMPOSER_MIN_HEIGHT + 12.0) * 1.5;
 const STICKY_ROW_HEIGHT: f32 = 32.0;
 const CHROME_BUTTON_HEIGHT: f32 = AGENT_CHROME_CONTROL_HEIGHT;
+const SPINNER_PERIOD: Duration = Duration::from_millis(800);
+const MAX_RENDERED_ERROR_BYTES: usize = 1024;
+
+fn agent_spinner(size: Size, color: Hsla, view: EntityId, cx: &mut gpui::App) -> AnyElement {
+    let phase = ease_in_out(pulse_phase(SPINNER_PERIOD, view, cx));
+    Icon::new(IconName::Loader)
+        .with_size(size)
+        .text_color(color)
+        .transform(Transformation::rotate(percentage(phase)))
+        .into_any_element()
+}
+
+const fn directory_picker_enabled(
+    connection: AgentConnectionState,
+    pending_permission: bool,
+    local_host: bool,
+) -> bool {
+    local_host && connection.accepts_prompt() && !pending_permission
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct CommandCompletion {
@@ -107,36 +130,75 @@ struct TimelineModel {
     entry_ids: Vec<u64>,
     entry_revisions: Vec<u64>,
     entry_to_row: Vec<usize>,
+    markdown: HashMap<u64, AgentMarkdown>,
+    tool_payloads: HashMap<(u64, usize), AgentToolPayload>,
+    nested_entries: HashMap<u64, AgentEntry>,
+    nested_revisions: HashMap<u64, u64>,
+    sticky_revision: u64,
 }
 
 impl TimelineModel {
-    fn new(entries: &[AgentThreadEntry], revisions: &[u64]) -> Self {
+    fn new(
+        entries: &[AgentThreadEntry],
+        revisions: &[u64],
+        child_revisions: &HashMap<u64, u64>,
+    ) -> Self {
         debug_assert_eq!(entries.len(), revisions.len());
-        let ui_entries = ui_entries(entries);
+        let mut markdown = HashMap::new();
+        let mut tool_payloads = HashMap::new();
+        let mut nested_entries = HashMap::new();
+        let mut nested_revisions = HashMap::new();
+        let ui_entries = ui_entries_with_markdown(
+            entries,
+            &mut markdown,
+            &mut tool_payloads,
+            child_revisions,
+            &mut nested_entries,
+            &mut nested_revisions,
+        );
         let FoldedTimelineRows { rows, entry_to_row } = fold_timeline_rows(&ui_entries);
         Self {
             rows,
             entry_ids: entries.iter().map(AgentThreadEntry::id).collect(),
             entry_revisions: revisions.to_vec(),
             entry_to_row,
+            markdown,
+            tool_payloads,
+            nested_entries,
+            nested_revisions,
+            sticky_revision: 1,
         }
     }
 
     fn clear(&mut self) {
+        self.sticky_revision = self.sticky_revision.wrapping_add(1);
         self.rows = Arc::new(Vec::new());
         self.entry_ids.clear();
         self.entry_revisions.clear();
         self.entry_to_row.clear();
+        self.markdown.clear();
+        self.tool_payloads.clear();
+        self.nested_entries.clear();
+        self.nested_revisions.clear();
     }
 
-    fn rebuild(&mut self, entries: &[AgentThreadEntry], revisions: &[u64]) {
-        *self = Self::new(entries, revisions);
+    fn rebuild(
+        &mut self,
+        entries: &[AgentThreadEntry],
+        revisions: &[u64],
+        child_revisions: &HashMap<u64, u64>,
+    ) {
+        let sticky_revision = self.sticky_revision.wrapping_add(1);
+        *self = Self::new(entries, revisions, child_revisions);
+        self.sticky_revision = sticky_revision;
     }
 
     fn synchronize(
         &mut self,
         entries: &[AgentThreadEntry],
         revisions: &[u64],
+        child_revisions: &HashMap<u64, u64>,
+        changed_entries: Option<&[usize]>,
     ) -> TimelineModelUpdate {
         debug_assert_eq!(entries.len(), revisions.len());
         if entries.len() != revisions.len() {
@@ -145,42 +207,87 @@ impl TimelineModel {
 
         let old_entry_count = self.entry_ids.len();
         let append_only = old_entry_count <= entries.len()
-            && self
-                .entry_ids
-                .iter()
-                .zip(entries)
-                .all(|(id, entry)| *id == entry.id());
+            && if changed_entries.is_some() {
+                old_entry_count == 0
+                    || self.entry_ids.last().copied()
+                        == entries.get(old_entry_count - 1).map(AgentThreadEntry::id)
+            } else {
+                self.entry_ids
+                    .iter()
+                    .zip(entries)
+                    .all(|(id, entry)| *id == entry.id())
+            };
         if !append_only {
-            self.rebuild(entries, revisions);
+            self.rebuild(entries, revisions, child_revisions);
             return TimelineModelUpdate::Rebuild;
         }
 
-        let changed_existing = (0..old_entry_count)
-            .filter(|index| self.entry_revisions[*index] != revisions[*index])
-            .collect::<Vec<_>>();
+        let changed_existing = changed_entries.map_or_else(
+            || {
+                (0..old_entry_count)
+                    .filter(|index| self.entry_revisions[*index] != revisions[*index])
+                    .collect::<Vec<_>>()
+            },
+            |changes| {
+                changes
+                    .iter()
+                    .copied()
+                    .filter(|index| {
+                        *index < old_entry_count
+                            && self.entry_revisions[*index] != revisions[*index]
+                    })
+                    .collect::<Vec<_>>()
+            },
+        );
         if changed_existing.is_empty() && old_entry_count == entries.len() {
             return TimelineModelUpdate::None;
         }
 
         let mut replacements = Vec::with_capacity(changed_existing.len());
+        let mut sticky_changed = false;
         for &entry_index in &changed_existing {
             let id = self.entry_ids[entry_index];
             let Some(&row_index) = self.entry_to_row.get(entry_index) else {
-                self.rebuild(entries, revisions);
+                self.rebuild(entries, revisions, child_revisions);
                 return TimelineModelUpdate::Rebuild;
             };
-            let next = ui_entry(&entries[entry_index]);
+            let next = ui_entry_with_markdown(
+                &entries[entry_index],
+                &mut self.markdown,
+                &mut self.tool_payloads,
+                child_revisions,
+                &mut self.nested_entries,
+                &mut self.nested_revisions,
+            );
             let Some(previous) = self.rows.get(row_index).and_then(|row| row.entry(id)) else {
-                self.rebuild(entries, revisions);
+                self.rebuild(entries, revisions, child_revisions);
                 return TimelineModelUpdate::Rebuild;
             };
             if !replacement_preserves_folding(previous, &next) {
-                self.rebuild(entries, revisions);
+                self.rebuild(entries, revisions, child_revisions);
                 return TimelineModelUpdate::Rebuild;
             }
+            sticky_changed |= sticky_entry_rows(previous) != sticky_entry_rows(&next);
             replacements.push((entry_index, row_index, id, next));
         }
 
+        let appended = entries
+            .iter()
+            .skip(old_entry_count)
+            .map(|entry| {
+                ui_entry_with_markdown(
+                    entry,
+                    &mut self.markdown,
+                    &mut self.tool_payloads,
+                    child_revisions,
+                    &mut self.nested_entries,
+                    &mut self.nested_revisions,
+                )
+            })
+            .collect::<Vec<_>>();
+        sticky_changed |= appended.iter().any(|entry| {
+            matches!(entry, AgentEntry::User { .. }) || !sticky_entry_rows(entry).is_empty()
+        });
         let old_row_count = self.rows.len();
         let mut store_entries = Vec::with_capacity(replacements.len());
         let mut remeasure_rows = replacements
@@ -194,8 +301,7 @@ impl TimelineModel {
             self.entry_revisions[entry_index] = revisions[entry_index];
         }
 
-        for entry in entries.iter().skip(old_entry_count) {
-            let entry = ui_entry(entry);
+        for entry in appended {
             let (row_index, row_added) = append_timeline_row(rows, entry);
             self.entry_to_row.push(row_index);
             if !row_added && row_index < old_row_count {
@@ -206,6 +312,9 @@ impl TimelineModel {
             .extend(entries[old_entry_count..].iter().map(AgentThreadEntry::id));
         self.entry_revisions
             .extend_from_slice(&revisions[old_entry_count..]);
+        if sticky_changed {
+            self.sticky_revision = self.sticky_revision.wrapping_add(1);
+        }
 
         remeasure_rows.sort_unstable();
         remeasure_rows.dedup();
@@ -386,11 +495,15 @@ pub(crate) struct AgentView {
     timeline: TimelineModel,
     timeline_store: Entity<AgentTimelineStore>,
     timeline_next_revision: u64,
+    conversation_epoch: u64,
     timeline_scroll: ListState,
     stick: TimelineStick,
     completion_scroll: UniformListScrollHandle,
     submission_error: Option<Arc<str>>,
     dismissed_notifications: BTreeSet<u64>,
+    sticky_rows: Arc<[StickyAgentRow]>,
+    sticky_timeline_revision: u64,
+    sticky_dismissed_notifications: BTreeSet<u64>,
     permission_wizard: PermissionWizard,
     attachments: Vec<Arc<Image>>,
     completions: Arc<[CommandCompletion]>,
@@ -409,8 +522,10 @@ pub(crate) struct AgentView {
     changes: Option<Arc<TurnDiff>>,
     changes_error: Option<Arc<str>>,
     changes_expanded: Option<SharedString>,
+    changes_hunks: Option<(usize, Option<AgentPatch>)>,
     changes_scroll: UniformListScrollHandle,
     changes_patch_scroll: UniformListScrollHandle,
+    changes_turn_generation: u64,
     /// The in-flight capture. Dropping it cancels the diff.
     changes_task: Option<Task<()>>,
     directory_picker: Option<Entity<FilePickerView>>,
@@ -465,17 +580,27 @@ impl AgentView {
         controller.update(cx, |controller, cx| {
             controller.ensure_pane(pane, descriptor, cx);
         });
-        let (pane_state, timeline, timeline_next_revision) = {
+        let (
+            pane_state,
+            timeline,
+            timeline_next_revision,
+            conversation_epoch,
+            changes_turn_generation,
+        ) = {
             let controller = controller.read(cx);
             let pane_state = controller
                 .pane_state(pane)
                 .unwrap_or_else(disconnected_pane_state);
-            let (entries, revisions, next_revision) =
-                controller.pane_entries(pane).unwrap_or((&[], &[], 0));
+            let empty_child_revisions = HashMap::new();
+            let (entries, revisions, child_revisions, next_revision) = controller
+                .pane_entries(pane)
+                .unwrap_or((&[], &[], &empty_child_revisions, 0));
             (
                 pane_state,
-                TimelineModel::new(entries, revisions),
+                TimelineModel::new(entries, revisions, child_revisions),
                 next_revision,
+                controller.conversation_epoch(pane),
+                controller.turn_generation(pane),
             )
         };
         let timeline_scroll = ListState::new(0, ListAlignment::Top, px(1_200.0));
@@ -496,17 +621,6 @@ impl AgentView {
                 cx.notify();
             }
         });
-        let controller_subscription = cx.subscribe(
-            &controller,
-            |view, controller, event: &AgentControllerEvent, cx| {
-                if view.visible
-                    && matches!(event, AgentControllerEvent::Pane { pane } if *pane == view.pane)
-                    && view.synchronize_controller(&controller, cx)
-                {
-                    cx.notify();
-                }
-            },
-        );
         Self {
             pane,
             mux,
@@ -518,11 +632,15 @@ impl AgentView {
             timeline,
             timeline_store,
             timeline_next_revision,
+            conversation_epoch,
             timeline_scroll,
             stick,
             completion_scroll: UniformListScrollHandle::new(),
             submission_error: None,
             dismissed_notifications: BTreeSet::new(),
+            sticky_rows: Arc::from([]),
+            sticky_timeline_revision: 0,
+            sticky_dismissed_notifications: BTreeSet::new(),
             permission_wizard: PermissionWizard::default(),
             attachments: Vec::new(),
             completions: Arc::from([]),
@@ -541,8 +659,10 @@ impl AgentView {
             changes: None,
             changes_error: None,
             changes_expanded: None,
+            changes_hunks: None,
             changes_scroll: UniformListScrollHandle::new(),
             changes_patch_scroll: UniformListScrollHandle::new(),
+            changes_turn_generation,
             changes_task: None,
             directory_picker: None,
             window_corners: WindowCorners::NONE,
@@ -552,7 +672,6 @@ impl AgentView {
                 input_subscription,
                 history_input_subscription,
                 controller_observer,
-                controller_subscription,
             ],
         }
     }
@@ -668,8 +787,11 @@ impl AgentView {
             .unwrap_or_else(disconnected_pane_state);
         let state_changed = self.pane_state != next_state;
         let provider_changed = self.pane_state.provider != next_state.provider;
-        let conversation_changed =
-            provider_changed || self.pane_state.session_id != next_state.session_id;
+        let next_conversation_epoch = controller.conversation_epoch(self.pane);
+        let conversation_changed = self.conversation_epoch != next_conversation_epoch
+            || provider_changed
+            || self.pane_state.session_id != next_state.session_id;
+        self.conversation_epoch = next_conversation_epoch;
         let history_changed = provider_changed
             || self.pane_state.session_history != next_state.session_history
             || self.pane_state.session_id != next_state.session_id;
@@ -679,6 +801,23 @@ impl AgentView {
         let commands_changed = provider_changed
             || self.pane_state.available_commands.as_ref()
                 != next_state.available_commands.as_ref();
+        let next_turn_generation = controller.turn_generation(self.pane);
+        let changes_invalidated = (self.changes_turn_generation != next_turn_generation
+            || !controller.has_turn_base(self.pane))
+            && (self.changes_open
+                || self.changes.is_some()
+                || self.changes_error.is_some()
+                || self.changes_expanded.is_some()
+                || self.changes_task.is_some());
+        if changes_invalidated {
+            self.changes_open = false;
+            self.changes = None;
+            self.changes_error = None;
+            self.changes_expanded = None;
+            self.changes_hunks = None;
+            self.changes_task = None;
+        }
+        self.changes_turn_generation = next_turn_generation;
         if conversation_changed {
             self.dismissed_notifications.clear();
         }
@@ -698,7 +837,9 @@ impl AgentView {
             self.recompute_completions(provider, &commands);
         }
 
-        let Some((entries, revisions, next_revision)) = controller.pane_entries(self.pane) else {
+        let Some((entries, revisions, child_revisions, next_revision)) =
+            controller.pane_entries(self.pane)
+        else {
             if !self.timeline.rows.is_empty() {
                 self.timeline.clear();
                 self.timeline_next_revision = 0;
@@ -707,17 +848,65 @@ impl AgentView {
                 self.stick.engage_now(&self.timeline_scroll, reduce_motion);
                 return (true, TimelineStoreUpdate::Clear);
             }
-            return (state_changed, TimelineStoreUpdate::Clear);
+            return (
+                state_changed || changes_invalidated,
+                TimelineStoreUpdate::Clear,
+            );
         };
+        if conversation_changed {
+            self.timeline.rebuild(entries, revisions, child_revisions);
+            self.timeline_next_revision = next_revision;
+            self.timeline_scroll.reset(self.timeline.rows.len());
+            self.stick.engage_now(&self.timeline_scroll, reduce_motion);
+            self.sticky_rows =
+                sticky_agent_rows(&self.timeline.rows, &self.dismissed_notifications).into();
+            self.sticky_timeline_revision = self.timeline.sticky_revision;
+            self.sticky_dismissed_notifications
+                .clone_from(&self.dismissed_notifications);
+            return (true, TimelineStoreUpdate::Clear);
+        }
         if self.timeline.entry_ids.len() == entries.len()
             && self.timeline_next_revision == next_revision
         {
-            return (state_changed, TimelineStoreUpdate::None);
+            return (
+                state_changed || changes_invalidated,
+                TimelineStoreUpdate::None,
+            );
         }
+        let Some(changed_entries) =
+            controller.pane_entry_changes(self.pane, self.timeline_next_revision)
+        else {
+            self.timeline.rebuild(entries, revisions, child_revisions);
+            self.timeline_next_revision = next_revision;
+            self.timeline_scroll.reset(self.timeline.rows.len());
+            self.stick.engage_now(&self.timeline_scroll, reduce_motion);
+            return (true, TimelineStoreUpdate::Clear);
+        };
         self.timeline_next_revision = next_revision;
-        let (timeline_changed, store_update) =
-            self.synchronize_timeline(entries, revisions, reduce_motion);
-        (timeline_changed || state_changed, store_update)
+        let (timeline_changed, store_update) = self.synchronize_timeline(
+            entries,
+            revisions,
+            child_revisions,
+            &changed_entries,
+            reduce_motion,
+        );
+        (
+            timeline_changed || state_changed || changes_invalidated,
+            store_update,
+        )
+    }
+
+    fn cached_sticky_rows(&mut self) -> Arc<[StickyAgentRow]> {
+        if self.sticky_timeline_revision != self.timeline.sticky_revision
+            || self.sticky_dismissed_notifications != self.dismissed_notifications
+        {
+            self.sticky_rows =
+                sticky_agent_rows(&self.timeline.rows, &self.dismissed_notifications).into();
+            self.sticky_timeline_revision = self.timeline.sticky_revision;
+            self.sticky_dismissed_notifications
+                .clone_from(&self.dismissed_notifications);
+        }
+        Arc::clone(&self.sticky_rows)
     }
 
     fn recompute_history_results(&mut self, query: &str) {
@@ -762,9 +951,14 @@ impl AgentView {
         &mut self,
         entries: &[AgentThreadEntry],
         revisions: &[u64],
+        child_revisions: &HashMap<u64, u64>,
+        changed_entries: &[usize],
         reduce_motion: bool,
     ) -> (bool, TimelineStoreUpdate) {
-        match self.timeline.synchronize(entries, revisions) {
+        match self
+            .timeline
+            .synchronize(entries, revisions, child_revisions, Some(changed_entries))
+        {
             TimelineModelUpdate::None => (false, TimelineStoreUpdate::None),
             TimelineModelUpdate::Rebuild => {
                 self.timeline_scroll.reset(self.timeline.rows.len());
@@ -864,9 +1058,14 @@ impl AgentView {
             return false;
         };
         let pane = self.pane;
-        self.controller.update(cx, |controller, cx| {
-            controller.respond_permission(pane, request_id, option_id, cx);
+        let sent = self.controller.update(cx, |controller, cx| {
+            controller.respond_permission(pane, request_id, option_id, cx)
         });
+        if !sent {
+            self.permission_wizard.answered.remove(&request_id);
+            self.permission_wizard
+                .sync(&self.pane_state.pending_permissions);
+        }
         cx.notify();
         true
     }
@@ -1094,6 +1293,9 @@ impl AgentView {
     /// runs on the background executor; only the result comes back here.
     fn refresh_changes(&mut self, cx: &mut Context<Self>) {
         let pane = self.pane;
+        self.changes = None;
+        self.changes_expanded = None;
+        self.changes_hunks = None;
         let Some(capture) = self
             .controller
             .update(cx, |controller, cx| controller.capture_turn_diff(pane, cx))
@@ -1125,21 +1327,38 @@ impl AgentView {
                         .is_some_and(|path| path == file.path.as_str())
                 }) {
                     self.changes_expanded = None;
+                    self.changes_hunks = None;
                 }
                 self.changes = Some(Arc::new(diff));
                 self.changes_error = None;
             }
-            Err(error) => self.changes_error = Some(Arc::from(error.as_str())),
+            Err(error) => {
+                self.changes = None;
+                self.changes_expanded = None;
+                self.changes_hunks = None;
+                self.changes_error = Some(Arc::from(error.as_str()));
+            }
         }
         cx.notify();
     }
 
     fn toggle_changed_file(&mut self, path: &SharedString, cx: &mut Context<Self>) {
-        self.changes_expanded = if self.changes_expanded.as_ref() == Some(path) {
-            None
+        if self.changes_expanded.as_ref() == Some(path) {
+            self.changes_expanded = None;
+            self.changes_hunks = None;
         } else {
-            Some(path.clone())
-        };
+            self.changes_expanded = Some(path.clone());
+            self.changes_hunks = self.changes.as_ref().and_then(|diff| {
+                let index = diff
+                    .files
+                    .iter()
+                    .position(|file| file.path.as_str() == path.as_ref())?;
+                Some((
+                    index,
+                    file_hunks(&diff.patch, &diff.files[index]).map(agent_patch),
+                ))
+            });
+        }
         cx.notify();
     }
 
@@ -1344,7 +1563,11 @@ impl AgentView {
         )
     }
 
-    fn render_empty_state(state: &AgentPaneState, cx: &gpui::App) -> impl IntoElement {
+    fn render_empty_state(
+        state: &AgentPaneState,
+        view: EntityId,
+        cx: &mut gpui::App,
+    ) -> impl IntoElement {
         let agent = state
             .agent_name
             .as_deref()
@@ -1372,7 +1595,14 @@ impl AgentView {
             .gap_2()
             .text_size(zz_ui::rems_from_px(12.0))
             .text_color(cx.theme().foreground.muted())
-            .when(busy, |this| this.child(Spinner::new().small()))
+            .when(busy, |this| {
+                this.child(agent_spinner(
+                    Size::Small,
+                    cx.theme().foreground.muted(),
+                    view,
+                    cx,
+                ))
+            })
             .child(message)
     }
 
@@ -1571,36 +1801,12 @@ impl AgentView {
     }
 
     fn render_error(&self, state: &AgentPaneState, cx: &gpui::App) -> Option<impl IntoElement> {
-        let error = state
-            .error
+        let runtime_error = state.error.clone();
+        let error = runtime_error
             .clone()
             .or_else(|| self.submission_error.clone())?;
         let retry_controller = self.controller.clone();
         let pane = self.pane;
-        let auth_buttons = state
-            .auth_methods
-            .iter()
-            .enumerate()
-            .map(|(index, method)| {
-                let controller = self.controller.clone();
-                let method_id = method.id.clone();
-                Button::new(format!("agent-auth-{}-{index}", self.pane.0))
-                    .secondary()
-                    .small()
-                    .label(method.name.clone())
-                    .tooltip(
-                        method
-                            .description
-                            .clone()
-                            .unwrap_or_else(|| "Authenticate with the agent".to_owned()),
-                    )
-                    .on_click(move |_, _, cx| {
-                        controller.update(cx, |controller, cx| {
-                            controller.authenticate(pane, method_id.clone(), cx);
-                        });
-                    })
-            })
-            .collect::<Vec<_>>();
         Some(
             v_flex()
                 .w_full()
@@ -1611,32 +1817,69 @@ impl AgentView {
                 .bg(cx.theme().danger.fill())
                 .p_3()
                 .text_size(zz_ui::rems_from_px(11.0))
-                .child(error.to_string())
-                .child(
-                    h_flex()
-                        .flex_wrap()
-                        .gap_2()
-                        .child(
-                            Button::new(format!("agent-retry-{}", self.pane.0))
-                                .primary()
-                                .small()
-                                .icon(IconName::Redo2)
-                                .label("Try again")
-                                .on_click(move |_, _, cx| {
-                                    retry_controller.update(cx, |controller, cx| {
-                                        controller.retry(pane, cx);
-                                    });
-                                }),
+                .child(rendered_error(&error))
+                .when(
+                    runtime_error.is_some() && state.connection == AgentConnectionState::Failed,
+                    |this| {
+                        let auth_buttons =
+                            state
+                                .auth_methods
+                                .iter()
+                                .enumerate()
+                                .map(|(index, method)| {
+                                    let controller = self.controller.clone();
+                                    let method_id = method.id.clone();
+                                    Button::new(format!("agent-auth-{}-{index}", self.pane.0))
+                                        .secondary()
+                                        .small()
+                                        .label(method.name.clone())
+                                        .tooltip(method.description.clone().unwrap_or_else(|| {
+                                            "Authenticate with the agent".to_owned()
+                                        }))
+                                        .on_click(move |_, _, cx| {
+                                            controller.update(cx, |controller, cx| {
+                                                controller.authenticate(
+                                                    pane,
+                                                    method_id.clone(),
+                                                    cx,
+                                                );
+                                            });
+                                        })
+                                });
+                        this.child(
+                            h_flex()
+                                .flex_wrap()
+                                .gap_2()
+                                .child(
+                                    Button::new(format!("agent-retry-{}", self.pane.0))
+                                        .primary()
+                                        .small()
+                                        .icon(IconName::Redo2)
+                                        .label(if state.lifecycle_pending {
+                                            "Restarting…"
+                                        } else {
+                                            "Try again"
+                                        })
+                                        .disabled(state.lifecycle_pending)
+                                        .on_click(move |_, _, cx| {
+                                            retry_controller.update(cx, |controller, cx| {
+                                                controller.retry(pane, cx);
+                                            });
+                                        }),
+                                )
+                                .children(auth_buttons),
                         )
-                        .children(auth_buttons),
+                    },
                 ),
         )
     }
 
     fn render_agent_picker(&self, state: &AgentPaneState, view: Entity<Self>) -> impl IntoElement {
         let selected = state.provider;
-        let disabled = state.connection.has_active_turn();
-        let tooltip = if disabled {
+        let disabled = state.connection.has_active_turn() || state.lifecycle_pending;
+        let tooltip = if state.lifecycle_pending {
+            "Waiting for the daemon to switch agents".to_owned()
+        } else if disabled {
             "Finish or cancel the current turn before switching agents".to_owned()
         } else {
             state.agent_name.as_deref().map_or_else(
@@ -1722,7 +1965,7 @@ impl AgentView {
         )
     }
 
-    fn render_changes_overlay(&self, view: &Entity<Self>, cx: &gpui::App) -> impl IntoElement {
+    fn render_changes_overlay(&self, view: &Entity<Self>, cx: &mut gpui::App) -> impl IntoElement {
         let pane = self.pane;
         let diff = self.changes.clone();
         let loading = self.changes_task.is_some();
@@ -1846,19 +2089,10 @@ impl AgentView {
         );
         let truncated = diff.as_ref().is_some_and(|diff| diff.truncated);
         let empty = diff.as_ref().is_some_and(|diff| diff.files.is_empty());
-        // Borrowed straight out of the retained diff: slicing the patch on every
-        // render is a search, copying it out would be an allocation.
         let hunks = self
-            .changes
+            .changes_hunks
             .as_ref()
-            .zip(self.changes_expanded.as_ref())
-            .and_then(|(diff, path)| {
-                let index = diff
-                    .files
-                    .iter()
-                    .position(|file| file.path.as_str() == path.as_ref())?;
-                Some((index, file_hunks(&diff.patch, &diff.files[index])))
-            });
+            .map(|(index, hunks)| (*index, hunks.as_ref()));
         let refresh_view = view.clone();
         let close_view = view.clone();
         let backdrop_view = view.clone();
@@ -1909,7 +2143,14 @@ impl AgentView {
                                     .items_center()
                                     .gap_2()
                                     .text_size(zz_ui::rems_from_px(12.0))
-                                    .when(loading, |this| this.child(Spinner::new().xsmall()))
+                                    .when(loading, |this| {
+                                        this.child(agent_spinner(
+                                            Size::XSmall,
+                                            cx.theme().foreground.muted(),
+                                            view.entity_id(),
+                                            cx,
+                                        ))
+                                    })
                                     .child(
                                         div()
                                             .min_w_0()
@@ -2019,7 +2260,7 @@ impl AgentView {
                                 .py_2()
                                 .text_size(zz_ui::rems_from_px(10.0))
                                 .text_color(cx.theme().danger)
-                                .child(error.to_string()),
+                                .child(rendered_error(&error)),
                         )
                     }),
             )
@@ -2051,18 +2292,27 @@ impl AgentView {
         &self,
         state: &AgentPaneState,
         view: Entity<Self>,
+        local_host: bool,
     ) -> impl IntoElement {
-        let busy = state.connection.has_active_turn() || !state.pending_permissions.is_empty();
+        let ready = directory_picker_enabled(
+            state.connection,
+            !state.pending_permissions.is_empty(),
+            local_host,
+        );
         let cwd = state.cwd.display().to_string();
         agent_chrome_button(("agent-working-directory", self.pane.0))
             .icon(IconName::FolderOpen)
             .label(session_directory_label(&state.cwd))
-            .tooltip(if busy {
+            .tooltip(if !local_host {
+                format!("{cwd} · working directory is managed by the remote host")
+            } else if state.connection.has_active_turn() || !state.pending_permissions.is_empty() {
                 "Finish or cancel the current turn before changing the working directory".to_owned()
+            } else if !state.connection.accepts_prompt() {
+                "Wait for the agent to be ready before changing the working directory".to_owned()
             } else {
                 format!("{cwd} · choose another workspace (starts a new session)")
             })
-            .disabled(busy)
+            .disabled(!ready)
             .on_click(move |_, window, cx| {
                 view.update(cx, |view, cx| view.open_directory_picker(window, cx));
                 cx.stop_propagation();
@@ -2353,7 +2603,7 @@ impl AgentView {
                             .text_ellipsis()
                             .whitespace_nowrap()
                             .text_color(cx.theme().danger)
-                            .child(error.to_string()),
+                            .child(rendered_error(&error)),
                     )
                 })
                 .when(state.session_history.loading, |this| {
@@ -2799,7 +3049,7 @@ impl AgentView {
     fn render_sticky_strip(
         rows: &[StickyAgentRow],
         view: &Entity<Self>,
-        cx: &gpui::App,
+        cx: &mut gpui::App,
     ) -> Option<AnyElement> {
         if rows.is_empty() {
             return None;
@@ -2827,11 +3077,12 @@ impl AgentView {
                             .items_center()
                             .gap_2()
                             .px_2()
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .child(Spinner::new().xsmall().color(spinner_color)),
-                            )
+                            .child(div().flex_none().child(agent_spinner(
+                                Size::XSmall,
+                                spinner_color,
+                                view.entity_id(),
+                                cx,
+                            )))
                             .child(
                                 div()
                                     .min_w_0()
@@ -2897,7 +3148,7 @@ impl AgentView {
         state: &AgentPaneState,
         sticky_rows: &[StickyAgentRow],
         view: &Entity<Self>,
-        cx: &gpui::App,
+        cx: &mut gpui::App,
     ) -> impl IntoElement {
         let can_submit = state.connection.accepts_prompt();
         let button = Button::new(format!("agent-action-{}", self.pane.0))
@@ -3163,12 +3414,13 @@ impl Render for AgentView {
             .sync(&self.pane_state.pending_permissions);
         let state = self.pane_state.clone();
         let rows = self.timeline.rows.clone();
-        let sticky_rows = sticky_agent_rows(&rows, &self.dismissed_notifications);
+        let sticky_rows = self.cached_sticky_rows();
         let timeline_clearance =
             TIMELINE_COMPOSER_CLEARANCE + sticky_strip_clearance(sticky_rows.len());
         self.stick.set_bottom_padding(timeline_clearance);
         self.drive_stick(window, cx);
         let view = cx.entity();
+        let local_host = self.mux.read(cx).attached_host() == HostId::LOCAL;
         let header_controls = h_flex()
             .min_w_0()
             .gap(px(CHROME_GAP))
@@ -3193,7 +3445,7 @@ impl Render for AgentView {
             .on_key_down(cx.listener(Self::on_key_down))
             .child(agent_pane_header(
                 header_controls,
-                self.render_directory_picker(&state, view.clone()),
+                self.render_directory_picker(&state, view.clone(), local_host),
                 cx,
             ))
             .child(
@@ -3209,7 +3461,7 @@ impl Render for AgentView {
                                     .w_full()
                                     .max_w(px(AGENT_CONTENT_MAX_WIDTH))
                                     .mx_auto()
-                                    .child(Self::render_empty_state(&state, cx)),
+                                    .child(Self::render_empty_state(&state, cx.entity_id(), cx)),
                             ),
                         )
                     })
@@ -3267,6 +3519,33 @@ fn sticky_agent_rows(rows: &[TimelineRow], dismissed: &BTreeSet<u64>) -> Vec<Sti
         append_sticky_agent_entry(&mut sticky, entry, acknowledged, dismissed);
     }
     sticky
+}
+
+fn sticky_entry_rows(entry: &AgentEntry) -> Vec<StickyAgentRow> {
+    let mut sticky = Vec::new();
+    append_sticky_agent_entry(&mut sticky, entry, false, &BTreeSet::new());
+    sticky
+}
+
+fn rendered_error(error: &str) -> String {
+    let mut rendered = String::with_capacity(MAX_RENDERED_ERROR_BYTES);
+    let mut truncated = false;
+    for character in error.trim().chars() {
+        let character = if character.is_control() && !matches!(character, '\n' | '\t') {
+            '�'
+        } else {
+            character
+        };
+        if rendered.len().saturating_add(character.len_utf8()) > MAX_RENDERED_ERROR_BYTES - 3 {
+            truncated = true;
+            break;
+        }
+        rendered.push(character);
+    }
+    if truncated {
+        rendered.push('…');
+    }
+    rendered
 }
 
 fn append_sticky_agent_entry(
@@ -3347,6 +3626,7 @@ fn disconnected_pane_state() -> AgentPaneState {
         session_capabilities: AgentSessionCapabilities::default(),
         session_history: AgentSessionHistoryState::default(),
         settings_busy: false,
+        lifecycle_pending: false,
         mode: None,
         modes: Arc::from([]),
         config_options: Arc::from([]),
@@ -3357,11 +3637,86 @@ fn disconnected_pane_state() -> AgentPaneState {
     }
 }
 
+#[cfg(test)]
 fn ui_entries(entries: &[AgentThreadEntry]) -> Arc<[AgentEntry]> {
-    entries.iter().map(ui_entry).collect::<Vec<_>>().into()
+    ui_entries_with_markdown(
+        entries,
+        &mut HashMap::new(),
+        &mut HashMap::new(),
+        &HashMap::new(),
+        &mut HashMap::new(),
+        &mut HashMap::new(),
+    )
 }
 
+#[cfg(test)]
 fn ui_entry(entry: &AgentThreadEntry) -> AgentEntry {
+    ui_entry_with_markdown(
+        entry,
+        &mut HashMap::new(),
+        &mut HashMap::new(),
+        &HashMap::new(),
+        &mut HashMap::new(),
+        &mut HashMap::new(),
+    )
+}
+
+fn ui_entries_with_markdown(
+    entries: &[AgentThreadEntry],
+    markdown: &mut HashMap<u64, AgentMarkdown>,
+    tool_payloads: &mut HashMap<(u64, usize), AgentToolPayload>,
+    child_revisions: &HashMap<u64, u64>,
+    nested_entries: &mut HashMap<u64, AgentEntry>,
+    nested_revisions: &mut HashMap<u64, u64>,
+) -> Arc<[AgentEntry]> {
+    entries
+        .iter()
+        .map(|entry| {
+            ui_entry_with_markdown(
+                entry,
+                markdown,
+                tool_payloads,
+                child_revisions,
+                nested_entries,
+                nested_revisions,
+            )
+        })
+        .collect::<Vec<_>>()
+        .into()
+}
+
+fn streaming_markdown(
+    markdown: &mut HashMap<u64, AgentMarkdown>,
+    id: u64,
+    source: &str,
+) -> AgentMarkdown {
+    let markdown = markdown
+        .entry(id)
+        .or_insert_with(|| AgentMarkdown::new(source));
+    markdown.synchronize_append(source);
+    markdown.clone()
+}
+
+fn replaced_markdown(
+    markdown: &mut HashMap<u64, AgentMarkdown>,
+    id: u64,
+    source: &str,
+) -> AgentMarkdown {
+    let markdown = markdown
+        .entry(id)
+        .or_insert_with(|| AgentMarkdown::new(source));
+    markdown.replace(source);
+    markdown.clone()
+}
+
+fn ui_entry_with_markdown(
+    entry: &AgentThreadEntry,
+    markdown_sources: &mut HashMap<u64, AgentMarkdown>,
+    tool_payloads: &mut HashMap<(u64, usize), AgentToolPayload>,
+    child_revisions: &HashMap<u64, u64>,
+    nested_entries: &mut HashMap<u64, AgentEntry>,
+    nested_revisions: &mut HashMap<u64, u64>,
+) -> AgentEntry {
     match entry {
         AgentThreadEntry::User {
             id,
@@ -3369,12 +3724,12 @@ fn ui_entry(entry: &AgentThreadEntry) -> AgentEntry {
             images,
         } => AgentEntry::User {
             id: *id,
-            markdown: SharedString::from(markdown.clone()),
+            markdown: streaming_markdown(markdown_sources, *id, markdown),
             images: images.clone().into(),
         },
         AgentThreadEntry::Assistant { id, markdown, .. } => AgentEntry::Assistant {
             id: *id,
-            markdown: SharedString::from(markdown.clone()),
+            markdown: streaming_markdown(markdown_sources, *id, markdown),
         },
         AgentThreadEntry::Reasoning {
             id,
@@ -3384,7 +3739,7 @@ fn ui_entry(entry: &AgentThreadEntry) -> AgentEntry {
         } => AgentEntry::Reasoning {
             id: *id,
             label: SharedString::from(label.clone()),
-            markdown: SharedString::from(markdown.clone()),
+            markdown: streaming_markdown(markdown_sources, *id, markdown),
             default_expanded: *default_expanded,
         },
         AgentThreadEntry::Tool {
@@ -3399,42 +3754,69 @@ fn ui_entry(entry: &AgentThreadEntry) -> AgentEntry {
             subagent,
             children,
             ..
-        } => AgentEntry::Tool(AgentToolEntry {
-            id: *id,
-            kind: match kind {
-                AgentToolKindModel::Read => AgentToolKind::Read,
-                AgentToolKindModel::Search => AgentToolKind::Search,
-                AgentToolKindModel::Edit
-                | AgentToolKindModel::Delete
-                | AgentToolKindModel::Move => AgentToolKind::Edit,
-                AgentToolKindModel::Execute => AgentToolKind::Execute,
-                AgentToolKindModel::Fetch => AgentToolKind::Fetch,
-                AgentToolKindModel::Think => AgentToolKind::Think,
-                AgentToolKindModel::SwitchMode | AgentToolKindModel::Other => AgentToolKind::Other,
-            },
-            status: match status {
-                AgentToolStatusModel::Pending => AgentToolStatus::Pending,
-                AgentToolStatusModel::Running => AgentToolStatus::Running,
-                AgentToolStatusModel::NeedsApproval => AgentToolStatus::NeedsApproval,
-                AgentToolStatusModel::Completed => AgentToolStatus::Completed,
-                AgentToolStatusModel::Failed => AgentToolStatus::Failed,
-                AgentToolStatusModel::Canceled => AgentToolStatus::Canceled,
-            },
-            label: SharedString::from(label.clone()),
-            location: location.clone().map(SharedString::from),
-            input: input.as_ref().map(ui_tool_payload),
-            output: output
-                .iter()
-                .map(ui_tool_payload)
-                .collect::<Vec<_>>()
-                .into(),
-            default_expanded: *default_expanded,
-            subagent: *subagent,
-            children: children.iter().map(ui_entry).collect::<Vec<_>>().into(),
-        }),
+        } => {
+            tool_payloads.retain(|(entry_id, slot), _| {
+                *entry_id != *id
+                    || (*slot == 0 && input.is_some())
+                    || (*slot > 0 && *slot <= output.len())
+            });
+            AgentEntry::Tool(AgentToolEntry {
+                id: *id,
+                kind: match kind {
+                    AgentToolKindModel::Read => AgentToolKind::Read,
+                    AgentToolKindModel::Search => AgentToolKind::Search,
+                    AgentToolKindModel::Edit
+                    | AgentToolKindModel::Delete
+                    | AgentToolKindModel::Move => AgentToolKind::Edit,
+                    AgentToolKindModel::Execute => AgentToolKind::Execute,
+                    AgentToolKindModel::Fetch => AgentToolKind::Fetch,
+                    AgentToolKindModel::Think => AgentToolKind::Think,
+                    AgentToolKindModel::SwitchMode | AgentToolKindModel::Other => {
+                        AgentToolKind::Other
+                    }
+                },
+                status: match status {
+                    AgentToolStatusModel::Pending => AgentToolStatus::Pending,
+                    AgentToolStatusModel::Running => AgentToolStatus::Running,
+                    AgentToolStatusModel::NeedsApproval => AgentToolStatus::NeedsApproval,
+                    AgentToolStatusModel::Completed => AgentToolStatus::Completed,
+                    AgentToolStatusModel::Failed => AgentToolStatus::Failed,
+                    AgentToolStatusModel::Canceled => AgentToolStatus::Canceled,
+                },
+                label: SharedString::from(label.clone()),
+                location: location.clone().map(SharedString::from),
+                input: input
+                    .as_ref()
+                    .map(|payload| retained_tool_payload(tool_payloads, *id, 0, payload)),
+                output: output
+                    .iter()
+                    .enumerate()
+                    .map(|(index, payload)| {
+                        retained_tool_payload(tool_payloads, *id, index + 1, payload)
+                    })
+                    .collect::<Vec<_>>()
+                    .into(),
+                default_expanded: *default_expanded,
+                subagent: *subagent,
+                children: children
+                    .iter()
+                    .map(|entry| {
+                        ui_nested_entry(
+                            entry,
+                            markdown_sources,
+                            tool_payloads,
+                            child_revisions,
+                            nested_entries,
+                            nested_revisions,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .into(),
+            })
+        }
         AgentThreadEntry::Plan { id, markdown } => AgentEntry::Plan {
             id: *id,
-            markdown: SharedString::from(markdown.clone()),
+            markdown: replaced_markdown(markdown_sources, *id, markdown),
         },
         AgentThreadEntry::Notification {
             id,
@@ -3448,9 +3830,46 @@ fn ui_entry(entry: &AgentThreadEntry) -> AgentEntry {
             task_id: SharedString::from(task_id.clone()),
             status: SharedString::from(status.clone()),
             summary: SharedString::from(summary.clone()),
-            result_markdown: SharedString::from(result_markdown.clone()),
+            result_markdown: replaced_markdown(markdown_sources, *id, result_markdown),
         },
     }
+}
+
+fn ui_nested_entry(
+    entry: &AgentThreadEntry,
+    markdown_sources: &mut HashMap<u64, AgentMarkdown>,
+    tool_payloads: &mut HashMap<(u64, usize), AgentToolPayload>,
+    child_revisions: &HashMap<u64, u64>,
+    nested_entries: &mut HashMap<u64, AgentEntry>,
+    nested_revisions: &mut HashMap<u64, u64>,
+) -> AgentEntry {
+    let id = entry.id();
+    let Some(revision) = child_revisions.get(&id).copied() else {
+        return ui_entry_with_markdown(
+            entry,
+            markdown_sources,
+            tool_payloads,
+            child_revisions,
+            nested_entries,
+            nested_revisions,
+        );
+    };
+    if nested_revisions.get(&id) == Some(&revision)
+        && let Some(retained) = nested_entries.get(&id)
+    {
+        return retained.clone();
+    }
+    let next = ui_entry_with_markdown(
+        entry,
+        markdown_sources,
+        tool_payloads,
+        child_revisions,
+        nested_entries,
+        nested_revisions,
+    );
+    nested_revisions.insert(id, revision);
+    nested_entries.insert(id, next.clone());
+    next
 }
 
 fn synchronize_entry_store(
@@ -3489,17 +3908,55 @@ fn synchronize_entry_store(
     }
 }
 
-fn ui_tool_payload(payload: &ToolPayload) -> AgentToolPayload {
-    match payload {
-        ToolPayload::Diff { path, old, new } => AgentToolPayload::Diff {
+fn retained_tool_payload(
+    retained: &mut HashMap<(u64, usize), AgentToolPayload>,
+    entry_id: u64,
+    slot: usize,
+    payload: &ToolPayload,
+) -> AgentToolPayload {
+    let key = (entry_id, slot);
+    let next = match (retained.get(&key), payload) {
+        (
+            Some(AgentToolPayload::Diff {
+                old: retained_old,
+                new: retained_new,
+                ..
+            }),
+            ToolPayload::Diff { path, old, new },
+        ) if retained_old.is_some() == old.is_some() => {
+            if let (Some(retained_old), Some(old)) = (retained_old, old) {
+                retained_old.synchronize(old);
+            }
+            retained_new.synchronize(new);
+            AgentToolPayload::Diff {
+                path: path.clone().into(),
+                old: retained_old.clone(),
+                new: retained_new.clone(),
+            }
+        }
+        (Some(AgentToolPayload::Text(retained)), ToolPayload::Text(text)) => {
+            retained.synchronize(text);
+            AgentToolPayload::Text(retained.clone())
+        }
+        (Some(AgentToolPayload::Json(retained)), ToolPayload::Json(text)) => {
+            retained.synchronize(text);
+            AgentToolPayload::Json(retained.clone())
+        }
+        (Some(AgentToolPayload::Terminal(retained)), ToolPayload::Terminal(text)) => {
+            retained.synchronize(text);
+            AgentToolPayload::Terminal(retained.clone())
+        }
+        (_, ToolPayload::Diff { path, old, new }) => AgentToolPayload::Diff {
             path: path.clone().into(),
-            old: old.clone().map(SharedString::from),
-            new: new.clone().into(),
+            old: old.as_deref().map(AgentToolText::new),
+            new: AgentToolText::new(new),
         },
-        ToolPayload::Text(text) => AgentToolPayload::Text(text.clone().into()),
-        ToolPayload::Json(json) => AgentToolPayload::Json(json.clone().into()),
-        ToolPayload::Terminal(terminal) => AgentToolPayload::Terminal(terminal.clone().into()),
-    }
+        (_, ToolPayload::Text(text)) => AgentToolPayload::Text(AgentToolText::new(text)),
+        (_, ToolPayload::Json(text)) => AgentToolPayload::Json(AgentToolText::new(text)),
+        (_, ToolPayload::Terminal(text)) => AgentToolPayload::Terminal(AgentToolText::new(text)),
+    };
+    retained.insert(key, next.clone());
+    next
 }
 
 const fn changed_file_glyph(status: TurnFileStatus) -> &'static str {
@@ -3769,6 +4226,7 @@ fn ranked_completions(
     ranked.sort_by(|left, right| (left.1, left.0, &left.2).cmp(&(right.1, right.0, &right.2)));
     ranked
         .into_iter()
+        .take(MAX_COMPLETION_RESULTS)
         .map(|(_, _, _, completion)| completion)
         .collect()
 }
@@ -4191,14 +4649,18 @@ mod completion_tests {
                 history_input,
                 visible: false,
                 pane_state: disconnected_pane_state(),
-                timeline: TimelineModel::new(&timeline_entries, &[1, 2]),
+                timeline: TimelineModel::new(&timeline_entries, &[1, 2], &HashMap::new()),
                 timeline_store,
                 timeline_next_revision: 2,
+                conversation_epoch: 0,
                 stick: TimelineStick::new(&timeline_scroll, false),
                 timeline_scroll,
                 completion_scroll: UniformListScrollHandle::new(),
                 submission_error: None,
                 dismissed_notifications: BTreeSet::new(),
+                sticky_rows: Arc::from([]),
+                sticky_timeline_revision: 0,
+                sticky_dismissed_notifications: BTreeSet::new(),
                 permission_wizard: PermissionWizard::default(),
                 attachments: Vec::new(),
                 completions: Arc::from([]),
@@ -4217,8 +4679,10 @@ mod completion_tests {
                 changes: None,
                 changes_error: None,
                 changes_expanded: None,
+                changes_hunks: None,
                 changes_scroll: UniformListScrollHandle::new(),
                 changes_patch_scroll: UniformListScrollHandle::new(),
+                changes_turn_generation: 0,
                 changes_task: None,
                 directory_picker: None,
                 window_corners: WindowCorners::NONE,
@@ -4287,11 +4751,15 @@ mod completion_tests {
                 timeline: TimelineModel::default(),
                 timeline_store: view_cx.new(|_| AgentTimelineStore::default()),
                 timeline_next_revision: 0,
+                conversation_epoch: 0,
                 stick: TimelineStick::new(&timeline_scroll, false),
                 timeline_scroll,
                 completion_scroll: UniformListScrollHandle::new(),
                 submission_error: None,
                 dismissed_notifications: BTreeSet::new(),
+                sticky_rows: Arc::from([]),
+                sticky_timeline_revision: 0,
+                sticky_dismissed_notifications: BTreeSet::new(),
                 permission_wizard: PermissionWizard::default(),
                 attachments: Vec::new(),
                 completions: vec![
@@ -4322,8 +4790,10 @@ mod completion_tests {
                 changes: None,
                 changes_error: None,
                 changes_expanded: None,
+                changes_hunks: None,
                 changes_scroll: UniformListScrollHandle::new(),
                 changes_patch_scroll: UniformListScrollHandle::new(),
+                changes_turn_generation: 0,
                 changes_task: None,
                 directory_picker: None,
                 window_corners: WindowCorners::NONE,
@@ -4370,6 +4840,44 @@ mod completion_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_picker_requires_a_ready_local_pane_without_a_permission() {
+        for connection in [
+            AgentConnectionState::Starting,
+            AgentConnectionState::Restoring,
+            AgentConnectionState::Running,
+            AgentConnectionState::Cancelling,
+            AgentConnectionState::Failed,
+            AgentConnectionState::Disconnected,
+        ] {
+            assert!(!directory_picker_enabled(connection, false, true));
+        }
+        assert!(directory_picker_enabled(
+            AgentConnectionState::Ready,
+            false,
+            true
+        ));
+        assert!(!directory_picker_enabled(
+            AgentConnectionState::Ready,
+            true,
+            true
+        ));
+        assert!(!directory_picker_enabled(
+            AgentConnectionState::Ready,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    fn rendered_errors_are_bounded_and_strip_control_bytes() {
+        let rendered = rendered_error(&format!("bad\0{}", "x".repeat(4096)));
+        assert!(rendered.len() <= MAX_RENDERED_ERROR_BYTES);
+        assert!(rendered.starts_with("bad�"));
+        assert!(rendered.ends_with('…'));
+        assert!(!rendered.contains('\0'));
+    }
 
     fn thread_tool(id: u64, label: &str, status: AgentToolStatusModel) -> AgentThreadEntry {
         AgentThreadEntry::Tool {
@@ -4511,7 +5019,7 @@ mod tests {
             },
             thread_notification(3, "second completed"),
         ];
-        let timeline = TimelineModel::new(&entries, &[1, 1, 1]);
+        let timeline = TimelineModel::new(&entries, &[1, 1, 1], &HashMap::new());
         let mut dismissed = BTreeSet::new();
 
         assert_eq!(sticky_agent_rows(&timeline.rows, &dismissed).len(), 2);
@@ -4530,7 +5038,7 @@ mod tests {
             },
             thread_notification(3, "second completed"),
         ];
-        let timeline = TimelineModel::new(&with_prompt, &[1, 1, 1]);
+        let timeline = TimelineModel::new(&with_prompt, &[1, 1, 1], &HashMap::new());
         assert!(matches!(
             sticky_agent_rows(&timeline.rows, &BTreeSet::new()).as_slice(),
             [StickyAgentRow::Notification { id: 3, .. }]
@@ -4546,7 +5054,7 @@ mod tests {
             unreachable!();
         };
         *subagent = true;
-        let running = TimelineModel::new(&[task.clone()], &[1]);
+        let running = TimelineModel::new(&[task.clone()], &[1], &HashMap::new());
         assert!(matches!(
             sticky_agent_rows(&running.rows, &BTreeSet::new()).as_slice(),
             [StickyAgentRow::Subagent {
@@ -4560,7 +5068,7 @@ mod tests {
             unreachable!();
         };
         *status = AgentToolStatusModel::Completed;
-        let completed = TimelineModel::new(&[task], &[2]);
+        let completed = TimelineModel::new(&[task], &[2], &HashMap::new());
         assert!(sticky_agent_rows(&completed.rows, &BTreeSet::new()).is_empty());
     }
 
@@ -4572,7 +5080,7 @@ mod tests {
             thread_tool(3, "Editing files", AgentToolStatusModel::Completed),
         ];
         let mut revisions = vec![1, 1, 1];
-        let mut timeline = TimelineModel::new(&entries, &revisions);
+        let mut timeline = TimelineModel::new(&entries, &revisions, &HashMap::new());
         assert_eq!(timeline.entry_to_row, [0, 0, 1]);
         assert!(matches!(
             &timeline.rows[0],
@@ -4584,7 +5092,7 @@ mod tests {
         entries.push(thread_reasoning(5, "fourth"));
         revisions.extend([1, 1]);
         let TimelineModelUpdate::Incremental { splice_start, .. } =
-            timeline.synchronize(&entries, &revisions)
+            timeline.synchronize(&entries, &revisions, &HashMap::new(), None)
         else {
             panic!("appending reasoning after a tool should splice a row");
         };
@@ -4597,7 +5105,7 @@ mod tests {
             remeasure_rows,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions)
+        } = timeline.synchronize(&entries, &revisions, &HashMap::new(), None)
         else {
             panic!("a member revision should update its owning group row");
         };
@@ -4613,7 +5121,7 @@ mod tests {
             thread_tool(3, "Editing files", AgentToolStatusModel::Completed),
         ];
         let mut revisions = vec![1, 1, 1];
-        let mut timeline = TimelineModel::new(&entries, &revisions);
+        let mut timeline = TimelineModel::new(&entries, &revisions, &HashMap::new());
         assert_eq!(timeline.rows.len(), 1);
         assert_eq!(timeline.entry_to_row, [0, 0, 0]);
 
@@ -4628,7 +5136,7 @@ mod tests {
             remeasure_rows,
             splice_start,
             added_rows,
-        } = timeline.synchronize(&entries, &revisions)
+        } = timeline.synchronize(&entries, &revisions, &HashMap::new(), None)
         else {
             panic!("tool append should update the trailing group");
         };
@@ -4654,7 +5162,7 @@ mod tests {
             splice_start,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions)
+        } = timeline.synchronize(&entries, &revisions, &HashMap::new(), None)
         else {
             panic!("different-label tool append should update the trailing group");
         };
@@ -4671,7 +5179,7 @@ mod tests {
             remeasure_rows,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions)
+        } = timeline.synchronize(&entries, &revisions, &HashMap::new(), None)
         else {
             panic!("member revision should update its owning row");
         };
@@ -4694,7 +5202,7 @@ mod tests {
             remeasure_rows,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions)
+        } = timeline.synchronize(&entries, &revisions, &HashMap::new(), None)
         else {
             panic!("tool label changes should preserve contiguous grouping");
         };
@@ -4752,6 +5260,59 @@ mod tests {
                     && text == "done"
                     && terminal.contains("exit status")
         ));
+    }
+
+    #[test]
+    fn tool_entry_adapter_releases_replaced_payload_slots() {
+        let mut entry = AgentThreadEntry::Tool {
+            id: 7,
+            protocol_id: "tool".to_owned(),
+            kind: AgentToolKindModel::Execute,
+            status: AgentToolStatusModel::Running,
+            label: "run".to_owned(),
+            location: None,
+            input: Some(ToolPayload::Text("input".to_owned())),
+            output: vec![
+                ToolPayload::Text("one".to_owned()),
+                ToolPayload::Text("two".to_owned()),
+                ToolPayload::Text("three".to_owned()),
+            ],
+            default_expanded: false,
+            subagent: false,
+            children: Vec::new(),
+        };
+        let mut markdown = HashMap::new();
+        let mut tool_payloads = HashMap::new();
+        let child_revisions = HashMap::new();
+        let mut nested_entries = HashMap::new();
+        let mut nested_revisions = HashMap::new();
+
+        ui_entry_with_markdown(
+            &entry,
+            &mut markdown,
+            &mut tool_payloads,
+            &child_revisions,
+            &mut nested_entries,
+            &mut nested_revisions,
+        );
+        assert_eq!(tool_payloads.len(), 4);
+
+        let AgentThreadEntry::Tool { input, output, .. } = &mut entry else {
+            unreachable!();
+        };
+        *input = None;
+        output.truncate(1);
+        ui_entry_with_markdown(
+            &entry,
+            &mut markdown,
+            &mut tool_payloads,
+            &child_revisions,
+            &mut nested_entries,
+            &mut nested_revisions,
+        );
+
+        assert_eq!(tool_payloads.len(), 1);
+        assert!(tool_payloads.contains_key(&(7, 1)));
     }
 
     #[test]

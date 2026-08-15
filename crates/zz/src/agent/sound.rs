@@ -91,13 +91,22 @@ const fn chime_for(previous: AgentPaneStatus, next: AgentPaneStatus) -> Option<C
     }
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct AgentAttentionTracker {
-    previous: BTreeMap<PaneId, AgentPaneStatus>,
-    unseen: BTreeSet<PaneId>,
+#[derive(Debug)]
+pub(crate) struct AgentAttentionTracker<K = PaneId> {
+    previous: BTreeMap<K, AgentPaneStatus>,
+    unseen: BTreeSet<K>,
 }
 
-impl AgentAttentionTracker {
+impl<K> Default for AgentAttentionTracker<K> {
+    fn default() -> Self {
+        Self {
+            previous: BTreeMap::new(),
+            unseen: BTreeSet::new(),
+        }
+    }
+}
+
+impl<K: Copy + Ord> AgentAttentionTracker<K> {
     /// `watched` is the pane the user is demonstrably looking at (focused pane
     /// of an active window), the single gate for both suppressing chimes and
     /// clearing the finished-but-unseen badge. At most one chime per batch:
@@ -105,8 +114,8 @@ impl AgentAttentionTracker {
     /// a completion.
     pub(crate) fn observe(
         &mut self,
-        statuses: &BTreeMap<PaneId, AgentPaneStatus>,
-        watched: Option<PaneId>,
+        statuses: &BTreeMap<K, AgentPaneStatus>,
+        watched: Option<K>,
     ) -> Option<Chime> {
         self.previous.retain(|pane, _| statuses.contains_key(pane));
         self.unseen.retain(|pane| statuses.contains_key(pane));
@@ -137,7 +146,7 @@ impl AgentAttentionTracker {
         chime
     }
 
-    pub(crate) fn badge(&self, pane: PaneId, status: AgentPaneStatus) -> Option<AgentBadge> {
+    pub(crate) fn badge(&self, pane: K, status: AgentPaneStatus) -> Option<AgentBadge> {
         match status {
             AgentPaneStatus::NeedsInput => Some(AgentBadge::NeedsInput),
             AgentPaneStatus::Failed => Some(AgentBadge::Failed),
@@ -425,6 +434,23 @@ mod tests {
         assert_eq!(tracker.badge(PaneId(1), AgentPaneStatus::Idle), None);
         let chime = tracker.observe(&statuses(&[(1, AgentPaneStatus::Idle)]), None);
         assert_eq!(chime, None);
+    }
+
+    #[test]
+    fn identical_pane_ids_on_different_hosts_do_not_share_transitions() {
+        let mut tracker = AgentAttentionTracker::<(u8, PaneId)>::default();
+        tracker.observe(
+            &BTreeMap::from([((1, PaneId(7)), AgentPaneStatus::Working)]),
+            None,
+        );
+
+        let chime = tracker.observe(
+            &BTreeMap::from([((2, PaneId(7)), AgentPaneStatus::Idle)]),
+            None,
+        );
+
+        assert_eq!(chime, None);
+        assert_eq!(tracker.badge((2, PaneId(7)), AgentPaneStatus::Idle), None);
     }
 
     #[test]

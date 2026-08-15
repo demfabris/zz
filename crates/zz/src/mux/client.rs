@@ -72,6 +72,9 @@ pub(crate) enum AgentRequest {
     TurnDiff {
         request_id: u64,
     },
+    AcknowledgePromptRestore {
+        reclaim_id: u64,
+    },
 }
 
 /// What one drain hands the agent controller.
@@ -905,6 +908,11 @@ impl HostConnection {
         }
         Some(hello)
     }
+
+    #[cfg(feature = "agent-pane")]
+    pub(crate) fn client_instance_id(&self) -> Option<zz_protocol::ClientInstanceId> {
+        self.current_hello().map(|hello| hello.client_instance_id)
+    }
 }
 
 pub struct MuxClient {
@@ -924,6 +932,8 @@ pub struct MuxClient {
     input_sink: Option<std::rc::Rc<std::cell::RefCell<Vec<InputMessage>>>>,
     #[cfg(all(test, feature = "agent-pane"))]
     agent_sink: Option<std::rc::Rc<std::cell::RefCell<Vec<(PaneId, AgentRequest)>>>>,
+    #[cfg(all(test, feature = "agent-pane"))]
+    agent_client_instance_id: Option<zz_protocol::ClientInstanceId>,
     attached_snapshot_pending: bool,
     viewports: BTreeMap<PaneId, Arc<RwLock<RetainedTerminalViewport>>>,
     kitty_images: BTreeMap<PaneId, Arc<RwLock<KittyImageCache>>>,
@@ -1018,6 +1028,8 @@ impl MuxClient {
             input_sink: None,
             #[cfg(all(test, feature = "agent-pane"))]
             agent_sink: None,
+            #[cfg(all(test, feature = "agent-pane"))]
+            agent_client_instance_id: None,
             attached_snapshot_pending: false,
             viewports: BTreeMap::new(),
             kitty_images: BTreeMap::new(),
@@ -1441,6 +1453,15 @@ impl MuxClient {
 
     pub const fn attached_host(&self) -> HostId {
         self.attached_host
+    }
+
+    #[cfg(feature = "agent-pane")]
+    pub(crate) fn client_instance_id(&self) -> Option<zz_protocol::ClientInstanceId> {
+        #[cfg(test)]
+        if self.agent_client_instance_id.is_some() {
+            return self.agent_client_instance_id;
+        }
+        self.attached_connection().client_instance_id()
     }
 
     #[must_use]
@@ -2033,6 +2054,14 @@ impl MuxClient {
         let sink = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         self.agent_sink = Some(std::rc::Rc::clone(&sink));
         sink
+    }
+
+    #[cfg(all(test, feature = "agent-pane"))]
+    pub(crate) fn set_agent_client_instance_id_for_test(
+        &mut self,
+        client_instance_id: zz_protocol::ClientInstanceId,
+    ) {
+        self.agent_client_instance_id = Some(client_instance_id);
     }
 
     /// Reduce one event payload into the core without running its effects, so
@@ -2892,6 +2921,14 @@ impl MuxClient {
                     continue;
                 }
             };
+            if item.seq > cursor.saturating_add(1)
+                && matches!(
+                    &item.payload,
+                    zz_daemon::AgentStreamPayload::SessionReset { restoring: true }
+                )
+            {
+                *cursor = item.seq.saturating_sub(1);
+            }
             if item.seq <= *cursor {
                 continue;
             }
@@ -2936,10 +2973,41 @@ impl MuxClient {
     #[cfg(not(feature = "agent-pane"))]
     fn clear_agent_streams(&mut self) {}
 
-    /// Everything the agent controller has yet to reduce, in arrival order.
     #[cfg(feature = "agent-pane")]
-    pub(crate) fn take_agent_events(&mut self) -> AgentEvents {
-        std::mem::take(&mut self.agent_events)
+    pub(crate) fn take_agent_events_for(&mut self, panes: &BTreeSet<PaneId>) -> AgentEvents {
+        let pending = std::mem::take(&mut self.agent_events);
+        let mut ready = AgentEvents::default();
+        for (pane, items) in pending.items {
+            if panes.contains(&pane) {
+                ready.items.push((pane, items));
+            } else {
+                self.agent_events.items.push((pane, items));
+            }
+        }
+        for (pane, state) in pending.states {
+            if panes.contains(&pane) {
+                ready.states.push((pane, state));
+            } else {
+                self.agent_events.states.push((pane, state));
+            }
+        }
+        for (pane, request_id, result) in pending.sessions {
+            if panes.contains(&pane) {
+                ready.sessions.push((pane, request_id, result));
+            } else {
+                self.agent_events.sessions.push((pane, request_id, result));
+            }
+        }
+        for (pane, request_id, result) in pending.turn_diffs {
+            if panes.contains(&pane) {
+                ready.turn_diffs.push((pane, request_id, result));
+            } else {
+                self.agent_events
+                    .turn_diffs
+                    .push((pane, request_id, result));
+            }
+        }
+        ready
     }
 
     #[cfg(feature = "agent-pane")]
@@ -2978,6 +3046,9 @@ impl MuxClient {
             AgentRequest::SessionOp { op } => client.agent_session_op(pane, op),
             AgentRequest::Replay { from_seq } => client.agent_replay(pane, from_seq),
             AgentRequest::TurnDiff { request_id } => client.agent_turn_diff(pane, request_id),
+            AgentRequest::AcknowledgePromptRestore { reclaim_id } => {
+                client.agent_acknowledge_prompt_restore(pane, reclaim_id)
+            }
         };
         if let Err(error) = sent {
             log::warn!("failed to send an agent request for {pane}: {error}");
@@ -3442,7 +3513,7 @@ impl MuxClient {
                     target: "zz::diagnostics::mux",
                     "agent lane cleared for {pane}; replaying from {next_seq}"
                 );
-                self.request_agent_replay_from_cursor(pane);
+                self.send_agent_request(pane, AgentRequest::Replay { from_seq: next_seq });
             }
             CoreEvent::AgentSessions {
                 pane,
@@ -4148,6 +4219,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             server_id: 1,
             client_id: zz_protocol::ClientId(1),
+            client_instance_id: zz_protocol::ClientInstanceId(1),
             capabilities: Vec::new(),
             appearance: TerminalAppearance::default(),
             appearance_provenance: AppearanceProvenance::default(),
@@ -6111,7 +6183,7 @@ mod tests {
                     cx,
                 )
             });
-            mux.update(cx, |mux, _| {
+            mux.update(cx, |mux, cx| {
                 let pane = PaneId(3);
                 let sink = mux.record_agent_requests_for_test();
                 let blob = |seq: u64| {
@@ -6121,8 +6193,15 @@ mod tests {
                     })
                     .expect("a stream item encodes")
                 };
+                let reset = |seq: u64| {
+                    serde_json::to_vec(&zz_daemon::AgentStreamItem {
+                        seq,
+                        payload: zz_daemon::AgentStreamPayload::SessionReset { restoring: true },
+                    })
+                    .expect("a reset item encodes")
+                };
                 let applied = |mux: &mut MuxClient| {
-                    mux.take_agent_events()
+                    mux.take_agent_events_for(&BTreeSet::from([pane]))
                         .items
                         .into_iter()
                         .flat_map(|(_, items)| items.into_iter().map(|item| item.seq))
@@ -6164,6 +6243,25 @@ mod tests {
                     &*sink.borrow(),
                     &[(pane, AgentRequest::Replay { from_seq: 0 })],
                     "an attach forgets the cursor so the stream replays from the top"
+                );
+
+                sink.borrow_mut().clear();
+                mux.apply_agent_updates(pane, 40, vec![reset(40), blob(41)]);
+                assert_eq!(applied(mux), [40, 41]);
+                assert_eq!(mux.agent_cursors.get(&pane), Some(&41));
+                assert!(sink.borrow().is_empty());
+
+                let mut attaching = false;
+                mux.apply_core_event(
+                    HostId::LOCAL,
+                    CoreEvent::AgentLagged { pane, next_seq: 42 },
+                    None,
+                    &mut attaching,
+                    cx,
+                );
+                assert_eq!(
+                    &*sink.borrow(),
+                    &[(pane, AgentRequest::Replay { from_seq: 42 })]
                 );
             });
         });

@@ -43,7 +43,7 @@ use zz_ui::{
 
 use crate::{
     agent::{
-        AgentAttention, AgentController, AgentControllerEvent,
+        AgentAttention, AgentController,
         sound::{AgentAttentionTracker, AgentBadge, AgentPaneStatus},
     },
     config::{frame_content_corner_radius, pane_gaps, settings::SettingsView},
@@ -154,6 +154,7 @@ impl Render for SidebarResizePreview {
 
 pub struct WorkspaceSidebar {
     mux: Entity<MuxClient>,
+    agents: Entity<AgentController>,
     tree_model: Rc<MuxTreeModel>,
     visible_entries: Rc<[VisibleTreeEntry]>,
     visible_indices: BTreeMap<TreeNode, usize>,
@@ -170,8 +171,8 @@ pub struct WorkspaceSidebar {
     width: f32,
     local_hostname: SharedString,
     attention: AgentAttention,
-    badges: Rc<BTreeMap<PaneId, AgentBadge>>,
-    tracker: AgentAttentionTracker,
+    badges: Rc<BTreeMap<(HostId, PaneId), AgentBadge>>,
+    tracker: AgentAttentionTracker<(HostId, PaneId)>,
 }
 
 impl WorkspaceSidebar {
@@ -195,14 +196,10 @@ impl WorkspaceSidebar {
             sidebar.reconcile_attention(&agents, cx);
         })
         .detach();
-        cx.subscribe(agents, |sidebar, agents, _: &AgentControllerEvent, cx| {
-            sidebar.reconcile_attention(&agents, cx);
-        })
-        .detach();
-
         let attention = agents.read(cx).attention();
         Self {
             mux,
+            agents: agents.clone(),
             attention,
             tree_model: Rc::new(MuxTreeModel::default()),
             visible_entries: Rc::from([]),
@@ -228,8 +225,10 @@ impl WorkspaceSidebar {
     /// over the agent panes feeds the same transition detector that chimes.
     fn reconcile_attention(&mut self, agents: &Entity<AgentController>, cx: &mut Context<Self>) {
         let attention = agents.read(cx).attention();
+        let attached_host = self.mux.read(cx).attached_host();
         let statuses = self.agent_pane_statuses(agents, cx);
-        if let Some(chime) = self.tracker.observe(&statuses, self.watched_pane(cx)) {
+        let watched = self.watched_pane(cx).map(|pane| (attached_host, pane));
+        if let Some(chime) = self.tracker.observe(&statuses, watched) {
             crate::agent::sound::play(chime);
         }
         let badges = statuses
@@ -243,23 +242,22 @@ impl WorkspaceSidebar {
         }
     }
 
-    /// Agent panes come from the tree model, which render refreshes; a pane
-    /// created this frame is picked up by the controller's own event a moment
-    /// later, and a first observation never chimes.
     fn agent_pane_statuses(
         &self,
         agents: &Entity<AgentController>,
         cx: &App,
-    ) -> BTreeMap<PaneId, AgentPaneStatus> {
+    ) -> BTreeMap<(HostId, PaneId), AgentPaneStatus> {
         let controller = agents.read(cx);
+        let attached_host = self.mux.read(cx).attached_host();
         self.tree_model
             .hosts
             .iter()
+            .filter(|host| host.id == attached_host)
             .flat_map(|host| &host.sessions)
             .flat_map(|session| &session.windows)
             .flat_map(|window| &window.panes)
             .filter(|pane| pane.kind == MuxTreePaneKind::Agent)
-            .filter_map(|pane| Some((pane.id, controller.pane_status(pane.id)?)))
+            .filter_map(|pane| Some(((attached_host, pane.id), controller.pane_status(pane.id)?)))
             .collect()
     }
 
@@ -654,9 +652,9 @@ impl WorkspaceSidebar {
             .execute(CommandInvocation::new("command-prompt", [] as [&str; 0]));
     }
 
-    fn reconcile_tree(&mut self, model: MuxTreeModel) {
+    fn reconcile_tree(&mut self, model: MuxTreeModel) -> bool {
         if self.tree_model.as_ref() == &model {
-            return;
+            return false;
         }
 
         let previous_active = self.active_target;
@@ -686,6 +684,7 @@ impl WorkspaceSidebar {
             self.active_target,
             self.expanded.len(),
         );
+        true
     }
     fn render_navigation(
         &self,
@@ -988,7 +987,7 @@ fn active_pane_for_split(snapshot: &MuxSnapshot, attached: Option<SessionId>) ->
 /// or window still carries the most urgent badge hidden below it.
 fn node_agent_badge(
     tree_model: &MuxTreeModel,
-    badges: &BTreeMap<PaneId, AgentBadge>,
+    badges: &BTreeMap<(HostId, PaneId), AgentBadge>,
     node: TreeNode,
 ) -> Option<AgentBadge> {
     if badges.is_empty() {
@@ -997,10 +996,12 @@ fn node_agent_badge(
     let host = tree_model.host(node.host())?;
     match node {
         TreeNode::Host(_) => windows_agent_badge(
+            host.id,
             host.sessions.iter().flat_map(|session| &session.windows),
             badges,
         ),
         TreeNode::Target(_, TreeTarget::Session(id)) => windows_agent_badge(
+            host.id,
             host.sessions
                 .iter()
                 .filter(|session| session.id == id)
@@ -1008,23 +1009,25 @@ fn node_agent_badge(
             badges,
         ),
         TreeNode::Target(_, TreeTarget::Window(id)) => windows_agent_badge(
+            host.id,
             host.sessions
                 .iter()
                 .flat_map(|session| &session.windows)
                 .filter(|window| window.id == id),
             badges,
         ),
-        TreeNode::Target(_, TreeTarget::Pane(id)) => badges.get(&id).copied(),
+        TreeNode::Target(host, TreeTarget::Pane(id)) => badges.get(&(host, id)).copied(),
     }
 }
 
 fn windows_agent_badge<'a>(
+    host: HostId,
     windows: impl Iterator<Item = &'a MuxTreeWindow>,
-    badges: &BTreeMap<PaneId, AgentBadge>,
+    badges: &BTreeMap<(HostId, PaneId), AgentBadge>,
 ) -> Option<AgentBadge> {
     let mut rollup = None;
     for pane in windows.flat_map(|window| &window.panes) {
-        if let Some(&badge) = badges.get(&pane.id) {
+        if let Some(&badge) = badges.get(&(host, pane.id)) {
             AgentBadge::merge_into(&mut rollup, badge);
         }
     }
@@ -1097,7 +1100,10 @@ impl Render for WorkspaceSidebar {
                 mux.is_connected(),
             )
         };
-        self.reconcile_tree(model);
+        if self.reconcile_tree(model) {
+            let agents = self.agents.clone();
+            self.reconcile_attention(&agents, cx);
+        }
 
         let sidebar = cx.entity().clone();
         let width = self.width;
@@ -1396,7 +1402,7 @@ struct TreeRowRuntime {
     selected: Option<TreeNode>,
     focused: bool,
     local_hostname: SharedString,
-    badges: Rc<BTreeMap<PaneId, AgentBadge>>,
+    badges: Rc<BTreeMap<(HostId, PaneId), AgentBadge>>,
 }
 
 fn render_status_section(
@@ -2361,8 +2367,8 @@ mod tests {
         let snapshot = snapshot_with_two_panes();
         let model = local_model(&snapshot, Some(SessionId(1)));
         let badges = BTreeMap::from([
-            (PaneId(101), AgentBadge::Finished),
-            (PaneId(202), AgentBadge::NeedsInput),
+            ((HostId::LOCAL, PaneId(101)), AgentBadge::Finished),
+            ((HostId::LOCAL, PaneId(202)), AgentBadge::NeedsInput),
         ]);
         let badge = |node| node_agent_badge(&model, &badges, node);
 
@@ -2382,6 +2388,43 @@ mod tests {
         }
         assert_eq!(
             node_agent_badge(&model, &BTreeMap::new(), TreeNode::Host(HostId::LOCAL)),
+            None
+        );
+    }
+
+    #[test]
+    fn agent_badges_do_not_cross_host_id_boundaries() {
+        let remote = host_ids(&["studio"])[0];
+        let connected = HostState::Connected;
+        let snapshot = snapshot_with_two_panes();
+        let model = MuxTreeModel::from_hosts(
+            HostId::LOCAL,
+            Some(SessionId(1)),
+            [
+                (HostId::LOCAL, "local", &connected, Some(&snapshot)),
+                (remote, "studio", &connected, Some(&snapshot)),
+            ],
+        );
+        let badges = BTreeMap::from([((HostId::LOCAL, PaneId(202)), AgentBadge::NeedsInput)]);
+
+        assert_eq!(
+            node_agent_badge(
+                &model,
+                &badges,
+                TreeNode::Target(HostId::LOCAL, TreeTarget::Pane(PaneId(202)))
+            ),
+            Some(AgentBadge::NeedsInput)
+        );
+        assert_eq!(
+            node_agent_badge(
+                &model,
+                &badges,
+                TreeNode::Target(remote, TreeTarget::Pane(PaneId(202)))
+            ),
+            None
+        );
+        assert_eq!(
+            node_agent_badge(&model, &badges, TreeNode::Host(remote)),
             None
         );
     }

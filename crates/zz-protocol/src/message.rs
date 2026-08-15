@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt, path::PathBuf};
 
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -10,14 +10,11 @@ use zz_terminal::{
     TerminalDictionary, TerminalViewAction, TerminalViewport, TerminalViewportPatch,
 };
 
-use crate::{ClientId, MuxSnapshot, PaneId, SessionId, SplitId, WindowId};
+use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId, WindowId};
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-/// v53 moves the agent pane's ACP runtime into the daemon: prompts, session
-/// operations, and settings travel as commands, and the transcript streams
-/// back as journal-sequenced JSON items plus a small typed pane state.
-pub const PROTOCOL_VERSION: u16 = 53;
+pub const PROTOCOL_VERSION: u16 = 55;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
@@ -33,15 +30,25 @@ pub const MAX_GUI_TEXT_BYTES: usize = 64 * 1024;
 /// normalize prompt images the way pasted ones are, so this mirrors
 /// [`MAX_PASTE_UPLOAD_BYTES`].
 pub const MAX_AGENT_PROMPT_BYTES: usize = 6 * 1024 * 1024;
+pub const MAX_AGENT_PROMPT_IMAGES: usize = 64;
+pub const MAX_AGENT_QUEUED_PROMPTS: usize = 4;
+pub const MAX_AGENT_AUTH_METHODS: usize = 32;
+pub const MAX_AGENT_PERMISSION_OPTIONS: usize = 32;
+pub const MAX_AGENT_AVAILABLE_COMMANDS: usize = 256;
+pub const MAX_AGENT_CONFIG_OPTIONS: usize = 64;
+pub const MAX_AGENT_CONFIG_CHOICES: usize = 128;
+pub const MAX_AGENT_MODES: usize = 64;
+pub const MAX_AGENT_TOOL_CONTENT_ITEMS: usize = 128;
 /// Longest encoded-format label one prompt image may name.
 pub const MAX_AGENT_IMAGE_FORMAT_BYTES: usize = 64;
 /// Longest option, mode, or authentication-method identifier on the agent lane.
 pub const MAX_AGENT_OPTION_BYTES: usize = 4 * 1024;
 /// Longest agent session identifier, matching what an agent pane descriptor accepts.
 pub const MAX_AGENT_SESSION_ID_BYTES: usize = 16 * 1024;
+pub const MAX_AGENT_SESSION_DIRECTORIES: usize = 256;
 /// Largest batch of journal items one `AgentUpdates` event may carry. The
 /// daemon splits a longer coalescing window across frames.
-pub const MAX_AGENT_UPDATES_BYTES: usize = 1024 * 1024;
+pub const MAX_AGENT_UPDATES_BYTES: usize = 9 * 1024 * 1024;
 /// Largest JSON blob one [`AgentPaneWire`] field may carry.
 pub const MAX_AGENT_STATE_BLOB_BYTES: usize = 256 * 1024;
 /// Largest pending permission request payload carried by [`AgentPaneWire`].
@@ -452,6 +459,29 @@ where
     deserialize_bounded_text(deserializer, MAX_AGENT_STATE_BLOB_BYTES)
 }
 
+fn deserialize_optional_agent_state_blob<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_optional_text(deserializer, MAX_AGENT_STATE_BLOB_BYTES)
+}
+
+fn deserialize_agent_images<'de, D>(deserializer: D) -> Result<Vec<AgentImage>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let images = Vec::<AgentImage>::deserialize(deserializer)?;
+    if images.len() > MAX_AGENT_PROMPT_IMAGES {
+        return Err(D::Error::invalid_length(
+            images.len(),
+            &"an agent prompt within the image count limit",
+        ));
+    }
+    Ok(images)
+}
+
 fn deserialize_agent_permission_payload<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
@@ -609,6 +639,7 @@ where
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientHello {
     pub protocol_version: u16,
+    pub client_instance_id: ClientInstanceId,
     pub kind: ClientKind,
     #[serde(deserialize_with = "deserialize_device_name")]
     pub device_name: Option<String>,
@@ -625,6 +656,7 @@ pub struct ServerHello {
     pub protocol_version: u16,
     pub server_id: u64,
     pub client_id: ClientId,
+    pub client_instance_id: ClientInstanceId,
     #[serde(deserialize_with = "deserialize_capabilities")]
     pub capabilities: Vec<String>,
     pub appearance: TerminalAppearance,
@@ -971,11 +1003,20 @@ pub struct AgentImage {
 /// One session-management request against a pane's daemon-owned adapter.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AgentSessionOpKind {
-    List,
-    New,
+    List {
+        cwd: Option<PathBuf>,
+        #[serde(deserialize_with = "deserialize_optional_agent_session_id")]
+        cursor: Option<String>,
+        replace: bool,
+    },
+    New {
+        cwd: PathBuf,
+    },
     Switch {
         #[serde(deserialize_with = "deserialize_agent_session_id")]
         session_id: String,
+        cwd: PathBuf,
+        additional_directories: Vec<PathBuf>,
     },
     Delete {
         #[serde(deserialize_with = "deserialize_agent_session_id")]
@@ -1018,6 +1059,8 @@ pub struct AgentPaneWire {
     pub session_id: Option<String>,
     #[serde(deserialize_with = "deserialize_optional_agent_option_text")]
     pub title: Option<String>,
+    #[serde(deserialize_with = "deserialize_optional_agent_state_blob")]
+    pub error: Option<String>,
     #[serde(deserialize_with = "deserialize_agent_state_blob")]
     pub auth_methods: String,
     #[serde(deserialize_with = "deserialize_agent_state_blob")]
@@ -1048,6 +1091,13 @@ impl AgentPaneWire {
             .is_some_and(|title| title.len() > MAX_AGENT_OPTION_BYTES)
         {
             return Err("agent title exceeds the wire byte limit");
+        }
+        if self
+            .error
+            .as_ref()
+            .is_some_and(|error| error.len() > MAX_AGENT_STATE_BLOB_BYTES)
+        {
+            return Err("agent error exceeds the wire byte limit");
         }
         if self.auth_methods.len() > MAX_AGENT_STATE_BLOB_BYTES
             || self.config_options.len() > MAX_AGENT_STATE_BLOB_BYTES
@@ -1566,6 +1616,7 @@ pub enum ProtocolMessage {
         pane: PaneId,
         #[serde(deserialize_with = "deserialize_agent_prompt_text")]
         text: String,
+        #[serde(deserialize_with = "deserialize_agent_images")]
         images: Vec<AgentImage>,
     },
     AgentCancel {
@@ -1615,6 +1666,10 @@ pub enum ProtocolMessage {
     AgentTurnDiff {
         pane: PaneId,
         request_id: u64,
+    },
+    AgentAcknowledgePromptRestore {
+        pane: PaneId,
+        reclaim_id: u64,
     },
 }
 
@@ -1737,7 +1792,11 @@ mod tests {
             },
             super::ProtocolMessage::AgentSessionOp {
                 pane,
-                op: super::AgentSessionOpKind::List,
+                op: super::AgentSessionOpKind::List {
+                    cwd: None,
+                    cursor: None,
+                    replace: true,
+                },
             },
             super::ProtocolMessage::AgentReplay { pane, from_seq: 0 },
             super::ProtocolMessage::AgentTurnDiff {

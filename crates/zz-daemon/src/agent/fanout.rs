@@ -16,17 +16,19 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Weak,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
 
+use agent_client_protocol::schema::v1::SessionUpdate;
 use parking_lot::{Condvar, Mutex};
 use serde_json::Value;
 use zz_protocol::{
-    AgentPaneWire, AgentPermissionWire, ClientId, MAX_AGENT_UPDATES_BYTES, PaneId,
-    agent_update_batch_bytes,
+    AgentPaneWire, AgentPermissionWire, AgentProvider, ClientId, ClientInstanceId,
+    MAX_AGENT_PROMPT_BYTES, MAX_AGENT_QUEUED_PROMPTS, MAX_AGENT_RESULT_BYTES,
+    MAX_AGENT_UPDATES_BYTES, PaneId,
 };
 
 use crate::agent::{
@@ -41,7 +43,9 @@ use crate::agent::{
 const BATCH_WINDOW: Duration = Duration::from_millis(25);
 /// What one pane keeps replayable in memory. Past it a reattaching client is
 /// served from the journal instead.
-const MAX_REPLAY_RING_BYTES: usize = 16 * 1024 * 1024;
+const MAX_REPLAY_RING_BYTES: usize = 2 * MAX_AGENT_UPDATES_BYTES;
+const MAX_AGENT_FRAME_BYTES: usize = MAX_AGENT_RESULT_BYTES;
+const MAX_RECLAIMED_PROMPTS: usize = MAX_AGENT_QUEUED_PROMPTS + 1;
 /// A derived pane title is the opening words of the first prompt: enough to
 /// tell agent panes apart in the tree without wrapping the pane header.
 const MAX_TITLE_WORDS: usize = 7;
@@ -51,12 +55,16 @@ const MAX_TITLE_CHARS: usize = 48;
 /// the one title the daemon may overwrite.
 const DEFAULT_AGENT_PANE_TITLE: &str = "agent";
 
-/// A reply to one client request, correlated by the identifier that client
-/// sent. Session listings carry no client identifier on the wire, so they ride
-/// [`AgentRequestReply::request_id`] zero and reach everyone on the pane.
 pub(crate) enum AgentRequestReply {
-    Sessions { request_id: u64, result: String },
-    TurnDiff { request_id: u64, result: String },
+    Sessions {
+        client: ClientId,
+        result: String,
+    },
+    TurnDiff {
+        client: ClientId,
+        request_id: u64,
+        result: String,
+    },
 }
 
 /// What the daemon does with everything an agent pane produces. The fanout
@@ -72,18 +80,24 @@ pub(crate) trait AgentPublisher: Send + Sync + 'static {
         items: Vec<Vec<u8>>,
         also: Option<ClientId>,
     );
-    fn send_agent_updates(
+    fn send_agent_replay(&self, client: ClientId, pane: PaneId, frames: Vec<(u64, Vec<Vec<u8>>)>);
+    fn publish_agent_replay(
         &self,
-        client: ClientId,
         pane: PaneId,
-        first_seq: u64,
-        items: Vec<Vec<u8>>,
+        frames: Vec<(u64, Vec<Vec<u8>>)>,
+        also: Option<ClientId>,
     );
     fn publish_agent_state(&self, pane: PaneId, state: AgentPaneWire);
-    fn publish_agent_reply(&self, pane: PaneId, reply: AgentRequestReply);
+    fn send_agent_reply(&self, pane: PaneId, reply: AgentRequestReply);
     /// The adapter named the session this pane is now speaking to. The daemon
     /// owns that metadata, so it lands in the mux state, not just the stream.
-    fn adopt_agent_session(&self, pane: PaneId, session_id: String, cwd: Option<PathBuf>);
+    fn adopt_agent_session(
+        &self,
+        pane: PaneId,
+        provider: AgentProvider,
+        session_id: String,
+        cwd: Option<PathBuf>,
+    );
     fn title_agent_pane(&self, pane: PaneId, title: String);
 }
 
@@ -91,6 +105,8 @@ pub(crate) trait AgentPublisher: Send + Sync + 'static {
 pub(crate) struct AgentRuntime {
     host: AgentHost,
     fanout: Arc<AgentFanout>,
+    generation: AtomicU64,
+    lifecycle: Arc<Mutex<()>>,
 }
 
 impl AgentRuntime {
@@ -99,43 +115,93 @@ impl AgentRuntime {
         config: AgentSpawnConfig,
         journal: Option<Arc<AgentJournal>>,
     ) -> Self {
-        let fanout = Arc::new(AgentFanout::new(publisher, journal.clone()));
+        let lifecycle = Arc::new(Mutex::new(()));
+        let fanout = Arc::new(AgentFanout::new(
+            publisher,
+            journal.clone(),
+            Arc::clone(&lifecycle),
+        ));
         let sink_fanout = Arc::downgrade(&fanout);
         let host = AgentHost::with_journal(
             config,
-            Box::new(move |pane, state, item| {
+            Box::new(move |pane, generation, state, item| {
                 if let Some(fanout) = sink_fanout.upgrade() {
-                    fanout.accept(pane, &state, item);
+                    fanout.accept(pane, generation, &state, item);
                 }
             }),
             journal,
         );
-        Self { host, fanout }
+        Self {
+            host,
+            fanout,
+            generation: AtomicU64::new(1),
+            lifecycle,
+        }
     }
 
     pub(crate) fn open(&self, pane: PaneId, spec: AgentPaneSpec) -> bool {
-        self.fanout.open_lane(pane, spec.resume_session.clone());
-        if self.host.open(pane, spec) {
+        let lifecycle = self.lifecycle.lock();
+        if self.host.contains(pane) {
+            return true;
+        }
+        let generation = self.generation.fetch_add(1, Ordering::Relaxed);
+        self.fanout
+            .open_lane(pane, generation, spec.provider, spec.resume_session.clone());
+        if self.host.open(pane, generation, spec) {
+            let state = self.host.snapshot_state(pane);
+            drop(lifecycle);
+            if let Some(state) = state {
+                self.fanout.accept(pane, generation, &state, None);
+            }
             return true;
         }
         self.fanout.close_lane(pane);
         false
     }
 
+    pub(crate) fn restart(&self, pane: PaneId, spec: AgentPaneSpec) -> bool {
+        let lifecycle = self.lifecycle.lock();
+        let generation = self.generation.fetch_add(1, Ordering::Relaxed);
+        let _ = self.host.close(pane);
+        self.fanout
+            .restart_lane(pane, generation, spec.provider, spec.resume_session.clone());
+        if self.host.open(pane, generation, spec) {
+            let state = self.host.snapshot_state(pane);
+            drop(lifecycle);
+            if let Some(state) = state {
+                self.fanout.accept(pane, generation, &state, None);
+            }
+            true
+        } else {
+            self.fanout.close_lane(pane);
+            false
+        }
+    }
+
     pub(crate) fn close(&self, pane: PaneId) {
+        let _lifecycle = self.lifecycle.lock();
         let _ = self.host.close(pane);
         self.fanout.close_lane(pane);
     }
 
     pub(crate) fn command(&self, pane: PaneId, command: HostCommand) -> bool {
-        self.host.command(pane, command)
+        let _lifecycle = self.lifecycle.lock();
+        match self.host.command(pane, command) {
+            Ok(()) => true,
+            Err(command) => self.fanout.reject_command(pane, command),
+        }
     }
 
     /// Dispatch a prompt and, on the pane's first one, name it after what was
     /// asked.
     pub(crate) fn prompt(&self, pane: PaneId, prompt: AgentPrompt) -> bool {
+        let _lifecycle = self.lifecycle.lock();
         let title = self.fanout.propose_title(pane, &prompt.text);
-        let sent = self.host.command(pane, HostCommand::Prompt(prompt));
+        let sent = match self.host.command(pane, HostCommand::Prompt(prompt)) {
+            Ok(()) => true,
+            Err(HostCommand::Prompt(prompt)) => self.fanout.reclaim_prompt(pane, prompt),
+            Err(_) => unreachable!(),
+        };
         if !sent {
             return false;
         }
@@ -154,6 +220,7 @@ impl AgentRuntime {
     }
 
     pub(crate) fn reconfigure(&self, config: AgentSpawnConfig) {
+        let _lifecycle = self.lifecycle.lock();
         self.host.reconfigure(config);
     }
 
@@ -176,9 +243,22 @@ impl AgentRuntime {
         self.fanout.replay(client, pane, from_seq);
     }
 
+    pub(crate) fn acknowledge_prompt_restore(
+        &self,
+        owner: ClientInstanceId,
+        pane: PaneId,
+        reclaim_id: u64,
+    ) {
+        let _lifecycle = self.lifecycle.lock();
+        self.fanout
+            .acknowledge_prompt_restore(owner, pane, reclaim_id);
+    }
+
     pub(crate) fn shutdown(&self) {
-        self.host.shutdown();
+        let lifecycle = self.lifecycle.lock();
         self.fanout.shutdown();
+        drop(lifecycle);
+        self.host.shutdown();
     }
 
     #[cfg(test)]
@@ -195,11 +275,14 @@ impl Drop for AgentRuntime {
 
 /// Everything one pane's stream carries between the host and the wire.
 struct PaneLane {
+    generation: u64,
+    provider: AgentProvider,
     next_seq: u64,
     /// Highest sequence the ring has dropped, so a replay knows when it has
     /// fallen behind what memory still holds.
     evicted_seq: u64,
     batch: Vec<Vec<u8>>,
+    batch_bytes: usize,
     batch_first_seq: u64,
     deadline: Option<Instant>,
     ring: VecDeque<(u64, Vec<u8>)>,
@@ -209,19 +292,37 @@ struct PaneLane {
     titled: bool,
     modes: String,
     config_options: String,
+    ready: Option<AgentStreamPayload>,
+    modes_value: Option<Value>,
+    config_options_value: Option<Value>,
+    turn_id: Option<u64>,
+    reclaimed: VecDeque<ReclaimedPrompt>,
+    reclaimed_bytes: usize,
+    next_reclaim_id: u64,
     /// Bumped whenever a blob the pane state carries is replaced, so the
     /// per-item comparison never copies a quarter-megabyte of JSON.
     blobs: u64,
     fingerprint: Option<StateFingerprint>,
     state: Option<AgentPaneWire>,
+    sync_next_state: bool,
+}
+
+#[derive(Clone)]
+struct ReclaimedPrompt {
+    reclaim_id: u64,
+    last_seq: u64,
+    prompt: AgentPrompt,
 }
 
 impl PaneLane {
-    fn new(session_id: Option<String>) -> Self {
+    fn new(generation: u64, provider: AgentProvider, session_id: Option<String>) -> Self {
         Self {
+            generation,
+            provider,
             next_seq: 1,
             evicted_seq: 0,
             batch: Vec::new(),
+            batch_bytes: 0,
             batch_first_seq: 0,
             deadline: None,
             ring: VecDeque::new(),
@@ -231,18 +332,35 @@ impl PaneLane {
             titled: false,
             modes: String::new(),
             config_options: String::new(),
+            ready: None,
+            modes_value: None,
+            config_options_value: None,
+            turn_id: None,
+            reclaimed: VecDeque::new(),
+            reclaimed_bytes: 0,
+            next_reclaim_id: 1,
             blobs: 0,
             fingerprint: None,
             state: None,
+            sync_next_state: false,
         }
     }
 
     fn push(&mut self, seq: u64, encoded: Vec<u8>) {
+        if self.batch_bytes.saturating_add(encoded.len()) > MAX_AGENT_UPDATES_BYTES {
+            self.batch.clear();
+            self.batch_bytes = 0;
+        }
         if self.batch.is_empty() {
             self.batch_first_seq = seq;
             self.deadline = Some(Instant::now() + BATCH_WINDOW);
         }
         self.batch.push(encoded.clone());
+        self.batch_bytes = self.batch_bytes.saturating_add(encoded.len());
+        self.push_ring(seq, encoded);
+    }
+
+    fn push_ring(&mut self, seq: u64, encoded: Vec<u8>) {
         self.ring_bytes = self.ring_bytes.saturating_add(encoded.len());
         self.ring.push_back((seq, encoded));
         while self.ring_bytes > MAX_REPLAY_RING_BYTES {
@@ -257,8 +375,29 @@ impl PaneLane {
     /// Everything gathered so far, split so no frame outgrows the wire bound.
     fn take_batch(&mut self) -> Vec<(u64, Vec<Vec<u8>>)> {
         self.deadline = None;
+        self.batch_bytes = 0;
         let first_seq = self.batch_first_seq;
         split_frames(first_seq, std::mem::take(&mut self.batch))
+    }
+
+    fn restart(&mut self, generation: u64, provider: AgentProvider, session_id: Option<String>) {
+        if self.provider != provider {
+            self.title = None;
+            self.titled = false;
+        }
+        self.generation = generation;
+        self.provider = provider;
+        self.session_id = session_id;
+        self.modes.clear();
+        self.config_options.clear();
+        self.ready = None;
+        self.modes_value = None;
+        self.config_options_value = None;
+        self.turn_id = None;
+        self.blobs = self.blobs.saturating_add(1);
+        self.fingerprint = None;
+        self.state = None;
+        self.sync_next_state = true;
     }
 }
 
@@ -277,6 +416,7 @@ struct StateFingerprint {
 struct AgentFanout {
     publisher: Weak<dyn AgentPublisher>,
     journal: Option<Arc<AgentJournal>>,
+    lifecycle: Arc<Mutex<()>>,
     lanes: Mutex<BTreeMap<PaneId, PaneLane>>,
     wake: Condvar,
     stopped: AtomicBool,
@@ -284,10 +424,15 @@ struct AgentFanout {
 }
 
 impl AgentFanout {
-    fn new(publisher: &Arc<dyn AgentPublisher>, journal: Option<Arc<AgentJournal>>) -> Self {
+    fn new(
+        publisher: &Arc<dyn AgentPublisher>,
+        journal: Option<Arc<AgentJournal>>,
+        lifecycle: Arc<Mutex<()>>,
+    ) -> Self {
         Self {
             publisher: Arc::downgrade(publisher),
             journal,
+            lifecycle,
             lanes: Mutex::new(BTreeMap::new()),
             wake: Condvar::new(),
             stopped: AtomicBool::new(false),
@@ -295,8 +440,33 @@ impl AgentFanout {
         }
     }
 
-    fn open_lane(self: &Arc<Self>, pane: PaneId, session_id: Option<String>) {
-        self.lanes.lock().insert(pane, PaneLane::new(session_id));
+    fn open_lane(
+        self: &Arc<Self>,
+        pane: PaneId,
+        generation: u64,
+        provider: AgentProvider,
+        session_id: Option<String>,
+    ) {
+        self.lanes
+            .lock()
+            .insert(pane, PaneLane::new(generation, provider, session_id));
+        self.ensure_flusher();
+    }
+
+    fn restart_lane(
+        self: &Arc<Self>,
+        pane: PaneId,
+        generation: u64,
+        provider: AgentProvider,
+        session_id: Option<String>,
+    ) {
+        let mut lanes = self.lanes.lock();
+        if let Some(lane) = lanes.get_mut(&pane) {
+            lane.restart(generation, provider, session_id);
+        } else {
+            lanes.insert(pane, PaneLane::new(generation, provider, session_id));
+        }
+        drop(lanes);
         self.ensure_flusher();
     }
 
@@ -308,77 +478,293 @@ impl AgentFanout {
         self.lanes.lock().get(&pane)?.state.clone()
     }
 
+    fn reclaim_prompt(&self, pane: PaneId, prompt: AgentPrompt) -> bool {
+        let mut lanes = self.lanes.lock();
+        let Some(lane) = lanes.get_mut(&pane) else {
+            return false;
+        };
+        lane.enqueue_reclaimed(pane, vec![prompt]);
+        drop(lanes);
+        self.wake.notify_all();
+        true
+    }
+
+    fn reject_command(&self, pane: PaneId, command: HostCommand) -> bool {
+        let Some(publisher) = self.publisher.upgrade() else {
+            return false;
+        };
+        if !self.lanes.lock().contains_key(&pane) {
+            return false;
+        }
+        let payload = match command {
+            HostCommand::Authenticate { .. } => AgentStreamPayload::AuthenticationFailed {
+                message: "agent command queue is busy".to_owned(),
+            },
+            HostCommand::SetConfigOption { option_id, .. } => AgentStreamPayload::SettingFailed {
+                option_id,
+                message: "agent command queue is busy".to_owned(),
+            },
+            HostCommand::SetMode { .. } => AgentStreamPayload::SettingFailed {
+                option_id: "legacy-session-mode".to_owned(),
+                message: "agent command queue is busy".to_owned(),
+            },
+            HostCommand::ListSessions { client, .. } => {
+                let payload = AgentStreamPayload::SessionListFailed {
+                    client,
+                    message: "agent command queue is busy".to_owned(),
+                };
+                let Some(result) = encode_reply(&payload) else {
+                    return false;
+                };
+                publisher.send_agent_reply(pane, AgentRequestReply::Sessions { client, result });
+                return true;
+            }
+            HostCommand::DeleteSession { client, .. } => {
+                let payload = AgentStreamPayload::SessionDeleteFailed {
+                    client,
+                    message: "agent command queue is busy".to_owned(),
+                };
+                let Some(result) = encode_reply(&payload) else {
+                    return false;
+                };
+                publisher.send_agent_reply(pane, AgentRequestReply::Sessions { client, result });
+                return true;
+            }
+            HostCommand::TurnDiff { client, request_id } => {
+                let payload = AgentStreamPayload::TurnDiff {
+                    client,
+                    request_id,
+                    outcome: crate::agent::stream::AgentTurnDiffOutcome::Failed {
+                        message: "agent command queue is busy".to_owned(),
+                    },
+                };
+                let Some(result) = encode_reply(&payload) else {
+                    return false;
+                };
+                publisher.send_agent_reply(
+                    pane,
+                    AgentRequestReply::TurnDiff {
+                        client,
+                        request_id,
+                        result,
+                    },
+                );
+                return true;
+            }
+            HostCommand::NewSession { .. } | HostCommand::SwitchSession { .. } => {
+                AgentStreamPayload::SessionSwitchFailed {
+                    message: "agent command queue is busy".to_owned(),
+                }
+            }
+            HostCommand::Prompt(prompt) => {
+                return self.reclaim_prompt(pane, prompt);
+            }
+            HostCommand::Cancel
+            | HostCommand::Unqueue
+            | HostCommand::RespondPermission { .. }
+            | HostCommand::Park => AgentStreamPayload::PaneFailed {
+                message: "agent control queue is busy".to_owned(),
+            },
+        };
+        let mut lanes = self.lanes.lock();
+        let Some(lane) = lanes.get_mut(&pane) else {
+            return false;
+        };
+        lane.enqueue(pane, payload);
+        drop(lanes);
+        self.wake.notify_all();
+        true
+    }
+
     /// One item from a pane, plus the pane state it left behind. A state-only
     /// call (no item) is how a queued prompt reaches the badges.
-    fn accept(&self, pane: PaneId, state: &AgentPaneState, item: Option<AgentStreamItem>) {
+    fn accept(
+        &self,
+        pane: PaneId,
+        generation: u64,
+        state: &AgentPaneState,
+        item: Option<AgentStreamItem>,
+    ) {
+        let _lifecycle = self.lifecycle.lock();
+        if self.stopped.load(Ordering::Acquire) {
+            return;
+        }
         let Some(publisher) = self.publisher.upgrade() else {
             return;
         };
         let mut adoption = None;
         let mut reply = None;
-        let next_state = {
-            let mut lanes = self.lanes.lock();
-            let Some(lane) = lanes.get_mut(&pane) else {
-                return;
-            };
-            if let Some(item) = item {
-                match &item.payload {
-                    AgentStreamPayload::SessionReady {
-                        session_id,
-                        modes,
-                        config_options,
-                    } => {
-                        lane.session_id = Some(session_id.clone());
-                        lane.modes = blob(modes.as_ref());
-                        lane.config_options = blob(config_options.as_ref());
-                        lane.blobs = lane.blobs.saturating_add(1);
-                        adoption = Some((session_id.clone(), None));
-                    }
-                    AgentStreamPayload::SessionSwitched {
-                        session_id,
-                        cwd,
-                        modes,
-                        config_options,
-                        ..
-                    } => {
-                        lane.session_id = Some(session_id.clone());
-                        lane.modes = blob(modes.as_ref());
-                        lane.config_options = blob(config_options.as_ref());
-                        lane.blobs = lane.blobs.saturating_add(1);
-                        adoption = Some((session_id.clone(), Some(cwd.clone())));
-                    }
-                    AgentStreamPayload::ConfigOptionsChanged { config_options, .. } => {
-                        lane.config_options = blob(Some(config_options));
-                        lane.blobs = lane.blobs.saturating_add(1);
-                    }
-                    AgentStreamPayload::SessionsListed { .. } => {
-                        reply =
-                            encode_reply(&item.payload).map(|result| AgentRequestReply::Sessions {
-                                request_id: 0,
-                                result,
-                            });
-                    }
-                    AgentStreamPayload::TurnDiff { request_id, .. } => {
-                        reply =
-                            encode_reply(&item.payload).map(|result| AgentRequestReply::TurnDiff {
-                                request_id: *request_id,
-                                result,
-                            });
-                    }
-                    _ => {}
+        let mut lanes = self.lanes.lock();
+        let Some(lane) = lanes.get_mut(&pane) else {
+            return;
+        };
+        if lane.generation != generation {
+            if let Some(AgentStreamItem {
+                payload: AgentStreamPayload::PromptsReclaimed { prompts },
+                ..
+            }) = item
+            {
+                lane.enqueue_reclaimed(pane, prompts);
+                drop(lanes);
+                self.wake.notify_all();
+            }
+            return;
+        }
+        if let Some(item) = item {
+            match &item.payload {
+                AgentStreamPayload::Ready { .. } => {
+                    lane.ready = Some(item.payload.clone());
                 }
-                if reply.is_none() {
-                    lane.enqueue(pane, item.payload);
+                AgentStreamPayload::SessionReady {
+                    session_id,
+                    modes,
+                    config_options,
+                } => {
+                    if lane.session_id.as_deref() != Some(session_id) {
+                        lane.title = None;
+                        lane.titled = false;
+                        lane.turn_id = None;
+                    }
+                    lane.session_id = Some(session_id.clone());
+                    lane.modes = blob(modes.as_ref());
+                    lane.config_options = blob(config_options.as_ref());
+                    lane.modes_value.clone_from(modes);
+                    lane.config_options_value.clone_from(config_options);
+                    lane.blobs = lane.blobs.saturating_add(1);
+                    adoption = Some((lane.provider, session_id.clone(), None));
+                }
+                AgentStreamPayload::SessionSwitched {
+                    session_id,
+                    cwd,
+                    modes,
+                    config_options,
+                    ..
+                } => {
+                    lane.turn_id = None;
+                    lane.title = None;
+                    lane.titled = false;
+                    lane.session_id = Some(session_id.clone());
+                    lane.modes = blob(modes.as_ref());
+                    lane.config_options = blob(config_options.as_ref());
+                    lane.modes_value.clone_from(modes);
+                    lane.config_options_value.clone_from(config_options);
+                    lane.blobs = lane.blobs.saturating_add(1);
+                    adoption = Some((lane.provider, session_id.clone(), Some(cwd.clone())));
+                }
+                AgentStreamPayload::ConfigOptionsChanged { config_options, .. } => {
+                    lane.config_options = blob(Some(config_options));
+                    lane.config_options_value = Some(config_options.clone());
+                    lane.blobs = lane.blobs.saturating_add(1);
+                }
+                AgentStreamPayload::ModeChanged { mode_id } => {
+                    let changed = lane
+                        .modes_value
+                        .as_mut()
+                        .and_then(Value::as_object_mut)
+                        .map(|modes| {
+                            modes
+                                .insert("currentModeId".to_owned(), Value::String(mode_id.clone()));
+                        })
+                        .is_some();
+                    if changed {
+                        lane.modes = blob(lane.modes_value.as_ref());
+                        lane.blobs = lane.blobs.saturating_add(1);
+                    }
+                }
+                AgentStreamPayload::Update { update } => {
+                    match serde_json::from_value::<SessionUpdate>(update.clone()) {
+                        Ok(SessionUpdate::CurrentModeUpdate(update)) => {
+                            let changed = lane
+                                .modes_value
+                                .as_mut()
+                                .and_then(Value::as_object_mut)
+                                .map(|modes| {
+                                    modes.insert(
+                                        "currentModeId".to_owned(),
+                                        Value::String(update.current_mode_id.0.to_string()),
+                                    );
+                                })
+                                .is_some();
+                            if changed {
+                                lane.modes = blob(lane.modes_value.as_ref());
+                                lane.blobs = lane.blobs.saturating_add(1);
+                            }
+                        }
+                        Ok(SessionUpdate::ConfigOptionUpdate(update)) => {
+                            if let Ok(value) = serde_json::to_value(update.config_options) {
+                                lane.config_options = blob(Some(&value));
+                                lane.config_options_value = Some(value);
+                                lane.blobs = lane.blobs.saturating_add(1);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                AgentStreamPayload::SessionReset { .. } => lane.turn_id = None,
+                AgentStreamPayload::TurnStarted { turn_id } => lane.turn_id = Some(*turn_id),
+                AgentStreamPayload::SessionsListed { client, .. }
+                | AgentStreamPayload::SessionListFailed { client, .. }
+                | AgentStreamPayload::SessionDeleted { client, .. }
+                | AgentStreamPayload::SessionDeleteFailed { client, .. } => {
+                    let result = encode_reply(&item.payload).or_else(|| {
+                        encode_reply(&AgentStreamPayload::SessionListFailed {
+                            client: *client,
+                            message: "agent returned too much session history".to_owned(),
+                        })
+                    });
+                    reply = result.map(|result| AgentRequestReply::Sessions {
+                        client: *client,
+                        result,
+                    });
+                }
+                AgentStreamPayload::TurnDiff {
+                    client, request_id, ..
+                } => {
+                    let result = encode_reply(&item.payload).or_else(|| {
+                        encode_reply(&AgentStreamPayload::TurnDiff {
+                            client: *client,
+                            request_id: *request_id,
+                            outcome: crate::agent::stream::AgentTurnDiffOutcome::Failed {
+                                message: "agent returned too many worktree changes".to_owned(),
+                            },
+                        })
+                    });
+                    reply = result.map(|result| AgentRequestReply::TurnDiff {
+                        client: *client,
+                        request_id: *request_id,
+                        result,
+                    });
+                }
+                _ => {}
+            }
+            if reply.is_none() {
+                match item.payload {
+                    AgentStreamPayload::PromptsReclaimed { prompts } => {
+                        lane.enqueue_reclaimed(pane, prompts);
+                    }
+                    payload => lane.enqueue(pane, payload),
                 }
             }
-            lane.refresh_state(state)
-        };
+        }
+        let next_state = lane.refresh_state(state);
+        if lane.sync_next_state
+            && let Some(state) = next_state.as_ref()
+        {
+            lane.enqueue(
+                pane,
+                AgentStreamPayload::StateSynced {
+                    state: state.clone(),
+                },
+            );
+            lane.sync_next_state = false;
+        }
+        drop(lanes);
         self.wake.notify_all();
         if let Some(reply) = reply {
-            publisher.publish_agent_reply(pane, reply);
+            publisher.send_agent_reply(pane, reply);
         }
-        if let Some((session_id, cwd)) = adoption {
-            publisher.adopt_agent_session(pane, session_id, cwd);
+        if let Some((provider, session_id, cwd)) = adoption {
+            publisher.adopt_agent_session(pane, provider, session_id, cwd);
         }
         if let Some(next_state) = next_state {
             publisher.publish_agent_state(pane, next_state);
@@ -420,22 +806,19 @@ impl AgentFanout {
             let Some(first_seq) = items.first().map(|(seq, _)| *seq) else {
                 return;
             };
-            for (first_seq, items) in split_frames(
+            let frames = split_frames(
                 first_seq,
                 items.into_iter().map(|(_, encoded)| encoded).collect(),
-            ) {
-                publisher.send_agent_updates(client, pane, first_seq, items);
-            }
+            );
+            publisher.send_agent_replay(client, pane, frames);
             return;
         }
-        for (first_seq, items) in lane.take_batch() {
-            publisher.publish_agent_updates(pane, first_seq, items, Some(client));
-        }
+        lane.take_batch();
         let session_id = lane.session_id.clone();
         let replay = session_id
             .as_deref()
             .zip(self.journal.as_ref())
-            .and_then(|(session_id, journal)| journal.replay(session_id).ok())
+            .and_then(|(session_id, journal)| journal.replay_for(lane.provider, session_id).ok())
             .unwrap_or_default();
         log::info!(
             target: "zz::agent",
@@ -444,16 +827,75 @@ impl AgentFanout {
             lane.evicted_seq.saturating_add(1),
             replay.len(),
         );
-        lane.enqueue(pane, AgentStreamPayload::SessionReset { restoring: true });
+        let first_seq = lane.next_seq;
+        let mut synthesized = Vec::new();
+        lane.synthesize(
+            pane,
+            AgentStreamPayload::SessionReset { restoring: true },
+            &mut synthesized,
+        );
+        if let Some(ready) = lane.ready.clone() {
+            lane.synthesize(pane, ready, &mut synthesized);
+        }
         for (_, update) in replay {
-            lane.enqueue(pane, AgentStreamPayload::Update { update });
+            lane.synthesize(
+                pane,
+                AgentStreamPayload::Update { update },
+                &mut synthesized,
+            );
         }
-        for (first_seq, items) in lane.take_batch() {
-            publisher.publish_agent_updates(pane, first_seq, items, Some(client));
+        if let Some(session_id) = session_id {
+            lane.synthesize(
+                pane,
+                AgentStreamPayload::SessionReady {
+                    session_id,
+                    modes: lane.modes_value.clone(),
+                    config_options: lane.config_options_value.clone(),
+                },
+                &mut synthesized,
+            );
         }
-        if let Some(state) = lane.state.clone() {
-            drop(lanes);
-            publisher.publish_agent_state(pane, state);
+        if let Some(turn_id) = lane.turn_id {
+            lane.synthesize(
+                pane,
+                AgentStreamPayload::TurnStarted { turn_id },
+                &mut synthesized,
+            );
+        }
+        for reclaimed in lane.reclaimed.clone() {
+            let seq = lane.synthesize_with_seq(
+                pane,
+                AgentStreamPayload::PromptsRestored {
+                    reclaim_id: reclaimed.reclaim_id,
+                    prompts: vec![reclaimed.prompt],
+                },
+                &mut synthesized,
+            );
+            if let Some(seq) = seq
+                && let Some(cached) = lane
+                    .reclaimed
+                    .iter_mut()
+                    .find(|cached| cached.reclaim_id == reclaimed.reclaim_id)
+            {
+                cached.last_seq = seq;
+            }
+        }
+        let state = lane.state.clone();
+        if let Some(state) = state {
+            lane.synthesize(
+                pane,
+                AgentStreamPayload::StateSynced { state },
+                &mut synthesized,
+            );
+        }
+        let frames = split_frames(first_seq, synthesized);
+        publisher.publish_agent_replay(pane, frames, Some(client));
+    }
+
+    fn acknowledge_prompt_restore(&self, owner: ClientInstanceId, pane: PaneId, reclaim_id: u64) {
+        let mut lanes = self.lanes.lock();
+        if let Some(lane) = lanes.get_mut(&pane) {
+            lane.acknowledge_reclaimed(owner, reclaim_id);
         }
     }
 
@@ -483,10 +925,94 @@ impl AgentFanout {
 }
 
 impl PaneLane {
+    fn enqueue_reclaimed(&mut self, pane: PaneId, prompts: Vec<AgentPrompt>) {
+        for prompt in prompts {
+            let reclaim_id = self.next_reclaim_id;
+            self.next_reclaim_id = self.next_reclaim_id.saturating_add(1);
+            let Some(last_seq) = self.enqueue_with_seq(
+                pane,
+                AgentStreamPayload::PromptsRestored {
+                    reclaim_id,
+                    prompts: vec![prompt.clone()],
+                },
+            ) else {
+                continue;
+            };
+            self.reclaimed_bytes = self.reclaimed_bytes.saturating_add(prompt.byte_len());
+            self.reclaimed.push_back(ReclaimedPrompt {
+                reclaim_id,
+                last_seq,
+                prompt,
+            });
+            while self.reclaimed_bytes > MAX_AGENT_PROMPT_BYTES
+                || self.reclaimed.len() > MAX_RECLAIMED_PROMPTS
+            {
+                let Some(evicted) = self.reclaimed.pop_front() else {
+                    break;
+                };
+                self.reclaimed_bytes = self
+                    .reclaimed_bytes
+                    .saturating_sub(evicted.prompt.byte_len());
+            }
+        }
+    }
+
+    fn acknowledge_reclaimed(&mut self, owner: ClientInstanceId, reclaim_id: u64) {
+        let Some(index) = self.reclaimed.iter().position(|reclaimed| {
+            reclaimed.reclaim_id == reclaim_id && reclaimed.prompt.owner == owner
+        }) else {
+            return;
+        };
+        let Some(reclaimed) = self.reclaimed.remove(index) else {
+            return;
+        };
+        self.reclaimed_bytes = self
+            .reclaimed_bytes
+            .saturating_sub(reclaimed.prompt.byte_len());
+        while self
+            .ring
+            .front()
+            .is_some_and(|(seq, _)| *seq <= reclaimed.last_seq)
+        {
+            let Some((seq, encoded)) = self.ring.pop_front() else {
+                break;
+            };
+            self.ring_bytes = self.ring_bytes.saturating_sub(encoded.len());
+            self.evicted_seq = self.evicted_seq.max(seq);
+        }
+        self.evicted_seq = self.evicted_seq.max(reclaimed.last_seq);
+    }
+
     /// Stamp, encode, and queue one payload. An item too large for a single
     /// frame is dropped rather than stamped: the wire cannot carry it, and a
     /// sequence spent on it would look like loss to every client.
     fn enqueue(&mut self, pane: PaneId, payload: AgentStreamPayload) {
+        _ = self.enqueue_with_seq(pane, payload);
+    }
+
+    fn enqueue_with_seq(&mut self, pane: PaneId, payload: AgentStreamPayload) -> Option<u64> {
+        let (seq, encoded) = self.stamp(pane, payload)?;
+        self.push(seq, encoded);
+        Some(seq)
+    }
+
+    fn synthesize(&mut self, pane: PaneId, payload: AgentStreamPayload, items: &mut Vec<Vec<u8>>) {
+        _ = self.synthesize_with_seq(pane, payload, items);
+    }
+
+    fn synthesize_with_seq(
+        &mut self,
+        pane: PaneId,
+        payload: AgentStreamPayload,
+        items: &mut Vec<Vec<u8>>,
+    ) -> Option<u64> {
+        let (seq, encoded) = self.stamp(pane, payload)?;
+        self.push_ring(seq, encoded.clone());
+        items.push(encoded);
+        Some(seq)
+    }
+
+    fn stamp(&mut self, pane: PaneId, payload: AgentStreamPayload) -> Option<(u64, Vec<u8>)> {
         let item = AgentStreamItem {
             seq: self.next_seq,
             payload,
@@ -495,7 +1021,7 @@ impl PaneLane {
             Ok(encoded) => encoded,
             Err(error) => {
                 log::error!(target: "zz::agent", "could not encode a stream item for pane {pane}: {error}");
-                return;
+                return None;
             }
         };
         if encoded.len() > MAX_AGENT_UPDATES_BYTES {
@@ -504,11 +1030,11 @@ impl PaneLane {
                 "dropping a {} byte agent update for pane {pane}: one item may not exceed {MAX_AGENT_UPDATES_BYTES} bytes",
                 encoded.len(),
             );
-            return;
+            return None;
         }
         let seq = self.next_seq;
         self.next_seq = self.next_seq.saturating_add(1);
-        self.push(seq, encoded);
+        Some((seq, encoded))
     }
 
     /// The pane state to publish, or `None` when nothing a client renders
@@ -599,16 +1125,16 @@ fn run_flusher(fanout: &Weak<AgentFanout>) {
 fn split_frames(first_seq: u64, items: Vec<Vec<u8>>) -> Vec<(u64, Vec<Vec<u8>>)> {
     let mut frames = Vec::new();
     let mut current: Vec<Vec<u8>> = Vec::new();
+    let mut current_bytes = 0usize;
     let mut seq = first_seq;
     let mut start = first_seq;
     for item in items {
-        if !current.is_empty()
-            && agent_update_batch_bytes(&current).saturating_add(item.len())
-                > MAX_AGENT_UPDATES_BYTES
-        {
+        if !current.is_empty() && current_bytes.saturating_add(item.len()) > MAX_AGENT_FRAME_BYTES {
             frames.push((start, std::mem::take(&mut current)));
             start = seq;
+            current_bytes = 0;
         }
+        current_bytes = current_bytes.saturating_add(item.len());
         current.push(item);
         seq = seq.saturating_add(1);
     }
@@ -623,11 +1149,16 @@ fn blob(value: Option<&Value>) -> String {
 }
 
 fn encode_reply(payload: &AgentStreamPayload) -> Option<String> {
-    serde_json::to_string(payload)
+    let encoded = serde_json::to_string(payload)
         .map_err(
             |error| log::error!(target: "zz::agent", "could not encode an agent reply: {error}"),
         )
-        .ok()
+        .ok()?;
+    if encoded.len() > MAX_AGENT_RESULT_BYTES {
+        log::warn!(target: "zz::agent", "dropping an oversized {} byte agent reply", encoded.len());
+        return None;
+    }
+    Some(encoded)
 }
 
 /// The host's pane state as a client renders it.
@@ -658,6 +1189,7 @@ fn wire(state: &AgentPaneState, title: Option<&str>) -> AgentPaneWire {
         queued_prompts: u32::try_from(state.queued_prompts).unwrap_or(u32::MAX),
         session_id: state.session_id.clone(),
         title: title.map(ToOwned::to_owned),
+        error: state.error.clone(),
         auth_methods: serde_json::to_string(&state.auth_methods).unwrap_or_default(),
         config_options: String::new(),
         modes: String::new(),
@@ -699,7 +1231,10 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::agent::stream::{AgentSessionSummary, AgentTurnDiffOutcome};
+    use crate::agent::{
+        fixture::{Behavior, fixture_runner},
+        stream::{AgentImage, AgentSessionCapabilities, AgentSessionSummary, AgentTurnDiffOutcome},
+    };
 
     const DEADLINE: Duration = Duration::from_secs(5);
 
@@ -708,7 +1243,7 @@ mod tests {
         broadcast: Mutex<Vec<(PaneId, u64, Vec<Vec<u8>>, Option<ClientId>)>>,
         direct: Mutex<Vec<(ClientId, PaneId, u64, Vec<Vec<u8>>)>>,
         states: Mutex<Vec<(PaneId, AgentPaneWire)>>,
-        replies: Mutex<Vec<(PaneId, u64, String)>>,
+        replies: Mutex<Vec<(ClientId, PaneId, u64, String)>>,
         sessions: Mutex<Vec<(PaneId, String)>>,
         titles: Mutex<Vec<(PaneId, String)>>,
     }
@@ -776,29 +1311,55 @@ mod tests {
             self.broadcast.lock().push((pane, first_seq, items, also));
         }
 
-        fn send_agent_updates(
+        fn send_agent_replay(
             &self,
             client: ClientId,
             pane: PaneId,
-            first_seq: u64,
-            items: Vec<Vec<u8>>,
+            frames: Vec<(u64, Vec<Vec<u8>>)>,
         ) {
-            self.direct.lock().push((client, pane, first_seq, items));
+            self.direct.lock().extend(
+                frames
+                    .into_iter()
+                    .map(|(first_seq, items)| (client, pane, first_seq, items)),
+            );
+        }
+
+        fn publish_agent_replay(
+            &self,
+            pane: PaneId,
+            frames: Vec<(u64, Vec<Vec<u8>>)>,
+            also: Option<ClientId>,
+        ) {
+            self.broadcast.lock().extend(
+                frames
+                    .into_iter()
+                    .map(|(first_seq, items)| (pane, first_seq, items, also)),
+            );
         }
 
         fn publish_agent_state(&self, pane: PaneId, state: AgentPaneWire) {
             self.states.lock().push((pane, state));
         }
 
-        fn publish_agent_reply(&self, pane: PaneId, reply: AgentRequestReply) {
-            let (request_id, result) = match reply {
-                AgentRequestReply::Sessions { request_id, result }
-                | AgentRequestReply::TurnDiff { request_id, result } => (request_id, result),
+        fn send_agent_reply(&self, pane: PaneId, reply: AgentRequestReply) {
+            let (client, request_id, result) = match reply {
+                AgentRequestReply::Sessions { client, result } => (client, 0, result),
+                AgentRequestReply::TurnDiff {
+                    client,
+                    request_id,
+                    result,
+                } => (client, request_id, result),
             };
-            self.replies.lock().push((pane, request_id, result));
+            self.replies.lock().push((client, pane, request_id, result));
         }
 
-        fn adopt_agent_session(&self, pane: PaneId, session_id: String, _cwd: Option<PathBuf>) {
+        fn adopt_agent_session(
+            &self,
+            pane: PaneId,
+            _provider: AgentProvider,
+            session_id: String,
+            _cwd: Option<PathBuf>,
+        ) {
             self.sessions.lock().push((pane, session_id));
         }
 
@@ -817,9 +1378,18 @@ mod tests {
         fn open(journal: Option<Arc<AgentJournal>>, session_id: Option<&str>) -> Self {
             let recorder = Arc::new(Recorder::default());
             let publisher: Arc<dyn AgentPublisher> = Arc::<Recorder>::clone(&recorder);
-            let fanout = Arc::new(AgentFanout::new(&publisher, journal));
+            let fanout = Arc::new(AgentFanout::new(
+                &publisher,
+                journal,
+                Arc::new(Mutex::new(())),
+            ));
             let pane = PaneId(4);
-            fanout.open_lane(pane, session_id.map(ToOwned::to_owned));
+            fanout.open_lane(
+                pane,
+                1,
+                AgentProvider::Codex,
+                session_id.map(ToOwned::to_owned),
+            );
             Self {
                 fanout,
                 recorder,
@@ -828,8 +1398,13 @@ mod tests {
         }
 
         fn accept(&self, payload: AgentStreamPayload) {
+            self.accept_generation(1, payload);
+        }
+
+        fn accept_generation(&self, generation: u64, payload: AgentStreamPayload) {
             self.fanout.accept(
                 self.pane,
+                generation,
                 &state(AgentConnectionPhase::Running),
                 Some(AgentStreamItem { seq: 0, payload }),
             );
@@ -887,6 +1462,63 @@ mod tests {
     }
 
     #[test]
+    fn an_unflushed_batch_stays_inside_its_byte_bound() {
+        let mut lane = PaneLane::new(1, AgentProvider::Codex, None);
+        let item = vec![b'x'; MAX_AGENT_RESULT_BYTES];
+        for seq in 1..=32 {
+            lane.push(seq, item.clone());
+        }
+        assert!(lane.batch_bytes <= MAX_AGENT_UPDATES_BYTES);
+        assert!(lane.ring_bytes <= MAX_REPLAY_RING_BYTES);
+        assert!(lane.batch.len() <= MAX_AGENT_UPDATES_BYTES / MAX_AGENT_RESULT_BYTES);
+    }
+
+    #[test]
+    fn zero_byte_reclaimed_prompts_stay_inside_the_count_bound() {
+        let mut lane = PaneLane::new(1, AgentProvider::Codex, None);
+        for _ in 0..MAX_RECLAIMED_PROMPTS + 8 {
+            lane.enqueue_reclaimed(
+                PaneId(1),
+                vec![AgentPrompt {
+                    owner: ClientInstanceId::default(),
+                    text: String::new(),
+                    images: vec![AgentImage {
+                        format: "image/png".to_owned(),
+                        data: Vec::new(),
+                    }],
+                }],
+            );
+        }
+
+        assert_eq!(lane.reclaimed.len(), MAX_RECLAIMED_PROMPTS);
+        assert_eq!(lane.reclaimed_bytes, 0);
+    }
+
+    #[test]
+    fn only_the_prompt_owner_can_retire_a_restored_prompt() {
+        let mut lane = PaneLane::new(1, AgentProvider::Codex, None);
+        lane.enqueue_reclaimed(
+            PaneId(1),
+            vec![AgentPrompt {
+                owner: ClientInstanceId(7),
+                text: "keep me".to_owned(),
+                images: Vec::new(),
+            }],
+        );
+        let reclaim_id = lane.reclaimed[0].reclaim_id;
+        let last_seq = lane.reclaimed[0].last_seq;
+
+        lane.acknowledge_reclaimed(ClientInstanceId(8), reclaim_id);
+        assert_eq!(lane.reclaimed.len(), 1);
+
+        lane.acknowledge_reclaimed(ClientInstanceId(7), reclaim_id);
+        assert!(lane.reclaimed.is_empty());
+        assert_eq!(lane.reclaimed_bytes, 0);
+        assert!(lane.evicted_seq >= last_seq);
+        assert!(lane.ring.iter().all(|(seq, _)| *seq > last_seq));
+    }
+
+    #[test]
     fn a_replay_inside_the_ring_serves_only_what_the_client_missed() {
         let fixture = Fixture::open(None, Some("s-1"));
         for text in ["a", "b", "c"] {
@@ -930,14 +1562,26 @@ mod tests {
                 .expect("append");
         }
         let fixture = Fixture::open(Some(journal), Some("s-1"));
+        fixture.accept(AgentStreamPayload::Ready {
+            agent_name: "Codex".to_owned(),
+            agent_key: "codex".to_owned(),
+            auth_methods: Vec::new(),
+            capabilities: AgentSessionCapabilities::default(),
+        });
+        fixture.accept(AgentStreamPayload::SessionReady {
+            session_id: "s-1".to_owned(),
+            modes: Some(json!({ "currentModeId": "plan", "availableModes": [] })),
+            config_options: None,
+        });
+        fixture.recorder.wait_for_items(2);
 
         // Overrun the ring: every item is stamped, so the first ones are the
         // ones memory drops.
-        let filler = "x".repeat(900 * 1024);
-        for _ in 0..20 {
+        let filler = "x".repeat(MAX_AGENT_UPDATES_BYTES - 4096);
+        let filler_count = MAX_REPLAY_RING_BYTES / filler.len() + 2;
+        for _ in 0..filler_count {
             fixture.chunk(&filler);
         }
-        fixture.recorder.wait_for_items(20);
         let last_live = fixture.fanout.lanes.lock()[&fixture.pane]
             .next_seq
             .saturating_sub(1);
@@ -958,8 +1602,24 @@ mod tests {
                 replayed.first().map(|item| &item.payload),
                 Some(AgentStreamPayload::SessionReset { restoring: true })
             ),
-            "the fallback resets before it replays: {replayed:?}"
+            "the fallback starts with an explicit stream reset: {replayed:?}"
         );
+        assert!(matches!(
+            replayed.get(1).map(|item| &item.payload),
+            Some(AgentStreamPayload::Ready { agent_name, .. }) if agent_name == "Codex"
+        ));
+        assert!(matches!(
+            replayed.get(replayed.len().saturating_sub(2)).map(|item| &item.payload),
+            Some(AgentStreamPayload::SessionReady {
+                session_id,
+                modes: Some(_),
+                ..
+            }) if session_id == "s-1"
+        ));
+        assert!(matches!(
+            replayed.last().map(|item| &item.payload),
+            Some(AgentStreamPayload::StateSynced { .. })
+        ));
         assert_eq!(
             replayed.iter().filter_map(text_of).collect::<Vec<_>>(),
             ["one", "two"]
@@ -970,8 +1630,457 @@ mod tests {
         );
         assert_eq!(
             replayed.iter().map(|item| item.seq).collect::<Vec<_>>(),
-            (replayed[0].seq..replayed[0].seq + 3).collect::<Vec<_>>(),
+            (replayed[0].seq..replayed[0].seq + 6).collect::<Vec<_>>(),
             "and stays contiguous for every client on the pane"
+        );
+    }
+
+    #[test]
+    fn a_large_journal_replay_keeps_its_reset_and_every_frame() {
+        let directory = tempfile::tempdir().expect("journal directory");
+        let journal = Arc::new(AgentJournal::open(directory.path()).expect("open journal"));
+        let body = "x".repeat(850 * 1024);
+        for index in 0..12 {
+            journal
+                .append(
+                    "s-large",
+                    &json!({
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": { "text": format!("{index}:{body}") }
+                    }),
+                )
+                .expect("append");
+        }
+        let fixture = Fixture::open(Some(journal), Some("s-large"));
+        fixture.accept(AgentStreamPayload::Ready {
+            agent_name: "Codex".to_owned(),
+            agent_key: "codex".to_owned(),
+            auth_methods: Vec::new(),
+            capabilities: AgentSessionCapabilities::default(),
+        });
+        fixture.accept(AgentStreamPayload::SessionReady {
+            session_id: "s-large".to_owned(),
+            modes: None,
+            config_options: None,
+        });
+        fixture.recorder.wait_for_items(2);
+        fixture
+            .fanout
+            .lanes
+            .lock()
+            .get_mut(&fixture.pane)
+            .expect("lane")
+            .evicted_seq = 1;
+
+        fixture.fanout.replay(ClientId(3), fixture.pane, 1);
+        let frames = fixture
+            .recorder
+            .broadcast
+            .lock()
+            .iter()
+            .filter(|(_, _, _, also)| *also == Some(ClientId(3)))
+            .cloned()
+            .collect::<Vec<_>>();
+        assert!(frames.len() > 1);
+        let replayed = frames
+            .into_iter()
+            .flat_map(|(_, _, items, _)| items)
+            .map(|item| serde_json::from_slice::<AgentStreamItem>(&item).expect("decode"))
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            replayed.first().map(|item| &item.payload),
+            Some(AgentStreamPayload::SessionReset { restoring: true })
+        ));
+        assert!(matches!(
+            replayed.last().map(|item| &item.payload),
+            Some(AgentStreamPayload::StateSynced { .. })
+        ));
+        assert_eq!(
+            replayed
+                .iter()
+                .filter(|item| matches!(item.payload, AgentStreamPayload::Update { .. }))
+                .count(),
+            12
+        );
+        assert!(
+            replayed
+                .windows(2)
+                .all(|items| items[1].seq == items[0].seq + 1)
+        );
+    }
+
+    #[test]
+    fn restarting_a_lane_keeps_sequences_monotonic_and_drops_the_old_runtime_tail() {
+        let fixture = Fixture::open(None, None);
+        fixture.chunk("before");
+        fixture.recorder.wait_for_items(1);
+
+        fixture
+            .fanout
+            .restart_lane(fixture.pane, 2, AgentProvider::Codex, None);
+        fixture.fanout.accept(
+            fixture.pane,
+            2,
+            &state(AgentConnectionPhase::Starting),
+            None,
+        );
+        fixture.accept_generation(
+            1,
+            AgentStreamPayload::Update {
+                update: json!({ "sessionUpdate": "agent_message_chunk", "content": { "text": "stale" } }),
+            },
+        );
+        fixture.accept_generation(
+            2,
+            AgentStreamPayload::Update {
+                update: json!({ "sessionUpdate": "agent_message_chunk", "content": { "text": "after" } }),
+            },
+        );
+
+        let items = fixture.recorder.wait_for_items(3);
+        assert_eq!(
+            items.iter().filter_map(text_of).collect::<Vec<_>>(),
+            ["before", "after"]
+        );
+        assert_eq!(
+            items.iter().map(|item| item.seq).collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+        assert!(matches!(
+            items.get(1).map(|item| &item.payload),
+            Some(AgentStreamPayload::StateSynced { state })
+                if state.phase == zz_protocol::AgentConnectionPhase::Starting
+        ));
+    }
+
+    #[test]
+    fn concurrent_restarts_leave_one_live_current_generation() {
+        let recorder = Arc::new(Recorder::default());
+        let publisher: Arc<dyn AgentPublisher> = Arc::<Recorder>::clone(&recorder);
+        let runtime = Arc::new(AgentRuntime::new(
+            &publisher,
+            AgentSpawnConfig::default(),
+            None,
+        ));
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = Arc::new(Mutex::new(Some(release_rx)));
+        runtime.set_runner_factory(Box::new(move |spec| {
+            let call = calls.fetch_add(1, Ordering::Relaxed);
+            if call == 1 {
+                entered_tx.send(()).expect("mark first restart");
+                release_rx
+                    .lock()
+                    .take()
+                    .expect("first restart release")
+                    .recv()
+                    .expect("release first restart");
+            }
+            fixture_runner(spec.provider, Behavior::Chunk, false, true)
+        }));
+        let pane = PaneId(44);
+        let spec = AgentPaneSpec {
+            provider: AgentProvider::Codex,
+            cwd: PathBuf::from("/"),
+            resume_session: None,
+            workspace: crate::agent::environment::AgentWorkspaceEnvironment::default(),
+        };
+        assert!(runtime.open(pane, spec.clone()));
+
+        let first_runtime = Arc::clone(&runtime);
+        let first_spec = spec.clone();
+        let first = std::thread::spawn(move || first_runtime.restart(pane, first_spec));
+        entered_rx
+            .recv_timeout(DEADLINE)
+            .expect("first restart reached open");
+        let second_runtime = Arc::clone(&runtime);
+        let second_spec = spec.clone();
+        let (second_started_tx, second_started_rx) = std::sync::mpsc::channel();
+        let second = std::thread::spawn(move || {
+            second_started_tx.send(()).expect("mark second restart");
+            second_runtime.restart(pane, second_spec)
+        });
+        second_started_rx
+            .recv_timeout(DEADLINE)
+            .expect("second restart started");
+        std::thread::sleep(Duration::from_millis(20));
+        release_tx.send(()).expect("release restart");
+
+        assert!(first.join().expect("first restart thread"));
+        assert!(second.join().expect("second restart thread"));
+        assert_eq!(runtime.host.pane_count(), 1);
+        assert!(runtime.fanout.lanes.lock().contains_key(&pane));
+        assert!(runtime.prompt(
+            pane,
+            AgentPrompt {
+                owner: ClientInstanceId::default(),
+                text: "probe".to_owned(),
+                images: Vec::new(),
+            },
+        ));
+        let deadline = Instant::now() + DEADLINE;
+        while Instant::now() < deadline {
+            if recorder
+                .payloads()
+                .iter()
+                .filter_map(text_of)
+                .any(|text| text == "turn 0")
+            {
+                runtime.shutdown();
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        panic!("the surviving runtime did not deliver its prompt");
+    }
+
+    #[test]
+    fn opening_an_existing_pane_leaves_its_live_lane_intact() {
+        let recorder = Arc::new(Recorder::default());
+        let publisher: Arc<dyn AgentPublisher> = Arc::<Recorder>::clone(&recorder);
+        let runtime = AgentRuntime::new(&publisher, AgentSpawnConfig::default(), None);
+        runtime.set_runner_factory(Box::new(|spec| {
+            fixture_runner(spec.provider, Behavior::Chunk, false, true)
+        }));
+        let pane = PaneId(45);
+        let spec = AgentPaneSpec {
+            provider: AgentProvider::Codex,
+            cwd: PathBuf::from("/"),
+            resume_session: None,
+            workspace: crate::agent::environment::AgentWorkspaceEnvironment::default(),
+        };
+
+        assert!(runtime.open(pane, spec.clone()));
+        let generation = runtime.fanout.lanes.lock()[&pane].generation;
+        assert!(runtime.open(pane, spec));
+        assert_eq!(runtime.host.pane_count(), 1);
+        assert_eq!(runtime.fanout.lanes.lock()[&pane].generation, generation);
+        assert!(runtime.prompt(
+            pane,
+            AgentPrompt {
+                owner: ClientInstanceId::default(),
+                text: "probe".to_owned(),
+                images: Vec::new(),
+            },
+        ));
+        let deadline = Instant::now() + DEADLINE;
+        while Instant::now() < deadline {
+            if recorder
+                .payloads()
+                .iter()
+                .filter_map(text_of)
+                .any(|text| text == "turn 0")
+            {
+                runtime.shutdown();
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        panic!("the original lane stopped delivering after a duplicate open");
+    }
+
+    #[test]
+    fn restarting_a_lane_reclaims_prompts_from_the_retiring_runtime() {
+        let fixture = Fixture::open(None, None);
+        fixture.chunk("before");
+        fixture.recorder.wait_for_items(1);
+
+        fixture
+            .fanout
+            .restart_lane(fixture.pane, 2, AgentProvider::Codex, None);
+        fixture.accept_generation(
+            1,
+            AgentStreamPayload::PromptsReclaimed {
+                prompts: vec![AgentPrompt {
+                    owner: ClientInstanceId::default(),
+                    text: "keep me".to_owned(),
+                    images: Vec::new(),
+                }],
+            },
+        );
+        fixture.accept_generation(
+            1,
+            AgentStreamPayload::Update {
+                update: json!({ "sessionUpdate": "agent_message_chunk", "content": { "text": "stale" } }),
+            },
+        );
+        fixture.accept_generation(
+            2,
+            AgentStreamPayload::Update {
+                update: json!({ "sessionUpdate": "agent_message_chunk", "content": { "text": "after" } }),
+            },
+        );
+
+        let items = fixture.recorder.wait_for_items(4);
+        assert!(items.iter().any(|item| matches!(
+            &item.payload,
+            AgentStreamPayload::PromptsRestored { prompts, .. }
+                if prompts.first().is_some_and(|prompt| prompt.text == "keep me")
+        )));
+        assert_eq!(
+            items.iter().filter_map(text_of).collect::<Vec<_>>(),
+            ["before", "after"]
+        );
+        assert_eq!(
+            items.iter().map(|item| item.seq).collect::<Vec<_>>(),
+            [1, 2, 3, 4]
+        );
+    }
+
+    #[test]
+    fn restarting_a_lane_reclaims_a_near_limit_image() {
+        let fixture = Fixture::open(None, None);
+        fixture
+            .fanout
+            .restart_lane(fixture.pane, 2, AgentProvider::Codex, None);
+        let image_bytes = zz_protocol::MAX_AGENT_PROMPT_BYTES - 1024;
+        fixture.accept_generation(
+            1,
+            AgentStreamPayload::PromptsReclaimed {
+                prompts: vec![AgentPrompt {
+                    owner: ClientInstanceId::default(),
+                    text: "keep the screenshot".to_owned(),
+                    images: vec![crate::agent::stream::AgentImage {
+                        format: "image/png".to_owned(),
+                        data: vec![7; image_bytes],
+                    }],
+                }],
+            },
+        );
+
+        let items = fixture.recorder.wait_for_items(1);
+        assert!(items.iter().any(|item| matches!(
+            &item.payload,
+            AgentStreamPayload::PromptsRestored { prompts, .. }
+                if prompts.first().is_some_and(|prompt|
+                    prompt.text == "keep the screenshot"
+                        && prompt.images.first().is_some_and(|image| image.data.len() == image_bytes)
+                )
+        )));
+    }
+
+    #[test]
+    fn journal_replay_restores_the_latest_mode_and_live_state() {
+        let fixture = Fixture::open(None, Some("s-1"));
+        fixture.accept(AgentStreamPayload::SessionReady {
+            session_id: "s-1".to_owned(),
+            modes: Some(json!({
+                "currentModeId": "plan",
+                "availableModes": [
+                    { "id": "plan", "name": "Plan" },
+                    { "id": "ask", "name": "Ask" }
+                ]
+            })),
+            config_options: None,
+        });
+        fixture.accept(AgentStreamPayload::Update {
+            update: serde_json::to_value(SessionUpdate::CurrentModeUpdate(
+                agent_client_protocol::schema::v1::CurrentModeUpdate::new("ask"),
+            ))
+            .expect("encode mode update"),
+        });
+        fixture.recorder.wait_for_items(2);
+        {
+            let mut lanes = fixture.fanout.lanes.lock();
+            let lane = lanes.get_mut(&fixture.pane).expect("pane lane");
+            lane.evicted_seq = lane.next_seq.saturating_sub(1);
+        }
+
+        fixture.fanout.replay(ClientId(3), fixture.pane, 1);
+        let replayed = fixture
+            .recorder
+            .broadcast
+            .lock()
+            .iter()
+            .filter(|(_, _, _, also)| *also == Some(ClientId(3)))
+            .flat_map(|(_, _, items, _)| items.clone())
+            .map(|item| serde_json::from_slice::<AgentStreamItem>(&item).expect("decode"))
+            .collect::<Vec<_>>();
+        let modes = replayed.iter().find_map(|item| match &item.payload {
+            AgentStreamPayload::SessionReady {
+                modes: Some(modes), ..
+            } => Some(modes),
+            _ => None,
+        });
+        assert_eq!(
+            modes
+                .and_then(|modes| modes.get("currentModeId"))
+                .and_then(Value::as_str),
+            Some("ask")
+        );
+        let state = replayed.last().and_then(|item| match &item.payload {
+            AgentStreamPayload::StateSynced { state } => Some(state),
+            _ => None,
+        });
+        assert!(matches!(
+            state.map(|state| &state.phase),
+            Some(zz_protocol::AgentConnectionPhase::Running)
+        ));
+        assert_eq!(
+            state
+                .and_then(|state| serde_json::from_str::<Value>(&state.modes).ok())
+                .and_then(|modes| modes.get("currentModeId").cloned())
+                .and_then(|mode| mode.as_str().map(ToOwned::to_owned))
+                .as_deref(),
+            Some("ask")
+        );
+    }
+
+    #[test]
+    fn journal_replay_restores_raw_config_option_updates() {
+        use agent_client_protocol::schema::v1::{ConfigOptionUpdate, SessionConfigOption};
+
+        let fixture = Fixture::open(None, Some("s-1"));
+        fixture.accept(AgentStreamPayload::SessionReady {
+            session_id: "s-1".to_owned(),
+            modes: None,
+            config_options: Some(
+                serde_json::to_value(vec![SessionConfigOption::boolean(
+                    "sandbox", "Sandbox", false,
+                )])
+                .expect("encode initial config"),
+            ),
+        });
+        fixture.accept(AgentStreamPayload::Update {
+            update: serde_json::to_value(SessionUpdate::ConfigOptionUpdate(
+                ConfigOptionUpdate::new(vec![SessionConfigOption::boolean(
+                    "sandbox", "Sandbox", true,
+                )]),
+            ))
+            .expect("encode config update"),
+        });
+        fixture.recorder.wait_for_items(2);
+        {
+            let mut lanes = fixture.fanout.lanes.lock();
+            let lane = lanes.get_mut(&fixture.pane).expect("pane lane");
+            lane.evicted_seq = lane.next_seq.saturating_sub(1);
+        }
+
+        fixture.fanout.replay(ClientId(3), fixture.pane, 1);
+        let replayed = fixture
+            .recorder
+            .broadcast
+            .lock()
+            .iter()
+            .filter(|(_, _, _, also)| *also == Some(ClientId(3)))
+            .flat_map(|(_, _, items, _)| items.clone())
+            .map(|item| serde_json::from_slice::<AgentStreamItem>(&item).expect("decode"))
+            .collect::<Vec<_>>();
+        let config = replayed.iter().find_map(|item| match &item.payload {
+            AgentStreamPayload::SessionReady {
+                config_options: Some(config),
+                ..
+            } => Some(config),
+            _ => None,
+        });
+        assert_eq!(
+            config
+                .and_then(Value::as_array)
+                .and_then(|options| options.first())
+                .and_then(|option| option.get("currentValue"))
+                .and_then(Value::as_bool),
+            Some(true)
         );
     }
 
@@ -979,6 +2088,7 @@ mod tests {
     fn request_replies_leave_the_stream_without_spending_a_sequence() {
         let fixture = Fixture::open(None, Some("s-1"));
         fixture.accept(AgentStreamPayload::SessionsListed {
+            client: ClientId(8),
             sessions: vec![AgentSessionSummary {
                 session_id: "s-2".to_owned(),
                 cwd: PathBuf::from("/work"),
@@ -991,10 +2101,15 @@ mod tests {
             replace: true,
         });
         fixture.accept(AgentStreamPayload::TurnDiff {
+            client: ClientId(9),
             request_id: 7,
             outcome: AgentTurnDiffOutcome::Failed {
                 message: "no turn".to_owned(),
             },
+        });
+        fixture.accept(AgentStreamPayload::SessionDeleted {
+            client: ClientId(10),
+            session_id: "s-3".to_owned(),
         });
         fixture.chunk("after");
         let items = fixture.recorder.wait_for_items(1);
@@ -1005,10 +2120,71 @@ mod tests {
             "a reply is not part of the transcript the client replays"
         );
         let replies = fixture.recorder.replies.lock();
-        assert_eq!(replies.len(), 2);
-        assert_eq!(replies[0].1, 0, "session listings carry no client request");
-        assert_eq!(replies[1].1, 7);
-        assert!(replies[1].2.contains("no turn"));
+        assert_eq!(replies.len(), 3);
+        assert_eq!(replies[0].0, ClientId(8));
+        assert_eq!(replies[0].2, 0);
+        assert_eq!(replies[1].0, ClientId(9));
+        assert_eq!(replies[1].2, 7);
+        assert!(replies[1].3.contains("no turn"));
+        assert_eq!(replies[2].0, ClientId(10));
+        assert!(replies[2].3.contains("s-3"));
+    }
+
+    #[test]
+    fn an_oversized_session_page_returns_a_targeted_failure() {
+        let fixture = Fixture::open(None, Some("s-1"));
+        fixture.accept(AgentStreamPayload::SessionsListed {
+            client: ClientId(8),
+            sessions: (0..300)
+                .map(|index| AgentSessionSummary {
+                    session_id: format!("s-{index}"),
+                    cwd: PathBuf::from("/work"),
+                    additional_directories: Vec::new(),
+                    title: Some("x".repeat(4 * 1024)),
+                    updated_at: None,
+                })
+                .collect(),
+            next_cursor: None,
+            cwd_filter: None,
+            replace: true,
+        });
+
+        let replies = fixture.recorder.replies.lock();
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0].0, ClientId(8));
+        assert!(matches!(
+            serde_json::from_str::<AgentStreamPayload>(&replies[0].3),
+            Ok(AgentStreamPayload::SessionListFailed { client, message })
+                if client == ClientId(8) && message.contains("too much session history")
+        ));
+    }
+
+    #[test]
+    fn an_oversized_turn_diff_returns_a_targeted_failure() {
+        let fixture = Fixture::open(None, Some("s-1"));
+        fixture.accept(AgentStreamPayload::TurnDiff {
+            client: ClientId(8),
+            request_id: 9,
+            outcome: AgentTurnDiffOutcome::Captured {
+                diff: crate::agent::turn_snapshot::TurnDiff {
+                    patch: "x".repeat(MAX_AGENT_RESULT_BYTES),
+                    ..crate::agent::turn_snapshot::TurnDiff::default()
+                },
+            },
+        });
+
+        let replies = fixture.recorder.replies.lock();
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0].0, ClientId(8));
+        assert_eq!(replies[0].2, 9);
+        assert!(matches!(
+            serde_json::from_str::<AgentStreamPayload>(&replies[0].3),
+            Ok(AgentStreamPayload::TurnDiff {
+                client,
+                request_id: 9,
+                outcome: AgentTurnDiffOutcome::Failed { message },
+            }) if client == ClientId(8) && message.contains("too many worktree changes")
+        ));
     }
 
     #[test]
@@ -1030,6 +2206,37 @@ mod tests {
     }
 
     #[test]
+    fn switching_provider_allows_the_new_conversation_to_name_the_pane() {
+        let fixture = Fixture::open(None, None);
+        assert!(
+            fixture
+                .fanout
+                .propose_title(fixture.pane, "old provider turn")
+                .is_some()
+        );
+
+        fixture
+            .fanout
+            .restart_lane(fixture.pane, 2, AgentProvider::ClaudeCode, None);
+        assert_eq!(
+            fixture
+                .fanout
+                .propose_title(fixture.pane, "new provider turn"),
+            Some("new provider turn".to_owned())
+        );
+
+        fixture
+            .fanout
+            .restart_lane(fixture.pane, 3, AgentProvider::ClaudeCode, None);
+        assert_eq!(
+            fixture
+                .fanout
+                .propose_title(fixture.pane, "same provider retry"),
+            None
+        );
+    }
+
+    #[test]
     fn the_pane_state_is_published_only_when_something_a_client_renders_moves() {
         let fixture = Fixture::open(None, Some("s-1"));
         fixture.chunk("a");
@@ -1042,7 +2249,7 @@ mod tests {
 
         let mut running = state(AgentConnectionPhase::Running);
         running.queued_prompts = 1;
-        fixture.fanout.accept(fixture.pane, &running, None);
+        fixture.fanout.accept(fixture.pane, 1, &running, None);
         let states = fixture.recorder.states.lock();
         assert_eq!(states.len(), 2);
         assert_eq!(states[1].1.queued_prompts, 1);

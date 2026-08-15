@@ -87,7 +87,7 @@ pub(crate) enum FilePickerEvent {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PickerEntry {
     relative: SharedString,
-    absolute: PathBuf,
+    absolute: Arc<Path>,
     prior: u32,
 }
 
@@ -139,7 +139,10 @@ fn home_directory() -> Option<PathBuf> {
 
 #[cfg(feature = "agent-pane")]
 pub(crate) fn directory_picker_root(fallback: &Path) -> PathBuf {
-    home_directory().unwrap_or_else(|| fallback.to_path_buf())
+    match home_directory() {
+        Some(home) if fallback.starts_with(&home) => home,
+        _ => fallback.parent().unwrap_or(fallback).to_path_buf(),
+    }
 }
 
 fn walk_root(
@@ -199,7 +202,7 @@ fn walk_root(
         let is_workspace = is_directory && entry.path().join(".git").exists();
         batch.push(PickerEntry {
             relative: SharedString::from(relative.to_owned()),
-            absolute: entry.path().to_path_buf(),
+            absolute: Arc::from(entry.path()),
             prior: entry_prior(entry.depth(), is_workspace),
         });
         produced += 1;
@@ -293,6 +296,10 @@ pub(crate) struct FilePickerView {
     scanning: bool,
     truncated: bool,
     error: Option<SharedString>,
+    rank_generation: u64,
+    accept_generation: u64,
+    _rank: Task<()>,
+    _accept: Task<()>,
     _walk: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -329,6 +336,10 @@ impl FilePickerView {
             scanning: true,
             truncated: false,
             error: None,
+            rank_generation: 0,
+            accept_generation: 0,
+            _rank: Task::ready(()),
+            _accept: Task::ready(()),
             _walk: Self::spawn_walk(mode, root, cx),
             _subscriptions: vec![subscription],
         }
@@ -393,10 +404,41 @@ impl FilePickerView {
             return;
         }
         self.query = query;
-        let mut ranked = rank_entries(&self.entries, 0, &self.query, &mut self.matcher);
-        ranked.truncate(MAX_PICKER_ROWS);
+        self.error = None;
+        self.accept_generation = self.accept_generation.saturating_add(1);
         let preferred = self.selected_entry();
-        self.set_ranked(ranked, preferred);
+        self.ranked.clear();
+        self.rows = Arc::from([]);
+        self.selected = None;
+        self.rank_generation = self.rank_generation.saturating_add(1);
+        let generation = self.rank_generation;
+        let entries = self.entries.clone();
+        let entry_count = entries.len();
+        let query = self.query.clone();
+        let ranking = cx.background_executor().spawn(async move {
+            let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+            let mut ranked = rank_entries(&entries, 0, &query, &mut matcher);
+            ranked.truncate(MAX_PICKER_ROWS);
+            ranked
+        });
+        self._rank = cx.spawn(async move |picker, cx| {
+            let ranked = ranking.await;
+            picker
+                .update(cx, |picker, cx| {
+                    if picker.rank_generation != generation {
+                        return;
+                    }
+                    let tail = picker
+                        .ranked
+                        .iter()
+                        .copied()
+                        .filter(|row| row.entry >= entry_count)
+                        .collect();
+                    picker.set_ranked(merge_ranked(ranked, tail, MAX_PICKER_ROWS), preferred);
+                    cx.notify();
+                })
+                .ok();
+        });
         cx.notify();
     }
 
@@ -446,13 +488,48 @@ impl FilePickerView {
         else {
             return;
         };
-        cx.emit(FilePickerEvent::Selected(entry.absolute.clone()));
+        cx.emit(FilePickerEvent::Selected(entry.absolute.to_path_buf()));
     }
 
     fn accept_selected(&mut self, cx: &mut Context<Self>) {
-        if let Some(index) = self.selected {
-            self.accept(index, cx);
+        let typed = PathBuf::from(self.query.trim());
+        if !typed.is_absolute() {
+            if let Some(index) = self.selected {
+                self.accept(index, cx);
+            }
+            return;
         }
+        self.accept_generation = self.accept_generation.saturating_add(1);
+        let generation = self.accept_generation;
+        let mode = self.mode;
+        let validation = cx.background_executor().spawn({
+            let typed = typed.clone();
+            async move {
+                std::fs::metadata(&typed).is_ok_and(|metadata| match mode {
+                    FilePickerMode::Files => metadata.is_file(),
+                    FilePickerMode::Directories => metadata.is_dir(),
+                })
+            }
+        });
+        self._accept = cx.spawn(async move |picker, cx| {
+            let accepted = validation.await;
+            picker
+                .update(cx, |picker, cx| {
+                    if picker.accept_generation != generation {
+                        return;
+                    }
+                    if accepted {
+                        cx.emit(FilePickerEvent::Selected(typed));
+                    } else {
+                        picker.error = Some(SharedString::from(match picker.mode {
+                            FilePickerMode::Files => "That path is not a file.",
+                            FilePickerMode::Directories => "That path is not a folder.",
+                        }));
+                        cx.notify();
+                    }
+                })
+                .ok();
+        });
     }
 
     #[allow(
@@ -721,7 +798,7 @@ mod tests {
     fn entry_with_prior(relative: &str, prior: u32) -> PickerEntry {
         PickerEntry {
             relative: SharedString::from(relative.to_owned()),
-            absolute: Path::new("/root").join(relative),
+            absolute: Arc::from(Path::new("/root").join(relative)),
             prior,
         }
     }

@@ -55,6 +55,7 @@ stable_id!(WindowId, "@");
 stable_id!(PaneId, "%");
 stable_id!(SplitId, "^");
 stable_id!(ClientId, "c");
+stable_id!(ClientInstanceId, "i");
 
 #[cfg(test)]
 mod tests {

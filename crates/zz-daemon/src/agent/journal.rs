@@ -21,6 +21,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
+use zz_protocol::AgentProvider;
 
 use crate::user_data::{restrict_directory_to_current_user, restrict_to_current_user};
 
@@ -28,7 +29,8 @@ const JOURNAL_EXTENSION: &str = "jsonl";
 
 /// Ceiling on one session's journal. Past it appends are refused rather than
 /// rotated: a truncated head would replay a conversation that never happened.
-const MAX_JOURNAL_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_JOURNAL_BYTES: u64 = 2 * 9 * 1024 * 1024;
+const MAX_JOURNAL_RECORDS: usize = 4_096;
 
 /// Descriptors held across appends. Updates arrive in bursts, so re-opening per
 /// line would be wasteful, but a long-lived app must not keep one descriptor
@@ -48,8 +50,8 @@ pub(crate) enum JournalError {
     Encode(#[from] serde_json::Error),
     /// The refusal a caller surfaces: the turn keeps streaming, it just stops
     /// being replayable past this point.
-    #[error("journal is full at {bytes} bytes")]
-    Full { bytes: u64 },
+    #[error("journal is full at {bytes} bytes and {records} records")]
+    Full { bytes: u64, records: usize },
 }
 
 #[derive(Serialize)]
@@ -68,12 +70,14 @@ struct OpenJournal {
     file: File,
     next_seq: u64,
     bytes: u64,
+    records: usize,
     needs_newline: bool,
 }
 
 struct JournalTail {
     next_seq: u64,
     bytes: u64,
+    records: usize,
     needs_newline: bool,
 }
 
@@ -94,15 +98,21 @@ impl AgentJournal {
     }
 
     /// Record one `session/update` payload; returns the seq it was written as.
-    pub(crate) fn append(&self, session_id: &str, update: &Value) -> Result<u64, JournalError> {
+    pub(crate) fn append_for(
+        &self,
+        provider: AgentProvider,
+        session_id: &str,
+        update: &Value,
+    ) -> Result<u64, JournalError> {
+        let key = journal_key(provider, session_id);
         let mut handles = self.handles.lock();
-        if handles.len() >= MAX_OPEN_JOURNALS && !handles.contains_key(session_id) {
+        if handles.len() >= MAX_OPEN_JOURNALS && !handles.contains_key(&key) {
             handles.clear();
         }
-        let journal = match handles.entry(session_id.to_owned()) {
+        let journal = match handles.entry(key.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                let path = self.directory.join(journal_file_name(session_id));
+                let path = self.directory.join(journal_file_name(&key));
                 let tail = scan(&path)?;
                 let file = OpenOptions::new().create(true).append(true).open(&path)?;
                 restrict_to_current_user(&path)?;
@@ -110,6 +120,7 @@ impl AgentJournal {
                     file,
                     next_seq: tail.next_seq,
                     bytes: tail.bytes,
+                    records: tail.records,
                     needs_newline: tail.needs_newline,
                 })
             }
@@ -124,9 +135,12 @@ impl AgentJournal {
         line.extend_from_slice(&record);
         line.push(b'\n');
         let written = u64::try_from(line.len()).unwrap_or(u64::MAX);
-        if journal.bytes.saturating_add(written) > MAX_JOURNAL_BYTES {
+        if journal.bytes.saturating_add(written) > MAX_JOURNAL_BYTES
+            || journal.records >= MAX_JOURNAL_RECORDS
+        {
             return Err(JournalError::Full {
                 bytes: journal.bytes,
+                records: journal.records,
             });
         }
 
@@ -137,37 +151,76 @@ impl AgentJournal {
             .write_all(&line)
             .and_then(|()| journal.file.flush())
         {
-            handles.remove(session_id);
+            handles.remove(&key);
             return Err(error.into());
         }
         journal.needs_newline = false;
         journal.bytes = journal.bytes.saturating_add(written);
+        journal.records = journal.records.saturating_add(1);
         journal.next_seq = seq.saturating_add(1);
         Ok(seq)
     }
 
     /// Every recorded update in order, torn or malformed lines skipped.
-    pub(crate) fn replay(&self, session_id: &str) -> Result<Vec<(u64, Value)>, JournalError> {
-        read_records(&self.directory.join(journal_file_name(session_id)))
+    pub(crate) fn replay_for(
+        &self,
+        provider: AgentProvider,
+        session_id: &str,
+    ) -> Result<Vec<(u64, Value)>, JournalError> {
+        read_records(
+            &self
+                .directory
+                .join(journal_file_name(&journal_key(provider, session_id))),
+        )
     }
 
     /// Seq of the last recorded update, 0 when nothing is journalled.
     #[cfg(test)]
-    pub(crate) fn last_seq(&self, session_id: &str) -> Result<u64, JournalError> {
-        if let Some(journal) = self.handles.lock().get(session_id) {
+    pub(crate) fn last_seq_for(
+        &self,
+        provider: AgentProvider,
+        session_id: &str,
+    ) -> Result<u64, JournalError> {
+        let key = journal_key(provider, session_id);
+        if let Some(journal) = self.handles.lock().get(&key) {
             return Ok(journal.next_seq.saturating_sub(1));
         }
-        let tail = scan(&self.directory.join(journal_file_name(session_id)))?;
+        let tail = scan(&self.directory.join(journal_file_name(&key)))?;
         Ok(tail.next_seq.saturating_sub(1))
     }
 
-    pub(crate) fn remove(&self, session_id: &str) -> Result<(), JournalError> {
-        self.handles.lock().remove(session_id);
-        match fs::remove_file(self.directory.join(journal_file_name(session_id))) {
+    pub(crate) fn remove_for(
+        &self,
+        provider: AgentProvider,
+        session_id: &str,
+    ) -> Result<(), JournalError> {
+        let key = journal_key(provider, session_id);
+        self.handles.lock().remove(&key);
+        match fs::remove_file(self.directory.join(journal_file_name(&key))) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error.into()),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn append(&self, session_id: &str, update: &Value) -> Result<u64, JournalError> {
+        self.append_for(AgentProvider::Codex, session_id, update)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn replay(&self, session_id: &str) -> Result<Vec<(u64, Value)>, JournalError> {
+        self.replay_for(AgentProvider::Codex, session_id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn last_seq(&self, session_id: &str) -> Result<u64, JournalError> {
+        self.last_seq_for(AgentProvider::Codex, session_id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remove(&self, session_id: &str) -> Result<(), JournalError> {
+        self.remove_for(AgentProvider::Codex, session_id)
     }
 
     /// Drop journals untouched for longer than `retain_days`; returns how many
@@ -204,6 +257,10 @@ impl AgentJournal {
         }
         Ok(removed)
     }
+}
+
+fn journal_key(provider: AgentProvider, session_id: &str) -> String {
+    format!("{}:{session_id}", provider.as_str())
 }
 
 fn journal_file_name(session_id: &str) -> String {
@@ -253,18 +310,23 @@ fn scan(path: &Path) -> Result<JournalTail, JournalError> {
             return Ok(JournalTail {
                 next_seq: 1,
                 bytes: 0,
+                records: 0,
                 needs_newline: false,
             });
         }
         Err(error) => return Err(error.into()),
     };
-    let next_seq = bytes
-        .rsplit(|byte| *byte == b'\n')
-        .find_map(|line| serde_json::from_slice::<StoredRecord>(line).ok())
+    let records = bytes
+        .split(|byte| *byte == b'\n')
+        .filter_map(|line| serde_json::from_slice::<StoredRecord>(line).ok())
+        .collect::<Vec<_>>();
+    let next_seq = records
+        .last()
         .map_or(1, |record| record.seq.saturating_add(1));
     Ok(JournalTail {
         next_seq,
         bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+        records: records.len(),
         needs_newline: bytes.last().is_some_and(|byte| *byte != b'\n'),
     })
 }
@@ -277,6 +339,9 @@ fn read_records(path: &Path) -> Result<Vec<(u64, Value)>, JournalError> {
     };
     let mut records = Vec::new();
     for line in bytes.split(|byte| *byte == b'\n') {
+        if records.len() >= MAX_JOURNAL_RECORDS {
+            break;
+        }
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
@@ -342,7 +407,10 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt as _;
 
-            let path = directory.path().join(journal_file_name("sess-2"));
+            let path = directory.path().join(journal_file_name(&journal_key(
+                AgentProvider::Codex,
+                "sess-2",
+            )));
             assert_eq!(
                 fs::metadata(path).expect("metadata").permissions().mode() & 0o777,
                 0o600
@@ -382,7 +450,10 @@ mod tests {
     #[test]
     fn torn_trailing_line_is_tolerated() {
         let directory = tempdir().expect("temporary directory");
-        let path = directory.path().join(journal_file_name("sess-1"));
+        let path = directory.path().join(journal_file_name(&journal_key(
+            AgentProvider::Codex,
+            "sess-1",
+        )));
         {
             let journal = AgentJournal::open(directory.path()).expect("open journal");
             journal.append("sess-1", &update("a")).expect("append");
@@ -440,7 +511,10 @@ mod tests {
     #[test]
     fn append_is_refused_past_the_size_cap() {
         let directory = tempdir().expect("temporary directory");
-        let path = directory.path().join(journal_file_name("sess-1"));
+        let path = directory.path().join(journal_file_name(&journal_key(
+            AgentProvider::Codex,
+            "sess-1",
+        )));
         File::create(&path)
             .expect("create journal")
             .set_len(MAX_JOURNAL_BYTES)
@@ -450,7 +524,7 @@ mod tests {
         let error = journal
             .append("sess-1", &update("a"))
             .expect_err("append past the cap");
-        assert!(matches!(error, JournalError::Full { bytes } if bytes == MAX_JOURNAL_BYTES));
+        assert!(matches!(error, JournalError::Full { bytes, .. } if bytes == MAX_JOURNAL_BYTES));
         assert!(matches!(
             journal.append("sess-1", &update("b")),
             Err(JournalError::Full { .. })
@@ -459,6 +533,57 @@ mod tests {
             fs::metadata(&path).expect("metadata").len(),
             MAX_JOURNAL_BYTES
         );
+    }
+
+    #[test]
+    fn append_is_refused_past_the_record_cap() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+        for index in 0..MAX_JOURNAL_RECORDS {
+            assert_eq!(
+                journal.append("sess-1", &update("x")).expect("append"),
+                u64::try_from(index).expect("index") + 1
+            );
+        }
+        let error = journal
+            .append("sess-1", &update("overflow"))
+            .expect_err("append past the record cap");
+        assert!(matches!(
+            error,
+            JournalError::Full { records, .. } if records == MAX_JOURNAL_RECORDS
+        ));
+        assert_eq!(
+            journal.replay("sess-1").expect("replay").len(),
+            MAX_JOURNAL_RECORDS
+        );
+    }
+
+    #[test]
+    fn providers_with_the_same_session_id_have_separate_journals() {
+        let directory = tempdir().expect("temporary directory");
+        let journal = AgentJournal::open(directory.path()).expect("open journal");
+        journal
+            .append_for(AgentProvider::Codex, "same", &update("codex"))
+            .expect("append codex");
+        journal
+            .append_for(AgentProvider::ClaudeCode, "same", &update("claude"))
+            .expect("append claude");
+
+        assert_eq!(
+            journal
+                .replay_for(AgentProvider::Codex, "same")
+                .expect("replay codex")[0]
+                .1,
+            update("codex")
+        );
+        assert_eq!(
+            journal
+                .replay_for(AgentProvider::ClaudeCode, "same")
+                .expect("replay claude")[0]
+                .1,
+            update("claude")
+        );
+        assert_eq!(journal_entries(directory.path()).len(), 2);
     }
 
     #[test]

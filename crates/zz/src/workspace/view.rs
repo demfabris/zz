@@ -580,12 +580,13 @@ impl AppView {
         let mut observed_revision = AppRevision::for_mux(mux.read(cx));
         cx.observe(&mux, move |view, mux, cx| {
             view.drain_gui_requests(cx);
-            view.drain_agent_events(cx);
             let revision = AppRevision::for_mux(mux.read(cx));
             if revision != observed_revision {
                 observed_revision = revision;
+                view.register_agent_panes(cx);
                 cx.notify();
             }
+            view.drain_agent_events(cx);
         })
         .detach();
         let window_handle = window.window_handle();
@@ -650,6 +651,12 @@ impl AppView {
                         ["-t", &pane.to_string(), provider.as_str()],
                     ));
                 }
+                AgentControllerEvent::Restart { pane } => {
+                    view.mux.read(cx).execute(CommandInvocation::new(
+                        "restart-agent-pane",
+                        ["-t", &pane.to_string()],
+                    ));
+                }
                 AgentControllerEvent::Title { pane, title } => {
                     view.mux.read(cx).execute(CommandInvocation::new(
                         "select-pane",
@@ -661,7 +668,6 @@ impl AppView {
                         ],
                     ));
                 }
-                AgentControllerEvent::Pane { .. } => {}
             },
         )
         .detach();
@@ -692,7 +698,7 @@ impl AppView {
         })
         .detach();
         let new_session = cx.new(|cx| NewSessionView::new(mux.clone(), cx));
-        Self {
+        let mut view = Self {
             controller,
             agent_controller,
             mux,
@@ -725,7 +731,9 @@ impl AppView {
             pane_canvas_size: Rc::new(Cell::new(Size::default())),
             prefix_claim: PrefixClaim::default(),
             synchronized_signature: None,
-        }
+        };
+        view.register_agent_panes(cx);
+        view
     }
 
     fn intercept_keystroke(
@@ -1020,14 +1028,15 @@ impl AppView {
         let retained_agents = snapshot
             .sessions
             .iter()
+            .filter(|session| Some(session.id) == attached)
             .flat_map(|session| &session.windows)
             .flat_map(|window| &window.panes)
             .filter_map(|(pane, snapshot)| {
                 matches!(snapshot.kind, PaneKindSnapshot::Agent(_)).then_some(*pane)
             })
             .collect::<BTreeSet<_>>();
-        self.agent_controller.update(cx, |controller, _| {
-            controller.retain_panes(&retained_agents);
+        self.agent_controller.update(cx, |controller, cx| {
+            controller.retain_panes(&retained_agents, cx);
         });
         let active_window = snapshot
             .sessions
@@ -1474,11 +1483,45 @@ impl AppView {
     /// the seq-filtered stream, the published pane states, and the answers to
     /// the requests it made.
     #[cfg(feature = "agent-pane")]
+    fn register_agent_panes(&mut self, cx: &mut Context<Self>) {
+        let (retained, active) = {
+            let mux = self.mux.read(cx);
+            let attached = mux.attached_session();
+            let snapshot = mux.snapshot();
+            let active = snapshot
+                .sessions
+                .iter()
+                .filter(|session| Some(session.id) == attached)
+                .flat_map(|session| &session.windows)
+                .flat_map(|window| &window.panes)
+                .filter_map(|(pane, snapshot)| match &snapshot.kind {
+                    PaneKindSnapshot::Agent(descriptor) => Some((*pane, descriptor.clone())),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let retained = active.iter().map(|(pane, _)| *pane).collect();
+            (retained, active)
+        };
+        self.agent_controller.update(cx, |controller, cx| {
+            controller.retain_panes(&retained, cx);
+            for (pane, descriptor) in active {
+                controller.ensure_pane(pane, &descriptor, cx);
+            }
+        });
+    }
+
+    #[cfg(not(feature = "agent-pane"))]
+    fn register_agent_panes(&mut self, _cx: &mut Context<Self>) {}
+
+    #[cfg(feature = "agent-pane")]
     fn drain_agent_events(&mut self, cx: &mut Context<Self>) {
         if !self.mux.read(cx).has_agent_events() {
             return;
         }
-        let events = self.mux.update(cx, |mux, _| mux.take_agent_events());
+        let registered = self.agent_controller.read(cx).registered_panes();
+        let events = self
+            .mux
+            .update(cx, |mux, _| mux.take_agent_events_for(&registered));
         self.agent_controller.update(cx, |controller, cx| {
             for (pane, items) in events.items {
                 controller.apply_stream_items(pane, items, cx);
@@ -1489,8 +1532,8 @@ impl AppView {
             for (pane, _, result) in events.sessions {
                 controller.apply_sessions_result(pane, &result, cx);
             }
-            for (_, _, result) in events.turn_diffs {
-                controller.apply_turn_diff_result(&result);
+            for (pane, _, result) in events.turn_diffs {
+                controller.apply_turn_diff_result(pane, &result, cx);
             }
         });
     }

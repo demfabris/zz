@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use zz_protocol::{AgentPaneWire, ClientId, ClientInstanceId};
 
 use crate::agent::{profile::SdkTaskEvent, turn_snapshot::TurnDiff};
 
@@ -40,13 +41,18 @@ pub enum AgentStreamPayload {
         modes: Option<Value>,
         config_options: Option<Value>,
     },
+    StateSynced {
+        state: AgentPaneWire,
+    },
     SessionsListed {
+        client: ClientId,
         sessions: Vec<AgentSessionSummary>,
         next_cursor: Option<String>,
         cwd_filter: Option<PathBuf>,
         replace: bool,
     },
     SessionListFailed {
+        client: ClientId,
         message: String,
     },
     SessionSwitched {
@@ -60,9 +66,11 @@ pub enum AgentStreamPayload {
         message: String,
     },
     SessionDeleted {
+        client: ClientId,
         session_id: String,
     },
     SessionDeleteFailed {
+        client: ClientId,
         message: String,
     },
     /// A raw `session/update` payload, the transcript's atom.
@@ -82,7 +90,14 @@ pub enum AgentStreamPayload {
         canceled: bool,
     },
     PromptFinished {
+        turn_id: u64,
         outcome: AgentPromptOutcome,
+    },
+    PromptAccepted {
+        turn_id: u64,
+    },
+    TurnStarted {
+        turn_id: u64,
     },
     Authenticated,
     AuthenticationFailed {
@@ -103,6 +118,9 @@ pub enum AgentStreamPayload {
     PaneFailed {
         message: String,
     },
+    TurnAbandoned {
+        turn_id: u64,
+    },
     /// The turn went quiet past the quiesce window and was settled without
     /// touching the child.
     Parked,
@@ -111,7 +129,12 @@ pub enum AgentStreamPayload {
     PromptsReclaimed {
         prompts: Vec<AgentPrompt>,
     },
+    PromptsRestored {
+        reclaim_id: u64,
+        prompts: Vec<AgentPrompt>,
+    },
     TurnDiff {
+        client: ClientId,
         request_id: u64,
         outcome: AgentTurnDiffOutcome,
     },
@@ -128,12 +151,16 @@ pub enum AgentPromptOutcome {
 #[serde(rename_all = "camelCase", tag = "outcome")]
 pub enum AgentTurnDiffOutcome {
     Captured { diff: TurnDiff },
+    Unavailable { message: String },
     Failed { message: String },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentPrompt {
+    #[serde(default)]
+    pub owner: ClientInstanceId,
+    #[serde(with = "base64_text")]
     pub text: String,
     pub images: Vec<AgentImage>,
 }
@@ -141,6 +168,12 @@ pub struct AgentPrompt {
 impl AgentPrompt {
     pub(crate) fn is_empty(&self) -> bool {
         self.text.is_empty() && self.images.is_empty()
+    }
+
+    pub(crate) fn byte_len(&self) -> usize {
+        self.images.iter().fold(self.text.len(), |total, image| {
+            total.saturating_add(image.data.len())
+        })
     }
 }
 
@@ -201,6 +234,23 @@ mod base64_bytes {
     }
 }
 
+mod base64_text {
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+    use serde::{Deserialize as _, Deserializer, Serializer, de::Error as _};
+
+    pub(super) fn serialize<S: Serializer>(text: &str, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&BASE64.encode(text.as_bytes()))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let encoded = String::deserialize(deserializer)?;
+        let bytes = BASE64.decode(&encoded).map_err(D::Error::custom)?;
+        String::from_utf8(bytes).map_err(D::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,7 +283,11 @@ mod tests {
                 modes: Some(serde_json::json!({"currentModeId": "default"})),
                 config_options: None,
             },
+            AgentStreamPayload::StateSynced {
+                state: AgentPaneWire::default(),
+            },
             AgentStreamPayload::SessionsListed {
+                client: ClientId(3),
                 sessions: vec![AgentSessionSummary {
                     session_id: "s-1".to_owned(),
                     cwd: PathBuf::from("/work"),
@@ -246,6 +300,7 @@ mod tests {
                 replace: true,
             },
             AgentStreamPayload::SessionListFailed {
+                client: ClientId(3),
                 message: "no".to_owned(),
             },
             AgentStreamPayload::SessionSwitched {
@@ -259,9 +314,11 @@ mod tests {
                 message: "no".to_owned(),
             },
             AgentStreamPayload::SessionDeleted {
+                client: ClientId(3),
                 session_id: "s-1".to_owned(),
             },
             AgentStreamPayload::SessionDeleteFailed {
+                client: ClientId(3),
                 message: "no".to_owned(),
             },
             AgentStreamPayload::Update {
@@ -287,15 +344,18 @@ mod tests {
                 canceled: false,
             },
             AgentStreamPayload::PromptFinished {
+                turn_id: 1,
                 outcome: AgentPromptOutcome::Finished {
                     stop_reason: serde_json::json!("end_turn"),
                 },
             },
             AgentStreamPayload::PromptFinished {
+                turn_id: 2,
                 outcome: AgentPromptOutcome::Failed {
                     message: "boom".to_owned(),
                 },
             },
+            AgentStreamPayload::PromptAccepted { turn_id: 2 },
             AgentStreamPayload::Authenticated,
             AgentStreamPayload::AuthenticationFailed {
                 message: "denied".to_owned(),
@@ -315,9 +375,11 @@ mod tests {
             AgentStreamPayload::PaneFailed {
                 message: "gone".to_owned(),
             },
+            AgentStreamPayload::TurnAbandoned { turn_id: 2 },
             AgentStreamPayload::Parked,
             AgentStreamPayload::PromptsReclaimed {
                 prompts: vec![AgentPrompt {
+                    owner: ClientInstanceId::default(),
                     text: "retry".to_owned(),
                     images: vec![AgentImage {
                         format: "image/png".to_owned(),
@@ -326,6 +388,7 @@ mod tests {
                 }],
             },
             AgentStreamPayload::TurnDiff {
+                client: ClientId(3),
                 request_id: 3,
                 outcome: AgentTurnDiffOutcome::Failed {
                     message: "not a worktree".to_owned(),
@@ -359,6 +422,7 @@ mod tests {
             seq: 1,
             payload: AgentStreamPayload::PromptsReclaimed {
                 prompts: vec![AgentPrompt {
+                    owner: ClientInstanceId::default(),
                     text: String::new(),
                     images: vec![AgentImage {
                         format: "image/png".to_owned(),

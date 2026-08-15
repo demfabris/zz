@@ -48,6 +48,7 @@ async-channel.workspace = true
 base64.workspace = true
 chrono.workspace = true
 env_logger.workspace = true
+futures-lite.workspace = true
 gpui.workspace = true
 ignore = { version = "0.4.31", optional = true }
 image.workspace = true

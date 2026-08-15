@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v53)
+title: zz wire protocol (v55)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-08-14T00:00:00Z
+timestamp: 2026-08-15T00:00:00Z
 ---
 
 # Overview
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 53`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 55`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (53) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (55) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -73,8 +73,8 @@ fields in declaration order.
 
 | Variant | Fields | Purpose |
 |---------|--------|---------|
-| `ClientHello(ClientHello)` | `protocol_version: u16`, `kind: ClientKind`, `device_name: Option<String>` (≤256 B), `capabilities: Vec<String>`, `color_scheme: Option<TerminalColorScheme>`, `origin: Option<PaneId>` | Client → daemon handshake. `device_name` labels this device in presence and eviction notices; `$ZZ_PANE` supplies `origin`, so an untargeted CLI command resolves against its invoking pane |
-| `ServerHello(ServerHello)` | `protocol_version: u16`, `server_id: u64`, `client_id: ClientId`, `capabilities: Vec<String>` (≤64 entries, ≤256 B each), `appearance: TerminalAppearance`, `appearance_provenance: AppearanceProvenance`, `mux_options: MuxOptions`, `status: StatusLine`, `key_tables: Vec<KeyTableSnapshot>` | Daemon → client handshake reply; every key table (root, prefix, copy-mode, copy-mode-vi, custom) lets clients label key hints and render binding help, while capabilities describe optional behavior |
+| `ClientHello(ClientHello)` | `protocol_version: u16`, `client_instance_id: ClientInstanceId`, `kind: ClientKind`, `device_name: Option<String>` (≤256 B), `capabilities: Vec<String>`, `color_scheme: Option<TerminalColorScheme>`, `origin: Option<PaneId>` | Client → daemon handshake. The process-stable instance ID owns recoverable Agent drafts across reconnects; `device_name` labels this device in presence and eviction notices; `$ZZ_PANE` supplies `origin`, so an untargeted CLI command resolves against its invoking pane |
+| `ServerHello(ServerHello)` | `protocol_version: u16`, `server_id: u64`, `client_id: ClientId`, `client_instance_id: ClientInstanceId`, `capabilities: Vec<String>` (≤64 entries, ≤256 B each), `appearance: TerminalAppearance`, `appearance_provenance: AppearanceProvenance`, `mux_options: MuxOptions`, `status: StatusLine`, `key_tables: Vec<KeyTableSnapshot>` | Daemon → client handshake reply; echoes the accepted process identity, while every key table (root, prefix, copy-mode, copy-mode-vi, custom) lets clients label key hints and render binding help and capabilities describe optional behavior |
 | `CommandRequest(CommandRequest)` | `request_id: u64`, `command: CommandInvocation` | tmux-style command from any client |
 | `CommandResponse(CommandResponse)` | `Success { request_id, output }` / `Error { request_id, error: ServerError }` | Command result |
 | `Attach { session: String }` | target string | Interactive attach request. A session holds a set of attached clients, so a second device never collides with the first |
@@ -101,13 +101,18 @@ fields in declaration order.
 | `AgentSetConfigOption { pane, option_id, value }` | one setting | Write one adapter config option |
 | `AgentSetMode { pane, mode_id }` | one mode | Switch the session mode |
 | `AgentAuthenticate { pane, method_id }` | one method | Run one advertised authentication method |
-| `AgentSessionOp { pane, op }` | `List` / `New` / `Switch { session_id }` / `Delete { session_id }` | Session management against the pane's adapter; `List` answers with `EventPayload::AgentSessions` |
+| `AgentSessionOp { pane, op }` | `List { cwd, cursor, replace }` / `New { cwd }` / `Switch { session_id, cwd, additional_directories }` / `Delete { session_id }` | Session management against the pane's adapter; `List` answers with `EventPayload::AgentSessions` |
 | `AgentReplay { pane, from_seq: u64 }` | journal cursor | Replay the pane's journal from `from_seq`, then tail it. Sent on attach, after `AgentLagged`, and when a pane enters the visible set |
 | `AgentTurnDiff { pane, request_id }` | one request | Ask for the diff of the pane's current turn against its dispatch-time snapshot; answered by `EventPayload::AgentTurnDiffResult` |
+| `AgentAcknowledgePromptRestore { pane, reclaim_id }` | one restored draft | Retire one daemon-cached recovered prompt after its owning client has put it back in the composer, preventing a later replay from restoring it again |
 
 The agent identifiers (`option_id`, `value`, `mode_id`, `method_id`) are bounded to
-`MAX_AGENT_OPTION_BYTES` (4 KiB) and session IDs to `MAX_AGENT_SESSION_ID_BYTES` (16 KiB), on encode
-and during deserialization; rejections surface as `ProtocolError::InvalidAgentPayload`.
+`MAX_AGENT_OPTION_BYTES` (4 KiB), and session IDs and list cursors to
+`MAX_AGENT_SESSION_ID_BYTES` (16 KiB), on encode and during deserialization. Session directories
+must be nonempty and fit `MAX_GUI_TEXT_BYTES`; a switch carries at most
+`MAX_AGENT_SESSION_DIRECTORIES` (256) additional roots. The wire treats path syntax as opaque so a
+Windows client can carry a Unix daemon path and vice versa; the receiving daemon enforces local
+absoluteness before the adapter sees it. Rejections surface as `ProtocolError::InvalidAgentPayload`.
 
 `ClientKind`: `Interactive | Command`. `ClientMessageKind` (typed notifications introduced in v17):
 `Info | Success | Warning | Error`.
@@ -157,10 +162,10 @@ offset: u32, columns: u16, rows: Vec<Vec<PackedCell>>, dictionary: TerminalDicti
 (each chunk ≤ `MAX_KITTY_IMAGE_CHUNK_BYTES`, 1 MiB), and
 `KittyImagesRemoved { pane, image_ids }`.
 
-The v53 agent lane adds five more: `AgentUpdates { pane, first_seq: u64, items: Vec<Vec<u8>> }`
-carries one coalesced batch of JSON agent stream items numbered from the pane's journal sequence
+The agent lane added at v53 carries five more: `AgentUpdates { pane, first_seq: u64, items: Vec<Vec<u8>> }`
+carries one coalesced batch of JSON agent stream items numbered by the pane's fanout lane
 (`first_seq` names the first item, the rest follow one by one; a batch is nonempty and totals at most
-`MAX_AGENT_UPDATES_BYTES`, 1 MiB, so a longer window splits across frames).
+`MAX_AGENT_UPDATES_BYTES`, 9 MiB, so a longer window splits across frames).
 `AgentState { pane, state: AgentPaneWire }` is the small typed pane state published to every client
 attached to the session: `phase` (`Starting | Ready | Running | AwaitingPermission | Failed
 { message }`), `queued_prompts: u32`, `session_id`, `title`, the adapter's auth methods, config
@@ -171,7 +176,8 @@ postcard cannot carry the ACP SDK's JSON-shaped types), and
 overflowed and was cleared, which the client answers with `AgentReplay` rather than dying.
 `AgentSessions { pane, request_id, result }` and `AgentTurnDiffResult { pane, request_id, result }`
 are the JSON replies to `AgentSessionOp::List` and `AgentTurnDiff`, each ≤ `MAX_AGENT_RESULT_BYTES`
-(1 MiB).
+(1 MiB) and sent only to the client that made the request. A session listing uses request ID zero;
+the daemon carries its requester out of band.
 
 The three payloads `TerminalViewport`, `TerminalPatch`, and `CommandOutput { viewport: Some(..) }` are
 diverted to the [Terminal lane](/protocol/terminal-lanes.md) by `encode_protocol_message`; all other
@@ -298,16 +304,15 @@ rather than 256 entries. Both `ServerHello.appearance_provenance` and `Appearanc
 carry the map, so the settings UI can explain the current value without inferring it from colors.
 Missing keys are rejected during control-message validation.
 
-`MuxOptions` is a `BTreeMap<MuxOptionKey, MuxOptionValue>` over the 11 keys of `MuxOptionKey::ALL`, in
+`MuxOptions` is a `BTreeMap<MuxOptionKey, MuxOptionValue>` over the 14 keys of `MuxOptionKey::ALL`, in
 declaration order: `prefix`, `mode-keys`, `history-limit`, `word-separators`, `copy-command`,
 `set-clipboard`, `buffer-limit`, `synchronize-panes`, `experimental-agent-pane`,
-`experimental-editor-pane`, and `history-trickle` (default `2000`). `postcard` encodes the key as its
-variant index, so a new key is only ever appended: `history-trickle` is `10`, and it is now the last
-one . v43 removed `predict` (11) and `browser-egress` (12) with the client predictor and the egress
-tunnel they configured. Every entry contains an effective display string plus `MuxOptionSource`:
+`experimental-editor-pane`, `history-trickle` (default `2000`), `agent-command`,
+`agent-claude-code-command`, and `agent-auto-approve`. `postcard` encodes the key as its variant
+index, so a new key is appended. Every entry contains an effective display string plus `MuxOptionSource`:
 `Default`, `TmuxConfig`, `Override`, or `RuntimeCommand`. `ServerHello.mux_options` supplies initial
 state and `MuxOptionsChanged` replaces it whenever a successful writer changes a value or source.
-Validation requires exactly those 11 keys and bounds every string to 64 KiB on encode and during
+Validation requires exactly those 14 keys and bounds every string to 64 KiB on encode and during
 deserialization.
 
 `StatusLine { left, right }` is the daemon-rendered [tmux status line](/tmux/status-line.md): finished
@@ -319,7 +324,7 @@ unbounded `#()` script off the wire.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 53`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 55`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
 - **Any change that affects an already shipped encoding** (new enum variants, reordered fields,
@@ -355,9 +360,11 @@ unbounded `#()` script off the wire.
   `ProtocolError::InvalidPasteUpload`.
 - The agent lane is bounded the same way, on encode and on decode: a prompt's text plus its image
   bytes to `MAX_AGENT_PROMPT_BYTES` (6 MiB) with each image `format` at most 64 bytes; option, mode,
-  and method identifiers to `MAX_AGENT_OPTION_BYTES` (4 KiB) and session IDs to
-  `MAX_AGENT_SESSION_ID_BYTES` (16 KiB); an `AgentUpdates` batch nonempty, inside the `u64` sequence
-  space, and at most `MAX_AGENT_UPDATES_BYTES` (1 MiB); each `AgentPaneWire` JSON blob to 256 KiB and
+  and method identifiers to `MAX_AGENT_OPTION_BYTES` (4 KiB), and session IDs and list cursors to
+  `MAX_AGENT_SESSION_ID_BYTES` (16 KiB); session paths must be nonempty, fit
+  `MAX_GUI_TEXT_BYTES`, and carry at most 256 additional roots, while the destination daemon checks
+  its own absolute-path syntax; an `AgentUpdates` batch nonempty, inside the `u64` sequence
+  space, and at most `MAX_AGENT_UPDATES_BYTES` (9 MiB); each `AgentPaneWire` JSON blob to 256 KiB and
   a pending permission payload to 64 KiB; and every JSON result to 1 MiB. Rejections surface as
   `ProtocolError::InvalidAgentPayload`.
 
@@ -365,22 +372,23 @@ unbounded `#()` script off the wire.
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 53, kind: Interactive, device_name: None, capabilities: [],
-color_scheme: Some(Dark), origin: None }` is 16 bytes on the wire: an 8-byte envelope over an
-8-byte postcard payload.
+`ClientHello { protocol_version: 55, client_instance_id: ClientInstanceId(1), kind: Interactive,
+device_name: None, capabilities: [], color_scheme: Some(Dark), origin: None }` is 17 bytes on the
+wire: an 8-byte envelope over a 9-byte postcard payload.
 
 ```text
-byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15
-      0c 00 00 00  00     00      35 00         00 35 00 00 00 01 01 00
+byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15 16
+      0d 00 00 00  00     00      37 00         00 37 01 00 00 00 01 01 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 12  Control        (= 53)
+      length = 13  Control        (= 55)
 ```
 
-- **length `12`** = `ENVELOPE_BYTES` (4) + payload (8); it counts the four envelope bytes, not itself.
-- **payload** `00 35 00 00 00 01 01 00`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x35` (= 53), `kind` variant `0` (`Interactive`), `device_name`
-  as the `Option::None` tag `00`, `capabilities` as the sequence length `00`, `Option::Some` tag
-  `01`, `TerminalColorScheme` variant `1` (`Dark`), then `origin` as `Option::None` (`00`). Postcard
+- **length `13`** = `ENVELOPE_BYTES` (4) + payload (9); it counts the four envelope bytes, not itself.
+- **payload** `00 37 01 00 00 00 01 01 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x37` (= 55), `client_instance_id` as varint `01`, `kind`
+  variant `0` (`Interactive`), `device_name` as the `Option::None` tag `00`, `capabilities` as the
+  sequence length `00`, `Option::Some` tag `01`, `TerminalColorScheme` variant `1` (`Dark`), then
+  `origin` as `Option::None` (`00`). Postcard
   writes multi-byte integers as LEB128 varints, so the version is one byte here and two in the
   envelope, which is fixed-width LE. A real interactive hello carries the device's short hostname
   and still no capabilities.
@@ -409,9 +417,9 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 53, kind: Interactive, device_name: Some("laptop"),
+client → ClientHello { protocol_version: 55, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
                        capabilities: [], color_scheme: Some(Dark), origin: None }
-server → ServerHello { protocol_version: 53, server_id, client_id: c11,
+server → ServerHello { protocol_version: 55, server_id, client_id: c11, client_instance_id: i1,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],

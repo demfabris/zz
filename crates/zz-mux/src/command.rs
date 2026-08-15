@@ -3,9 +3,9 @@ use std::{collections::BTreeMap, path::PathBuf, str::FromStr as _};
 use zz_protocol::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind, CommandInvocation,
     DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
-    DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES, MuxOptionKey,
-    PaneId, PaneKindSnapshot, ServerError, SessionId, TerminalUiCommand, WindowId,
-    normalize_browser_profile_name,
+    DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES,
+    MAX_GUI_TEXT_BYTES, MuxOptionKey, PaneId, PaneKindSnapshot, ServerError, SessionId,
+    TerminalUiCommand, WindowId, normalize_browser_profile_name,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, DEFAULT_HISTORY_LIMIT,
@@ -119,6 +119,9 @@ pub enum MuxEffect {
     },
     MuxOptionChanged {
         option: MuxOptionKey,
+    },
+    AgentPaneRestart {
+        pane: PaneId,
     },
     StatusFormatsChanged,
     Attach {
@@ -433,6 +436,7 @@ impl MuxEngine {
             "set-browser-profile" => self.set_browser_profile(context, &command.args)?,
             "set-agent-session" => self.set_agent_session(context, &command.args)?,
             "set-agent-provider" => self.set_agent_provider(context, &command.args)?,
+            "restart-agent-pane" => self.restart_agent_pane(context, &command.args)?,
             "set-editor-path" => self.set_editor_path(context, &command.args)?,
             "select-pane" => self.select_pane(context, &command.args)?,
             "last-pane" => self.last_pane(context, &command.args)?,
@@ -958,6 +962,15 @@ impl MuxEngine {
         let pane = self
             .state
             .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let agent_cwd = options.value("-c").map(PathBuf::from);
+        if agent_cwd.as_ref().is_some_and(|cwd| {
+            !cwd.is_absolute() || cwd.as_os_str().as_encoded_bytes().len() > MAX_GUI_TEXT_BYTES
+        }) {
+            return Err(ServerError::InvalidCommand(
+                "agent working directory must be absolute and stay inside the wire limit"
+                    .to_owned(),
+            ));
+        }
         let kind = match selection.as_str() {
             "terminal" => PaneKind::Terminal,
             "browser" => PaneKind::Browser(BrowserDescriptor::single(
@@ -972,7 +985,10 @@ impl MuxEngine {
                             .to_owned(),
                     ));
                 }
-                PaneKind::Agent(AgentDescriptor::default())
+                PaneKind::Agent(AgentDescriptor {
+                    cwd: agent_cwd,
+                    ..AgentDescriptor::default()
+                })
             }
             "editor" => {
                 if !self.experimental_editor_pane {
@@ -1269,8 +1285,36 @@ impl MuxEngine {
             ));
         };
         let provider = AgentProvider::from_str(provider).map_err(ServerError::InvalidCommand)?;
-        self.state.update_agent_provider(pane, provider)?;
-        Ok(Execution::default())
+        if self.state.update_agent_provider(pane, provider)? {
+            Ok(Execution::effect(MuxEffect::AgentPaneRestart { pane }))
+        } else {
+            Ok(Execution::default())
+        }
+    }
+
+    fn restart_agent_pane(
+        &mut self,
+        context: &ExecutionContext,
+        args: &[String],
+    ) -> Result<Execution, ServerError> {
+        let (options, positional) = parse_command_options("restart-agent-pane", args)?;
+        if !positional.is_empty() {
+            return Err(ServerError::InvalidCommand(
+                "restart-agent-pane does not accept positional arguments".to_owned(),
+            ));
+        }
+        let pane = self
+            .state
+            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        if !matches!(
+            self.state.pane(pane).map(|pane| &pane.kind),
+            Some(PaneKind::Agent(_))
+        ) {
+            return Err(ServerError::InvalidCommand(format!(
+                "pane {pane} is not an agent"
+            )));
+        }
+        Ok(Execution::effect(MuxEffect::AgentPaneRestart { pane }))
     }
 
     fn set_editor_path(
@@ -3916,27 +3960,37 @@ mod tests {
                 &command("set-option", &["-g", "experimental-agent-pane", "on"]),
             )
             .expect("enable agent panes");
+        let configured_cwd = absolute_test_path("configured agent project");
+        let configured_cwd_arg = configured_cwd.to_string_lossy().into_owned();
         let materialized = engine
             .execute(
                 &mut context,
                 &command(
                     "select-pane-kind",
-                    &["-t", &agent_picker.to_string(), "agent"],
+                    &[
+                        "-t",
+                        &agent_picker.to_string(),
+                        "-c",
+                        &configured_cwd_arg,
+                        "agent",
+                    ],
                 ),
             )
             .expect("agent selection");
         assert!(matches!(
             engine.state.pane(agent_picker).map(|pane| &pane.kind),
-            Some(PaneKind::Agent(_))
+            Some(PaneKind::Agent(descriptor)) if descriptor.cwd.as_ref() == Some(&configured_cwd)
         ));
         assert!(matches!(
             materialized.effects.first(),
             Some(MuxEffect::PaneMaterialized {
                 pane,
-                kind: PaneKindSnapshot::Agent(_),
+                kind: PaneKindSnapshot::Agent(descriptor),
                 inherit_cwd_from: Some(donor),
                 ..
-            }) if *pane == agent_picker && *donor == picker
+            }) if *pane == agent_picker
+                && *donor == picker
+                && descriptor.cwd.as_ref() == Some(&configured_cwd)
         ));
         assert!(engine.state.validate().is_ok());
     }
@@ -4000,7 +4054,13 @@ mod tests {
                 ),
             )
             .expect("switch agent provider");
-        assert_eq!(switched.effects, [MuxEffect::SnapshotChanged]);
+        assert_eq!(
+            switched.effects,
+            [
+                MuxEffect::AgentPaneRestart { pane: agent },
+                MuxEffect::SnapshotChanged,
+            ]
+        );
         assert!(matches!(
             &engine.state.pane(agent).expect("agent state").kind,
             PaneKind::Agent(descriptor)
@@ -4008,6 +4068,17 @@ mod tests {
                     && descriptor.session_id.is_none()
                     && descriptor.cwd.as_ref() == Some(&cwd)
         ));
+
+        let restarted = engine
+            .execute(
+                &mut context,
+                &command("restart-agent-pane", &["-t", &agent.to_string()]),
+            )
+            .expect("restart agent pane");
+        assert_eq!(
+            restarted.effects,
+            [MuxEffect::AgentPaneRestart { pane: agent }]
+        );
 
         assert!(matches!(
             engine.execute(

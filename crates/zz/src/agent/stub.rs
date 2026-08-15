@@ -15,12 +15,12 @@ use crate::{agent::sound::AgentPaneStatus, config::AgentConfig, mux::client::Mux
 /// Never constructed: the stub controller emits nothing.
 #[allow(dead_code)]
 pub(crate) enum AgentControllerEvent {
-    Pane {
-        pane: PaneId,
-    },
     Provider {
         pane: PaneId,
         provider: AgentProvider,
+    },
+    Restart {
+        pane: PaneId,
     },
     Title {
         pane: PaneId,
@@ -80,7 +80,12 @@ impl AgentController {
 
     pub(crate) fn synchronize_config(&mut self, _config: AgentConfig, _cx: &mut Context<Self>) {}
 
-    pub(crate) fn retain_panes(&mut self, _retained: &std::collections::BTreeSet<PaneId>) {}
+    pub(crate) fn retain_panes(
+        &mut self,
+        _retained: &std::collections::BTreeSet<PaneId>,
+        _cx: &mut Context<Self>,
+    ) {
+    }
 
     pub(crate) fn attention(&self) -> AgentAttention {
         AgentAttention::default()

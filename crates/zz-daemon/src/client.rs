@@ -2,16 +2,25 @@ use std::{
     fmt,
     io::{self, Read, Write},
     path::Path,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use parking_lot::Mutex;
 use zz_protocol::{
-    AgentImage, AgentSessionOpKind, ClientHello, ClientKind, CommandInvocation, CommandRequest,
-    CommandResponse, ConfigOverrideEntry, GuiResponse, InputMessage, MAX_PASTE_UPLOAD_CHUNK_BYTES,
-    PROTOCOL_VERSION, PaneId, PasteUploadPurpose, ProtocolMessage, ServerError, ServerHello,
-    encode_protocol_message_into, read_protocol_message_into,
+    AgentImage, AgentSessionOpKind, ClientHello, ClientInstanceId, ClientKind, CommandInvocation,
+    CommandRequest, CommandResponse, ConfigOverrideEntry, GuiResponse, InputMessage,
+    MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION, PaneId, PasteUploadPurpose, ProtocolMessage,
+    ServerError, ServerHello, encode_protocol_message_into, read_protocol_message_into,
 };
+
+static CLIENT_INSTANCE_ID: OnceLock<ClientInstanceId> = OnceLock::new();
+
+fn client_instance_id() -> ClientInstanceId {
+    *CLIENT_INSTANCE_ID.get_or_init(|| ClientInstanceId(getrandom::u64().unwrap_or(1).max(1)))
+}
 use zz_terminal::TerminalColorScheme;
 
 // iOS cannot run ssh, so it tunnels in-process instead of forwarding a socket.
@@ -492,6 +501,14 @@ impl InteractiveClient {
         self.send(&ProtocolMessage::AgentTurnDiff { pane, request_id })
     }
 
+    pub fn agent_acknowledge_prompt_restore(
+        &self,
+        pane: PaneId,
+        reclaim_id: u64,
+    ) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::AgentAcknowledgePromptRestore { pane, reclaim_id })
+    }
+
     /// Answer one daemon-issued request for GUI-owned work, success or failure.
     pub fn send_gui_response(&self, response: GuiResponse) -> Result<(), DaemonError> {
         self.send(&ProtocolMessage::GuiResponse(response))
@@ -652,6 +669,7 @@ fn connect_stream<S: TransportStream>(
     let mut writer = ProtocolSender::new(stream);
     writer.send(&ProtocolMessage::ClientHello(ClientHello {
         protocol_version: PROTOCOL_VERSION,
+        client_instance_id: client_instance_id(),
         kind,
         device_name,
         capabilities: Vec::new(),

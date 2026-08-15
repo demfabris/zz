@@ -4,7 +4,7 @@ title: tmux command set (command.rs)
 description: "MuxEngine, the tmux-style command executor: canonical names + aliases, shared option/flag parsing, -t target resolution, and structured MuxEffect side effects for the daemon."
 resource: crates/zz-mux/src/command.rs
 tags: [tmux, commands, mux-engine, targets, effects]
-timestamp: 2026-07-26T00:00:00Z
+timestamp: 2026-08-15T00:00:00Z
 ---
 
 # Overview
@@ -63,13 +63,14 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `new-pane` | . | *zz-native/internal:* split into a runtime-free picker (`-h` horizontal, else vertical); accepts the `split-window` target/size/cwd options so configured bindings retain their arguments. |
 | `split-window` | `splitw` | Split a terminal pane and inherit the target pane's live cwd when invoked directly; key-bound invocations are routed by the daemon to `new-pane` so `.tmux.conf` owns the picker keys. |
 | `split-browser` | . | *zz-native:* split into a browser pane (`-p` profile, URL positional). |
-| `select-pane-kind` | . | *zz-native/internal:* materialize a pending picker as `terminal`, `browser`, or `agent` (`-t` target). |
+| `select-pane-kind` | . | *zz-native/internal:* materialize a pending picker as `terminal`, `browser`, `agent`, or `editor` (`-t` target; `-c` supplies an Agent cwd). |
 | `break-pane` | `breakp` | Reparent a pane into a new one-pane window (`-n`,`-s`,`-t`,`-d`). |
 | `join-pane` / `move-pane` | `joinp` / `movep` | Insert a pane beside another (`-b`,`-f`,`-h/-v`,`-p`,`-s`,`-t`,`-d`). |
 | `set-browser-url` | . | *zz-native:* update a browser pane's URL. |
 | `set-browser-profile` | . | *zz-native:* validate and switch a browser pane's persistent zz profile (`-t`, one profile name). |
 | `set-agent-session` | . | *zz-native/internal:* atomically persist an Agent pane's opaque ACP session ID and optional absolute cwd (`-t`, `-c`). |
-| `set-agent-provider` | . | *zz-native/internal:* persist `codex` or `claude-code` for an Agent pane and clear its provider-bound session ID (`-t`). |
+| `set-agent-provider` | . | *zz-native/internal:* persist `codex` or `claude-code` for an Agent pane, clear its provider-bound session ID, and restart its adapter (`-t`). |
+| `restart-agent-pane` | . | *zz-native/internal:* replace an Agent pane's daemon-owned ACP adapter (`-t`). |
 | `select-pane` | `selectp` | Select by target/direction (`-L/-R/-U/-D`), `-l` last, `-Z` keep zoom; `-T` updates only the pane title. |
 | `last-pane` | `lastp` | Return to the previously active pane (`-Z`). |
 | `swap-pane` | `swapp` | Exchange two layout leaves (`-U/-D/-s/-t`, `-d` keep slot, `-Z`). |

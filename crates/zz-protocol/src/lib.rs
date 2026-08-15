@@ -13,7 +13,7 @@ pub use catalog::{
     command_spec,
 };
 pub use framing::{MAX_ENCODED_FRAME_BYTES, MAX_FRAME_BYTES, ProtocolError};
-pub use id::{ClientId, PaneId, SessionId, SplitId, WindowId};
+pub use id::{ClientId, ClientInstanceId, PaneId, SessionId, SplitId, WindowId};
 pub use key::{
     Binding, KeyDecision, KeyEngine, KeyName, KeyTables, canonical_key, input_key_name,
     input_typed_text,
@@ -27,17 +27,20 @@ pub use message::{
     CommandPromptState, CommandRequest, CommandResponse, ConfigOverrideEntry,
     DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
     DisplayPanesAction, DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage,
-    KeyBindingSnapshot, KeyTableSnapshot, KeyToken, MAX_AGENT_COMMAND_BYTES,
-    MAX_AGENT_IMAGE_FORMAT_BYTES, MAX_AGENT_OPTION_BYTES, MAX_AGENT_PERMISSION_BYTES,
-    MAX_AGENT_PROMPT_BYTES, MAX_AGENT_RESULT_BYTES, MAX_AGENT_SEND_BYTES,
-    MAX_AGENT_SESSION_ID_BYTES, MAX_AGENT_STATE_BLOB_BYTES, MAX_AGENT_UPDATES_BYTES,
-    MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES, MAX_COMMAND_PROMPT_BYTES,
-    MAX_GUI_TEXT_BYTES, MAX_PASTE_UPLOAD_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES,
-    MAX_PASTE_UPLOAD_EXTENSION_BYTES, MAX_STATUS_TEXT_BYTES, MuxOptionKey, MuxOptionSource,
-    MuxOptionValue, MuxOptions, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneIndicator,
-    PasteUploadPurpose, PastedImageFormat, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError,
-    ServerHello, SourceSpan, StatusLine, TerminalUiCommand, agent_update_batch_bytes,
-    paste_upload_extension_is_valid,
+    KeyBindingSnapshot, KeyTableSnapshot, KeyToken, MAX_AGENT_AUTH_METHODS,
+    MAX_AGENT_AVAILABLE_COMMANDS, MAX_AGENT_COMMAND_BYTES, MAX_AGENT_CONFIG_CHOICES,
+    MAX_AGENT_CONFIG_OPTIONS, MAX_AGENT_IMAGE_FORMAT_BYTES, MAX_AGENT_MODES,
+    MAX_AGENT_OPTION_BYTES, MAX_AGENT_PERMISSION_BYTES, MAX_AGENT_PERMISSION_OPTIONS,
+    MAX_AGENT_PROMPT_BYTES, MAX_AGENT_PROMPT_IMAGES, MAX_AGENT_QUEUED_PROMPTS,
+    MAX_AGENT_RESULT_BYTES, MAX_AGENT_SEND_BYTES, MAX_AGENT_SESSION_DIRECTORIES,
+    MAX_AGENT_SESSION_ID_BYTES, MAX_AGENT_STATE_BLOB_BYTES, MAX_AGENT_TOOL_CONTENT_ITEMS,
+    MAX_AGENT_UPDATES_BYTES, MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
+    MAX_COMMAND_PROMPT_BYTES, MAX_GUI_TEXT_BYTES, MAX_PASTE_UPLOAD_BYTES,
+    MAX_PASTE_UPLOAD_CHUNK_BYTES, MAX_PASTE_UPLOAD_EXTENSION_BYTES, MAX_STATUS_TEXT_BYTES,
+    MuxOptionKey, MuxOptionSource, MuxOptionValue, MuxOptions, NEW_SESSION_ATTACH_CAPABILITY,
+    PROTOCOL_VERSION, PaneIndicator, PasteUploadPurpose, PastedImageFormat, ProtocolMessage,
+    SPLIT_RATIO_BASIS, ServerError, ServerHello, SourceSpan, StatusLine, TerminalUiCommand,
+    agent_update_batch_bytes, paste_upload_extension_is_valid,
 };
 pub use snapshot::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, BrowserProfileNameError,

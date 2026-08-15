@@ -30,7 +30,7 @@ repository = "https://github.com/demfabris/zz"
 rust-version = "1.97"
 
 [workspace.dependencies]
-agent-client-protocol = "=1.2.0"
+agent-client-protocol = { git = "https://github.com/agentclientprotocol/rust-sdk", rev = "112a85e6e4a2e9bad2a79af640c61f97b8afff94" }
 aes = "=0.8.4"
 aes-gcm = "=0.10.3"
 async-channel = "2.5.0"

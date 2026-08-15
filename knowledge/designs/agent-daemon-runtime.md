@@ -9,7 +9,7 @@ tags:
 - daemon
 - protocol
 - persistence
-timestamp: 2026-08-14T00:00:00Z
+timestamp: 2026-08-15T00:00:00Z
 ---
 
 # Goal
@@ -26,7 +26,7 @@ runs on the daemon's machine, which is the correct machine).
 
 # Ownership shift
 
-| Concern | Today (v52) | After (v53) |
+| Concern | Before (v52) | Current (v55) |
 | --- | --- | --- |
 | Adapter child, stdio, ACP session | GUI (`AgentController` runtime tasks) | daemon `agent::host`, one thread per pane |
 | Auto-approve, quiesce park, queued prompts, stderr tail, session ops | GUI runtime half | daemon `agent::host` |
@@ -37,9 +37,12 @@ runs on the daemon's machine, which is the correct machine).
 | `agent-send --submit` | daemon → GUI round-trip (`request_from_gui`) | daemon dispatches directly into the host; `ComposerAppend` keeps the GUI round-trip |
 | Adopting the ACP session ID, naming a pane after its first prompt | GUI, via `set-agent-session` / `select-pane -T` round trips | daemon (`adopt_agent_session`, `title_agent_pane`); the GUI keeps its own titling for the pane it drives |
 
-# Wire surface (v53)
+# Wire surface (v55)
 
-`PROTOCOL_VERSION` 52 → 53. Postcard cannot carry the ACP SDK's JSON-shaped types
+v53 moved the runtime into the daemon. v54 completed its session and restart controls. v55 gives
+each client process a stable identity and acknowledges restored prompts so reconnects remain
+owner-specific and do not resurrect consumed drafts. Postcard
+cannot carry the ACP SDK's JSON-shaped types
 (`serde_json::Map` metas, `RawValue` params), so every stream item crosses as an opaque JSON
 blob with a byte cap, and the client deserializes into the same `RuntimeEvent`-shaped enum the
 reducer already consumes. The daemon defines `AgentStreamItem` (a serde/JSON mirror of today's
@@ -56,7 +59,8 @@ Client → daemon (`ProtocolMessage`, appended, never reordered):
   cancels. First answer wins; late answers are acknowledged as no-ops.
 - `AgentSetConfigOption { pane, option_id, value }` / `AgentSetMode { pane, mode_id }` /
   `AgentAuthenticate { pane, method_id }` — strings, 4 KiB bounds.
-- `AgentSessionOp { pane, op: List | New | Switch { session_id } | Delete { session_id } }`
+- `AgentSessionOp { pane, op }`, where `List` carries cwd/cursor/replace, `New` carries cwd,
+  `Switch` carries session ID/cwd/additional directories, and `Delete` carries the session ID.
 - `AgentReplay { pane, from_seq: u64 }` — request journal replay (attach, lag recovery, pane
   focus).
 - `AgentTurnDiff { pane, request_id: u64 }`
@@ -74,10 +78,10 @@ Daemon → client (`EventPayload`, appended):
   client answers with `AgentReplay`.
 - `AgentSessions { pane, request_id, result }` and
   `AgentTurnDiffResult { pane, request_id, result }` — JSON replies to `AgentSessionOp::List`
-  and `AgentTurnDiff` (the `HistoryRequest → HistoryChunk` precedent), each ≤ 1 MiB. Both are
-  published to the whole pane rather than answered to one caller. A turn diff carries the
-  requester's `request_id`; a session listing has none on the ACP side, so it rides
-  `request_id` 0 and every client on the pane takes it.
+  and `AgentTurnDiff` (the `HistoryRequest → HistoryChunk` precedent), each ≤ 1 MiB. Both return
+  only to the requesting connection. A turn diff carries the requester's `request_id`; a session
+  listing has none on the ACP side, so it rides `request_id` 0 while the daemon carries `ClientId`
+  out of band. An oversized listing becomes a bounded failure reply.
 
 Every new payload gets an explicit bound in `validate_control_message`, and
 `knowledge/protocol/wire-protocol.md` gets the variant list plus its byte-level example updated
@@ -96,10 +100,11 @@ hundreds of updates, so agent streams get their own `OutboundState` lane, preced
   frames per second, not one per token.
 - Each pane also keeps a `MAX_REPLAY_RING_BYTES` (16 MiB) in-memory ring of encoded items. A
   replay inside the ring is served straight to the asking client and nothing else moves. A
-  replay older than the ring falls back to the journal, and that path is a *reset*, not a
-  splice: the lane emits `SessionReset { restoring: true }` followed by the journalled updates
-  as freshly numbered items, so the client rebuilds the transcript instead of trying to graft
-  onto a sequence memory no longer has.
+  replay older than the ring falls back to the journal. The lane emits cached adapter `Ready`,
+  `SessionReset { restoring: true }`, the journalled updates, and `SessionReady` with the current
+  session/configuration as freshly numbered items, followed by an ordered `StateSynced` snapshot.
+  The client rebuilds the transcript, then returns to the daemon's current Running, Failed,
+  permission, or Ready phase even though reliable state frames drain first.
 - Drain order: `reliable` → `command_output` → `agent` (round-robin) → `terminals`.
 - Overflow does NOT close the connection: the pane's lane is cleared and a tiny
   `AgentLagged { pane, next_seq }` marker queued; the client re-requests `AgentReplay` from its
@@ -124,6 +129,12 @@ synthesizes fresh items, so only the fanout can promise a client a gapless run. 
 not literally the journal's seq. **An item too large for one frame is dropped, not stamped**: a
 single encoded `AgentStreamItem` over `MAX_AGENT_UPDATES_BYTES` is logged and skipped, because
 the wire cannot carry it and a sequence spent on it would read as loss to every client.
+
+v54 keeps the fanout sequence across a runtime replacement. Each open receives a runtime generation;
+the sink drops events whose generation no longer owns the lane. Provider changes and explicit Retry
+can close one adapter and open another without resetting the client cursor or admitting a late event
+from the old child. A retiring generation may deliver only `PromptsReclaimed`, which preserves the
+queue without accepting stale adapter state or output.
 
 # Daemon host (`zz-daemon/src/agent/`)
 
@@ -171,6 +182,10 @@ depend on `zz-daemon` with `default-features = false` and never inherit
   (`agent_spawn_config`, socket only), and the per-pane `ZZ_PANE`/`ZZ_SESSION` identity rides
   `AgentPaneSpec.workspace`, merged over the config at spawn
   (`AgentWorkspaceEnvironment::adopt_pane_identity`), so an agent can still address itself.
+- `set-agent-provider` emits an `AgentPaneRestart` effect after it updates the descriptor and clears
+  the provider-bound session ID. The Retry action emits the same restart through
+  `restart-agent-pane`. The daemon resolves the current descriptor after it drops the mux lock,
+  closes the old host, and opens the replacement under a new generation.
 
 # Client changes
 
@@ -191,10 +206,14 @@ depend on `zz-daemon` with `default-features = false` and never inherit
   `apply_stream_items` and feed the existing reducer, so the view, wizard, badges, mend, and
   spring are untouched. The client-side journal, stdio runtime, turn snapshots, and PATH repair
   are deleted, along with the `set-agent-session` round trip the daemon now does itself.
+- v54 carries the client's full session intent to the daemon. History scope and cursors reach
+  `session/list`; a new workspace reaches `session/new`; a restore preserves cwd and additional
+  directories for `session/load`. The local picker also passes configured cwd through
+  `select-pane-kind -c`, so the descriptor wins over a donor terminal before the host starts. A
+  remote picker omits the desktop path and inherits cwd on the daemon host.
 - Agent config keys (`agent-command`, `agent-claude-code-command`, `agent-auto-approve`)
   become mux options; the settings UI writes them through the existing option machinery.
-  `agent-working-directory` stays client-side (it feeds pane creation, which is already a
-  client concern).
+  `agent-working-directory` stays client-side and applies only to the local host.
 
 # Performance gates
 
@@ -236,7 +255,7 @@ condvars when no pane has work (pinned by host tests), so an idle daemon schedul
 
 # Risks accepted
 
-- v53 hard-rejects v52 peers at three layers; the shipped mismatch UX (identity file +
+- v54 hard-rejects older peers at three layers; the shipped mismatch UX (identity file +
   prompted daemon restart) is the rollout path.
 - JSON blobs on the wire forfeit wire-level introspection beyond byte caps; the journal and
   client reducer already speak exactly this shape.

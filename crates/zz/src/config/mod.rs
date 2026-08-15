@@ -17,7 +17,9 @@ use gpui::{
 use zz_browser::SearchProvider;
 use zz_daemon::{Endpoint, InteractiveClient};
 pub(crate) use zz_daemon::{HostEntry, RejectedHost, configured_fleet_hosts, validate_fleet_host};
-use zz_protocol::{CommandInvocation, ConfigOverrideEntry, MuxOptionKey, PROTOCOL_VERSION};
+use zz_protocol::{
+    CommandInvocation, ConfigOverrideEntry, MAX_GUI_TEXT_BYTES, MuxOptionKey, PROTOCOL_VERSION,
+};
 use zz_terminal::{
     AppearanceColor, AppearanceConfigKey, CellHeightAdjustment, Color, CursorBlinkPolicy,
     CursorStyle, TerminalAppearance,
@@ -1488,6 +1490,9 @@ fn apply_agent_key(
                 let path = PathBuf::from(value);
                 if !path.is_absolute() {
                     return invalid("expected an absolute path");
+                }
+                if path.as_os_str().as_encoded_bytes().len() > MAX_GUI_TEXT_BYTES {
+                    return invalid("path exceeds the wire byte limit");
                 }
                 agent.working_directory = Some(path);
             }

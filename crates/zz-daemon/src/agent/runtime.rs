@@ -8,6 +8,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    future::Future,
     path::PathBuf,
     str::FromStr as _,
     sync::{
@@ -37,7 +38,13 @@ use async_channel::{Receiver, Sender};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use parking_lot::Mutex;
 use serde_json::Value;
-use zz_protocol::AgentProvider;
+#[cfg(test)]
+use zz_protocol::ClientInstanceId;
+use zz_protocol::{
+    AgentProvider, ClientId, MAX_AGENT_AUTH_METHODS, MAX_AGENT_PERMISSION_BYTES,
+    MAX_AGENT_RESULT_BYTES, MAX_AGENT_SESSION_DIRECTORIES, MAX_AGENT_UPDATES_BYTES,
+    MAX_GUI_TEXT_BYTES,
+};
 
 use crate::agent::{
     environment::{
@@ -57,6 +64,13 @@ const MAX_SESSION_TIMESTAMP_BYTES: usize = 256;
 const MAX_SESSION_CURSOR_BYTES: usize = 16 * 1024;
 const MAX_RUNTIME_ERROR_BYTES: usize = 300;
 const TRUNCATION_MARKER: &str = "… [truncated]";
+const INITIALIZE_TIMEOUT: Duration = Duration::from_mins(1);
+const RPC_TIMEOUT: Duration = Duration::from_secs(30);
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_STAGED_UPDATES: usize = 4096;
+const MAX_STAGED_UPDATE_BYTES: usize = 2 * MAX_AGENT_UPDATES_BYTES;
+const MAX_PENDING_PERMISSIONS: usize = 64;
+const MAX_PENDING_PERMISSION_BYTES: usize = MAX_PENDING_PERMISSIONS * MAX_AGENT_PERMISSION_BYTES;
 /// How long a turn may go silent before the watchdog parks it. Agents think
 /// for minutes on end, so this is deliberately generous and parking never
 /// touches the child; `ZZ_AGENT_QUIESCE_MS=0` disables the watchdog.
@@ -72,6 +86,7 @@ pub(crate) enum RuntimeCommand {
         resume_session: Option<String>,
     },
     ListSessions {
+        client: ClientId,
         cwd: Option<PathBuf>,
         cursor: Option<String>,
         replace: bool,
@@ -83,15 +98,12 @@ pub(crate) enum RuntimeCommand {
         cwd: PathBuf,
     },
     DeleteSession {
+        client: ClientId,
         session_id: String,
     },
     Prompt {
+        turn_id: u64,
         prompt: AgentPrompt,
-    },
-    Cancel,
-    RespondPermission {
-        request_id: u64,
-        option_id: Option<String>,
     },
     Authenticate {
         method_id: String,
@@ -106,8 +118,42 @@ pub(crate) enum RuntimeCommand {
     Shutdown,
 }
 
+#[derive(Debug)]
+pub(crate) enum RuntimeControl {
+    AbandonTurn {
+        turn_id: u64,
+    },
+    Cancel {
+        turn_id: u64,
+        session_id: Option<String>,
+    },
+    RespondPermission {
+        request_id: u64,
+        option_id: Option<String>,
+    },
+}
+
 struct PendingPermissionResponder {
     responder: Responder<RequestPermissionResponse>,
+    bytes: usize,
+}
+
+struct PendingPromptCancellation {
+    cancel: Sender<()>,
+    done: Receiver<()>,
+}
+
+#[derive(Clone, Copy)]
+enum DeferredPromptControl {
+    Abandon,
+    Cancel,
+}
+
+#[derive(Default)]
+struct PromptControls {
+    pending: HashMap<u64, PendingPromptCancellation>,
+    deferred: HashMap<u64, DeferredPromptControl>,
+    last_consumed: u64,
 }
 
 /// Which sessions this connection still speaks for. A session leaves the moment
@@ -117,11 +163,90 @@ struct PendingPermissionResponder {
 struct RuntimeRouting {
     live_sessions: HashSet<String>,
     staged_updates: HashMap<String, Vec<SessionUpdate>>,
+    staged_update_count: usize,
+    staged_update_bytes: usize,
+    staged_overflowed: bool,
+    pending_new_session: bool,
     permissions: HashMap<u64, PendingPermissionResponder>,
+    pending_permission_bytes: usize,
     /// Sessions whose updates are recorded. A session only enters once its
     /// transcript has settled in the pane, so the burst an agent replays out of
     /// `session/load` is never journalled on top of what it already replays.
     journaled: HashSet<String>,
+}
+
+impl RuntimeRouting {
+    fn take_permission(&mut self, request_id: u64) -> Option<PendingPermissionResponder> {
+        let pending = self.permissions.remove(&request_id)?;
+        self.pending_permission_bytes = self.pending_permission_bytes.saturating_sub(pending.bytes);
+        Some(pending)
+    }
+
+    fn take_permissions(&mut self) -> HashMap<u64, PendingPermissionResponder> {
+        self.pending_permission_bytes = 0;
+        std::mem::take(&mut self.permissions)
+    }
+
+    fn begin_staging(&mut self, session_id: &str) {
+        self.clear_staging();
+        self.staged_updates
+            .insert(session_id.to_owned(), Vec::new());
+    }
+
+    fn begin_new_session(&mut self) {
+        self.clear_staging();
+        self.pending_new_session = true;
+    }
+
+    fn claim_new_session(&mut self, session_id: &str) {
+        self.pending_new_session = false;
+        self.staged_updates.retain(|id, _| id == session_id);
+        self.staged_updates
+            .entry(session_id.to_owned())
+            .or_default();
+    }
+
+    fn clear_staging(&mut self) {
+        self.staged_updates.clear();
+        self.staged_update_count = 0;
+        self.staged_update_bytes = 0;
+        self.staged_overflowed = false;
+        self.pending_new_session = false;
+    }
+
+    fn discard_staging(&mut self, _session_id: &str) {
+        self.clear_staging();
+    }
+
+    fn stage(&mut self, session_id: &str, update: SessionUpdate) -> Result<(), SessionUpdate> {
+        let should_stage = self.staged_updates.contains_key(session_id)
+            || (self.pending_new_session && !self.live_sessions.contains(session_id));
+        if !should_stage {
+            return Err(update);
+        }
+        let bytes =
+            serde_json::to_vec(&update).map_or(MAX_STAGED_UPDATE_BYTES + 1, |value| value.len());
+        if self.staged_update_count >= MAX_STAGED_UPDATES
+            || self.staged_update_bytes.saturating_add(bytes) > MAX_STAGED_UPDATE_BYTES
+        {
+            self.staged_overflowed = true;
+            return Ok(());
+        }
+        self.staged_updates
+            .entry(session_id.to_owned())
+            .or_default()
+            .push(update);
+        self.staged_update_count += 1;
+        self.staged_update_bytes += bytes;
+        Ok(())
+    }
+
+    fn drain_staging(&mut self, session_id: &str) -> Vec<SessionUpdate> {
+        self.staged_updates
+            .get_mut(session_id)
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
 }
 
 /// Everything a pane's adapter child needs to exist: what to run, whether it
@@ -160,6 +285,7 @@ pub(crate) async fn run_agent_runtime(
     permission_ids: Arc<AtomicU64>,
     journal: Option<Arc<AgentJournal>>,
     command_rx: Receiver<RuntimeCommand>,
+    control_rx: Receiver<RuntimeControl>,
     event_tx: Sender<AgentStreamPayload>,
 ) -> Result<(), String> {
     let agent = AcpAgent::from_str(config.command_for(provider))
@@ -182,6 +308,7 @@ pub(crate) async fn run_agent_runtime(
         permission_ids,
         journal,
         command_rx,
+        control_rx,
         event_tx,
     )
     .await
@@ -308,7 +435,12 @@ fn report_journal_error(session_id: &str, error: &str) {
     }
 }
 
-fn record_update(journal: Option<&AgentJournal>, session_id: &str, update: &SessionUpdate) {
+fn record_update(
+    journal: Option<&AgentJournal>,
+    provider: AgentProvider,
+    session_id: &str,
+    update: &SessionUpdate,
+) {
     let Some(journal) = journal else {
         return;
     };
@@ -319,24 +451,22 @@ fn record_update(journal: Option<&AgentJournal>, session_id: &str, update: &Sess
             return;
         }
     };
-    if let Err(error) = journal.append(session_id, &value) {
+    if let Err(error) = journal.append_for(provider, session_id, &value) {
         report_journal_error(session_id, &error.to_string());
-    }
-}
-
-fn record_updates(journal: Option<&AgentJournal>, session_id: &str, updates: &[SessionUpdate]) {
-    for update in updates {
-        record_update(journal, session_id, update);
     }
 }
 
 /// The journalled transcript of `session_id`, as updates the reducer replays
 /// exactly like the ones an agent sends out of `session/load`.
-fn journal_replay(journal: Option<&AgentJournal>, session_id: Option<&str>) -> Vec<SessionUpdate> {
+fn journal_replay(
+    journal: Option<&AgentJournal>,
+    provider: AgentProvider,
+    session_id: Option<&str>,
+) -> Vec<SessionUpdate> {
     let (Some(journal), Some(session_id)) = (journal, session_id) else {
         return Vec::new();
     };
-    let records = match journal.replay(session_id) {
+    let records = match journal.replay_for(provider, session_id) {
         Ok(records) => records,
         Err(error) => {
             report_journal_error(session_id, &error.to_string());
@@ -347,7 +477,16 @@ fn journal_replay(journal: Option<&AgentJournal>, session_id: Option<&str>) -> V
         .into_iter()
         .filter_map(
             |(seq, update)| match serde_json::from_value::<SessionUpdate>(update) {
-                Ok(update) => Some(update),
+                Ok(update) => match update_payload(&update) {
+                    Ok(_) => Some(update),
+                    Err(error) => {
+                        log::warn!(
+                            target: "zz::agent::journal",
+                            "skipping oversized journalled update {seq} of session {session_id}: {error}"
+                        );
+                        None
+                    }
+                },
                 Err(error) => {
                     log::warn!(
                         target: "zz::agent::journal",
@@ -360,40 +499,98 @@ fn journal_replay(journal: Option<&AgentJournal>, session_id: Option<&str>) -> V
         .collect()
 }
 
-/// Seed a freshly created session with a journalled transcript, and take over
-/// journalling under its id. Staging the live session before the copy is what
-/// makes the restore atomic: an update that arrives mid-copy queues behind the
-/// restored entries instead of racing them into the pane.
-fn restore_journaled_session(
-    routing: &Mutex<RuntimeRouting>,
+async fn complete_staged_session(
+    routing: &Arc<Mutex<RuntimeRouting>>,
+    event_tx: &Sender<AgentStreamPayload>,
     journal: Option<&AgentJournal>,
+    provider: AgentProvider,
     session_id: &str,
-    restored_from: Option<&str>,
-    restored: Vec<SessionUpdate>,
-) -> Vec<SessionUpdate> {
-    {
-        let mut routes = routing.lock();
-        routes
-            .staged_updates
-            .insert(session_id.to_owned(), Vec::new());
-        routes.live_sessions.insert(session_id.to_owned());
+    previous_session: Option<&str>,
+    replay: Vec<SessionUpdate>,
+    final_payload: AgentStreamPayload,
+    record_replay: bool,
+    remove_previous_journal: bool,
+) -> Result<(), agent_client_protocol::Error> {
+    validate_payload(&final_payload)?;
+    for update in replay {
+        let payload = update_payload(&update)?;
+        if record_replay {
+            record_update(journal, provider, session_id, &update);
+        }
+        send_payload(event_tx, payload).await?;
     }
-    record_updates(journal, session_id, &restored);
-    if let (Some(journal), Some(previous)) = (journal, restored_from)
+
+    let mut final_payload = Some(final_payload);
+    loop {
+        let staged = {
+            let mut routes = routing.lock();
+            if routes.staged_overflowed {
+                routes.clear_staging();
+                return Err(agent_client_protocol::Error::internal_error().data(format!(
+                    "agent session replay exceeded {MAX_STAGED_UPDATES} updates or {MAX_STAGED_UPDATE_BYTES} bytes"
+                )));
+            }
+            routes.drain_staging(session_id)
+        };
+        for update in staged {
+            let payload = update_payload(&update)?;
+            if record_replay {
+                record_update(journal, provider, session_id, &update);
+            }
+            send_payload(event_tx, payload).await?;
+        }
+
+        let retry_payload = {
+            let mut routes = routing.lock();
+            if routes.staged_overflowed {
+                routes.clear_staging();
+                return Err(agent_client_protocol::Error::internal_error().data(format!(
+                    "agent session replay exceeded {MAX_STAGED_UPDATES} updates or {MAX_STAGED_UPDATE_BYTES} bytes"
+                )));
+            }
+            if routes
+                .staged_updates
+                .get(session_id)
+                .is_some_and(|updates| !updates.is_empty())
+            {
+                continue;
+            }
+            let payload = final_payload.take().expect("session boundary payload");
+            match event_tx.try_send(payload) {
+                Ok(()) => {
+                    routes.clear_staging();
+                    routes.live_sessions.insert(session_id.to_owned());
+                    routes.journaled.insert(session_id.to_owned());
+                    if let Some(previous) =
+                        previous_session.filter(|previous| *previous != session_id)
+                    {
+                        routes.live_sessions.remove(previous);
+                        routes.journaled.remove(previous);
+                    }
+                    None
+                }
+                Err(async_channel::TrySendError::Full(payload)) => Some(payload),
+                Err(async_channel::TrySendError::Closed(_)) => {
+                    return Err(agent_client_protocol::Error::internal_error()
+                        .data("agent stream is unavailable"));
+                }
+            }
+        };
+        let Some(payload) = retry_payload else {
+            break;
+        };
+        final_payload = Some(payload);
+        smol::Timer::after(Duration::from_millis(1)).await;
+    }
+
+    if remove_previous_journal
+        && let (Some(journal), Some(previous)) = (journal, previous_session)
         && previous != session_id
-        && let Err(error) = journal.remove(previous)
+        && let Err(error) = journal.remove_for(provider, previous)
     {
         report_journal_error(previous, &error.to_string());
     }
-    let staged = {
-        let mut routes = routing.lock();
-        routes.journaled.insert(session_id.to_owned());
-        routes.staged_updates.remove(session_id).unwrap_or_default()
-    };
-    record_updates(journal, session_id, &staged);
-    let mut replay = restored;
-    replay.extend(staged);
-    replay
+    Ok(())
 }
 
 pub(crate) async fn run_agent_connection(
@@ -403,9 +600,11 @@ pub(crate) async fn run_agent_connection(
     permission_ids: Arc<AtomicU64>,
     journal: Option<Arc<AgentJournal>>,
     command_rx: Receiver<RuntimeCommand>,
+    control_rx: Receiver<RuntimeControl>,
     event_tx: Sender<AgentStreamPayload>,
 ) -> Result<(), String> {
     let routing = Arc::new(Mutex::new(RuntimeRouting::default()));
+    let prompt_controls = Arc::new(Mutex::new(PromptControls::default()));
 
     let notification_journal = journal.clone();
     let notification_routing = Arc::clone(&routing);
@@ -422,28 +621,29 @@ pub(crate) async fn run_agent_connection(
                 match notification {
                     AgentNotification::SessionNotification(notification) => {
                         let session_id = notification.session_id.0.to_string();
-                        let mut routing = notification_routing.lock();
-                        if let Some(updates) = routing.staged_updates.get_mut(&session_id) {
-                            updates.push(notification.update);
-                            return Ok(());
-                        }
-                        let live = routing.live_sessions.contains(&session_id);
-                        let journaled = routing.journaled.contains(&session_id);
-                        drop(routing);
-                        if journaled {
-                            record_update(
-                                notification_journal.as_deref(),
-                                &session_id,
-                                &notification.update,
-                            );
-                        }
+                        let (update, live, journaled) = {
+                            let mut routing = notification_routing.lock();
+                            let update = match routing.stage(&session_id, notification.update) {
+                                Ok(()) => return Ok(()),
+                                Err(update) => update,
+                            };
+                            (
+                                update,
+                                routing.live_sessions.contains(&session_id),
+                                routing.journaled.contains(&session_id),
+                            )
+                        };
                         if live {
-                            send_payload(
-                                &notification_events,
-                                AgentStreamPayload::Update {
-                                    update: encode_update(&notification.update)?,
-                                },
-                            )?;
+                            let payload = update_payload(&update)?;
+                            if journaled {
+                                record_update(
+                                    notification_journal.as_deref(),
+                                    provider,
+                                    &session_id,
+                                    &update,
+                                );
+                            }
+                            send_payload(&notification_events, payload).await?;
                         }
                         Ok(())
                     }
@@ -459,14 +659,16 @@ pub(crate) async fn run_agent_connection(
                         let Some((session_id, event)) = parse_sdk_task_event(&params) else {
                             return Ok(());
                         };
-                        let routing = ext_routing.lock();
-                        if routing.staged_updates.contains_key(&session_id) {
-                            return Ok(());
-                        }
-                        let live = routing.live_sessions.contains(&session_id);
-                        drop(routing);
+                        let live = {
+                            let routing = ext_routing.lock();
+                            if routing.staged_updates.contains_key(&session_id) {
+                                return Ok(());
+                            }
+                            routing.live_sessions.contains(&session_id)
+                        };
                         if live {
-                            send_payload(&ext_events, AgentStreamPayload::TaskEvent { event })?;
+                            send_payload(&ext_events, AgentStreamPayload::TaskEvent { event })
+                                .await?;
                         }
                         Ok(())
                     }
@@ -478,10 +680,11 @@ pub(crate) async fn run_agent_connection(
         .on_receive_request(
             async move |request: RequestPermissionRequest, responder, _| {
                 let session_id = request.session_id.0.to_string();
-                let routing = permission_routing.lock();
-                let live = routing.live_sessions.contains(&session_id)
-                    && !routing.staged_updates.contains_key(&session_id);
-                drop(routing);
+                let live = {
+                    let routing = permission_routing.lock();
+                    routing.live_sessions.contains(&session_id)
+                        && !routing.staged_updates.contains_key(&session_id)
+                };
                 if !live {
                     return responder.respond(RequestPermissionResponse::new(
                         RequestPermissionOutcome::Cancelled,
@@ -495,10 +698,13 @@ pub(crate) async fn run_agent_connection(
                         target: "zz::agent",
                         "auto-approving tool permission with option {option_id}"
                     );
-                    let update = SessionUpdate::ToolCallUpdate(request.tool_call);
-                    if let Err(error) = encode_update(&update).and_then(|update| {
-                        send_payload(&permission_events, AgentStreamPayload::Update { update })
-                    }) {
+                    let update = encode_update(&SessionUpdate::ToolCallUpdate(request.tool_call))?;
+                    if let Err(error) = send_payload(
+                        &permission_events,
+                        AgentStreamPayload::Update { update },
+                    )
+                    .await
+                    {
                         responder.respond(RequestPermissionResponse::new(
                             RequestPermissionOutcome::Cancelled,
                         ))?;
@@ -511,24 +717,44 @@ pub(crate) async fn run_agent_connection(
                     ));
                 }
                 let request_id = permission_ids.fetch_add(1, Ordering::Relaxed);
-                permission_routing
-                    .lock()
-                    .permissions
-                    .insert(request_id, PendingPermissionResponder { responder });
-                let requested = json_of(&request.tool_call)
+                let Ok((requested, bytes)) = json_of(&request.tool_call)
                     .and_then(|tool_call| Ok((tool_call, json_of(&request.options)?)))
                     .and_then(|(tool_call, options)| {
-                        send_payload(
-                            &permission_events,
-                            AgentStreamPayload::PermissionRequested {
-                                request_id,
-                                tool_call,
-                                options,
-                            },
-                        )
-                    });
+                        let payload = AgentStreamPayload::PermissionRequested {
+                            request_id,
+                            tool_call,
+                            options,
+                        };
+                        let bytes = validate_payload(&payload)?;
+                        Ok((payload, bytes))
+                    })
+                else {
+                    return responder.respond(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Cancelled,
+                    ));
+                };
+                {
+                    let mut routing = permission_routing.lock();
+                    if !routing.live_sessions.contains(&session_id)
+                        || routing.staged_updates.contains_key(&session_id)
+                        || routing.permissions.len() >= MAX_PENDING_PERMISSIONS
+                        || routing.pending_permission_bytes.saturating_add(bytes)
+                            > MAX_PENDING_PERMISSION_BYTES
+                    {
+                        drop(routing);
+                        return responder.respond(RequestPermissionResponse::new(
+                            RequestPermissionOutcome::Cancelled,
+                        ));
+                    }
+                    routing.pending_permission_bytes += bytes;
+                    routing.permissions.insert(
+                        request_id,
+                        PendingPermissionResponder { responder, bytes },
+                    );
+                }
+                let requested = send_payload(&permission_events, requested).await;
                 if let Err(error) = requested {
-                    if let Some(pending) = permission_routing.lock().permissions.remove(&request_id)
+                    if let Some(pending) = permission_routing.lock().take_permission(request_id)
                     {
                         let _ = pending.responder.respond(RequestPermissionResponse::new(
                             RequestPermissionOutcome::Cancelled,
@@ -551,7 +777,12 @@ pub(crate) async fn run_agent_connection(
                         .meta(client_meta_caps(provider)),
                 )
                 .client_info(Implementation::new("zz", env!("CARGO_PKG_VERSION")).title("zz"));
-            let response = connection.send_request(initialize).block_task().await?;
+            let response = await_rpc(
+                connection.send_request(initialize).block_task(),
+                INITIALIZE_TIMEOUT,
+                "ACP initialize",
+            )
+            .await?;
             if response.protocol_version != ProtocolVersion::V1 {
                 return Err(agent_client_protocol::Error::internal_error().data(format!(
                     "agent selected unsupported protocol version {:?}",
@@ -588,6 +819,7 @@ pub(crate) async fn run_agent_connection(
             let auth_methods = response
                 .auth_methods
                 .iter()
+                .take(MAX_AGENT_AUTH_METHODS)
                 .map(auth_method_model)
                 .collect::<Vec<_>>();
             send_payload(
@@ -598,7 +830,108 @@ pub(crate) async fn run_agent_connection(
                     auth_methods,
                     capabilities,
                 },
-            )?;
+            )
+            .await?;
+
+            let control_connection = connection.clone();
+            let control_routing = Arc::clone(&routing);
+            let control_prompts = Arc::clone(&prompt_controls);
+            let control_events = event_tx.clone();
+            connection.spawn(async move {
+                while let Ok(control) = control_rx.recv().await {
+                    match control {
+                        RuntimeControl::AbandonTurn { turn_id } => {
+                            let (pending, deferred) = {
+                                let mut prompts = control_prompts.lock();
+                                let pending = prompts.pending.remove(&turn_id);
+                                let deferred = pending.is_none() && turn_id > prompts.last_consumed;
+                                if deferred {
+                                    prompts
+                                        .deferred
+                                        .insert(turn_id, DeferredPromptControl::Abandon);
+                                }
+                                (pending, deferred)
+                            };
+                            if let Some(pending) = pending {
+                                pending.cancel.close();
+                                let _ = pending.done.recv().await;
+                            }
+                            if deferred {
+                                continue;
+                            }
+                            send_payload(
+                                &control_events,
+                                AgentStreamPayload::TurnAbandoned { turn_id },
+                            )
+                            .await?;
+                        }
+                        RuntimeControl::Cancel {
+                            turn_id,
+                            session_id,
+                        } => {
+                            let pending = {
+                                let mut prompts = control_prompts.lock();
+                                let pending = prompts.pending.remove(&turn_id);
+                                if pending.is_none() && turn_id > prompts.last_consumed {
+                                    prompts
+                                        .deferred
+                                        .insert(turn_id, DeferredPromptControl::Cancel);
+                                }
+                                pending
+                            };
+                            if let Some(pending) = pending {
+                                pending.cancel.close();
+                                let _ = pending.done.recv().await;
+                            }
+                            if let Some(session_id) = session_id {
+                                control_connection.send_notification(CancelNotification::new(
+                                    AcpSessionId::new(session_id),
+                                ))?;
+                            }
+                            cancel_pending_permissions(&control_routing, &control_events).await?;
+                            send_payload(
+                                &control_events,
+                                AgentStreamPayload::PromptFinished {
+                                    turn_id,
+                                    outcome: AgentPromptOutcome::Finished {
+                                        stop_reason: Value::String("cancelled".to_owned()),
+                                    },
+                                },
+                            )
+                            .await?;
+                        }
+                        RuntimeControl::RespondPermission {
+                            request_id,
+                            option_id,
+                        } => {
+                            let pending = control_routing.lock().take_permission(request_id);
+                            if let Some(pending) = pending {
+                                let canceled = option_id.is_none();
+                                let outcome = option_id.map_or(
+                                    RequestPermissionOutcome::Cancelled,
+                                    |option_id| {
+                                        RequestPermissionOutcome::Selected(
+                                            SelectedPermissionOutcome::new(option_id),
+                                        )
+                                    },
+                                );
+                                pending
+                                    .responder
+                                    .respond(RequestPermissionResponse::new(outcome))?;
+                                send_payload(
+                                    &control_events,
+                                    AgentStreamPayload::PermissionResolved {
+                                        request_id,
+                                        canceled,
+                                    },
+                                )
+                                .await?;
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            })?;
 
             let mut session: Option<AcpSessionId> = None;
             while let Ok(command) = command_rx.recv().await {
@@ -607,155 +940,172 @@ pub(crate) async fn run_agent_connection(
                         cwd,
                         resume_session,
                     } => {
-                        // An agent that cannot load the session itself is
-                        // restored from the journal instead, so the pane says
-                        // RESTORING on both routes rather than flashing
-                        // STARTING at a transcript that is about to appear.
                         let mut restored = if capabilities.load {
                             Vec::new()
                         } else {
-                            journal_replay(journal.as_deref(), resume_session.as_deref())
+                            journal_replay(journal.as_deref(), provider, resume_session.as_deref())
                         };
                         let restoring =
                             (capabilities.load && resume_session.is_some()) || !restored.is_empty();
-                        send_payload(&event_tx, AgentStreamPayload::SessionReset { restoring })?;
-                        let session_result = if let Some(resume) =
+                        send_payload(&event_tx, AgentStreamPayload::SessionReset { restoring })
+                            .await?;
+                        let session_result: Result<_, agent_client_protocol::Error> = if let Some(resume) =
                             resume_session.clone().filter(|_| capabilities.load)
                         {
                             let session_id = AcpSessionId::new(resume);
-                            routing
-                                .lock()
-                                .live_sessions
-                                .insert(session_id.0.to_string());
-                            match connection
-                                .send_request(load_session_request(
+                            routing.lock().begin_staging(session_id.0.as_ref());
+                            match await_rpc(
+                                connection.send_request(load_session_request(
                                     provider,
                                     session_id.clone(),
                                     cwd.clone(),
                                 ))
-                                .block_task()
-                                .await
+                                .block_task(),
+                                RPC_TIMEOUT,
+                                "ACP session load",
+                            )
+                            .await
                             {
-                                Ok(response) => {
-                                    Ok((session_id, response.modes, response.config_options))
-                                }
+                                Ok(response) => Ok((
+                                    session_id,
+                                    response.modes,
+                                    response.config_options,
+                                    false,
+                                    false,
+                                )),
                                 Err(error) => {
-                                    routing
-                                        .lock()
-                                        .live_sessions
-                                        .remove(session_id.0.as_ref());
+                                    routing.lock().discard_staging(session_id.0.as_ref());
                                     log::warn!(
                                         target: "zz::agent",
                                         "could not restore the ACP session: {error}; creating a new session"
                                     );
                                     restored = journal_replay(
                                         journal.as_deref(),
+                                        provider,
                                         resume_session.as_deref(),
                                     );
-                                    connection
-                                        .send_request(new_session_request(provider, cwd.clone()))
-                                        .block_task()
-                                        .await
-                                        .map(|response| {
-                                            (
-                                                response.session_id,
-                                                response.modes,
-                                                response.config_options,
-                                            )
-                                        })
-                                }
-                            }
-                        } else {
-                            connection
-                                .send_request(new_session_request(provider, cwd.clone()))
-                                .block_task()
-                                .await
-                                .map(|response| {
-                                    (
+                                    routing.lock().begin_new_session();
+                                    let response = await_rpc(
+                                        connection
+                                            .send_request(new_session_request(
+                                                provider,
+                                                cwd.clone(),
+                                            ))
+                                            .block_task(),
+                                        RPC_TIMEOUT,
+                                        "ACP session creation",
+                                    )
+                                    .await?;
+                                    routing
+                                        .lock()
+                                        .claim_new_session(response.session_id.0.as_ref());
+                                    Ok((
                                         response.session_id,
                                         response.modes,
                                         response.config_options,
-                                    )
-                                })
+                                        true,
+                                        true,
+                                    ))
+                                }
+                            }
+                        } else {
+                            routing.lock().begin_new_session();
+                            let response = await_rpc(
+                                connection
+                                    .send_request(new_session_request(provider, cwd.clone()))
+                                    .block_task(),
+                                RPC_TIMEOUT,
+                                "ACP session creation",
+                            )
+                            .await?;
+                            routing
+                                .lock()
+                                .claim_new_session(response.session_id.0.as_ref());
+                            Ok((
+                                response.session_id,
+                                response.modes,
+                                response.config_options,
+                                true,
+                                resume_session.is_some() && !restored.is_empty(),
+                            ))
                         };
                         match session_result {
-                            Ok((session_id, modes, config_options)) => {
+                            Ok((
+                                session_id,
+                                modes,
+                                config_options,
+                                record_replay,
+                                remove_previous_journal,
+                            )) => {
                                 if !valid_session_id(session_id.0.as_ref()) {
-                                    routing.lock().live_sessions.clear();
+                                    routing.lock().clear_staging();
                                     send_payload(
                                         &event_tx,
                                         AgentStreamPayload::PaneFailed {
                                             message: "agent returned an invalid session ID"
                                                 .to_owned(),
                                         },
-                                    )?;
+                                    )
+                                    .await?;
                                     continue;
                                 }
                                 let live = session_id.0.to_string();
+                                complete_staged_session(
+                                    &routing,
+                                    &event_tx,
+                                    journal.as_deref(),
+                                    provider,
+                                    &live,
+                                    resume_session.as_deref(),
+                                    std::mem::take(&mut restored),
+                                    AgentStreamPayload::SessionReady {
+                                        session_id: live.clone(),
+                                        modes: optional_json(modes.as_ref())?,
+                                        config_options: optional_json(config_options.as_ref())?,
+                                    },
+                                    record_replay,
+                                    remove_previous_journal,
+                                )
+                                .await?;
                                 session = Some(session_id);
-                                if restored.is_empty() {
-                                    let mut routes = routing.lock();
-                                    routes.live_sessions.insert(live.clone());
-                                    routes.journaled.insert(live.clone());
-                                    drop(routes);
-                                    send_payload(
-                                        &event_tx,
-                                        AgentStreamPayload::SessionReady {
-                                            session_id: live,
-                                            modes: optional_json(modes.as_ref())?,
-                                            config_options: optional_json(
-                                                config_options.as_ref(),
-                                            )?,
-                                        },
-                                    )?;
-                                } else {
-                                    let replay = restore_journaled_session(
-                                        &routing,
-                                        journal.as_deref(),
-                                        &live,
-                                        resume_session.as_deref(),
-                                        restored,
-                                    );
-                                    send_payload(
-                                        &event_tx,
-                                        AgentStreamPayload::SessionSwitched {
-                                            session_id: live,
-                                            cwd,
-                                            modes: optional_json(modes.as_ref())?,
-                                            config_options: optional_json(
-                                                config_options.as_ref(),
-                                            )?,
-                                            replay: encode_updates(&replay)?,
-                                        },
-                                    )?;
-                                }
                             }
                             Err(error) => {
+                                routing.lock().clear_staging();
                                 send_payload(
                                     &event_tx,
                                     AgentStreamPayload::PaneFailed {
                                         message: error.to_string(),
                                     },
-                                )?;
+                                )
+                                .await?;
                             }
                         }
                     }
                     RuntimeCommand::ListSessions {
+                        client,
                         cwd,
                         cursor,
                         replace,
                     } => {
                         if !capabilities.list {
-                            send_payload(
-                                &event_tx,
-                                AgentStreamPayload::SessionListFailed {
-                                    message: "agent does not support session/list".to_owned(),
+                                send_payload(
+                                    &event_tx,
+                                    AgentStreamPayload::SessionListFailed {
+                                        client,
+                                        message: "agent does not support session/list".to_owned(),
                                 },
-                            )?;
+                            )
+                            .await?;
                             continue;
                         }
                         let request = ListSessionsRequest::new().cwd(cwd.clone()).cursor(cursor);
-                        match connection.send_request(request).block_task().await {
+                        match await_rpc(
+                            connection.send_request(request).block_task(),
+                            RPC_TIMEOUT,
+                            "ACP session list",
+                        )
+                        .await
+                        {
                             Ok(response) => {
                                 let sessions = response
                                     .sessions
@@ -784,6 +1134,7 @@ pub(crate) async fn run_agent_connection(
                                 send_payload(
                                     &event_tx,
                                     AgentStreamPayload::SessionsListed {
+                                        client,
                                         sessions,
                                         next_cursor: response
                                             .next_cursor
@@ -791,14 +1142,17 @@ pub(crate) async fn run_agent_connection(
                                         cwd_filter: cwd,
                                         replace,
                                     },
-                                )?;
+                                )
+                                .await?;
                             }
                             Err(error) => send_payload(
                                 &event_tx,
                                 AgentStreamPayload::SessionListFailed {
+                                    client,
                                     message: format!("could not list agent sessions: {error}"),
                                 },
-                            )?,
+                            )
+                            .await?,
                         }
                     }
                     RuntimeCommand::SwitchSession { session: target } => {
@@ -808,52 +1162,62 @@ pub(crate) async fn run_agent_connection(
                                 AgentStreamPayload::SessionSwitchFailed {
                                     message: "agent does not support session/load".to_owned(),
                                 },
-                            )?;
+                            )
+                            .await?;
                             continue;
                         }
                         let session_id = AcpSessionId::new(target.session_id.clone());
-                        {
-                            let mut routing = routing.lock();
-                            routing.live_sessions.insert(target.session_id.clone());
-                            routing
-                                .staged_updates
-                                .insert(target.session_id.clone(), Vec::new());
-                        }
+                        routing.lock().begin_staging(&target.session_id);
                         let mut request =
                             load_session_request(provider, session_id.clone(), target.cwd.clone());
                         if capabilities.additional_directories {
                             request = request
                                 .additional_directories(target.additional_directories.clone());
                         }
-                        match connection.send_request(request).block_task().await {
+                        match await_rpc(
+                            connection.send_request(request).block_task(),
+                            RPC_TIMEOUT,
+                            "ACP session load",
+                        )
+                        .await
+                        {
                             Ok(response) => {
-                                let previous = session.replace(session_id.clone());
+                                let previous = session.clone();
                                 let previous = previous.filter(|previous| previous != &session_id);
-                                let replay = {
-                                    let mut routes = routing.lock();
-                                    let replay = routes
-                                        .staged_updates
-                                        .remove(&target.session_id)
-                                        .unwrap_or_default();
-                                    routes.journaled.insert(target.session_id.clone());
-                                    if let Some(previous) = &previous {
-                                        routes.live_sessions.remove(previous.0.as_ref());
-                                        routes.journaled.remove(previous.0.as_ref());
-                                    }
-                                    replay
-                                };
+                                if let Some(previous) = &previous {
+                                    routing
+                                        .lock()
+                                        .live_sessions
+                                        .remove(previous.0.as_ref());
+                                }
+                                cancel_pending_permissions(&routing, &event_tx).await?;
                                 send_payload(
                                     &event_tx,
+                                    AgentStreamPayload::SessionReset { restoring: true },
+                                )
+                                .await?;
+                                complete_staged_session(
+                                    &routing,
+                                    &event_tx,
+                                    journal.as_deref(),
+                                    provider,
+                                    &target.session_id,
+                                    previous.as_ref().map(|previous| previous.0.as_ref()),
+                                    Vec::new(),
                                     AgentStreamPayload::SessionSwitched {
-                                        session_id: target.session_id,
-                                        cwd: target.cwd,
+                                        session_id: target.session_id.clone(),
+                                        cwd: target.cwd.clone(),
                                         modes: optional_json(response.modes.as_ref())?,
                                         config_options: optional_json(
                                             response.config_options.as_ref(),
                                         )?,
-                                        replay: encode_updates(&replay)?,
+                                        replay: Vec::new(),
                                     },
-                                )?;
+                                    false,
+                                    false,
+                                )
+                                .await?;
+                                session = Some(session_id);
                                 if capabilities.close
                                     && let Some(previous) = previous
                                 {
@@ -865,17 +1229,14 @@ pub(crate) async fn run_agent_connection(
                                 }
                             }
                             Err(error) => {
-                                {
-                                    let mut routes = routing.lock();
-                                    routes.staged_updates.remove(&target.session_id);
-                                    routes.live_sessions.remove(&target.session_id);
-                                }
+                                routing.lock().discard_staging(&target.session_id);
                                 send_payload(
                                     &event_tx,
                                     AgentStreamPayload::SessionSwitchFailed {
                                         message: format!("could not load selected session: {error}"),
                                     },
-                                )?;
+                                )
+                                .await?;
                                 if capabilities.close {
                                     spawn_close_session(
                                         &connection,
@@ -887,36 +1248,57 @@ pub(crate) async fn run_agent_connection(
                         }
                     }
                     RuntimeCommand::NewSession { cwd } => {
-                        match connection
-                            .send_request(new_session_request(provider, cwd.clone()))
-                            .block_task()
-                            .await
+                        routing.lock().begin_new_session();
+                        match await_rpc(
+                            connection
+                                .send_request(new_session_request(provider, cwd.clone()))
+                                .block_task(),
+                            RPC_TIMEOUT,
+                            "ACP session creation",
+                        )
+                        .await
                         {
                             Ok(response) if valid_session_id(response.session_id.0.as_ref()) => {
                                 let session_id = response.session_id;
-                                let previous = session.replace(session_id.clone());
+                                routing
+                                    .lock()
+                                    .claim_new_session(session_id.0.as_ref());
+                                let previous = session.clone();
                                 let previous = previous.filter(|previous| previous != &session_id);
-                                {
-                                    let mut routes = routing.lock();
-                                    routes.live_sessions.insert(session_id.0.to_string());
-                                    routes.journaled.insert(session_id.0.to_string());
-                                    if let Some(previous) = &previous {
-                                        routes.live_sessions.remove(previous.0.as_ref());
-                                        routes.journaled.remove(previous.0.as_ref());
-                                    }
+                                if let Some(previous) = &previous {
+                                    routing
+                                        .lock()
+                                        .live_sessions
+                                        .remove(previous.0.as_ref());
                                 }
+                                cancel_pending_permissions(&routing, &event_tx).await?;
                                 send_payload(
                                     &event_tx,
+                                    AgentStreamPayload::SessionReset { restoring: true },
+                                )
+                                .await?;
+                                complete_staged_session(
+                                    &routing,
+                                    &event_tx,
+                                    journal.as_deref(),
+                                    provider,
+                                    session_id.0.as_ref(),
+                                    previous.as_ref().map(|previous| previous.0.as_ref()),
+                                    Vec::new(),
                                     AgentStreamPayload::SessionSwitched {
                                         session_id: session_id.0.to_string(),
-                                        cwd,
+                                        cwd: cwd.clone(),
                                         modes: optional_json(response.modes.as_ref())?,
                                         config_options: optional_json(
                                             response.config_options.as_ref(),
                                         )?,
                                         replay: Vec::new(),
                                     },
-                                )?;
+                                    true,
+                                    false,
+                                )
+                                .await?;
+                                session = Some(session_id);
                                 if capabilities.close
                                     && let Some(previous) = previous
                                 {
@@ -927,63 +1309,81 @@ pub(crate) async fn run_agent_connection(
                                     )?;
                                 }
                             }
-                            Ok(_) => send_payload(
-                                &event_tx,
-                                AgentStreamPayload::SessionSwitchFailed {
-                                    message: "agent returned an invalid session ID".to_owned(),
-                                },
-                            )?,
-                            Err(error) => send_payload(
-                                &event_tx,
-                                AgentStreamPayload::SessionSwitchFailed {
-                                    message: format!("could not create a new session: {error}"),
-                                },
-                            )?,
+                            Ok(_) => {
+                                routing.lock().clear_staging();
+                                send_payload(
+                                    &event_tx,
+                                    AgentStreamPayload::SessionSwitchFailed {
+                                        message: "agent returned an invalid session ID".to_owned(),
+                                    },
+                                )
+                                .await?;
+                            }
+                            Err(error) => {
+                                routing.lock().clear_staging();
+                                send_payload(
+                                    &event_tx,
+                                    AgentStreamPayload::SessionSwitchFailed {
+                                        message: format!("could not create a new session: {error}"),
+                                    },
+                                )
+                                .await?;
+                            }
                         }
                     }
-                    RuntimeCommand::DeleteSession { session_id } => {
+                    RuntimeCommand::DeleteSession { client, session_id } => {
                         if !capabilities.delete {
                             send_payload(
                                 &event_tx,
                                 AgentStreamPayload::SessionDeleteFailed {
+                                    client,
                                     message: "agent does not support session/delete".to_owned(),
                                 },
-                            )?;
+                            )
+                            .await?;
                             continue;
                         }
-                        match connection
-                            .send_request(DeleteSessionRequest::new(session_id.clone()))
-                            .block_task()
-                            .await
+                        match await_rpc(
+                            connection
+                                .send_request(DeleteSessionRequest::new(session_id.clone()))
+                                .block_task(),
+                            RPC_TIMEOUT,
+                            "ACP session deletion",
+                        )
+                        .await
                         {
                             Ok(_) => {
                                 routing.lock().journaled.remove(&session_id);
                                 if let Some(journal) = journal.as_deref()
-                                    && let Err(error) = journal.remove(&session_id)
+                                    && let Err(error) = journal.remove_for(provider, &session_id)
                                 {
                                     report_journal_error(&session_id, &error.to_string());
                                 }
                                 send_payload(
                                     &event_tx,
-                                    AgentStreamPayload::SessionDeleted { session_id },
-                                )?;
+                                    AgentStreamPayload::SessionDeleted { client, session_id },
+                                )
+                                .await?;
                             }
                             Err(error) => send_payload(
                                 &event_tx,
                                 AgentStreamPayload::SessionDeleteFailed {
+                                    client,
                                     message: format!("could not delete session: {error}"),
                                 },
-                            )?,
+                            )
+                            .await?,
                         }
                     }
-                    RuntimeCommand::Prompt { prompt } => {
+                    RuntimeCommand::Prompt { turn_id, prompt } => {
                         let Some(session_id) = session.clone() else {
                             send_payload(
                                 &event_tx,
                                 AgentStreamPayload::PaneFailed {
                                     message: "agent session is not ready".to_owned(),
                                 },
-                            )?;
+                            )
+                            .await?;
                             continue;
                         };
                         let prompt_events = event_tx.clone();
@@ -991,8 +1391,69 @@ pub(crate) async fn run_agent_connection(
                             session_id,
                             prompt_blocks(prompt),
                         ));
-                        connection.spawn(async move {
-                            let outcome = match request.block_task().await {
+                        let (cancel_tx, cancel_rx) = async_channel::bounded::<()>(1);
+                        let (done_tx, done_rx) = async_channel::bounded::<()>(1);
+                        let deferred = {
+                            let mut prompts = prompt_controls.lock();
+                            prompts.last_consumed = prompts.last_consumed.max(turn_id);
+                            if let Some(deferred) = prompts.deferred.remove(&turn_id) {
+                                Some(deferred)
+                            } else {
+                                prompts.pending.insert(
+                                    turn_id,
+                                    PendingPromptCancellation {
+                                        cancel: cancel_tx,
+                                        done: done_rx,
+                                    },
+                                );
+                                None
+                            }
+                        };
+                        if let Some(deferred) = deferred {
+                            send_payload(
+                                &event_tx,
+                                AgentStreamPayload::PromptAccepted { turn_id },
+                            )
+                            .await?;
+                            match deferred {
+                                DeferredPromptControl::Cancel => {
+                                    send_payload(
+                                        &event_tx,
+                                        AgentStreamPayload::PromptFinished {
+                                            turn_id,
+                                            outcome: AgentPromptOutcome::Finished {
+                                                stop_reason: Value::String("cancelled".to_owned()),
+                                            },
+                                        },
+                                    )
+                                    .await?;
+                                }
+                                DeferredPromptControl::Abandon => {
+                                    send_payload(
+                                        &event_tx,
+                                        AgentStreamPayload::TurnAbandoned { turn_id },
+                                    )
+                                    .await?;
+                                }
+                            }
+                            continue;
+                        }
+                        let task_prompts = Arc::clone(&prompt_controls);
+                        let spawned = connection.spawn(async move {
+                            let completed = futures_lite::future::race(
+                                async { Some(request.block_task().await) },
+                                async {
+                                    let _ = cancel_rx.recv().await;
+                                    None
+                                },
+                            )
+                            .await;
+                            task_prompts.lock().pending.remove(&turn_id);
+                            let _ = done_tx.try_send(());
+                            let Some(completed) = completed else {
+                                return Ok(());
+                            };
+                            let outcome = match completed {
                                 Ok(response) => AgentPromptOutcome::Finished {
                                     stop_reason: serde_json::to_value(response.stop_reason)
                                         .unwrap_or(Value::Null),
@@ -1002,57 +1463,40 @@ pub(crate) async fn run_agent_connection(
                                 },
                             };
                             let _ = prompt_events
-                                .send(AgentStreamPayload::PromptFinished { outcome })
+                                .send(AgentStreamPayload::PromptFinished { turn_id, outcome })
                                 .await;
                             Ok(())
-                        })?;
-                    }
-                    RuntimeCommand::Cancel => {
-                        if let Some(session_id) = session.clone() {
-                            connection.send_notification(CancelNotification::new(session_id))?;
-                            cancel_pending_permissions(&routing, &event_tx)?;
+                        });
+                        if let Err(error) = spawned {
+                            prompt_controls.lock().pending.remove(&turn_id);
+                            return Err(error);
                         }
-                    }
-                    RuntimeCommand::RespondPermission {
-                        request_id,
-                        option_id,
-                    } => {
-                        let pending = routing.lock().permissions.remove(&request_id);
-                        if let Some(pending) = pending {
-                            let canceled = option_id.is_none();
-                            let outcome = option_id.map_or(
-                                RequestPermissionOutcome::Cancelled,
-                                |option_id| {
-                                    RequestPermissionOutcome::Selected(
-                                        SelectedPermissionOutcome::new(option_id),
-                                    )
-                                },
-                            );
-                            pending
-                                .responder
-                                .respond(RequestPermissionResponse::new(outcome))?;
-                            send_payload(
-                                &event_tx,
-                                AgentStreamPayload::PermissionResolved {
-                                    request_id,
-                                    canceled,
-                                },
-                            )?;
-                        }
+                        send_payload(
+                            &event_tx,
+                            AgentStreamPayload::PromptAccepted { turn_id },
+                        )
+                        .await?;
                     }
                     RuntimeCommand::Authenticate { method_id } => {
-                        match connection
-                            .send_request(AuthenticateRequest::new(method_id))
-                            .block_task()
-                            .await
+                        match await_rpc(
+                            connection
+                                .send_request(AuthenticateRequest::new(method_id))
+                                .block_task(),
+                            RPC_TIMEOUT,
+                            "ACP authentication",
+                        )
+                        .await
                         {
-                            Ok(_) => send_payload(&event_tx, AgentStreamPayload::Authenticated)?,
+                            Ok(_) => {
+                                send_payload(&event_tx, AgentStreamPayload::Authenticated).await?;
+                            }
                             Err(error) => send_payload(
                                 &event_tx,
                                 AgentStreamPayload::AuthenticationFailed {
                                     message: format!("authentication failed: {error}"),
                                 },
-                            )?,
+                            )
+                            .await?,
                         }
                     }
                     RuntimeCommand::SetConfigOption { option_id, value } => {
@@ -1063,17 +1507,22 @@ pub(crate) async fn run_agent_connection(
                                     option_id,
                                     message: "agent session is not ready".to_owned(),
                                 },
-                            )?;
+                            )
+                            .await?;
                             continue;
                         };
-                        match connection
-                            .send_request(SetSessionConfigOptionRequest::new(
+                        match await_rpc(
+                            connection
+                                .send_request(SetSessionConfigOptionRequest::new(
                                 session_id,
                                 option_id.clone(),
                                 SessionConfigOptionValue::value_id(value.clone()),
-                            ))
-                            .block_task()
-                            .await
+                                ))
+                                .block_task(),
+                            RPC_TIMEOUT,
+                            "ACP setting change",
+                        )
+                        .await
                         {
                             Ok(response) => send_payload(
                                 &event_tx,
@@ -1082,14 +1531,16 @@ pub(crate) async fn run_agent_connection(
                                     value,
                                     config_options: json_of(&response.config_options)?,
                                 },
-                            )?,
+                            )
+                            .await?,
                             Err(error) => send_payload(
                                 &event_tx,
                                 AgentStreamPayload::SettingFailed {
                                     option_id,
                                     message: format!("could not change agent setting: {error}"),
                                 },
-                            )?,
+                            )
+                            .await?,
                         }
                     }
                     RuntimeCommand::SetMode { mode_id } => {
@@ -1100,18 +1551,27 @@ pub(crate) async fn run_agent_connection(
                                     option_id: mode_id,
                                     message: "agent session is not ready".to_owned(),
                                 },
-                            )?;
+                            )
+                            .await?;
                             continue;
                         };
-                        match connection
-                            .send_request(SetSessionModeRequest::new(session_id, mode_id.clone()))
-                            .block_task()
-                            .await
+                        match await_rpc(
+                            connection
+                                .send_request(SetSessionModeRequest::new(
+                                    session_id,
+                                    mode_id.clone(),
+                                ))
+                                .block_task(),
+                            RPC_TIMEOUT,
+                            "ACP mode change",
+                        )
+                        .await
                         {
                             Ok(_) => send_payload(
                                 &event_tx,
                                 AgentStreamPayload::ModeChanged { mode_id },
-                            )?,
+                            )
+                            .await?,
                             Err(error) => send_payload(
                                 &event_tx,
                                 AgentStreamPayload::SettingFailed {
@@ -1120,16 +1580,21 @@ pub(crate) async fn run_agent_connection(
                                         "could not change agent permission mode: {error}"
                                     ),
                                 },
-                            )?,
+                            )
+                            .await?,
                         }
                     }
                     RuntimeCommand::Shutdown => {
                         if let Some(session_id) = session.clone() {
                             if capabilities.close {
-                                if let Err(error) = connection
-                                    .send_request(CloseSessionRequest::new(session_id))
-                                    .block_task()
-                                    .await
+                                if let Err(error) = await_rpc(
+                                    connection
+                                        .send_request(CloseSessionRequest::new(session_id))
+                                        .block_task(),
+                                    CLOSE_TIMEOUT,
+                                    "ACP session close",
+                                )
+                                .await
                                 {
                                     log::warn!(target: "zz::agent", "could not close ACP session during shutdown: {error}");
                                 }
@@ -1137,7 +1602,7 @@ pub(crate) async fn run_agent_connection(
                                 connection.send_notification(CancelNotification::new(session_id))?;
                             }
                         }
-                        cancel_pending_permissions(&routing, &event_tx)?;
+                        cancel_pending_permissions(&routing, &event_tx).await?;
                         break;
                     }
                 }
@@ -1156,7 +1621,8 @@ fn spawn_close_session(
 ) -> Result<(), agent_client_protocol::Error> {
     let close = connection.send_request(CloseSessionRequest::new(session_id));
     connection.spawn(async move {
-        if let Err(error) = close.block_task().await {
+        if let Err(error) = await_rpc(close.block_task(), CLOSE_TIMEOUT, "ACP session close").await
+        {
             log::warn!(target: "zz::agent", "could not close {reason}: {error}");
         }
         Ok(())
@@ -1177,11 +1643,12 @@ fn valid_session_cursor(cursor: &str) -> bool {
 
 fn valid_session_summary(session: &AgentSessionSummary) -> bool {
     valid_session_id(&session.session_id)
-        && session.cwd.is_absolute()
+        && valid_session_directory(&session.cwd)
+        && session.additional_directories.len() <= MAX_AGENT_SESSION_DIRECTORIES
         && session
             .additional_directories
             .iter()
-            .all(|directory| directory.is_absolute())
+            .all(|directory| valid_session_directory(directory))
         && session.title.as_deref().is_none_or(|title| {
             title.len() <= MAX_SESSION_TITLE_BYTES && !title.chars().any(char::is_control)
         })
@@ -1191,20 +1658,56 @@ fn valid_session_summary(session: &AgentSessionSummary) -> bool {
         })
 }
 
+fn valid_session_directory(path: &std::path::Path) -> bool {
+    path.is_absolute() && path.as_os_str().as_encoded_bytes().len() <= MAX_GUI_TEXT_BYTES
+}
+
 fn clean_session_metadata(value: &str, max_bytes: usize) -> Option<String> {
     let value = value.trim();
     (!value.is_empty() && value.len() <= max_bytes && !value.chars().any(char::is_control))
         .then(|| value.to_owned())
 }
 
-fn send_payload(
+async fn send_payload(
     sender: &Sender<AgentStreamPayload>,
     payload: AgentStreamPayload,
 ) -> Result<(), agent_client_protocol::Error> {
-    sender.try_send(payload).map_err(|error| {
+    validate_payload(&payload)?;
+    sender.send(payload).await.map_err(|error| {
         agent_client_protocol::Error::internal_error()
             .data(format!("agent stream is unavailable: {error}"))
     })
+}
+
+fn validate_payload(payload: &AgentStreamPayload) -> Result<usize, agent_client_protocol::Error> {
+    let bytes = serde_json::to_vec(payload).map_err(|error| {
+        agent_client_protocol::Error::internal_error()
+            .data(format!("could not encode agent stream item: {error}"))
+    })?;
+    let limit = match payload {
+        AgentStreamPayload::PermissionRequested { .. } => MAX_AGENT_PERMISSION_BYTES,
+        _ => MAX_AGENT_RESULT_BYTES,
+    };
+    if bytes.len() > limit {
+        return Err(agent_client_protocol::Error::internal_error()
+            .data(format!("agent stream item exceeds the {limit} byte limit")));
+    }
+    Ok(bytes.len())
+}
+
+async fn await_rpc<T>(
+    request: impl Future<Output = Result<T, agent_client_protocol::Error>>,
+    timeout: Duration,
+    operation: &'static str,
+) -> Result<T, agent_client_protocol::Error> {
+    futures_lite::future::race(request, async move {
+        smol::Timer::after(timeout).await;
+        Err(agent_client_protocol::Error::internal_error().data(format!(
+            "{operation} timed out after {} seconds",
+            timeout.as_secs()
+        )))
+    })
+    .await
 }
 
 /// The ACP types are JSON by construction, so an encode failure is a bug, not
@@ -1226,34 +1729,33 @@ fn encode_update(update: &SessionUpdate) -> Result<Value, agent_client_protocol:
     json_of(update)
 }
 
-fn encode_updates(updates: &[SessionUpdate]) -> Result<Vec<Value>, agent_client_protocol::Error> {
-    updates.iter().map(encode_update).collect()
+fn update_payload(
+    update: &SessionUpdate,
+) -> Result<AgentStreamPayload, agent_client_protocol::Error> {
+    let payload = AgentStreamPayload::Update {
+        update: encode_update(update)?,
+    };
+    validate_payload(&payload)?;
+    Ok(payload)
 }
 
-fn cancel_pending_permissions(
+async fn cancel_pending_permissions(
     routing: &Arc<Mutex<RuntimeRouting>>,
     event_tx: &Sender<AgentStreamPayload>,
 ) -> Result<(), agent_client_protocol::Error> {
-    let pending_ids = routing
-        .lock()
-        .permissions
-        .keys()
-        .copied()
-        .collect::<Vec<_>>();
-    for request_id in pending_ids {
-        let pending = routing.lock().permissions.remove(&request_id);
-        if let Some(pending) = pending {
-            pending.responder.respond(RequestPermissionResponse::new(
-                RequestPermissionOutcome::Cancelled,
-            ))?;
-            send_payload(
-                event_tx,
-                AgentStreamPayload::PermissionResolved {
-                    request_id,
-                    canceled: true,
-                },
-            )?;
-        }
+    let pending = routing.lock().take_permissions();
+    for (request_id, pending) in pending {
+        pending.responder.respond(RequestPermissionResponse::new(
+            RequestPermissionOutcome::Cancelled,
+        ))?;
+        send_payload(
+            event_tx,
+            AgentStreamPayload::PermissionResolved {
+                request_id,
+                canceled: true,
+            },
+        )
+        .await?;
     }
     Ok(())
 }
@@ -1298,7 +1800,7 @@ fn preferred_allow_option(options: &[PermissionOption]) -> Option<String> {
 }
 
 fn prompt_blocks(prompt: AgentPrompt) -> Vec<ContentBlock> {
-    let AgentPrompt { text, images } = prompt;
+    let AgentPrompt { text, images, .. } = prompt;
     let mut blocks = Vec::with_capacity(usize::from(!text.is_empty()) + images.len());
     if !text.is_empty() {
         blocks.push(ContentBlock::Text(TextContent::new(text)));
@@ -1383,6 +1885,21 @@ mod tests {
     }
 
     #[test]
+    fn an_rpc_that_never_answers_hits_its_deadline() {
+        let result = futures_lite::future::block_on(await_rpc(
+            std::future::pending::<Result<(), agent_client_protocol::Error>>(),
+            Duration::from_millis(1),
+            "fixture RPC",
+        ));
+        assert!(
+            result
+                .expect_err("the pending request must time out")
+                .to_string()
+                .contains("fixture RPC timed out")
+        );
+    }
+
+    #[test]
     fn the_preferred_allow_option_never_rejects() {
         assert_eq!(
             preferred_allow_option(&[
@@ -1450,6 +1967,7 @@ mod tests {
     #[test]
     fn a_prompt_carries_its_text_then_its_images() {
         let blocks = prompt_blocks(AgentPrompt {
+            owner: ClientInstanceId::default(),
             text: "look".to_owned(),
             images: vec![AgentImage {
                 format: "image/png".to_owned(),

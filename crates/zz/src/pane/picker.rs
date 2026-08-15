@@ -7,7 +7,7 @@ use zz_ui::{
     ActiveTheme as _, Icon, IconName, Sizable as _, kbd::Kbd, navigation::workspace_row_highlight,
 };
 
-use crate::mux::client::MuxClient;
+use crate::mux::{client::MuxClient, hosts::HostId};
 use crate::window::corners::{WindowCorners, round_div_radii};
 use crate::{browser, config};
 use zz_ui::Colorize as _;
@@ -118,15 +118,19 @@ fn wrapping_step(selected: usize, delta: isize, len: usize) -> usize {
     (selected + len).wrapping_add_signed(delta) % len
 }
 
-fn materialize_command(pane: PaneId, choice: PaneChoice) -> CommandInvocation {
-    CommandInvocation::new(
-        "select-pane-kind",
-        [
-            "-t".to_owned(),
-            pane.to_string(),
-            choice.command_argument().to_owned(),
-        ],
-    )
+fn materialize_command(
+    pane: PaneId,
+    choice: PaneChoice,
+    agent_cwd: Option<&std::path::Path>,
+) -> CommandInvocation {
+    let mut args = vec!["-t".to_owned(), pane.to_string()];
+    if choice == PaneChoice::Agent
+        && let Some(cwd) = agent_cwd
+    {
+        args.extend(["-c".to_owned(), cwd.to_string_lossy().into_owned()]);
+    }
+    args.push(choice.command_argument().to_owned());
+    CommandInvocation::new("select-pane-kind", args)
 }
 
 fn close_command(pane: PaneId) -> CommandInvocation {
@@ -168,9 +172,12 @@ impl PanePickerView {
     }
 
     fn activate(&self, choice: PaneChoice, cx: &Context<Self>) {
-        self.mux
-            .read(cx)
-            .execute(materialize_command(self.pane, choice));
+        let agent_config = config::agent_config(cx);
+        let mux = self.mux.read(cx);
+        let agent_cwd = (mux.attached_host() == HostId::LOCAL)
+            .then_some(agent_config.working_directory.as_deref())
+            .flatten();
+        mux.execute(materialize_command(self.pane, choice, agent_cwd));
     }
 
     fn close(&self, cx: &Context<Self>) {
@@ -413,16 +420,31 @@ mod tests {
     #[test]
     fn activation_targets_the_existing_picker_pane() {
         assert_eq!(
-            materialize_command(PaneId(42), PaneChoice::Browser),
+            materialize_command(
+                PaneId(42),
+                PaneChoice::Browser,
+                Some(std::path::Path::new("/x"))
+            ),
             CommandInvocation::new("select-pane-kind", ["-t", "%42", "browser"])
         );
         assert_eq!(
-            materialize_command(PaneId(42), PaneChoice::Editor),
+            materialize_command(
+                PaneId(42),
+                PaneChoice::Editor,
+                Some(std::path::Path::new("/x"))
+            ),
             CommandInvocation::new("select-pane-kind", ["-t", "%42", "editor"])
         );
         assert_eq!(
-            materialize_command(PaneId(7), PaneChoice::Agent),
-            CommandInvocation::new("select-pane-kind", ["-t", "%7", "agent"])
+            materialize_command(
+                PaneId(7),
+                PaneChoice::Agent,
+                Some(std::path::Path::new("/workspace")),
+            ),
+            CommandInvocation::new(
+                "select-pane-kind",
+                ["-t", "%7", "-c", "/workspace", "agent"],
+            )
         );
         assert_eq!(
             close_command(PaneId(7)),

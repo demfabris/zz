@@ -76,12 +76,9 @@ BEGIN {
 const SOAK_ITEMS: usize = 50_000;
 const SOAK_TEXT_BYTES: usize = 120;
 const SOAK_BLOB_BYTES: usize = 900;
-/// Two thousand items of roughly 4 KiB are twice the daemon's 4 MiB per-client agent
-/// lane, which is what makes the lag marker inevitable for a client that stops
-/// reading.
-const SLOW_ITEMS: usize = 2_000;
-const SLOW_TEXT_BYTES: usize = 3_800;
-const SLOW_BLOB_BYTES: usize = 3_800;
+const SLOW_ITEMS: usize = 1_500;
+const SLOW_TEXT_BYTES: usize = 8_000;
+const SLOW_BLOB_BYTES: usize = 8_000;
 
 /// A terminal that echoes what is typed at it, so the terminal lane can be
 /// watched while the agent lane is jammed.
@@ -216,6 +213,7 @@ impl Peer {
         };
         peer.send(&ProtocolMessage::ClientHello(ClientHello {
             protocol_version: PROTOCOL_VERSION,
+            client_instance_id: zz_protocol::ClientInstanceId(1),
             kind: ClientKind::Interactive,
             device_name: Some("soak".to_owned()),
             capabilities: Vec::new(),
@@ -473,8 +471,8 @@ fn agent_stream_soak() {
     );
     assert_eq!(
         items,
-        u64::try_from(SOAK_ITEMS + 1).unwrap_or(u64::MAX),
-        "the turn is every streamed update plus the item that closes it"
+        u64::try_from(SOAK_ITEMS + 2).unwrap_or(u64::MAX),
+        "the turn is its start, every streamed update, and the item that closes it"
     );
     assert_eq!(
         kinds.get("update").copied(),
@@ -510,8 +508,6 @@ fn agent_stream_soak_slow_client() {
     );
 
     soak.prompt(&mut peer, "soak a client that stops reading");
-    // Nothing is read for a moment: the pane's lane fills past the 4 MiB cap
-    // while the terminal keeps producing on its own.
     thread::sleep(Duration::from_secs(2));
     let terminal = soak.terminal.to_string();
     for keys in [
@@ -550,7 +546,7 @@ fn agent_stream_soak_slow_client() {
 
     assert!(
         first_marker >= 1,
-        "the 4 MiB lane cap trips into a lag marker"
+        "the bounded agent lane trips into a lag marker"
     );
     assert!(
         transcript.terminal_frames > 0,

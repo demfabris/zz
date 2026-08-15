@@ -53,6 +53,7 @@ pub struct TextViewState {
     pub(super) parsed_content: ParsedContent,
     text: String,
     revision: usize,
+    deferred_full_parse: bool,
     parsed_error: Option<SharedString>,
     tx: Sender<UpdateOptions>,
     _parse_task: Task<()>,
@@ -61,10 +62,14 @@ pub struct TextViewState {
 
 impl TextViewState {
     pub fn markdown(text: &str, cx: &mut Context<Self>) -> Self {
-        Self::new(text, cx)
+        Self::new(text, true, cx)
     }
 
-    fn new(text: &str, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn markdown_deferred(text: &str, cx: &mut Context<Self>) -> Self {
+        Self::new(text, false, cx)
+    }
+
+    fn new(text: &str, parse_initial: bool, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
         let entity_id = cx.entity_id();
 
@@ -87,6 +92,7 @@ impl TextViewState {
                                 state.parsed_error = Some(err);
                             }
                         }
+                        state.deferred_full_parse = false;
                         if !state.is_selecting {
                             state.reset_selection();
                         }
@@ -117,11 +123,12 @@ impl TextViewState {
             parsed_error: None,
             text: text.to_string(),
             revision: 0,
+            deferred_full_parse: !parse_initial,
             tx,
             _parse_task,
             _receive_task,
         };
-        this.increment_update(&text, false, cx);
+        this.increment_update(&text, false, parse_initial, cx);
         this
     }
 
@@ -134,10 +141,41 @@ impl TextViewState {
             return;
         }
 
+        self.replace_markdown(text, false, cx);
+    }
+
+    pub(crate) fn replace_markdown(
+        &mut self,
+        text: &str,
+        defer_full_parse: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.text.clear();
         self.text.push_str(text);
+        self.deferred_full_parse = defer_full_parse;
         self.parsed_error = None;
-        self.increment_update(text, false, cx);
+        self.increment_update(text, false, !defer_full_parse, cx);
+    }
+
+    pub(crate) fn synchronize_markdown(
+        &mut self,
+        text: &str,
+        defer_full_parse: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.text.as_str() == text {
+            return;
+        }
+        let len = self.text.len();
+        if len < text.len()
+            && text.is_char_boundary(len)
+            && self.text.as_bytes() == &text.as_bytes()[..len]
+        {
+            self.text.push_str(&text[len..]);
+            self.increment_update(&text[len..], true, false, cx);
+            return;
+        }
+        self.replace_markdown(text, defer_full_parse, cx);
     }
 
     pub fn push_str(&mut self, new_text: &str, cx: &mut Context<Self>) {
@@ -145,7 +183,7 @@ impl TextViewState {
             return;
         }
         self.text.push_str(new_text);
-        self.increment_update(new_text, true, cx);
+        self.increment_update(new_text, true, false, cx);
     }
 
     pub(crate) fn set_markdown_extensions(
@@ -159,7 +197,7 @@ impl TextViewState {
 
         self.markdown_extensions = markdown_extensions;
         let text = self.text.clone();
-        self.increment_update(&text, false, cx);
+        self.increment_update(&text, false, !self.deferred_full_parse, cx);
     }
 
     pub fn selected_text(&self) -> String {
@@ -174,7 +212,13 @@ impl TextViewState {
         self.parsed_content.document.selected_text()
     }
 
-    fn increment_update(&mut self, text: &str, append: bool, cx: &mut Context<Self>) {
+    fn increment_update(
+        &mut self,
+        text: &str,
+        append: bool,
+        parse_synchronously: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.revision += 1;
         let update_options = UpdateOptions {
             revision: self.revision,
@@ -183,7 +227,7 @@ impl TextViewState {
             markdown_extensions: self.markdown_extensions.clone(),
         };
 
-        if !append {
+        if parse_synchronously {
             match parse_content(ParsedContent::default(), &update_options) {
                 Ok(content) => {
                     self.parsed_content = content;
@@ -545,6 +589,29 @@ mod tests {
         state.read_with(cx, |state, _| {
             assert_eq!(state.text.as_str(), "");
             assert_eq!(state.source().as_str(), "");
+        });
+    }
+
+    #[gpui::test]
+    fn deferred_markdown_parses_after_construction(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let state =
+            cx.update(|cx| cx.new(|cx| TextViewState::markdown_deferred("# delayed\n\nbody", cx)));
+        state.update(cx, |state, cx| {
+            state.set_markdown_extensions(
+                Arc::new(MarkdownExtensions::default().link_rewriter(|_| None)),
+                cx,
+            );
+        });
+
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.source().as_str(), "");
+        });
+
+        cx.run_until_parked();
+
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.source().as_str(), "# delayed\n\nbody");
         });
     }
 

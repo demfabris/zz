@@ -20,9 +20,6 @@ fn static_library() -> PathBuf {
     let deps = executable.parent().expect("deps directory");
     let debug = deps.parent().expect("target profile directory");
     let uplifted = debug.join("libzz_client_ffi.a");
-    if uplifted.exists() {
-        return uplifted;
-    }
     let mut candidates: Vec<PathBuf> = std::fs::read_dir(deps)
         .expect("read deps directory")
         .filter_map(Result::ok)
@@ -34,7 +31,10 @@ fn static_library() -> PathBuf {
         })
         .collect();
     candidates.sort();
-    candidates.pop().expect("libzz_client_ffi.a was built")
+    candidates
+        .pop()
+        .or_else(|| uplifted.exists().then_some(uplifted))
+        .expect("libzz_client_ffi.a was built")
 }
 
 fn compile_smoke_client(scratch: &Path) -> PathBuf {

@@ -13,7 +13,8 @@ use zz_terminal::{
 use crate::message::{MAX_KITTY_IMAGE_BYTES, MAX_KITTY_IMAGE_CHUNK_BYTES};
 use crate::{
     AgentSessionOpKind, BrowserCommand, Event, EventPayload, MAX_AGENT_IMAGE_FORMAT_BYTES,
-    MAX_AGENT_OPTION_BYTES, MAX_AGENT_PROMPT_BYTES, MAX_AGENT_RESULT_BYTES, MAX_AGENT_SEND_BYTES,
+    MAX_AGENT_OPTION_BYTES, MAX_AGENT_PROMPT_BYTES, MAX_AGENT_PROMPT_IMAGES,
+    MAX_AGENT_RESULT_BYTES, MAX_AGENT_SEND_BYTES, MAX_AGENT_SESSION_DIRECTORIES,
     MAX_AGENT_SESSION_ID_BYTES, MAX_AGENT_UPDATES_BYTES, MAX_GUI_TEXT_BYTES,
     MAX_PASTE_UPLOAD_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, MAX_PASTE_UPLOAD_EXTENSION_BYTES,
     PROTOCOL_VERSION, PaneId, PasteUploadPurpose, PastedImageFormat, ProtocolMessage,
@@ -451,6 +452,11 @@ fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolErr
                 "agent prompt image formats must be at most {MAX_AGENT_IMAGE_FORMAT_BYTES} bytes"
             )));
         }
+        if images.len() > MAX_AGENT_PROMPT_IMAGES {
+            return Err(ProtocolError::InvalidAgentPayload(format!(
+                "agent prompts may attach at most {MAX_AGENT_PROMPT_IMAGES} images"
+            )));
+        }
     }
     if !agent_option_strings_are_bounded(message) {
         return Err(ProtocolError::InvalidAgentPayload(format!(
@@ -458,15 +464,52 @@ fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolErr
              {MAX_AGENT_OPTION_BYTES} bytes"
         )));
     }
-    if let ProtocolMessage::AgentSessionOp {
-        op: AgentSessionOpKind::Switch { session_id } | AgentSessionOpKind::Delete { session_id },
-        ..
-    } = message
-        && session_id.len() > MAX_AGENT_SESSION_ID_BYTES
-    {
-        return Err(ProtocolError::InvalidAgentPayload(format!(
-            "agent session IDs must be at most {MAX_AGENT_SESSION_ID_BYTES} bytes"
-        )));
+    if let ProtocolMessage::AgentSessionOp { op, .. } = message {
+        let session_id = match op {
+            AgentSessionOpKind::Switch { session_id, .. }
+            | AgentSessionOpKind::Delete { session_id } => Some(session_id),
+            AgentSessionOpKind::List { .. } | AgentSessionOpKind::New { .. } => None,
+        };
+        if session_id.is_some_and(|session_id| session_id.len() > MAX_AGENT_SESSION_ID_BYTES) {
+            return Err(ProtocolError::InvalidAgentPayload(format!(
+                "agent session IDs must be at most {MAX_AGENT_SESSION_ID_BYTES} bytes"
+            )));
+        }
+        if matches!(
+            op,
+            AgentSessionOpKind::List {
+                cursor: Some(cursor),
+                ..
+            } if cursor.len() > MAX_AGENT_SESSION_ID_BYTES
+        ) {
+            return Err(ProtocolError::InvalidAgentPayload(format!(
+                "agent session cursors must be at most {MAX_AGENT_SESSION_ID_BYTES} bytes"
+            )));
+        }
+        let (cwd, additional_directories) = match op {
+            AgentSessionOpKind::List { cwd, .. } => (cwd.as_ref(), &[][..]),
+            AgentSessionOpKind::New { cwd } => (Some(cwd), &[][..]),
+            AgentSessionOpKind::Switch {
+                cwd,
+                additional_directories,
+                ..
+            } => (Some(cwd), additional_directories.as_slice()),
+            AgentSessionOpKind::Delete { .. } => (None, &[][..]),
+        };
+        if cwd.is_some_and(|path| {
+            path.as_os_str().is_empty()
+                || path.as_os_str().as_encoded_bytes().len() > MAX_GUI_TEXT_BYTES
+        }) || additional_directories.len() > MAX_AGENT_SESSION_DIRECTORIES
+            || additional_directories.iter().any(|path| {
+                path.as_os_str().is_empty()
+                    || path.as_os_str().as_encoded_bytes().len() > MAX_GUI_TEXT_BYTES
+            })
+        {
+            return Err(ProtocolError::InvalidAgentPayload(
+                "agent session directories must be nonempty and stay inside their wire limits"
+                    .to_owned(),
+            ));
+        }
     }
     if let ProtocolMessage::Event(Event {
         payload: EventPayload::AgentUpdates {
@@ -2028,6 +2071,7 @@ mod tests {
             protocol_version: crate::PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
+            client_instance_id: crate::ClientInstanceId(13),
             capabilities: vec!["terminal-appearance-v1".to_owned()],
             appearance,
             appearance_provenance,
@@ -2108,6 +2152,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
+            client_instance_id: crate::ClientInstanceId(13),
             capabilities: vec!["config-overrides-v1".to_owned()],
             appearance: TerminalAppearance::default(),
             appearance_provenance: AppearanceProvenance::default(),
@@ -2145,6 +2190,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
+            client_instance_id: crate::ClientInstanceId(13),
             capabilities: Vec::new(),
             appearance: TerminalAppearance::default(),
             appearance_provenance: AppearanceProvenance::default(),
@@ -2191,6 +2237,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
+            client_instance_id: crate::ClientInstanceId(13),
             capabilities: Vec::new(),
             appearance: TerminalAppearance::default(),
             appearance_provenance: AppearanceProvenance::default(),
@@ -2221,6 +2268,7 @@ mod tests {
             protocol_version: crate::PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
+            client_instance_id: crate::ClientInstanceId(13),
             capabilities: Vec::new(),
             appearance,
             appearance_provenance: AppearanceProvenance::default(),
@@ -2252,6 +2300,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
+            client_instance_id: crate::ClientInstanceId(13),
             capabilities: Vec::new(),
             appearance,
             appearance_provenance: AppearanceProvenance::default(),
@@ -2279,6 +2328,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION - 1,
             server_id: 7,
             client_id: crate::ClientId(11),
+            client_instance_id: crate::ClientInstanceId(13),
             capabilities: Vec::new(),
             appearance: TerminalAppearance::default(),
             appearance_provenance: AppearanceProvenance::default(),
@@ -2326,6 +2376,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 server_id: 7,
                 client_id: crate::ClientId(11),
+                client_instance_id: crate::ClientInstanceId(13),
                 capabilities: Vec::new(),
                 appearance,
                 appearance_provenance: AppearanceProvenance::default(),
@@ -2353,6 +2404,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 server_id: 7,
                 client_id: crate::ClientId(11),
+                client_instance_id: crate::ClientInstanceId(13),
                 capabilities,
                 appearance: TerminalAppearance::default(),
                 appearance_provenance: AppearanceProvenance::default(),
@@ -2383,6 +2435,7 @@ mod tests {
         ] {
             let message = ProtocolMessage::ClientHello(crate::ClientHello {
                 protocol_version: PROTOCOL_VERSION,
+                client_instance_id: crate::ClientInstanceId(13),
                 kind: crate::ClientKind::Interactive,
                 device_name: Some("fixture".to_owned()),
                 capabilities,
@@ -2410,6 +2463,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             server_id: 7,
             client_id: crate::ClientId(11),
+            client_instance_id: crate::ClientInstanceId(13),
             capabilities: Vec::new(),
             appearance: TerminalAppearance::default(),
             appearance_provenance: AppearanceProvenance::default(),
@@ -2531,6 +2585,7 @@ mod tests {
     fn stream_messages_round_trip() {
         let message = ProtocolMessage::ClientHello(crate::ClientHello {
             protocol_version: PROTOCOL_VERSION,
+            client_instance_id: crate::ClientInstanceId(13),
             kind: crate::ClientKind::Command,
             device_name: None,
             capabilities: Vec::new(),
@@ -3141,6 +3196,7 @@ mod tests {
             queued_prompts: 2,
             session_id: Some("sess-7".to_owned()),
             title: Some("port the runtime".to_owned()),
+            error: Some("setting failed".to_owned()),
             auth_methods: r#"[{"id":"oauth"}]"#.to_owned(),
             config_options: r#"[{"id":"model","value":"opus"}]"#.to_owned(),
             modes: r#"{"current":"plan"}"#.to_owned(),
@@ -3199,16 +3255,24 @@ mod tests {
             },
             ProtocolMessage::AgentSessionOp {
                 pane,
-                op: AgentSessionOpKind::List,
+                op: AgentSessionOpKind::List {
+                    cwd: Some("/work".into()),
+                    cursor: Some("page-2".to_owned()),
+                    replace: false,
+                },
             },
             ProtocolMessage::AgentSessionOp {
                 pane,
-                op: AgentSessionOpKind::New,
+                op: AgentSessionOpKind::New {
+                    cwd: "/next".into(),
+                },
             },
             ProtocolMessage::AgentSessionOp {
                 pane,
                 op: AgentSessionOpKind::Switch {
                     session_id: "sess-7".to_owned(),
+                    cwd: "/restored".into(),
+                    additional_directories: vec!["/shared".into()],
                 },
             },
             ProtocolMessage::AgentSessionOp {
@@ -3326,6 +3390,13 @@ mod tests {
             encode_protocol_message(&format(MAX_AGENT_IMAGE_FORMAT_BYTES + 1)),
             Err(ProtocolError::InvalidAgentPayload(_))
         ));
+        assert!(matches!(
+            encode_protocol_message(&prompt(
+                String::new(),
+                (0..=MAX_AGENT_PROMPT_IMAGES).map(|_| image(0)).collect(),
+            )),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
     }
 
     #[test]
@@ -3388,13 +3459,60 @@ mod tests {
 
         let session_op = |session_id: String| ProtocolMessage::AgentSessionOp {
             pane,
-            op: AgentSessionOpKind::Switch { session_id },
+            op: AgentSessionOpKind::Switch {
+                session_id,
+                cwd: "/work".into(),
+                additional_directories: Vec::new(),
+            },
         };
         assert!(
             encode_protocol_message(&session_op("s".repeat(MAX_AGENT_SESSION_ID_BYTES))).is_ok()
         );
         assert!(matches!(
             encode_protocol_message(&session_op("s".repeat(MAX_AGENT_SESSION_ID_BYTES + 1))),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+        assert!(
+            encode_protocol_message(&ProtocolMessage::AgentSessionOp {
+                pane,
+                op: AgentSessionOpKind::New {
+                    cwd: "relative".into(),
+                },
+            })
+            .is_ok()
+        );
+        assert!(matches!(
+            encode_protocol_message(&ProtocolMessage::AgentSessionOp {
+                pane,
+                op: AgentSessionOpKind::New {
+                    cwd: "x".repeat(MAX_GUI_TEXT_BYTES + 1).into(),
+                },
+            }),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+        assert!(matches!(
+            encode_protocol_message(&ProtocolMessage::AgentSessionOp {
+                pane,
+                op: AgentSessionOpKind::Switch {
+                    session_id: "session".to_owned(),
+                    cwd: "/work".into(),
+                    additional_directories: vec![
+                        "/shared".into();
+                        MAX_AGENT_SESSION_DIRECTORIES + 1
+                    ],
+                },
+            }),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+        assert!(matches!(
+            encode_protocol_message(&ProtocolMessage::AgentSessionOp {
+                pane,
+                op: AgentSessionOpKind::List {
+                    cwd: None,
+                    cursor: Some("c".repeat(MAX_AGENT_SESSION_ID_BYTES + 1)),
+                    replace: false,
+                },
+            }),
             Err(ProtocolError::InvalidAgentPayload(_))
         ));
     }
@@ -3459,6 +3577,15 @@ mod tests {
         );
         assert!(matches!(
             encode_protocol_message(&state(with_permission(MAX_AGENT_PERMISSION_BYTES + 1))),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+        let with_error = |length: usize| crate::AgentPaneWire {
+            error: Some("e".repeat(length)),
+            ..agent_state_fixture()
+        };
+        assert!(encode_protocol_message(&state(with_error(MAX_AGENT_STATE_BLOB_BYTES))).is_ok());
+        assert!(matches!(
+            encode_protocol_message(&state(with_error(MAX_AGENT_STATE_BLOB_BYTES + 1))),
             Err(ProtocolError::InvalidAgentPayload(_))
         ));
 

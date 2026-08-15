@@ -14,10 +14,10 @@ use crate::{ClientId, MuxSnapshot, PaneId, SessionId, SplitId, WindowId};
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-/// v52 publishes every key table instead of the prefix table alone, and
-/// routes chooser keys through the daemon's `choose-tree`/`choose-buffer`
-/// tables.
-pub const PROTOCOL_VERSION: u16 = 52;
+/// v53 moves the agent pane's ACP runtime into the daemon: prompts, session
+/// operations, and settings travel as commands, and the transcript streams
+/// back as journal-sequenced JSON items plus a small typed pane state.
+pub const PROTOCOL_VERSION: u16 = 53;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
@@ -29,6 +29,25 @@ pub const MAX_STATUS_TEXT_BYTES: usize = 1024;
 pub const MAX_AGENT_SEND_BYTES: usize = 1024 * 1024;
 /// Longest path or human-readable message carried by a GUI request or its reply.
 pub const MAX_GUI_TEXT_BYTES: usize = 64 * 1024;
+/// Largest complete agent prompt: its text plus every attached image. Clients
+/// normalize prompt images the way pasted ones are, so this mirrors
+/// [`MAX_PASTE_UPLOAD_BYTES`].
+pub const MAX_AGENT_PROMPT_BYTES: usize = 6 * 1024 * 1024;
+/// Longest encoded-format label one prompt image may name.
+pub const MAX_AGENT_IMAGE_FORMAT_BYTES: usize = 64;
+/// Longest option, mode, or authentication-method identifier on the agent lane.
+pub const MAX_AGENT_OPTION_BYTES: usize = 4 * 1024;
+/// Longest agent session identifier, matching what an agent pane descriptor accepts.
+pub const MAX_AGENT_SESSION_ID_BYTES: usize = 16 * 1024;
+/// Largest batch of journal items one `AgentUpdates` event may carry. The
+/// daemon splits a longer coalescing window across frames.
+pub const MAX_AGENT_UPDATES_BYTES: usize = 1024 * 1024;
+/// Largest JSON blob one [`AgentPaneWire`] field may carry.
+pub const MAX_AGENT_STATE_BLOB_BYTES: usize = 256 * 1024;
+/// Largest pending permission request payload carried by [`AgentPaneWire`].
+pub const MAX_AGENT_PERMISSION_BYTES: usize = 64 * 1024;
+/// Largest JSON reply to an agent session listing or turn-diff request.
+pub const MAX_AGENT_RESULT_BYTES: usize = 1024 * 1024;
 /// Largest complete image one paste upload may carry. Clients normalize
 /// pasted images to 5 MiB first, so this leaves that cap headroom.
 pub const MAX_PASTE_UPLOAD_BYTES: u32 = 6 * 1024 * 1024;
@@ -336,6 +355,110 @@ where
     deserialize_bounded_text(deserializer, MAX_GUI_TEXT_BYTES)
 }
 
+fn deserialize_agent_prompt_text<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_text(deserializer, MAX_AGENT_PROMPT_BYTES)
+}
+
+fn deserialize_agent_image_format<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_text(deserializer, MAX_AGENT_IMAGE_FORMAT_BYTES)
+}
+
+fn deserialize_agent_image_data<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let bytes = Vec::<u8>::deserialize(deserializer)?;
+    if bytes.len() > MAX_AGENT_PROMPT_BYTES {
+        return Err(D::Error::invalid_length(
+            bytes.len(),
+            &"a prompt image within the wire byte limit",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn deserialize_agent_option_text<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_text(deserializer, MAX_AGENT_OPTION_BYTES)
+}
+
+fn deserialize_optional_agent_option_text<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_optional_text(deserializer, MAX_AGENT_OPTION_BYTES)
+}
+
+fn deserialize_agent_session_id<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_text(deserializer, MAX_AGENT_SESSION_ID_BYTES)
+}
+
+fn deserialize_optional_agent_session_id<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_optional_text(deserializer, MAX_AGENT_SESSION_ID_BYTES)
+}
+
+fn deserialize_agent_state_blob<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_text(deserializer, MAX_AGENT_STATE_BLOB_BYTES)
+}
+
+fn deserialize_agent_permission_payload<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_text(deserializer, MAX_AGENT_PERMISSION_BYTES)
+}
+
+fn deserialize_agent_result<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_text(deserializer, MAX_AGENT_RESULT_BYTES)
+}
+
+fn deserialize_agent_update_items<'de, D>(deserializer: D) -> Result<Vec<Vec<u8>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let items = Vec::<Vec<u8>>::deserialize(deserializer)?;
+    if agent_update_batch_bytes(&items) > MAX_AGENT_UPDATES_BYTES {
+        return Err(D::Error::invalid_length(
+            items.len(),
+            &"an agent update batch within the wire byte limit",
+        ));
+    }
+    Ok(items)
+}
+
+/// Total wire bytes an `AgentUpdates` batch carries, saturating rather than
+/// wrapping so a forged length can never appear small.
+#[must_use]
+pub fn agent_update_batch_bytes(items: &[Vec<u8>]) -> usize {
+    items
+        .iter()
+        .fold(0_usize, |total, item| total.saturating_add(item.len()))
+}
+
 /// Whether `extension` can safely suffix a daemon-written file name. The daemon
 /// interpolates it into a path, so only lowercase ASCII alphanumerics pass.
 #[must_use]
@@ -426,6 +549,25 @@ where
 {
     let text = String::deserialize(deserializer)?;
     if text.len() > limit {
+        return Err(D::Error::invalid_length(
+            text.len(),
+            &"text within the wire byte limit",
+        ));
+    }
+    Ok(text)
+}
+
+fn deserialize_bounded_optional_text<'de, D>(
+    deserializer: D,
+    limit: usize,
+) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let text = Option::<String>::deserialize(deserializer)?;
+    if let Some(text) = &text
+        && text.len() > limit
+    {
         return Err(D::Error::invalid_length(
             text.len(),
             &"text within the wire byte limit",
@@ -783,6 +925,114 @@ impl AgentCommand {
         match self {
             Self::ComposerAppend { text } | Self::Prompt { text } => text,
         }
+    }
+}
+
+/// One image attached to an agent prompt, in the encoded form the daemon
+/// converts into an ACP content block.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentImage {
+    #[serde(deserialize_with = "deserialize_agent_image_format")]
+    pub format: String,
+    #[serde(deserialize_with = "deserialize_agent_image_data")]
+    pub data: Vec<u8>,
+}
+
+/// One session-management request against a pane's daemon-owned adapter.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AgentSessionOpKind {
+    List,
+    New,
+    Switch {
+        #[serde(deserialize_with = "deserialize_agent_session_id")]
+        session_id: String,
+    },
+    Delete {
+        #[serde(deserialize_with = "deserialize_agent_session_id")]
+        session_id: String,
+    },
+}
+
+/// The adapter connection phase a client renders without reading the stream.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AgentConnectionPhase {
+    #[default]
+    Starting,
+    Ready,
+    Running,
+    AwaitingPermission,
+    Failed {
+        #[serde(deserialize_with = "deserialize_agent_state_blob")]
+        message: String,
+    },
+}
+
+/// The permission request parked in the daemon, so a late-attaching client
+/// sees the same prompt the running client does.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentPermissionWire {
+    pub request_id: u64,
+    /// JSON: the tool call plus its options, shaped like the reducer's input.
+    #[serde(deserialize_with = "deserialize_agent_permission_payload")]
+    pub payload: String,
+}
+
+/// One agent pane's live state, small enough to publish to every client
+/// attached to the session. Postcard cannot carry the ACP SDK's JSON-shaped
+/// types, so auth methods, config options, and modes cross as JSON blobs.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentPaneWire {
+    pub phase: AgentConnectionPhase,
+    pub queued_prompts: u32,
+    #[serde(deserialize_with = "deserialize_optional_agent_session_id")]
+    pub session_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_optional_agent_option_text")]
+    pub title: Option<String>,
+    #[serde(deserialize_with = "deserialize_agent_state_blob")]
+    pub auth_methods: String,
+    #[serde(deserialize_with = "deserialize_agent_state_blob")]
+    pub config_options: String,
+    #[serde(deserialize_with = "deserialize_agent_state_blob")]
+    pub modes: String,
+    pub pending_permission: Option<AgentPermissionWire>,
+}
+
+impl AgentPaneWire {
+    /// Ensure a wire payload stays inside the agent state byte limits.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if let AgentConnectionPhase::Failed { message } = &self.phase
+            && message.len() > MAX_AGENT_STATE_BLOB_BYTES
+        {
+            return Err("agent failure message exceeds the wire byte limit");
+        }
+        if self
+            .session_id
+            .as_ref()
+            .is_some_and(|session_id| session_id.len() > MAX_AGENT_SESSION_ID_BYTES)
+        {
+            return Err("agent session ID exceeds the wire byte limit");
+        }
+        if self
+            .title
+            .as_ref()
+            .is_some_and(|title| title.len() > MAX_AGENT_OPTION_BYTES)
+        {
+            return Err("agent title exceeds the wire byte limit");
+        }
+        if self.auth_methods.len() > MAX_AGENT_STATE_BLOB_BYTES
+            || self.config_options.len() > MAX_AGENT_STATE_BLOB_BYTES
+            || self.modes.len() > MAX_AGENT_STATE_BLOB_BYTES
+        {
+            return Err("agent state blob exceeds the wire byte limit");
+        }
+        if self
+            .pending_permission
+            .as_ref()
+            .is_some_and(|permission| permission.payload.len() > MAX_AGENT_PERMISSION_BYTES)
+        {
+            return Err("agent permission payload exceeds the wire byte limit");
+        }
+        Ok(())
     }
 }
 
@@ -1174,6 +1424,37 @@ pub enum EventPayload {
         pane: PaneId,
         image_ids: Vec<u32>,
     },
+    /// One coalesced batch of JSON agent stream items, numbered from the
+    /// pane's journal sequence. `first_seq` names the first item; the rest
+    /// follow it one by one.
+    AgentUpdates {
+        pane: PaneId,
+        first_seq: u64,
+        #[serde(deserialize_with = "deserialize_agent_update_items")]
+        items: Vec<Vec<u8>>,
+    },
+    AgentState {
+        pane: PaneId,
+        state: AgentPaneWire,
+    },
+    /// The client's agent lane overflowed and was cleared; the client answers
+    /// with [`ProtocolMessage::AgentReplay`] from `next_seq`.
+    AgentLagged {
+        pane: PaneId,
+        next_seq: u64,
+    },
+    AgentSessions {
+        pane: PaneId,
+        request_id: u64,
+        #[serde(deserialize_with = "deserialize_agent_result")]
+        result: String,
+    },
+    AgentTurnDiffResult {
+        pane: PaneId,
+        request_id: u64,
+        #[serde(deserialize_with = "deserialize_agent_result")]
+        result: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1250,6 +1531,61 @@ pub enum ProtocolMessage {
         pane: PaneId,
         number: u32,
     },
+    // Postcard tags variants by index: append new messages, never reorder.
+    AgentPrompt {
+        pane: PaneId,
+        #[serde(deserialize_with = "deserialize_agent_prompt_text")]
+        text: String,
+        images: Vec<AgentImage>,
+    },
+    AgentCancel {
+        pane: PaneId,
+    },
+    /// Reclaim the pane's queued prompts; the daemon returns them inside the
+    /// stream so the composer refills.
+    AgentUnqueue {
+        pane: PaneId,
+    },
+    /// Answer a parked permission request. `None` cancels it, and the first
+    /// answer wins: a late one is a no-op.
+    AgentRespondPermission {
+        pane: PaneId,
+        request_id: u64,
+        #[serde(deserialize_with = "deserialize_optional_agent_option_text")]
+        option_id: Option<String>,
+    },
+    AgentSetConfigOption {
+        pane: PaneId,
+        #[serde(deserialize_with = "deserialize_agent_option_text")]
+        option_id: String,
+        #[serde(deserialize_with = "deserialize_agent_option_text")]
+        value: String,
+    },
+    AgentSetMode {
+        pane: PaneId,
+        #[serde(deserialize_with = "deserialize_agent_option_text")]
+        mode_id: String,
+    },
+    AgentAuthenticate {
+        pane: PaneId,
+        #[serde(deserialize_with = "deserialize_agent_option_text")]
+        method_id: String,
+    },
+    AgentSessionOp {
+        pane: PaneId,
+        op: AgentSessionOpKind,
+    },
+    /// Replay the pane's journal from `from_seq`, then tail it. Sent on
+    /// attach, after [`EventPayload::AgentLagged`], and when a pane becomes
+    /// visible.
+    AgentReplay {
+        pane: PaneId,
+        from_seq: u64,
+    },
+    AgentTurnDiff {
+        pane: PaneId,
+        request_id: u64,
+    },
 }
 
 #[cfg(test)]
@@ -1323,6 +1659,105 @@ mod tests {
                 .expect("decoded mouse input"),
             compact
         );
+    }
+
+    #[test]
+    fn agent_runtime_variants_hold_the_wire_tails_they_were_appended_to() {
+        let pane = crate::PaneId(1);
+        let message_tag = |message: &super::ProtocolMessage| {
+            postcard::to_stdvec(message).expect("message encodes")[0]
+        };
+        let payload_tag = |payload: super::EventPayload| {
+            postcard::to_stdvec(&super::Event {
+                sequence: 0,
+                payload,
+            })
+            .expect("event encodes")[1]
+        };
+
+        assert_eq!(
+            message_tag(&super::ProtocolMessage::PastedImageUnavailable { pane, number: 0 }),
+            20
+        );
+        for (index, message) in [
+            super::ProtocolMessage::AgentPrompt {
+                pane,
+                text: String::new(),
+                images: Vec::new(),
+            },
+            super::ProtocolMessage::AgentCancel { pane },
+            super::ProtocolMessage::AgentUnqueue { pane },
+            super::ProtocolMessage::AgentRespondPermission {
+                pane,
+                request_id: 0,
+                option_id: None,
+            },
+            super::ProtocolMessage::AgentSetConfigOption {
+                pane,
+                option_id: String::new(),
+                value: String::new(),
+            },
+            super::ProtocolMessage::AgentSetMode {
+                pane,
+                mode_id: String::new(),
+            },
+            super::ProtocolMessage::AgentAuthenticate {
+                pane,
+                method_id: String::new(),
+            },
+            super::ProtocolMessage::AgentSessionOp {
+                pane,
+                op: super::AgentSessionOpKind::List,
+            },
+            super::ProtocolMessage::AgentReplay { pane, from_seq: 0 },
+            super::ProtocolMessage::AgentTurnDiff {
+                pane,
+                request_id: 0,
+            },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(
+                u8::try_from(21 + index).expect("tag"),
+                message_tag(&message)
+            );
+        }
+
+        assert_eq!(
+            payload_tag(super::EventPayload::KittyImagesRemoved {
+                pane,
+                image_ids: Vec::new(),
+            }),
+            29
+        );
+        for (index, payload) in [
+            super::EventPayload::AgentUpdates {
+                pane,
+                first_seq: 0,
+                items: Vec::new(),
+            },
+            super::EventPayload::AgentState {
+                pane,
+                state: super::AgentPaneWire::default(),
+            },
+            super::EventPayload::AgentLagged { pane, next_seq: 0 },
+            super::EventPayload::AgentSessions {
+                pane,
+                request_id: 0,
+                result: String::new(),
+            },
+            super::EventPayload::AgentTurnDiffResult {
+                pane,
+                request_id: 0,
+                result: String::new(),
+            },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(u8::try_from(30 + index).expect("tag"), payload_tag(payload));
+        }
     }
 
     #[test]

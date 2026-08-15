@@ -541,6 +541,13 @@ impl ClientCore {
                 self.events
                     .push_back(CoreEvent::KittyImagesRemoved { pane, image_ids });
             }
+            // The daemon-owned agent lane is not reduced yet: the core stores
+            // nothing for it and publishes no event until its client phase lands.
+            EventPayload::AgentUpdates { .. }
+            | EventPayload::AgentState { .. }
+            | EventPayload::AgentLagged { .. }
+            | EventPayload::AgentSessions { .. }
+            | EventPayload::AgentTurnDiffResult { .. } => {}
         }
     }
 

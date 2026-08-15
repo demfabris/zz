@@ -36,6 +36,7 @@ mod russh_client;
 mod status;
 #[cfg_attr(target_os = "ios", allow(dead_code))]
 mod transport;
+pub mod user_data;
 
 /// Only unix and Windows spawn ssh, so only they carry the askpass helper.
 #[cfg(any(unix, windows))]

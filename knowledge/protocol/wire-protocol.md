@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v52)
+title: zz wire protocol (v53)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-08-13T00:00:00Z
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 52`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 53`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (52) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (53) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -94,6 +94,20 @@ fields in declaration order.
 | `PastedImageBegin { pane, number, format, total_bytes }` | one image announced | Daemon → client: start streaming that numbered image. `format` is `Png` / `Jpeg` / `Gif` / `Webp` |
 | `PastedImageChunk { pane, number, bytes }` | one ordered slice | Body of the announced fetch, at most `MAX_PASTE_UPLOAD_CHUNK_BYTES` (1 MiB) per message |
 | `PastedImageUnavailable { pane, number }` | one placeholder | Daemon → client: that numbered image is gone or could not be encoded |
+| `AgentPrompt { pane, text, images: Vec<AgentImage> }` | one prompt | Client → daemon: submit an ACP prompt to the pane's daemon-owned adapter. `AgentImage { format, data }` carries encoded bytes the daemon turns into content blocks; text plus every image totals at most `MAX_AGENT_PROMPT_BYTES` (6 MiB), each `format` at most 64 bytes |
+| `AgentCancel { pane }` | . | Cancel the pane's running turn |
+| `AgentUnqueue { pane }` | . | Reclaim the pane's queued prompts; the daemon returns them inside the stream so the composer refills |
+| `AgentRespondPermission { pane, request_id, option_id: Option<String> }` | one answer | Answer a parked permission request; `None` cancels. First answer wins and a late one is a no-op |
+| `AgentSetConfigOption { pane, option_id, value }` | one setting | Write one adapter config option |
+| `AgentSetMode { pane, mode_id }` | one mode | Switch the session mode |
+| `AgentAuthenticate { pane, method_id }` | one method | Run one advertised authentication method |
+| `AgentSessionOp { pane, op }` | `List` / `New` / `Switch { session_id }` / `Delete { session_id }` | Session management against the pane's adapter; `List` answers with `EventPayload::AgentSessions` |
+| `AgentReplay { pane, from_seq: u64 }` | journal cursor | Replay the pane's journal from `from_seq`, then tail it. Sent on attach, after `AgentLagged`, and when a pane enters the visible set |
+| `AgentTurnDiff { pane, request_id }` | one request | Ask for the diff of the pane's current turn against its dispatch-time snapshot; answered by `EventPayload::AgentTurnDiffResult` |
+
+The agent identifiers (`option_id`, `value`, `mode_id`, `method_id`) are bounded to
+`MAX_AGENT_OPTION_BYTES` (4 KiB) and session IDs to `MAX_AGENT_SESSION_ID_BYTES` (16 KiB), on encode
+and during deserialization; rejections surface as `ProtocolError::InvalidAgentPayload`.
 
 `ClientKind`: `Interactive | Command`. `ClientMessageKind` (typed notifications introduced in v17):
 `Info | Success | Warning | Error`.
@@ -142,6 +156,22 @@ offset: u32, columns: u16, rows: Vec<Vec<PackedCell>>, dictionary: TerminalDicti
 `KittyImageChunk { pane, image_id, generation, bytes }`
 (each chunk ≤ `MAX_KITTY_IMAGE_CHUNK_BYTES`, 1 MiB), and
 `KittyImagesRemoved { pane, image_ids }`.
+
+The v53 agent lane adds five more: `AgentUpdates { pane, first_seq: u64, items: Vec<Vec<u8>> }`
+carries one coalesced batch of JSON agent stream items numbered from the pane's journal sequence
+(`first_seq` names the first item, the rest follow one by one; a batch is nonempty and totals at most
+`MAX_AGENT_UPDATES_BYTES`, 1 MiB, so a longer window splits across frames).
+`AgentState { pane, state: AgentPaneWire }` is the small typed pane state published to every client
+attached to the session: `phase` (`Starting | Ready | Running | AwaitingPermission | Failed
+{ message }`), `queued_prompts: u32`, `session_id`, `title`, the adapter's auth methods, config
+options, and modes as one JSON `String` blob each (≤ `MAX_AGENT_STATE_BLOB_BYTES`, 256 KiB, because
+postcard cannot carry the ACP SDK's JSON-shaped types), and
+`pending_permission: Option<AgentPermissionWire { request_id, payload }>` whose payload is bounded to
+`MAX_AGENT_PERMISSION_BYTES` (64 KiB). `AgentLagged { pane, next_seq }` says the client's agent lane
+overflowed and was cleared, which the client answers with `AgentReplay` rather than dying.
+`AgentSessions { pane, request_id, result }` and `AgentTurnDiffResult { pane, request_id, result }`
+are the JSON replies to `AgentSessionOp::List` and `AgentTurnDiff`, each ≤ `MAX_AGENT_RESULT_BYTES`
+(1 MiB).
 
 The three payloads `TerminalViewport`, `TerminalPatch`, and `CommandOutput { viewport: Some(..) }` are
 diverted to the [Terminal lane](/protocol/terminal-lanes.md) by `encode_protocol_message`; all other
@@ -289,7 +319,7 @@ unbounded `#()` script off the wire.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 52`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 53`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
 - **Any change that affects an already shipped encoding** (new enum variants, reordered fields,
@@ -323,25 +353,32 @@ unbounded `#()` script off the wire.
   and the extension to 1..=8 lowercase ASCII alphanumerics . an alphabet, not a length, because the
   daemon interpolates it into a file name. Rejections surface as
   `ProtocolError::InvalidPasteUpload`.
+- The agent lane is bounded the same way, on encode and on decode: a prompt's text plus its image
+  bytes to `MAX_AGENT_PROMPT_BYTES` (6 MiB) with each image `format` at most 64 bytes; option, mode,
+  and method identifiers to `MAX_AGENT_OPTION_BYTES` (4 KiB) and session IDs to
+  `MAX_AGENT_SESSION_ID_BYTES` (16 KiB); an `AgentUpdates` batch nonempty, inside the `u64` sequence
+  space, and at most `MAX_AGENT_UPDATES_BYTES` (1 MiB); each `AgentPaneWire` JSON blob to 256 KiB and
+  a pending permission payload to 64 KiB; and every JSON result to 1 MiB. Rejections surface as
+  `ProtocolError::InvalidAgentPayload`.
 
 # Examples
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 52, kind: Interactive, device_name: None, capabilities: [],
+`ClientHello { protocol_version: 53, kind: Interactive, device_name: None, capabilities: [],
 color_scheme: Some(Dark), origin: None }` is 16 bytes on the wire: an 8-byte envelope over an
 8-byte postcard payload.
 
 ```text
 byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15
-      0c 00 00 00  00     00      34 00         00 34 00 00 00 01 01 00
+      0c 00 00 00  00     00      35 00         00 35 00 00 00 01 01 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 12  Control        (= 52)
+      length = 12  Control        (= 53)
 ```
 
 - **length `12`** = `ENVELOPE_BYTES` (4) + payload (8); it counts the four envelope bytes, not itself.
-- **payload** `00 34 00 00 00 01 01 00`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x34` (= 52), `kind` variant `0` (`Interactive`), `device_name`
+- **payload** `00 35 00 00 00 01 01 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x35` (= 53), `kind` variant `0` (`Interactive`), `device_name`
   as the `Option::None` tag `00`, `capabilities` as the sequence length `00`, `Option::Some` tag
   `01`, `TerminalColorScheme` variant `1` (`Dark`), then `origin` as `Option::None` (`00`). Postcard
   writes multi-byte integers as LEB128 varints, so the version is one byte here and two in the
@@ -367,14 +404,14 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 `UnsupportedLane(u8)`, `UnsupportedFlags(u8)`,
 `VersionMismatch { expected, received }`, `Encode/Decode(postcard::Error)`, `InvalidTerminal`,
 `InvalidAppearance`, `InvalidServerHello`, `InvalidClientHello`, `InvalidConfigOverrides`,
-`InvalidGuiRequest`, `InvalidPasteUpload`, `Io`.
+`InvalidGuiRequest`, `InvalidPasteUpload`, `InvalidAgentPayload`, `Io`.
 
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 52, kind: Interactive, device_name: Some("laptop"),
+client → ClientHello { protocol_version: 53, kind: Interactive, device_name: Some("laptop"),
                        capabilities: [], color_scheme: Some(Dark), origin: None }
-server → ServerHello { protocol_version: 52, server_id, client_id: c11,
+server → ServerHello { protocol_version: 53, server_id, client_id: c11,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],

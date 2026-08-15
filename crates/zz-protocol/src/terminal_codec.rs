@@ -12,9 +12,12 @@ use zz_terminal::{
 
 use crate::message::{MAX_KITTY_IMAGE_BYTES, MAX_KITTY_IMAGE_CHUNK_BYTES};
 use crate::{
-    BrowserCommand, Event, EventPayload, MAX_AGENT_SEND_BYTES, MAX_GUI_TEXT_BYTES,
+    AgentSessionOpKind, BrowserCommand, Event, EventPayload, MAX_AGENT_IMAGE_FORMAT_BYTES,
+    MAX_AGENT_OPTION_BYTES, MAX_AGENT_PROMPT_BYTES, MAX_AGENT_RESULT_BYTES, MAX_AGENT_SEND_BYTES,
+    MAX_AGENT_SESSION_ID_BYTES, MAX_AGENT_UPDATES_BYTES, MAX_GUI_TEXT_BYTES,
     MAX_PASTE_UPLOAD_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, MAX_PASTE_UPLOAD_EXTENSION_BYTES,
     PROTOCOL_VERSION, PaneId, PasteUploadPurpose, PastedImageFormat, ProtocolMessage,
+    agent_update_batch_bytes,
     framing::{
         Lane, MAX_ENCODED_FRAME_BYTES, ProtocolError, begin_enveloped_into, decode_enveloped,
         finish_enveloped_in_place, read_enveloped_into,
@@ -431,6 +434,80 @@ fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolErr
     {
         return invalid("kitty image removal list exceeds its wire limit");
     }
+    if let ProtocolMessage::AgentPrompt { text, images, .. } = message {
+        let total = images.iter().try_fold(text.len(), |total, image| {
+            total.checked_add(image.data.len())
+        });
+        if total.is_none_or(|total| total > MAX_AGENT_PROMPT_BYTES) {
+            return Err(ProtocolError::InvalidAgentPayload(format!(
+                "agent prompt text and images must total at most {MAX_AGENT_PROMPT_BYTES} bytes"
+            )));
+        }
+        if images
+            .iter()
+            .any(|image| image.format.len() > MAX_AGENT_IMAGE_FORMAT_BYTES)
+        {
+            return Err(ProtocolError::InvalidAgentPayload(format!(
+                "agent prompt image formats must be at most {MAX_AGENT_IMAGE_FORMAT_BYTES} bytes"
+            )));
+        }
+    }
+    if !agent_option_strings_are_bounded(message) {
+        return Err(ProtocolError::InvalidAgentPayload(format!(
+            "agent option, mode, and method identifiers must be at most \
+             {MAX_AGENT_OPTION_BYTES} bytes"
+        )));
+    }
+    if let ProtocolMessage::AgentSessionOp {
+        op: AgentSessionOpKind::Switch { session_id } | AgentSessionOpKind::Delete { session_id },
+        ..
+    } = message
+        && session_id.len() > MAX_AGENT_SESSION_ID_BYTES
+    {
+        return Err(ProtocolError::InvalidAgentPayload(format!(
+            "agent session IDs must be at most {MAX_AGENT_SESSION_ID_BYTES} bytes"
+        )));
+    }
+    if let ProtocolMessage::Event(Event {
+        payload: EventPayload::AgentUpdates {
+            first_seq, items, ..
+        },
+        ..
+    }) = message
+    {
+        if items.is_empty() || first_seq.checked_add(items.len() as u64).is_none() {
+            return Err(ProtocolError::InvalidAgentPayload(
+                "agent update batches must be nonempty and stay inside the sequence space"
+                    .to_owned(),
+            ));
+        }
+        if agent_update_batch_bytes(items) > MAX_AGENT_UPDATES_BYTES {
+            return Err(ProtocolError::InvalidAgentPayload(format!(
+                "agent update batches must total at most {MAX_AGENT_UPDATES_BYTES} bytes"
+            )));
+        }
+    }
+    if let ProtocolMessage::Event(Event {
+        payload: EventPayload::AgentState { state, .. },
+        ..
+    }) = message
+    {
+        state
+            .validate()
+            .map_err(|error| ProtocolError::InvalidAgentPayload(error.to_owned()))?;
+    }
+    if let ProtocolMessage::Event(Event {
+        payload:
+            EventPayload::AgentSessions { result, .. }
+            | EventPayload::AgentTurnDiffResult { result, .. },
+        ..
+    }) = message
+        && result.len() > MAX_AGENT_RESULT_BYTES
+    {
+        return Err(ProtocolError::InvalidAgentPayload(format!(
+            "agent request results must be at most {MAX_AGENT_RESULT_BYTES} bytes"
+        )));
+    }
     if let ProtocolMessage::SetConfigOverrides { entries } = message
         && (entries.len() > MAX_CONFIG_OVERRIDE_ENTRIES
             || entries.iter().any(|(key, value)| {
@@ -448,6 +525,21 @@ fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolErr
         )));
     }
     Ok(())
+}
+
+fn agent_option_strings_are_bounded(message: &ProtocolMessage) -> bool {
+    let bounded = |text: &str| text.len() <= MAX_AGENT_OPTION_BYTES;
+    match message {
+        ProtocolMessage::AgentRespondPermission { option_id, .. } => {
+            option_id.as_deref().is_none_or(bounded)
+        }
+        ProtocolMessage::AgentSetConfigOption {
+            option_id, value, ..
+        } => bounded(option_id) && bounded(value),
+        ProtocolMessage::AgentSetMode { mode_id, .. } => bounded(mode_id),
+        ProtocolMessage::AgentAuthenticate { method_id, .. } => bounded(method_id),
+        _ => true,
+    }
 }
 
 fn capabilities_are_bounded(capabilities: &[String]) -> bool {
@@ -1890,7 +1982,10 @@ impl<'a> WireReader<'a> {
 #[cfg(test)]
 mod tests {
     use crate::message::MAX_MUX_OPTION_VALUE_BYTES;
-    use crate::{MuxOptionKey, MuxOptionSource, MuxOptions};
+    use crate::{
+        MAX_AGENT_PERMISSION_BYTES, MAX_AGENT_STATE_BLOB_BYTES, MuxOptionKey, MuxOptionSource,
+        MuxOptions,
+    };
     use zz_terminal::{
         AppearanceConfigKey, AppearanceProvenance, AppearanceSource, CellWidth, CursorStyle,
         KittyLayer, KittyPlacement, OverlayKind, SearchDirection, TerminalAppearance,
@@ -3038,6 +3133,421 @@ mod tests {
             encode_protocol_message(&oversized),
             Err(ProtocolError::InvalidGuiRequest(_))
         ));
+    }
+
+    fn agent_state_fixture() -> crate::AgentPaneWire {
+        crate::AgentPaneWire {
+            phase: crate::AgentConnectionPhase::Running,
+            queued_prompts: 2,
+            session_id: Some("sess-7".to_owned()),
+            title: Some("port the runtime".to_owned()),
+            auth_methods: r#"[{"id":"oauth"}]"#.to_owned(),
+            config_options: r#"[{"id":"model","value":"opus"}]"#.to_owned(),
+            modes: r#"{"current":"plan"}"#.to_owned(),
+            pending_permission: Some(crate::AgentPermissionWire {
+                request_id: 4,
+                payload: r#"{"tool":"edit"}"#.to_owned(),
+            }),
+        }
+    }
+
+    fn assert_control_round_trip(message: &ProtocolMessage) {
+        let encoded = encode_protocol_message(message).expect("encode agent message");
+        assert_eq!(encoded[4], Lane::Control as u8);
+        assert_eq!(
+            &decode_protocol_frame(&encoded).expect("decode agent message"),
+            message
+        );
+    }
+
+    #[test]
+    fn agent_runtime_commands_round_trip_on_the_control_lane() {
+        let pane = PaneId(12);
+        for message in [
+            ProtocolMessage::AgentPrompt {
+                pane,
+                text: "port the runtime".to_owned(),
+                images: vec![crate::AgentImage {
+                    format: "png".to_owned(),
+                    data: vec![0x89, 0x50, 0x4e, 0x47],
+                }],
+            },
+            ProtocolMessage::AgentCancel { pane },
+            ProtocolMessage::AgentUnqueue { pane },
+            ProtocolMessage::AgentRespondPermission {
+                pane,
+                request_id: 9,
+                option_id: Some("allow-once".to_owned()),
+            },
+            ProtocolMessage::AgentRespondPermission {
+                pane,
+                request_id: 10,
+                option_id: None,
+            },
+            ProtocolMessage::AgentSetConfigOption {
+                pane,
+                option_id: "model".to_owned(),
+                value: "opus".to_owned(),
+            },
+            ProtocolMessage::AgentSetMode {
+                pane,
+                mode_id: "plan".to_owned(),
+            },
+            ProtocolMessage::AgentAuthenticate {
+                pane,
+                method_id: "oauth".to_owned(),
+            },
+            ProtocolMessage::AgentSessionOp {
+                pane,
+                op: AgentSessionOpKind::List,
+            },
+            ProtocolMessage::AgentSessionOp {
+                pane,
+                op: AgentSessionOpKind::New,
+            },
+            ProtocolMessage::AgentSessionOp {
+                pane,
+                op: AgentSessionOpKind::Switch {
+                    session_id: "sess-7".to_owned(),
+                },
+            },
+            ProtocolMessage::AgentSessionOp {
+                pane,
+                op: AgentSessionOpKind::Delete {
+                    session_id: "sess-8".to_owned(),
+                },
+            },
+            ProtocolMessage::AgentReplay { pane, from_seq: 41 },
+            ProtocolMessage::AgentTurnDiff {
+                pane,
+                request_id: 3,
+            },
+        ] {
+            assert_control_round_trip(&message);
+        }
+    }
+
+    #[test]
+    fn agent_stream_events_round_trip_on_the_control_lane() {
+        let pane = PaneId(12);
+        for payload in [
+            EventPayload::AgentUpdates {
+                pane,
+                first_seq: 17,
+                items: vec![
+                    br#"{"kind":"assistant"}"#.to_vec(),
+                    br#"{"kind":"tool"}"#.to_vec(),
+                ],
+            },
+            EventPayload::AgentState {
+                pane,
+                state: agent_state_fixture(),
+            },
+            EventPayload::AgentState {
+                pane,
+                state: crate::AgentPaneWire {
+                    phase: crate::AgentConnectionPhase::Failed {
+                        message: "adapter exited".to_owned(),
+                    },
+                    ..crate::AgentPaneWire::default()
+                },
+            },
+            EventPayload::AgentLagged { pane, next_seq: 88 },
+            EventPayload::AgentSessions {
+                pane,
+                request_id: 5,
+                result: r#"{"sessions":[]}"#.to_owned(),
+            },
+            EventPayload::AgentTurnDiffResult {
+                pane,
+                request_id: 6,
+                result: r#"{"files":[]}"#.to_owned(),
+            },
+        ] {
+            assert_control_round_trip(&ProtocolMessage::Event(Event {
+                sequence: 4,
+                payload,
+            }));
+        }
+    }
+
+    #[test]
+    fn agent_prompts_bound_their_text_images_and_formats() {
+        let prompt = |text: String, images: Vec<crate::AgentImage>| ProtocolMessage::AgentPrompt {
+            pane: PaneId(1),
+            text,
+            images,
+        };
+        assert!(
+            encode_protocol_message(&prompt("x".repeat(MAX_AGENT_PROMPT_BYTES), Vec::new()))
+                .is_ok()
+        );
+        assert!(matches!(
+            encode_protocol_message(&prompt("x".repeat(MAX_AGENT_PROMPT_BYTES + 1), Vec::new())),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+
+        let image = |bytes: usize| crate::AgentImage {
+            format: "png".to_owned(),
+            data: vec![0; bytes],
+        };
+        assert!(
+            encode_protocol_message(&prompt(
+                "x".to_owned(),
+                vec![
+                    image(MAX_AGENT_PROMPT_BYTES / 2),
+                    image(MAX_AGENT_PROMPT_BYTES / 2 - 1)
+                ]
+            ))
+            .is_ok()
+        );
+        assert!(matches!(
+            encode_protocol_message(&prompt(
+                "x".to_owned(),
+                vec![
+                    image(MAX_AGENT_PROMPT_BYTES / 2),
+                    image(MAX_AGENT_PROMPT_BYTES / 2)
+                ]
+            )),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+
+        let format = |length: usize| {
+            prompt(
+                String::new(),
+                vec![crate::AgentImage {
+                    format: "f".repeat(length),
+                    data: Vec::new(),
+                }],
+            )
+        };
+        assert!(encode_protocol_message(&format(MAX_AGENT_IMAGE_FORMAT_BYTES)).is_ok());
+        assert!(matches!(
+            encode_protocol_message(&format(MAX_AGENT_IMAGE_FORMAT_BYTES + 1)),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+    }
+
+    #[test]
+    fn agent_identifiers_bound_options_modes_methods_and_sessions() {
+        let pane = PaneId(2);
+        let at_limit = "o".repeat(MAX_AGENT_OPTION_BYTES);
+        let over_limit = "o".repeat(MAX_AGENT_OPTION_BYTES + 1);
+        for (accepted, rejected) in [
+            (
+                ProtocolMessage::AgentSetConfigOption {
+                    pane,
+                    option_id: at_limit.clone(),
+                    value: at_limit.clone(),
+                },
+                ProtocolMessage::AgentSetConfigOption {
+                    pane,
+                    option_id: at_limit.clone(),
+                    value: over_limit.clone(),
+                },
+            ),
+            (
+                ProtocolMessage::AgentSetMode {
+                    pane,
+                    mode_id: at_limit.clone(),
+                },
+                ProtocolMessage::AgentSetMode {
+                    pane,
+                    mode_id: over_limit.clone(),
+                },
+            ),
+            (
+                ProtocolMessage::AgentAuthenticate {
+                    pane,
+                    method_id: at_limit.clone(),
+                },
+                ProtocolMessage::AgentAuthenticate {
+                    pane,
+                    method_id: over_limit.clone(),
+                },
+            ),
+            (
+                ProtocolMessage::AgentRespondPermission {
+                    pane,
+                    request_id: 1,
+                    option_id: Some(at_limit.clone()),
+                },
+                ProtocolMessage::AgentRespondPermission {
+                    pane,
+                    request_id: 1,
+                    option_id: Some(over_limit.clone()),
+                },
+            ),
+        ] {
+            assert!(encode_protocol_message(&accepted).is_ok());
+            assert!(matches!(
+                encode_protocol_message(&rejected),
+                Err(ProtocolError::InvalidAgentPayload(_))
+            ));
+        }
+
+        let session_op = |session_id: String| ProtocolMessage::AgentSessionOp {
+            pane,
+            op: AgentSessionOpKind::Switch { session_id },
+        };
+        assert!(
+            encode_protocol_message(&session_op("s".repeat(MAX_AGENT_SESSION_ID_BYTES))).is_ok()
+        );
+        assert!(matches!(
+            encode_protocol_message(&session_op("s".repeat(MAX_AGENT_SESSION_ID_BYTES + 1))),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+    }
+
+    #[test]
+    fn agent_update_batches_bound_their_bytes_and_sequence_space() {
+        let batch = |first_seq: u64, items: Vec<Vec<u8>>| {
+            ProtocolMessage::Event(Event {
+                sequence: 7,
+                payload: EventPayload::AgentUpdates {
+                    pane: PaneId(3),
+                    first_seq,
+                    items,
+                },
+            })
+        };
+        assert!(encode_protocol_message(&batch(0, vec![vec![0; MAX_AGENT_UPDATES_BYTES]])).is_ok());
+        assert!(matches!(
+            encode_protocol_message(&batch(0, vec![vec![0; MAX_AGENT_UPDATES_BYTES], vec![0]])),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+        assert!(matches!(
+            encode_protocol_message(&batch(0, Vec::new())),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+        assert!(matches!(
+            encode_protocol_message(&batch(u64::MAX, vec![vec![1]])),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+    }
+
+    #[test]
+    fn agent_state_bounds_blobs_permissions_and_results() {
+        let state = |state: crate::AgentPaneWire| {
+            ProtocolMessage::Event(Event {
+                sequence: 8,
+                payload: EventPayload::AgentState {
+                    pane: PaneId(4),
+                    state,
+                },
+            })
+        };
+        let with_modes = |length: usize| crate::AgentPaneWire {
+            modes: "m".repeat(length),
+            ..agent_state_fixture()
+        };
+        assert!(encode_protocol_message(&state(with_modes(MAX_AGENT_STATE_BLOB_BYTES))).is_ok());
+        assert!(matches!(
+            encode_protocol_message(&state(with_modes(MAX_AGENT_STATE_BLOB_BYTES + 1))),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+
+        let with_permission = |length: usize| crate::AgentPaneWire {
+            pending_permission: Some(crate::AgentPermissionWire {
+                request_id: 2,
+                payload: "p".repeat(length),
+            }),
+            ..agent_state_fixture()
+        };
+        assert!(
+            encode_protocol_message(&state(with_permission(MAX_AGENT_PERMISSION_BYTES))).is_ok()
+        );
+        assert!(matches!(
+            encode_protocol_message(&state(with_permission(MAX_AGENT_PERMISSION_BYTES + 1))),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+
+        let sessions = |length: usize| {
+            ProtocolMessage::Event(Event {
+                sequence: 9,
+                payload: EventPayload::AgentSessions {
+                    pane: PaneId(4),
+                    request_id: 1,
+                    result: "r".repeat(length),
+                },
+            })
+        };
+        assert!(encode_protocol_message(&sessions(MAX_AGENT_RESULT_BYTES)).is_ok());
+        assert!(matches!(
+            encode_protocol_message(&sessions(MAX_AGENT_RESULT_BYTES + 1)),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+
+        let turn_diff = |length: usize| {
+            ProtocolMessage::Event(Event {
+                sequence: 10,
+                payload: EventPayload::AgentTurnDiffResult {
+                    pane: PaneId(4),
+                    request_id: 1,
+                    result: "r".repeat(length),
+                },
+            })
+        };
+        assert!(encode_protocol_message(&turn_diff(MAX_AGENT_RESULT_BYTES)).is_ok());
+        assert!(matches!(
+            encode_protocol_message(&turn_diff(MAX_AGENT_RESULT_BYTES + 1)),
+            Err(ProtocolError::InvalidAgentPayload(_))
+        ));
+    }
+
+    #[test]
+    fn agent_bounds_also_reject_hand_built_frames() {
+        let tag_of = |message: &ProtocolMessage| {
+            postcard::to_stdvec(message).expect("a valid message encodes")[0]
+        };
+        let forge = |tag: u8, fields: Vec<u8>| {
+            let mut payload = vec![tag];
+            payload.extend(fields);
+            crate::framing::encode_enveloped(Lane::Control, &payload).expect("envelope")
+        };
+        let mode_tag = tag_of(&ProtocolMessage::AgentSetMode {
+            pane: PaneId(0),
+            mode_id: String::new(),
+        });
+        let oversized_mode = forge(
+            mode_tag,
+            postcard::to_stdvec(&(0_u64, "m".repeat(MAX_AGENT_OPTION_BYTES + 1))).expect("fields"),
+        );
+        assert!(decode_protocol_frame(&oversized_mode).is_err());
+
+        let prompt_tag = tag_of(&ProtocolMessage::AgentPrompt {
+            pane: PaneId(0),
+            text: String::new(),
+            images: Vec::new(),
+        });
+        let oversized_format = forge(
+            prompt_tag,
+            postcard::to_stdvec(&(
+                0_u64,
+                "",
+                vec![(
+                    "f".repeat(MAX_AGENT_IMAGE_FORMAT_BYTES + 1),
+                    Vec::<u8>::new(),
+                )],
+            ))
+            .expect("fields"),
+        );
+        assert!(decode_protocol_frame(&oversized_format).is_err());
+
+        let updates = ProtocolMessage::Event(Event {
+            sequence: 1,
+            payload: EventPayload::AgentUpdates {
+                pane: PaneId(0),
+                first_seq: 0,
+                items: vec![vec![0; MAX_AGENT_UPDATES_BYTES], vec![0]],
+            },
+        });
+        let oversized_batch = crate::framing::encode_enveloped(
+            Lane::Control,
+            &postcard::to_stdvec(&updates).expect("oversized batch fixture"),
+        )
+        .expect("envelope");
+        assert!(decode_protocol_frame(&oversized_batch).is_err());
     }
 
     #[test]

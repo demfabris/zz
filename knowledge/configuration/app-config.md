@@ -17,7 +17,7 @@ timestamp: 2026-08-14T00:00:00Z
 The GUI process loads the first existing `zz/config` file from the user's platform configuration
 roots. `crates/zz/src/config/mod.rs` resolves the candidates when `run_app` enters the GPUI application
 closure, parses thirty-two client-local behavior/layout/diagnostic/theme/browser knobs into typed
-`AppConfig` and `BrowserConfig` values, parses three app-owned ACP launch keys into `AgentConfig`,
+`AppConfig` and `BrowserConfig` values, parses the one app-owned ACP key into `AgentConfig`,
 collects repeatable `chrome-keybind`/`chrome-unbind` entries for the client-local keymap, and collects the supported
 daemon-owned appearance and mux entries as ordered raw `(key, value)` pairs. Client-reserved
 `host-<name> = <uri>` entries ([fleet attach](/designs/fleet-attach.md)) are matched before any
@@ -309,25 +309,24 @@ square top corners and only follow the pane curve at the bottom.
 
 ## App-owned Agent keys
 
+Exactly one is left. The three adapter keys are [mux options](#daemon-owned-mux-option-keys) now,
+because the daemon spawns the adapter; this one feeds pane creation, which is a client concern.
+
 | Key | Default | Validation / effect |
 | --- | --- | --- |
-| `agent-command` | `npx -y @agentclientprotocol/codex-acp@1.1.7` | Nonempty command string or raw ACP stdio JSON configuration used by Codex panes |
-| `agent-claude-code-command` | `npx -y @agentclientprotocol/claude-agent-acp@0.63.0` | Nonempty command string or raw ACP stdio JSON configuration used by Claude Code panes |
 | `agent-working-directory` | unset | Absolute path only; overrides the donor cwd for brand-new Agent sessions |
-| `agent-auto-approve` | `true` | `true` or `false`; when on, a kinded `session/request_permission` is answered with the agent's preferred allow option (`allow_always`, else `allow_once`) and the tool call is still rendered. A request with no allow option always falls through to the permission wizard |
 
-The command value may be unquoted, wrapped in matching single/double quotes, or supplied as raw JSON
-when explicit arguments/environment variables are needed. zz does not log the configured command,
-because a JSON environment map may contain credentials. A configured working directory takes
+The adapter command values may be unquoted, wrapped in matching single/double quotes, or supplied as
+raw JSON when explicit arguments/environment variables are needed. zz does not log the configured
+command, because a JSON environment map may contain credentials. A configured working directory takes
 precedence when creating a new pane; a daemon-persisted descriptor cwd takes precedence when loading
-an existing ACP session. File polling hot-reloads these keys by cancelling each pane-local process
-and loading retained sessions through the replacement provider process. They are currently
-config-file keys, not rows in the Settings dialog.
+an existing ACP session. None of the four has a row in the Settings dialog.
 
-On macOS, the GUI captures and caches the user's login-shell `PATH` before the first ACP launch,
+The daemon captures and caches the user's login-shell `PATH` before the first ACP launch,
 merges in inherited entries, and injects the result only when the parsed command has no explicit
-`PATH` environment entry. The capture is bounded and falls back to `/usr/libexec/path_helper`, so a
-Finder-launched bundle can resolve Homebrew and user-local executables while raw JSON or a leading
+`PATH` environment entry. The capture is bounded and falls back to `/usr/libexec/path_helper` on
+macOS, so a launch-agent or Finder-started daemon can resolve Homebrew and user-local executables
+while raw JSON or a leading
 `PATH=...` assignment remains authoritative.
 
 ## Daemon-owned appearance keys
@@ -363,7 +362,7 @@ accepts their spellings, which is what makes a Ghostty file importable, but they
 
 ## Daemon-owned mux option keys
 
-The eleven mux keys are also transported raw and in file order. The daemon turns each entry into a
+The fourteen mux keys are also transported raw and in file order. The daemon turns each entry into a
 global `set-option`, so repeated keys retain normal last-writer behavior and invalid entries produce
 a daemon diagnostic without blocking later entries.
 
@@ -380,6 +379,15 @@ a daemon diagnostic without blocking later entries.
 | `experimental-agent-pane` | `off` | flag value (`on`/`off`/`true`/`false`/…); gates `select-pane-kind agent` in the engine |
 | `experimental-editor-pane` | `off` | flag value; gates `select-pane-kind editor` in the engine |
 | `history-trickle` | `2000` | integer `0..=10000`; background scrollback backfill budget. `0` disables trickle and leaves scroll-driven prefetch intact |
+| `agent-command` | `npx -y @agentclientprotocol/codex-acp@1.1.7` | Nonempty command string or raw ACP stdio JSON, up to 4 KiB; what the daemon spawns for a Codex pane |
+| `agent-claude-code-command` | `npx -y @agentclientprotocol/claude-agent-acp@0.63.0` | Same, for Claude Code panes |
+| `agent-auto-approve` | `on` | flag value; when on, a kinded `session/request_permission` is answered daemon-side with the agent's preferred allow option (`allow_always`, else `allow_once`) and the tool call is still published to the stream. A request with no allow option always falls through to the permission wizard |
+
+The three agent keys became mux options when the [Agent pane](/concepts/agent-pane.md)'s ACP runtime
+moved into the daemon at wire v53 . the daemon spawns the adapter, so the daemon owns what it spawns.
+They are still written in `zz/config` like any other key; the client's parser recognizes them and
+partitions them into the ordered daemon set, exactly as it does for the appearance and other mux
+keys. Changing one reconfigures the runtime without restarting the children already running.
 
 # Parsing contract
 

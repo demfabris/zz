@@ -12,6 +12,7 @@ use gpui::{
     SharedString, Subscription, Task, UniformListScrollHandle, Window, div, prelude::*, px,
     relative, uniform_list,
 };
+use zz_daemon::{TurnDiff, TurnFile, TurnFileStatus};
 use zz_protocol::{AgentDescriptor, AgentProvider, CommandInvocation, PaneId};
 #[cfg(all(test, not(target_os = "macos")))]
 use zz_ui::agent::DisclosureKind;
@@ -44,7 +45,6 @@ use crate::{
         AgentSessionHistoryState, AgentSessionSummary, AgentThreadEntry, AgentToolKindModel,
         AgentToolStatusModel, ToolPayload,
     },
-    agent::turn_snapshot::{TurnDiff, TurnFile, TurnFileStatus},
     config::pane_content_radii,
     file_picker::{FilePickerEvent, FilePickerMode, FilePickerView, directory_picker_root},
     mux::client::MuxClient,
@@ -1094,7 +1094,10 @@ impl AgentView {
     /// runs on the background executor; only the result comes back here.
     fn refresh_changes(&mut self, cx: &mut Context<Self>) {
         let pane = self.pane;
-        let Some(capture) = self.controller.read(cx).capture_turn_diff(pane, cx) else {
+        let Some(capture) = self
+            .controller
+            .update(cx, |controller, cx| controller.capture_turn_diff(pane, cx))
+        else {
             self.changes_task = None;
             self.changes_error = Some(Arc::from("this turn has no snapshot to diff against"));
             cx.notify();
@@ -1703,7 +1706,10 @@ impl AgentView {
         view: Entity<Self>,
         cx: &gpui::App,
     ) -> Option<impl IntoElement> {
-        self.controller.read(cx).turn_base(self.pane)?;
+        self.controller
+            .read(cx)
+            .has_turn_base(self.pane)
+            .then_some(())?;
         Some(
             agent_chrome_button(("agent-turn-changes", self.pane.0))
                 .icon(IconName::Layers)
@@ -2086,7 +2092,7 @@ impl AgentView {
                     let pane = view.pane;
                     let path = path.clone();
                     let result = view.controller.update(cx, |controller, cx| {
-                        controller.set_working_directory(pane, path, cx)
+                        controller.set_working_directory(pane, &path, cx)
                     });
                     view.submission_error = result.err();
                 }

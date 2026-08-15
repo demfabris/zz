@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Native Agent pane
-description: The daemon-addressable Agent pane, pane-local Codex/Claude Code ACP runtime, provider artifact profiles, nested subagent and terminal streams, sticky controls, approvals, and restore metadata.
+description: The daemon-addressable Agent pane, its daemon-owned Codex/Claude Code ACP runtime streamed to client viewports, provider artifact profiles, nested subagent and terminal streams, sticky controls, approvals, and restore metadata.
 resource: crates/zz/src/agent/controller.rs
 tags: [agent, gpui, markdown, mermaid, acp, pane, sessions, persistence, keyboard, subagent, terminal]
 timestamp: 2026-08-14T00:00:00Z
@@ -13,20 +13,28 @@ The **Agent pane** is zz's third materialized pane surface alongside Terminal an
 stable `%pane` identity in the mux, participates in split layout, focus, choose-tree, and sidebar
 navigation, and hosts a live Agent Client Protocol (ACP) conversation in native GPUI controls.
 
-Pane identity and restore metadata are daemon-owned; pane-local ACP processes and live conversation state are
-GUI-owned. This keeps provider-specific traffic out of the zz wire protocol while allowing a GUI to
-reconnect to the daemon, recover the same pane and working directory, and ask an ACP agent that
-supports `session/load` to replay the conversation.
+The daemon owns the pane **and its ACP adapter child**, exactly as it owns a terminal's PTY. Clients
+are viewports: they send prompts, answers, and settings as protocol messages, and they render a
+transcript reduced from the stream the daemon fans out. A running turn therefore survives the GUI
+closing, and two clients attached to the same session converge on the same conversation. Provider
+traffic still never appears in the wire schema as typed ACP: every stream item crosses as an opaque
+JSON blob with a byte cap, which the client deserializes into the shape its reducer already ate.
 
 # Ownership and pane lifecycle
 
 | Layer | Representation | Responsibility |
 | --- | --- | --- |
-| protocol | `PaneKindSnapshot::Agent(AgentDescriptor)` | Versioned pane identity plus `provider`, `cwd`, and opaque ACP `session_id`; introduced across v22–v32. The live wire version is `PROTOCOL_VERSION` (52) |
+| protocol | `PaneKindSnapshot::Agent(AgentDescriptor)` | Versioned pane identity plus `provider`, `cwd`, and opaque ACP `session_id`; introduced across v22–v32. The live wire version is `PROTOCOL_VERSION` (53), which added the agent runtime lane |
 | mux | `PaneKind::Agent(AgentDescriptor)` | Stable layout leaf, targeting, titles, and validated restore-metadata updates |
-| server | no PTY, CEF, or agent child | Materializes the leaf and captures the donor terminal's live working directory |
-| app | shared `Entity<AgentController>` | Launches one provider process per `PaneId`, routes its ACP session, lists and transactionally loads provider-owned history, restores sticky settings, reduces events/configuration, and owns cleanup |
+| server | one ACP adapter child per pane, on its own thread | Spawns and owns the child (`zz-daemon/src/agent/host.rs`), auto-approves permissions, queues mid-turn prompts, parks quiet turns, snapshots turn bases, journals every stream item, adopts the session ID the adapter returns, and coalesces the stream onto a per-pane outbound lane (`fanout.rs`) |
+| app | shared `Entity<AgentController>` | Reduces the daemon's stream into a transcript, tracks the per-pane replay cursor, restores sticky settings, normalizes pasted attachments, and turns user gestures into `AgentRequest` sends |
 | view/UI | `AgentView`, `AgentTimeline`, `AgentEntry` | History picker, composer, cancellation, approval/auth actions, Markdown, reasoning, plans, tools, and Mermaid |
+
+The daemon builds its agent runtime lazily, on the first agent pane it opens; that build also opens
+and prunes the journal and prewarms the adapter package cache and the login-shell `PATH` snapshot.
+The whole runtime sits behind `zz-daemon`'s `agent` cargo feature, which is on by default
+(`default = ["daemon", "agent"]`); `zz-tui` and `zz-client-ffi` link `zz-daemon` with
+`default-features = false` and never pull in `agent-client-protocol` at all.
 
 `new-pane` still creates a runtime-free picker first. Choosing **Agent**, or issuing
 `select-pane-kind -t %N agent`, materializes that leaf in place, preserving its `%pane` ID and split
@@ -53,9 +61,10 @@ Terminal splits go through the same helper, so both paths follow one rule.
 
 `AppView` reconciles visible `AgentView` entities by `PaneId`, while the shared controller retains
 the complete set of Agent panes from every daemon session. Switching attached sessions therefore
-drops only the inactive view entity, not its live ACP session. Removing the actual daemon pane sends
+drops only the inactive view entity, and the ACP session itself is untouched either way — it is not
+the client's to drop. Removing the actual daemon pane is what ends a conversation: the host sends
 `session/close` when supported (otherwise `session/cancel`), resolves pending permission requests as
-cancelled, removes routing state, and stops that pane's agent process.
+cancelled, and stops that pane's agent process.
 
 # Keyboard ownership
 
@@ -67,15 +76,21 @@ passes back has no Agent sink and is dropped; everything else never crosses the 
 
 # ACP connection and session flow
 
-`agent/controller.rs` uses `agent-client-protocol` 1.2.0 and the stable ACP v1 schema:
+The connection lives in the daemon (`crates/zz-daemon/src/agent/runtime.rs`), against
+`agent-client-protocol` 1.2.0 and the stable ACP v1 schema. One `std::thread` per pane runs
+`futures_lite::future::block_on(run_agent_connection(..))` — the ACP crate is runtime-agnostic
+(`async-process` + `futures`, no tokio), so this matches the daemon's existing thread-per-pane idiom
+rather than introducing a shared async runtime. Commands arrive on an `async_channel`; every item the
+connection produces leaves through one sink that journals it and hands it to the fanout.
 
-1. Read the descriptor's built-in provider and parse `agent-command` (Codex) or
-   `agent-claude-code-command` (Claude Code) as either a shell-style executable/argument string or an
-   ACP stdio JSON configuration, then spawn that pane's child. `agent/environment.rs`
-   `with_platform_environment` (`:22`) supplies a repaired `PATH` to the ACP child when the command
-   did not configure one explicitly, so a Finder/LaunchServices or `.desktop` launch can still
-   resolve Homebrew, user-local, and version-manager executables without replacing an explicit
-   command environment. Only stderr is sent to zz logs; stdout remains ACP JSON-RPC.
+1. Read the descriptor's built-in provider and parse the `agent-command` (Codex) or
+   `agent-claude-code-command` (Claude Code) mux option as either a shell-style
+   executable/argument string or an ACP stdio JSON configuration, then spawn that pane's child.
+   `agent/environment.rs` `with_platform_environment` supplies a repaired `PATH` to the ACP child
+   when the command did not configure one explicitly, so a daemon started from a launch agent, a
+   login session, or `zz` itself can still resolve Homebrew, user-local, and version-manager
+   executables without replacing an explicit command environment. Only stderr is sent to zz logs;
+   stdout remains ACP JSON-RPC.
 2. Send `initialize` with zz client information and generic session-config-option support. Both
    provider profiles advertise the de-facto `_meta.terminal_output = true` stream convention, and
    Claude Code additionally advertises `_meta["subagent-transcript"] = true`. zz still advertises
@@ -84,10 +99,13 @@ passes back has no Agent sink and is dropped; everything else never crosses the 
 3. For each pane, prefer `session/load` when the agent advertises it and the descriptor has a
    session ID. Routing is installed before the load request so replay notifications are retained.
 4. If load is unsupported or fails, create a new session in the resolved absolute working
-   directory. The app persists the returned opaque session ID and actual cwd together through the
-   internal `set-agent-session -t %N -c /path ID` mux command.
-5. Send prompts as text content blocks. Prompt requests run concurrently with the runtime command
-   loop, so cancellation and permission responses remain responsive during a turn.
+   directory. The daemon adopts the returned opaque session ID and actual cwd into mux state
+   itself (`adopt_agent_session`), then publishes the changed snapshot; the GUI's old
+   `set-agent-session -t %N -c /path ID` round trip is gone.
+5. Send prompts as text content blocks, plus one `ContentBlock::Image` per attachment. Images
+   cross the wire as `AgentImage { format, data }` and become content blocks daemon-side, so
+   `gpui::Image` never leaves the client. Prompt requests run concurrently with the runtime
+   command loop, so cancellation and permission responses remain responsive during a turn.
 
 zz does not crawl or decode Codex CLI's or Claude Code's private session files. Their ACP adapters
 remain the authority over those local stores: zz discovers conversations through `session/list` and
@@ -100,17 +118,33 @@ local session while the metadata command is still making its round trip.
 
 The default provider processes are pinned to exact adapter versions . `@latest` would resolve the
 dist-tag against the npm registry on every pane spawn, while an exact version spawns from the npx
-cache and works offline. When the agent pane is enabled, app launch fires a background
-`npx --package <spec> npm --version` per pinned package to pre-populate that cache without executing
-the adapters, and takes the PATH snapshot on that same thread (`environment.rs:29`) so no pane spawn
-pays for it; version bumps are deliberate edits to the defaults in `config/mod.rs`:
+cache and works offline. The first agent pane a daemon opens fires a background
+`npx --package <spec> npm --version` per configured package to pre-populate that cache without
+executing the adapters, and takes the PATH snapshot on that same thread
+(`environment.rs` `warm_adapter_cache`) so no pane spawn pays for it; version bumps are deliberate
+edits to `DEFAULT_AGENT_COMMAND` / `DEFAULT_AGENT_CLAUDE_CODE_COMMAND` in
+`crates/zz-protocol/src/message.rs`:
 
 ```text
 npx -y @agentclientprotocol/codex-acp@1.1.7
 npx -y @agentclientprotocol/claude-agent-acp@0.63.0
 ```
 
-`zz/config` can override it, the default cwd, and whether approvals are automatic:
+## Where the agent keys live
+
+Three of the four agent keys are **mux options** now, because the daemon is what spawns the adapter:
+
+| Key | Owner | Default |
+| --- | --- | --- |
+| `agent-command` | daemon (`MuxOptionKey::AgentCommand`) | the pinned `codex-acp` line above |
+| `agent-claude-code-command` | daemon (`MuxOptionKey::AgentClaudeCodeCommand`) | the pinned `claude-agent-acp` line above |
+| `agent-auto-approve` | daemon (`MuxOptionKey::AgentAutoApprove`) | `on` |
+| `agent-working-directory` | client | unset; it feeds pane creation, which is a client concern |
+
+A user still writes all four in `zz/config`. The client's parser recognizes the three daemon keys and
+partitions them into the ordered `daemon_entries` it pushes as `SetConfigOverrides`, so the file
+keeps working unchanged; `set-option -g agent-command …` and `zz/mux.conf` reach the same place.
+Both adapter commands are rejected empty and bounded at `MAX_AGENT_COMMAND_BYTES` (4 KiB).
 
 ```text
 agent-command = my-agent --stdio
@@ -121,8 +155,49 @@ agent-auto-approve = false
 
 Raw ACP stdio JSON is also accepted for explicit arguments and environment variables. A configured
 working directory wins for a brand-new pane; a persisted descriptor cwd wins when restoring an
-existing session. Configuration reload restarts every pane-local process and reloads retained
-sessions through the provider stored in each descriptor.
+existing session. Changing an adapter option reconfigures the runtime but does **not** restart the
+children already running: a pane keeps the child it has, and the next pane to open uses the new
+configuration.
+
+# How the conversation reaches a client
+
+Ten `ProtocolMessage` variants go up and five `EventPayload` variants come down; the byte bounds and
+exact shapes are in [the wire protocol](/protocol/wire-protocol.md). What matters here is the
+delivery model.
+
+Up: `AgentPrompt` (text plus encoded images, 6 MiB total), `AgentCancel`, `AgentUnqueue`,
+`AgentRespondPermission`, `AgentSetConfigOption`, `AgentSetMode`, `AgentAuthenticate`,
+`AgentSessionOp` (`List` / `New` / `Switch` / `Delete`), `AgentReplay { from_seq }`, and
+`AgentTurnDiff`.
+
+Down: `AgentUpdates { pane, first_seq, items }` is one coalesced batch of JSON stream items;
+`AgentState { pane, state: AgentPaneWire }` is the small typed pane state; `AgentLagged` says a lane
+overflowed; `AgentSessions` and `AgentTurnDiffResult` are the JSON replies.
+
+- **Coalescing.** The fanout gathers items into 25 ms windows on one shared flush thread that parks
+  whenever no pane has anything gathered, so a healthy client sees a few frames per second rather
+  than one per token. A window longer than `MAX_AGENT_UPDATES_BYTES` (1 MiB) splits across frames; a
+  *single* item that exceeds it is dropped with a log line rather than stamped, because a sequence
+  spent on an unsendable item would read as loss to every client.
+- **Sequencing.** The fanout mints the per-pane sequence, not the host: request replies leave the
+  stream without spending one, and a journal replay synthesizes fresh items. The client keeps a
+  cursor per pane (`MuxClient::agent_cursors`), drops anything at or below it, and treats a batch
+  starting *past* it as a hole it cannot wait out — so it re-requests a replay instead of buffering.
+- **A dedicated lane.** Agent frames get their own `OutboundMailbox` slot, drained
+  `reliable` → `command_output` → `agent` (one frame per pane per turn) → `terminals`. It is capped
+  at `MAX_PENDING_AGENT_BYTES` (4 MiB) per pane, and overflow does **not** close the connection the
+  way a reliable-lane overflow does: the pane's queued frames are dropped and a tiny `AgentLagged`
+  marker is queued, so a slow client degrades to replay instead of dying.
+- **Replay.** Each pane keeps a 16 MiB in-memory ring of encoded items. A replay inside the ring is
+  served straight to the asking client. A replay older than the ring falls back to the journal, and
+  that path is a reset rather than a splice: the lane emits `SessionReset { restoring: true }` and
+  then the journalled updates as freshly numbered items.
+- **Visibility.** The heavy stream flows only to clients the pane is visible to — attached session
+  plus that client's focused window, honoring zoom, the same derivation terminal frames use.
+  `AgentState` goes to every client attached to the session, so badges and permission prompts work
+  for a pane nobody is looking at. Attaching pushes `AgentState` for every agent pane in the session
+  and a pane entering the visible set pushes its state; in both cases the *client* decides where to
+  replay from.
 
 # Driving a pane from outside: `agent-send`
 
@@ -139,23 +214,25 @@ fences the payload in a run of backticks longer than any run inside it. Payloads
 `MAX_AGENT_SEND_BYTES` (1 MiB) and rejected before routing if they carry control characters other
 than newline, carriage return, and tab, the same discipline that bounds ACP session IDs.
 
-Two ownership boundaries shape the implementation:
+The two halves of the verb now sit on opposite sides of the wire:
 
-- **The draft is the view's.** An Agent pane in another window has no `AgentView` at all (it may
-  even have no `AgentThread` yet), so text lands in the controller-owned
-  `AgentController::pending_composer` map, keyed by pane independent of thread registration, and
-  `AgentView::render` folds it into the `InputState` when a view exists. That fold happens at render
-  because `InputState::set_value` needs a `Window`, which no observer has. Existing draft text is
-  kept and separated by a newline, so a send never eats what the user was typing.
-- **Only the GUI knows whether a pane is idle.** `--submit` reuses the History picker's gate
-  (`accepts_prompt()` and no unresolved permission request), which the daemon cannot evaluate. So
-  the daemon publishes `EventPayload::AgentCommand { pane, request_id, command }` and parks the
-  calling command thread until the GUI answers with `ProtocolMessage::GuiResponse`, the protocol's
-  first client → daemon reply, added in v32 and shared with `capture-browser`. The wait is bounded
-  (5 s) and a GUI disconnect fails its waiters immediately. The GUI answers from
+- **`--submit` is the daemon's own business.** `deliver_to_agent` hands the text straight to the
+  pane's host (`submit_agent_prompt`), which dispatches it or queues it behind the running turn. It
+  works with only a TUI attached, or with nothing attached at all . the pane's runtime is what has
+  to be alive, not a GUI. A pane the daemon has no runtime for answers `PaneExited`.
+- **The draft is still the view's.** Without `--submit` the text is composer draft, and an Agent
+  pane in another window has no `AgentView` at all, so the daemon publishes
+  `EventPayload::AgentCommand { pane, request_id, command: ComposerAppend }` and parks the calling
+  command thread until the GUI answers with `ProtocolMessage::GuiResponse` . the protocol's first
+  client → daemon reply, added in v32 and shared with `capture-browser`. The wait is bounded (5 s)
+  and a GUI disconnect fails its waiters immediately. The GUI answers from
   `AppView::drain_gui_requests`, driven by the mux observation rather than by `render`, so a
   minimized or occluded window (which schedules no frames) still applies the command and replies
-  instead of letting the CLI sit out the timeout.
+  instead of letting the CLI sit out the timeout. Client-side the text lands in
+  `AgentController::pending_composer`, keyed by pane independent of thread registration, and
+  `AgentView::render` folds it into the `InputState` when a view exists . that fold happens at
+  render because `InputState::set_value` needs a `Window`, which no observer has. Existing draft
+  text is kept and separated by a newline, so a send never eats what the user was typing.
 
 `send-last-output -t %N` reuses that delivery: it extracts a terminal pane's last completed command
 and output from OSC 133 marks and appends it to `MuxState::recent_agent_pane`'s answer for that
@@ -164,46 +241,59 @@ window. Both verbs are daemon-side commands like `capture-pane`; see
 
 # Workspace environment for the ACP child
 
-Every ACP child is additively given `ZZ_PANE` (its `%id`), `ZZ_SESSION` (the attached session name),
-and `ZZ_SOCKET` (the daemon endpoint, passed explicitly because a `--socket` launch leaves it out of
-zz's own environment). Injection and the PATH repair share one shape
-(`with_workspace_environment` at `environment.rs:103`, `with_executable_path` at `:119`): match
-`McpServer::Stdio`, skip any name the user already configured through `agent-command`, push the
-rest. A configured value always wins. So an agent inside a pane can run
+An ACP child is additively given `ZZ_SOCKET` (the daemon endpoint, passed explicitly because a
+`--socket` launch leaves it out of the daemon's own environment). Injection and the PATH repair
+share one shape (`with_workspace_environment` at `environment.rs:101`, `with_executable_path` at
+`:114`): match `McpServer::Stdio`, skip any name the user already configured through
+`agent-command`, push the rest. A configured value always wins. So an agent inside a pane can run
 `zz tools` and then `zz agent-send -t %5 …` with no MCP server; the CLI is the tool surface.
+
+`AgentWorkspaceEnvironment` carries `pane`, `session`, and `socket`. The spawn config is built once
+per daemon (`Shared::agent_spawn_config`, socket only); the per-pane identity is resolved when the
+pane materializes (`agent_pane_spec` fills `AgentPaneSpec.workspace`) and merged over the config at
+spawn (`adopt_pane_identity`), so every ACP child still sees its own `ZZ_PANE` and `ZZ_SESSION` and
+can address itself (`zz agent-send` with no `-t`, `ZZ_PANE`-gated skills).
 
 ## The repaired PATH
 
-A GUI launch never runs the user's shell init, so zz's own `PATH` misses everything the shell shapes
-and the agent CLIs live exactly there. The repair is all-Unix: `executable_path` resolves through
-the `login_shell` module on macOS and Linux (`environment.rs:138`), while Windows returns nothing
-because a GUI launch there inherits the user's `PATH` already (`:143`). It is composed from three
-sources, in this order and deduplicated (`compose_executable_path`, `:368`):
+A daemon started from a launch agent, a login session, or `zz` itself never runs the user's shell
+init, so its `PATH` misses everything the shell shapes and the agent CLIs live exactly there. The
+repair moved into the daemon with the rest of the runtime and is all-Unix: `executable_path` resolves
+through the `login_shell` module on macOS and Linux (`crates/zz-daemon/src/agent/environment.rs:141`),
+while Windows returns nothing because a launch there inherits the user's `PATH` already. It is
+composed from three sources, in this order and deduplicated (`compose_executable_path`, `:366`):
 
 1. The login shell's own `$PATH`, captured by running the user's `$SHELL` (falling back to
    `/bin/zsh`, `/bin/bash`, `/bin/sh`) with `-l -i -c`, then `-l -c` if that yields nothing . rc
    files that hang or `exec` a multiplexer when interactive still answer a non-interactive login
    shell. The probe carries `ZZ_RESOLVING_ENVIRONMENT=1`, writes into a temp file rather than a
    pipe, and brackets the value in `0x1e`/`0x1f` so startup noise is skipped and a torn capture is
-   refused. It is killed at a 3 s deadline (`LOGIN_SHELL_TIMEOUT`, `:164`), but returns the moment
+   refused. It is killed at a 3 s deadline (`LOGIN_SHELL_TIMEOUT`, `:162`), but returns the moment
    the markers land, so init that blocks *after* printing costs nothing. `ZZ_AGENT_LOGIN_SHELL=0`
-   skips this step entirely; on macOS the fallback is then the system `path_helper` path.
-2. zz's own inherited `PATH`.
-3. Node version-manager bin directories that exist on disk (`node_version_manager_bins`, `:330`):
+   skips this step entirely; on macOS the fallback is then the system `path_helper` path. It is
+   read in the **daemon's** environment now, not the app's, so exporting it in a shell that only
+   ever launches the GUI no longer has any effect.
+2. The daemon's own inherited `PATH`.
+3. Node version-manager bin directories that exist on disk (`node_version_manager_bins`, `:328`):
    fnm's stable `aliases/default/bin` under `$FNM_DIR` and the three well-known roots, then
    `~/.volta/bin`, `~/.bun/bin`, `~/Library/pnpm`, `~/.local/share/pnpm`,
    `~/.local/share/mise/shims`, then every `~/.nvm/versions/node/*/bin` newest first. These land
    last on purpose: they are a fallback for what the shell never told us about, never a shadow over
-   what it did. fnm's PATH entries are per-shell and nvm is a shell function, so a GUI launch sees
-   neither.
+   what it did. fnm's PATH entries are per-shell and nvm is a shell function, so a non-shell launch
+   sees neither.
 
-The whole result is a process-wide `OnceLock`, negative results included (`:178`), so a broken or
+The whole result is a process-wide `OnceLock`, negative results included (`:177`), so a broken or
 slow shell is probed once rather than on every pane spawn.
 
 # Session history
 
 When an initialized adapter advertises `sessionCapabilities.list`, the pane header exposes a
-**History** picker. Its default scope passes the pane cwd to `session/list`; **All projects** omits
+**History** picker. Every one of its verbs is an `AgentSessionOp` on the wire . `List`, `New`,
+`Switch { session_id }`, `Delete { session_id }` . run by the daemon against the pane's adapter. A
+listing comes back as `EventPayload::AgentSessions { pane, request_id, result }`, and because ACP
+carries no client identifier through a session listing, `request_id` is always `0` and the reply
+reaches every client on the pane rather than only the one that asked. Its default scope passes the
+pane cwd to `session/list`; **All projects** omits
 that filter. Opaque pagination cursors are returned to the adapter unchanged. Listed records are
 accepted only when their session ID is bounded and control-free, their cwd and additional roots are
 absolute, and their optional title/timestamp metadata is bounded. The picker searches title, cwd,
@@ -236,7 +326,14 @@ tmux command palette's outlined keyboard-hint badges.
 
 # Streaming reducer and rendering
 
-The controller reduces ACP notifications into provider-neutral entries with stable native IDs:
+The controller reduces the daemon's stream into provider-neutral entries with stable native IDs. Its
+input is `AgentStreamPayload` (`crates/zz-daemon/src/agent/stream.rs`, re-exported from the crate
+root so a client never redeclares the shapes): `Update` wrapping a raw ACP `SessionUpdate`,
+`SessionReady`/`SessionSwitched`/`SessionReset`, `PermissionRequested`/`PermissionResolved`,
+`TaskEvent`, `PromptFinished`, `Parked`, `PromptsReclaimed`, and the failure variants.
+`translate_stream_payload` (`controller.rs:3212`) turns each into the same event the old in-process
+runtime produced and feeds `handle_runtime_event`, so everything downstream . the reducer, view,
+wizard, badges, mend, and spring . is unchanged. What it reduces to is a flat list of entries:
 
 - `User { id, markdown, images }`
 - `Assistant { id, markdown, memory_citations }`
@@ -253,20 +350,20 @@ over `raw_output`, including when a later raw-output update arrives; raw output 
 while the structured content collection is empty.
 
 A tool payload lives as long as its pane, and agents happily emit megabytes, so the reducer caps what
-it retains: `MAX_TOOL_PAYLOAD_BYTES` (512 KiB, `controller.rs:66`) on text, JSON, and accumulated
-terminal output, and `MAX_DIFF_SIDE_BYTES` (1 MiB, `:67`) on each side of a diff independently.
-`truncate_payload` (`:5706`) backs up to a char boundary and appends `TRUNCATION_MARKER`
+it retains: `MAX_TOOL_PAYLOAD_BYTES` (512 KiB, `controller.rs:49`) on text, JSON, and accumulated
+terminal output, and `MAX_DIFF_SIDE_BYTES` (1 MiB, `:50`) on each side of a diff independently.
+`truncate_payload` (`:4426`) backs up to a char boundary and appends `TRUNCATION_MARKER`
 (`"… [truncated]"`), so the cut is visible in the payload rather than silent. These caps are in-memory
 only; the journal writes the update as it arrived.
 
-Only some updates may re-type a tool. `update_carries_tool_shape` (`controller.rs:5507`) accepts a
-title, raw input, locations, or diff content as shape; `reclassifies_tool` (`:5522`) then allows a
+Only some updates may re-type a tool. `update_carries_tool_shape` (`controller.rs:4244`) accepts a
+title, raw input, locations, or diff content as shape; `reclassifies_tool` (`:4257`) then allows a
 kind change only when the update carries shape, when the current kind is already `Other`, or when the
 new kind is something better than `Other`. Without that gate a completion update repeating ACP's
 default `other` kind would downgrade an already-typed tool into a generic one, and an empty title
-would blank a good label. A second denylist, `PLACEHOLDER_TOOL_TITLES` (`:5460`, sixteen entries such
+would blank a good label. A second denylist, `PLACEHOLDER_TOOL_TITLES` (`:4194`, sixteen entries such
 as `terminal`, `read file`, `subagent task`), keeps a generic adapter title from being rendered as
-the `$ <command>` line of a terminal payload: `command_from_title` (`:5487`) prefers a backtick-quoted
+the `$ <command>` line of a terminal payload: `command_from_title` (`:4221`) prefers a backtick-quoted
 span and returns nothing for a placeholder, so the payload falls back to `[terminal <id>]`.
 
 `agent/profile.rs` is the only provider-artifact recognition seam. Its streaming scanner carries
@@ -322,8 +419,10 @@ per-tool update from leaving a permanent spinner in an otherwise finished turn. 
 arrive after the pane has already returned to ready are treated as late replay and settled to
 completed immediately; live turn updates remain non-terminal while the pane is running.
 
-The lossless runtime channel remains unbounded, but the GPUI-side receiver drains bursts of up to 256
-already queued events into one ordered controller transaction and one pane notification. Each thread
+The daemon has already coalesced the burst, so the client's job is just to stay ordered: `MuxClient`
+buffers whole batches per pane, `AppView::drain_agent_events` hands them over on a mux observation,
+and `apply_stream_items` folds one batch into a single controller transaction and one pane
+notification. Each thread
 maintains a stable ID-to-index map and a monotonic revision per entry. The reducer remains flat;
 the sole structural exception is the depth-1 `children` vector owned by a subagent tool.
 `AgentView` folds top-level entries into presentation-only `TimelineRow` values and retains an
@@ -465,26 +564,30 @@ on ACP completion and marks in-flight tools cancelled when the stop reason is `c
 One button carries three actions, chosen by `composer_action(active_turn, has_content)`
 (`view.rs:236`): **Send** while the pane is idle, **Queue** when a turn is running and the composer
 has content, **Stop** when a turn is running and it does not. Send and Queue are the same click .
-both call `submit()` . because `AgentController::prompt` (`controller.rs:2865`) already branches:
-with an active turn it pushes a `QueuedPrompt { text, images }` onto the pane's FIFO instead of
-dispatching. Only Stop is different: it moves the connection to `Cancelling` and emits
-`session/cancel`. It is also deliberately unreachable from the keyboard . Enter over an *empty*
+both call `submit()` . and both put the same `AgentPrompt` on the wire, because the *daemon* is what
+branches: a prompt arriving while the pane is not `Ready` is pushed onto that pane's FIFO instead of
+dispatched, and is never rejected. `AgentController::prompt` (`controller.rs:2760`) only bumps its
+local queue count so the chip stays honest between the daemon's publications. Only Stop is different:
+it sends `AgentCancel`. It is also deliberately unreachable from the keyboard . Enter over an *empty*
 composer confirms the highlighted permission option rather than killing the turn it just started.
 
-The queue's invariant is at-least-once: a prompt the user typed is either sent or visible in the
-draft again, never silently dropped, images included. `dispatch_next_queued_prompt` (`:2980`) pops
-the front prompt when a turn settles . on normal completion and after a quiesce park . while
-`reclaim_queued_prompts` (`:2999`) folds the whole queue back into the composer draft and attachment
-strip on cancel, on runtime shutdown, and on an unexpected child death. A failed dispatch reclaims
-the remainder too. While anything is queued the composer shows an "N queued" chip whose click calls
-`unqueue_prompts` (`:3018`) and hands it all back.
+The queue's invariant is at-least-once, and it is enforced daemon-side now, so it survives the client
+that typed it: a prompt is either sent or handed back, never silently dropped, images included. The
+host's `dispatch_next` pops the front prompt when a turn settles . on normal completion and after a
+quiesce park . while `reclaim_queue` emits `PromptsReclaimed` on cancel, on a lost runtime, on an
+unexpected child death, and for the remainder after a failed dispatch. The composer refills from that
+stream payload. While anything is queued the composer shows an "N queued" chip whose click sends
+`AgentUnqueue` and hands it all back. `AgentPaneWire.queued_prompts` carries the depth to every
+attached client, so a second device sees the same chip.
 
-The first prompt of a session names its pane. `derive_pane_title` (`controller.rs:3858`) takes the
-first line, strips quote/heading/emphasis dressing, keeps 7 words and 48 *characters* (never bytes,
-so CJK survives), and `name_pane_after_prompt` (`:2957`) applies it only when the pane has no title
-at all . anything already named, by the agent, by an earlier prompt, or by the user, keeps its name.
-The title travels the existing route: an `AgentControllerEvent::Title` becomes
-`select-pane -t %N -T <title>`, so the daemon owns the name like any other pane title.
+The first prompt of a session names its pane, and both sides do it. The daemon derives a title in
+`fanout.rs` `derive_pane_title` and applies it through `title_agent_pane`, which writes the pane title
+only while the pane still wears the default `agent` name . so a headless or TUI-driven prompt names
+its pane too. The client keeps its own `derive_pane_title` (`controller.rs:3761`) and
+`name_pane_after_prompt` (`:2821`) for the pane it drives, still routed as an
+`AgentControllerEvent::Title` → `select-pane -t %N -T <title>`. Both take the first line, strip
+quote/heading/emphasis dressing, and keep 7 words and 48 *characters* (never bytes, so CJK survives);
+both refuse to rename something already named, so the two cannot fight.
 
 Pending permissions render as a wizard, one request per page in arrival order (`PermissionWizard`,
 `view.rs:261`). Keys 1-9 answer option indices 0-8 directly, Enter confirms the highlighted option,
@@ -495,6 +598,14 @@ mid-sentence and focused, and the whole key path sits behind the Changes overlay
 and the completion menu, so a wizard never steals a key one of those owns. Because auto-approve
 answers kinded requests before they reach `pending_permissions`, the wizard is what a user sees with
 `agent-auto-approve = false`, or when an agent advertises no allow option at all.
+
+A surfaced request parks in the daemon with no timeout . a human decides . and rides
+`AgentPaneWire.pending_permission { request_id, payload }` (the tool call and its options as JSON,
+bounded at 64 KiB) out to every client attached to the session, so a client that attaches *after* the
+agent asked still sees the question. The answer goes back as `AgentRespondPermission { request_id,
+option_id }` with `None` meaning cancel; the first answer wins and a late one from a second device is
+a no-op rather than an error. Closing the pane or losing the adapter resolves everything outstanding
+as cancelled.
 
 A view-local sticky strip occupies the absolute composer overlay immediately above the card. It is
 derived from durable transcript state: running Claude subagent Task tools remain until their tool
@@ -598,57 +709,69 @@ turn, or shutting down responds `cancelled` to every outstanding permission befo
 connection. Authentication methods advertised during initialization appear beside retry when a
 session fails, and send ACP `authenticate` requests.
 
-`agent-auto-approve` (default `true`, `config/mod.rs:86`) answers a *kinded* request without waiting
-for the user. `preferred_allow_option` (`controller.rs:5236`) takes `AllowAlways` and falls back to
-`AllowOnce`, never a reject kind and never an empty option ID; a request that advertises no allow
-option falls through to the interactive UI rather than being silently denied. The tool call is still
-published as a `ToolCallUpdate` before the response goes back (`controller.rs:4335`), so an
-auto-approved action appears in the transcript exactly like one the user waved through. Turning the
-key off, or an agent that supplies no allow option, routes every request through the wizard.
+`agent-auto-approve` (a mux option, default `on`) answers a *kinded* request in the daemon, without
+waiting for the user or for a client to be attached. `preferred_allow_option`
+(`zz-daemon/src/agent/runtime.rs:1288`) takes `AllowAlways` and falls back to `AllowOnce`, never a
+reject kind and never an empty option ID; a request that advertises no allow option falls through to
+the interactive UI rather than being silently denied. The tool call is still published as a
+`ToolCallUpdate` on the stream before the response goes back (`runtime.rs:498`), so an auto-approved
+action appears in the transcript exactly like one the user waved through . and if publishing it
+fails, the request is answered `Cancelled` rather than approved unseen. Turning the option off, or an
+agent that supplies no allow option, routes every request through the wizard.
 
-The one shape auto-approve refuses is a *question*: `is_user_question` (`controller.rs:5221`) treats
+The one shape auto-approve refuses is a *question*: `is_user_question` (`runtime.rs:1273`) treats
 any option kind outside `{AllowOnce, AllowAlways, RejectOnce, RejectAlways}` as a prompt for the user
 rather than a tool approval. Repeated allow kinds are deliberately not that signal . codex-acp sends
 two `allow_always` options on every exec approval. This branch is forward-compat only and currently
 unreachable: ACP v1 types `PermissionOptionKind` as a closed enum, so a question-shaped kind is
 rejected at JSON-RPC deserialization before it can reach the check, pinned by
-`acp_v1_rejects_permission_options_with_an_unknown_kind` (`controller.rs:7798`).
+`acp_v1_rejects_permission_options_with_an_unknown_kind` (`controller.rs:5592`), which stayed on the
+client side as the pin on why the daemon's branch is unreachable.
 
 Launch, initialize, new/load session, prompt, and authentication failures become pane-local error
 cards with retry. Unexpected process exit does not spin in an automatic restart loop; the user can
 retry after fixing credentials or configuration. What the card *says* comes from the child's own
-stderr: `StderrTail` (`controller.rs:4004`) keeps the last 6 non-empty lines, each capped at 700
-bytes and the join capped again, and `runtime_failure_message` (`:4032`) folds that tail and the
-parsed exit status into `"<adapter> exited unexpectedly (<status>): <tail>"`. A missing adapter or a
-node version that cannot run it therefore reads as the shell's own complaint instead of a bare exit
-code. Application shutdown closes every session when
-the adapter supports `session/close`, otherwise it sends cancellation; in either case it resolves
-approvals, waits for the runtime task, and then allows the ACP child guard to reap the process.
+stderr: `StderrTail` (`zz-daemon/src/agent/runtime.rs:194`) keeps the last 6 non-empty lines, each
+capped at 700 bytes and the join capped again, and `runtime_failure_message` (`:223`) folds that tail
+and the parsed exit status into `"<adapter> exited unexpectedly (<status>): <tail>"`. A missing
+adapter or a node version that cannot run it therefore reads as the shell's own complaint instead of
+a bare exit code. The message reaches clients as the `Failed { message }` phase on `AgentPaneWire`,
+so a client that was not attached when the child died still gets the real reason. **Daemon**
+shutdown, not app quit, is what closes the sessions: it sends `session/close` where the adapter
+supports it and cancellation otherwise, resolves approvals, and lets the ACP child guard reap.
 
-An adapter that stops talking mid-turn is parked, not killed. `quiesce_window` (`controller.rs:3833`)
-reads `ZZ_AGENT_QUIESCE_MS` once per process, defaulting to 120 s, and `0` disables the watchdog
-entirely. `should_park_turn` (`:3849`) trips only when the pane has been silent that long *and*
-nothing is outstanding . `turn_in_flight` (`:2040`) counts unanswered permissions, live subagent
-tasks, and any tool the agent has not resolved, so a long-running Bash call or a background agent
-never trips it. Parking (`park_turn`, `:2050`) settles the in-flight tools to completed and returns
-the connection to Ready. It does not signal, cancel, or reap the child: the process keeps running,
-and output that arrives afterwards opens a fresh segment rather than reviving the settled one. The
-point is that a wedged turn costs a pane its spinner, not its session.
+An adapter that stops talking mid-turn is parked, not killed. `quiesce_window`
+(`zz-daemon/src/agent/runtime.rs:1314`) reads `ZZ_AGENT_QUIESCE_MS` once per **daemon** process,
+defaulting to 120 s, and `0` disables the watchdog entirely . setting it in the shell that launches
+the GUI no longer does anything. `should_park_turn` (`:1332`) trips only when the pane has been
+silent that long *and* nothing is outstanding . `turn_in_flight` (`host.rs:181`) counts unanswered
+permissions, live subagent tasks, and any tool the agent has not resolved, so a long-running Bash
+call or a background agent never trips it. One shared `PARK_TICK` ticker (one second, since the
+window is minutes) walks the open panes and parks itself outright while none is open. Parking
+(`host.rs` `park`) settles the in-flight tools to completed, returns the pane to Ready, emits
+`Parked` on the stream, and starts the next queued prompt. It does not signal, cancel, or reap the
+child: the process keeps running, and output that arrives afterwards opens a fresh segment rather
+than reviving the settled one. The point is that a wedged turn costs a pane its spinner, not its
+session.
 
 ## What this turn changed
 
 The header offers a **Changes** action once the pane has recorded a turn base, opening a modal
 summary of what the agent did to the worktree. The base is a bare git *tree object*, not a commit or
-a stash: `snapshot_tree` (`agent/turn_snapshot.rs:73`) points `GIT_INDEX_FILE` at a throwaway index
-in a temp directory, runs `git add -A` against it, and keeps the `write-tree` SHA. The real
-`.git/index` is never touched, and staging untracked files is deliberate . a file that was already
-untracked when the turn started then diffs correctly instead of reading as brand new. The snapshot is
-taken at every prompt dispatch, on the background executor, and a pane outside a worktree simply
-keeps no base and shows no button; the failure is logged, never surfaced.
+a stash: `snapshot_tree` (`zz-daemon/src/agent/turn_snapshot.rs:78`) points `GIT_INDEX_FILE` at a
+throwaway index in a temp directory, runs `git add -A` against it, and keeps the `write-tree` SHA.
+The real `.git/index` is never touched, and staging untracked files is deliberate . a file that was
+already untracked when the turn started then diffs correctly instead of reading as brand new. The
+snapshot is taken at every prompt dispatch, on the pane's own daemon thread (blocking git there
+stalls nothing else), and a pane outside a worktree simply keeps no base and shows no button; the
+failure is logged, never surfaced. Running it daemon-side is also the correct machine: for a daemon
+reached over ssh, the worktree is the daemon's, not the client's.
 
-Opening the overlay takes a fresh tree and runs three `git diff-tree` invocations between the two
-trees . name-status, numstat, and the unified patch . all with rename detection. `capture_git`
-(`:253`) streams stdout and kills the child the moment it would exceed its ceiling (3 MiB for the
+Opening the overlay sends `AgentTurnDiff { pane, request_id }` and the answer comes back as
+`AgentTurnDiffResult`, JSON-encoded and capped at 1 MiB. Daemon-side it takes a fresh tree and runs
+three `git diff-tree` invocations between the two trees . name-status, numstat, and the unified patch
+. all with rename detection. `capture_git`
+(`:258`) streams stdout and kills the child the moment it would exceed its ceiling (3 MiB for the
 patch, 2 MiB for the summaries), so an enormous diff costs bounded memory rather than the pane. Any
 of the three overflowing sets `TurnDiff::truncated`, which the overlay shows as a **PARTIAL** pill
 beside the `N files · +A −D` summary; the patch text itself is cut back to the last whole line and
@@ -686,13 +809,18 @@ feature the status map is simply always empty.
 
 # Persistence boundary
 
-The daemon persists only `AgentDescriptor { provider, cwd, session_id }`, not messages, tool
-payloads, credentials, or provider state. It is still deliberately different from terminal
-persistence: the daemon never owns or keeps the ACP child alive after all GUI windows close.
+The mux still persists only `AgentDescriptor { provider, cwd, session_id }`, not messages, tool
+payloads, credentials, or provider state. What changed is the runtime around it: the ACP child is a
+daemon-lifetime process now, exactly like a PTY. Closing every GPUI window, detaching, or quitting
+the app leaves the turn running; reattaching replays the transcript and tails the live stream. The
+remaining difference from a terminal is the same one browsers have . nothing survives the *daemon*.
+A daemon restart takes the pane and its adapter with it, and there is no on-disk mux state to
+resurrect them from.
 
 `session/load` is preferred where it exists, but it is no longer the only durability. `AgentJournal`
-(`agent/journal.rs`) appends every inbound `session/update` verbatim to a per-session JSONL file
-under `<data dir>/zz/agent-journal`, beside `agent-preferences.json`, with the same user-only
+(`zz-daemon/src/agent/journal.rs`) appends every inbound `session/update` verbatim to a per-session
+JSONL file under `<data>/zz/daemon/agent-journal` . a directory the daemon owns, deliberately
+separate from the GUI's `<data>/zz` so the two never collide on one machine . with user-only
 directory and file modes. Adapters own the session-ID string, so it is jailed into a file stem before
 it reaches the filesystem: everything outside `[A-Za-z0-9_-]` becomes `_`, and an id that was altered,
 empty, or longer than 96 bytes is truncated and tagged with an FNV-1a digest of the original so two
@@ -701,26 +829,28 @@ and flushed before the append returns; a crash mid-write leaves a torn trailing 
 skip and the next append isolates behind a fresh newline. A session is capped at 32 MiB, past which
 appends are *refused* rather than rotated . a truncated head would replay a conversation that never
 happened . and at most 16 descriptors are held open. Journals untouched for 30 days are pruned once,
-at startup (`controller.rs:80`, `:4102`).
+when the daemon builds its agent runtime (`load_persistent_journal`, `runtime.rs:268`).
 
-Restore runs when the agent advertises no `session/load`, and again when a load request fails
-(`controller.rs:4457`, `:4494`). Both routes go through the same staged replay path the History
-picker uses, so the pane shows RESTORING rather than flashing STARTING at a transcript that is about
-to appear. `restore_journaled_session` (`:4185`) stages the new live session ID before copying, so an
-update arriving mid-copy queues behind the restored entries instead of racing them into the pane;
-the restored updates are then re-journalled under the new ID and the superseded file removed, so a
-chain of restarts leaves exactly one journal per conversation.
+The journal now serves two readers. Daemon-side it restores a transcript when the agent advertises no
+`session/load` and again when a load request fails, through the staged replay path that shows
+RESTORING rather than flashing STARTING at a transcript about to appear; the restored updates are
+re-journalled under the new live session ID and the superseded file removed, so a chain of adapter
+respawns leaves exactly one journal per conversation. Fanout-side it is the floor under the replay
+ring: a client asking for a sequence older than the pane's 16 MiB in-memory ring is served
+`SessionReset { restoring: true }` plus the journalled updates as freshly numbered items.
 
 What is journalled is what the agent said. Prompts are not written as requests (only whatever the
 agent echoes back as a `UserMessageChunk`), permission exchanges never reach the journal, and neither
 does authentication material. The reducer's own `MAX_TOOL_PAYLOAD_BYTES` / `MAX_DIFF_SIDE_BYTES` caps
-are in-memory only: the journal stores the update as it arrived, subject solely to its own file
-ceiling. A journal that cannot be opened is not fatal . the controller simply runs without one, and
-the pane falls back to whatever the provider can replay.
+are client-side and in-memory only: the journal stores the update as it arrived, subject solely to
+its own file ceiling. A journal that cannot be opened is not fatal . the runtime simply runs without
+one, and the pane falls back to whatever the provider can replay.
 
-Sticky selector preferences are a separate GUI-owned store because they are user intent rather than
-conversation data. They contain only opaque advertised option IDs/values and their scope, never
-messages, prompts, credentials, approval decisions, or a copy of provider session files.
+Sticky selector preferences remain a client-owned store because they are user intent rather than
+conversation data: `agent-preferences.json` under the *app's* platform application-data directory,
+using the permission-hardening helpers that now live in `zz-daemon::user_data` and are re-exported
+for it. They contain only opaque advertised option IDs/values and their scope, never messages,
+prompts, credentials, approval decisions, or a copy of provider session files.
 
 # Verification
 
@@ -732,15 +862,25 @@ messages, prompts, credentials, approval decisions, or a copy of provider sessio
   provider-specific completion sigils, matching `$` skills without requiring the stored prefix,
   complete result sets, suppression of ellipsis-only description placeholders, and real GPUI
   Up/Down/Tab routing ahead of the multiline input.
-- An in-process ACP peer test covers initialization, replay during load, load-to-new fallback,
-  advertised authentication and surfaced auth failure, client config capability negotiation,
-  streamed tool/thought/command/config updates, exact approval/config/mode selection, cancellation
-  while waiting for an approval, prompt stop reasons, and graceful shutdown through the real ACP
-  connection machinery.
-- A second ACP peer test covers capability discovery, cwd-filtered listing and pagination metadata,
-  sanitization, additional-directory restoration, discard of partial replay on failed load,
-  preservation of the former prompt binding, atomic successful switching, close, delete, and
-  shutdown. Preference tests cover bounded private persistence, workspace/provider scoping, and
+- The ACP peer tests moved to the daemon with the runtime. `zz-daemon/src/agent/fixture.rs` is an
+  in-process ACP agent both the host's own tests and the daemon's end-to-end wiring tests open panes
+  against, in place of spawning a child. Host tests cover the whole arc . spawn through prompt to a
+  finished turn, an auto-approved tool never reaching a client, a surfaced permission waiting for an
+  answer, a mid-turn prompt queueing and dispatching when the turn settles, unqueueing handing
+  prompts back with their images, a quiet turn parking and letting the queue move on, a park refused
+  while the agent still owes an answer, a session the agent cannot load being replayed out of the
+  journal, a pane outside a worktree reporting no turn to diff, closing a pane cancelling what it
+  owed, and tool calls and tasks holding a turn open until they settle.
+- Fanout tests pin the lane's contract: a window of items leaving as one frame numbered from the
+  first, a replay inside the ring serving only what the client missed, a replay older than the ring
+  resetting and replaying the journal, request replies leaving the stream without spending a
+  sequence, the first prompt naming the pane and later ones leaving it alone, and pane state being
+  published only when something a client renders moves.
+- Daemon wiring tests cover the lane batching per pane and draining behind the reliable one, an
+  overflowing lane asking for a replay instead of closing, updates reaching only the clients the pane
+  is visible to, a submitted `agent-send` being dispatched by the daemon itself, and the agent mux
+  options reconfiguring what the next pane spawns.
+- Client-side, preference tests cover bounded private persistence, workspace/provider scoping, and
   model → effort → permission restore order including legacy mode fallback.
 - Timeline tests cover both folds: a tool run and a thought run collapse independently, a lone
   member stays a plain row, an entry of the other kind ends a run, and a member revision remeasures
@@ -753,25 +893,36 @@ messages, prompts, credentials, approval decisions, or a copy of provider sessio
 - Workspace-verb tests cover `agent-send` option parsing (detached, attached, and `--` forms),
   payload bounds and control-character rejection, context-header fencing, the stdin decision the CLI
   shares with the daemon parser, the full round trip through an attached client mailbox, and failure
-  when that client disconnects. Environment tests assert `ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET`
+  when that client disconnects. Environment tests (now in `zz-daemon`) assert workspace-identity
   injection and that a user-configured value survives, that the login PATH keeps precedence over the
   inherited one with the version-manager bins last, that a failed login shell still yields those
-  bins, that the capture command follows the shell family, and that the probe is opt-out.
-- Permission tests cover the allow-always-then-allow-once preference, repeated allow kinds *not*
-  reading as a question, and `acp_v1_rejects_permission_options_with_an_unknown_kind` . which pins
+  bins, that the capture command follows the shell family, and that the probe is opt-out. The
+  pane-identity merge is pinned by `pane_identity_is_adopted_without_touching_the_socket`.
+- Permission tests cover the allow-always-then-allow-once preference and repeated allow kinds *not*
+  reading as a question (both daemon-side now), plus
+  `acp_v1_rejects_permission_options_with_an_unknown_kind`, which stayed with the client and pins
   the reason the question branch is unreachable rather than merely untested. Wizard tests cover
   page advance, an answered page latching until the controller drops it, page stability when another
   request resolves elsewhere, out-of-range and composer-engaged digits, and confirm/cancel.
-- Watchdog tests cover the park itself and each thing that blocks it (an unresolved tool call, a
-  pending permission, a reporting subagent), the window's default/zero/whitespace parsing, that a
-  parked tool settles completed rather than failed, and that output after a park opens a new segment.
-- Journal tests cover ordered round trips with `0o600`/`0o700` modes, hostile session IDs staying
-  inside the directory, refusal past the size cap, and retention pruning; a controller test restores
-  the same transcript with `load` both advertised and absent and asserts the superseded journal is
-  not left behind to be restored twice.
-- Turn-snapshot tests cover snapshot stability, the real index staying untouched, an untracked file
-  from *before* the turn not being reported, rename detection, binary flagging, a retargeted working
-  directory being refused, and patch truncation leaving the file summaries intact.
+- Watchdog tests are split: the daemon owns the park itself and each thing that blocks it (an
+  unresolved tool call, a pending permission, a reporting subagent) plus the window's
+  default/zero/whitespace parsing, while the client keeps the reducer half . that a parked tool
+  settles completed rather than failed, and that output after a park opens a new segment.
+- Journal tests cover ordered round trips with `0o600`/`0o700` modes, sequence continuity across a
+  reopen, a tolerated torn trailing line, hostile session IDs staying inside the directory, refusal
+  past the size cap, and retention pruning; a host test replays a session the agent cannot load out
+  of the journal. A separate paths test pins that the journal lives under the daemon's own data
+  directory rather than the GUI's.
+- Turn-snapshot tests (also daemon-side now) cover snapshot stability, the real index staying
+  untouched, an untracked file from *before* the turn not being reported, rename detection, binary
+  flagging, a directory outside a worktree and a retargeted working directory being refused, and
+  patch truncation leaving the file summaries intact.
+- Protocol tests pin that the ten agent messages and five agent payloads were appended to the wire
+  tails they claim (`agent_runtime_variants_hold_the_wire_tails_they_were_appended_to`) and that the
+  three agent mux options carry their defaults.
+- `crates/zz-daemon/tests/agent_soak.rs` drives the fixture adapter through the daemon into a
+  headless `InteractiveClient`: `agent_stream_soak` is `#[ignore]`d and prints throughput and daemon
+  CPU time, while `agent_stream_soak_slow_client` exercises the lag-and-replay path.
 - Reducer tests also pin that status-only updates never re-type a typed tool, that placeholder titles
   never become terminal commands, and that oversized payloads cap on char boundaries. Title tests
   pin the dressing strip, the 7-word/48-character limits counted in characters, and the once-per-pane
@@ -782,6 +933,9 @@ messages, prompts, credentials, approval decisions, or a copy of provider sessio
 # Related
 
 - [System overview](/architecture/overview.md)
+- [Daemon-owned agent runtime](/designs/agent-daemon-runtime.md) . the decision record for the move
+- [Wire protocol](/protocol/wire-protocol.md) . the ten agent messages, five agent payloads, and their bounds
+- [Session persistence](/concepts/session-persistence.md) . what survives detach, and what a daemon restart takes
 - [Mux snapshots](/protocol/snapshots.md)
 - [Application configuration](/configuration/app-config.md)
 - [tmux command set](/tmux/commands.md)

@@ -43,6 +43,17 @@ use zz_terminal::{
     apply_appearance_overrides, prepare_paste_buffer,
 };
 
+#[cfg(feature = "agent")]
+use zz_protocol::{AgentPaneWire, AgentSessionOpKind};
+
+#[cfg(feature = "agent")]
+use crate::agent::{
+    environment::AgentWorkspaceEnvironment,
+    fanout::{AgentPublisher, AgentRequestReply, AgentRuntime, is_default_agent_title},
+    host::{AgentPaneSpec, HostCommand},
+    runtime::{AgentSpawnConfig, load_persistent_journal},
+    stream::{AgentImage, AgentPrompt, AgentSessionSummary},
+};
 use crate::{
     DaemonError, diagnostic_elapsed_us, diagnostic_timer,
     keys::{choose_buffer_key_action, choose_tree_key_action, input_key_name, send_tokens},
@@ -63,6 +74,10 @@ const MAX_CONFIG_DEPTH: usize = 16;
 const MAX_RELIABLE_MESSAGES: usize = 256;
 const MAX_KITTY_IMAGE_CHUNK_BYTES: usize = 1024 * 1024;
 const MAX_PENDING_TERMINALS: usize = 128;
+/// What one pane's agent lane may hold before it is cleared in favour of a
+/// lag marker. A slow client degrades to replay instead of being closed.
+#[cfg(feature = "agent")]
+const MAX_PENDING_AGENT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_OUTBOUND_BYTES: usize = 72 * 1024 * 1024;
 const MAX_HISTORY_CHUNK_ROWS: u32 = 512;
 const MAX_RECYCLED_FRAME_BUFFERS: usize = 8;
@@ -266,6 +281,10 @@ impl Daemon {
         }
         accept_result?;
         shared.publish(EventPayload::ServerStopping);
+        // The adapter children are told to close and joined before the socket
+        // goes; what refuses to settle is the acp crate's problem, not ours.
+        #[cfg(feature = "agent")]
+        shared.shutdown_agents();
         shared.log_diagnostic_snapshot("shutdown");
         log::info!("zz daemon stopped");
         log::logger().flush();
@@ -443,6 +462,8 @@ struct OutboundMailbox {
 struct OutboundState {
     reliable: VecDeque<Vec<u8>>,
     command_output: Option<Vec<u8>>,
+    agent: BTreeMap<PaneId, PendingAgent>,
+    agent_order: VecDeque<PaneId>,
     terminals: BTreeMap<PaneId, PendingTerminal>,
     delivered_terminals: BTreeMap<PaneId, TerminalGeneration>,
     delivered_images: BTreeMap<PaneId, BTreeMap<u32, u64>>,
@@ -487,6 +508,17 @@ struct TerminalGeneration {
 struct PendingTerminal {
     encoded: Vec<u8>,
     current: TerminalGeneration,
+}
+
+/// One pane's undelivered agent frames. Unlike a terminal viewport an agent
+/// batch cannot be coalesced away — every item is transcript — so the lane
+/// queues them and drops the whole pane when it outgrows its share.
+#[derive(Default)]
+struct PendingAgent {
+    /// Encoded frames, each tagged with the first sequence it carries: what a
+    /// lagged client must replay from.
+    frames: VecDeque<(u64, Vec<u8>)>,
+    bytes: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -618,6 +650,7 @@ impl OutboundMailbox {
         }
         if let Some(pane) = removed_pane {
             remove_pending_terminal(&mut state, pane);
+            clear_pending_agent(&mut state, pane);
             state.delivered_terminals.remove(&pane);
             state.delivered_images.remove(&pane);
             state.delivered_pasted_images.remove(&pane);
@@ -766,6 +799,57 @@ impl OutboundMailbox {
         drop(state);
         self.ready.notify_one();
         PastedImageEnqueue::Queued
+    }
+
+    /// Queue one encoded `AgentUpdates` frame. Overflow clears the pane's lane
+    /// and answers with a lag marker on the reliable lane instead of closing
+    /// the connection: the journal makes the stream recoverable.
+    #[cfg(feature = "agent")]
+    fn enqueue_agent(&self, pane: PaneId, first_seq: u64, encoded: Vec<u8>) -> bool {
+        let lagged_from = {
+            let mut state = self.state.lock();
+            if state.closed {
+                return false;
+            }
+            let (queued_bytes, queued_first) =
+                state.agent.get(&pane).map_or((0, first_seq), |queued| {
+                    (
+                        queued.bytes,
+                        queued.frames.front().map_or(first_seq, |(seq, _)| *seq),
+                    )
+                });
+            if queued_bytes.saturating_add(encoded.len()) > MAX_PENDING_AGENT_BYTES
+                || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
+            {
+                clear_pending_agent(&mut state, pane);
+                Some(queued_first)
+            } else {
+                let fresh = queued_bytes == 0;
+                state.queued_bytes += encoded.len();
+                let queued = state.agent.entry(pane).or_default();
+                queued.bytes = queued.bytes.saturating_add(encoded.len());
+                queued.frames.push_back((first_seq, encoded));
+                if fresh {
+                    state.agent_order.push_back(pane);
+                }
+                None
+            }
+        };
+        let Some(next_seq) = lagged_from else {
+            self.ready.notify_one();
+            return true;
+        };
+        log::warn!(
+            target: "zz_daemon::diagnostics::outbound",
+            "agent lane for {pane} overflowed; asking for a replay from {next_seq}",
+        );
+        self.enqueue_reliable(&Shared::event(EventPayload::AgentLagged { pane, next_seq }))
+    }
+
+    #[cfg(feature = "agent")]
+    fn cancel_agent(&self, pane: PaneId) {
+        let mut state = self.state.lock();
+        clear_pending_agent(&mut state, pane);
     }
 
     fn enqueue_terminal(&self, pane: PaneId, message: &ProtocolMessage) -> TerminalEnqueue {
@@ -968,6 +1052,25 @@ impl OutboundMailbox {
                 state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
                 return Some(frame);
             }
+            // One frame per pane per turn: a chatty agent never starves the
+            // pane beside it, and terminals still drain behind both.
+            while let Some(pane) = state.agent_order.pop_front() {
+                let Some(queued) = state.agent.get_mut(&pane) else {
+                    continue;
+                };
+                let Some((_, frame)) = queued.frames.pop_front() else {
+                    state.agent.remove(&pane);
+                    continue;
+                };
+                queued.bytes = queued.bytes.saturating_sub(frame.len());
+                if queued.frames.is_empty() {
+                    state.agent.remove(&pane);
+                } else {
+                    state.agent_order.push_back(pane);
+                }
+                state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
+                return Some(frame);
+            }
             while let Some(pane) = state.terminal_order.pop_front() {
                 if let Some(pending) = state.terminals.remove(&pane) {
                     state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
@@ -1016,9 +1119,11 @@ impl OutboundMailbox {
         let state = self.state.lock();
         log::info!(
             target: "zz_daemon::diagnostics::outbound",
-            "snapshot reason={reason} client={client} reliable_messages={} command_output_bytes={} terminal_messages={} delivered_terminals={} delivered_image_panes={} terminal_order={} recycled_frames={} recycled_capacity={} queued_bytes={} closed={}",
+            "snapshot reason={reason} client={client} reliable_messages={} command_output_bytes={} agent_panes={} agent_frames={} terminal_messages={} delivered_terminals={} delivered_image_panes={} terminal_order={} recycled_frames={} recycled_capacity={} queued_bytes={} closed={}",
             state.reliable.len(),
             state.command_output.as_ref().map_or(0, Vec::len),
+            state.agent.len(),
+            state.agent.values().map(|queued| queued.frames.len()).sum::<usize>(),
             state.terminals.len(),
             state.delivered_terminals.len(),
             state.delivered_images.len(),
@@ -1066,6 +1171,16 @@ fn recycle_outbound_frame(state: &mut OutboundState, mut frame: Vec<u8>) {
     state.recycled_frames.push(frame);
 }
 
+fn clear_pending_agent(state: &mut OutboundState, pane: PaneId) {
+    if let Some(queued) = state.agent.remove(&pane) {
+        state.queued_bytes = state.queued_bytes.saturating_sub(queued.bytes);
+        for (_, frame) in queued.frames {
+            recycle_outbound_frame(state, frame);
+        }
+    }
+    state.agent_order.retain(|queued| *queued != pane);
+}
+
 fn remove_pending_terminal(state: &mut OutboundState, pane: PaneId) {
     if let Some(pending) = state.terminals.remove(&pane) {
         state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
@@ -1086,6 +1201,8 @@ fn close_outbound(state: &mut OutboundState) {
     state.closed = true;
     state.reliable.clear();
     state.command_output = None;
+    state.agent.clear();
+    state.agent_order.clear();
     state.terminals.clear();
     state.delivered_terminals.clear();
     state.delivered_images.clear();
@@ -1098,6 +1215,10 @@ fn close_outbound(state: &mut OutboundState) {
 
 struct Shared {
     inner: Mutex<ServerState>,
+    /// Built on the first agent pane rather than at startup: a daemon that
+    /// never opens one never touches the journal directory.
+    #[cfg(feature = "agent")]
+    agent: Mutex<Option<Arc<crate::agent::fanout::AgentRuntime>>>,
     kitty_image_frames: Mutex<BTreeMap<KittyImageKey, Arc<[Vec<u8>]>>>,
     pasted_images: Mutex<BTreeMap<PaneId, PanePastedImages>>,
     status: Mutex<StatusRenderer>,
@@ -1353,6 +1474,8 @@ impl Shared {
         let (display_panes_deadline_tx, display_panes_deadline_rx) = crossbeam_channel::unbounded();
         Self {
             inner: Mutex::new(state),
+            #[cfg(feature = "agent")]
+            agent: Mutex::new(None),
             kitty_image_frames: Mutex::new(BTreeMap::new()),
             pasted_images: Mutex::new(BTreeMap::new()),
             status: Mutex::new(StatusRenderer::default()),
@@ -1392,6 +1515,16 @@ impl Shared {
             )?;
         }
         self.exit_empty_armed.store(true, Ordering::Release);
+        // Building the runtime is what warms the adapter cache, so a daemon
+        // that has agent panes enabled pays the npx download before the first
+        // pane asks for it.
+        #[cfg(feature = "agent")]
+        {
+            let agent_panes_enabled = self.inner.lock().engine.experimental_agent_pane();
+            if agent_panes_enabled {
+                let _ = self.agent_runtime();
+            }
+        }
         self.request_shutdown_if_empty(&self.inner.lock());
         Ok(())
     }
@@ -1879,6 +2012,7 @@ impl Shared {
         let mut direct_events = Vec::new();
         let mut source_files = Vec::new();
         let mut removed_panes = Vec::new();
+        let mut agent_panes_opened = Vec::new();
         let mut relocated_terminal_views = Vec::new();
         let mut retired_command_outputs = Vec::new();
         let mut deferred_terminal_commands = Vec::new();
@@ -1891,6 +2025,8 @@ impl Shared {
         let mut reload_config = false;
         let mut snapshot_changed = false;
         let mut mux_options_changed = false;
+        #[cfg(feature = "agent")]
+        let mut agent_options_changed = false;
         let mut status_formats_changed = false;
 
         let (execution, mux_options_event) = {
@@ -2071,6 +2207,7 @@ impl Shared {
                             .engine
                             .state
                             .update_agent_cwd(*pane, working_directory)?;
+                        agent_panes_opened.push(*pane);
                     }
                     MuxEffect::PaneCreated {
                         pane,
@@ -2439,6 +2576,15 @@ impl Shared {
                         if mux_source != MuxOptionSource::Override {
                             inner.mux_option_underlay.set(*option, value, mux_source);
                         }
+                        #[cfg(feature = "agent")]
+                        {
+                            agent_options_changed |= matches!(
+                                option,
+                                MuxOptionKey::AgentCommand
+                                    | MuxOptionKey::AgentClaudeCodeCommand
+                                    | MuxOptionKey::AgentAutoApprove
+                            );
+                        }
                     }
                     MuxEffect::StatusFormatsChanged => status_formats_changed = true,
                     MuxEffect::Attach {
@@ -2550,6 +2696,16 @@ impl Shared {
                     DaemonError::Thread("display-panes deadline dispatcher stopped".to_owned())
                 })?;
         }
+        #[cfg(feature = "agent")]
+        {
+            if agent_options_changed {
+                self.reconfigure_agents();
+            }
+            self.close_agent_panes(&removed_panes);
+            for pane in agent_panes_opened {
+                self.open_agent_pane(pane);
+            }
+        }
         for pane in removed_panes {
             self.publish(EventPayload::PaneRemoved(pane));
         }
@@ -2653,7 +2809,7 @@ impl Shared {
     }
 
     fn agent_send(
-        &self,
+        self: &Arc<Self>,
         context: &ExecutionContext,
         args: &[String],
     ) -> Result<Execution, DaemonError> {
@@ -2664,7 +2820,7 @@ impl Shared {
     }
 
     fn send_last_output(
-        &self,
+        self: &Arc<Self>,
         context: &ExecutionContext,
         args: &[String],
     ) -> Result<Execution, DaemonError> {
@@ -2803,11 +2959,20 @@ impl Shared {
     }
 
     fn deliver_to_agent(
-        &self,
+        self: &Arc<Self>,
         pane: PaneId,
         text: String,
         submit: bool,
     ) -> Result<Execution, DaemonError> {
+        // A submitted prompt is the daemon's own business now; only the
+        // composer draft still belongs to whichever GUI owns the pane.
+        #[cfg(feature = "agent")]
+        if submit {
+            if !self.submit_agent_prompt(pane, text) {
+                return Err(ServerError::PaneExited(pane).into());
+            }
+            return Ok(Execution::default());
+        }
         let command = if submit {
             AgentCommand::Prompt { text }
         } else {
@@ -3142,6 +3307,11 @@ impl Shared {
         let visible = visible_terminal_panes(&inner, client, session);
         affected_panes.extend(visible.iter().copied());
         inner.visible_terminals.insert(client, visible);
+        #[cfg(feature = "agent")]
+        {
+            let visible = visible_agent_panes(&inner, client, session);
+            inner.visible_agents.insert(client, visible);
+        }
         let terminals = session_terminals(&inner, session);
         let unfocused_copy_mode_exits = unfocused_copy_sessions(&mut inner);
         let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
@@ -3257,6 +3427,7 @@ impl Shared {
         }
         inner.attached.retain(|_, clients| !clients.is_empty());
         inner.visible_terminals.remove(&client);
+        inner.visible_agents.remove(&client);
         inner.focused_windows.remove(&client);
         inner.client_terminal_input_sequences.remove(&client);
         inner.key_engines.remove(&client);
@@ -5181,6 +5352,8 @@ impl Shared {
                 let _ = outbound.replace_terminal(pane, &viewport);
             }
         }
+        #[cfg(feature = "agent")]
+        self.send_agent_resync(client, outbound);
         let inner = self.inner.lock();
         if let Some(output) = inner.command_outputs.get(&client) {
             let message = Self::event(EventPayload::CommandOutput {
@@ -5810,6 +5983,8 @@ impl Shared {
         }
         self.refresh_status(false);
         self.refresh_terminal_visibility();
+        #[cfg(feature = "agent")]
+        self.refresh_agent_visibility();
         self.refresh_choose_trees();
         self.refresh_choose_buffers();
         self.refresh_display_panes();
@@ -6795,6 +6970,471 @@ impl Shared {
     }
 }
 
+/// Everything the daemon owns on behalf of agent panes. Nothing in here may be
+/// reached while the daemon's own state lock is held: the runtime calls back
+/// into it from its pane threads.
+#[cfg(feature = "agent")]
+impl Shared {
+    fn agent_runtime(self: &Arc<Self>) -> Arc<AgentRuntime> {
+        if let Some(runtime) = self.agent.lock().as_ref() {
+            return Arc::clone(runtime);
+        }
+        // Tests never journal and never spawn an adapter: the pane opens
+        // against a runner that reports there is none, and whoever wants a
+        // real conversation installs a fixture first.
+        let journal = if cfg!(test) {
+            None
+        } else {
+            load_persistent_journal()
+        };
+        self.build_agent_runtime(journal)
+    }
+
+    fn build_agent_runtime(
+        self: &Arc<Self>,
+        journal: Option<Arc<crate::agent::journal::AgentJournal>>,
+    ) -> Arc<AgentRuntime> {
+        let config = self.agent_spawn_config();
+        let mut slot = self.agent.lock();
+        if let Some(runtime) = slot.as_ref() {
+            return Arc::clone(runtime);
+        }
+        let publisher: Arc<dyn AgentPublisher> = Arc::<Self>::clone(self);
+        let runtime = Arc::new(AgentRuntime::new(&publisher, config, journal));
+        runtime.prewarm();
+        #[cfg(test)]
+        runtime.set_runner_factory(Box::new(|_| {
+            Box::new(|_| Box::pin(async { Err("no agent adapter in tests".to_owned()) }))
+        }));
+        *slot = Some(Arc::clone(&runtime));
+        runtime
+    }
+
+    /// The runtime only if a pane has already asked for one.
+    fn open_agent_runtime(&self) -> Option<Arc<AgentRuntime>> {
+        self.agent.lock().clone()
+    }
+
+    fn agent_spawn_config(&self) -> AgentSpawnConfig {
+        let inner = self.inner.lock();
+        let options = inner.engine.agent_options();
+        AgentSpawnConfig {
+            command: options.command.clone(),
+            claude_code_command: options.claude_code_command.clone(),
+            auto_approve: options.auto_approve,
+            workspace: AgentWorkspaceEnvironment {
+                pane: None,
+                session: None,
+                socket: Some(self.socket_path.display().to_string()),
+            },
+        }
+    }
+
+    fn reconfigure_agents(&self) {
+        let Some(runtime) = self.open_agent_runtime() else {
+            return;
+        };
+        runtime.reconfigure(self.agent_spawn_config());
+    }
+
+    /// Start the adapter for a pane the mux just materialized.
+    fn open_agent_pane(self: &Arc<Self>, pane: PaneId) {
+        let Some(spec) = self.agent_pane_spec(pane) else {
+            return;
+        };
+        let runtime = self.agent_runtime();
+        if !runtime.open(pane, spec) {
+            log::warn!(target: "zz::agent", "{pane} already has an agent runtime");
+        }
+    }
+
+    fn agent_pane_spec(&self, pane: PaneId) -> Option<AgentPaneSpec> {
+        let inner = self.inner.lock();
+        let PaneKind::Agent(descriptor) = &inner.engine.state.pane(pane)?.kind else {
+            return None;
+        };
+        let session = inner
+            .engine
+            .state
+            .window_for_pane(pane)
+            .map(|window| inner.engine.state.windows[&window].session.to_string());
+        Some(AgentPaneSpec {
+            provider: descriptor.provider,
+            cwd: descriptor
+                .cwd
+                .clone()
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_else(|| PathBuf::from("/")),
+            resume_session: descriptor.session_id.clone(),
+            workspace: AgentWorkspaceEnvironment {
+                pane: Some(pane.to_string()),
+                session,
+                socket: None,
+            },
+        })
+    }
+
+    fn close_agent_panes(&self, panes: &[PaneId]) {
+        let Some(runtime) = self.open_agent_runtime() else {
+            return;
+        };
+        for pane in panes {
+            runtime.close(*pane);
+        }
+    }
+
+    fn shutdown_agents(&self) {
+        let Some(runtime) = self.agent.lock().take() else {
+            return;
+        };
+        runtime.shutdown();
+    }
+
+    /// One client's answer to an agent message, or the reason it was refused.
+    fn agent_message(
+        self: &Arc<Self>,
+        client: ClientId,
+        message: ProtocolMessage,
+    ) -> Result<(), ServerError> {
+        let pane = agent_message_pane(&message)?;
+        let cwd = {
+            let inner = self.inner.lock();
+            match inner.engine.state.pane(pane).map(|pane| &pane.kind) {
+                Some(PaneKind::Agent(descriptor)) => descriptor.cwd.clone(),
+                Some(_) => {
+                    return Err(ServerError::InvalidTarget(format!(
+                        "{pane} is not an agent pane"
+                    )));
+                }
+                None => return Err(ServerError::MissingTarget(pane.to_string())),
+            }
+        };
+        let runtime = self.agent_runtime();
+        let command = match message {
+            ProtocolMessage::AgentReplay { from_seq, .. } => {
+                runtime.replay(client, pane, from_seq);
+                return Ok(());
+            }
+            ProtocolMessage::AgentPrompt { text, images, .. } => {
+                return runtime
+                    .prompt(
+                        pane,
+                        AgentPrompt {
+                            text,
+                            images: images
+                                .into_iter()
+                                .map(|image| AgentImage {
+                                    format: image.format,
+                                    data: image.data,
+                                })
+                                .collect(),
+                        },
+                    )
+                    .then_some(())
+                    .ok_or(ServerError::PaneExited(pane));
+            }
+            ProtocolMessage::AgentCancel { .. } => HostCommand::Cancel,
+            ProtocolMessage::AgentUnqueue { .. } => HostCommand::Unqueue,
+            ProtocolMessage::AgentRespondPermission {
+                request_id,
+                option_id,
+                ..
+            } => HostCommand::RespondPermission {
+                request_id,
+                option_id,
+            },
+            ProtocolMessage::AgentSetConfigOption {
+                option_id, value, ..
+            } => HostCommand::SetConfigOption { option_id, value },
+            ProtocolMessage::AgentSetMode { mode_id, .. } => HostCommand::SetMode { mode_id },
+            ProtocolMessage::AgentAuthenticate { method_id, .. } => {
+                HostCommand::Authenticate { method_id }
+            }
+            ProtocolMessage::AgentTurnDiff { request_id, .. } => {
+                HostCommand::TurnDiff { request_id }
+            }
+            ProtocolMessage::AgentSessionOp { op, .. } => match op {
+                AgentSessionOpKind::List => HostCommand::ListSessions {
+                    cwd: cwd.clone(),
+                    cursor: None,
+                    replace: true,
+                },
+                AgentSessionOpKind::New => HostCommand::NewSession,
+                AgentSessionOpKind::Switch { session_id } => HostCommand::SwitchSession {
+                    session: AgentSessionSummary {
+                        session_id,
+                        cwd: cwd.unwrap_or_else(|| PathBuf::from("/")),
+                        additional_directories: Vec::new(),
+                        title: None,
+                        updated_at: None,
+                    },
+                },
+                AgentSessionOpKind::Delete { session_id } => {
+                    HostCommand::DeleteSession { session_id }
+                }
+            },
+            _ => return Ok(()),
+        };
+        runtime
+            .command(pane, command)
+            .then_some(())
+            .ok_or(ServerError::PaneExited(pane))
+    }
+
+    /// Dispatch `agent-send --submit` straight into the pane's runtime; the
+    /// composer half still round-trips through the GUI that owns the draft.
+    fn submit_agent_prompt(self: &Arc<Self>, pane: PaneId, text: String) -> bool {
+        self.agent_runtime().prompt(
+            pane,
+            AgentPrompt {
+                text,
+                images: Vec::new(),
+            },
+        )
+    }
+
+    /// Push the pane state of every agent pane a reattaching client can see.
+    /// The stream itself is not pushed: the client asks for the replay it
+    /// wants from the sequence it kept.
+    fn send_agent_resync(&self, client: ClientId, outbound: &OutboundMailbox) {
+        let Some(runtime) = self.open_agent_runtime() else {
+            return;
+        };
+        let panes = {
+            let inner = self.inner.lock();
+            let Some(session) = client_attached_session(&inner, client) else {
+                return;
+            };
+            session_agent_panes(&inner, session)
+        };
+        for pane in panes {
+            let Some(state) = runtime.wire_state(pane) else {
+                continue;
+            };
+            Self::send_event(outbound, EventPayload::AgentState { pane, state });
+        }
+    }
+
+    /// A pane entering a client's visible set gets its state pushed; the
+    /// client replays the stream from the sequence it cached.
+    fn refresh_agent_visibility(&self) {
+        let changes = {
+            let mut inner = self.inner.lock();
+            let attachments = inner
+                .attached
+                .iter()
+                .flat_map(|(session, clients)| clients.iter().map(|client| (*session, *client)))
+                .collect::<Vec<_>>();
+            let mut changes = Vec::new();
+            for (session, client) in attachments {
+                let next = visible_agent_panes(&inner, client, session);
+                let previous = inner
+                    .visible_agents
+                    .get(&client)
+                    .cloned()
+                    .unwrap_or_default();
+                if next == previous {
+                    continue;
+                }
+                let removed = previous.difference(&next).copied().collect::<Vec<_>>();
+                let entered = next.difference(&previous).copied().collect::<Vec<_>>();
+                if let Some(subscriber) = inner.subscribers.get(&client).cloned() {
+                    changes.push((subscriber, removed, entered));
+                }
+                inner.visible_agents.insert(client, next);
+            }
+            changes
+        };
+        if changes.is_empty() {
+            return;
+        }
+        let runtime = self.open_agent_runtime();
+        for (subscriber, removed, entered) in changes {
+            for pane in removed {
+                subscriber.cancel_agent(pane);
+            }
+            let Some(runtime) = runtime.as_ref() else {
+                continue;
+            };
+            for pane in entered {
+                let Some(state) = runtime.wire_state(pane) else {
+                    continue;
+                };
+                Self::send_event(&subscriber, EventPayload::AgentState { pane, state });
+            }
+        }
+    }
+}
+
+#[cfg(feature = "agent")]
+impl AgentPublisher for Shared {
+    fn publish_agent_updates(
+        &self,
+        pane: PaneId,
+        first_seq: u64,
+        items: Vec<Vec<u8>>,
+        also: Option<ClientId>,
+    ) {
+        let message = Self::event(EventPayload::AgentUpdates {
+            pane,
+            first_seq,
+            items,
+        });
+        let subscribers = {
+            let inner = self.inner.lock();
+            let mut clients = attached_clients_for_pane(&inner, pane)
+                .into_iter()
+                .flatten()
+                .filter(|client| {
+                    inner
+                        .visible_agents
+                        .get(client)
+                        .is_some_and(|visible| visible.contains(&pane))
+                })
+                .copied()
+                .collect::<BTreeSet<_>>();
+            clients.extend(also.filter(|client| client_is_attached_to_pane(&inner, *client, pane)));
+            clients
+                .into_iter()
+                .filter_map(|client| inner.subscribers.get(&client).cloned())
+                .collect::<Vec<_>>()
+        };
+        for subscriber in subscribers {
+            let Ok(encoded) = subscriber.encode_message(&message) else {
+                log::error!("failed to encode an agent update batch for {pane}");
+                continue;
+            };
+            subscriber.enqueue_agent(pane, first_seq, encoded);
+        }
+    }
+
+    fn send_agent_updates(
+        &self,
+        client: ClientId,
+        pane: PaneId,
+        first_seq: u64,
+        items: Vec<Vec<u8>>,
+    ) {
+        let Some(subscriber) = self.inner.lock().subscribers.get(&client).cloned() else {
+            return;
+        };
+        let message = Self::event(EventPayload::AgentUpdates {
+            pane,
+            first_seq,
+            items,
+        });
+        let Ok(encoded) = subscriber.encode_message(&message) else {
+            log::error!("failed to encode an agent replay batch for {pane}");
+            return;
+        };
+        subscriber.enqueue_agent(pane, first_seq, encoded);
+    }
+
+    fn publish_agent_state(&self, pane: PaneId, state: AgentPaneWire) {
+        self.publish_for_pane(pane, &EventPayload::AgentState { pane, state });
+    }
+
+    fn publish_agent_reply(&self, pane: PaneId, reply: AgentRequestReply) {
+        let payload = match reply {
+            AgentRequestReply::Sessions { request_id, result } => EventPayload::AgentSessions {
+                pane,
+                request_id,
+                result,
+            },
+            AgentRequestReply::TurnDiff { request_id, result } => {
+                EventPayload::AgentTurnDiffResult {
+                    pane,
+                    request_id,
+                    result,
+                }
+            }
+        };
+        self.publish_for_pane(pane, &payload);
+    }
+
+    fn adopt_agent_session(&self, pane: PaneId, session_id: String, cwd: Option<PathBuf>) {
+        let changed = {
+            let mut inner = self.inner.lock();
+            match inner
+                .engine
+                .state
+                .update_agent_session(pane, session_id, cwd)
+            {
+                Ok(()) => true,
+                Err(error) => {
+                    log::debug!(target: "zz::agent", "could not adopt the session for {pane}: {error}");
+                    false
+                }
+            }
+        };
+        if changed {
+            self.publish_snapshot();
+        }
+    }
+
+    fn title_agent_pane(&self, pane: PaneId, title: String) {
+        let changed = {
+            let mut inner = self.inner.lock();
+            let keeps_default_title = inner
+                .engine
+                .state
+                .pane(pane)
+                .is_some_and(|pane| is_default_agent_title(&pane.title));
+            keeps_default_title
+                && inner
+                    .engine
+                    .state
+                    .update_pane_title(pane, title)
+                    .unwrap_or(false)
+        };
+        if changed {
+            self.publish_snapshot();
+        }
+    }
+}
+
+/// Which pane an agent message addresses.
+#[cfg(feature = "agent")]
+fn agent_message_pane(message: &ProtocolMessage) -> Result<PaneId, ServerError> {
+    match message {
+        ProtocolMessage::AgentPrompt { pane, .. }
+        | ProtocolMessage::AgentCancel { pane }
+        | ProtocolMessage::AgentUnqueue { pane }
+        | ProtocolMessage::AgentRespondPermission { pane, .. }
+        | ProtocolMessage::AgentSetConfigOption { pane, .. }
+        | ProtocolMessage::AgentSetMode { pane, .. }
+        | ProtocolMessage::AgentAuthenticate { pane, .. }
+        | ProtocolMessage::AgentSessionOp { pane, .. }
+        | ProtocolMessage::AgentReplay { pane, .. }
+        | ProtocolMessage::AgentTurnDiff { pane, .. } => Ok(*pane),
+        _ => Err(ServerError::InvalidCommand(
+            "not an agent message".to_owned(),
+        )),
+    }
+}
+
+#[cfg(feature = "agent")]
+fn session_agent_panes(inner: &ServerState, session: SessionId) -> Vec<PaneId> {
+    inner
+        .engine
+        .state
+        .sessions
+        .get(&session)
+        .into_iter()
+        .flat_map(|session| session.windows.iter())
+        .filter_map(|window| inner.engine.state.windows.get(window))
+        .flat_map(|window| window.panes.keys())
+        .filter(|pane| {
+            inner
+                .engine
+                .state
+                .pane(**pane)
+                .is_some_and(|pane| matches!(pane.kind, PaneKind::Agent(_)))
+        })
+        .copied()
+        .collect()
+}
+
 #[derive(Default)]
 struct ConfigLoadReport {
     count: usize,
@@ -6855,6 +7495,7 @@ struct ServerState {
     subscribers: BTreeMap<ClientId, Arc<OutboundMailbox>>,
     attached: BTreeMap<SessionId, BTreeSet<ClientId>>,
     visible_terminals: BTreeMap<ClientId, BTreeSet<PaneId>>,
+    visible_agents: BTreeMap<ClientId, BTreeSet<PaneId>>,
     focused_windows: BTreeMap<ClientId, WindowId>,
     terminal_geometries: BTreeMap<PaneId, BTreeMap<ClientId, TerminalGeometry>>,
     terminal_input_sequence: u64,
@@ -8722,6 +9363,36 @@ fn visible_terminal_panes(
         .collect()
 }
 
+/// The agent panes a client can actually see, derived exactly like the
+/// terminal ones: attached session, focused window, zoom.
+#[cfg(feature = "agent")]
+fn visible_agent_panes(
+    inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+) -> BTreeSet<PaneId> {
+    let Some(session) = inner.engine.state.sessions.get(&session) else {
+        return BTreeSet::new();
+    };
+    let focused_window = client_focused_window(inner, client, session);
+    let Some(window) = inner.engine.state.windows.get(&focused_window) else {
+        return BTreeSet::new();
+    };
+    window
+        .panes
+        .keys()
+        .filter(|pane| {
+            window.zoomed_pane.is_none_or(|zoomed| **pane == zoomed)
+                && inner
+                    .engine
+                    .state
+                    .pane(**pane)
+                    .is_some_and(|pane| matches!(pane.kind, PaneKind::Agent(_)))
+        })
+        .copied()
+        .collect()
+}
+
 fn attached_clients_for_pane(inner: &ServerState, pane: PaneId) -> Option<&BTreeSet<ClientId>> {
     let window = inner.engine.state.window_for_pane(pane)?;
     let session = inner.engine.state.windows.get(&window)?.session;
@@ -9743,6 +10414,25 @@ fn handle_connection<S: TransportStream>(
             ProtocolMessage::FetchPastedImage { pane, number } => {
                 shared.fetch_pasted_image(client, pane, number);
             }
+            message @ (ProtocolMessage::AgentPrompt { .. }
+            | ProtocolMessage::AgentCancel { .. }
+            | ProtocolMessage::AgentUnqueue { .. }
+            | ProtocolMessage::AgentRespondPermission { .. }
+            | ProtocolMessage::AgentSetConfigOption { .. }
+            | ProtocolMessage::AgentSetMode { .. }
+            | ProtocolMessage::AgentAuthenticate { .. }
+            | ProtocolMessage::AgentSessionOp { .. }
+            | ProtocolMessage::AgentReplay { .. }
+            | ProtocolMessage::AgentTurnDiff { .. }) => {
+                if let Err(error) = handle_agent_message(shared, client, message) {
+                    let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
+                        CommandResponse::Error {
+                            request_id: 0,
+                            error,
+                        },
+                    ));
+                }
+            }
             _ => {}
         }
         log::trace!(
@@ -9767,6 +10457,28 @@ fn handle_connection<S: TransportStream>(
         diagnostic_elapsed_us(connection_started),
     );
     result
+}
+
+#[cfg(feature = "agent")]
+fn handle_agent_message(
+    shared: &Arc<Shared>,
+    client: ClientId,
+    message: ProtocolMessage,
+) -> Result<(), ServerError> {
+    shared.agent_message(client, message)
+}
+
+/// A daemon built without the agent feature still speaks the protocol; it just
+/// has nothing to run the adapter with.
+#[cfg(not(feature = "agent"))]
+fn handle_agent_message(
+    _shared: &Arc<Shared>,
+    _client: ClientId,
+    _message: ProtocolMessage,
+) -> Result<(), ServerError> {
+    Err(ServerError::UnsupportedCommand(
+        "this daemon was built without agent support".to_owned(),
+    ))
 }
 
 fn best_effort_protocol_mismatch_reply(stream: &mut impl Write, client: u16) {
@@ -19534,5 +20246,471 @@ bind - split-window -v -c "#{pane_current_path}"
             viewport.push_glyph(*cell, &mut output);
         }
         output
+    }
+
+    #[cfg(feature = "agent")]
+    mod agent {
+        use zz_protocol::{AgentImage as WireAgentImage, AgentProvider};
+
+        use super::*;
+        use crate::agent::{
+            fixture::{Behavior, fixture_runner},
+            journal::AgentJournal,
+            stream::{AgentStreamItem, AgentStreamPayload},
+        };
+
+        const DEADLINE: Duration = Duration::from_secs(10);
+
+        fn take_agent_frames(mailbox: &OutboundMailbox) -> Vec<ProtocolMessage> {
+            let frames = {
+                let mut state = mailbox.state.lock();
+                let panes = state.agent_order.drain(..).collect::<Vec<_>>();
+                let mut frames = Vec::new();
+                for pane in panes {
+                    let Some(queued) = state.agent.remove(&pane) else {
+                        continue;
+                    };
+                    state.queued_bytes = state.queued_bytes.saturating_sub(queued.bytes);
+                    frames.extend(queued.frames.into_iter().map(|(_, frame)| frame));
+                }
+                frames
+            };
+            frames
+                .into_iter()
+                .map(|frame| decode_protocol_frame(&frame).expect("decode agent frame"))
+                .collect()
+        }
+
+        /// Every stream item a mailbox has been handed, in delivery order.
+        fn drain_items(mailbox: &OutboundMailbox) -> Vec<AgentStreamItem> {
+            take_agent_frames(mailbox)
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::AgentUpdates { items, .. },
+                        ..
+                    }) => Some(items),
+                    _ => None,
+                })
+                .flatten()
+                .map(|item| serde_json::from_slice(&item).expect("decode stream item"))
+                .collect()
+        }
+
+        fn chunk_text(item: &AgentStreamItem) -> Option<&str> {
+            let AgentStreamPayload::Update { update } = &item.payload else {
+                return None;
+            };
+            update.get("content")?.get("text")?.as_str()
+        }
+
+        fn encoded_updates(pane: PaneId, first_seq: u64, items: usize, bytes: usize) -> Vec<u8> {
+            let message = Shared::event(EventPayload::AgentUpdates {
+                pane,
+                first_seq,
+                items: (0..items).map(|_| vec![b'x'; bytes]).collect(),
+            });
+            encode_protocol_message(&message).expect("encode agent updates")
+        }
+
+        struct Workspace {
+            shared: Arc<Shared>,
+            mailbox: Arc<OutboundMailbox>,
+            client: ClientId,
+            session: SessionId,
+            agent: PaneId,
+            runtime: Arc<crate::agent::fanout::AgentRuntime>,
+            _journal: tempfile::TempDir,
+        }
+
+        /// A daemon with one attached client and one materialized agent pane,
+        /// opened against the in-process fixture adapter.
+        fn workspace(behavior: Behavior) -> Workspace {
+            let shared = Arc::new(Shared::new(1));
+            let mailbox = OutboundMailbox::new();
+            let (client, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                None,
+                None,
+                Arc::clone(&mailbox),
+            );
+            let directory = tempfile::tempdir().expect("journal directory");
+            let journal = Arc::new(AgentJournal::open(directory.path()).expect("open journal"));
+            let runtime = shared.build_agent_runtime(Some(journal));
+            runtime.set_runner_factory(Box::new(move |_| {
+                fixture_runner(AgentProvider::Codex, behavior, false, true)
+            }));
+
+            let mut context = ExecutionContext::default();
+            for command in [
+                CommandInvocation::new("new-session", ["-s", "agents"]),
+                CommandInvocation::new("set-option", ["-g", "experimental-agent-pane", "on"]),
+                CommandInvocation::new("new-pane", ["-v"]),
+            ] {
+                shared
+                    .execute(client, ClientKind::Interactive, &mut context, &command)
+                    .expect("workspace command");
+            }
+            let session = context.session.expect("session");
+            let agent = context.pane.expect("picker");
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "select-pane-kind",
+                        ["-t", &agent.to_string(), "agent"],
+                    ),
+                )
+                .expect("agent pane");
+            shared.attach(client, session).expect("attach");
+            shared.send_resync(client, &mailbox);
+            take_reliable_messages(&mailbox);
+            Workspace {
+                shared,
+                mailbox,
+                client,
+                session,
+                agent,
+                runtime,
+                _journal: directory,
+            }
+        }
+
+        impl Workspace {
+            #[track_caller]
+            fn wait_for_items<F>(&self, what: &str, accept: F) -> Vec<AgentStreamItem>
+            where
+                F: Fn(&[AgentStreamItem]) -> bool,
+            {
+                let deadline = Instant::now() + DEADLINE;
+                let mut seen = Vec::new();
+                while Instant::now() < deadline {
+                    seen.extend(drain_items(&self.mailbox));
+                    if accept(&seen) {
+                        return seen;
+                    }
+                    thread::sleep(Duration::from_millis(5));
+                }
+                panic!("timed out waiting for {what}: {seen:#?}");
+            }
+
+            fn prompt(&self, text: &str) -> Result<(), ServerError> {
+                self.shared.agent_message(
+                    self.client,
+                    ProtocolMessage::AgentPrompt {
+                        pane: self.agent,
+                        text: text.to_owned(),
+                        images: Vec::new(),
+                    },
+                )
+            }
+        }
+
+        impl Drop for Workspace {
+            fn drop(&mut self) {
+                self.shared.shutdown_agents();
+            }
+        }
+
+        #[test]
+        fn the_agent_lane_batches_per_pane_and_drains_behind_the_reliable_one() {
+            let mailbox = OutboundMailbox::new();
+            let first = PaneId(1);
+            let second = PaneId(2);
+
+            assert!(mailbox.enqueue_agent(first, 1, encoded_updates(first, 1, 2, 16)));
+            assert!(mailbox.enqueue_agent(second, 1, encoded_updates(second, 1, 1, 16)));
+            assert!(mailbox.enqueue_agent(first, 3, encoded_updates(first, 3, 1, 16)));
+            assert!(mailbox.enqueue_reliable(&Shared::event(EventPayload::Bell { pane: first })));
+
+            let panes = std::iter::from_fn(|| mailbox.recv())
+                .take(4)
+                .map(
+                    |frame| match decode_protocol_frame(&frame).expect("decode") {
+                        ProtocolMessage::Event(Event {
+                            payload:
+                                EventPayload::AgentUpdates {
+                                    pane, first_seq, ..
+                                },
+                            ..
+                        }) => (Some(pane), first_seq),
+                        _ => (None, 0),
+                    },
+                )
+                .collect::<Vec<_>>();
+
+            assert_eq!(
+                panes,
+                [
+                    (None, 0),
+                    (Some(first), 1),
+                    (Some(second), 1),
+                    (Some(first), 3)
+                ],
+                "the reliable lane goes first, then one agent frame per pane per turn"
+            );
+        }
+
+        #[test]
+        fn an_overflowing_agent_lane_asks_for_a_replay_instead_of_closing() {
+            let mailbox = OutboundMailbox::new();
+            let pane = PaneId(1);
+            let chunk = MAX_PENDING_AGENT_BYTES / 4;
+
+            for seq in 0..3 {
+                assert!(mailbox.enqueue_agent(
+                    pane,
+                    seq * 10 + 1,
+                    encoded_updates(pane, seq * 10 + 1, 1, chunk)
+                ));
+            }
+            // Three frames of a quarter of the cap each fit; the fourth,
+            // with its framing overhead, does not.
+            assert!(mailbox.enqueue_agent(pane, 31, encoded_updates(pane, 31, 1, chunk)));
+
+            {
+                let state = mailbox.state.lock();
+                assert!(!state.closed, "a slow client is not disconnected");
+                assert!(state.agent.is_empty(), "the pane's lane was cleared");
+            }
+            let frame = mailbox.recv().expect("the lag marker");
+            assert!(matches!(
+                decode_protocol_frame(&frame).expect("decode"),
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::AgentLagged { pane: lagged, next_seq: 1 },
+                    ..
+                }) if lagged == pane
+            ));
+        }
+
+        #[test]
+        fn agent_updates_reach_only_the_clients_the_pane_is_visible_to() {
+            let workspace = workspace(Behavior::Chunk);
+            let elsewhere = OutboundMailbox::new();
+            let (watcher, _) = workspace.shared.register_subscribed(
+                ClientKind::Interactive,
+                None,
+                None,
+                Arc::clone(&elsewhere),
+            );
+            workspace
+                .shared
+                .attach(watcher, workspace.session)
+                .expect("attach the second client");
+            let mut context = ExecutionContext::default();
+            workspace
+                .shared
+                .execute(
+                    watcher,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("new-window", ["-t", "agents"]),
+                )
+                .expect("a window of its own");
+            workspace.shared.publish_snapshot();
+            take_reliable_messages(&elsewhere);
+            let _ = drain_items(&elsewhere);
+
+            workspace.prompt("go").expect("prompt");
+            workspace.wait_for_items("the turn", |items| {
+                items.iter().any(|item| chunk_text(item) == Some("turn 0"))
+            });
+
+            assert!(
+                drain_items(&elsewhere).is_empty(),
+                "a client looking at another window is not sent the transcript"
+            );
+            assert!(
+                take_reliable_messages(&elsewhere)
+                    .iter()
+                    .any(|message| matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::AgentState { pane, .. },
+                            ..
+                        }) if *pane == workspace.agent
+                    )),
+                "but it still sees the pane state its badges need"
+            );
+        }
+
+        #[test]
+        fn a_submitted_agent_send_is_dispatched_by_the_daemon_itself() {
+            let workspace = workspace(Behavior::Chunk);
+            let mut context = ExecutionContext::default();
+
+            let execution = workspace
+                .shared
+                .execute(
+                    ClientId(99),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "agent-send",
+                        [
+                            "-t",
+                            &workspace.agent.to_string(),
+                            "--submit",
+                            "review this",
+                        ],
+                    ),
+                )
+                .expect("agent-send reaches the runtime without a GUI");
+            assert!(execution.output.is_empty());
+
+            let items = workspace.wait_for_items("the dispatched turn", |items| {
+                items.iter().any(|item| chunk_text(item) == Some("turn 0"))
+            });
+            assert!(items.iter().any(|item| matches!(
+                &item.payload,
+                AgentStreamPayload::SessionReady { session_id, .. } if session_id == "fixture-session"
+            )));
+            let title = workspace
+                .shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(workspace.agent)
+                .expect("the agent pane")
+                .title
+                .clone();
+            assert_eq!(title, "review this", "the first prompt names the pane");
+        }
+
+        #[test]
+        fn the_agent_options_reconfigure_what_the_next_pane_spawns() {
+            let workspace = workspace(Behavior::Chunk);
+            let mut context = ExecutionContext::default();
+
+            assert_eq!(
+                workspace.runtime.spawn_config().command,
+                zz_protocol::DEFAULT_AGENT_COMMAND
+            );
+            for (option, value) in [
+                ("agent-command", "my-codex --acp"),
+                ("agent-claude-code-command", "my-claude --acp"),
+                ("agent-auto-approve", "off"),
+            ] {
+                workspace
+                    .shared
+                    .execute(
+                        workspace.client,
+                        ClientKind::Interactive,
+                        &mut context,
+                        &CommandInvocation::new("set-option", ["-g", "--", option, value]),
+                    )
+                    .expect("set an agent option");
+            }
+
+            let config = workspace.runtime.spawn_config();
+            assert_eq!(config.command, "my-codex --acp");
+            assert_eq!(config.claude_code_command, "my-claude --acp");
+            assert!(!config.auto_approve);
+            assert_eq!(
+                workspace
+                    .shared
+                    .inner
+                    .lock()
+                    .mux_options
+                    .get(MuxOptionKey::AgentCommand)
+                    .expect("the option is published")
+                    .value,
+                "my-codex --acp"
+            );
+        }
+
+        #[test]
+        fn a_reattaching_client_gets_the_pane_state_and_replays_the_transcript() {
+            let workspace = workspace(Behavior::Chunk);
+            workspace
+                .shared
+                .agent_message(
+                    workspace.client,
+                    ProtocolMessage::AgentPrompt {
+                        pane: workspace.agent,
+                        text: "go".to_owned(),
+                        images: vec![WireAgentImage {
+                            format: "image/png".to_owned(),
+                            data: b"zz".to_vec(),
+                        }],
+                    },
+                )
+                .expect("prompt");
+            let live = workspace.wait_for_items("the first turn", |items| {
+                items.iter().any(|item| chunk_text(item) == Some("turn 0"))
+            });
+            assert_eq!(
+                live.iter().map(|item| item.seq).collect::<Vec<_>>(),
+                (1..=live.len() as u64).collect::<Vec<_>>(),
+                "a live client sees every sequence, in order"
+            );
+
+            workspace.shared.detach(workspace.client);
+            workspace.prompt("again").expect("prompt while detached");
+            let deadline = Instant::now() + DEADLINE;
+            while Instant::now() < deadline
+                && workspace
+                    .runtime
+                    .wire_state(workspace.agent)
+                    .is_none_or(|state| state.session_id.is_none())
+            {
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert!(
+                drain_items(&workspace.mailbox).is_empty(),
+                "a detached client is sent nothing"
+            );
+
+            workspace
+                .shared
+                .attach(workspace.client, workspace.session)
+                .expect("reattach");
+            workspace
+                .shared
+                .send_resync(workspace.client, &workspace.mailbox);
+            assert!(
+                take_reliable_messages(&workspace.mailbox)
+                    .iter()
+                    .any(|message| matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::AgentState { pane, state },
+                            ..
+                        }) if *pane == workspace.agent && state.session_id.as_deref() == Some("fixture-session")
+                    )),
+                "a resync carries the pane state"
+            );
+
+            workspace
+                .shared
+                .agent_message(
+                    workspace.client,
+                    ProtocolMessage::AgentReplay {
+                        pane: workspace.agent,
+                        from_seq: 0,
+                    },
+                )
+                .expect("replay");
+            let replayed = workspace.wait_for_items("the replayed transcript", |items| {
+                items.iter().any(|item| chunk_text(item) == Some("turn 1"))
+            });
+            assert_eq!(
+                replayed.first().map(|item| item.seq),
+                Some(1),
+                "the replay starts at the beginning for a client that kept nothing"
+            );
+            assert_eq!(
+                replayed.iter().map(|item| item.seq).collect::<Vec<_>>(),
+                (1..=replayed.len() as u64).collect::<Vec<_>>(),
+                "and converges on the same contiguous transcript"
+            );
+            assert_eq!(
+                replayed.iter().filter_map(chunk_text).collect::<Vec<_>>(),
+                ["turn 0", "turn 1"]
+            );
+        }
     }
 }

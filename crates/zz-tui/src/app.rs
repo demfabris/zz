@@ -1183,6 +1183,13 @@ fn handle_core_event(
         | CoreEvent::KittyImageBegin { .. }
         | CoreEvent::KittyImageChunk { .. }
         | CoreEvent::KittyImagesRemoved { .. }
+        // The agent lane needs a transcript reducer the TUI does not have; its
+        // panes stay the static card `placeholder_text` paints.
+        | CoreEvent::AgentUpdates { .. }
+        | CoreEvent::AgentStateChanged { .. }
+        | CoreEvent::AgentLagged { .. }
+        | CoreEvent::AgentSessions { .. }
+        | CoreEvent::AgentTurnDiffResult { .. }
         | CoreEvent::Message(_) => Ok(ProtocolOutcome::None),
     }
 }

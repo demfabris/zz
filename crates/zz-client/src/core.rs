@@ -4,7 +4,7 @@ use std::{
 };
 
 use zz_protocol::{
-    AgentCommand, BrowserCommand, ChooseBufferSearchState, ChooseBufferState,
+    AgentCommand, AgentPaneWire, BrowserCommand, ChooseBufferSearchState, ChooseBufferState,
     ChooseTreeSearchState, ChooseTreeState, ClientMessageKind, CommandPromptState, CommandResponse,
     DisplayPanesState, Event, EventPayload, KeyBindingSnapshot, KeyTableSnapshot, MuxOptions,
     MuxSnapshot, PaneId, ProtocolMessage, ServerHello, SessionId, StatusLine, TerminalUiCommand,
@@ -130,6 +130,35 @@ pub enum CoreEvent {
         pane: PaneId,
         image_ids: Vec<u32>,
     },
+    /// One coalesced batch of JSON agent stream items. The core stores none of
+    /// them: the transcript reducer lives in the shell, and `first_seq` is the
+    /// replay cursor it must track to answer
+    /// [`CoreEvent::AgentLagged`].
+    AgentUpdates {
+        pane: PaneId,
+        first_seq: u64,
+        items: Vec<Vec<u8>>,
+    },
+    /// The pane's agent state changed; read it with [`ClientCore::agent_state`].
+    AgentStateChanged {
+        pane: PaneId,
+    },
+    /// The daemon cleared this pane's agent lane; the shell answers with
+    /// `AgentReplay` from `next_seq`.
+    AgentLagged {
+        pane: PaneId,
+        next_seq: u64,
+    },
+    AgentSessions {
+        pane: PaneId,
+        request_id: u64,
+        result: String,
+    },
+    AgentTurnDiffResult {
+        pane: PaneId,
+        request_id: u64,
+        result: String,
+    },
     /// An inbound message the core does not reduce (pasted-image previews,
     /// echoing of client-to-daemon variants); the shell keeps its own handling.
     Message(Box<ProtocolMessage>),
@@ -151,6 +180,7 @@ pub struct ClientCore {
     snapshot: Arc<MuxSnapshot>,
     attached_session: Option<SessionId>,
     viewports: HashMap<PaneId, TerminalViewport>,
+    agent_states: HashMap<PaneId, AgentPaneWire>,
     full_pending: HashSet<PaneId>,
     prefix_armed: bool,
     command_prompt: Option<CommandPromptState>,
@@ -177,6 +207,7 @@ impl ClientCore {
                 self.attached_session = Some(session);
                 self.snapshot = Arc::new(snapshot);
                 self.viewports.clear();
+                self.agent_states.clear();
                 self.full_pending.clear();
                 self.command_output = None;
                 self.events.push_back(CoreEvent::Attached { session });
@@ -264,6 +295,13 @@ impl ClientCore {
         self.viewports.get(&pane)
     }
 
+    /// The daemon-published state of an agent pane, or `None` before its first
+    /// publication. Read after [`CoreEvent::AgentStateChanged`].
+    #[must_use]
+    pub fn agent_state(&self, pane: PaneId) -> Option<&AgentPaneWire> {
+        self.agent_states.get(&pane)
+    }
+
     #[must_use]
     pub const fn prefix_armed(&self) -> bool {
         self.prefix_armed
@@ -325,8 +363,8 @@ impl ClientCore {
     }
 
     /// Drop the per-session state a reattach republishes — prefix arming,
-    /// prompt, command output, choosers, display-panes — while keeping what
-    /// the hello established. A shell calls this when the session goes away
+    /// prompt, command output, choosers, display-panes, agent pane state —
+    /// while keeping what the hello established. A shell calls this when the session goes away
     /// under it (detach, server stopping, host loss) so stale overlays do not
     /// outlive it.
     ///
@@ -339,10 +377,11 @@ impl ClientCore {
         self.choose_tree = None;
         self.choose_buffer = None;
         self.display_panes = None;
+        self.agent_states.clear();
     }
 
-    /// Forget the current attachment — session, snapshot and retained
-    /// viewports — without disturbing hello state. A shell calls this when it
+    /// Forget the current attachment — session, snapshot, retained viewports
+    /// and agent pane state — without disturbing hello state. A shell calls this when it
     /// moves to a different daemon, so the old machine's layout cannot render
     /// against the new one. Emits no events, for the same reason as
     /// [`Self::reset_session`].
@@ -350,6 +389,7 @@ impl ClientCore {
         self.attached_session = None;
         self.snapshot = Arc::new(MuxSnapshot::default());
         self.viewports.clear();
+        self.agent_states.clear();
         self.full_pending.clear();
     }
 
@@ -429,6 +469,7 @@ impl ClientCore {
             }
             EventPayload::PaneRemoved(pane) => {
                 self.viewports.remove(&pane);
+                self.agent_states.remove(&pane);
                 self.full_pending.remove(&pane);
                 if self
                     .command_output
@@ -541,6 +582,47 @@ impl ClientCore {
                 self.events
                     .push_back(CoreEvent::KittyImagesRemoved { pane, image_ids });
             }
+            EventPayload::AgentUpdates {
+                pane,
+                first_seq,
+                items,
+            } => {
+                self.events.push_back(CoreEvent::AgentUpdates {
+                    pane,
+                    first_seq,
+                    items,
+                });
+            }
+            EventPayload::AgentState { pane, state } => {
+                self.agent_states.insert(pane, state);
+                self.events.push_back(CoreEvent::AgentStateChanged { pane });
+            }
+            EventPayload::AgentLagged { pane, next_seq } => {
+                self.events
+                    .push_back(CoreEvent::AgentLagged { pane, next_seq });
+            }
+            EventPayload::AgentSessions {
+                pane,
+                request_id,
+                result,
+            } => {
+                self.events.push_back(CoreEvent::AgentSessions {
+                    pane,
+                    request_id,
+                    result,
+                });
+            }
+            EventPayload::AgentTurnDiffResult {
+                pane,
+                request_id,
+                result,
+            } => {
+                self.events.push_back(CoreEvent::AgentTurnDiffResult {
+                    pane,
+                    request_id,
+                    result,
+                });
+            }
         }
     }
 
@@ -565,7 +647,8 @@ impl ClientCore {
         }
     }
 
-    /// Drop retained viewports for panes the snapshot no longer contains.
+    /// Drop retained viewports and agent state for panes the snapshot no
+    /// longer contains.
     fn retain_snapshot_panes(&mut self) {
         let live: HashSet<PaneId> = self
             .snapshot
@@ -575,6 +658,7 @@ impl ClientCore {
             .flat_map(|window| window.panes.keys().copied())
             .collect();
         self.viewports.retain(|pane, _| live.contains(pane));
+        self.agent_states.retain(|pane, _| live.contains(pane));
         self.full_pending.retain(|pane| live.contains(pane));
     }
 
@@ -616,4 +700,217 @@ fn patch_damage(previous: &TerminalViewport, patch: &TerminalViewportPatch) -> V
     rows.sort_unstable();
     rows.dedup();
     ViewportDamage::Rows(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use zz_protocol::{
+        AgentConnectionPhase, ClientId, LayoutNode, PROTOCOL_VERSION, PaneKindSnapshot,
+        PaneSnapshot, SessionSnapshot, WindowId, WindowSnapshot,
+    };
+    use zz_terminal::TerminalAppearance;
+
+    use super::*;
+
+    fn event(payload: EventPayload) -> ProtocolMessage {
+        ProtocolMessage::Event(Event {
+            sequence: 0,
+            payload,
+        })
+    }
+
+    fn hello() -> ProtocolMessage {
+        ProtocolMessage::ServerHello(ServerHello {
+            protocol_version: PROTOCOL_VERSION,
+            server_id: 1,
+            client_id: ClientId(1),
+            capabilities: Vec::new(),
+            appearance: TerminalAppearance::default(),
+            appearance_provenance: AppearanceProvenance::default(),
+            mux_options: MuxOptions::default(),
+            status: StatusLine::default(),
+            key_tables: Vec::new(),
+        })
+    }
+
+    fn agent_state(title: &str) -> AgentPaneWire {
+        AgentPaneWire {
+            phase: AgentConnectionPhase::Running,
+            queued_prompts: 2,
+            title: Some(title.to_owned()),
+            ..AgentPaneWire::default()
+        }
+    }
+
+    fn snapshot_with(panes: &[PaneId]) -> MuxSnapshot {
+        let entries: BTreeMap<PaneId, PaneSnapshot> = panes
+            .iter()
+            .map(|pane| {
+                (
+                    *pane,
+                    PaneSnapshot {
+                        id: *pane,
+                        title: String::new(),
+                        kind: PaneKindSnapshot::Terminal,
+                        synchronized_input: false,
+                        bell: false,
+                    },
+                )
+            })
+            .collect();
+        let first = panes.first().copied().unwrap_or_default();
+        MuxSnapshot {
+            generation: 1,
+            sessions: vec![SessionSnapshot {
+                id: SessionId(0),
+                name: "0".to_owned(),
+                active_window: WindowId(0),
+                windows: vec![WindowSnapshot {
+                    id: WindowId(0),
+                    index: 0,
+                    name: "win".to_owned(),
+                    active_pane: first,
+                    zoomed_pane: None,
+                    layout: LayoutNode::Pane(first),
+                    panes: entries,
+                }],
+                viewers: Vec::new(),
+            }],
+            focused_window: None,
+        }
+    }
+
+    fn drain(core: &mut ClientCore) -> Vec<CoreEvent> {
+        let mut events = Vec::new();
+        while let Some(event) = core.poll_event() {
+            events.push(event);
+        }
+        events
+    }
+
+    #[test]
+    fn agent_state_is_stored_and_notified() {
+        let pane = PaneId(7);
+        let mut core = ClientCore::new();
+        core.handle_message(event(EventPayload::AgentState {
+            pane,
+            state: agent_state("first"),
+        }));
+        assert_eq!(
+            drain(&mut core),
+            vec![CoreEvent::AgentStateChanged { pane }]
+        );
+        assert_eq!(core.agent_state(pane), Some(&agent_state("first")));
+
+        core.handle_message(event(EventPayload::AgentState {
+            pane,
+            state: agent_state("second"),
+        }));
+        assert_eq!(
+            drain(&mut core),
+            vec![CoreEvent::AgentStateChanged { pane }]
+        );
+        assert_eq!(
+            core.agent_state(pane).and_then(|state| state.title.clone()),
+            Some("second".to_owned())
+        );
+        assert_eq!(core.agent_state(PaneId(8)), None);
+    }
+
+    #[test]
+    fn agent_stream_payloads_pass_through_without_retention() {
+        let pane = PaneId(3);
+        let mut core = ClientCore::new();
+        core.handle_message(event(EventPayload::AgentUpdates {
+            pane,
+            first_seq: 41,
+            items: vec![b"{\"kind\":\"chunk\"}".to_vec(), b"{}".to_vec()],
+        }));
+        core.handle_message(event(EventPayload::AgentLagged { pane, next_seq: 43 }));
+        core.handle_message(event(EventPayload::AgentSessions {
+            pane,
+            request_id: 9,
+            result: "[]".to_owned(),
+        }));
+        core.handle_message(event(EventPayload::AgentTurnDiffResult {
+            pane,
+            request_id: 10,
+            result: "{\"diff\":\"\"}".to_owned(),
+        }));
+
+        assert_eq!(
+            drain(&mut core),
+            vec![
+                CoreEvent::AgentUpdates {
+                    pane,
+                    first_seq: 41,
+                    items: vec![b"{\"kind\":\"chunk\"}".to_vec(), b"{}".to_vec()],
+                },
+                CoreEvent::AgentLagged { pane, next_seq: 43 },
+                CoreEvent::AgentSessions {
+                    pane,
+                    request_id: 9,
+                    result: "[]".to_owned(),
+                },
+                CoreEvent::AgentTurnDiffResult {
+                    pane,
+                    request_id: 10,
+                    result: "{\"diff\":\"\"}".to_owned(),
+                },
+            ]
+        );
+        assert_eq!(core.agent_state(pane), None);
+        assert!(core.poll_outbound().is_none());
+    }
+
+    #[test]
+    fn agent_state_drops_with_its_pane() {
+        let kept = PaneId(1);
+        let lost = PaneId(2);
+        let mut core = ClientCore::new();
+        for pane in [kept, lost] {
+            core.handle_message(event(EventPayload::AgentState {
+                pane,
+                state: agent_state("live"),
+            }));
+        }
+
+        core.handle_message(event(EventPayload::Snapshot(snapshot_with(&[kept]))));
+        assert!(core.agent_state(kept).is_some());
+        assert_eq!(core.agent_state(lost), None);
+
+        core.handle_message(event(EventPayload::PaneRemoved(kept)));
+        assert_eq!(core.agent_state(kept), None);
+    }
+
+    #[test]
+    fn reconnect_and_session_reset_clear_agent_state() {
+        let pane = PaneId(5);
+        let mut core = ClientCore::new();
+        core.handle_message(event(EventPayload::AgentState {
+            pane,
+            state: agent_state("live"),
+        }));
+        core.reset_session();
+        assert_eq!(core.agent_state(pane), None);
+
+        core.handle_message(event(EventPayload::AgentState {
+            pane,
+            state: agent_state("live"),
+        }));
+        core.handle_message(hello());
+        assert_eq!(core.agent_state(pane), None);
+
+        core.handle_message(event(EventPayload::AgentState {
+            pane,
+            state: agent_state("live"),
+        }));
+        core.handle_message(ProtocolMessage::Attached {
+            session: SessionId(0),
+            snapshot: snapshot_with(&[pane]),
+        });
+        assert_eq!(core.agent_state(pane), None);
+    }
 }

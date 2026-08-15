@@ -155,23 +155,30 @@ devices attached to that session never notice.
 | App-owned browser history list | Yes | **Yes** | Client-side, not daemon state: the app persists up to 5,000 live or imported Chrome visits in `<data dir>/zz/browser/recent-pages` (see [browser profile](/browser/profile.md)) |
 | Main-window bounds and mode | **Yes** | **Yes** | Client-side, not daemon state: bounded `<data dir>/zz/window-state.json` remembers size, position, display, and windowed/maximized/full-screen mode; restore clamps to a usable current display |
 | Chromium renderer runtime (JS heap, scroll, unsubmitted forms, media) | **No** | No | Not kept alive with no GUI attached; on reattach the GUI builds a fresh CEF instance from the descriptor |
-| Agent provider + cwd + opaque ACP session ID | Yes | No | Stored as `AgentDescriptor` in mux state; the replacement GUI launches that provider and passes the metadata to `session/load` when supported |
-| ACP child processes and reduced conversation state | **No** | No | GUI-owned per pane; children stop on GUI shutdown and the replacement GUI reduces the conversation again from replay |
-| Journalled ACP transcript | Yes | **Yes** | Client-side, not daemon state: every `session/update` is appended as JSONL under `<data dir>/zz/agent-journal`, one file per ACP session ID, pruned at 30 days. It is the fallback replay when the provider cannot `session/load`, and it is only reachable while the descriptor still names that session ID |
+| Agent provider + cwd + opaque ACP session ID | Yes | No | Stored as `AgentDescriptor` in mux state; the daemon adopts the session ID the adapter returns and passes the metadata to `session/load` when supported |
+| ACP child process + its running turn | Yes | No | Daemon-owned per pane (`zz-daemon/src/agent/host.rs`), one thread each, exactly like a PTY worker. Closing every GPUI window does not stop a turn; the adapter keeps working and a reattaching client replays and tails |
+| Reduced conversation state (the transcript as entries) | **No** | No | Client-side and rebuilt on every attach from the replayed stream; the daemon keeps raw items, never a transcript |
+| Journalled ACP transcript | Yes | **Yes** | Daemon state now: every `session/update` is appended as JSONL under `<data dir>/zz/daemon/agent-journal`, one file per ACP session ID, pruned at 30 days. It is the fallback replay when the provider cannot `session/load`, and the floor under the fanout's 16 MiB per-pane replay ring. It is only reachable while a descriptor still names that session ID |
 | Terminal frames in flight | No | No | Coalesced per-pane in each client's `OutboundMailbox`; newest replaces stale |
 
 Browser panes are the key asymmetry: the daemon persists only the **restorable descriptor**, not the
 live browser. Live browser input while detached returns `PaneNotAttached` and is not queued for
 replay. See [browser lifecycle](/browser/lifecycle.md) and [browser profile](/browser/profile.md).
 
-Agent panes follow the same descriptor/runtime split. The daemon retains the selected provider,
-absolute working directory, and opaque ACP session ID, while `AgentController`, streamed entries,
-pending approvals, and the pane-local child process are GUI-owned. Reattach reconstructs the
-timeline from the provider when it supports `session/load`; when it does not, or when the load
-fails, zz creates a fresh session and seeds it from its own journal, so the conversation survives an
-app restart even against an adapter with no replay of its own. Either way the pane is only as
-durable as the descriptor: a daemon exit takes the mux state with it, and the journal is left with
-no pane to replay into. See [Native Agent pane](/concepts/agent-pane.md).
+Agent panes are **not** that asymmetry any more . they follow the terminal. The daemon spawns and
+owns the ACP adapter child, so an agent run survives the GUI closing or detaching: the turn keeps
+going, permissions still park waiting for an answer, and a reattaching client asks for a replay and
+then tails the live stream. What stays client-side is the *rendering* half: `AgentController`'s
+reduced entries, the composer draft, the wizard, sticky selector preferences. Those are rebuilt from
+the replay on every attach, which is why the transcript survives a client detach *and* an app
+restart, not just an adapter that supports `session/load`.
+
+The durability floor is the journal. Reattach reconstructs the timeline from what the daemon replays;
+daemon-side, when a provider cannot `session/load` or the load fails, the runtime creates a fresh
+session and seeds it from the journal, so the conversation survives an adapter respawn even against
+an agent with no replay of its own. What agent panes still do not survive is a **daemon** exit: the
+mux state goes with it and the journal is left with no pane to replay into. See
+[Native Agent pane](/concepts/agent-pane.md).
 
 # Transport per platform
 

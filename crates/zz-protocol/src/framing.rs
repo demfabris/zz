@@ -61,6 +61,8 @@ pub enum ProtocolError {
     InvalidGuiRequest(String),
     #[error("invalid paste upload payload: {0}")]
     InvalidPasteUpload(String),
+    #[error("invalid agent payload: {0}")]
+    InvalidAgentPayload(String),
     #[error("protocol I/O failed: {0}")]
     Io(#[from] std::io::Error),
 }

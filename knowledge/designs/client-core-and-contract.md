@@ -15,7 +15,8 @@ timestamp: 2026-08-14T00:00:00Z
 
 # Overview
 
-The shipped split uses protocol v52. `zz-protocol` owns the command catalog, key grammar, tables,
+The shipped split landed on protocol v52; the live wire is v53, which added the agent runtime lane
+on top of it without changing anything below. `zz-protocol` owns the command catalog, key grammar, tables,
 and resolver; the daemon publishes every live table. `zz-client::ClientCore` reduces decoded
 messages into shared state and typed effects, while `ChromeKeymap` owns client-side chords. The TUI
 uses both directly. The GPUI `MuxClient` sends non-frame messages through the core but keeps terminal

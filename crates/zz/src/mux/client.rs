@@ -38,6 +38,62 @@ use crate::{
     terminal::view::localize_terminal_font_families,
 };
 
+/// One client-to-daemon agent request, named so the shell states its intent
+/// once and the transport picks the matching [`InteractiveClient`] helper.
+#[cfg(feature = "agent-pane")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum AgentRequest {
+    Prompt {
+        text: String,
+        images: Vec<zz_protocol::AgentImage>,
+    },
+    Cancel,
+    Unqueue,
+    RespondPermission {
+        request_id: u64,
+        option_id: Option<String>,
+    },
+    SetConfigOption {
+        option_id: String,
+        value: String,
+    },
+    SetMode {
+        mode_id: String,
+    },
+    Authenticate {
+        method_id: String,
+    },
+    SessionOp {
+        op: zz_protocol::AgentSessionOpKind,
+    },
+    Replay {
+        from_seq: u64,
+    },
+    TurnDiff {
+        request_id: u64,
+    },
+}
+
+/// What one drain hands the agent controller.
+#[cfg(feature = "agent-pane")]
+#[derive(Default)]
+pub(crate) struct AgentEvents {
+    pub(crate) items: Vec<(PaneId, Vec<zz_daemon::AgentStreamItem>)>,
+    pub(crate) states: Vec<(PaneId, zz_protocol::AgentPaneWire)>,
+    pub(crate) sessions: Vec<(PaneId, u64, String)>,
+    pub(crate) turn_diffs: Vec<(PaneId, u64, String)>,
+}
+
+#[cfg(feature = "agent-pane")]
+impl AgentEvents {
+    fn is_empty(&self) -> bool {
+        self.items.is_empty()
+            && self.states.is_empty()
+            && self.sessions.is_empty()
+            && self.turn_diffs.is_empty()
+    }
+}
+
 const MAX_PENDING_DECODED_MESSAGES: usize = 1;
 const MAX_HISTORY_ROWS: usize = 10_000;
 const MAX_HISTORY_CHUNK_ROWS: u32 = 512;
@@ -866,12 +922,21 @@ pub struct MuxClient {
     terminal_font_size_offset_points: f32,
     #[cfg(test)]
     input_sink: Option<std::rc::Rc<std::cell::RefCell<Vec<InputMessage>>>>,
+    #[cfg(all(test, feature = "agent-pane"))]
+    agent_sink: Option<std::rc::Rc<std::cell::RefCell<Vec<(PaneId, AgentRequest)>>>>,
     attached_snapshot_pending: bool,
     viewports: BTreeMap<PaneId, Arc<RwLock<RetainedTerminalViewport>>>,
     kitty_images: BTreeMap<PaneId, Arc<RwLock<KittyImageCache>>>,
     kitty_image_assemblies: BTreeMap<(PaneId, u32, u64), KittyImageAssembly>,
     browser_commands: BTreeMap<PaneId, Vec<BrowserCommand>>,
     agent_commands: BTreeMap<PaneId, Vec<(u64, AgentCommand)>>,
+    /// Per-pane replay cursor: the highest agent stream seq handed to the
+    /// shell. A replay overlaps the live tail on purpose, so this is what makes
+    /// the stream idempotent.
+    #[cfg(feature = "agent-pane")]
+    agent_cursors: BTreeMap<PaneId, u64>,
+    #[cfg(feature = "agent-pane")]
+    agent_events: AgentEvents,
     screenshot_requests: Vec<(PaneId, u64, String)>,
     terminal_commands: BTreeMap<PaneId, Vec<TerminalUiCommand>>,
     pane_images: BTreeMap<PaneId, PaneImageSnapshots>,
@@ -951,12 +1016,18 @@ impl MuxClient {
             terminal_font_size_offset_points: 0.0,
             #[cfg(test)]
             input_sink: None,
+            #[cfg(all(test, feature = "agent-pane"))]
+            agent_sink: None,
             attached_snapshot_pending: false,
             viewports: BTreeMap::new(),
             kitty_images: BTreeMap::new(),
             kitty_image_assemblies: BTreeMap::new(),
             browser_commands: BTreeMap::new(),
             agent_commands: BTreeMap::new(),
+            #[cfg(feature = "agent-pane")]
+            agent_cursors: BTreeMap::new(),
+            #[cfg(feature = "agent-pane")]
+            agent_events: AgentEvents::default(),
             screenshot_requests: Vec::new(),
             terminal_commands: BTreeMap::new(),
             pane_images: BTreeMap::new(),
@@ -1953,6 +2024,17 @@ impl MuxClient {
         sink
     }
 
+    /// Collect what the agent controller sends, so a test can assert the shape
+    /// that reaches the wire.
+    #[cfg(all(test, feature = "agent-pane"))]
+    pub(crate) fn record_agent_requests_for_test(
+        &mut self,
+    ) -> std::rc::Rc<std::cell::RefCell<Vec<(PaneId, AgentRequest)>>> {
+        let sink = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        self.agent_sink = Some(std::rc::Rc::clone(&sink));
+        sink
+    }
+
     /// Reduce one event payload into the core without running its effects, so
     /// a test can stand a piece of daemon state up directly.
     #[cfg(test)]
@@ -2505,6 +2587,7 @@ impl MuxClient {
         self.clear_all_kitty_images();
         self.browser_commands.clear();
         self.agent_commands.clear();
+        self.clear_agent_streams();
         self.screenshot_requests.clear();
         self.terminal_commands.clear();
         self.clear_all_pasted_images();
@@ -2784,6 +2867,123 @@ impl MuxClient {
         if let Some(images) = self.pane_images.get_mut(&pane) {
             images.remove(number);
         }
+    }
+
+    /// Buffer one coalesced agent batch, dropping what the shell already
+    /// applied: a replay deliberately overlaps the live tail, so the per-pane
+    /// cursor is what makes the stream idempotent. A batch that starts past the
+    /// cursor is a hole in the journal the shell cannot fill by waiting, so the
+    /// pane re-requests from where it is instead of buffering across it.
+    #[cfg(feature = "agent-pane")]
+    fn apply_agent_updates(&mut self, pane: PaneId, first_seq: u64, items: Vec<Vec<u8>>) {
+        let cursor = self.agent_cursors.entry(pane).or_default();
+        let mut accepted = Vec::new();
+        let mut gapped = false;
+        for (index, blob) in items.into_iter().enumerate() {
+            let positional = first_seq.saturating_add(index as u64);
+            let item = match serde_json::from_slice::<zz_daemon::AgentStreamItem>(&blob) {
+                Ok(item) => item,
+                Err(error) => {
+                    log::warn!(
+                        target: "zz::diagnostics::mux",
+                        "dropping undecodable agent item pane={pane} seq={positional}: {error}"
+                    );
+                    *cursor = (*cursor).max(positional);
+                    continue;
+                }
+            };
+            if item.seq <= *cursor {
+                continue;
+            }
+            if item.seq > cursor.saturating_add(1) {
+                gapped = true;
+                break;
+            }
+            *cursor = item.seq;
+            accepted.push(item);
+        }
+        if !accepted.is_empty() {
+            self.agent_events.items.push((pane, accepted));
+        }
+        if gapped {
+            self.request_agent_replay_from_cursor(pane);
+        }
+    }
+
+    #[cfg(not(feature = "agent-pane"))]
+    fn apply_agent_updates(&mut self, _pane: PaneId, _first_seq: u64, _items: Vec<Vec<u8>>) {}
+
+    /// Ask the daemon to replay this pane's stream from where the shell is.
+    /// Sent on a lane overflow, a journal gap, and when a pane's view goes live.
+    #[cfg(feature = "agent-pane")]
+    pub(crate) fn request_agent_replay_from_cursor(&self, pane: PaneId) -> bool {
+        let from_seq = self.agent_cursors.get(&pane).copied().unwrap_or_default();
+        self.send_agent_request(pane, AgentRequest::Replay { from_seq })
+    }
+
+    #[cfg(not(feature = "agent-pane"))]
+    fn request_agent_replay_from_cursor(&self, _pane: PaneId) {}
+
+    /// Forget every pane's replay cursor. The core clears its agent state at
+    /// the same two moments, so the next attach replays from seq 0 rather than
+    /// filtering the new stream against the old connection's cursor.
+    #[cfg(feature = "agent-pane")]
+    fn clear_agent_streams(&mut self) {
+        self.agent_cursors.clear();
+        self.agent_events = AgentEvents::default();
+    }
+
+    #[cfg(not(feature = "agent-pane"))]
+    fn clear_agent_streams(&mut self) {}
+
+    /// Everything the agent controller has yet to reduce, in arrival order.
+    #[cfg(feature = "agent-pane")]
+    pub(crate) fn take_agent_events(&mut self) -> AgentEvents {
+        std::mem::take(&mut self.agent_events)
+    }
+
+    #[cfg(feature = "agent-pane")]
+    #[must_use]
+    pub(crate) fn has_agent_events(&self) -> bool {
+        !self.agent_events.is_empty()
+    }
+
+    /// Ship one agent request to the daemon that owns `pane`. Returns whether
+    /// it reached the wire, which is what the composer reports as "not
+    /// connected".
+    #[cfg(feature = "agent-pane")]
+    pub(crate) fn send_agent_request(&self, pane: PaneId, request: AgentRequest) -> bool {
+        #[cfg(test)]
+        if let Some(sink) = &self.agent_sink {
+            sink.borrow_mut().push((pane, request));
+            return true;
+        }
+        let Some(client) = &self.attached_connection().client else {
+            log::trace!(target: "zz::diagnostics::mux", "agent request skipped: no client");
+            return false;
+        };
+        let sent = match request {
+            AgentRequest::Prompt { text, images } => client.agent_prompt(pane, text, images),
+            AgentRequest::Cancel => client.agent_cancel(pane),
+            AgentRequest::Unqueue => client.agent_unqueue(pane),
+            AgentRequest::RespondPermission {
+                request_id,
+                option_id,
+            } => client.agent_respond_permission(pane, request_id, option_id),
+            AgentRequest::SetConfigOption { option_id, value } => {
+                client.agent_set_config_option(pane, option_id, value)
+            }
+            AgentRequest::SetMode { mode_id } => client.agent_set_mode(pane, mode_id),
+            AgentRequest::Authenticate { method_id } => client.agent_authenticate(pane, method_id),
+            AgentRequest::SessionOp { op } => client.agent_session_op(pane, op),
+            AgentRequest::Replay { from_seq } => client.agent_replay(pane, from_seq),
+            AgentRequest::TurnDiff { request_id } => client.agent_turn_diff(pane, request_id),
+        };
+        if let Err(error) = sent {
+            log::warn!("failed to send an agent request for {pane}: {error}");
+            return false;
+        }
+        true
     }
 
     /// Every queued `agent-send` payload, in arrival order per pane.
@@ -3214,6 +3414,58 @@ impl MuxClient {
             CoreEvent::KittyImagesRemoved { pane, image_ids } => {
                 self.remove_kitty_images(pane, &image_ids);
             }
+            CoreEvent::AgentUpdates {
+                pane,
+                first_seq,
+                items,
+            } => self.apply_agent_updates(pane, first_seq, items),
+            CoreEvent::AgentStateChanged { pane } => {
+                #[cfg(feature = "agent-pane")]
+                if let Some(state) = self.core.agent_state(pane).cloned() {
+                    self.agent_events.states.push((pane, state));
+                    // The daemon publishes state to every attached client and
+                    // pushes it again on resync, but never pushes the stream:
+                    // a pane the shell has no cursor for is one it has to ask
+                    // for, which is what makes a reattach replay-then-tail.
+                    if let std::collections::btree_map::Entry::Vacant(slot) =
+                        self.agent_cursors.entry(pane)
+                    {
+                        slot.insert(0);
+                        self.request_agent_replay_from_cursor(pane);
+                    }
+                }
+                #[cfg(not(feature = "agent-pane"))]
+                let _ = pane;
+            }
+            CoreEvent::AgentLagged { pane, next_seq } => {
+                log::warn!(
+                    target: "zz::diagnostics::mux",
+                    "agent lane cleared for {pane}; replaying from {next_seq}"
+                );
+                self.request_agent_replay_from_cursor(pane);
+            }
+            CoreEvent::AgentSessions {
+                pane,
+                request_id,
+                result,
+            } => {
+                #[cfg(feature = "agent-pane")]
+                self.agent_events.sessions.push((pane, request_id, result));
+                #[cfg(not(feature = "agent-pane"))]
+                let _ = (pane, request_id, result);
+            }
+            CoreEvent::AgentTurnDiffResult {
+                pane,
+                request_id,
+                result,
+            } => {
+                #[cfg(feature = "agent-pane")]
+                self.agent_events
+                    .turn_diffs
+                    .push((pane, request_id, result));
+                #[cfg(not(feature = "agent-pane"))]
+                let _ = (pane, request_id, result);
+            }
             CoreEvent::Message(message) => self.handle_unreduced_message(*message, cx),
             // Key tables are read straight off the core; the handshake is
             // ingested rather than received; the frame path never reaches the
@@ -3228,6 +3480,7 @@ impl MuxClient {
     fn finish_attach(&mut self, host: HostId, session: SessionId, cx: &mut Context<Self>) {
         self.clear_all_kitty_images();
         self.clear_all_pasted_images();
+        self.clear_agent_streams();
         self.attached_snapshot_pending = false;
         let connection = self.attached_connection_mut();
         connection.last_attached_session = Some(session);
@@ -3297,6 +3550,8 @@ impl MuxClient {
         connection.history_backfill_deferred.remove(&pane);
         self.browser_commands.remove(&pane);
         self.terminal_commands.remove(&pane);
+        #[cfg(feature = "agent-pane")]
+        self.agent_cursors.remove(&pane);
         self.pane_images.remove(&pane);
         self.pasted_image_assemblies
             .retain(|(target, _), _| *target != pane);
@@ -5840,6 +6095,76 @@ mod tests {
                 assert_eq!(mux.host_states(cx).count(), 1);
                 assert!(mux.registry.get_by_name("remote").is_none());
                 assert_eq!(*route.read(), None);
+            });
+        });
+    }
+
+    #[cfg(feature = "agent-pane")]
+    #[gpui::test]
+    fn the_agent_stream_is_filtered_by_seq_and_a_gap_asks_for_a_replay(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("fixture".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            mux.update(cx, |mux, _| {
+                let pane = PaneId(3);
+                let sink = mux.record_agent_requests_for_test();
+                let blob = |seq: u64| {
+                    serde_json::to_vec(&zz_daemon::AgentStreamItem {
+                        seq,
+                        payload: zz_daemon::AgentStreamPayload::Parked,
+                    })
+                    .expect("a stream item encodes")
+                };
+                let applied = |mux: &mut MuxClient| {
+                    mux.take_agent_events()
+                        .items
+                        .into_iter()
+                        .flat_map(|(_, items)| items.into_iter().map(|item| item.seq))
+                        .collect::<Vec<_>>()
+                };
+
+                mux.apply_agent_updates(pane, 1, vec![blob(1), blob(2)]);
+                assert_eq!(applied(mux), [1, 2]);
+
+                mux.apply_agent_updates(pane, 1, vec![blob(1), blob(2), blob(3)]);
+                assert_eq!(
+                    applied(mux),
+                    [3],
+                    "a replay overlaps the live tail and only the new item survives"
+                );
+
+                mux.apply_agent_updates(pane, 9, vec![blob(9)]);
+                assert!(
+                    applied(mux).is_empty(),
+                    "a batch past the cursor is a hole, not something to buffer across"
+                );
+                assert_eq!(mux.agent_cursors.get(&pane), Some(&3));
+                assert_eq!(
+                    &*sink.borrow(),
+                    &[(pane, AgentRequest::Replay { from_seq: 3 })]
+                );
+
+                sink.borrow_mut().clear();
+                mux.request_agent_replay_from_cursor(pane);
+                assert_eq!(
+                    &*sink.borrow(),
+                    &[(pane, AgentRequest::Replay { from_seq: 3 })]
+                );
+
+                sink.borrow_mut().clear();
+                mux.clear_agent_streams();
+                mux.request_agent_replay_from_cursor(pane);
+                assert_eq!(
+                    &*sink.borrow(),
+                    &[(pane, AgentRequest::Replay { from_seq: 0 })],
+                    "an attach forgets the cursor so the stream replays from the top"
+                );
             });
         });
     }

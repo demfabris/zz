@@ -2,8 +2,10 @@ use std::{collections::BTreeMap, path::PathBuf, str::FromStr as _};
 
 use zz_protocol::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind, CommandInvocation,
-    DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MuxOptionKey, PaneId, PaneKindSnapshot,
-    ServerError, SessionId, TerminalUiCommand, WindowId, normalize_browser_profile_name,
+    DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
+    DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES, MuxOptionKey,
+    PaneId, PaneKindSnapshot, ServerError, SessionId, TerminalUiCommand, WindowId,
+    normalize_browser_profile_name,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, DEFAULT_HISTORY_LIMIT,
@@ -218,7 +220,26 @@ pub struct MuxEngine {
     status: StatusFormats,
     experimental_agent_pane: bool,
     experimental_editor_pane: bool,
+    agent: AgentOptions,
     pane_cells: BTreeMap<PaneId, (u16, u16)>,
+}
+
+/// What an agent pane's daemon-owned adapter is started with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentOptions {
+    pub command: String,
+    pub claude_code_command: String,
+    pub auto_approve: bool,
+}
+
+impl Default for AgentOptions {
+    fn default() -> Self {
+        Self {
+            command: DEFAULT_AGENT_COMMAND.to_owned(),
+            claude_code_command: DEFAULT_AGENT_CLAUDE_CODE_COMMAND.to_owned(),
+            auto_approve: DEFAULT_AGENT_AUTO_APPROVE,
+        }
+    }
 }
 
 impl Default for MuxEngine {
@@ -239,6 +260,7 @@ impl Default for MuxEngine {
             status: StatusFormats::default(),
             experimental_agent_pane: false,
             experimental_editor_pane: false,
+            agent: AgentOptions::default(),
             pane_cells: BTreeMap::new(),
         }
     }
@@ -295,7 +317,23 @@ impl MuxEngine {
                 "off"
             }
             .to_owned(),
+            MuxOptionKey::AgentCommand => self.agent.command.clone(),
+            MuxOptionKey::AgentClaudeCodeCommand => self.agent.claude_code_command.clone(),
+            MuxOptionKey::AgentAutoApprove => {
+                if self.agent.auto_approve { "on" } else { "off" }.to_owned()
+            }
         }
+    }
+
+    /// What the daemon starts an agent pane's adapter with.
+    #[must_use]
+    pub const fn agent_options(&self) -> &AgentOptions {
+        &self.agent
+    }
+
+    #[must_use]
+    pub const fn experimental_agent_pane(&self) -> bool {
+        self.experimental_agent_pane
     }
 
     /// The history limit a newly created pane inherits.
@@ -2246,6 +2284,30 @@ impl MuxEngine {
                 self.experimental_editor_pane =
                     parse_flag_value(Some(value.as_str()), self.experimental_editor_pane)?;
                 MuxOptionKey::ExperimentalEditorPane
+            }
+            "agent-command" | "agent-claude-code-command" => {
+                if value.len() > MAX_AGENT_COMMAND_BYTES {
+                    return Err(ServerError::InvalidCommand(format!(
+                        "{option} exceeds {MAX_AGENT_COMMAND_BYTES} bytes"
+                    )));
+                }
+                if value.trim().is_empty() {
+                    return Err(ServerError::InvalidCommand(format!(
+                        "{option} needs an adapter command"
+                    )));
+                }
+                if option == "agent-command" {
+                    self.agent.command.clone_from(value);
+                    MuxOptionKey::AgentCommand
+                } else {
+                    self.agent.claude_code_command.clone_from(value);
+                    MuxOptionKey::AgentClaudeCodeCommand
+                }
+            }
+            "agent-auto-approve" => {
+                self.agent.auto_approve =
+                    parse_flag_value(Some(value.as_str()), self.agent.auto_approve)?;
+                MuxOptionKey::AgentAutoApprove
             }
             _ => {
                 return Err(ServerError::UnsupportedCommand(format!(

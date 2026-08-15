@@ -12,6 +12,8 @@ use thiserror::Error;
 use zz_protocol::{ProtocolError, ServerError};
 
 // iOS uses the in-process russh tunnel, leaving the spawned-ssh and askpass halves unreachable.
+#[cfg(feature = "agent")]
+mod agent;
 #[cfg_attr(target_os = "ios", allow(dead_code))]
 mod askpass;
 mod client;
@@ -34,7 +36,20 @@ mod russh_client;
 mod status;
 #[cfg_attr(target_os = "ios", allow(dead_code))]
 mod transport;
+pub mod user_data;
 
+/// The agent stream vocabulary, so a client deserializes the JSON items the
+/// daemon journals and fans out without redeclaring their shapes.
+#[cfg(feature = "agent")]
+pub use agent::{
+    profile::{SdkTaskEvent, TaskNotification},
+    stream::{
+        AgentAuthMethod, AgentImage as AgentStreamImage, AgentPrompt, AgentPromptOutcome,
+        AgentSessionCapabilities, AgentSessionSummary, AgentStreamItem, AgentStreamPayload,
+        AgentTurnDiffOutcome,
+    },
+    turn_snapshot::{TurnDiff, TurnFile, TurnFileStatus},
+};
 /// Only unix and Windows spawn ssh, so only they carry the askpass helper.
 #[cfg(any(unix, windows))]
 pub use askpass::run_helper;

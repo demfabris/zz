@@ -1,10 +1,10 @@
 ---
 type: Rust Crate
 title: zz-daemon crate
-description: The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions, and the fan-out engine that streams coalesced terminal frames to attached and short-lived clients over a socket or named pipe.
+description: The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
 resource: crates/zz-daemon/src/daemon.rs
-tags: [crate, daemon, ipc, fanout, transport]
-timestamp: 2026-08-01T00:00:00Z
+tags: [crate, daemon, ipc, fanout, transport, agent]
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
@@ -18,11 +18,17 @@ attach to one session at once, each with its own viewport and window focus. The 
 detach so that sessions, windows, splits, and running terminal processes outlive every window. See
 [session persistence](/concepts/session-persistence.md).
 
+Since v53 it owns one more runtime: an [Agent pane](/concepts/agent-pane.md)'s ACP adapter child,
+spawned and supervised on its own thread exactly as a PTY is, behind the default-on `agent` cargo
+feature. A turn therefore survives every GUI window closing, and a reattaching client replays the
+transcript out of a daemon-side journal and tails the live stream.
+
 The daemon speaks the versioned [wire protocol](/protocol/wire-protocol.md) from
 [zz-protocol](/crates/zz-protocol.md), applies commands through the serialized `MuxEngine`, and
-translates the engine's `MuxEffect`s into terminal spawns, view attach/detach, send-keys, and client
-events. It contains no GPUI or CEF code; live browser rendering stays in [the app](/crates/zz.md),
-and the daemon only holds the browser pane's restorable `BrowserDescriptor` (URL + profile).
+translates the engine's `MuxEffect`s into terminal spawns, agent-pane opens, view attach/detach,
+send-keys, and client events. It contains no GPUI or CEF code; live browser rendering stays in
+[the app](/crates/zz.md), and the daemon only holds the browser pane's restorable
+`BrowserDescriptor` (URL + profile).
 
 # Responsibilities
 
@@ -30,20 +36,22 @@ and the daemon only holds the browser pane's restorable `BrowserDescriptor` (URL
 |----------------|-------|
 | Own mux state (`MuxEngine`, sessions/windows/panes/splits) | `Shared.inner: Mutex<ServerState>` |
 | Own each terminal pane's PTY worker | `ServerState.terminals: BTreeMap<PaneId, Arc<TerminalSession>>` |
+| Own each agent pane's ACP adapter child | `Shared.agent: Mutex<Option<Arc<AgentRuntime>>>` → `agent::host::AgentHost`, one thread per pane |
 | Bind + guard the owner-only endpoint | `Daemon::run_foreground`, `LocalListener`, `SocketGuard`, `restrict_socket_permissions` |
 | Accept connections, one thread per client | `run_foreground` accept loop → `handle_connection` |
 | Serialize + execute commands | `Shared::execute` / `execute_command_request` (mux engine under one lock) |
 | Fan terminal frames + persist live pane titles | `watch_terminal` → `synchronize_pane_title` / `publish_terminal_for_pane` → mux snapshots + per-client `OutboundMailbox` |
 | Route interactive input + `send-keys` | `input` / `input_text` / `input_key`, `execute_key_commands`, `resolve_input_sinks`, `send_tokens`; key-bound `split-window` commands retain their arguments but enter the native picker flow |
 | Attach/detach interactive clients | `attach` / `attach_target` / `detach`, `register` / `unregister`, `evict_other_clients` for `attach-session -d` |
-| Serve repair requests after a coalesced drop | `send_full` (`RequestFull`), `send_history` (`HistoryRequest` → `HistoryChunk`) |
+| Serve repair requests after a coalesced drop | `send_full` (`RequestFull`), `send_history` (`HistoryRequest` → `HistoryChunk`), `AgentRuntime::replay` (`AgentReplay` → `AgentUpdates`) |
+| Journal and fan out agent transcripts | `agent::journal::AgentJournal` under `<data>/zz/daemon/agent-journal`, `agent::fanout::AgentFanout` → the mailbox's `agent` lane |
 | Recover an incompatible daemon safely | `terminate_incompatible_daemon`, `DaemonIdentityGuard` (lifecycle) |
 
 # Module map
 
 | Module (`crates/zz-daemon/src/`) | Public surface | Role |
 |-------------------------------|----------------|------|
-| `lib.rs` | re-exports `Daemon`, `DaemonError`, `CommandClient`, `InteractiveClient`, `short_device_name`, `agent_send_reads_stdin`, `default_socket_path`, `default_mux_config`, `mux_config_candidates`, `mux_config_write_path`, `RecoveredDaemon`, `DaemonRecoveryError`, `terminate_incompatible_daemon`, `daemon_identity_protocol_version`, `classify_local_connect_error`, `Endpoint`, `EndpointError`, `SshEndpoint`, `SshPrompts`, `AskpassPrompt`, `AskpassPromptKind`, `AskpassReply`, `ASKPASS_SOCKET_ENV`, `run_helper` | Crate root; the whole public API, over nine modules |
+| `lib.rs` | re-exports `Daemon`, `DaemonError`, `CommandClient`, `InteractiveClient`, `short_device_name`, `agent_send_reads_stdin`, `default_socket_path`, `default_mux_config`, `mux_config_candidates`, `mux_config_write_path`, `RecoveredDaemon`, `DaemonRecoveryError`, `terminate_incompatible_daemon`, `daemon_identity_protocol_version`, `classify_local_connect_error`, `Endpoint`, `EndpointError`, `SshEndpoint`, `SshPrompts`, `AskpassPrompt`, `AskpassPromptKind`, `AskpassReply`, `ASKPASS_SOCKET_ENV`, `run_helper`, the `user_data` module, and (feature `agent`) the agent stream vocabulary a client deserializes against . `AgentStreamItem`, `AgentStreamPayload`, `AgentPrompt`, `AgentPromptOutcome`, `AgentSessionSummary`, `AgentSessionCapabilities`, `AgentAuthMethod`, `AgentTurnDiffOutcome`, `TurnDiff`/`TurnFile`/`TurnFileStatus`, `SdkTaskEvent`, `TaskNotification` | Crate root; the whole public API |
 | `daemon.rs` | `Daemon`, `DaemonError`, `agent_send_reads_stdin` | The server itself: local accept loop, `Shared`/`ServerState`, command execution, `OutboundMailbox` fan-out, terminal watching, attach/detach, input routing. It binds exactly one endpoint . the owner-only local socket |
 | `transport.rs` | `default_socket_path` | Platform IPC: wraps `interprocess` into `LocalListener`/`LocalStream`, per-platform endpoint paths, peer-credential capture |
 | `client.rs` | `CommandClient`, `InteractiveClient`, `short_device_name` | Client halves of the protocol: connect + handshake (`connect_endpoint` for an `ssh://` endpoint), framed `ProtocolSender`/`ProtocolReceiver`, request/response and attach/detach/input helpers |
@@ -53,6 +61,8 @@ and the daemon only holds the browser pane's restorable `BrowserDescriptor` (URL
 | `lifecycle.rs` | `RecoveredDaemon`, `DaemonRecoveryError`, `terminate_incompatible_daemon` | Single-instance identity file + guarded termination of an incompatible-protocol daemon |
 | `keys.rs` | (crate-internal) `input_key_name`, `send_tokens` | tmux key spelling ↔ `KeyInput`; named-key/literal fan-out for `send-keys` |
 | `status.rs` | (crate-internal) `StatusRenderer`, `status_context` | Expands the [tmux status line](/tmux/status-line.md) per client: strftime, bounded `#()` execution with an output cache, change diffing |
+| `user_data.rs` | `platform_data_dir`, `restrict_to_current_user`, `restrict_directory_to_current_user` | Where user-owned application data lives and how it is permission-hardened. The policy sits here because the daemon's agent journal answers to it too; `crates/zz/src/user_data.rs` is now a re-export of this module |
+| `agent/` (feature `agent`) | `AgentStreamItem`/`AgentStreamPayload` and friends via the crate root | The daemon-owned Agent runtime, over eight submodules: `host` (one thread per pane, prompt queue, park watchdog, permission bookkeeping), `runtime` (the ACP connection itself), `fanout` (coalescing, wire sequence, replay ring, pane state), `journal`, `turn_snapshot`, `environment` (ACP child PATH repair and workspace identity), `profile` (provider `_meta` opt-ins and the claude SDK passthrough), `paths`, plus a test-only in-process `fixture` |
 
 # How the daemon runs
 
@@ -196,9 +206,14 @@ The daemon is thread-per-connection with dedicated writer and per-pane watcher t
 | `zz-daemon-status` | `start_status_sampler` | Re-render the [status line](/tmux/status-line.md) every `status-interval`, re-running its `#()` commands |
 | `zz-daemon-signals` (Unix) | `DaemonSignalGuard` | Wait for `SIGTERM`/`SIGINT` or ordinary shutdown cancellation, then request the same graceful stop as `kill-server` |
 | `zz-copy-pipe` | `spawn_copy_pipe` | Run a `copy-pipe` child, feed selection on stdin (bounded pool) |
+| `zz-agent-{n}` | `AgentHost::open` | Block on one pane's ACP connection: adapter child stdio, prompt dispatch, permission responders, turn snapshots, journal appends |
+| `zz-agent-park` | `AgentHost::ensure_ticker` | The one quiesce clock, ticking every second over the open panes and parking outright while none is open |
+| `zz-agent-flush` | `AgentFanout::ensure_flusher` | Close 25 ms coalescing windows and hand finished frames to the publisher; parks whenever no pane has anything gathered |
 
 That is the whole inventory. The QUIC egress accept loop, the two pairing-request threads, the
 discovery-setting watcher, and the knock responder are gone with the transport that needed them.
+The three agent entries appear only in a build with the `agent` feature, and only after the first
+agent pane opens — the runtime is built lazily.
 
 State is shared through one `Arc<Shared>`; all mux mutations happen under `Shared.inner`
 (`Mutex<ServerState>`), and effects that touch terminals are applied **after** the lock is released
@@ -219,14 +234,25 @@ leave no matter how the connection died.
 # Terminal frame fan-out
 
 Every **interactive** client gets one `Arc<OutboundMailbox>`, registered in
-`ServerState.subscribers`. The mailbox is a three-lane coalescing queue drained by the client's
-writer thread (`recv()` priority: `reliable` → `command_output` → `terminals`):
+`ServerState.subscribers`. The mailbox is a four-lane coalescing queue drained by the client's
+writer thread (`recv()` priority: `reliable` → `command_output` → `agent` → `terminals`):
 
 | Lane (`OutboundState`) | Content | Coalescing |
 |------------------------|---------|-----------|
 | `reliable: VecDeque<Vec<u8>>` | `ServerHello`, command responses, snapshots, non-terminal events | Never dropped; bounded at `MAX_RELIABLE_MESSAGES = 256` / `MAX_OUTBOUND_BYTES = 72 MiB` |
 | `command_output: Option<Vec<u8>>` | Native command-output viewport | One coalesced slot; newest replaces stale |
+| `agent: BTreeMap<PaneId, PendingAgent>` | Per-pane `AgentUpdates` batches, already coalesced into 25 ms windows by the fanout | FIFO per pane, round-robin across panes (one frame per pane per turn), capped at `MAX_PENDING_AGENT_BYTES = 4 MiB` |
 | `terminals: BTreeMap<PaneId, PendingTerminal>` | Per-pane `TerminalViewport`/`TerminalPatch` frames | **One pending frame per pane**; newest replaces stale under backpressure |
+
+The agent lane is the one lane whose overflow does **not** close the mailbox. An ACP turn bursts
+hundreds of small updates and a slow client should not lose its session over it, so `enqueue_agent`
+clears the pane's queued frames and puts a tiny `EventPayload::AgentLagged { pane, next_seq }` on the
+reliable lane instead; the client answers with `AgentReplay` from its own cursor and the fanout
+serves it out of the pane's 16 MiB replay ring, or out of the journal when the ask predates the ring.
+Agent frames also follow visibility like terminal frames do: `AgentUpdates` reaches only clients the
+pane is visible to (`visible_agents`, derived by `visible_agent_panes`), while the small typed
+`AgentState` goes to every client attached to the session so badges and permission prompts work for a
+pane nobody is watching.
 
 A command-output watcher publishes in two phases: it validates the current terminal and captures the
 subscriber under `ServerState`, encodes the potentially megabyte-scale viewport after releasing that global
@@ -303,9 +329,9 @@ interactive clients as the user has devices. Per-client maps carry the rest:
 | `PaneCreated{Terminal}` | `TerminalSession::spawn_with_scrollback_and_appearance`, insert into `terminals`, queue `watch_terminal`, attach the attached client's view |
 | `PaneCreated{Browser}` | No PTY; the pane's `BrowserDescriptor` lives in mux state, rendered by the attached GUI |
 | `PaneCreated{Picker}` | No PTY or browser runtime; publish the layout leaf for the GPUI picker |
-| `PaneCreated{Agent}` | No daemon worker; capture the cwd donor and publish the default Codex `AgentDescriptor` for the GUI-owned ACP session |
-| `PaneMaterialized{Terminal/Browser/Agent}` | Spawn the terminal actor using the remembered cwd donor, retain the browser descriptor, or capture the donor cwd while keeping Agent runtime-free; the pane ID/layout leaf do not change |
-| `PanesRemoved` | Drop `Arc<TerminalSession>` (worker exits), publish `PaneRemoved` |
+| `PaneCreated{Agent}` | Capture the cwd donor, publish the default Codex `AgentDescriptor`, and `open_agent_pane` . which builds the runtime if this is the first agent pane and starts that pane's adapter thread |
+| `PaneMaterialized{Terminal/Browser/Agent}` | Spawn the terminal actor using the remembered cwd donor, retain the browser descriptor, or capture the donor cwd and open the agent runtime for the pane; the pane ID/layout leaf do not change |
+| `PanesRemoved` | Drop `Arc<TerminalSession>` (worker exits), close any agent pane's runtime and lane, publish `PaneRemoved` |
 | `SendKeys{pane, keys}` | `resolve_input_sinks` → `send_tokens` to terminals / `BrowserCommand::SendKeys` to the GUI |
 | `FocusSidebar{pane}` | Validate the invoking interactive attachment, retire competing native surfaces, and publish `EventPayload::FocusSidebar` to that client |
 | `Attach { session, detach_others }` / `Detach` | `attach` / `detach` for the interactive client; detach clears per-client attachment state without closing the connection or removing its subscriber, and the same connection can attach again. A command-only client cannot attach but still runs `evict_other_clients` when `detach_others` is set |
@@ -315,7 +341,8 @@ interactive clients as the user has devices. Per-client maps carry the rest:
 `InputMessage::{Key, Text}` from any pane kind resolves the key tables first: one `KeyEngine`
 cursor per interactive client, with release-swallowing and committed-text-suppression bookkeeping,
 and unbound input passing to the pane through `resolve_input_sinks` (synchronized Terminal and
-Browser fanout; Picker and Agent panes have no sink and drop passed keys). The daemon publishes
+Browser fanout; Picker and Agent panes have no sink and drop passed keys . an agent pane's keys are
+composer input the client owns, and its prompts arrive as `AgentPrompt`, not as key events). The daemon publishes
 `EventPayload::PrefixArmed` transitions of that cursor to the owning client, which uses them to
 claim in-flight sequence keys from focus contexts that never reach the daemon.
 
@@ -378,7 +405,14 @@ send-keys data flow (CLI → PTY):
 | `crates/zz-daemon/src/status.rs` | `StatusRenderer`: strftime, bounded `#()` execution with an output cache, and per-client status diffing. See [status line](/tmux/status-line.md). |
 | `crates/zz-daemon/src/lifecycle.rs` | `DaemonIdentityGuard`, `terminate_incompatible_daemon`, identity-file + guarded shutdown |
 | `crates/zz-daemon/src/keys.rs` | `input_key_name` (KeyInput → tmux spelling), `send_tokens` (named-key/literal fan-out) |
-| `crates/zz-daemon/Cargo.toml` | The daemon feature uses `async-signal`, `async-channel`, and `futures-lite` only to give the Unix signal-listener thread cancellable blocking; the core server remains thread-per-connection with no shared async runtime. Transport, mux, terminal, logging, and lifecycle dependencies remain otherwise unchanged. |
+| `crates/zz-daemon/src/user_data.rs` | `platform_data_dir` per OS and the Unix `0o600`/`0o700` hardening helpers, shared with the GUI |
+| `crates/zz-daemon/src/agent/host.rs` | `AgentHost`, `AgentPaneSpec`, `AgentPaneState`, `HostCommand`, the per-pane `PanePump`, and the shared park ticker |
+| `crates/zz-daemon/src/agent/runtime.rs` | `run_agent_runtime` / `run_agent_connection`, the ACP client role, auto-approve (`is_user_question`, `preferred_allow_option`), `StderrTail`, `quiesce_window`, `load_persistent_journal` |
+| `crates/zz-daemon/src/agent/fanout.rs` | `AgentRuntime` (what the daemon holds), the `AgentPublisher` trait, per-pane coalescing, wire sequencing, the replay ring, `AgentPaneWire` derivation, and first-prompt pane titles |
+| `crates/zz-daemon/src/agent/journal.rs` | Per-ACP-session JSONL append/replay/prune, session-ID jailing, the 32 MiB cap |
+| `crates/zz-daemon/src/agent/turn_snapshot.rs` | `snapshot_tree` and the bounded `git diff-tree` capture behind the "changes this turn" overlay |
+| `crates/zz-daemon/src/agent/environment.rs` | ACP child `PATH` repair (login shell + version-manager bins), `warm_adapter_cache`, workspace-identity injection |
+| `crates/zz-daemon/Cargo.toml` | `default = ["daemon", "agent"]`. The daemon feature uses `async-signal`, `async-channel`, and `futures-lite` only to give the Unix signal-listener thread cancellable blocking; the core server remains thread-per-connection with no shared async runtime. The `agent` feature adds `agent-client-protocol`, `serde`/`serde_json`, and `base64`, and runs its pane threads on `futures-lite`'s `block_on` rather than any shared runtime. Clients that never render a transcript (`zz-tui`, `zz-client-ffi`) depend on this crate with `default-features = false`. |
 
 # Related
 

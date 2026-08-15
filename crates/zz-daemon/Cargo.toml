@@ -8,7 +8,16 @@ description = "The zz daemon: session state, PTY workers, client connections"
 publish = false
 
 [features]
-default = ["daemon"]
+default = ["daemon", "agent"]
+agent = [
+    "daemon",
+    "dep:agent-client-protocol",
+    "dep:async-channel",
+    "dep:base64",
+    "dep:futures-lite",
+    "dep:serde",
+    "dep:serde_json",
+]
 daemon = [
     "dep:async-channel",
     "dep:async-signal",
@@ -21,7 +30,15 @@ daemon = [
 ]
 
 [dependencies]
+agent-client-protocol = { workspace = true, optional = true }
+# The agent host runs its pane threads on every platform, so its executor and
+# channel are not part of the unix-only signal plumbing below.
+async-channel = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
+futures-lite = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 crossbeam-channel = { workspace = true, optional = true }
 interprocess.workspace = true
 log.workspace = true
@@ -46,9 +63,7 @@ security-framework-sys = "2.17"
 getrandom.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-async-channel = { workspace = true, optional = true }
 async-signal = { workspace = true, optional = true }
-futures-lite = { workspace = true, optional = true }
 rustix.workspace = true
 
 [lints]

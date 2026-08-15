@@ -37,7 +37,7 @@ pub mod mux {
 }
 
 pub mod agent {
-    pub use crate::agent::{AgentController, AgentPreferences, warm_agent_adapter_cache};
+    pub use crate::agent::{AgentController, AgentPreferences};
 }
 
 pub mod browser {

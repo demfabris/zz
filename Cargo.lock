@@ -10831,8 +10831,10 @@ dependencies = [
 name = "zz-daemon"
 version = "0.2.0-beta.2"
 dependencies = [
+ "agent-client-protocol",
  "async-channel",
  "async-signal",
+ "base64",
  "chrono",
  "core-foundation 0.10.0",
  "crossbeam-channel",
@@ -10845,6 +10847,8 @@ dependencies = [
  "russh",
  "rustix 1.1.4",
  "security-framework-sys",
+ "serde",
+ "serde_json",
  "smallvec",
  "sysinfo",
  "tempfile",

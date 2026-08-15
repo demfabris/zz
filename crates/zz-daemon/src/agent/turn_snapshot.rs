@@ -12,6 +12,8 @@ use std::{
     process::{Command, Output, Stdio},
 };
 
+use serde::{Deserialize, Serialize};
+
 /// Ceiling on the unified patch; the pane renders a diff, not a repository.
 const MAX_PATCH_BYTES: usize = 3 * 1024 * 1024;
 
@@ -27,27 +29,30 @@ pub(crate) struct TurnTree {
     pub(crate) tree: String,
 }
 
-#[derive(Clone, Debug, Default)]
-pub(crate) struct TurnDiff {
-    pub(crate) files: Vec<TurnFile>,
-    pub(crate) patch: String,
-    pub(crate) additions: u32,
-    pub(crate) deletions: u32,
-    pub(crate) truncated: bool,
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnDiff {
+    pub files: Vec<TurnFile>,
+    pub patch: String,
+    pub additions: u32,
+    pub deletions: u32,
+    pub truncated: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct TurnFile {
-    pub(crate) path: String,
-    pub(crate) old_path: Option<String>,
-    pub(crate) status: TurnFileStatus,
-    pub(crate) additions: u32,
-    pub(crate) deletions: u32,
-    pub(crate) binary: bool,
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: TurnFileStatus,
+    pub additions: u32,
+    pub deletions: u32,
+    pub binary: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TurnFileStatus {
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TurnFileStatus {
     Added,
     Modified,
     Deleted,

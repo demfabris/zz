@@ -1,11 +1,11 @@
 //! The environment an ACP child is spawned with.
 //!
-//! A GUI launch (Dock, Finder, a .desktop entry) never runs the user's shell
-//! init, so zz's own PATH misses everything the shell shapes: nvm's shell
-//! function, fnm's per-shell multishells, mise shims, custom npm prefixes.
-//! The agent CLIs live exactly there, so the child gets a repaired PATH:
-//! the login shell's own PATH, then ours, then the Node version-manager bin
-//! directories that exist on disk.
+//! A daemon started from a launch agent, a login session, or `zz` itself never
+//! runs the user's shell init, so its PATH misses everything the shell shapes:
+//! nvm's shell function, fnm's per-shell multishells, mise shims, custom npm
+//! prefixes. The agent CLIs live exactly there, so the child gets a repaired
+//! PATH: the login shell's own PATH, then ours, then the Node version-manager
+//! bin directories that exist on disk.
 
 use std::{
     process::{Command, Stdio},
@@ -17,19 +17,17 @@ use agent_client_protocol::{
     schema::v1::{EnvVariable, McpServer},
 };
 
-use crate::config::AgentConfig;
-
 pub(crate) fn with_platform_environment(agent: AcpAgent) -> AcpAgent {
     with_executable_path(agent, executable_path())
 }
 
-/// Pre-populate the npx cache for the pinned adapter packages, off the main
-/// thread, so the first agent pane spawn doesn't pay the download — and take
-/// the login-shell PATH snapshot there too, off the spawn path.
-pub fn warm_agent_adapter_cache(config: &AgentConfig) {
-    let mut specs: Vec<String> = [config.command.as_str(), config.claude_code_command.as_str()]
-        .into_iter()
-        .filter_map(npx_package_spec)
+/// Pre-populate the npx cache for the configured adapter packages, off the
+/// calling thread, so the first agent pane spawn doesn't pay the download —
+/// and take the login-shell PATH snapshot there too, off the spawn path.
+pub(crate) fn warm_adapter_cache(commands: &[String]) {
+    let mut specs: Vec<String> = commands
+        .iter()
+        .filter_map(|command| npx_package_spec(command))
         .map(str::to_owned)
         .collect();
     specs.dedup();
@@ -87,6 +85,17 @@ pub(crate) struct AgentWorkspaceEnvironment {
 }
 
 impl AgentWorkspaceEnvironment {
+    /// Adopt the identity of the pane being spawned, keeping the daemon-wide
+    /// socket: the spawn config is one-per-daemon, the child is one-per-pane.
+    pub(crate) fn adopt_pane_identity(&mut self, pane: &Self) {
+        if pane.pane.is_some() {
+            self.pane.clone_from(&pane.pane);
+        }
+        if pane.session.is_some() {
+            self.session.clone_from(&pane.session);
+        }
+    }
+
     fn entries(&self) -> impl Iterator<Item = (&'static str, &str)> {
         [
             ("ZZ_PANE", self.pane.as_deref()),
@@ -99,7 +108,7 @@ impl AgentWorkspaceEnvironment {
 }
 
 /// Add the workspace identity to an ACP child's environment, additively: a
-/// value the user configured through `agent-command` wins.
+/// value the user configured through the adapter command wins.
 pub(crate) fn with_workspace_environment(
     agent: AcpAgent,
     workspace: &AgentWorkspaceEnvironment,
@@ -138,7 +147,7 @@ fn with_executable_path(agent: AcpAgent, path: Option<&str>) -> AcpAgent {
 #[cfg(unix)]
 use login_shell::executable_path;
 
-/// Windows GUI launches inherit the user's PATH, so there is nothing to repair.
+/// Windows daemons inherit the user's PATH, so there is nothing to repair.
 #[cfg(not(unix))]
 fn executable_path() -> Option<&'static str> {
     None
@@ -567,6 +576,27 @@ mod workspace_tests {
     use agent_client_protocol::{AcpAgent, schema::v1::McpServer};
 
     use super::{AgentWorkspaceEnvironment, with_executable_path, with_workspace_environment};
+
+    #[test]
+    fn pane_identity_is_adopted_without_touching_the_socket() {
+        let mut config = AgentWorkspaceEnvironment {
+            pane: None,
+            session: None,
+            socket: Some("/tmp/zz.sock".to_owned()),
+        };
+        config.adopt_pane_identity(&AgentWorkspaceEnvironment {
+            pane: Some("%4".to_owned()),
+            session: Some("work".to_owned()),
+            socket: None,
+        });
+        assert_eq!(config.pane.as_deref(), Some("%4"));
+        assert_eq!(config.session.as_deref(), Some("work"));
+        assert_eq!(config.socket.as_deref(), Some("/tmp/zz.sock"));
+
+        config.adopt_pane_identity(&AgentWorkspaceEnvironment::default());
+        assert_eq!(config.pane.as_deref(), Some("%4"));
+        assert_eq!(config.session.as_deref(), Some("work"));
+    }
 
     fn workspace() -> AgentWorkspaceEnvironment {
         AgentWorkspaceEnvironment {

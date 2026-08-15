@@ -16,7 +16,6 @@ mod zoom;
 
 use std::{
     cell::{Cell, RefCell},
-    fmt::Write as _,
     rc::{Rc, Weak},
     sync::Arc,
 };
@@ -354,12 +353,6 @@ impl SettingsRoute {
                     content.upcast()
                 }
                 Page::Hosts => self.hosts.widget().clone().upcast(),
-                Page::About => pages::about(
-                    &self.engine.endpoint(),
-                    &self.engine.capabilities(),
-                    self.store.borrow().path(),
-                )
-                .upcast(),
                 _ => content.upcast(),
             };
             self.stack.add_named(&child, Some(page.name()));
@@ -509,7 +502,6 @@ impl SettingsRoute {
         let store = self.store.borrow();
         let state = store.state();
         apply_theme_mode(state);
-        apply_animations(state);
         // The fleet is a config value like any other: the poll is what adds and
         // removes hosts, so a hand edit and this surface cannot disagree.
         self.engine.set_fleet_hosts(state.fleet_hosts());
@@ -549,11 +541,7 @@ impl SettingsRoute {
     }
 
     fn restyle(&self) {
-        let store = self.store.borrow();
-        let mut sheet = self.zoom.css();
-        sheet.push_str(&chrome_variables(store.state()));
-        drop(store);
-        self.css.load_from_string(&sheet);
+        self.css.load_from_string(&self.zoom.css());
     }
 
     /// Re-read every row from the file and from what the daemon published. The
@@ -725,114 +713,36 @@ fn apply_theme_mode(state: &State) {
     });
 }
 
-fn apply_animations(state: &State) {
-    if let Some(settings) = gtk::Settings::default() {
-        settings.set_gtk_enable_animations(state.boolean("animations", true));
-    }
-}
-
-/// The six chrome roots, mapped onto libadwaita's palette variables. The
-/// desktop derives its elevations from these roots; here the stylesheet does,
-/// so only the roots have to be named.
-const CHROME_VARIABLES: [(&str, &[&str]); 6] = [
-    (
-        "chrome-background",
-        &[
-            "--window-bg-color",
-            "--view-bg-color",
-            "--headerbar-bg-color",
-            "--sidebar-bg-color",
-            "--secondary-sidebar-bg-color",
-            "--popover-bg-color",
-            "--dialog-bg-color",
-            "--card-bg-color",
-        ],
-    ),
-    (
-        "chrome-foreground",
-        &[
-            "--window-fg-color",
-            "--view-fg-color",
-            "--headerbar-fg-color",
-            "--sidebar-fg-color",
-            "--secondary-sidebar-fg-color",
-            "--popover-fg-color",
-            "--dialog-fg-color",
-            "--card-fg-color",
-        ],
-    ),
-    (
-        "chrome-border",
-        &["--border-color", "--headerbar-border-color"],
-    ),
-    ("chrome-success", &["--success-color", "--success-bg-color"]),
-    ("chrome-warning", &["--warning-color", "--warning-bg-color"]),
-    (
-        "chrome-danger",
-        &[
-            "--error-color",
-            "--error-bg-color",
-            "--destructive-bg-color",
-        ],
-    ),
-];
-
-fn chrome_variables(state: &State) -> String {
-    let mut declarations = String::new();
-    for (key, variables) in CHROME_VARIABLES {
-        let Some(value) = state.value(key).filter(|value| !value.is_empty()) else {
-            continue;
-        };
-        if gtk::gdk::RGBA::parse(value).is_err() {
-            log::warn!("zz-gtk ignored an unreadable {key}: {value:?}");
-            continue;
-        }
-        for variable in variables {
-            let _ = writeln!(declarations, "  {variable}: {value};");
-        }
-    }
-    if declarations.is_empty() {
-        return String::new();
-    }
-    format!(":root {{\n{declarations}}}\n")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn no_chrome_root_means_no_rule_at_all() {
-        assert!(chrome_variables(&crate::config::parse("pane-gaps = true\n")).is_empty());
-    }
-
-    #[test]
-    fn a_chrome_root_paints_every_libadwaita_surface_it_owns() {
-        let sheet = chrome_variables(&crate::config::parse("chrome-background = #101418\n"));
-
-        assert!(sheet.starts_with(":root {"));
-        assert!(sheet.contains("--window-bg-color: #101418;"));
-        assert!(sheet.contains("--popover-bg-color: #101418;"));
-        assert!(!sheet.contains("--window-fg-color"));
-    }
-
-    #[test]
-    fn an_unreadable_color_is_dropped_rather_than_emitted() {
-        assert!(chrome_variables(&crate::config::parse("chrome-border = nonsense\n")).is_empty());
-    }
-
-    #[test]
     fn client_defaults_are_spelled_the_way_the_file_spells_them() {
-        let animations = schema::SETTINGS
-            .iter()
-            .find(|setting| setting.key == "animations")
-            .expect("animations is in the table");
-        let margin = schema::SETTINGS
-            .iter()
-            .find(|setting| setting.key == "pane-margin")
-            .expect("pane-margin is in the table");
+        let theme = setting("theme-mode");
+        let quit = setting("quit-daemon-on-exit");
 
-        assert_eq!(client_default(animations), "true");
-        assert_eq!(client_default(margin), "6");
+        assert_eq!(client_default(theme), "system");
+        assert_eq!(client_default(quit), "false");
+    }
+
+    /// Every row the surface still offers is one this client or the daemon
+    /// behind it acts on: a key nobody reads has no business being drawn.
+    #[test]
+    fn the_table_offers_no_key_this_shell_ignores() {
+        let client_keys: Vec<&str> = schema::SETTINGS
+            .iter()
+            .filter(|setting| setting.owner == Owner::Client)
+            .map(|setting| setting.key)
+            .collect();
+
+        assert_eq!(client_keys, ["theme-mode", "quit-daemon-on-exit"]);
+    }
+
+    fn setting(key: &str) -> &'static Setting {
+        schema::SETTINGS
+            .iter()
+            .find(|setting| setting.key == key)
+            .expect("the key is in the table")
     }
 }

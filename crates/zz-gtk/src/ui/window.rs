@@ -351,6 +351,10 @@ impl Shell {
         }
     }
 
+    /// About is the system dialog, as GNOME spells it. What a zz client is
+    /// actually asked about — which daemon it reached, on what protocol, with
+    /// what capabilities — rides along as the troubleshooting section rather
+    /// than as a settings page of its own.
     fn present_about(&self) {
         let about = adw::AboutDialog::builder()
             .application_name("zz")
@@ -360,8 +364,25 @@ impl Shell {
             .comments("A GNOME client for zz daemon sessions.")
             .website("https://zzmux.sh")
             .license_type(gtk::License::MitX11)
+            .debug_info(self.daemon_facts())
+            .debug_info_filename("zz-gtk.txt")
             .build();
         about.present(Some(&self.window));
+    }
+
+    fn daemon_facts(&self) -> String {
+        let capabilities = self.engine.capabilities();
+        format!(
+            "zz-gtk {}\nendpoint: {}\nprotocol: {}\ncapabilities: {}\n",
+            env!("CARGO_PKG_VERSION"),
+            self.engine.endpoint(),
+            zz_protocol::PROTOCOL_VERSION,
+            if capabilities.is_empty() {
+                "none advertised".to_owned()
+            } else {
+                capabilities.join(", ")
+            },
+        )
     }
 
     fn connect_signals(self: &Rc<Self>) {

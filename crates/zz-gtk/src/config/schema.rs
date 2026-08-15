@@ -6,7 +6,10 @@
 //! surface is generated from the table, so adding a key is adding a row.
 //!
 //! Key strings, defaults, ranges and value grammar are the desktop's; both
-//! clients read and write the same file and must agree on all of them.
+//! clients read and write the same file and must agree on all of them. Only
+//! keys this client acts on are in the table: `zz/config` is shared with the zz
+//! app and the writer preserves every line it does not know, so a key the GNOME
+//! shell has no use for is left to the file rather than rendered as a dead row.
 
 use zz_protocol::MuxOptionKey;
 use zz_terminal::{
@@ -26,16 +29,14 @@ pub enum Owner {
     Mux(MuxOptionKey),
 }
 
-/// How much of a key zz-gtk actually renders. Every key is still written, so a
-/// setting this client cannot honour still reaches the desktop through the
-/// shared file; the badge just refuses to pretend otherwise.
+/// How much of a key zz-gtk actually renders. Only keys this client or the
+/// daemon behind it acts on are offered at all; a daemon-owned key the surface
+/// cannot draw yet says so rather than pretending.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Support {
     Honored,
-    /// Written and honoured by the desktop, not yet read by this client.
+    /// Resolved by the daemon, not yet drawn by this client.
     Unwired(&'static str),
-    /// Cannot mean anything here, whatever the file says.
-    Inapplicable(&'static str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,58 +78,49 @@ pub enum Kind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Page {
     Interface,
-    Panes,
     Terminal,
     Multiplexer,
     Hosts,
     System,
-    About,
 }
 
 impl Page {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 5] = [
         Self::Interface,
-        Self::Panes,
         Self::Terminal,
         Self::Multiplexer,
         Self::Hosts,
         Self::System,
-        Self::About,
     ];
 
     pub const fn title(self) -> &'static str {
         match self {
-            Self::Interface => "Interface",
-            Self::Panes => "Panes",
+            Self::Interface => "General",
             Self::Terminal => "Terminal",
             Self::Multiplexer => "Multiplexer",
             Self::Hosts => "Hosts",
             Self::System => "System",
-            Self::About => "About",
         }
     }
 
     pub const fn icon(self) -> &'static str {
         match self {
-            Self::Interface => "applications-graphics-symbolic",
-            Self::Panes => "view-grid-symbolic",
+            Self::Interface => "preferences-system-symbolic",
             Self::Terminal => "utilities-terminal-symbolic",
             Self::Multiplexer => "view-list-symbolic",
             Self::Hosts => "network-server-symbolic",
             Self::System => "emblem-system-symbolic",
-            Self::About => "help-about-symbolic",
         }
     }
 
+    /// The deep-link name `win.settings-page` takes.
     pub const fn name(self) -> &'static str {
         match self {
             Self::Interface => "interface",
-            Self::Panes => "panes",
             Self::Terminal => "terminal",
             Self::Multiplexer => "multiplexer",
             Self::Hosts => "hosts",
             Self::System => "system",
-            Self::About => "about",
         }
     }
 }
@@ -174,25 +166,6 @@ const SET_CLIPBOARD: &[Choice] = &[
 
 const ON_OFF: &[Choice] = &[choice("off", "Off"), choice("on", "On")];
 
-/// The corner-radius family the desktop resolves as a chrome preset. zz-gtk
-/// takes its chrome from the GNOME stylesheet, so the key is written for the
-/// desktop's benefit and left unread here.
-const CHROME_PRESETS: &[Choice] = &[
-    choice("tokyo-night", "Tokyo Night"),
-    choice("catppuccin", "Catppuccin"),
-    choice("gruvbox", "Gruvbox"),
-    choice("nord", "Nord"),
-    choice("breeze", "Breeze"),
-    choice("adwaita", "Adwaita"),
-    choice("ubuntu", "Ubuntu"),
-    choice("rose-pine", "Rosé Pine"),
-    choice("ayu", "Ayu"),
-    choice("solarized", "Solarized"),
-    choice("macos-classic", "macOS Classic"),
-];
-
-const PANE_GEOMETRY_NOTE: &str = "the grid draws a fixed two-pixel divider.";
-
 pub const SETTINGS: &[Setting] = &[
     Setting {
         key: "theme-mode",
@@ -205,202 +178,6 @@ pub const SETTINGS: &[Setting] = &[
         kind: Kind::Choice {
             default: "system",
             options: THEME_MODES,
-        },
-    },
-    Setting {
-        key: "animations",
-        title: "Animations",
-        description: "Transitions and motion across the window.",
-        page: Page::Interface,
-        group: "Appearance",
-        owner: Owner::Client,
-        support: Support::Honored,
-        kind: Kind::Toggle { default: true },
-    },
-    Setting {
-        key: "chrome-background",
-        title: "Background",
-        description: "The window's base plane; every panel and popover derives from it.",
-        page: Page::Interface,
-        group: "Chrome colors",
-        owner: Owner::Client,
-        support: Support::Honored,
-        kind: Kind::Color,
-    },
-    Setting {
-        key: "chrome-foreground",
-        title: "Foreground",
-        description: "Default text, and the source of muted text and focus rings.",
-        page: Page::Interface,
-        group: "Chrome colors",
-        owner: Owner::Client,
-        support: Support::Honored,
-        kind: Kind::Color,
-    },
-    Setting {
-        key: "chrome-border",
-        title: "Border",
-        description: "Every edge: panel borders, dividers, input outlines.",
-        page: Page::Interface,
-        group: "Chrome colors",
-        owner: Owner::Client,
-        support: Support::Honored,
-        kind: Kind::Color,
-    },
-    Setting {
-        key: "chrome-success",
-        title: "Success",
-        description: "Something completed or is healthy.",
-        page: Page::Interface,
-        group: "Chrome colors",
-        owner: Owner::Client,
-        support: Support::Honored,
-        kind: Kind::Color,
-    },
-    Setting {
-        key: "chrome-warning",
-        title: "Warning",
-        description: "Something needs attention but still works.",
-        page: Page::Interface,
-        group: "Chrome colors",
-        owner: Owner::Client,
-        support: Support::Honored,
-        kind: Kind::Color,
-    },
-    Setting {
-        key: "chrome-danger",
-        title: "Danger",
-        description: "Something failed or is destructive.",
-        page: Page::Interface,
-        group: "Chrome colors",
-        owner: Owner::Client,
-        support: Support::Honored,
-        kind: Kind::Color,
-    },
-    Setting {
-        key: "chrome-preset",
-        title: "Chrome preset",
-        description: "A paired light/dark chrome family. Choosing one clears every explicit \
-                      chrome color.",
-        page: Page::Interface,
-        group: "Chrome colors",
-        owner: Owner::Client,
-        support: Support::Unwired(
-            "chrome comes from the GNOME stylesheet; the colors above override it.",
-        ),
-        kind: Kind::Choice {
-            default: "",
-            options: CHROME_PRESETS,
-        },
-    },
-    Setting {
-        key: "widget-corner-radius",
-        title: "Widget corner radius",
-        description: "Corner rounding of buttons, inputs and popovers.",
-        page: Page::Interface,
-        group: "Chrome colors",
-        owner: Owner::Client,
-        support: Support::Unwired("GTK widget radii come from the platform stylesheet."),
-        kind: Kind::Number {
-            default: 6.0,
-            min: 0.0,
-            max: 24.0,
-            step: 1.0,
-            digits: 1,
-        },
-    },
-    Setting {
-        key: "use-system-titlebar",
-        title: "System titlebar",
-        description: "Let the desktop draw the window frame instead of the app.",
-        page: Page::Interface,
-        group: "Window",
-        owner: Owner::Client,
-        support: Support::Inapplicable("the toolkit and compositor own the window frame."),
-        kind: Kind::Toggle { default: false },
-    },
-    Setting {
-        key: "window-corner-radius",
-        title: "Window corner radius",
-        description: "Rounding of the app-drawn window frame.",
-        page: Page::Interface,
-        group: "Window",
-        owner: Owner::Client,
-        support: Support::Inapplicable("the compositor owns the window shape."),
-        kind: Kind::Number {
-            default: 13.5,
-            min: 0.0,
-            max: 32.0,
-            step: 0.5,
-            digits: 1,
-        },
-    },
-    Setting {
-        key: "window-background-blur",
-        title: "Background blur",
-        description: "Translucent window background behind the panes.",
-        page: Page::Interface,
-        group: "Window",
-        owner: Owner::Client,
-        support: Support::Inapplicable("no blurred surface exists in this shell."),
-        kind: Kind::Toggle { default: false },
-    },
-    Setting {
-        key: "pane-gaps",
-        title: "Gapped panes",
-        description: "Separate panes with a gap instead of a hairline divider.",
-        page: Page::Panes,
-        group: "Layout",
-        owner: Owner::Client,
-        support: Support::Unwired(PANE_GEOMETRY_NOTE),
-        kind: Kind::Toggle { default: false },
-    },
-    Setting {
-        key: "pane-margin",
-        title: "Gap size",
-        description: "Space between neighbouring panes when gaps are on.",
-        page: Page::Panes,
-        group: "Layout",
-        owner: Owner::Client,
-        support: Support::Unwired(PANE_GEOMETRY_NOTE),
-        kind: Kind::Number {
-            default: 6.0,
-            min: 0.0,
-            max: 32.0,
-            step: 1.0,
-            digits: 1,
-        },
-    },
-    Setting {
-        key: "pane-corner-radius",
-        title: "Pane corner radius",
-        description: "Corner rounding of each pane when gaps are on.",
-        page: Page::Panes,
-        group: "Layout",
-        owner: Owner::Client,
-        support: Support::Unwired(PANE_GEOMETRY_NOTE),
-        kind: Kind::Number {
-            default: 13.5,
-            min: 0.0,
-            max: 32.0,
-            step: 0.5,
-            digits: 1,
-        },
-    },
-    Setting {
-        key: "pane-border-width",
-        title: "Pane border width",
-        description: "Outline drawn around each pane when gaps are on.",
-        page: Page::Panes,
-        group: "Layout",
-        owner: Owner::Client,
-        support: Support::Unwired(PANE_GEOMETRY_NOTE),
-        kind: Kind::Number {
-            default: 1.0,
-            min: 0.0,
-            max: 8.0,
-            step: 0.5,
-            digits: 1,
         },
     },
     Setting {
@@ -792,56 +569,6 @@ pub const SETTINGS: &[Setting] = &[
         group: "Daemon",
         owner: Owner::Client,
         support: Support::Honored,
-        kind: Kind::Toggle { default: false },
-    },
-    Setting {
-        key: "auto-restart-stale-daemon",
-        title: "Restart a stale daemon",
-        description: "Replace a daemon left running from an older build.",
-        page: Page::System,
-        group: "Daemon",
-        owner: Owner::Client,
-        support: Support::Inapplicable("this client never spawns a daemon; it dials a socket."),
-        kind: Kind::Toggle { default: false },
-    },
-    Setting {
-        key: "tray",
-        title: "Tray icon",
-        description: "Keep a status icon and close to the tray.",
-        page: Page::System,
-        group: "Daemon",
-        owner: Owner::Client,
-        support: Support::Inapplicable("this client publishes no StatusNotifierItem."),
-        kind: Kind::Toggle { default: true },
-    },
-    Setting {
-        key: "show-fps",
-        title: "Frame counter",
-        description: "Overlay a frames-per-second badge on each pane.",
-        page: Page::System,
-        group: "Daemon",
-        owner: Owner::Client,
-        support: Support::Inapplicable("GTK owns the frame clock."),
-        kind: Kind::Toggle { default: false },
-    },
-    Setting {
-        key: "experimental-agent-pane",
-        title: "Agent panes",
-        description: "Let the daemon create ACP agent panes.",
-        page: Page::System,
-        group: "Experimental",
-        owner: Owner::Mux(MuxOptionKey::ExperimentalAgentPane),
-        support: Support::Unwired("this client renders a placeholder for agent panes."),
-        kind: Kind::Toggle { default: false },
-    },
-    Setting {
-        key: "experimental-editor-pane",
-        title: "Editor panes",
-        description: "Let the daemon create editor panes.",
-        page: Page::System,
-        group: "Experimental",
-        owner: Owner::Mux(MuxOptionKey::ExperimentalEditorPane),
-        support: Support::Unwired("this client renders a placeholder for editor panes."),
         kind: Kind::Toggle { default: false },
     },
 ];

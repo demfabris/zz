@@ -723,13 +723,8 @@ fn run_app(
             let controller = cx.new(|cx| BrowserController::new(runtime, cx));
             let agent_config = config::agent_config(cx);
             let preferences = AgentPreferences::load_persistent();
-            let agent_socket = socket_path.to_str().map(str::to_owned);
-            if config::agent_pane_enabled(cx) {
-                agent::warm_agent_adapter_cache(&agent_config);
-            }
-            let agent_controller = cx.new(|_| {
-                AgentController::with_preferences(agent_config, preferences, agent_socket)
-            });
+            let agent_controller =
+                cx.new(|_| AgentController::with_preferences(agent_config, preferences));
             let window_state = window::state::MainWindowState::load_persistent();
 
             cx.on_window_closed(|cx, _window_id| {

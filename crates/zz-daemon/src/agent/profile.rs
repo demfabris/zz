@@ -47,22 +47,22 @@ pub(crate) fn session_meta(provider: AgentProvider) -> Option<Map<String, Value>
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct TaskNotification {
-    pub(crate) task_id: String,
+pub struct TaskNotification {
+    pub task_id: String,
     /// The Task tool call that spawned the agent this notification is about.
-    pub(crate) tool_use_id: String,
+    pub tool_use_id: String,
     /// Whether this notification is about an agent task. Background shell tasks
     /// notify too.
-    pub(crate) agent_task: bool,
-    pub(crate) status: String,
-    pub(crate) summary: String,
-    pub(crate) result_markdown: String,
+    pub agent_task: bool,
+    pub status: String,
+    pub summary: String,
+    pub result_markdown: String,
 }
 
 /// A background-task lifecycle event from the SDK passthrough.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
-pub(crate) enum SdkTaskEvent {
+pub enum SdkTaskEvent {
     /// A background task began, or an existing one was re-attached. `is_agent`
     /// is true for subagent tasks, false for background shells.
     Started {

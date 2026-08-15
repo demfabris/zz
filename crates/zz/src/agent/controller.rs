@@ -1,61 +1,44 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
-    ffi::OsStr,
-    io,
-    path::PathBuf,
-    str::FromStr as _,
-    sync::{
-        Arc, OnceLock,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
-    time::{Duration, Instant},
+    collections::{BTreeMap, BTreeSet, HashMap},
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Instant,
 };
 
+use agent_client_protocol::schema::{
+    MaybeUndefined,
+    v1::{
+        AvailableCommand, AvailableCommandInput, ContentBlock, ContentChunk, ImageContent,
+        PermissionOption, PermissionOptionKind, Plan, PlanEntryStatus, SessionConfigKind,
+        SessionConfigOption, SessionConfigOptionCategory, SessionModeState, SessionUpdate,
+        StopReason, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
+        ToolCallUpdateFields, ToolKind,
+    },
+};
+use async_channel::Sender;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-
-use agent_client_protocol::{
-    AcpAgent, Agent, Client as AcpClientRole, ConnectTo, ConnectionTo, LineDirection, Responder,
-    schema::{
-        MaybeUndefined, ProtocolVersion,
-        v1::{
-            AgentNotification, AuthMethod, AuthenticateRequest, AvailableCommand,
-            AvailableCommandInput, CancelNotification, ClientCapabilities,
-            ClientSessionCapabilities, CloseSessionRequest, ContentBlock, ContentChunk,
-            DeleteSessionRequest, ImageContent, Implementation, InitializeRequest,
-            ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PermissionOption,
-            PermissionOptionKind, Plan, PlanEntryStatus, PromptRequest, RequestPermissionOutcome,
-            RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
-            SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
-            SessionConfigOptionValue, SessionConfigOptionsCapabilities, SessionId as AcpSessionId,
-            SessionModeState, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest,
-            StopReason, TextContent, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
-            ToolCallUpdateFields, ToolKind,
-        },
-    },
+use gpui::{App, Context, Entity, EventEmitter, Image, ImageFormat, Task};
+use zz_daemon::{
+    AgentAuthMethod as StreamAuthMethod, AgentPromptOutcome, AgentStreamItem, AgentStreamPayload,
+    AgentTurnDiffOutcome, SdkTaskEvent, TurnDiff,
 };
-use async_channel::{Receiver, Sender};
-use gpui::{App, Context, EventEmitter, Image, ImageFormat, Task};
-use parking_lot::Mutex;
-use zz_protocol::{AgentDescriptor, AgentProvider, PaneId};
+use zz_protocol::{
+    AgentConnectionPhase, AgentDescriptor, AgentPaneWire, AgentProvider, AgentSessionOpKind, PaneId,
+};
 
 use crate::{
-    agent::environment::AgentWorkspaceEnvironment,
-    agent::journal::AgentJournal,
+    agent::attachment,
     agent::preferences::{AgentPreferenceKind, AgentPreferences},
     agent::profile::{
-        CodexCollaboration, MemoryCitation, SdkTaskEvent, Segment, TaskNotification,
-        client_meta_caps, codex_collab_label, codex_collaboration, codex_subagent_activity,
-        codex_tool_subagent, format_codex_collaboration, is_sdk_message_method,
-        parse_sdk_task_event, scan_text, session_meta,
+        CodexCollaboration, MemoryCitation, Segment, TaskNotification, codex_collab_label,
+        codex_collaboration, codex_subagent_activity, codex_tool_subagent,
+        format_codex_collaboration, scan_text,
     },
     agent::sound::AgentPaneStatus,
-    agent::turn_snapshot::{self, TurnDiff, TurnTree},
     config::AgentConfig,
-    user_data::platform_data_dir,
+    mux::client::{AgentRequest, MuxClient},
 };
 
-const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(10);
-const RUNTIME_EVENT_BATCH_LIMIT: usize = 256;
 const LEGACY_MODE_PREFERENCE_ID: &str = "legacy-session-mode";
 const MAX_SESSION_ID_BYTES: usize = 16 * 1024;
 const MAX_SESSION_TITLE_BYTES: usize = 4 * 1024;
@@ -65,19 +48,11 @@ const MAX_SESSION_CURSOR_BYTES: usize = 16 * 1024;
 /// reducer caps what it keeps: agents happily emit multi-megabyte outputs.
 const MAX_TOOL_PAYLOAD_BYTES: usize = 512 * 1024;
 const MAX_DIFF_SIDE_BYTES: usize = 1024 * 1024;
-const MAX_RUNTIME_ERROR_BYTES: usize = 300;
 const TRUNCATION_MARKER: &str = "… [truncated]";
-/// How long a turn may go silent before the watchdog parks it. Agents think
-/// for minutes on end, so this is deliberately generous and parking never
-/// touches the child; `ZZ_AGENT_QUIESCE_MS=0` disables the watchdog.
-const DEFAULT_QUIESCE_MS: u64 = 120_000;
 /// A derived pane title is the opening words of the first prompt: enough to
 /// tell agent panes apart in the tree without wrapping the pane header.
 const MAX_TITLE_WORDS: usize = 7;
 const MAX_TITLE_CHARS: usize = 48;
-/// Journals live beside `agent-preferences.json`, one directory of them.
-const JOURNAL_DIRECTORY_NAME: &str = "agent-journal";
-const JOURNAL_RETENTION_DAYS: u64 = 30;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AgentConnectionState {
@@ -421,7 +396,6 @@ struct AgentThread {
     /// When the pane last heard from the agent. Stamped by the reducer, which
     /// sees every runtime event, so the quiesce watchdog only ever reads it.
     last_activity: Instant,
-    opened_generation: Option<u64>,
 }
 
 impl AgentThread {
@@ -471,7 +445,6 @@ impl AgentThread {
             suppress_user_echo: false,
             auto_titled: false,
             last_activity: Instant::now(),
-            opened_generation: None,
         }
     }
 
@@ -2040,12 +2013,6 @@ impl AgentThread {
     /// What the quiesce watchdog refuses to park through: a permission the user
     /// still owes an answer to (a question is one), a subagent task still
     /// reporting, or any tool call the agent has not resolved.
-    fn turn_in_flight(&self) -> bool {
-        !self.pending_permissions.is_empty()
-            || !self.live_task_tools.is_empty()
-            || self.entries.iter().any(entry_awaits_agent)
-    }
-
     /// Finalize a turn the agent went quiet on without touching the child: the
     /// streaming entries settle, the pane accepts prompts again, and any later
     /// output opens a fresh segment because `active_stream` is cleared.
@@ -2171,69 +2138,15 @@ pub(crate) enum AgentControllerEvent {
         pane: PaneId,
         provider: AgentProvider,
     },
-    Session {
-        pane: PaneId,
-        session_id: Arc<str>,
-        cwd: PathBuf,
-    },
     Title {
         pane: PaneId,
         title: Arc<str>,
     },
 }
 
-#[derive(Debug)]
-enum RuntimeCommand {
-    Open {
-        pane: PaneId,
-        cwd: PathBuf,
-        resume_session: Option<String>,
-    },
-    ListSessions {
-        pane: PaneId,
-        cwd: Option<PathBuf>,
-        cursor: Option<String>,
-        replace: bool,
-    },
-    SwitchSession {
-        pane: PaneId,
-        session: AgentSessionSummary,
-    },
-    NewSession {
-        pane: PaneId,
-        cwd: PathBuf,
-    },
-    DeleteSession {
-        pane: PaneId,
-        session_id: String,
-    },
-    Prompt {
-        pane: PaneId,
-        text: String,
-        images: Vec<Arc<Image>>,
-    },
-    Cancel {
-        pane: PaneId,
-    },
-    RespondPermission {
-        request_id: u64,
-        option_id: Option<String>,
-    },
-    Authenticate {
-        method_id: String,
-    },
-    SetConfigOption {
-        pane: PaneId,
-        request: AgentSettingRequest,
-    },
-    SetMode {
-        pane: PaneId,
-        mode_id: String,
-        origin: AgentSettingOrigin,
-    },
-    Shutdown,
-}
-
+/// The reducer's input shape. The daemon owns the adapter now, so every one of
+/// these is translated from an [`AgentStreamPayload`] the wire carried; the
+/// enum stays because it is what [`AgentThread`] has always been fed.
 #[derive(Debug)]
 enum RuntimeEvent {
     Ready {
@@ -2330,6 +2243,16 @@ enum RuntimeEvent {
         pane: PaneId,
         message: String,
     },
+    /// The daemon settled a turn that went quiet past its quiesce window.
+    Parked {
+        pane: PaneId,
+    },
+    /// Prompts the daemon queued and is handing back, so the composer refills.
+    PromptsReclaimed {
+        pane: PaneId,
+        text: String,
+        images: Vec<Arc<Image>>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2358,100 +2281,75 @@ struct AgentSettingRequest {
     origin: AgentSettingOrigin,
 }
 
-struct PendingPermissionResponder {
-    pane: PaneId,
-    responder: Responder<RequestPermissionResponse>,
-}
-
+/// A pane's viewport onto the daemon-owned runtime: where its stream has been
+/// applied to, and the request bookkeeping the reducer's inputs need answered.
 #[derive(Default)]
-struct RuntimeRouting {
-    session_to_pane: HashMap<String, PaneId>,
-    staged_updates: HashMap<String, Vec<SessionUpdate>>,
-    permissions: HashMap<u64, PendingPermissionResponder>,
-    /// Sessions whose updates are recorded. A session only enters once its
-    /// transcript has settled in the pane, so the burst an agent replays out of
-    /// `session/load` is never journalled on top of what it already replays.
-    journaled: BTreeSet<String>,
-}
-
-/// A prompt typed while the pane's turn was still running, waiting its turn.
-#[derive(Debug)]
-struct QueuedPrompt {
-    text: String,
-    images: Vec<Arc<Image>>,
-}
-
-struct PaneRuntime {
-    command_tx: Sender<RuntimeCommand>,
-    _runtime_task: Task<()>,
-    _event_task: Task<()>,
-    generation: u64,
-    stopping: bool,
-    restart_after_stop: bool,
+struct PaneViewport {
+    /// Highest stream seq handed to the reducer. The replay cursor, and the
+    /// signal that this pane has anything at all to resume from.
+    last_applied: u64,
+    /// The setting request in flight, so the acknowledgement can be paired with
+    /// the origin that asked for it: a user's pick reports failures, a sticky
+    /// preference restores quietly.
+    pending_setting: Option<AgentSettingRequest>,
+    /// How many prompts the daemon is holding behind the live turn.
+    queued_prompts: usize,
+    /// Whether a turn has been dispatched, which is when the daemon takes the
+    /// worktree snapshot the turn diff is measured against.
+    turn_dispatched: bool,
 }
 
 pub struct AgentController {
     config: AgentConfig,
     preferences: AgentPreferences,
-    journal: Option<Arc<AgentJournal>>,
-    workspace: AgentWorkspaceEnvironment,
+    /// The wire. Installed by the workspace once the mux client exists; a
+    /// controller without one accepts no sends, which is how the composer
+    /// reports a disconnected daemon.
+    mux: Option<Entity<MuxClient>>,
     panes: BTreeMap<PaneId, AgentThread>,
+    viewports: BTreeMap<PaneId, PaneViewport>,
     pending_composer: BTreeMap<PaneId, String>,
     /// Images reclaimed from queued prompts, waiting for the pane's view to
     /// re-attach them beside the reclaimed text.
     pending_images: BTreeMap<PaneId, Vec<Arc<Image>>>,
-    queued_prompts: BTreeMap<PaneId, VecDeque<QueuedPrompt>>,
     retained_panes: BTreeSet<PaneId>,
-    runtimes: BTreeMap<PaneId, PaneRuntime>,
-    quiesce_watchdogs: BTreeMap<PaneId, Task<()>>,
-    turn_bases: BTreeMap<PaneId, TurnTree>,
-    turn_snapshots: BTreeMap<PaneId, Task<()>>,
-    next_runtime_generation: u64,
+    /// Turn-diff captures waiting on the daemon's answer, keyed by request.
+    turn_diffs: BTreeMap<u64, Sender<Result<TurnDiff, String>>>,
+    next_turn_diff_request: u64,
     shutting_down: bool,
 }
 
 impl AgentController {
-    /// A controller with no journal: tests must never reach the user's data
-    /// directory.
+    /// A controller with no wire: view tests that only need a sidebar.
     #[cfg(test)]
     pub(crate) fn new(config: AgentConfig) -> Self {
-        Self::build(config, AgentPreferences::default(), None, None)
+        Self::build(config, AgentPreferences::default())
     }
 
-    pub fn with_preferences(
-        config: AgentConfig,
-        preferences: AgentPreferences,
-        socket: Option<String>,
-    ) -> Self {
-        Self::build(config, preferences, socket, load_persistent_journal())
+    pub fn with_preferences(config: AgentConfig, preferences: AgentPreferences) -> Self {
+        Self::build(config, preferences)
     }
 
-    fn build(
-        config: AgentConfig,
-        preferences: AgentPreferences,
-        socket: Option<String>,
-        journal: Option<Arc<AgentJournal>>,
-    ) -> Self {
+    fn build(config: AgentConfig, preferences: AgentPreferences) -> Self {
         Self {
             config,
             preferences,
-            journal,
-            workspace: AgentWorkspaceEnvironment {
-                socket,
-                ..AgentWorkspaceEnvironment::default()
-            },
+            mux: None,
             panes: BTreeMap::new(),
+            viewports: BTreeMap::new(),
             pending_composer: BTreeMap::new(),
             pending_images: BTreeMap::new(),
-            queued_prompts: BTreeMap::new(),
             retained_panes: BTreeSet::new(),
-            runtimes: BTreeMap::new(),
-            quiesce_watchdogs: BTreeMap::new(),
-            turn_bases: BTreeMap::new(),
-            turn_snapshots: BTreeMap::new(),
-            next_runtime_generation: 0,
+            turn_diffs: BTreeMap::new(),
+            next_turn_diff_request: 0,
             shutting_down: false,
         }
+    }
+
+    /// Point the controller at the daemon connection. Every agent request goes
+    /// out through the mux client, so this is what turns the proxy on.
+    pub(crate) fn attach_mux(&mut self, mux: Entity<MuxClient>) {
+        self.mux = Some(mux);
     }
 
     pub(crate) fn pane_state(&self, pane: PaneId) -> Option<AgentPaneState> {
@@ -2466,31 +2364,54 @@ impl AgentController {
         })
     }
 
-    /// How many prompts are waiting behind the pane's live turn.
+    /// How many prompts the daemon is holding behind the pane's live turn, as
+    /// its last published state reported.
     pub(crate) fn queued_count(&self, pane: PaneId) -> usize {
-        self.queued_prompts.get(&pane).map_or(0, VecDeque::len)
+        self.viewports
+            .get(&pane)
+            .map_or(0, |viewport| viewport.queued_prompts)
     }
 
-    /// The worktree the pane's turn started from, once the snapshot has landed.
-    /// Absent while it is still being taken, and for a pane that is not inside
-    /// a git worktree.
-    pub(crate) fn turn_base(&self, pane: PaneId) -> Option<&TurnTree> {
-        self.turn_bases.get(&pane)
+    /// Whether the pane has a turn to diff against. The daemon snapshots the
+    /// worktree at dispatch, so a pane that has never prompted has no base and
+    /// a pane outside a worktree learns so from the capture itself.
+    pub(crate) fn has_turn_base(&self, pane: PaneId) -> bool {
+        self.viewports
+            .get(&pane)
+            .is_some_and(|viewport| viewport.turn_dispatched)
     }
 
-    /// Diff the pane's worktree against the base its turn started from. Git
-    /// runs on the background executor; the task carries the diff back.
+    /// Ask the daemon to diff the pane's worktree against the base its turn
+    /// started from. Git runs on the daemon's machine — which is the machine
+    /// the worktree is on — and the task carries the answer back.
     pub(crate) fn capture_turn_diff(
-        &self,
+        &mut self,
         pane: PaneId,
         cx: &App,
     ) -> Option<Task<Result<TurnDiff, String>>> {
-        let cwd = self.panes.get(&pane)?.cwd.clone();
-        let base = self.turn_base(pane)?.clone();
-        Some(
-            cx.background_executor()
-                .spawn(async move { turn_snapshot::capture_turn_diff(&cwd, &base) }),
-        )
+        if !self.has_turn_base(pane) {
+            return None;
+        }
+        self.next_turn_diff_request = self.next_turn_diff_request.saturating_add(1);
+        let request_id = self.next_turn_diff_request;
+        if !self.send(pane, AgentRequest::TurnDiff { request_id }, cx) {
+            return Some(Task::ready(Err("agent daemon is not connected".to_owned())));
+        }
+        let (sender, receiver) = async_channel::bounded(1);
+        self.turn_diffs.insert(request_id, sender);
+        Some(cx.background_executor().spawn(async move {
+            receiver
+                .recv()
+                .await
+                .unwrap_or_else(|_| Err("the turn diff was abandoned".to_owned()))
+        }))
+    }
+
+    /// Answer one outstanding turn-diff capture.
+    fn resolve_turn_diff(&mut self, request_id: u64, outcome: Result<TurnDiff, String>) {
+        if let Some(sender) = self.turn_diffs.remove(&request_id) {
+            let _ = sender.try_send(outcome);
+        }
     }
 
     /// Which bucket one pane lands in, in the same order the fleet rollup uses.
@@ -2554,9 +2475,6 @@ impl AgentController {
             .panes
             .get(&pane)
             .is_some_and(|thread| thread.provider != descriptor.provider);
-        if provider_changed {
-            self.stop_runtime(pane, true);
-        }
         let thread = self.panes.entry(pane).or_insert_with(|| {
             AgentThread::new(descriptor.provider, cwd.clone(), session_id.clone())
         });
@@ -2565,25 +2483,27 @@ impl AgentController {
         }
         if thread.cwd != cwd {
             thread.cwd.clone_from(&cwd);
-            thread.opened_generation = None;
         }
-        if thread.opened_generation.is_none()
-            && session_id.is_some()
-            && thread.session_id.as_deref() != session_id.as_deref()
-        {
+        if session_id.is_some() && thread.session_id.as_deref() != session_id.as_deref() {
             thread.session_id = session_id.clone().map(Arc::from);
         }
-        self.retained_panes.insert(pane);
-        self.ensure_runtime(pane, cx);
-        self.open_pane_if_needed(pane);
+        let opened = self.retained_panes.insert(pane);
+        self.viewports.entry(pane).or_default();
+        // A pane going live asks for its stream: from the top when it is new,
+        // from its cursor when it is coming back. `ensure_pane` runs on every
+        // snapshot, so only the open — not every pass — asks.
+        if opened || provider_changed {
+            self.request_replay(pane, cx);
+        }
     }
 
-    /// Record the daemon session an ACP child should be told about. Only
-    /// children started afterwards see it.
-    pub(crate) fn set_session_name(&mut self, session: Option<String>) {
-        if self.workspace.session != session {
-            self.workspace.session = session;
-        }
+    /// Ask the daemon for this pane's stream from where the reducer stands.
+    fn request_replay(&mut self, pane: PaneId, cx: &App) {
+        let from_seq = self
+            .viewports
+            .get(&pane)
+            .map_or(0, |viewport| viewport.last_applied);
+        self.send(pane, AgentRequest::Replay { from_seq }, cx);
     }
 
     pub(crate) fn retain_panes(&mut self, retained: &BTreeSet<PaneId>) {
@@ -2593,19 +2513,12 @@ impl AgentController {
             .copied()
             .collect::<Vec<_>>();
         for pane in removed {
-            self.stop_runtime(pane, false);
             self.panes.remove(&pane);
         }
+        self.viewports.retain(|pane, _| retained.contains(pane));
         self.pending_composer
             .retain(|pane, _| retained.contains(pane));
         self.pending_images
-            .retain(|pane, _| retained.contains(pane));
-        self.queued_prompts
-            .retain(|pane, _| retained.contains(pane));
-        self.quiesce_watchdogs
-            .retain(|pane, _| retained.contains(pane));
-        self.turn_bases.retain(|pane, _| retained.contains(pane));
-        self.turn_snapshots
             .retain(|pane, _| retained.contains(pane));
         self.retained_panes.clone_from(retained);
     }
@@ -2615,23 +2528,12 @@ impl AgentController {
             return;
         }
         self.config = config;
-        for thread in self.panes.values_mut() {
-            thread.opened_generation = None;
-            thread.connection = AgentConnectionState::Starting;
-            thread.error = None;
-        }
-        let panes = self.retained_panes.iter().copied().collect::<Vec<_>>();
-        for pane in panes {
-            if self.runtimes.contains_key(&pane) {
-                self.stop_runtime(pane, true);
-            } else {
-                self.ensure_runtime(pane, cx);
-                self.open_pane_if_needed(pane);
-            }
-        }
         cx.notify();
     }
 
+    /// Switch the pane's agent. The descriptor is daemon-authoritative, so this
+    /// only reports the choice; the daemon reopens the adapter and the pane's
+    /// stream starts over.
     pub(crate) fn select_provider(
         &mut self,
         pane: PaneId,
@@ -2650,14 +2552,10 @@ impl AgentController {
             ));
         }
         let cwd = thread.cwd.clone();
-        self.stop_runtime(pane, true);
         self.panes
             .insert(pane, AgentThread::new(provider, cwd, None));
+        self.viewports.insert(pane, PaneViewport::default());
         cx.emit(AgentControllerEvent::Provider { pane, provider });
-        if !self.runtimes.contains_key(&pane) {
-            self.ensure_runtime(pane, cx);
-            self.open_pane_if_needed(pane);
-        }
         cx.notify();
         Ok(())
     }
@@ -2669,7 +2567,7 @@ impl AgentController {
         append: bool,
         cx: &mut Context<Self>,
     ) -> Result<(), Arc<str>> {
-        let (cwd, cursor) = {
+        {
             let Some(thread) = self.panes.get(&pane) else {
                 return Err(Arc::from("agent pane is not registered"));
             };
@@ -2679,37 +2577,28 @@ impl AgentController {
             if thread.session_history.loading {
                 return Ok(());
             }
-            let cursor = append
-                .then(|| {
-                    thread
-                        .session_history
-                        .next_cursor
-                        .as_deref()
-                        .map(ToOwned::to_owned)
-                })
-                .flatten();
-            if append && cursor.is_none() {
+            // The daemon lists a pane's own project in one shot, so there is no
+            // cursor to follow and an append has nothing left to fetch.
+            if append {
                 return Ok(());
             }
-            ((!all_projects).then(|| thread.cwd.clone()), cursor)
-        };
-        let command = RuntimeCommand::ListSessions {
+        }
+        if !self.send(
             pane,
-            cwd: cwd.clone(),
-            cursor,
-            replace: !append,
-        };
-        if !self.send(pane, command) {
-            return Err(Arc::from("agent runtime is not connected"));
+            AgentRequest::SessionOp {
+                op: AgentSessionOpKind::List,
+            },
+            cx,
+        ) {
+            return Err(Arc::from("agent daemon is not connected"));
         }
         if let Some(thread) = self.panes.get_mut(&pane) {
+            let cwd = (!all_projects).then(|| thread.cwd.clone());
             thread.session_history.loading = true;
             thread.session_history.error = None;
-            if !append {
-                thread.session_history.sessions = Arc::from([]);
-                thread.session_history.cwd_filter = cwd;
-                thread.session_history.next_cursor = None;
-            }
+            thread.session_history.sessions = Arc::from([]);
+            thread.session_history.cwd_filter = cwd;
+            thread.session_history.next_cursor = None;
         }
         cx.notify();
         Ok(())
@@ -2749,8 +2638,16 @@ impl AgentController {
                 "that session is already open in another agent pane",
             ));
         }
-        if !self.send(pane, RuntimeCommand::SwitchSession { pane, session }) {
-            return Err(Arc::from("agent runtime is not connected"));
+        if !self.send(
+            pane,
+            AgentRequest::SessionOp {
+                op: AgentSessionOpKind::Switch {
+                    session_id: session.session_id,
+                },
+            },
+            cx,
+        ) {
+            return Err(Arc::from("agent daemon is not connected"));
         }
         if let Some(thread) = self.panes.get_mut(&pane) {
             thread.connection = AgentConnectionState::Restoring;
@@ -2773,9 +2670,14 @@ impl AgentController {
                 "finish or cancel the current turn before starting a new session",
             ));
         }
-        let cwd = thread.cwd.clone();
-        if !self.send(pane, RuntimeCommand::NewSession { pane, cwd }) {
-            return Err(Arc::from("agent runtime is not connected"));
+        if !self.send(
+            pane,
+            AgentRequest::SessionOp {
+                op: AgentSessionOpKind::New,
+            },
+            cx,
+        ) {
+            return Err(Arc::from("agent daemon is not connected"));
         }
         if let Some(thread) = self.panes.get_mut(&pane) {
             thread.connection = AgentConnectionState::Starting;
@@ -2786,13 +2688,15 @@ impl AgentController {
     }
 
     /// Point the pane at another workspace. An ACP session is bound to the
-    /// directory it was created in, so this opens a new session in `cwd`, and a
-    /// refused switch leaves the pane where it was.
+    /// directory it was created in and the daemon captured that directory when
+    /// it opened the pane's adapter, so a live pane cannot be moved: the wire
+    /// carries no "new session over there". A pane opened in the directory
+    /// does what this used to.
     pub(crate) fn set_working_directory(
         &mut self,
         pane: PaneId,
-        cwd: PathBuf,
-        cx: &mut Context<Self>,
+        cwd: &Path,
+        _cx: &mut Context<Self>,
     ) -> Result<(), Arc<str>> {
         let Some(thread) = self.panes.get(&pane) else {
             return Err(Arc::from("agent pane is not registered"));
@@ -2803,20 +2707,9 @@ impl AgentController {
         if thread.cwd == cwd {
             return Ok(());
         }
-        if thread.connection.has_active_turn() || !thread.pending_permissions.is_empty() {
-            return Err(Arc::from(
-                "finish or cancel the current turn before changing the working directory",
-            ));
-        }
-        if !self.send(pane, RuntimeCommand::NewSession { pane, cwd }) {
-            return Err(Arc::from("agent runtime is not connected"));
-        }
-        if let Some(thread) = self.panes.get_mut(&pane) {
-            thread.connection = AgentConnectionState::Starting;
-            thread.error = None;
-        }
-        cx.notify();
-        Ok(())
+        Err(Arc::from(
+            "the daemon owns this agent's working directory; open a new agent pane there instead",
+        ))
     }
 
     pub(crate) fn delete_session(
@@ -2844,12 +2737,14 @@ impl AgentController {
         }
         if !self.send(
             pane,
-            RuntimeCommand::DeleteSession {
-                pane,
-                session_id: session_id.to_owned(),
+            AgentRequest::SessionOp {
+                op: AgentSessionOpKind::Delete {
+                    session_id: session_id.to_owned(),
+                },
             },
+            cx,
         ) {
-            return Err(Arc::from("agent runtime is not connected"));
+            return Err(Arc::from("agent daemon is not connected"));
         }
         if let Some(thread) = self.panes.get_mut(&pane) {
             thread.session_history.loading = true;
@@ -2859,9 +2754,9 @@ impl AgentController {
         Ok(())
     }
 
-    /// Send the prompt, or queue it behind the turn already running. A queued
-    /// prompt is dispatched when that turn settles on its own; a turn the user
-    /// stops, or one the runtime loses, hands the queue back to the composer.
+    /// Send the prompt. The daemon queues it behind a turn already running and
+    /// hands it back through the stream if that turn is stopped, so the
+    /// at-least-once rule holds without a client-side queue.
     pub(crate) fn prompt(
         &mut self,
         pane: PaneId,
@@ -2879,76 +2774,45 @@ impl AgentController {
         if let Some(refusal) = thread.image_refusal(!images.is_empty()) {
             return Err(refusal);
         }
-        if thread.connection.has_active_turn() {
-            self.queued_prompts
-                .entry(pane)
-                .or_default()
-                .push_back(QueuedPrompt { text, images });
+        let queueing = thread.connection.has_active_turn();
+        if !queueing && let Some(refusal) = thread.prompt_refusal(!images.is_empty()) {
+            return Err(refusal);
+        }
+        let wire_images = attachment::wire_images(&images);
+        if !self.send(
+            pane,
+            AgentRequest::Prompt {
+                text: text.clone(),
+                images: wire_images,
+            },
+            cx,
+        ) {
+            if let Some(thread) = self.panes.get_mut(&pane) {
+                thread.connection = AgentConnectionState::Failed;
+                thread.error = Some(Arc::from("agent daemon is not connected"));
+            }
+            cx.notify();
+            return Err(Arc::from("agent daemon is not connected"));
+        }
+        if queueing {
+            // The daemon publishes the queue depth; showing it immediately keeps
+            // the composer's Queue affordance honest between publications.
+            self.viewport_mut(pane).queued_prompts += 1;
             cx.notify();
             return Ok(());
         }
-        let result = self.dispatch_prompt(pane, QueuedPrompt { text, images }, cx);
-        cx.notify();
-        result
-    }
-
-    fn dispatch_prompt(
-        &mut self,
-        pane: PaneId,
-        prompt: QueuedPrompt,
-        cx: &mut Context<Self>,
-    ) -> Result<(), Arc<str>> {
-        let QueuedPrompt { text, images } = prompt;
-        {
-            let Some(thread) = self.panes.get_mut(&pane) else {
-                return Err(Arc::from("agent pane is not registered"));
-            };
-            if let Some(refusal) = thread.prompt_refusal(!images.is_empty()) {
-                return Err(refusal);
-            }
-            thread.begin_prompt(text.clone(), images.clone());
-        }
         let title = derive_pane_title(&text);
-        if !self.send(pane, RuntimeCommand::Prompt { pane, text, images }) {
-            if let Some(thread) = self.panes.get_mut(&pane) {
-                thread.connection = AgentConnectionState::Failed;
-                thread.error = Some(Arc::from("agent runtime is not connected"));
-            }
-            return Err(Arc::from("agent runtime is not connected"));
+        if let Some(thread) = self.panes.get_mut(&pane) {
+            thread.begin_prompt(text, images);
         }
+        self.viewport_mut(pane).turn_dispatched = true;
         self.name_pane_after_prompt(pane, title, cx);
-        self.arm_quiesce_watchdog(pane, cx);
-        self.snapshot_turn_base(pane, cx);
+        cx.notify();
         Ok(())
     }
 
-    /// Record the worktree this turn starts from, so the pane can show what the
-    /// agent changed. Git is shelled out to, so the snapshot never runs on the
-    /// UI thread, and a pane whose working directory is not a worktree simply
-    /// keeps no base.
-    fn snapshot_turn_base(&mut self, pane: PaneId, cx: &mut Context<Self>) {
-        let Some(cwd) = self.panes.get(&pane).map(|thread| thread.cwd.clone()) else {
-            return;
-        };
-        self.turn_bases.remove(&pane);
-        let task = cx.spawn(async move |this, cx| {
-            let snapshot = cx
-                .background_executor()
-                .spawn(async move { turn_snapshot::snapshot_tree(&cwd) })
-                .await;
-            match snapshot {
-                Ok(base) => {
-                    let _ = this.update(cx, |controller, _| {
-                        controller.turn_bases.insert(pane, base);
-                    });
-                }
-                Err(error) => log::debug!(
-                    target: "zz::agent",
-                    "no turn snapshot for pane {pane}: {error}"
-                ),
-            }
-        });
-        self.turn_snapshots.insert(pane, task);
+    fn viewport_mut(&mut self, pane: PaneId) -> &mut PaneViewport {
+        self.viewports.entry(pane).or_default()
     }
 
     /// Name the pane after the session's opening prompt. The mux owns pane
@@ -2974,107 +2838,13 @@ impl AgentController {
         cx.emit(AgentControllerEvent::Title { pane, title });
     }
 
-    /// Start the next queued prompt now that the pane accepts prompts again.
-    /// A dispatch that cannot reach the runtime returns the whole queue to the
-    /// composer rather than dropping what the user typed.
-    fn dispatch_next_queued_prompt(&mut self, pane: PaneId, cx: &mut Context<Self>) {
-        let Some(prompt) = self
-            .queued_prompts
-            .get_mut(&pane)
-            .and_then(VecDeque::pop_front)
-        else {
-            return;
-        };
-        let text = prompt.text.clone();
-        if self.dispatch_prompt(pane, prompt, cx).is_err() {
-            self.queue_composer_text(pane, &text);
-            self.reclaim_queued_prompts(pane);
-        }
-        cx.notify();
-    }
-
-    /// Hand every queued prompt back to the composer. The at-least-once rule:
-    /// a prompt the user typed is either sent or visible in the draft again,
-    /// never silently dropped — images included.
-    fn reclaim_queued_prompts(&mut self, pane: PaneId) -> bool {
-        let Some(queue) = self.queued_prompts.remove(&pane) else {
-            return false;
-        };
-        let mut reclaimed = false;
-        for prompt in queue {
-            reclaimed |= self.queue_composer_text(pane, &prompt.text);
-            if !prompt.images.is_empty() {
-                self.pending_images
-                    .entry(pane)
-                    .or_default()
-                    .extend(prompt.images);
-                reclaimed = true;
-            }
-        }
-        reclaimed
-    }
-
     /// Empty the pane's queue back into its composer draft on the user's ask.
+    /// The prompts themselves come back through the stream.
     pub(crate) fn unqueue_prompts(&mut self, pane: PaneId, cx: &mut Context<Self>) {
-        if !self.reclaim_queued_prompts(pane) {
+        if self.queued_count(pane) == 0 {
             return;
         }
-        cx.emit(AgentControllerEvent::Pane { pane });
-        cx.notify();
-    }
-
-    /// Watch the turn for silence and park it when the agent goes quiet with
-    /// nothing outstanding. The child is never signalled: parking only settles
-    /// what the transcript shows and hands the composer back.
-    fn arm_quiesce_watchdog(&mut self, pane: PaneId, cx: &mut Context<Self>) {
-        let Some(window) = quiesce_window() else {
-            return;
-        };
-        let watchdog = cx.spawn(async move |this, cx| {
-            let mut delay = window;
-            loop {
-                cx.background_executor().timer(delay).await;
-                let Ok(Some(next)) = this.update(cx, |controller, cx| {
-                    controller.poll_quiesce(pane, window, cx)
-                }) else {
-                    return;
-                };
-                delay = next;
-            }
-        });
-        self.quiesce_watchdogs.insert(pane, watchdog);
-    }
-
-    /// `None` retires the watchdog, `Some(delay)` asks for another look later.
-    fn poll_quiesce(
-        &mut self,
-        pane: PaneId,
-        window: Duration,
-        cx: &mut Context<Self>,
-    ) -> Option<Duration> {
-        let thread = self.panes.get(&pane)?;
-        if thread.connection != AgentConnectionState::Running {
-            return None;
-        }
-        let silence = thread.last_activity.elapsed();
-        let in_flight = thread.turn_in_flight();
-        if !should_park_turn(Some(window), silence, in_flight) {
-            return Some(if in_flight {
-                window
-            } else {
-                window.saturating_sub(silence)
-            });
-        }
-        log::info!(
-            target: "zz::agent",
-            "parking quiet turn for pane {pane} after {}ms of silence; agent process left alone",
-            silence.as_millis()
-        );
-        self.panes.get_mut(&pane)?.park_turn();
-        self.dispatch_next_queued_prompt(pane, cx);
-        cx.emit(AgentControllerEvent::Pane { pane });
-        cx.notify();
-        None
+        self.send(pane, AgentRequest::Unqueue, cx);
     }
 
     /// Queue `agent-send` text for the pane's composer draft. The view folds it
@@ -3120,8 +2890,7 @@ impl AgentController {
             return;
         }
         thread.connection = AgentConnectionState::Cancelling;
-        self.send(pane, RuntimeCommand::Cancel { pane });
-        self.reclaim_queued_prompts(pane);
+        self.send(pane, AgentRequest::Cancel, cx);
         cx.notify();
     }
 
@@ -3135,10 +2904,11 @@ impl AgentController {
         let canceled = option_id.is_none();
         if self.send(
             pane,
-            RuntimeCommand::RespondPermission {
+            AgentRequest::RespondPermission {
                 request_id,
                 option_id,
             },
+            cx,
         ) {
             if let Some(thread) = self.panes.get_mut(&pane) {
                 thread.resolve_permission(request_id, canceled);
@@ -3148,7 +2918,7 @@ impl AgentController {
     }
 
     pub(crate) fn authenticate(&mut self, pane: PaneId, method_id: String, cx: &mut Context<Self>) {
-        if self.send(pane, RuntimeCommand::Authenticate { method_id }) {
+        if self.send(pane, AgentRequest::Authenticate { method_id }, cx) {
             if let Some(thread) = self.panes.get_mut(&pane) {
                 thread.connection = AgentConnectionState::Starting;
                 thread.error = None;
@@ -3178,22 +2948,13 @@ impl AgentController {
         let Some(preference_kind) = selection else {
             return Err(Arc::from("the agent no longer advertises that setting"));
         };
-        if !self.send(
-            pane,
-            RuntimeCommand::SetConfigOption {
-                pane,
-                request: AgentSettingRequest {
-                    config_id: config_id.to_owned(),
-                    value: value.to_owned(),
-                    origin: AgentSettingOrigin::User(preference_kind),
-                },
-            },
-        ) {
-            return Err(Arc::from("agent runtime is not connected"));
-        }
-        if let Some(thread) = self.panes.get_mut(&pane) {
-            thread.error = None;
-            thread.settings_busy = true;
+        let request = AgentSettingRequest {
+            config_id: config_id.to_owned(),
+            value: value.to_owned(),
+            origin: AgentSettingOrigin::User(preference_kind),
+        };
+        if !self.dispatch_setting(pane, request, cx) {
+            return Err(Arc::from("agent daemon is not connected"));
         }
         cx.notify();
         Ok(())
@@ -3218,48 +2979,78 @@ impl AgentController {
                 "the agent no longer advertises that permission mode",
             ));
         }
-        if !self.send(
-            pane,
-            RuntimeCommand::SetMode {
-                pane,
-                mode_id: mode_id.to_owned(),
-                origin: AgentSettingOrigin::User(Some(AgentPreferenceKind::Permission)),
-            },
-        ) {
-            return Err(Arc::from("agent runtime is not connected"));
-        }
-        if let Some(thread) = self.panes.get_mut(&pane) {
-            thread.error = None;
-            thread.settings_busy = true;
+        let request = AgentSettingRequest {
+            config_id: LEGACY_MODE_PREFERENCE_ID.to_owned(),
+            value: mode_id.to_owned(),
+            origin: AgentSettingOrigin::User(Some(AgentPreferenceKind::Permission)),
+        };
+        if !self.dispatch_setting(pane, request, cx) {
+            return Err(Arc::from("agent daemon is not connected"));
         }
         cx.notify();
         Ok(())
     }
 
-    fn reconcile_preferences(&mut self, pane: PaneId) {
+    /// Send one setting change and remember who asked for it. A mode change
+    /// rides the same slot: only one setting is ever in flight per pane, which
+    /// is what `settings_busy` has always meant.
+    fn dispatch_setting(&mut self, pane: PaneId, request: AgentSettingRequest, cx: &App) -> bool {
+        let wire = if request.config_id == LEGACY_MODE_PREFERENCE_ID {
+            AgentRequest::SetMode {
+                mode_id: request.value.clone(),
+            }
+        } else {
+            AgentRequest::SetConfigOption {
+                option_id: request.config_id.clone(),
+                value: request.value.clone(),
+            }
+        };
+        if !self.send(pane, wire, cx) {
+            return false;
+        }
+        self.viewport_mut(pane).pending_setting = Some(request);
+        if let Some(thread) = self.panes.get_mut(&pane) {
+            thread.error = None;
+            thread.settings_busy = true;
+        }
+        true
+    }
+
+    /// The origin behind the setting the daemon just acknowledged. An
+    /// acknowledgement the client did not ask for — another attached client
+    /// changed it — reads as a user pick with nothing sticky behind it.
+    fn take_setting_request(&mut self, pane: PaneId, option_id: &str) -> AgentSettingRequest {
+        self.viewports
+            .get_mut(&pane)
+            .and_then(|viewport| viewport.pending_setting.take())
+            .filter(|request| request.config_id == option_id)
+            .unwrap_or_else(|| AgentSettingRequest {
+                config_id: option_id.to_owned(),
+                value: String::new(),
+                origin: AgentSettingOrigin::User(None),
+            })
+    }
+
+    fn reconcile_preferences(&mut self, pane: PaneId, cx: &App) {
         let Some(thread) = self.panes.get(&pane) else {
             return;
         };
         if thread.settings_busy || !thread.connection.accepts_prompt() {
             return;
         }
-        let command = preferred_setting_command(thread, &self.preferences, pane);
-        if let Some(command) = command
-            && self.send(pane, command)
-            && let Some(thread) = self.panes.get_mut(&pane)
-        {
-            thread.settings_busy = true;
+        if let Some(request) = preferred_setting_command(thread, &self.preferences) {
+            self.dispatch_setting(pane, request, cx);
         }
     }
 
+    /// Re-ask the daemon for everything about this pane. The adapter is the
+    /// daemon's to restart, so retrying is a resubscribe.
     pub(crate) fn retry(&mut self, pane: PaneId, cx: &mut Context<Self>) {
         if let Some(thread) = self.panes.get_mut(&pane) {
             thread.error = None;
             thread.connection = AgentConnectionState::Starting;
-            thread.opened_generation = None;
         }
-        self.ensure_runtime(pane, cx);
-        self.open_pane_if_needed(pane);
+        self.request_replay(pane, cx);
         cx.notify();
     }
 
@@ -3268,199 +3059,343 @@ impl AgentController {
     }
 
     pub(crate) fn is_shutdown_complete(&self) -> bool {
-        self.shutting_down && self.runtimes.is_empty()
+        self.shutting_down
     }
 
-    pub(crate) fn shutdown(&mut self, cx: &mut Context<Self>) -> Task<bool> {
-        if !self.shutting_down {
-            self.shutting_down = true;
-            let panes = self.runtimes.keys().copied().collect::<Vec<_>>();
-            for pane in panes {
-                self.stop_runtime(pane, false);
-            }
-        }
-        if self.runtimes.is_empty() {
-            return Task::ready(true);
-        }
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(SHUTDOWN_POLL_INTERVAL).await;
-                match this.read_with(cx, |controller, _| controller.runtimes.is_empty()) {
-                    Ok(true) => return true,
-                    Ok(false) => {}
-                    Err(error) => {
-                        log::error!("lost agent controller during shutdown: {error}");
-                        return false;
-                    }
-                }
-            }
-        })
+    /// Nothing to wind down: the adapters are the daemon's children and a
+    /// running turn is meant to outlive the window.
+    pub(crate) fn shutdown(&mut self, _cx: &mut Context<Self>) -> Task<bool> {
+        self.shutting_down = true;
+        Task::ready(true)
     }
 
-    fn ensure_runtime(&mut self, pane: PaneId, cx: &mut Context<Self>) {
-        if self.shutting_down {
-            return;
-        }
-        if let Some(runtime) = self.runtimes.get_mut(&pane) {
-            if runtime.stopping {
-                runtime.restart_after_stop = true;
-            }
-            return;
-        }
-        let Some(provider) = self.panes.get(&pane).map(|thread| thread.provider) else {
-            return;
-        };
-        self.next_runtime_generation = self.next_runtime_generation.saturating_add(1);
-        let generation = self.next_runtime_generation;
-        let (command_tx, command_rx) = async_channel::unbounded();
-        let (event_tx, event_rx) = async_channel::unbounded();
-        let config = self.config.clone();
-        let workspace = AgentWorkspaceEnvironment {
-            pane: Some(pane.to_string()),
-            ..self.workspace.clone()
-        };
-        let journal = self.journal.clone();
-        let background = cx.background_executor().spawn(async move {
-            run_agent_runtime(config, provider, workspace, journal, command_rx, event_tx).await
-        });
-        let runtime_task = cx.spawn(async move |this, cx| {
-            let result = background.await;
-            let _ = this.update(cx, |controller, cx| {
-                controller.runtime_finished(pane, generation, result, cx);
-            });
-        });
-        let event_task = cx.spawn(async move |this, cx| {
-            while let Ok(event) = event_rx.recv().await {
-                let mut events = Vec::with_capacity(RUNTIME_EVENT_BATCH_LIMIT);
-                events.push(event);
-                while events.len() < RUNTIME_EVENT_BATCH_LIMIT {
-                    let Ok(event) = event_rx.try_recv() else {
-                        break;
-                    };
-                    events.push(event);
-                }
-                if this
-                    .update(cx, |controller, cx| {
-                        if controller.runtimes.get(&pane).is_some_and(|runtime| {
-                            runtime.generation == generation && !runtime.stopping
-                        }) {
-                            let mut changed = false;
-                            for event in events {
-                                changed |= controller.handle_runtime_event(pane, event, cx);
-                            }
-                            if changed {
-                                cx.emit(AgentControllerEvent::Pane { pane });
-                            }
-                        }
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-        self.runtimes.insert(
-            pane,
-            PaneRuntime {
-                command_tx,
-                _runtime_task: runtime_task,
-                _event_task: event_task,
-                generation,
-                stopping: false,
-                restart_after_stop: false,
-            },
-        );
+    fn send(&self, pane: PaneId, request: AgentRequest, cx: &App) -> bool {
+        self.mux
+            .as_ref()
+            .is_some_and(|mux| mux.read(cx).send_agent_request(pane, request))
     }
 
-    fn open_pane_if_needed(&mut self, pane: PaneId) {
-        let Some(generation) = self
-            .runtimes
-            .get(&pane)
-            .filter(|runtime| !runtime.stopping)
-            .map(|runtime| runtime.generation)
-        else {
-            return;
-        };
-        let command = {
-            let Some(thread) = self.panes.get(&pane) else {
-                return;
-            };
-            if thread.opened_generation == Some(generation) {
-                return;
-            }
-            RuntimeCommand::Open {
-                pane,
-                cwd: thread.cwd.clone(),
-                resume_session: thread.session_id.as_deref().map(ToOwned::to_owned),
-            }
-        };
-        if self.send(pane, command)
-            && let Some(thread) = self.panes.get_mut(&pane)
-        {
-            thread.opened_generation = Some(generation);
-            thread.connection = AgentConnectionState::Starting;
-        }
-    }
-
-    fn send(&self, pane: PaneId, command: RuntimeCommand) -> bool {
-        self.runtimes
-            .get(&pane)
-            .filter(|runtime| !runtime.stopping)
-            .is_some_and(|runtime| runtime.command_tx.try_send(command).is_ok())
-    }
-
-    fn stop_runtime(&mut self, pane: PaneId, restart_after_stop: bool) {
-        let Some(runtime) = self.runtimes.get_mut(&pane) else {
-            return;
-        };
-        runtime.restart_after_stop |= restart_after_stop;
-        if runtime.stopping {
-            return;
-        }
-        runtime.stopping = true;
-        let _ = runtime.command_tx.try_send(RuntimeCommand::Shutdown);
-        self.reclaim_queued_prompts(pane);
-    }
-
-    fn runtime_finished(
+    /// Apply one batch of stream items, in seq order, to the pane's reducer.
+    pub(crate) fn apply_stream_items(
         &mut self,
         pane: PaneId,
-        generation: u64,
-        result: Result<(), String>,
+        items: Vec<AgentStreamItem>,
         cx: &mut Context<Self>,
     ) {
-        let Some(runtime) = self.runtimes.get(&pane) else {
+        let mut changed = false;
+        for item in items {
+            self.viewport_mut(pane).last_applied = item.seq;
+            let Some(event) = self.translate_stream_payload(pane, item.payload) else {
+                continue;
+            };
+            changed |= self.handle_runtime_event(pane, event, cx);
+        }
+        if changed {
+            cx.emit(AgentControllerEvent::Pane { pane });
+            cx.notify();
+        }
+    }
+
+    /// Adopt the daemon's published pane state: connection phase, queue depth,
+    /// and the permission request a late-attaching client has to see.
+    pub(crate) fn apply_pane_state(
+        &mut self,
+        pane: PaneId,
+        state: &AgentPaneWire,
+        cx: &mut Context<Self>,
+    ) {
+        self.viewport_mut(pane).queued_prompts = state.queued_prompts as usize;
+        let Some(thread) = self.panes.get_mut(&pane) else {
             return;
         };
-        if runtime.generation != generation {
-            return;
+        match &state.phase {
+            AgentConnectionPhase::Starting => {
+                if !matches!(
+                    thread.connection,
+                    AgentConnectionState::Restoring | AgentConnectionState::Starting
+                ) {
+                    thread.connection = AgentConnectionState::Starting;
+                }
+            }
+            AgentConnectionPhase::Ready | AgentConnectionPhase::AwaitingPermission => {
+                if thread.connection == AgentConnectionState::Starting {
+                    thread.connection = AgentConnectionState::Ready;
+                }
+            }
+            AgentConnectionPhase::Running => {
+                if !thread.connection.has_active_turn() {
+                    thread.connection = AgentConnectionState::Running;
+                }
+            }
+            AgentConnectionPhase::Failed { message } => {
+                thread.connection = AgentConnectionState::Failed;
+                thread.error = Some(Arc::from(message.as_str()));
+            }
         }
-        let intentional_stop = runtime.stopping;
-        let restart = runtime.restart_after_stop
-            && self.retained_panes.contains(&pane)
-            && !self.shutting_down;
-        self.runtimes.remove(&pane);
-        if !self.shutting_down
-            && !intentional_stop
-            && let Some(thread) = self.panes.get_mut(&pane)
+        if let Some(session_id) = &state.session_id
+            && thread.session_id.as_deref() != Some(session_id.as_str())
         {
-            let error = result.err().map_or_else(
-                || Arc::from("agent process disconnected unexpectedly"),
-                Arc::<str>::from,
-            );
-            thread.opened_generation = None;
-            thread.connection = AgentConnectionState::Failed;
-            thread.cancel_inflight();
-            thread.error = Some(error);
+            thread.session_id = Some(Arc::from(session_id.as_str()));
         }
-        if self.reclaim_queued_prompts(pane) {
-            cx.emit(AgentControllerEvent::Pane { pane });
+        if let Some(title) = &state.title
+            && thread.title.as_deref() != Some(title.as_str())
+        {
+            thread.title = Some(Arc::from(title.as_str()));
         }
-        if restart {
-            self.ensure_runtime(pane, cx);
-            self.open_pane_if_needed(pane);
+        if let Some(methods) = decode_state_blob::<Vec<StreamAuthMethod>>(&state.auth_methods) {
+            thread.auth_methods = methods
+                .into_iter()
+                .map(|method| AgentAuthMethod {
+                    id: method.id,
+                    name: method.name,
+                    description: method.description,
+                })
+                .collect::<Vec<_>>()
+                .into();
         }
+        if let Some(permission) = &state.pending_permission
+            && !thread
+                .pending_permissions
+                .iter()
+                .any(|pending| pending.request_id == permission.request_id)
+            && let Some((tool_call, options)) = decode_permission_payload(&permission.payload)
+        {
+            thread.request_permission(permission.request_id, tool_call, options);
+        }
+        cx.emit(AgentControllerEvent::Pane { pane });
         cx.notify();
+    }
+
+    /// Reduce the answer to `AgentSessionOp::List`. It arrives pane-wide, so it
+    /// carries no request the client has to match.
+    pub(crate) fn apply_sessions_result(
+        &mut self,
+        pane: PaneId,
+        result: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(payload) = decode_state_blob::<AgentStreamPayload>(result) else {
+            return;
+        };
+        let Some(event) = self.translate_stream_payload(pane, payload) else {
+            return;
+        };
+        if self.handle_runtime_event(pane, event, cx) {
+            cx.emit(AgentControllerEvent::Pane { pane });
+            cx.notify();
+        }
+    }
+
+    /// Reduce the answer to one `AgentTurnDiff` request.
+    pub(crate) fn apply_turn_diff_result(&mut self, result: &str) {
+        let Some(payload) = decode_state_blob::<AgentStreamPayload>(result) else {
+            return;
+        };
+        if let AgentStreamPayload::TurnDiff {
+            request_id,
+            outcome,
+        } = payload
+        {
+            self.resolve_turn_diff(
+                request_id,
+                match outcome {
+                    AgentTurnDiffOutcome::Captured { diff } => Ok(diff),
+                    AgentTurnDiffOutcome::Failed { message } => Err(message),
+                },
+            );
+        }
+    }
+
+    /// Turn one wire item into the reducer's input. `None` is an item the
+    /// reducer has nothing to do with, or one whose payload did not survive
+    /// re-typing — the stream carries the ACP SDK's JSON verbatim.
+    fn translate_stream_payload(
+        &mut self,
+        pane: PaneId,
+        payload: AgentStreamPayload,
+    ) -> Option<RuntimeEvent> {
+        Some(match payload {
+            AgentStreamPayload::Ready {
+                agent_name,
+                agent_key,
+                auth_methods,
+                capabilities,
+            } => RuntimeEvent::Ready {
+                agent_name,
+                agent_key,
+                auth_methods: auth_methods
+                    .into_iter()
+                    .map(|method| AgentAuthMethod {
+                        id: method.id,
+                        name: method.name,
+                        description: method.description,
+                    })
+                    .collect(),
+                session_capabilities: AgentSessionCapabilities {
+                    load: capabilities.load,
+                    list: capabilities.list,
+                    close: capabilities.close,
+                    delete: capabilities.delete,
+                    additional_directories: capabilities.additional_directories,
+                    images: capabilities.images,
+                },
+            },
+            AgentStreamPayload::SessionReset { restoring } => {
+                RuntimeEvent::SessionReset { pane, restoring }
+            }
+            AgentStreamPayload::SessionReady {
+                session_id,
+                modes,
+                config_options,
+            } => RuntimeEvent::SessionReady {
+                pane,
+                session_id,
+                modes: decode_json(modes),
+                config_options: decode_json(config_options),
+            },
+            AgentStreamPayload::SessionsListed {
+                sessions,
+                next_cursor,
+                cwd_filter,
+                replace,
+            } => RuntimeEvent::SessionsListed {
+                pane,
+                sessions: sessions
+                    .into_iter()
+                    .map(|session| AgentSessionSummary {
+                        session_id: session.session_id,
+                        cwd: session.cwd,
+                        additional_directories: session.additional_directories,
+                        title: session.title,
+                        updated_at: session.updated_at,
+                    })
+                    .collect(),
+                next_cursor: next_cursor.filter(|cursor| valid_session_cursor(cursor)),
+                cwd_filter,
+                replace,
+            },
+            AgentStreamPayload::SessionListFailed { message } => {
+                RuntimeEvent::SessionListFailed { pane, message }
+            }
+            AgentStreamPayload::SessionSwitched {
+                session_id,
+                cwd,
+                modes,
+                config_options,
+                replay,
+            } => RuntimeEvent::SessionSwitched {
+                pane,
+                session_id,
+                cwd,
+                modes: decode_json(modes),
+                config_options: decode_json(config_options),
+                replay: replay.into_iter().filter_map(decode_value).collect(),
+            },
+            AgentStreamPayload::SessionSwitchFailed { message } => {
+                RuntimeEvent::SessionSwitchFailed { pane, message }
+            }
+            AgentStreamPayload::SessionDeleted { session_id } => {
+                RuntimeEvent::SessionDeleted { pane, session_id }
+            }
+            AgentStreamPayload::SessionDeleteFailed { message } => {
+                RuntimeEvent::SessionDeleteFailed { pane, message }
+            }
+            AgentStreamPayload::Update { update } => RuntimeEvent::SessionUpdate {
+                pane,
+                update: decode_value(update)?,
+            },
+            AgentStreamPayload::TaskEvent { event } => RuntimeEvent::TaskEvent { pane, event },
+            AgentStreamPayload::PermissionRequested {
+                request_id,
+                tool_call,
+                options,
+            } => RuntimeEvent::PermissionRequested {
+                pane,
+                request_id,
+                tool_call: decode_value(tool_call)?,
+                options: decode_value(options)?,
+            },
+            AgentStreamPayload::PermissionResolved {
+                request_id,
+                canceled,
+            } => RuntimeEvent::PermissionResolved {
+                pane,
+                request_id,
+                canceled,
+            },
+            AgentStreamPayload::PromptFinished { outcome } => RuntimeEvent::PromptFinished {
+                pane,
+                result: match outcome {
+                    AgentPromptOutcome::Finished { stop_reason } => Ok(decode_value(stop_reason)?),
+                    AgentPromptOutcome::Failed { message } => Err(message),
+                },
+            },
+            AgentStreamPayload::Authenticated => RuntimeEvent::Authenticated,
+            AgentStreamPayload::AuthenticationFailed { message } => {
+                RuntimeEvent::AuthenticationFailed { message }
+            }
+            AgentStreamPayload::ConfigOptionsChanged {
+                option_id,
+                value,
+                config_options,
+            } => {
+                let mut request = self.take_setting_request(pane, &option_id);
+                request.value = value;
+                RuntimeEvent::ConfigOptionsChanged {
+                    pane,
+                    config_options: decode_value(config_options)?,
+                    request,
+                }
+            }
+            AgentStreamPayload::ModeChanged { mode_id } => {
+                let request = self.take_setting_request(pane, LEGACY_MODE_PREFERENCE_ID);
+                RuntimeEvent::ModeChanged {
+                    pane,
+                    mode_id,
+                    origin: request.origin,
+                }
+            }
+            AgentStreamPayload::SettingFailed { option_id, message } => {
+                let request = self.take_setting_request(pane, &option_id);
+                RuntimeEvent::SettingFailed {
+                    pane,
+                    message,
+                    option_id,
+                    origin: request.origin,
+                }
+            }
+            AgentStreamPayload::PaneFailed { message } => {
+                RuntimeEvent::PaneFailed { pane, message }
+            }
+            AgentStreamPayload::Parked => RuntimeEvent::Parked { pane },
+            AgentStreamPayload::PromptsReclaimed { prompts } => {
+                let mut text = String::new();
+                let mut images = Vec::new();
+                for prompt in prompts {
+                    if !prompt.text.trim().is_empty() {
+                        if !text.is_empty() {
+                            text.push('\n');
+                        }
+                        text.push_str(&prompt.text);
+                    }
+                    images.extend(prompt.images.iter().filter_map(attachment::inbound_image));
+                }
+                RuntimeEvent::PromptsReclaimed { pane, text, images }
+            }
+            AgentStreamPayload::TurnDiff {
+                request_id,
+                outcome,
+            } => {
+                self.resolve_turn_diff(
+                    request_id,
+                    match outcome {
+                        AgentTurnDiffOutcome::Captured { diff } => Ok(diff),
+                        AgentTurnDiffOutcome::Failed { message } => Err(message),
+                    },
+                );
+                return None;
+            }
+        })
     }
 
     fn handle_runtime_event(
@@ -3471,7 +3406,6 @@ impl AgentController {
     ) -> bool {
         let mut changed_pane = None;
         let mut reconcile_pane = None;
-        let mut drain_pane = None;
         let mut remembered_preference = None;
         match event {
             RuntimeEvent::Ready {
@@ -3510,11 +3444,6 @@ impl AgentController {
                     thread.settle_inflight(AgentToolStatusModel::Completed);
                     thread.connection = AgentConnectionState::Ready;
                     thread.error = None;
-                    cx.emit(AgentControllerEvent::Session {
-                        pane,
-                        session_id,
-                        cwd: thread.cwd.clone(),
-                    });
                     changed_pane = Some(pane);
                     reconcile_pane = Some(pane);
                 }
@@ -3580,11 +3509,6 @@ impl AgentController {
                     thread.set_session_configuration(modes, config_options);
                     thread.connection = AgentConnectionState::Ready;
                     thread.error = None;
-                    cx.emit(AgentControllerEvent::Session {
-                        pane,
-                        session_id,
-                        cwd: thread.cwd.clone(),
-                    });
                     if thread.title != previous_title {
                         let title = thread.title.clone().unwrap_or_else(|| Arc::from("agent"));
                         cx.emit(AgentControllerEvent::Title { pane, title });
@@ -3673,7 +3597,6 @@ impl AgentController {
                         Ok(_) => {
                             thread.connection = AgentConnectionState::Ready;
                             thread.settle_inflight(AgentToolStatusModel::Completed);
-                            drain_pane = Some(pane);
                         }
                         Err(error) => {
                             thread.connection = AgentConnectionState::Failed;
@@ -3685,17 +3608,13 @@ impl AgentController {
                     if thread.connection.accepts_prompt() {
                         reconcile_pane = Some(pane);
                     }
-                    if drain_pane.is_none() {
-                        self.reclaim_queued_prompts(pane);
-                    }
                 }
             }
             RuntimeEvent::Authenticated => {
                 if let Some(thread) = self.panes.get_mut(&runtime_pane) {
-                    thread.opened_generation = None;
+                    thread.connection = AgentConnectionState::Starting;
                     thread.error = None;
                 }
-                self.open_pane_if_needed(runtime_pane);
                 changed_pane = Some(runtime_pane);
             }
             RuntimeEvent::AuthenticationFailed { message } => {
@@ -3810,51 +3729,35 @@ impl AgentController {
                     changed_pane = Some(pane);
                 }
             }
+            RuntimeEvent::Parked { pane } => {
+                if let Some(thread) = self.panes.get_mut(&pane) {
+                    thread.park_turn();
+                    changed_pane = Some(pane);
+                    reconcile_pane = Some(pane);
+                }
+            }
+            RuntimeEvent::PromptsReclaimed { pane, text, images } => {
+                self.queue_composer_text(pane, &text);
+                if !images.is_empty() {
+                    self.pending_images.entry(pane).or_default().extend(images);
+                }
+                changed_pane = Some(pane);
+            }
         }
         if let Some((provider, agent_key, kind, option_id, value)) = remembered_preference {
             self.preferences
                 .remember(provider, &agent_key, kind, &option_id, &value);
         }
         if let Some(pane) = reconcile_pane {
-            self.reconcile_preferences(pane);
+            self.reconcile_preferences(pane, cx);
         }
         if let Some(thread) = changed_pane.and_then(|pane| self.panes.get_mut(&pane)) {
             thread.last_activity = Instant::now();
-        }
-        if let Some(pane) = drain_pane {
-            self.dispatch_next_queued_prompt(pane, cx);
         }
         changed_pane.is_some()
     }
 }
 
-/// The quiesce window, read once per process. Absent or unparseable falls back
-/// to the default; `0` disables the watchdog.
-fn quiesce_window() -> Option<Duration> {
-    static WINDOW: OnceLock<Option<Duration>> = OnceLock::new();
-
-    *WINDOW.get_or_init(|| parse_quiesce_window(std::env::var_os("ZZ_AGENT_QUIESCE_MS").as_deref()))
-}
-
-fn parse_quiesce_window(value: Option<&OsStr>) -> Option<Duration> {
-    let millis = value
-        .and_then(OsStr::to_str)
-        .map(str::trim)
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_QUIESCE_MS);
-    (millis > 0).then(|| Duration::from_millis(millis))
-}
-
-/// Silence alone never ends a run: a live child is the working signal, so the
-/// watchdog parks only once the turn has been quiet past `window` with nothing
-/// outstanding. A false trip costs a status dip, never data.
-fn should_park_turn(window: Option<Duration>, silence: Duration, in_flight: bool) -> bool {
-    window.is_some_and(|window| !in_flight && silence >= window)
-}
-
-/// Name a pane after the prompt that opened its session: the first line, with
-/// quote and heading dressing stripped, trimmed to a handful of words. Agents
-/// that title their own sessions overrule this the moment they say so.
 fn derive_pane_title(prompt: &str) -> Option<Arc<str>> {
     let first_line = prompt.trim().lines().next().unwrap_or_default();
     let cleaned = first_line
@@ -3870,33 +3773,10 @@ fn derive_pane_title(prompt: &str) -> Option<Arc<str>> {
     (!title.is_empty()).then(|| Arc::from(title))
 }
 
-fn entry_awaits_agent(entry: &AgentThreadEntry) -> bool {
-    let AgentThreadEntry::Tool {
-        status, children, ..
-    } = entry
-    else {
-        return false;
-    };
-    unresolved_tool_status(*status)
-        || children.iter().any(|child| {
-            matches!(child, AgentThreadEntry::Tool { status, .. } if unresolved_tool_status(*status))
-        })
-}
-
-const fn unresolved_tool_status(status: AgentToolStatusModel) -> bool {
-    matches!(
-        status,
-        AgentToolStatusModel::Pending
-            | AgentToolStatusModel::Running
-            | AgentToolStatusModel::NeedsApproval
-    )
-}
-
 fn preferred_setting_command(
     thread: &AgentThread,
     preferences: &AgentPreferences,
-    pane: PaneId,
-) -> Option<RuntimeCommand> {
+) -> Option<AgentSettingRequest> {
     for kind in [
         AgentPreferenceKind::Model,
         AgentPreferenceKind::Effort,
@@ -3923,13 +3803,10 @@ fn preferred_setting_command(
             {
                 continue;
             }
-            return Some(RuntimeCommand::SetConfigOption {
-                pane,
-                request: AgentSettingRequest {
-                    config_id: option.id.clone(),
-                    value: value.to_owned(),
-                    origin: AgentSettingOrigin::Preference(kind),
-                },
+            return Some(AgentSettingRequest {
+                config_id: option.id.clone(),
+                value: value.to_owned(),
+                origin: AgentSettingOrigin::Preference(kind),
             });
         }
         if kind == AgentPreferenceKind::Permission {
@@ -3952,9 +3829,9 @@ fn preferred_setting_command(
             {
                 continue;
             }
-            return Some(RuntimeCommand::SetMode {
-                pane,
-                mode_id: value.to_owned(),
+            return Some(AgentSettingRequest {
+                config_id: LEGACY_MODE_PREFERENCE_ID.to_owned(),
+                value: value.to_owned(),
                 origin: AgentSettingOrigin::Preference(AgentPreferenceKind::Permission),
             });
         }
@@ -3962,1102 +3839,44 @@ fn preferred_setting_command(
     None
 }
 
+/// Re-type one JSON value the stream carried verbatim. A payload that does not
+/// survive is dropped rather than half-applied: the ACP schema is the contract
+/// between the daemon and the adapter, and a shape zz cannot read is a shape it
+/// has nothing to render.
+fn decode_value<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Option<T> {
+    serde_json::from_value(value)
+        .map_err(|error| {
+            log::warn!(target: "zz::agent", "dropping an agent payload zz could not re-type: {error}");
+        })
+        .ok()
+}
+
+fn decode_json<T: serde::de::DeserializeOwned>(value: Option<serde_json::Value>) -> Option<T> {
+    value.and_then(decode_value)
+}
+
+/// Read one of [`AgentPaneWire`]'s JSON blobs. Empty means "not published".
+fn decode_state_blob<T: serde::de::DeserializeOwned>(blob: &str) -> Option<T> {
+    if blob.is_empty() {
+        return None;
+    }
+    serde_json::from_str(blob)
+        .map_err(|error| {
+            log::warn!(target: "zz::agent", "dropping an agent state blob zz could not re-type: {error}");
+        })
+        .ok()
+}
+
+/// The parked permission request rides the pane state so a client that attaches
+/// mid-question still sees it.
+fn decode_permission_payload(payload: &str) -> Option<(ToolCallUpdate, Vec<PermissionOption>)> {
+    let value = decode_state_blob::<serde_json::Value>(payload)?;
+    let tool_call = decode_value(value.get("toolCall")?.clone())?;
+    let options = decode_value(value.get("options")?.clone())?;
+    Some((tool_call, options))
+}
+
 impl EventEmitter<AgentControllerEvent> for AgentController {}
-
-async fn run_agent_runtime(
-    config: AgentConfig,
-    provider: AgentProvider,
-    workspace: AgentWorkspaceEnvironment,
-    journal: Option<Arc<AgentJournal>>,
-    command_rx: Receiver<RuntimeCommand>,
-    event_tx: Sender<RuntimeEvent>,
-) -> Result<(), String> {
-    let agent = AcpAgent::from_str(config.command_for(provider))
-        .map_err(|error| format!("invalid {}: {error}", AgentConfig::key_for(provider)))?;
-    let agent = crate::agent::environment::with_platform_environment(agent);
-    let stderr = StderrTail::default();
-    let debug_stderr = stderr.clone();
-    let agent = crate::agent::environment::with_workspace_environment(agent, &workspace)
-        .with_debug(move |line, direction| {
-            if matches!(direction, LineDirection::Stderr) {
-                log::warn!(target: "zz::agent::stderr", "{line}");
-                debug_stderr.push(line);
-            }
-        });
-
-    run_agent_connection(
-        provider,
-        config.auto_approve,
-        agent,
-        journal,
-        command_rx,
-        event_tx,
-    )
-    .await
-    .map_err(|error| runtime_failure_message(provider.label(), &error, stderr.snapshot()))
-}
-
-/// Rolling tail of the adapter's stderr, kept so an unexpected exit can say
-/// what the child complained about instead of shrugging.
-#[derive(Clone, Default)]
-struct StderrTail(Arc<Mutex<VecDeque<String>>>);
-
-impl StderrTail {
-    const KEEP_LINES: usize = 6;
-    const KEEP_BYTES: usize = 700;
-
-    fn push(&self, line: &str) {
-        let line = line.trim();
-        if line.is_empty() {
-            return;
-        }
-        let mut tail = self.0.lock();
-        tail.push_back(capped(line.to_owned(), Self::KEEP_BYTES));
-        while tail.len() > Self::KEEP_LINES {
-            tail.pop_front();
-        }
-    }
-
-    fn snapshot(&self) -> Option<String> {
-        let tail = self.0.lock();
-        (!tail.is_empty()).then(|| {
-            capped(
-                tail.iter().cloned().collect::<Vec<_>>().join("\n"),
-                Self::KEEP_BYTES,
-            )
-        })
-    }
-}
-
-fn runtime_failure_message(adapter: &str, error: &str, tail: Option<String>) -> String {
-    let status = exit_status_detail(error).unwrap_or_else(|| {
-        capped(
-            error.lines().next().unwrap_or(error).trim().to_owned(),
-            MAX_RUNTIME_ERROR_BYTES,
-        )
-    });
-    match tail {
-        Some(tail) => format!("{adapter} exited unexpectedly ({status}): {tail}"),
-        None => format!("{adapter} exited unexpectedly ({status})"),
-    }
-}
-
-/// Recover the child's exit status from the ACP crate's process error, which
-/// reads `Process exited with <status>[: <stderr>]`. The crate owns the child,
-/// so this string is the only handle on the status we get.
-fn exit_status_detail(error: &str) -> Option<String> {
-    let status = error.split_once("exited with ")?.1;
-    let status = status
-        .split(": ")
-        .take(2)
-        .collect::<Vec<_>>()
-        .join(": ")
-        .trim()
-        .to_owned();
-    (!status.is_empty()).then_some(status)
-}
-
-fn new_session_request(provider: AgentProvider, cwd: PathBuf) -> NewSessionRequest {
-    let mut request = NewSessionRequest::new(cwd);
-    request.meta = session_meta(provider);
-    request
-}
-
-fn load_session_request(
-    provider: AgentProvider,
-    session_id: AcpSessionId,
-    cwd: PathBuf,
-) -> LoadSessionRequest {
-    let mut request = LoadSessionRequest::new(session_id, cwd);
-    request.meta = session_meta(provider);
-    request
-}
-
-/// Journals sit beside `agent-preferences.json`, in the same per-user
-/// application-data directory.
-fn journal_directory() -> io::Result<PathBuf> {
-    let data = platform_data_dir().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "could not resolve the current user's application-data directory",
-        )
-    })?;
-    Ok(data.join("zz").join(JOURNAL_DIRECTORY_NAME))
-}
-
-fn load_persistent_journal() -> Option<Arc<AgentJournal>> {
-    let journal = journal_directory().and_then(|directory| {
-        AgentJournal::open(&directory).map_err(|error| io::Error::other(error.to_string()))
-    });
-    let journal = match journal {
-        Ok(journal) => journal,
-        Err(error) => {
-            log::warn!(
-                target: "zz::agent::journal",
-                "agent transcripts are not journalled: {error}"
-            );
-            return None;
-        }
-    };
-    match journal.prune(JOURNAL_RETENTION_DAYS) {
-        Ok(0) => {}
-        Ok(removed) => log::info!(
-            target: "zz::agent::journal",
-            "pruned {removed} agent journals older than {JOURNAL_RETENTION_DAYS} days"
-        ),
-        Err(error) => log::warn!(
-            target: "zz::agent::journal",
-            "could not prune agent journals: {error}"
-        ),
-    }
-    Some(Arc::new(journal))
-}
-
-/// A journal failure never interrupts a turn: the transcript keeps streaming,
-/// it just stops being replayable. The first one is loud, the rest are not.
-fn report_journal_error(session_id: &str, error: &str) {
-    static REPORTED: AtomicBool = AtomicBool::new(false);
-
-    if REPORTED.swap(true, Ordering::Relaxed) {
-        log::debug!(target: "zz::agent::journal", "session {session_id}: {error}");
-    } else {
-        log::warn!(
-            target: "zz::agent::journal",
-            "agent transcripts are no longer journalled for session {session_id}: {error}"
-        );
-    }
-}
-
-fn record_update(journal: Option<&AgentJournal>, session_id: &str, update: &SessionUpdate) {
-    let Some(journal) = journal else {
-        return;
-    };
-    let value = match serde_json::to_value(update) {
-        Ok(value) => value,
-        Err(error) => {
-            report_journal_error(session_id, &error.to_string());
-            return;
-        }
-    };
-    if let Err(error) = journal.append(session_id, &value) {
-        report_journal_error(session_id, &error.to_string());
-    }
-}
-
-fn record_updates(journal: Option<&AgentJournal>, session_id: &str, updates: &[SessionUpdate]) {
-    for update in updates {
-        record_update(journal, session_id, update);
-    }
-}
-
-/// The journalled transcript of `session_id`, as updates the reducer replays
-/// exactly like the ones an agent sends out of `session/load`.
-fn journal_replay(journal: Option<&AgentJournal>, session_id: Option<&str>) -> Vec<SessionUpdate> {
-    let (Some(journal), Some(session_id)) = (journal, session_id) else {
-        return Vec::new();
-    };
-    let records = match journal.replay(session_id) {
-        Ok(records) => records,
-        Err(error) => {
-            report_journal_error(session_id, &error.to_string());
-            return Vec::new();
-        }
-    };
-    records
-        .into_iter()
-        .filter_map(
-            |(seq, update)| match serde_json::from_value::<SessionUpdate>(update) {
-                Ok(update) => Some(update),
-                Err(error) => {
-                    log::warn!(
-                        target: "zz::agent::journal",
-                        "skipping journalled update {seq} of session {session_id}: {error}"
-                    );
-                    None
-                }
-            },
-        )
-        .collect()
-}
-
-/// Seed a freshly created session with a journalled transcript, and take over
-/// journalling under its id. Staging the live session before the copy is what
-/// makes the restore atomic: an update that arrives mid-copy queues behind the
-/// restored entries instead of racing them into the pane.
-fn restore_journaled_session(
-    routing: &Mutex<RuntimeRouting>,
-    journal: Option<&AgentJournal>,
-    pane: PaneId,
-    session_id: &str,
-    restored_from: Option<&str>,
-    restored: Vec<SessionUpdate>,
-) -> Vec<SessionUpdate> {
-    {
-        let mut routes = routing.lock();
-        routes
-            .staged_updates
-            .insert(session_id.to_owned(), Vec::new());
-        routes.session_to_pane.insert(session_id.to_owned(), pane);
-    }
-    record_updates(journal, session_id, &restored);
-    if let (Some(journal), Some(previous)) = (journal, restored_from)
-        && previous != session_id
-        && let Err(error) = journal.remove(previous)
-    {
-        report_journal_error(previous, &error.to_string());
-    }
-    let staged = {
-        let mut routes = routing.lock();
-        routes.journaled.insert(session_id.to_owned());
-        routes.staged_updates.remove(session_id).unwrap_or_default()
-    };
-    record_updates(journal, session_id, &staged);
-    let mut replay = restored;
-    replay.extend(staged);
-    replay
-}
-
-async fn run_agent_connection(
-    provider: AgentProvider,
-    auto_approve: bool,
-    agent: impl ConnectTo<AcpClientRole>,
-    journal: Option<Arc<AgentJournal>>,
-    command_rx: Receiver<RuntimeCommand>,
-    event_tx: Sender<RuntimeEvent>,
-) -> Result<(), String> {
-    let routing = Arc::new(Mutex::new(RuntimeRouting::default()));
-    let next_permission_id = Arc::new(AtomicU64::new(1));
-
-    let notification_journal = journal.clone();
-    let notification_routing = Arc::clone(&routing);
-    let notification_events = event_tx.clone();
-    let ext_routing = Arc::clone(&routing);
-    let ext_events = event_tx.clone();
-    let permission_routing = Arc::clone(&routing);
-    let permission_events = event_tx.clone();
-    let permission_ids = Arc::clone(&next_permission_id);
-
-    agent_client_protocol::Client
-        .builder()
-        .on_receive_notification(
-            async move |notification: AgentNotification, _| {
-                match notification {
-                    AgentNotification::SessionNotification(notification) => {
-                        let session_id = notification.session_id.0.to_string();
-                        let mut routing = notification_routing.lock();
-                        if let Some(updates) = routing.staged_updates.get_mut(&session_id) {
-                            updates.push(notification.update);
-                            return Ok(());
-                        }
-                        let pane = routing.session_to_pane.get(&session_id).copied();
-                        let journaled = routing.journaled.contains(&session_id);
-                        drop(routing);
-                        if journaled {
-                            record_update(
-                                notification_journal.as_deref(),
-                                &session_id,
-                                &notification.update,
-                            );
-                        }
-                        if let Some(pane) = pane {
-                            permission_safe_send(
-                                &notification_events,
-                                RuntimeEvent::SessionUpdate {
-                                    pane,
-                                    update: notification.update,
-                                },
-                            )?;
-                        }
-                        Ok(())
-                    }
-                    AgentNotification::ExtNotification(notification) => {
-                        log::debug!(
-                            target: "zz::agent",
-                            "ext notification received: {}",
-                            notification.method
-                        );
-                        if !is_sdk_message_method(notification.method.as_ref()) {
-                            return Ok(());
-                        }
-                        let Ok(params) =
-                            serde_json::from_str::<serde_json::Value>(notification.params.get())
-                        else {
-                            return Ok(());
-                        };
-                        let Some((session_id, event)) = parse_sdk_task_event(&params) else {
-                            return Ok(());
-                        };
-                        log::debug!(
-                            target: "zz::agent",
-                            "sdk task event for session {session_id}: {event:?}"
-                        );
-                        let routing = ext_routing.lock();
-                        if routing.staged_updates.contains_key(&session_id) {
-                            return Ok(());
-                        }
-                        let pane = routing.session_to_pane.get(&session_id).copied();
-                        drop(routing);
-                        if let Some(pane) = pane {
-                            permission_safe_send(
-                                &ext_events,
-                                RuntimeEvent::TaskEvent { pane, event },
-                            )?;
-                        }
-                        Ok(())
-                    }
-                    _ => Ok(()),
-                }
-            },
-            agent_client_protocol::on_receive_notification!(),
-        )
-        .on_receive_request(
-            async move |request: RequestPermissionRequest, responder, _| {
-                let session_id = request.session_id.0.to_string();
-                let routing = permission_routing.lock();
-                if routing.staged_updates.contains_key(&session_id) {
-                    drop(routing);
-                    return responder.respond(RequestPermissionResponse::new(
-                        RequestPermissionOutcome::Cancelled,
-                    ));
-                }
-                let pane = routing.session_to_pane.get(&session_id).copied();
-                drop(routing);
-                let Some(pane) = pane else {
-                    return responder.respond(RequestPermissionResponse::new(
-                        RequestPermissionOutcome::Cancelled,
-                    ));
-                };
-                if auto_approve
-                    && !is_user_question(&request.options)
-                    && let Some(option_id) = preferred_allow_option(&request.options)
-                {
-                    log::debug!(
-                        target: "zz::agent",
-                        "auto-approving tool permission for pane {pane} with option {option_id}"
-                    );
-                    if let Err(error) = permission_safe_send(
-                        &permission_events,
-                        RuntimeEvent::SessionUpdate {
-                            pane,
-                            update: SessionUpdate::ToolCallUpdate(request.tool_call),
-                        },
-                    ) {
-                        responder.respond(RequestPermissionResponse::new(
-                            RequestPermissionOutcome::Cancelled,
-                        ))?;
-                        return Err(error);
-                    }
-                    return responder.respond(RequestPermissionResponse::new(
-                        RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
-                            option_id,
-                        )),
-                    ));
-                }
-                let request_id = permission_ids.fetch_add(1, Ordering::Relaxed);
-                permission_routing.lock().permissions.insert(
-                    request_id,
-                    PendingPermissionResponder {
-                        pane,
-                        responder,
-                    },
-                );
-                if let Err(error) = permission_safe_send(
-                    &permission_events,
-                    RuntimeEvent::PermissionRequested {
-                        pane,
-                        request_id,
-                        tool_call: request.tool_call,
-                        options: request.options,
-                    },
-                ) {
-                    if let Some(pending) = permission_routing.lock().permissions.remove(&request_id)
-                    {
-                        let _ = pending.responder.respond(RequestPermissionResponse::new(
-                            RequestPermissionOutcome::Cancelled,
-                        ));
-                    }
-                    return Err(error);
-                }
-                Ok(())
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .connect_with(agent, async move |connection: ConnectionTo<Agent>| {
-            let initialize = InitializeRequest::new(ProtocolVersion::V1)
-                .client_capabilities(
-                    ClientCapabilities::new()
-                        .session(
-                            ClientSessionCapabilities::new()
-                                .config_options(SessionConfigOptionsCapabilities::new()),
-                        )
-                        .meta(client_meta_caps(provider)),
-                )
-                .client_info(
-                    Implementation::new("zz", env!("CARGO_PKG_VERSION")).title("zz"),
-                );
-            let response = connection.send_request(initialize).block_task().await?;
-            if response.protocol_version != ProtocolVersion::V1 {
-                return Err(agent_client_protocol::Error::internal_error().data(format!(
-                    "agent selected unsupported protocol version {:?}",
-                    response.protocol_version
-                )));
-            }
-            let session_capabilities = AgentSessionCapabilities {
-                load: response.agent_capabilities.load_session,
-                list: response.agent_capabilities.session_capabilities.list.is_some(),
-                close: response
-                    .agent_capabilities
-                    .session_capabilities
-                    .close
-                    .is_some(),
-                delete: response
-                    .agent_capabilities
-                    .session_capabilities
-                    .delete
-                    .is_some(),
-                additional_directories: response
-                    .agent_capabilities
-                    .session_capabilities
-                    .additional_directories
-                    .is_some(),
-                images: response.agent_capabilities.prompt_capabilities.image,
-            };
-            let (agent_name, agent_key) = response.agent_info.map_or_else(
-                || ("ACP agent".to_owned(), "acp-agent".to_owned()),
-                |info| {
-                    let agent_key = info.name.clone();
-                    (info.title.unwrap_or(info.name), agent_key)
-                },
-            );
-            let auth_methods = response
-                .auth_methods
-                .iter()
-                .map(auth_method_model)
-                .collect::<Vec<_>>();
-            permission_safe_send(
-                &event_tx,
-                RuntimeEvent::Ready {
-                    agent_name,
-                    agent_key,
-                    auth_methods,
-                    session_capabilities,
-                },
-            )?;
-
-            let mut sessions = BTreeMap::<PaneId, AcpSessionId>::new();
-            while let Ok(command) = command_rx.recv().await {
-                match command {
-                    RuntimeCommand::Open {
-                        pane,
-                        cwd,
-                        resume_session,
-                    } => {
-                        // An agent that cannot load the session itself is
-                        // restored from the journal instead, so the pane says
-                        // RESTORING on both routes rather than flashing
-                        // STARTING at a transcript that is about to appear.
-                        let mut restored = if session_capabilities.load {
-                            Vec::new()
-                        } else {
-                            journal_replay(journal.as_deref(), resume_session.as_deref())
-                        };
-                        let restoring = (session_capabilities.load && resume_session.is_some())
-                            || !restored.is_empty();
-                        permission_safe_send(
-                            &event_tx,
-                            RuntimeEvent::SessionReset { pane, restoring },
-                        )?;
-                        let session_result = if let Some(resume) =
-                            resume_session.clone().filter(|_| session_capabilities.load)
-                        {
-                            let session_id = AcpSessionId::new(resume);
-                            routing
-                                .lock()
-                                .session_to_pane
-                                .insert(session_id.0.to_string(), pane);
-                            match connection
-                                .send_request(load_session_request(
-                                    provider,
-                                    session_id.clone(),
-                                    cwd.clone(),
-                                ))
-                                .block_task()
-                                .await
-                            {
-                                Ok(response) => Ok((
-                                    session_id,
-                                    response.modes,
-                                    response.config_options,
-                                )),
-                                Err(error) => {
-                                    routing
-                                        .lock()
-                                        .session_to_pane
-                                        .remove(session_id.0.as_ref());
-                                    log::warn!(
-                                        target: "zz::agent",
-                                        "could not restore ACP session for pane {pane}: {error}; creating a new session"
-                                    );
-                                    restored = journal_replay(
-                                        journal.as_deref(),
-                                        resume_session.as_deref(),
-                                    );
-                                    connection
-                                        .send_request(new_session_request(provider, cwd.clone()))
-                                        .block_task()
-                                        .await
-                                        .map(|response| {
-                                            (
-                                                response.session_id,
-                                                response.modes,
-                                                response.config_options,
-                                            )
-                                        })
-                                }
-                            }
-                        } else {
-                            connection
-                                .send_request(new_session_request(provider, cwd.clone()))
-                                .block_task()
-                                .await
-                                .map(|response| {
-                                    (
-                                        response.session_id,
-                                        response.modes,
-                                        response.config_options,
-                                    )
-                                })
-                        };
-                        match session_result {
-                            Ok((session_id, modes, config_options)) => {
-                                if !valid_session_id(session_id.0.as_ref()) {
-                                    routing
-                                        .lock()
-                                        .session_to_pane
-                                        .retain(|_, routed_pane| *routed_pane != pane);
-                                    permission_safe_send(
-                                        &event_tx,
-                                        RuntimeEvent::PaneFailed {
-                                            pane,
-                                            message: "agent returned an invalid session ID"
-                                                .to_owned(),
-                                        },
-                                    )?;
-                                    continue;
-                                }
-                                let live = session_id.0.to_string();
-                                sessions.insert(pane, session_id);
-                                if restored.is_empty() {
-                                    let mut routes = routing.lock();
-                                    routes.session_to_pane.insert(live.clone(), pane);
-                                    routes.journaled.insert(live.clone());
-                                    drop(routes);
-                                    permission_safe_send(
-                                        &event_tx,
-                                        RuntimeEvent::SessionReady {
-                                            pane,
-                                            session_id: live,
-                                            modes,
-                                            config_options,
-                                        },
-                                    )?;
-                                } else {
-                                    let replay = restore_journaled_session(
-                                        &routing,
-                                        journal.as_deref(),
-                                        pane,
-                                        &live,
-                                        resume_session.as_deref(),
-                                        restored,
-                                    );
-                                    permission_safe_send(
-                                        &event_tx,
-                                        RuntimeEvent::SessionSwitched {
-                                            pane,
-                                            session_id: live,
-                                            cwd,
-                                            modes,
-                                            config_options,
-                                            replay,
-                                        },
-                                    )?;
-                                }
-                            }
-                            Err(error) => {
-                                permission_safe_send(
-                                    &event_tx,
-                                    RuntimeEvent::PaneFailed {
-                                        pane,
-                                        message: error.to_string(),
-                                    },
-                                )?;
-                            }
-                        }
-                    }
-                    RuntimeCommand::ListSessions {
-                        pane,
-                        cwd,
-                        cursor,
-                        replace,
-                    } => {
-                        if !session_capabilities.list {
-                            permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::SessionListFailed {
-                                    pane,
-                                    message: "agent does not support session/list".to_owned(),
-                                },
-                            )?;
-                            continue;
-                        }
-                        let request = ListSessionsRequest::new()
-                            .cwd(cwd.clone())
-                            .cursor(cursor);
-                        match connection.send_request(request).block_task().await {
-                            Ok(response) => {
-                                let sessions = response
-                                    .sessions
-                                    .into_iter()
-                                    .filter_map(|session| {
-                                        let summary = AgentSessionSummary {
-                                            session_id: session.session_id.0.to_string(),
-                                            cwd: session.cwd,
-                                            additional_directories: session.additional_directories,
-                                            title: session.title.and_then(|title| {
-                                                clean_session_metadata(
-                                                    &title,
-                                                    MAX_SESSION_TITLE_BYTES,
-                                                )
-                                            }),
-                                            updated_at: session.updated_at.and_then(|timestamp| {
-                                                clean_session_metadata(
-                                                    &timestamp,
-                                                    MAX_SESSION_TIMESTAMP_BYTES,
-                                                )
-                                            }),
-                                        };
-                                        valid_session_summary(&summary).then_some(summary)
-                                    })
-                                    .collect();
-                                permission_safe_send(
-                                    &event_tx,
-                                    RuntimeEvent::SessionsListed {
-                                        pane,
-                                        sessions,
-                                        next_cursor: response
-                                            .next_cursor
-                                            .filter(|cursor| valid_session_cursor(cursor)),
-                                        cwd_filter: cwd,
-                                        replace,
-                                    },
-                                )?;
-                            }
-                            Err(error) => permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::SessionListFailed {
-                                    pane,
-                                    message: format!("could not list agent sessions: {error}"),
-                                },
-                            )?,
-                        }
-                    }
-                    RuntimeCommand::SwitchSession { pane, session } => {
-                        if !session_capabilities.load {
-                            permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::SessionSwitchFailed {
-                                    pane,
-                                    message: "agent does not support session/load".to_owned(),
-                                },
-                            )?;
-                            continue;
-                        }
-                        let session_id = AcpSessionId::new(session.session_id.clone());
-                        {
-                            let mut routing = routing.lock();
-                            routing
-                                .session_to_pane
-                                .insert(session.session_id.clone(), pane);
-                            routing
-                                .staged_updates
-                                .insert(session.session_id.clone(), Vec::new());
-                        }
-                        let mut request =
-                            load_session_request(provider, session_id.clone(), session.cwd.clone());
-                        if session_capabilities.additional_directories {
-                            request = request.additional_directories(
-                                session.additional_directories.clone(),
-                            );
-                        }
-                        match connection.send_request(request).block_task().await {
-                            Ok(response) => {
-                                let previous = sessions.insert(pane, session_id.clone());
-                                let previous = previous.filter(|previous| previous != &session_id);
-                                {
-                                    let mut routes = routing.lock();
-                                    let replay = routes
-                                        .staged_updates
-                                        .remove(&session.session_id)
-                                        .unwrap_or_default();
-                                    routes.journaled.insert(session.session_id.clone());
-                                    if let Some(previous) = &previous {
-                                        routes.session_to_pane.remove(previous.0.as_ref());
-                                        routes.journaled.remove(previous.0.as_ref());
-                                    }
-                                    permission_safe_send(
-                                        &event_tx,
-                                        RuntimeEvent::SessionSwitched {
-                                            pane,
-                                            session_id: session.session_id,
-                                            cwd: session.cwd,
-                                            modes: response.modes,
-                                            config_options: response.config_options,
-                                            replay,
-                                        },
-                                    )?;
-                                }
-                                if session_capabilities.close
-                                    && let Some(previous) = previous
-                                {
-                                    spawn_close_session(
-                                        &connection,
-                                        previous,
-                                        "previous ACP session after switch",
-                                    )?;
-                                }
-                            }
-                            Err(error) => {
-                                {
-                                    let mut routes = routing.lock();
-                                    routes.staged_updates.remove(&session.session_id);
-                                    routes.session_to_pane.remove(&session.session_id);
-                                }
-                                permission_safe_send(
-                                    &event_tx,
-                                    RuntimeEvent::SessionSwitchFailed {
-                                        pane,
-                                        message: format!(
-                                            "could not load selected session: {error}"
-                                        ),
-                                    },
-                                )?;
-                                if session_capabilities.close {
-                                    spawn_close_session(
-                                        &connection,
-                                        session_id,
-                                        "failed ACP session target",
-                                    )?;
-                                }
-                            }
-                        }
-                    }
-                    RuntimeCommand::NewSession { pane, cwd } => {
-                        match connection
-                            .send_request(new_session_request(provider, cwd.clone()))
-                            .block_task()
-                            .await
-                        {
-                            Ok(response) if valid_session_id(response.session_id.0.as_ref()) => {
-                                let session_id = response.session_id;
-                                let previous = sessions.insert(pane, session_id.clone());
-                                let previous = previous.filter(|previous| previous != &session_id);
-                                {
-                                    let mut routes = routing.lock();
-                                    routes
-                                        .session_to_pane
-                                        .insert(session_id.0.to_string(), pane);
-                                    routes.journaled.insert(session_id.0.to_string());
-                                    if let Some(previous) = &previous {
-                                        routes.session_to_pane.remove(previous.0.as_ref());
-                                        routes.journaled.remove(previous.0.as_ref());
-                                    }
-                                    permission_safe_send(
-                                        &event_tx,
-                                        RuntimeEvent::SessionSwitched {
-                                            pane,
-                                            session_id: session_id.0.to_string(),
-                                            cwd,
-                                            modes: response.modes,
-                                            config_options: response.config_options,
-                                            replay: Vec::new(),
-                                        },
-                                    )?;
-                                }
-                                if session_capabilities.close
-                                    && let Some(previous) = previous
-                                {
-                                    spawn_close_session(
-                                        &connection,
-                                        previous,
-                                        "previous ACP session after creating a new one",
-                                    )?;
-                                }
-                            }
-                            Ok(_) => permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::SessionSwitchFailed {
-                                    pane,
-                                    message: "agent returned an invalid session ID".to_owned(),
-                                },
-                            )?,
-                            Err(error) => permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::SessionSwitchFailed {
-                                    pane,
-                                    message: format!("could not create a new session: {error}"),
-                                },
-                            )?,
-                        }
-                    }
-                    RuntimeCommand::DeleteSession { pane, session_id } => {
-                        if !session_capabilities.delete {
-                            permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::SessionDeleteFailed {
-                                    pane,
-                                    message: "agent does not support session/delete".to_owned(),
-                                },
-                            )?;
-                            continue;
-                        }
-                        match connection
-                            .send_request(DeleteSessionRequest::new(session_id.clone()))
-                            .block_task()
-                            .await
-                        {
-                            Ok(_) => {
-                                routing.lock().journaled.remove(&session_id);
-                                if let Some(journal) = journal.as_deref()
-                                    && let Err(error) = journal.remove(&session_id)
-                                {
-                                    report_journal_error(&session_id, &error.to_string());
-                                }
-                                permission_safe_send(
-                                    &event_tx,
-                                    RuntimeEvent::SessionDeleted { pane, session_id },
-                                )?;
-                            }
-                            Err(error) => permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::SessionDeleteFailed {
-                                    pane,
-                                    message: format!("could not delete session: {error}"),
-                                },
-                            )?,
-                        }
-                    }
-                    RuntimeCommand::Prompt { pane, text, images } => {
-                        let Some(session_id) = sessions.get(&pane).cloned() else {
-                            permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::PaneFailed {
-                                    pane,
-                                    message: "agent session is not ready".to_owned(),
-                                },
-                            )?;
-                            continue;
-                        };
-                        let prompt_events = event_tx.clone();
-                        let request = connection
-                            .send_request(PromptRequest::new(session_id, prompt_blocks(text, &images)));
-                        connection.spawn(async move {
-                            let result = request
-                                .block_task()
-                                .await
-                                .map(|response| response.stop_reason)
-                                .map_err(|error| error.to_string());
-                            let _ = prompt_events
-                                .send(RuntimeEvent::PromptFinished { pane, result })
-                                .await;
-                            Ok(())
-                        })?;
-                    }
-                    RuntimeCommand::Cancel { pane } => {
-                        if let Some(session_id) = sessions.get(&pane).cloned() {
-                            connection.send_notification(CancelNotification::new(session_id))?;
-                            cancel_pending_permissions(&routing, pane, &event_tx)?;
-                        }
-                    }
-                    RuntimeCommand::RespondPermission {
-                        request_id,
-                        option_id,
-                    } => {
-                        let pending = routing.lock().permissions.remove(&request_id);
-                        if let Some(pending) = pending {
-                            let canceled = option_id.is_none();
-                            let outcome = option_id.map_or(
-                                RequestPermissionOutcome::Cancelled,
-                                |option_id| {
-                                    RequestPermissionOutcome::Selected(
-                                        SelectedPermissionOutcome::new(option_id),
-                                    )
-                                },
-                            );
-                            pending
-                                .responder
-                                .respond(RequestPermissionResponse::new(outcome))?;
-                            permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::PermissionResolved {
-                                    pane: pending.pane,
-                                    request_id,
-                                    canceled,
-                                },
-                            )?;
-                        }
-                    }
-                    RuntimeCommand::Authenticate { method_id } => {
-                        match connection
-                            .send_request(AuthenticateRequest::new(method_id))
-                            .block_task()
-                            .await
-                        {
-                            Ok(_) => permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::Authenticated,
-                            )?,
-                            Err(error) => permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::AuthenticationFailed {
-                                    message: format!("authentication failed: {error}"),
-                                },
-                            )?,
-                        }
-                    }
-                    RuntimeCommand::SetConfigOption {
-                        pane,
-                        request,
-                    } => {
-                        let Some(session_id) = sessions.get(&pane).cloned() else {
-                            permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::SettingFailed {
-                                    pane,
-                                    message: "agent session is not ready".to_owned(),
-                                    option_id: request.config_id,
-                                    origin: request.origin,
-                                },
-                            )?;
-                            continue;
-                        };
-                        match connection
-                            .send_request(SetSessionConfigOptionRequest::new(
-                                session_id,
-                                request.config_id.clone(),
-                                SessionConfigOptionValue::value_id(request.value.clone()),
-                            ))
-                            .block_task()
-                            .await
-                        {
-                            Ok(response) => permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::ConfigOptionsChanged {
-                                    pane,
-                                    config_options: response.config_options,
-                                    request,
-                                },
-                            )?,
-                            Err(error) => permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::SettingFailed {
-                                    pane,
-                                    message: format!("could not change agent setting: {error}"),
-                                    option_id: request.config_id,
-                                    origin: request.origin,
-                                },
-                            )?,
-                        }
-                    }
-                    RuntimeCommand::SetMode {
-                        pane,
-                        mode_id,
-                        origin,
-                    } => {
-                        let Some(session_id) = sessions.get(&pane).cloned() else {
-                            permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::SettingFailed {
-                                    pane,
-                                    message: "agent session is not ready".to_owned(),
-                                    option_id: LEGACY_MODE_PREFERENCE_ID.to_owned(),
-                                    origin,
-                                },
-                            )?;
-                            continue;
-                        };
-                        match connection
-                            .send_request(SetSessionModeRequest::new(
-                                session_id,
-                                mode_id.clone(),
-                            ))
-                            .block_task()
-                            .await
-                        {
-                            Ok(_) => permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::ModeChanged {
-                                    pane,
-                                    mode_id,
-                                    origin,
-                                },
-                            )?,
-                            Err(error) => permission_safe_send(
-                                &event_tx,
-                                RuntimeEvent::SettingFailed {
-                                    pane,
-                                    message: format!(
-                                        "could not change agent permission mode: {error}"
-                                    ),
-                                    option_id: LEGACY_MODE_PREFERENCE_ID.to_owned(),
-                                    origin,
-                                },
-                            )?,
-                        }
-                    }
-                    RuntimeCommand::Shutdown => {
-                        for (pane, session_id) in sessions
-                            .iter()
-                            .map(|(pane, session_id)| (*pane, session_id.clone()))
-                            .collect::<Vec<_>>()
-                        {
-                            if session_capabilities.close {
-                                if let Err(error) = connection
-                                    .send_request(CloseSessionRequest::new(session_id))
-                                    .block_task()
-                                    .await
-                                {
-                                    log::warn!(target: "zz::agent", "could not close ACP session during shutdown: {error}");
-                                }
-                            } else {
-                                connection
-                                    .send_notification(CancelNotification::new(session_id))?;
-                            }
-                            cancel_pending_permissions(&routing, pane, &event_tx)?;
-                        }
-                        break;
-                    }
-                }
-            }
-            Ok(())
-        })
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[track_caller]
-fn spawn_close_session(
-    connection: &ConnectionTo<Agent>,
-    session_id: AcpSessionId,
-    reason: &'static str,
-) -> Result<(), agent_client_protocol::Error> {
-    let close = connection.send_request(CloseSessionRequest::new(session_id));
-    connection.spawn(async move {
-        if let Err(error) = close.block_task().await {
-            log::warn!(target: "zz::agent", "could not close {reason}: {error}");
-        }
-        Ok(())
-    })
-}
 
 fn valid_session_id(session_id: &str) -> bool {
     !session_id.is_empty()
@@ -5087,12 +3906,6 @@ fn valid_session_summary(session: &AgentSessionSummary) -> bool {
         })
 }
 
-fn clean_session_metadata(value: &str, max_bytes: usize) -> Option<String> {
-    let value = value.trim();
-    (!value.is_empty() && value.len() <= max_bytes && !value.chars().any(char::is_control))
-        .then(|| value.to_owned())
-}
-
 const fn preference_kind_for_category(
     category: AgentConfigCategory,
 ) -> Option<AgentPreferenceKind> {
@@ -5102,46 +3915,6 @@ const fn preference_kind_for_category(
         AgentConfigCategory::ThoughtLevel => Some(AgentPreferenceKind::Effort),
         AgentConfigCategory::ModelConfig | AgentConfigCategory::Other => None,
     }
-}
-
-fn permission_safe_send(
-    sender: &Sender<RuntimeEvent>,
-    event: RuntimeEvent,
-) -> Result<(), agent_client_protocol::Error> {
-    sender.try_send(event).map_err(|error| {
-        agent_client_protocol::Error::internal_error()
-            .data(format!("agent UI event channel is unavailable: {error}"))
-    })
-}
-
-fn cancel_pending_permissions(
-    routing: &Arc<Mutex<RuntimeRouting>>,
-    pane: PaneId,
-    event_tx: &Sender<RuntimeEvent>,
-) -> Result<(), agent_client_protocol::Error> {
-    let pending_ids = routing
-        .lock()
-        .permissions
-        .iter()
-        .filter_map(|(id, pending)| (pending.pane == pane).then_some(*id))
-        .collect::<Vec<_>>();
-    for request_id in pending_ids {
-        let pending = routing.lock().permissions.remove(&request_id);
-        if let Some(pending) = pending {
-            pending.responder.respond(RequestPermissionResponse::new(
-                RequestPermissionOutcome::Cancelled,
-            ))?;
-            permission_safe_send(
-                event_tx,
-                RuntimeEvent::PermissionResolved {
-                    pane,
-                    request_id,
-                    canceled: true,
-                },
-            )?;
-        }
-    }
-    Ok(())
 }
 
 fn agent_command_model(command: AvailableCommand) -> AgentCommand {
@@ -5204,45 +3977,6 @@ fn config_option_model(option: SessionConfigOption) -> Option<AgentConfigOption>
         current_value: select.current_value.0.to_string(),
         choices,
     })
-}
-
-fn auth_method_model(method: &AuthMethod) -> AgentAuthMethod {
-    AgentAuthMethod {
-        id: method.id().0.to_string(),
-        name: method.name().to_owned(),
-        description: method.description().map(ToOwned::to_owned),
-    }
-}
-
-/// A permission request is a QUESTION rather than a tool approval when any
-/// option carries a kind outside the allow/reject set — that is how agents
-/// relay user-facing choices. Repeated kinds are not a question signal:
-/// codex-acp sends two `allow_always` options on every exec approval.
-fn is_user_question(options: &[PermissionOption]) -> bool {
-    options.iter().any(|option| {
-        !matches!(
-            option.kind,
-            PermissionOptionKind::AllowOnce
-                | PermissionOptionKind::AllowAlways
-                | PermissionOptionKind::RejectOnce
-                | PermissionOptionKind::RejectAlways
-        )
-    })
-}
-
-/// The option an unattended approval picks: `allow_always` over `allow_once`,
-/// and never a reject — a request with no allow option falls through to the
-/// permission UI rather than being silently denied.
-fn preferred_allow_option(options: &[PermissionOption]) -> Option<String> {
-    let by_kind = |kind: PermissionOptionKind| {
-        options
-            .iter()
-            .find(|option| option.kind == kind)
-            .map(|option| option.option_id.0.to_string())
-    };
-    by_kind(PermissionOptionKind::AllowAlways)
-        .or_else(|| by_kind(PermissionOptionKind::AllowOnce))
-        .filter(|option_id| !option_id.is_empty())
 }
 
 fn map_permission_kind(kind: PermissionOptionKind) -> AgentPermissionKind {
@@ -5550,20 +4284,6 @@ fn map_tool_status(status: ToolCallStatus) -> AgentToolStatusModel {
     }
 }
 
-fn prompt_blocks(text: String, images: &[Arc<Image>]) -> Vec<ContentBlock> {
-    let mut blocks = Vec::with_capacity(usize::from(!text.is_empty()) + images.len());
-    if !text.is_empty() {
-        blocks.push(ContentBlock::Text(TextContent::new(text)));
-    }
-    blocks.extend(images.iter().map(|image| {
-        ContentBlock::Image(ImageContent::new(
-            BASE64.encode(&image.bytes),
-            image.format.mime_type(),
-        ))
-    }));
-    blocks
-}
-
 fn inbound_image(image: &ImageContent) -> Option<Arc<Image>> {
     let format = ImageFormat::from_mime_type(&image.mime_type)?;
     let bytes = BASE64.decode(&image.data).ok()?;
@@ -5722,29 +4442,18 @@ fn pretty_json_markdown(value: &impl serde::Serialize) -> String {
 #[cfg(test)]
 mod tests {
     use agent_client_protocol::schema::v1::{
-        AgentCapabilities, AuthMethodAgent, AvailableCommandsUpdate, CloseSessionResponse,
-        ConfigOptionUpdate, ContentChunk, DeleteSessionResponse, Diff, InitializeResponse,
-        ListSessionsResponse, LoadSessionResponse, MessageId, NewSessionRequest,
-        NewSessionResponse, PlanEntry, PlanEntryPriority, PromptResponse,
-        SessionAdditionalDirectoriesCapabilities, SessionCapabilities, SessionCloseCapabilities,
-        SessionConfigSelectOption, SessionDeleteCapabilities, SessionInfo, SessionListCapabilities,
-        SessionMode, SessionModeState, SetSessionConfigOptionResponse, SetSessionModeResponse,
-        Terminal, ToolCallLocation, ToolCallUpdateFields,
+        AvailableCommandsUpdate, ConfigOptionUpdate, Diff, MessageId, PlanEntry, PlanEntryPriority,
+        SessionConfigSelectOption, Terminal, TextContent, ToolCallLocation,
     };
+    use std::{cell::RefCell, rc::Rc};
+
+    use gpui::{AppContext as _, TestAppContext};
+    use parking_lot::Mutex;
 
     use super::*;
-    use agent_client_protocol::schema::v1::SessionNotification;
-    use gpui::{AppContext as _, TestAppContext};
 
     fn thread() -> AgentThread {
         AgentThread::new(AgentProvider::Codex, PathBuf::from("/workspace"), None)
-    }
-
-    fn absolute_test_path(name: &str) -> PathBuf {
-        std::env::current_dir()
-            .expect("current directory")
-            .join("target/agent-controller-tests")
-            .join(name)
     }
 
     fn select_option(
@@ -5776,7 +4485,6 @@ mod tests {
 
     #[test]
     fn sticky_settings_restore_in_model_effort_permission_order() {
-        let pane = PaneId(9);
         let mut thread = thread();
         thread.connection = AgentConnectionState::Ready;
         thread.config_options = vec![
@@ -5799,35 +4507,25 @@ mod tests {
             preferences.remember(thread.provider, &thread.agent_key, kind, option, value);
         }
 
-        let next = |thread: &AgentThread| preferred_setting_command(thread, &preferences, pane);
+        let next = |thread: &AgentThread| preferred_setting_command(thread, &preferences);
         assert!(matches!(
             next(&thread),
-            Some(RuntimeCommand::SetConfigOption {
-                request: AgentSettingRequest { ref config_id, .. },
-                ..
-            }) if config_id == "model"
+            Some(AgentSettingRequest { ref config_id, .. }) if config_id == "model"
         ));
         Arc::make_mut(&mut thread.config_options)[0].current_value = "large".to_owned();
         assert!(matches!(
             next(&thread),
-            Some(RuntimeCommand::SetConfigOption {
-                request: AgentSettingRequest { ref config_id, .. },
-                ..
-            }) if config_id == "effort"
+            Some(AgentSettingRequest { ref config_id, .. }) if config_id == "effort"
         ));
         Arc::make_mut(&mut thread.config_options)[1].current_value = "high".to_owned();
         assert!(matches!(
             next(&thread),
-            Some(RuntimeCommand::SetConfigOption {
-                request: AgentSettingRequest { ref config_id, .. },
-                ..
-            }) if config_id == "permission"
+            Some(AgentSettingRequest { ref config_id, .. }) if config_id == "permission"
         ));
     }
 
     #[test]
     fn sticky_legacy_permission_mode_can_coexist_with_other_config_options() {
-        let pane = PaneId(10);
         let mut thread = thread();
         thread.connection = AgentConnectionState::Ready;
         thread.config_options = vec![select_option(
@@ -5861,8 +4559,9 @@ mod tests {
         );
 
         assert!(matches!(
-            preferred_setting_command(&thread, &preferences, pane),
-            Some(RuntimeCommand::SetMode { ref mode_id, .. }) if mode_id == "code"
+            preferred_setting_command(&thread, &preferences),
+            Some(AgentSettingRequest { ref config_id, ref value, .. })
+                if config_id == LEGACY_MODE_PREFERENCE_ID && value == "code"
         ));
     }
 
@@ -6679,34 +5378,15 @@ mod tests {
     }
 
     #[test]
-    fn a_prompt_carries_its_attachments_as_inline_image_blocks() {
-        let image = attachment();
-        let blocks = prompt_blocks("look at this".to_owned(), std::slice::from_ref(&image));
-
-        assert_eq!(blocks.len(), 2, "the text leads, the image follows");
-        assert!(matches!(&blocks[0], ContentBlock::Text(text) if text.text == "look at this"));
-        let ContentBlock::Image(sent) = &blocks[1] else {
-            panic!("the attachment should travel as an image block");
-        };
-        assert_eq!(sent.mime_type, "image/png");
-        assert_eq!(
-            BASE64.decode(&sent.data).expect("data should be base64"),
-            PNG_PIXEL,
-            "the agent should receive the bytes we rendered"
-        );
-
-        let alone = prompt_blocks(String::new(), std::slice::from_ref(&image));
-        assert!(matches!(alone.as_slice(), [ContentBlock::Image(_)]));
-    }
-
-    #[test]
     fn a_replayed_user_image_returns_to_the_transcript() {
         let mut thread = thread();
-        let sent = prompt_blocks(String::new(), &[attachment()]);
+        let attachment = attachment();
+        let sent = ContentBlock::Image(ImageContent::new(
+            BASE64.encode(&attachment.bytes),
+            attachment.format.mime_type(),
+        ));
 
-        thread.apply_update(SessionUpdate::UserMessageChunk(ContentChunk::new(
-            sent[0].clone(),
-        )));
+        thread.apply_update(SessionUpdate::UserMessageChunk(ContentChunk::new(sent)));
 
         let Some(AgentThreadEntry::User {
             markdown, images, ..
@@ -6816,25 +5496,6 @@ mod tests {
         ));
     }
 
-    fn next_runtime_event(receiver: &Receiver<RuntimeEvent>) -> RuntimeEvent {
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
-        loop {
-            match receiver.try_recv() {
-                Ok(event) => return event,
-                Err(async_channel::TryRecvError::Empty) => {
-                    assert!(
-                        std::time::Instant::now() < deadline,
-                        "timed out waiting for ACP runtime event"
-                    );
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Err(async_channel::TryRecvError::Closed) => {
-                    panic!("ACP runtime event channel closed unexpectedly")
-                }
-            }
-        }
-    }
-
     #[test]
     fn attention_buckets_partition_the_fleet() {
         let mut controller = AgentController::new(AgentConfig::default());
@@ -6924,873 +5585,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn acp_runtime_lists_and_transactionally_switches_sessions() {
-        let history_cwd = absolute_test_path("history");
-        let additional_directory = absolute_test_path("shared");
-        let (list_tx, list_rx) = std::sync::mpsc::channel();
-        let (prompt_tx, prompt_rx) = std::sync::mpsc::channel();
-        let (closed_tx, closed_rx) = std::sync::mpsc::channel();
-        let (deleted_tx, deleted_rx) = std::sync::mpsc::channel();
-        let agent = Agent
-            .builder()
-            .on_receive_request(
-                async |initialize: InitializeRequest, responder, _| {
-                    assert!(!initialize.client_capabilities.terminal);
-                    let meta = initialize
-                        .client_capabilities
-                        .meta
-                        .as_ref()
-                        .expect("Claude profile metadata");
-                    assert_eq!(
-                        meta.get("terminal_output"),
-                        Some(&serde_json::Value::Bool(true))
-                    );
-                    assert_eq!(
-                        meta.get("subagent-transcript"),
-                        Some(&serde_json::Value::Bool(true))
-                    );
-                    responder.respond(
-                        InitializeResponse::new(initialize.protocol_version).agent_capabilities(
-                            AgentCapabilities::new()
-                                .load_session(true)
-                                .session_capabilities(
-                                    SessionCapabilities::new()
-                                        .list(SessionListCapabilities::new())
-                                        .delete(SessionDeleteCapabilities::new())
-                                        .close(SessionCloseCapabilities::new())
-                                        .additional_directories(
-                                            SessionAdditionalDirectoriesCapabilities::new(),
-                                        ),
-                                ),
-                        ),
-                    )
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async |request: NewSessionRequest, responder, _| {
-                    assert_eq!(request.cwd, absolute_test_path("history"));
-                    responder.respond(NewSessionResponse::new("active-session"))
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let list_tx = list_tx.clone();
-                    async move |request: ListSessionsRequest, responder, _| {
-                        list_tx
-                            .send((request.cwd, request.cursor))
-                            .map_err(|error| {
-                                agent_client_protocol::Error::internal_error()
-                                    .data(error.to_string())
-                            })?;
-                        responder.respond(
-                            ListSessionsResponse::new(vec![
-                                SessionInfo::new("history-session", absolute_test_path("history"))
-                                    .additional_directories(vec![absolute_test_path("shared")])
-                                    .title("Previous work")
-                                    .updated_at("2026-07-20T17:00:00Z"),
-                                SessionInfo::new("invalid-session", "relative/path"),
-                            ])
-                            .next_cursor("next-page"),
-                        )
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async |request: LoadSessionRequest, responder, connection| match request
-                    .session_id
-                    .0
-                    .as_ref()
-                {
-                    "history-session" => {
-                        assert_eq!(
-                            request.additional_directories,
-                            vec![absolute_test_path("shared")]
-                        );
-                        connection.send_notification(SessionNotification::new(
-                            request.session_id,
-                            SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                                ContentBlock::Text(TextContent::new("loaded history")),
-                            )),
-                        ))?;
-                        responder.respond(LoadSessionResponse::new())
-                    }
-                    "missing-session" => {
-                        connection.send_notification(SessionNotification::new(
-                            request.session_id,
-                            SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                                ContentBlock::Text(TextContent::new("discard this replay")),
-                            )),
-                        ))?;
-                        responder.respond_with_error(
-                            agent_client_protocol::Error::invalid_params()
-                                .data("fixture session is missing"),
-                        )
-                    }
-                    _ => responder.respond_with_error(
-                        agent_client_protocol::Error::invalid_params()
-                            .data("unexpected fixture session"),
-                    ),
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let prompt_tx = prompt_tx.clone();
-                    async move |request: PromptRequest, responder, _| {
-                        prompt_tx
-                            .send(request.session_id.0.to_string())
-                            .map_err(|error| {
-                                agent_client_protocol::Error::internal_error()
-                                    .data(error.to_string())
-                            })?;
-                        responder.respond(PromptResponse::new(StopReason::EndTurn))
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let closed_tx = closed_tx.clone();
-                    async move |request: CloseSessionRequest, responder, _| {
-                        closed_tx
-                            .send(request.session_id.0.to_string())
-                            .map_err(|error| {
-                                agent_client_protocol::Error::internal_error()
-                                    .data(error.to_string())
-                            })?;
-                        responder.respond(CloseSessionResponse::new())
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async move |request: DeleteSessionRequest, responder, _| {
-                    deleted_tx
-                        .send(request.session_id.0.to_string())
-                        .map_err(|error| {
-                            agent_client_protocol::Error::internal_error().data(error.to_string())
-                        })?;
-                    responder.respond(DeleteSessionResponse::new())
-                },
-                agent_client_protocol::on_receive_request!(),
-            );
-
-        let (command_tx, command_rx) = async_channel::unbounded();
-        let (event_tx, event_rx) = async_channel::unbounded();
-        let runtime = std::thread::spawn(move || {
-            pollster::block_on(run_agent_connection(
-                AgentProvider::ClaudeCode,
-                false,
-                agent,
-                None,
-                command_rx,
-                event_tx,
-            ))
-        });
-        let pane = PaneId(70);
-        assert!(matches!(
-            next_runtime_event(&event_rx),
-            RuntimeEvent::Ready {
-                session_capabilities: AgentSessionCapabilities {
-                    load: true,
-                    list: true,
-                    close: true,
-                    delete: true,
-                    additional_directories: true,
-                    images: false,
-                },
-                ..
-            }
-        ));
-        command_tx
-            .send_blocking(RuntimeCommand::Open {
-                pane,
-                cwd: history_cwd.clone(),
-                resume_session: None,
-            })
-            .expect("open session");
-        assert!(matches!(
-            next_runtime_event(&event_rx),
-            RuntimeEvent::SessionReset { pane: event_pane, restoring: false }
-                if event_pane == pane
-        ));
-        assert!(matches!(
-            next_runtime_event(&event_rx),
-            RuntimeEvent::SessionReady { pane: event_pane, session_id, .. }
-                if event_pane == pane && session_id == "active-session"
-        ));
-
-        command_tx
-            .send_blocking(RuntimeCommand::ListSessions {
-                pane,
-                cwd: Some(history_cwd.clone()),
-                cursor: None,
-                replace: true,
-            })
-            .expect("list sessions");
-        assert_eq!(
-            list_rx
-                .recv_timeout(Duration::from_secs(3))
-                .expect("list request"),
-            (Some(history_cwd.clone()), None)
-        );
-        assert!(matches!(
-            next_runtime_event(&event_rx),
-            RuntimeEvent::SessionsListed { sessions, next_cursor, .. }
-                if sessions.len() == 1
-                    && sessions[0].session_id == "history-session"
-                    && sessions[0].title.as_deref() == Some("Previous work")
-                    && next_cursor.as_deref() == Some("next-page")
-        ));
-
-        command_tx
-            .send_blocking(RuntimeCommand::SwitchSession {
-                pane,
-                session: AgentSessionSummary {
-                    session_id: "missing-session".to_owned(),
-                    cwd: history_cwd.clone(),
-                    additional_directories: Vec::new(),
-                    title: None,
-                    updated_at: None,
-                },
-            })
-            .expect("switch to missing session");
-        assert!(matches!(
-            next_runtime_event(&event_rx),
-            RuntimeEvent::SessionSwitchFailed { pane: event_pane, message }
-                if event_pane == pane && message.contains("fixture session is missing")
-        ));
-        assert_eq!(
-            closed_rx
-                .recv_timeout(Duration::from_secs(3))
-                .expect("failed target session closed"),
-            "missing-session"
-        );
-        command_tx
-            .send_blocking(RuntimeCommand::Prompt {
-                pane,
-                text: "still active".to_owned(),
-                images: Vec::new(),
-            })
-            .expect("prompt old session after failed switch");
-        assert_eq!(
-            prompt_rx
-                .recv_timeout(Duration::from_secs(3))
-                .expect("prompt request after failed switch"),
-            "active-session"
-        );
-        assert!(matches!(
-            next_runtime_event(&event_rx),
-            RuntimeEvent::PromptFinished { pane: event_pane, result: Ok(StopReason::EndTurn) }
-                if event_pane == pane
-        ));
-
-        command_tx
-            .send_blocking(RuntimeCommand::SwitchSession {
-                pane,
-                session: AgentSessionSummary {
-                    session_id: "history-session".to_owned(),
-                    cwd: history_cwd.clone(),
-                    additional_directories: vec![additional_directory.clone()],
-                    title: Some("Previous work".to_owned()),
-                    updated_at: Some("2026-07-20T17:00:00Z".to_owned()),
-                },
-            })
-            .expect("switch to history session");
-        assert!(matches!(
-            next_runtime_event(&event_rx),
-            RuntimeEvent::SessionSwitched { pane: event_pane, session_id, replay, .. }
-                if event_pane == pane
-                    && session_id == "history-session"
-                    && matches!(
-                        replay.as_slice(),
-                        [SessionUpdate::AgentMessageChunk(chunk)]
-                            if matches!(
-                                &chunk.content,
-                                ContentBlock::Text(text) if text.text == "loaded history"
-                            )
-                    )
-        ));
-        assert_eq!(
-            closed_rx
-                .recv_timeout(Duration::from_secs(3))
-                .expect("old session closed"),
-            "active-session"
-        );
-
-        command_tx
-            .send_blocking(RuntimeCommand::DeleteSession {
-                pane,
-                session_id: "obsolete-session".to_owned(),
-            })
-            .expect("delete session");
-        assert_eq!(
-            deleted_rx
-                .recv_timeout(Duration::from_secs(3))
-                .expect("delete request"),
-            "obsolete-session"
-        );
-        assert!(matches!(
-            next_runtime_event(&event_rx),
-            RuntimeEvent::SessionDeleted { pane: event_pane, session_id }
-                if event_pane == pane && session_id == "obsolete-session"
-        ));
-
-        command_tx
-            .send_blocking(RuntimeCommand::Shutdown)
-            .expect("shutdown command");
-        assert_eq!(
-            closed_rx
-                .recv_timeout(Duration::from_secs(3))
-                .expect("active history session closed"),
-            "history-session"
-        );
-        assert!(runtime.join().expect("runtime thread").is_ok());
-    }
-
-    #[test]
-    fn acp_runtime_restores_streams_approves_cancels_and_shuts_down() {
-        let runtime_cwd = absolute_test_path("runtime");
-        let (cancel_tx, cancel_rx) = async_channel::unbounded::<AcpSessionId>();
-        let (permission_tx, permission_rx) = std::sync::mpsc::channel();
-        let (setting_tx, setting_rx) = std::sync::mpsc::channel();
-        let prompt_count = Arc::new(AtomicU64::new(0));
-        let prompt_cancels = cancel_rx.clone();
-        let prompt_permissions = permission_tx.clone();
-        let prompts = Arc::clone(&prompt_count);
-        let agent = Agent
-            .builder()
-            .on_receive_request(
-                async |initialize: InitializeRequest, responder, _| {
-                    assert!(
-                        initialize
-                            .client_capabilities
-                            .session
-                            .as_ref()
-                            .and_then(|session| session.config_options.as_ref())
-                            .is_some()
-                    );
-                    assert!(!initialize.client_capabilities.terminal);
-                    let meta = initialize
-                        .client_capabilities
-                        .meta
-                        .as_ref()
-                        .expect("Codex profile metadata");
-                    assert_eq!(
-                        meta.get("terminal_output"),
-                        Some(&serde_json::Value::Bool(true))
-                    );
-                    assert!(!meta.contains_key("subagent-transcript"));
-                    responder.respond(
-                        InitializeResponse::new(initialize.protocol_version)
-                            .agent_capabilities(AgentCapabilities::new().load_session(true))
-                            .agent_info(
-                                Implementation::new("zz-test-agent", "1.0").title("zz test agent"),
-                            )
-                            .auth_methods(vec![AuthMethod::Agent(AuthMethodAgent::new(
-                                "fixture-login",
-                                "Fixture login",
-                            ))]),
-                    )
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async |request: AuthenticateRequest, responder, _| {
-                    assert_eq!(request.method_id.0.as_ref(), "fixture-login");
-                    responder.respond_with_error(
-                        agent_client_protocol::Error::invalid_params()
-                            .data("fixture authentication failed"),
-                    )
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async |request: NewSessionRequest, responder, _| {
-                    assert!(request.cwd.is_absolute());
-                    responder.respond(NewSessionResponse::new("new-session").config_options(vec![
-                            SessionConfigOption::select(
-                                "reasoning_effort",
-                                "Reasoning effort",
-                                "medium",
-                                vec![
-                                    SessionConfigSelectOption::new("medium", "Medium"),
-                                    SessionConfigSelectOption::new("high", "High"),
-                                ],
-                            )
-                            .category(SessionConfigOptionCategory::ThoughtLevel),
-                        ]))
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async |request: LoadSessionRequest, responder, connection| {
-                    assert!(request.cwd.is_absolute());
-                    if request.session_id.0.as_ref() == "restored-session" {
-                        connection.send_notification(SessionNotification::new(
-                            request.session_id,
-                            SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                                ContentBlock::Text(TextContent::new("restored history")),
-                            )),
-                        ))?;
-                        responder.respond(LoadSessionResponse::new().modes(SessionModeState::new(
-                            "code",
-                            vec![SessionMode::new("code", "Code")],
-                        )))
-                    } else {
-                        responder.respond_with_error(
-                            agent_client_protocol::Error::invalid_params()
-                                .data("fixture session is missing"),
-                        )
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let setting_tx = setting_tx.clone();
-                    async move |request: SetSessionModeRequest, responder, _| {
-                        setting_tx
-                            .send(format!("mode:{}", request.mode_id.0))
-                            .map_err(|error| {
-                                agent_client_protocol::Error::internal_error()
-                                    .data(error.to_string())
-                            })?;
-                        responder.respond(SetSessionModeResponse::new())
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let setting_tx = setting_tx.clone();
-                    async move |request: SetSessionConfigOptionRequest, responder, _| {
-                        let value = request
-                            .value
-                            .as_value_id()
-                            .map(|value| value.0.to_string())
-                            .unwrap_or_default();
-                        setting_tx
-                            .send(format!("config:{}:{value}", request.config_id.0))
-                            .map_err(|error| {
-                                agent_client_protocol::Error::internal_error()
-                                    .data(error.to_string())
-                            })?;
-                        responder.respond(SetSessionConfigOptionResponse::new(vec![
-                            SessionConfigOption::select(
-                                "reasoning_effort",
-                                "Reasoning effort",
-                                value,
-                                vec![
-                                    SessionConfigSelectOption::new("medium", "Medium"),
-                                    SessionConfigSelectOption::new("high", "High"),
-                                ],
-                            )
-                            .category(SessionConfigOptionCategory::ThoughtLevel),
-                        ]))
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async move |request: PromptRequest, responder, connection| {
-                    let prompt_index = prompts.fetch_add(1, Ordering::Relaxed);
-                    if prompt_index == 1 {
-                        connection.send_notification(SessionNotification::new(
-                            request.session_id,
-                            SessionUpdate::AgentThoughtChunk(ContentChunk::new(
-                                ContentBlock::Text(TextContent::new("waiting for cancellation")),
-                            )),
-                        ))?;
-                        let cancel_rx = prompt_cancels.clone();
-                        connection.spawn(async move {
-                            cancel_rx.recv().await.map_err(|error| {
-                                agent_client_protocol::Error::internal_error()
-                                    .data(error.to_string())
-                            })?;
-                            responder.respond(PromptResponse::new(StopReason::Cancelled))
-                        })?;
-                    } else {
-                        connection.send_notification(SessionNotification::new(
-                            request.session_id.clone(),
-                            SessionUpdate::ToolCall(
-                                ToolCall::new("tool-1", "Write fixture")
-                                    .kind(ToolKind::Edit)
-                                    .status(ToolCallStatus::InProgress),
-                            ),
-                        ))?;
-                        let permission = connection.send_request(RequestPermissionRequest::new(
-                            request.session_id,
-                            ToolCallUpdate::new(
-                                "tool-1",
-                                ToolCallUpdateFields::new().title("Write fixture".to_owned()),
-                            ),
-                            vec![PermissionOption::new(
-                                "allow-once",
-                                "Allow once",
-                                PermissionOptionKind::AllowOnce,
-                            )],
-                        ));
-                        let permission_tx = prompt_permissions.clone();
-                        permission.on_receiving_result(async move |result| {
-                            let response = result?;
-                            let stop_reason = if matches!(
-                                response.outcome,
-                                RequestPermissionOutcome::Cancelled
-                            ) {
-                                StopReason::Cancelled
-                            } else {
-                                StopReason::EndTurn
-                            };
-                            permission_tx.send(response.outcome).map_err(|error| {
-                                agent_client_protocol::Error::internal_error()
-                                    .data(error.to_string())
-                            })?;
-                            responder.respond(PromptResponse::new(stop_reason))
-                        })?;
-                    }
-                    Ok(())
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_notification(
-                async move |cancel: CancelNotification, _| {
-                    cancel_tx.try_send(cancel.session_id).map_err(|error| {
-                        agent_client_protocol::Error::internal_error().data(error.to_string())
-                    })
-                },
-                agent_client_protocol::on_receive_notification!(),
-            );
-
-        let (command_tx, command_rx) = async_channel::unbounded();
-        let (event_tx, event_rx) = async_channel::unbounded();
-        let runtime = std::thread::spawn(move || {
-            pollster::block_on(run_agent_connection(
-                AgentProvider::Codex,
-                false,
-                agent,
-                None,
-                command_rx,
-                event_tx,
-            ))
-        });
-
-        assert!(matches!(
-            next_runtime_event(&event_rx),
-            RuntimeEvent::Ready {
-                agent_name,
-                auth_methods,
-                ..
-            } if agent_name == "zz test agent"
-                && auth_methods.first().is_some_and(|method| method.id == "fixture-login")
-        ));
-        command_tx
-            .send_blocking(RuntimeCommand::Authenticate {
-                method_id: "fixture-login".to_owned(),
-            })
-            .expect("authentication command");
-        assert!(matches!(
-            next_runtime_event(&event_rx),
-            RuntimeEvent::AuthenticationFailed { message }
-                if message.contains("fixture authentication failed")
-        ));
-        let pane = PaneId(44);
-        command_tx
-            .send_blocking(RuntimeCommand::Open {
-                pane,
-                cwd: runtime_cwd.clone(),
-                resume_session: Some("restored-session".to_owned()),
-            })
-            .expect("open command");
-
-        let mut saw_reset = false;
-        let mut saw_history = false;
-        let mut saw_ready = false;
-        while !(saw_reset && saw_history && saw_ready) {
-            match next_runtime_event(&event_rx) {
-                RuntimeEvent::SessionReset {
-                    pane: event_pane,
-                    restoring,
-                } => saw_reset = event_pane == pane && restoring,
-                RuntimeEvent::SessionUpdate {
-                    pane: event_pane,
-                    update: SessionUpdate::AgentMessageChunk(chunk),
-                } => {
-                    saw_history = event_pane == pane
-                        && matches!(
-                            chunk.content,
-                            ContentBlock::Text(text) if text.text == "restored history"
-                        );
-                }
-                RuntimeEvent::SessionReady {
-                    pane: event_pane,
-                    session_id,
-                    modes,
-                    config_options,
-                } => {
-                    saw_ready = event_pane == pane
-                        && session_id == "restored-session"
-                        && config_options.is_none()
-                        && modes.is_some_and(|modes| modes.current_mode_id.0.as_ref() == "code");
-                }
-                _ => {}
-            }
-        }
-
-        command_tx
-            .send_blocking(RuntimeCommand::SetMode {
-                pane,
-                mode_id: "code".to_owned(),
-                origin: AgentSettingOrigin::User(Some(AgentPreferenceKind::Permission)),
-            })
-            .expect("set legacy mode command");
-        assert_eq!(
-            setting_rx
-                .recv_timeout(Duration::from_secs(3))
-                .expect("agent received mode setting"),
-            "mode:code"
-        );
-        loop {
-            if matches!(
-                next_runtime_event(&event_rx),
-                RuntimeEvent::ModeChanged {
-                    pane: event_pane,
-                    mode_id,
-                    ..
-                } if event_pane == pane && mode_id == "code"
-            ) {
-                break;
-            }
-        }
-
-        let fallback_pane = PaneId(45);
-        command_tx
-            .send_blocking(RuntimeCommand::Open {
-                pane: fallback_pane,
-                cwd: runtime_cwd,
-                resume_session: Some("missing-session".to_owned()),
-            })
-            .expect("fallback open command");
-        let mut saw_fallback_reset = false;
-        let mut saw_fallback_ready = false;
-        while !(saw_fallback_reset && saw_fallback_ready) {
-            match next_runtime_event(&event_rx) {
-                RuntimeEvent::SessionReset {
-                    pane: event_pane,
-                    restoring,
-                } => saw_fallback_reset = event_pane == fallback_pane && restoring,
-                RuntimeEvent::SessionReady {
-                    pane: event_pane,
-                    session_id,
-                    ..
-                } => {
-                    saw_fallback_ready = event_pane == fallback_pane && session_id == "new-session";
-                }
-                _ => {}
-            }
-        }
-
-        command_tx
-            .send_blocking(RuntimeCommand::SetConfigOption {
-                pane: fallback_pane,
-                request: AgentSettingRequest {
-                    config_id: "reasoning_effort".to_owned(),
-                    value: "high".to_owned(),
-                    origin: AgentSettingOrigin::User(Some(AgentPreferenceKind::Effort)),
-                },
-            })
-            .expect("set config option command");
-        assert_eq!(
-            setting_rx
-                .recv_timeout(Duration::from_secs(3))
-                .expect("agent received config setting"),
-            "config:reasoning_effort:high"
-        );
-        loop {
-            if matches!(
-                next_runtime_event(&event_rx),
-                RuntimeEvent::ConfigOptionsChanged {
-                    pane: event_pane,
-                    config_options,
-                    ..
-                } if event_pane == fallback_pane
-                    && config_options.first().is_some_and(|option| {
-                        matches!(
-                            &option.kind,
-                            SessionConfigKind::Select(select)
-                                if select.current_value.0.as_ref() == "high"
-                        )
-                    })
-            ) {
-                break;
-            }
-        }
-
-        command_tx
-            .send_blocking(RuntimeCommand::Prompt {
-                pane,
-                text: "request permission".to_owned(),
-                images: Vec::new(),
-            })
-            .expect("prompt command");
-        let request_id = loop {
-            if let RuntimeEvent::PermissionRequested {
-                pane: event_pane,
-                request_id,
-                options,
-                ..
-            } = next_runtime_event(&event_rx)
-            {
-                assert_eq!(event_pane, pane);
-                assert_eq!(options[0].option_id.0.as_ref(), "allow-once");
-                break request_id;
-            }
-        };
-        command_tx
-            .send_blocking(RuntimeCommand::RespondPermission {
-                request_id,
-                option_id: Some("allow-once".to_owned()),
-            })
-            .expect("permission response");
-        let outcome = permission_rx
-            .recv_timeout(Duration::from_secs(3))
-            .expect("agent received permission response");
-        assert!(matches!(
-            outcome,
-            RequestPermissionOutcome::Selected(selected)
-                if selected.option_id.0.as_ref() == "allow-once"
-        ));
-        let mut saw_resolved = false;
-        let mut saw_completed = false;
-        while !(saw_resolved && saw_completed) {
-            match next_runtime_event(&event_rx) {
-                RuntimeEvent::PermissionResolved {
-                    pane: event_pane,
-                    request_id: event_request,
-                    canceled,
-                } => {
-                    saw_resolved = event_pane == pane && event_request == request_id && !canceled;
-                }
-                RuntimeEvent::PromptFinished {
-                    pane: event_pane,
-                    result: Ok(StopReason::EndTurn),
-                } => saw_completed = event_pane == pane,
-                _ => {}
-            }
-        }
-
-        command_tx
-            .send_blocking(RuntimeCommand::Prompt {
-                pane,
-                text: "wait".to_owned(),
-                images: Vec::new(),
-            })
-            .expect("cancelable prompt");
-        loop {
-            if matches!(
-                next_runtime_event(&event_rx),
-                RuntimeEvent::SessionUpdate {
-                    pane: event_pane,
-                    update: SessionUpdate::AgentThoughtChunk(_),
-                } if event_pane == pane
-            ) {
-                break;
-            }
-        }
-        command_tx
-            .send_blocking(RuntimeCommand::Cancel { pane })
-            .expect("cancel command");
-        loop {
-            if matches!(
-                next_runtime_event(&event_rx),
-                RuntimeEvent::PromptFinished {
-                    pane: event_pane,
-                    result: Ok(StopReason::Cancelled),
-                } if event_pane == pane
-            ) {
-                break;
-            }
-        }
-
-        command_tx
-            .send_blocking(RuntimeCommand::Prompt {
-                pane,
-                text: "cancel permission".to_owned(),
-                images: Vec::new(),
-            })
-            .expect("permission prompt to cancel");
-        let canceled_request = loop {
-            if let RuntimeEvent::PermissionRequested {
-                pane: event_pane,
-                request_id,
-                ..
-            } = next_runtime_event(&event_rx)
-            {
-                assert_eq!(event_pane, pane);
-                break request_id;
-            }
-        };
-        command_tx
-            .send_blocking(RuntimeCommand::Cancel { pane })
-            .expect("cancel pending permission");
-        assert!(matches!(
-            permission_rx
-                .recv_timeout(Duration::from_secs(3))
-                .expect("agent received canceled permission response"),
-            RequestPermissionOutcome::Cancelled
-        ));
-        let mut saw_permission_cancel = false;
-        let mut saw_prompt_cancel = false;
-        while !(saw_permission_cancel && saw_prompt_cancel) {
-            match next_runtime_event(&event_rx) {
-                RuntimeEvent::PermissionResolved {
-                    pane: event_pane,
-                    request_id,
-                    canceled,
-                } => {
-                    saw_permission_cancel =
-                        event_pane == pane && request_id == canceled_request && canceled;
-                }
-                RuntimeEvent::PromptFinished {
-                    pane: event_pane,
-                    result: Ok(StopReason::Cancelled),
-                } => saw_prompt_cancel = event_pane == pane,
-                _ => {}
-            }
-        }
-
-        command_tx
-            .send_blocking(RuntimeCommand::Shutdown)
-            .expect("shutdown command");
-        assert_eq!(
-            runtime.join().expect("runtime thread did not panic"),
-            Ok(())
-        );
-    }
-    fn permission_option(id: &'static str, kind: PermissionOptionKind) -> PermissionOption {
-        PermissionOption::new(id, id, kind)
-    }
-
-    #[test]
-    fn repeated_allow_kinds_are_not_a_question_signal() {
-        let codex_exec_approval = [
-            permission_option("allow-session", PermissionOptionKind::AllowAlways),
-            permission_option("allow-prefix", PermissionOptionKind::AllowAlways),
-            permission_option("allow-once", PermissionOptionKind::AllowOnce),
-            permission_option("reject-once", PermissionOptionKind::RejectOnce),
-        ];
-        assert!(!is_user_question(&codex_exec_approval));
-        assert!(!is_user_question(&[
-            permission_option("yes", PermissionOptionKind::AllowOnce),
-            permission_option("no", PermissionOptionKind::RejectAlways),
-        ]));
-        assert!(!is_user_question(&[]));
-    }
-
     /// The question branch is unreachable while zz speaks ACP v1: the schema
     /// types an option kind as a closed enum, so a question-shaped kind never
     /// survives deserialization to reach [`is_user_question`].
@@ -7803,63 +5597,6 @@ mod tests {
                 "kind": "answer"
             }))
             .is_err()
-        );
-    }
-
-    #[test]
-    fn auto_approval_prefers_allow_always_then_allow_once() {
-        assert_eq!(
-            preferred_allow_option(&[
-                permission_option("once", PermissionOptionKind::AllowOnce),
-                permission_option("always", PermissionOptionKind::AllowAlways),
-                permission_option("always-prefix", PermissionOptionKind::AllowAlways),
-            ]),
-            Some("always".to_owned())
-        );
-        assert_eq!(
-            preferred_allow_option(&[
-                permission_option("reject", PermissionOptionKind::RejectOnce),
-                permission_option("once", PermissionOptionKind::AllowOnce),
-            ]),
-            Some("once".to_owned())
-        );
-        assert_eq!(
-            preferred_allow_option(&[
-                permission_option("reject", PermissionOptionKind::RejectOnce),
-                permission_option("reject-always", PermissionOptionKind::RejectAlways),
-            ]),
-            None
-        );
-        assert_eq!(preferred_allow_option(&[]), None);
-    }
-
-    #[test]
-    fn stderr_tail_keeps_the_last_lines_for_the_crash_message() {
-        let tail = StderrTail::default();
-        assert_eq!(tail.snapshot(), None);
-        for line in 0..8 {
-            tail.push(&format!("line {line}"));
-            tail.push("   ");
-        }
-        assert_eq!(
-            tail.snapshot(),
-            Some("line 2\nline 3\nline 4\nline 5\nline 6\nline 7".to_owned())
-        );
-        assert_eq!(
-            runtime_failure_message(
-                "Codex",
-                "Process exited with exit status: 1: boom",
-                tail.snapshot()
-            ),
-            "Codex exited unexpectedly (exit status: 1): line 2\nline 3\nline 4\nline 5\nline 6\nline 7"
-        );
-        assert_eq!(
-            runtime_failure_message("Codex", "Process exited with signal: 9 (SIGKILL)", None),
-            "Codex exited unexpectedly (signal: 9 (SIGKILL))"
-        );
-        assert_eq!(
-            runtime_failure_message("Claude Code", "connection closed\ndetails", None),
-            "Claude Code exited unexpectedly (connection closed)"
         );
     }
 
@@ -7977,108 +5714,6 @@ mod tests {
         thread
     }
 
-    const WINDOW: Duration = Duration::from_millis(DEFAULT_QUIESCE_MS);
-
-    #[test]
-    fn a_silent_turn_with_nothing_outstanding_parks() {
-        let thread = quiet_turn();
-
-        assert!(!thread.turn_in_flight());
-        assert!(should_park_turn(
-            Some(WINDOW),
-            WINDOW,
-            thread.turn_in_flight()
-        ));
-        assert!(
-            !should_park_turn(
-                Some(WINDOW),
-                WINDOW.saturating_sub(Duration::from_millis(1)),
-                false
-            ),
-            "a turn that has not gone quiet long enough keeps running"
-        );
-    }
-
-    #[test]
-    fn an_unresolved_tool_call_blocks_the_park() {
-        let mut thread = quiet_turn();
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("tool-1", "Run tests")
-                .kind(ToolKind::Execute)
-                .status(ToolCallStatus::InProgress),
-        ));
-
-        assert!(thread.turn_in_flight());
-        assert!(!should_park_turn(
-            Some(WINDOW),
-            WINDOW * 10,
-            thread.turn_in_flight()
-        ));
-
-        thread.apply_update(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
-            "tool-1",
-            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
-        )));
-
-        assert!(!thread.turn_in_flight());
-    }
-
-    #[test]
-    fn a_pending_permission_blocks_the_park() {
-        let mut thread = quiet_turn();
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("tool-1", "Edit file").status(ToolCallStatus::Completed),
-        ));
-        thread.request_permission(
-            11,
-            ToolCallUpdate::new("tool-1", ToolCallUpdateFields::new()),
-            vec![PermissionOption::new(
-                "allow-once",
-                "Allow once",
-                PermissionOptionKind::AllowOnce,
-            )],
-        );
-
-        assert!(thread.turn_in_flight());
-        assert!(!should_park_turn(
-            Some(WINDOW),
-            WINDOW * 10,
-            thread.turn_in_flight()
-        ));
-    }
-
-    #[test]
-    fn a_subagent_task_still_reporting_blocks_the_park() {
-        let mut thread = quiet_turn();
-        thread
-            .live_task_tools
-            .insert("task-1".to_owned(), "tool-1".to_owned());
-
-        assert!(thread.turn_in_flight());
-    }
-
-    #[test]
-    fn the_quiesce_window_falls_back_to_the_default_and_zero_disables_it() {
-        assert_eq!(parse_quiesce_window(None), Some(WINDOW));
-        assert_eq!(
-            parse_quiesce_window(Some(OsStr::new("not a number"))),
-            Some(WINDOW)
-        );
-        assert_eq!(
-            parse_quiesce_window(Some(OsStr::new(" 500 "))),
-            Some(Duration::from_millis(500))
-        );
-        assert_eq!(parse_quiesce_window(Some(OsStr::new("0"))), None);
-        assert!(
-            !should_park_turn(
-                parse_quiesce_window(Some(OsStr::new("0"))),
-                WINDOW * 10,
-                false
-            ),
-            "the watchdog never fires once it is disabled"
-        );
-    }
-
     #[test]
     fn parking_settles_the_streaming_turn_without_an_error() {
         let mut thread = quiet_turn();
@@ -8114,10 +5749,15 @@ mod tests {
         thread.park_turn();
 
         assert!(
-            thread
-                .entries
-                .iter()
-                .all(|entry| !entry_awaits_agent(entry)),
+            !thread.entries.iter().any(|entry| matches!(
+                entry,
+                AgentThreadEntry::Tool {
+                    status: AgentToolStatusModel::Pending
+                        | AgentToolStatusModel::Running
+                        | AgentToolStatusModel::NeedsApproval,
+                    ..
+                }
+            )),
             "parking leaves nothing half-open in the transcript"
         );
         assert!(matches!(
@@ -8155,193 +5795,431 @@ mod tests {
         ));
     }
 
-    /// A pane holding a ready thread and a runtime whose commands the test reads
-    /// back, standing in for the ACP child.
-    fn queued_pane(controller: &mut AgentController, pane: PaneId) -> Receiver<RuntimeCommand> {
-        let (command_tx, command_rx) = async_channel::unbounded();
+    /// A controller wired to a mux client whose agent requests the test reads
+    /// back, standing in for the daemon on the other end of the wire.
+    fn proxy_controller(
+        cx: &mut TestAppContext,
+    ) -> (
+        Entity<AgentController>,
+        Rc<RefCell<Vec<(PaneId, AgentRequest)>>>,
+    ) {
+        cx.update(|cx| {
+            crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let sink = mux.update(cx, |mux, _| mux.record_agent_requests_for_test());
+            let controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            controller.update(cx, |controller, _| controller.attach_mux(mux));
+            (controller, sink)
+        })
+    }
+
+    /// A registered pane whose agent is connected and taking prompts.
+    fn ready_pane(controller: &mut AgentController, pane: PaneId) {
         let mut thread = thread();
         thread.connection = AgentConnectionState::Ready;
+        thread.session_capabilities.images = true;
         controller.panes.insert(pane, thread);
-        controller.runtimes.insert(
-            pane,
-            PaneRuntime {
-                command_tx,
-                _runtime_task: Task::ready(()),
-                _event_task: Task::ready(()),
-                generation: 1,
-                stopping: false,
-                restart_after_stop: false,
+        controller.viewports.insert(pane, PaneViewport::default());
+        controller.retained_panes.insert(pane);
+    }
+
+    fn item(seq: u64, payload: AgentStreamPayload) -> AgentStreamItem {
+        AgentStreamItem { seq, payload }
+    }
+
+    fn json(value: &impl serde::Serialize) -> serde_json::Value {
+        serde_json::to_value(value).expect("the ACP schema encodes")
+    }
+
+    fn turn_finished(reason: StopReason) -> AgentStreamPayload {
+        AgentStreamPayload::PromptFinished {
+            outcome: AgentPromptOutcome::Finished {
+                stop_reason: json(&reason),
             },
-        );
-        command_rx
-    }
-
-    fn next_prompt_text(commands: &Receiver<RuntimeCommand>) -> Option<String> {
-        loop {
-            match commands.try_recv() {
-                Ok(RuntimeCommand::Prompt { text, .. }) => return Some(text),
-                Ok(_) => {}
-                Err(_) => return None,
-            }
-        }
-    }
-
-    fn turn_finished(pane: PaneId, reason: StopReason) -> RuntimeEvent {
-        RuntimeEvent::PromptFinished {
-            pane,
-            result: Ok(reason),
         }
     }
 
     #[gpui::test]
-    fn prompts_typed_mid_turn_run_in_order_once_the_turn_settles(cx: &mut TestAppContext) {
+    fn stream_items_reduce_exactly_as_the_runtime_events_did(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(3);
         cx.update(|cx| {
-            let pane = PaneId(4);
-            let controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             controller.update(cx, |controller, cx| {
-                let commands = queued_pane(controller, pane);
-
-                controller
-                    .prompt(pane, "first", Vec::new(), cx)
-                    .expect("live prompt");
-                assert_eq!(next_prompt_text(&commands).as_deref(), Some("first"));
-                assert_eq!(controller.queued_count(pane), 0);
-
-                controller
-                    .prompt(pane, "second", Vec::new(), cx)
-                    .expect("queued prompt");
-                controller
-                    .prompt(pane, "third", Vec::new(), cx)
-                    .expect("queued prompt");
-                assert_eq!(controller.queued_count(pane), 2);
-                assert_eq!(
-                    controller.pane_state(pane).expect("state").queued_prompts,
-                    2
-                );
-                assert_eq!(
-                    next_prompt_text(&commands),
-                    None,
-                    "a queued prompt never reaches the agent mid-turn"
-                );
-
-                controller.handle_runtime_event(pane, turn_finished(pane, StopReason::EndTurn), cx);
-                assert_eq!(next_prompt_text(&commands).as_deref(), Some("second"));
-                assert_eq!(controller.queued_count(pane), 1);
-
-                controller.handle_runtime_event(pane, turn_finished(pane, StopReason::EndTurn), cx);
-                assert_eq!(next_prompt_text(&commands).as_deref(), Some("third"));
-                assert_eq!(controller.queued_count(pane), 0);
-                assert!(
-                    controller.take_pending_composer(pane).is_none(),
-                    "a queue that ran never lands back in the composer"
-                );
-            });
-        });
-    }
-
-    #[gpui::test]
-    fn stopping_a_turn_hands_the_queue_back_to_the_composer(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            let pane = PaneId(5);
-            let controller = cx.new(|_| AgentController::new(AgentConfig::default()));
-            controller.update(cx, |controller, cx| {
-                let commands = queued_pane(controller, pane);
-                for text in ["first", "second", "third"] {
-                    controller
-                        .prompt(pane, text, Vec::new(), cx)
-                        .expect("prompt");
-                }
-                assert_eq!(next_prompt_text(&commands).as_deref(), Some("first"));
-
-                controller.cancel(pane, cx);
-
-                assert_eq!(controller.queued_count(pane), 0);
-                assert_eq!(
-                    controller.take_pending_composer(pane).as_deref(),
-                    Some("second\nthird")
-                );
-
-                controller.handle_runtime_event(
+                ready_pane(controller, pane);
+                controller.apply_stream_items(
                     pane,
-                    turn_finished(pane, StopReason::Cancelled),
+                    vec![
+                        item(
+                            1,
+                            AgentStreamPayload::Ready {
+                                agent_name: "Codex".to_owned(),
+                                agent_key: "codex".to_owned(),
+                                auth_methods: vec![zz_daemon::AgentAuthMethod {
+                                    id: "api".to_owned(),
+                                    name: "API key".to_owned(),
+                                    description: None,
+                                }],
+                                capabilities: zz_daemon::AgentSessionCapabilities {
+                                    list: true,
+                                    load: true,
+                                    ..zz_daemon::AgentSessionCapabilities::default()
+                                },
+                            },
+                        ),
+                        item(
+                            2,
+                            AgentStreamPayload::SessionReady {
+                                session_id: "s-1".to_owned(),
+                                modes: None,
+                                config_options: None,
+                            },
+                        ),
+                        item(
+                            3,
+                            AgentStreamPayload::Update {
+                                update: json(&SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                                    ContentBlock::Text(TextContent::new("hello")),
+                                ))),
+                            },
+                        ),
+                        item(
+                            4,
+                            AgentStreamPayload::PermissionRequested {
+                                request_id: 7,
+                                tool_call: json(&ToolCallUpdate::new(
+                                    "tool-1",
+                                    ToolCallUpdateFields::new(),
+                                )),
+                                options: json(&vec![PermissionOption::new(
+                                    "allow-once",
+                                    "Allow once",
+                                    PermissionOptionKind::AllowOnce,
+                                )]),
+                            },
+                        ),
+                        item(
+                            5,
+                            AgentStreamPayload::PermissionResolved {
+                                request_id: 7,
+                                canceled: false,
+                            },
+                        ),
+                        item(6, turn_finished(StopReason::EndTurn)),
+                        item(
+                            7,
+                            AgentStreamPayload::PromptsReclaimed {
+                                prompts: vec![zz_daemon::AgentPrompt {
+                                    text: "retry that".to_owned(),
+                                    images: Vec::new(),
+                                }],
+                            },
+                        ),
+                    ],
                     cx,
                 );
-                assert_eq!(
-                    next_prompt_text(&commands),
-                    None,
-                    "a turn the user stopped never starts the queue"
-                );
-            });
-        });
-    }
 
-    #[gpui::test]
-    fn unqueueing_returns_the_queue_with_its_attachments(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            let pane = PaneId(11);
-            let controller = cx.new(|_| AgentController::new(AgentConfig::default()));
-            controller.update(cx, |controller, cx| {
-                let commands = queued_pane(controller, pane);
-                if let Some(thread) = controller.panes.get_mut(&pane) {
-                    thread.session_capabilities.images = true;
-                }
-                controller
-                    .prompt(pane, "first", Vec::new(), cx)
-                    .expect("live prompt");
-                assert_eq!(next_prompt_text(&commands).as_deref(), Some("first"));
-                controller
-                    .prompt(pane, "second", vec![attachment()], cx)
-                    .expect("queued prompt");
-
-                controller.unqueue_prompts(pane, cx);
-
-                assert_eq!(controller.queued_count(pane), 0);
+                let state = controller.pane_state(pane).expect("the pane is registered");
+                assert_eq!(state.agent_name.as_deref(), Some("Codex"));
+                assert_eq!(state.session_id.as_deref(), Some("s-1"));
+                assert!(state.session_capabilities.list);
+                assert_eq!(state.auth_methods.len(), 1);
+                assert_eq!(state.connection, AgentConnectionState::Ready);
+                assert!(state.pending_permissions.is_empty());
+                let (entries, ..) = controller.pane_entries(pane).expect("entries");
+                assert!(matches!(
+                    entries.first(),
+                    Some(AgentThreadEntry::Assistant { markdown, .. }) if markdown == "hello"
+                ));
                 assert_eq!(
                     controller.take_pending_composer(pane).as_deref(),
-                    Some("second")
+                    Some("retry that"),
+                    "a reclaimed prompt is visible in the draft again"
                 );
-                assert_eq!(controller.take_pending_images(pane).len(), 1);
-                assert!(controller.take_pending_images(pane).is_empty());
+                assert_eq!(
+                    controller.viewports[&pane].last_applied, 7,
+                    "the cursor follows the highest applied seq"
+                );
             });
         });
     }
 
     #[gpui::test]
-    fn a_lost_runtime_returns_queued_prompts_to_the_composer(cx: &mut TestAppContext) {
+    fn an_item_the_client_cannot_re_type_is_dropped_without_stalling_the_cursor(
+        cx: &mut TestAppContext,
+    ) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(4);
         cx.update(|cx| {
-            let pane = PaneId(6);
-            let controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             controller.update(cx, |controller, cx| {
-                let commands = queued_pane(controller, pane);
+                ready_pane(controller, pane);
+                controller.apply_stream_items(
+                    pane,
+                    vec![
+                        item(
+                            1,
+                            AgentStreamPayload::Update {
+                                update: serde_json::json!({"sessionUpdate": "from the future"}),
+                            },
+                        ),
+                        item(
+                            2,
+                            AgentStreamPayload::Update {
+                                update: json(&SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                                    ContentBlock::Text(TextContent::new("still here")),
+                                ))),
+                            },
+                        ),
+                    ],
+                    cx,
+                );
+
+                let (entries, ..) = controller.pane_entries(pane).expect("entries");
+                assert_eq!(entries.len(), 1);
+                assert_eq!(controller.viewports[&pane].last_applied, 2);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn published_pane_state_drives_the_composer_and_the_wizard(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(5);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                let state = AgentPaneWire {
+                    phase: AgentConnectionPhase::AwaitingPermission,
+                    queued_prompts: 2,
+                    session_id: Some("s-9".to_owned()),
+                    title: Some("ship it".to_owned()),
+                    auth_methods: serde_json::to_string(&vec![zz_daemon::AgentAuthMethod {
+                        id: "api".to_owned(),
+                        name: "API key".to_owned(),
+                        description: None,
+                    }])
+                    .expect("auth methods encode"),
+                    config_options: String::new(),
+                    modes: String::new(),
+                    pending_permission: Some(zz_protocol::AgentPermissionWire {
+                        request_id: 11,
+                        payload: serde_json::json!({
+                            "toolCall": json(&ToolCallUpdate::new(
+                                "tool-9",
+                                ToolCallUpdateFields::new(),
+                            )),
+                            "options": json(&vec![PermissionOption::new(
+                                "allow-once",
+                                "Allow once",
+                                PermissionOptionKind::AllowOnce,
+                            )]),
+                        })
+                        .to_string(),
+                    }),
+                };
+
+                controller.apply_pane_state(pane, &state, cx);
+
+                assert_eq!(controller.queued_count(pane), 2);
+                let pane_state = controller.pane_state(pane).expect("the pane is registered");
+                assert_eq!(pane_state.queued_prompts, 2);
+                assert_eq!(pane_state.session_id.as_deref(), Some("s-9"));
+                assert_eq!(pane_state.auth_methods.len(), 1);
+                assert_eq!(
+                    pane_state
+                        .pending_permissions
+                        .first()
+                        .map(|request| request.request_id),
+                    Some(11),
+                    "a client that attaches mid-question still sees the wizard"
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn a_prompt_reaches_the_wire_with_normalized_attachments(cx: &mut TestAppContext) {
+        let (controller, sink) = proxy_controller(cx);
+        let pane = PaneId(6);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                controller
+                    .prompt(pane, "  ship it  ", vec![attachment()], cx)
+                    .expect("the prompt is accepted");
+            });
+        });
+
+        assert_eq!(
+            &*sink.borrow(),
+            &[(
+                pane,
+                AgentRequest::Prompt {
+                    text: "ship it".to_owned(),
+                    images: vec![zz_protocol::AgentImage {
+                        format: "image/png".to_owned(),
+                        data: PNG_PIXEL.to_vec(),
+                    }],
+                }
+            )],
+            "the daemon receives bytes plus format, never a gpui image"
+        );
+    }
+
+    #[gpui::test]
+    fn a_prompt_typed_mid_turn_is_queued_by_the_daemon(cx: &mut TestAppContext) {
+        let (controller, sink) = proxy_controller(cx);
+        let pane = PaneId(7);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
                 controller
                     .prompt(pane, "first", Vec::new(), cx)
-                    .expect("live prompt");
+                    .expect("first prompt");
                 controller
                     .prompt(pane, "second", Vec::new(), cx)
-                    .expect("queued prompt");
-                assert_eq!(next_prompt_text(&commands).as_deref(), Some("first"));
+                    .expect("second prompt is queued rather than refused");
 
-                controller.runtime_finished(pane, 1, Err("agent exited".to_owned()), cx);
-
-                assert_eq!(
-                    controller.pane_state(pane).expect("state").connection,
-                    AgentConnectionState::Failed
-                );
-                assert_eq!(controller.queued_count(pane), 0);
-                assert_eq!(
-                    controller.take_pending_composer(pane).as_deref(),
-                    Some("second")
-                );
+                assert_eq!(controller.queued_count(pane), 1);
+                controller.unqueue_prompts(pane, cx);
             });
         });
+
+        assert_eq!(
+            sink.borrow()
+                .iter()
+                .map(|(_, request)| request.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                AgentRequest::Prompt {
+                    text: "first".to_owned(),
+                    images: Vec::new(),
+                },
+                AgentRequest::Prompt {
+                    text: "second".to_owned(),
+                    images: Vec::new(),
+                },
+                AgentRequest::Unqueue,
+            ]
+        );
+    }
+
+    #[gpui::test]
+    fn a_pane_going_live_asks_for_the_stream_from_where_it_stopped(cx: &mut TestAppContext) {
+        let (controller, sink) = proxy_controller(cx);
+        let pane = PaneId(8);
+        let descriptor = AgentDescriptor {
+            provider: AgentProvider::Codex,
+            cwd: Some(PathBuf::from("/workspace")),
+            session_id: None,
+        };
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                controller.ensure_pane(pane, &descriptor, cx);
+                controller.ensure_pane(pane, &descriptor, cx);
+                controller.apply_stream_items(
+                    pane,
+                    vec![item(
+                        1,
+                        AgentStreamPayload::SessionReset { restoring: false },
+                    )],
+                    cx,
+                );
+                controller.ensure_pane(pane, &descriptor, cx);
+            });
+        });
+
+        assert_eq!(
+            sink.borrow()
+                .iter()
+                .map(|(_, request)| request.clone())
+                .collect::<Vec<_>>(),
+            vec![AgentRequest::Replay { from_seq: 0 }],
+            "a pane asks for its stream once per open, not once per snapshot"
+        );
+
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                controller.retain_panes(&BTreeSet::new());
+                controller.ensure_pane(pane, &descriptor, cx);
+            });
+        });
+
+        assert_eq!(
+            sink.borrow()
+                .iter()
+                .map(|(_, request)| request.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                AgentRequest::Replay { from_seq: 0 },
+                AgentRequest::Replay { from_seq: 0 },
+            ],
+            "a pane that left the tree and came back replays from the top"
+        );
+    }
+
+    #[gpui::test]
+    fn a_settings_acknowledgement_is_paired_with_the_origin_that_asked(cx: &mut TestAppContext) {
+        let (controller, sink) = proxy_controller(cx);
+        let pane = PaneId(9);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                if let Some(thread) = controller.panes.get_mut(&pane) {
+                    thread.config_options = vec![select_option(
+                        "model",
+                        AgentConfigCategory::Model,
+                        "small",
+                        "large",
+                    )]
+                    .into();
+                }
+                controller
+                    .set_config_option(pane, "model", "large", cx)
+                    .expect("the option is advertised");
+                assert!(controller.panes[&pane].settings_busy);
+
+                controller.apply_stream_items(
+                    pane,
+                    vec![item(
+                        1,
+                        AgentStreamPayload::ConfigOptionsChanged {
+                            option_id: "model".to_owned(),
+                            value: "large".to_owned(),
+                            config_options: json(&Vec::<SessionConfigOption>::new()),
+                        },
+                    )],
+                    cx,
+                );
+
+                assert!(!controller.panes[&pane].settings_busy);
+                assert!(controller.viewports[&pane].pending_setting.is_none());
+            });
+        });
+
+        assert_eq!(
+            sink.borrow()
+                .iter()
+                .map(|(_, request)| request.clone())
+                .collect::<Vec<_>>(),
+            vec![AgentRequest::SetConfigOption {
+                option_id: "model".to_owned(),
+                value: "large".to_owned(),
+            }]
+        );
     }
 
     #[gpui::test]
     fn the_first_prompt_of_a_session_names_the_pane_once(cx: &mut TestAppContext) {
-        let pane = PaneId(8);
+        let pane = PaneId(10);
         let titles = Arc::new(Mutex::new(Vec::new()));
-        let controller = cx.update(|cx| {
-            let controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+        let (controller, _sink) = proxy_controller(cx);
+        cx.update(|cx| {
             let sink = titles.clone();
             cx.subscribe(&controller, move |_, event: &AgentControllerEvent, _| {
                 if let AgentControllerEvent::Title { title, .. } = event {
@@ -8349,22 +6227,16 @@ mod tests {
                 }
             })
             .detach();
-            controller
-        });
-        cx.update(|cx| {
             controller.update(cx, |controller, cx| {
-                let commands = queued_pane(controller, pane);
-
+                ready_pane(controller, pane);
                 controller
                     .prompt(pane, "  \"Fix the flaky daemon test\"  ", Vec::new(), cx)
                     .expect("first prompt");
-                assert_eq!(
-                    next_prompt_text(&commands).as_deref(),
-                    Some("\"Fix the flaky daemon test\""),
-                    "the agent still sees the prompt verbatim"
+                controller.apply_stream_items(
+                    pane,
+                    vec![item(1, turn_finished(StopReason::EndTurn))],
+                    cx,
                 );
-
-                controller.handle_runtime_event(pane, turn_finished(pane, StopReason::EndTurn), cx);
                 controller
                     .prompt(pane, "now do the other thing", Vec::new(), cx)
                     .expect("second prompt");
@@ -8414,248 +6286,5 @@ mod tests {
         );
         assert_eq!(title("   \n   "), None);
         assert_eq!(title(""), None);
-    }
-
-    #[test]
-    fn journals_sit_beside_the_agent_preferences_file() {
-        let Some(data) = platform_data_dir() else {
-            return;
-        };
-        let directory = journal_directory().expect("journal directory");
-
-        assert_eq!(
-            directory.parent(),
-            Some(data.join("zz").as_path()),
-            "journals share the directory that holds agent-preferences.json"
-        );
-        assert_eq!(
-            directory.file_name().and_then(OsStr::to_str),
-            Some(JOURNAL_DIRECTORY_NAME)
-        );
-    }
-
-    fn journalled_chunk(text: &str) -> SessionUpdate {
-        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
-            text,
-        ))))
-    }
-
-    fn chunk_text(update: &SessionUpdate) -> Option<&str> {
-        match update {
-            SessionUpdate::AgentMessageChunk(chunk) => match &chunk.content {
-                ContentBlock::Text(text) => Some(text.text.as_str()),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-
-    fn journal_fixture_agent(load: bool) -> impl ConnectTo<AcpClientRole> {
-        Agent
-            .builder()
-            .on_receive_request(
-                async move |initialize: InitializeRequest, responder, _| {
-                    responder.respond(
-                        InitializeResponse::new(initialize.protocol_version)
-                            .agent_capabilities(AgentCapabilities::new().load_session(load)),
-                    )
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async |_: LoadSessionRequest, responder, _| {
-                    responder.respond_with_error(
-                        agent_client_protocol::Error::invalid_params()
-                            .data("fixture session cannot be loaded"),
-                    )
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async |_: NewSessionRequest, responder, _| {
-                    responder.respond(NewSessionResponse::new("fresh-session"))
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-    }
-
-    /// Open a pane against a fixture agent that cannot restore `stale-session`,
-    /// with two updates already journalled under it.
-    fn restore_from_journal(
-        load: bool,
-    ) -> (
-        tempfile::TempDir,
-        Arc<AgentJournal>,
-        String,
-        Vec<SessionUpdate>,
-    ) {
-        let directory = tempfile::tempdir().expect("journal directory");
-        let journal = Arc::new(AgentJournal::open(directory.path()).expect("open journal"));
-        for text in ["first restored", "second restored"] {
-            let update = serde_json::to_value(journalled_chunk(text)).expect("encode update");
-            journal.append("stale-session", &update).expect("append");
-        }
-
-        let (command_tx, command_rx) = async_channel::unbounded();
-        let (event_tx, event_rx) = async_channel::unbounded();
-        let runtime = {
-            let journal = Arc::clone(&journal);
-            std::thread::spawn(move || {
-                pollster::block_on(run_agent_connection(
-                    AgentProvider::Codex,
-                    false,
-                    journal_fixture_agent(load),
-                    Some(journal),
-                    command_rx,
-                    event_tx,
-                ))
-            })
-        };
-        let pane = PaneId(71);
-        assert!(matches!(
-            next_runtime_event(&event_rx),
-            RuntimeEvent::Ready { .. }
-        ));
-        command_tx
-            .send_blocking(RuntimeCommand::Open {
-                pane,
-                cwd: absolute_test_path("journal"),
-                resume_session: Some("stale-session".to_owned()),
-            })
-            .expect("open session");
-        assert!(
-            matches!(
-                next_runtime_event(&event_rx),
-                RuntimeEvent::SessionReset {
-                    pane: event_pane,
-                    restoring: true,
-                } if event_pane == pane
-            ),
-            "a journalled restore reads as RESTORING, never as a fresh pane"
-        );
-        let event = next_runtime_event(&event_rx);
-        let RuntimeEvent::SessionSwitched {
-            pane: event_pane,
-            session_id,
-            replay,
-            ..
-        } = event
-        else {
-            panic!("a journalled restore reports what a session switch reports: {event:?}");
-        };
-        assert_eq!(event_pane, pane);
-
-        command_tx
-            .send_blocking(RuntimeCommand::Shutdown)
-            .expect("shutdown command");
-        assert!(runtime.join().expect("runtime thread").is_ok());
-        (directory, journal, session_id, replay)
-    }
-
-    #[test]
-    fn a_session_the_agent_cannot_load_is_restored_from_the_journal() {
-        for load in [true, false] {
-            let (_directory, journal, session_id, replay) = restore_from_journal(load);
-
-            assert_eq!(session_id, "fresh-session");
-            assert_eq!(
-                replay.iter().filter_map(chunk_text).collect::<Vec<_>>(),
-                ["first restored", "second restored"],
-                "load capability {load} should not change what is restored"
-            );
-            assert_eq!(
-                journal
-                    .replay("fresh-session")
-                    .expect("replay")
-                    .into_iter()
-                    .filter_map(|(_, update)| serde_json::from_value::<SessionUpdate>(update).ok())
-                    .filter_map(|update| chunk_text(&update).map(ToOwned::to_owned))
-                    .collect::<Vec<_>>(),
-                ["first restored", "second restored"],
-                "the live session adopts the restored transcript"
-            );
-            assert!(
-                journal.replay("stale-session").expect("replay").is_empty(),
-                "the superseded journal is not left behind to be restored twice"
-            );
-        }
-    }
-
-    /// A throwaway git worktree, or `None` when git is unavailable.
-    fn seeded_worktree() -> Option<(tempfile::TempDir, PathBuf)> {
-        let scratch = tempfile::tempdir().expect("temporary directory");
-        // git reports the resolved path, and the temp root is a symlink on macOS.
-        let root = scratch.path().canonicalize().expect("resolved temp path");
-        for args in [
-            ["init", "--quiet"].as_slice(),
-            &["config", "user.email", "turn@zz.test"],
-            &["config", "user.name", "zz turn snapshot"],
-        ] {
-            let ran = std::process::Command::new("git")
-                .arg("-C")
-                .arg(&root)
-                .args(args)
-                .status()
-                .is_ok_and(|status| status.success());
-            if !ran {
-                return None;
-            }
-        }
-        std::fs::write(root.join("tracked.txt"), "one\n").expect("seed file");
-        Some((scratch, root))
-    }
-
-    #[gpui::test]
-    async fn a_prompt_snapshots_a_worktree_and_skips_anything_else(cx: &mut TestAppContext) {
-        let Some((_scratch, root)) = seeded_worktree() else {
-            return;
-        };
-        let inside = PaneId(12);
-        let outside = PaneId(13);
-        let controller = cx.update(|cx| cx.new(|_| AgentController::new(AgentConfig::default())));
-        cx.update(|cx| {
-            controller.update(cx, |controller, cx| {
-                for (pane, cwd) in [
-                    (inside, root.clone()),
-                    (outside, PathBuf::from("/workspace")),
-                ] {
-                    let commands = queued_pane(controller, pane);
-                    controller.panes.get_mut(&pane).expect("pane").cwd = cwd;
-                    controller
-                        .prompt(pane, "go", Vec::new(), cx)
-                        .expect("prompt");
-                    assert_eq!(next_prompt_text(&commands).as_deref(), Some("go"));
-                }
-            });
-        });
-        cx.run_until_parked();
-        std::fs::write(root.join("tracked.txt"), "one\ntwo\n").expect("edit during the turn");
-
-        let diff = cx.update(|cx| {
-            controller.update(cx, |controller, cx| {
-                assert!(
-                    controller.turn_base(outside).is_none(),
-                    "a pane outside a worktree keeps no base"
-                );
-                assert!(controller.capture_turn_diff(outside, cx).is_none());
-                assert_eq!(
-                    controller.turn_base(inside).map(|base| base.root.clone()),
-                    Some(root.clone())
-                );
-                controller
-                    .capture_turn_diff(inside, cx)
-                    .expect("the pane should diff its turn")
-            })
-        });
-
-        let diff = diff.await.expect("the turn should diff");
-        assert_eq!(
-            diff.files
-                .iter()
-                .map(|file| file.path.as_str())
-                .collect::<Vec<_>>(),
-            ["tracked.txt"]
-        );
-        assert_eq!((diff.additions, diff.deletions), (1, 0));
     }
 }

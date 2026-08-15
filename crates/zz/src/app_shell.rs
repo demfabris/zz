@@ -285,8 +285,6 @@ mod tests {
                 cx.new(|cx| BrowserController::new(Err(BrowserError::AlreadyShutdown), cx));
             let agent_controller = cx.new(|_| {
                 AgentController::new(crate::config::AgentConfig {
-                    command: "unused-test-agent".to_owned(),
-                    claude_code_command: "unused-test-claude-agent".to_owned(),
                     working_directory: None,
                 })
             });

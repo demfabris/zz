@@ -22,11 +22,6 @@ pub(crate) enum AgentControllerEvent {
         pane: PaneId,
         provider: AgentProvider,
     },
-    Session {
-        pane: PaneId,
-        session_id: Arc<str>,
-        cwd: std::path::PathBuf,
-    },
     Title {
         pane: PaneId,
         title: Arc<str>,
@@ -69,13 +64,11 @@ impl AgentController {
         Self
     }
 
-    pub fn with_preferences(
-        _config: AgentConfig,
-        _preferences: AgentPreferences,
-        _socket: Option<String>,
-    ) -> Self {
+    pub fn with_preferences(_config: AgentConfig, _preferences: AgentPreferences) -> Self {
         Self
     }
+
+    pub(crate) fn attach_mux(&mut self, _mux: gpui::Entity<MuxClient>) {}
 
     pub(crate) fn ensure_pane(
         &mut self,
@@ -86,8 +79,6 @@ impl AgentController {
     }
 
     pub(crate) fn synchronize_config(&mut self, _config: AgentConfig, _cx: &mut Context<Self>) {}
-
-    pub(crate) fn set_session_name(&mut self, _session: Option<String>) {}
 
     pub(crate) fn retain_panes(&mut self, _retained: &std::collections::BTreeSet<PaneId>) {}
 
@@ -123,8 +114,6 @@ impl AgentController {
         Task::ready(true)
     }
 }
-
-pub fn warm_agent_adapter_cache(_config: &AgentConfig) {}
 
 /// Placeholder for an agent pane this build cannot host.
 pub(crate) struct AgentView {

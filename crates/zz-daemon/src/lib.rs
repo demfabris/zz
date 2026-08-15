@@ -38,6 +38,18 @@ mod status;
 mod transport;
 pub mod user_data;
 
+/// The agent stream vocabulary, so a client deserializes the JSON items the
+/// daemon journals and fans out without redeclaring their shapes.
+#[cfg(feature = "agent")]
+pub use agent::{
+    profile::{SdkTaskEvent, TaskNotification},
+    stream::{
+        AgentAuthMethod, AgentImage as AgentStreamImage, AgentPrompt, AgentPromptOutcome,
+        AgentSessionCapabilities, AgentSessionSummary, AgentStreamItem, AgentStreamPayload,
+        AgentTurnDiffOutcome,
+    },
+    turn_snapshot::{TurnDiff, TurnFile, TurnFileStatus},
+};
 /// Only unix and Windows spawn ssh, so only they carry the askpass helper.
 #[cfg(any(unix, windows))]
 pub use askpass::run_helper;

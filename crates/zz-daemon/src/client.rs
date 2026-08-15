@@ -7,9 +7,9 @@ use std::{
 
 use parking_lot::Mutex;
 use zz_protocol::{
-    ClientHello, ClientKind, CommandInvocation, CommandRequest, CommandResponse,
-    ConfigOverrideEntry, GuiResponse, InputMessage, MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION,
-    PaneId, PasteUploadPurpose, ProtocolMessage, ServerError, ServerHello,
+    AgentImage, AgentSessionOpKind, ClientHello, ClientKind, CommandInvocation, CommandRequest,
+    CommandResponse, ConfigOverrideEntry, GuiResponse, InputMessage, MAX_PASTE_UPLOAD_CHUNK_BYTES,
+    PROTOCOL_VERSION, PaneId, PasteUploadPurpose, ProtocolMessage, ServerError, ServerHello,
     encode_protocol_message_into, read_protocol_message_into,
 };
 use zz_terminal::TerminalColorScheme;
@@ -418,6 +418,78 @@ impl InteractiveClient {
 
     pub fn request_history(&self, pane: PaneId, start: u32, count: u32) -> Result<(), DaemonError> {
         self.send(&ProtocolMessage::HistoryRequest { pane, start, count })
+    }
+
+    /// Submit a prompt to the pane's daemon-owned agent. Images cross as
+    /// bytes plus MIME format; the daemon turns them into ACP content blocks.
+    pub fn agent_prompt(
+        &self,
+        pane: PaneId,
+        text: String,
+        images: Vec<AgentImage>,
+    ) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::AgentPrompt { pane, text, images })
+    }
+
+    pub fn agent_cancel(&self, pane: PaneId) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::AgentCancel { pane })
+    }
+
+    /// Reclaim the pane's queued prompts; they come back inside the stream.
+    pub fn agent_unqueue(&self, pane: PaneId) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::AgentUnqueue { pane })
+    }
+
+    /// Answer a parked permission request; `None` cancels it.
+    pub fn agent_respond_permission(
+        &self,
+        pane: PaneId,
+        request_id: u64,
+        option_id: Option<String>,
+    ) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::AgentRespondPermission {
+            pane,
+            request_id,
+            option_id,
+        })
+    }
+
+    pub fn agent_set_config_option(
+        &self,
+        pane: PaneId,
+        option_id: String,
+        value: String,
+    ) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::AgentSetConfigOption {
+            pane,
+            option_id,
+            value,
+        })
+    }
+
+    pub fn agent_set_mode(&self, pane: PaneId, mode_id: String) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::AgentSetMode { pane, mode_id })
+    }
+
+    pub fn agent_authenticate(&self, pane: PaneId, method_id: String) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::AgentAuthenticate { pane, method_id })
+    }
+
+    pub fn agent_session_op(
+        &self,
+        pane: PaneId,
+        op: AgentSessionOpKind,
+    ) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::AgentSessionOp { pane, op })
+    }
+
+    /// Replay the pane's agent stream from `from_seq`, then tail it.
+    pub fn agent_replay(&self, pane: PaneId, from_seq: u64) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::AgentReplay { pane, from_seq })
+    }
+
+    pub fn agent_turn_diff(&self, pane: PaneId, request_id: u64) -> Result<(), DaemonError> {
+        self.send(&ProtocolMessage::AgentTurnDiff { pane, request_id })
     }
 
     /// Answer one daemon-issued request for GUI-owned work, success or failure.

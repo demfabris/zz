@@ -58,6 +58,27 @@ pub(crate) fn normalize(image: &Image) -> Result<Arc<Image>, Cow<'static, str>> 
     Ok(Arc::new(Image::from_bytes(ImageFormat::Png, png)))
 }
 
+/// Hand normalized attachments to the wire. The daemon turns bytes plus MIME
+/// type into ACP content blocks on its own host, so `gpui::Image` never
+/// crosses the socket.
+#[cfg(feature = "agent-pane")]
+pub(crate) fn wire_images(images: &[Arc<Image>]) -> Vec<zz_protocol::AgentImage> {
+    images
+        .iter()
+        .map(|image| zz_protocol::AgentImage {
+            format: image.format.mime_type().to_owned(),
+            data: image.bytes.clone(),
+        })
+        .collect()
+}
+
+/// Rebuild an attachment the daemon handed back with a reclaimed prompt.
+#[cfg(feature = "agent-pane")]
+pub(crate) fn inbound_image(image: &zz_daemon::AgentStreamImage) -> Option<Arc<Image>> {
+    let format = ImageFormat::from_mime_type(&image.format)?;
+    Some(Arc::new(Image::from_bytes(format, image.data.clone())))
+}
+
 const fn decoder_format(format: ImageFormat) -> Option<image::ImageFormat> {
     Some(match format {
         ImageFormat::Png => image::ImageFormat::Png,

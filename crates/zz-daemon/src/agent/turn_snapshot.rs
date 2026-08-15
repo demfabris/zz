@@ -31,28 +31,28 @@ pub(crate) struct TurnTree {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct TurnDiff {
-    pub(crate) files: Vec<TurnFile>,
-    pub(crate) patch: String,
-    pub(crate) additions: u32,
-    pub(crate) deletions: u32,
-    pub(crate) truncated: bool,
+pub struct TurnDiff {
+    pub files: Vec<TurnFile>,
+    pub patch: String,
+    pub additions: u32,
+    pub deletions: u32,
+    pub truncated: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct TurnFile {
-    pub(crate) path: String,
-    pub(crate) old_path: Option<String>,
-    pub(crate) status: TurnFileStatus,
-    pub(crate) additions: u32,
-    pub(crate) deletions: u32,
-    pub(crate) binary: bool,
+pub struct TurnFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: TurnFileStatus,
+    pub additions: u32,
+    pub deletions: u32,
+    pub binary: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) enum TurnFileStatus {
+pub enum TurnFileStatus {
     Added,
     Modified,
     Deleted,

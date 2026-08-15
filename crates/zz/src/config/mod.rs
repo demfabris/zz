@@ -83,74 +83,33 @@ const DEFAULT_EDITOR_SOFT_WRAP: bool = true;
 const DEFAULT_EDITOR_VIM_MODE: bool = true;
 const DEFAULT_EXPERIMENTAL_AGENT_PANE: bool = false;
 const DEFAULT_EXPERIMENTAL_EDITOR_PANE: bool = false;
-const DEFAULT_AGENT_AUTO_APPROVE: bool = true;
 #[cfg(target_os = "linux")]
 const UNBLURRED_WINDOW_BACKGROUND: WindowBackgroundAppearance =
     WindowBackgroundAppearance::Transparent;
 #[cfg(not(target_os = "linux"))]
 const UNBLURRED_WINDOW_BACKGROUND: WindowBackgroundAppearance = WindowBackgroundAppearance::Opaque;
-// Version-pinned on purpose: `@latest` costs a registry round trip on every
-// pane spawn, so bumps are deliberate edits.
-pub(crate) const DEFAULT_AGENT_COMMAND: &str = "npx -y @agentclientprotocol/codex-acp@1.1.7";
-pub(crate) const DEFAULT_CLAUDE_CODE_AGENT_COMMAND: &str =
-    "npx -y @agentclientprotocol/claude-agent-acp@0.63.0";
 static CONFIG_TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// The one agent key the client still owns: the adapter commands and the
+/// auto-approve flag are mux options now, because the daemon spawns the
+/// adapter. This one feeds pane creation, which is a client concern.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AgentConfigKey {
-    Command,
-    ClaudeCodeCommand,
     WorkingDirectory,
-    AutoApprove,
 }
 
 impl AgentConfigKey {
     fn from_str(key: &str) -> Option<Self> {
         match key {
-            "agent-command" => Some(Self::Command),
-            "agent-claude-code-command" => Some(Self::ClaudeCodeCommand),
             "agent-working-directory" => Some(Self::WorkingDirectory),
-            "agent-auto-approve" => Some(Self::AutoApprove),
             _ => None,
         }
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AgentConfig {
-    pub(crate) command: String,
-    pub(crate) claude_code_command: String,
     pub(crate) working_directory: Option<PathBuf>,
-    pub(crate) auto_approve: bool,
-}
-
-impl Default for AgentConfig {
-    fn default() -> Self {
-        Self {
-            command: DEFAULT_AGENT_COMMAND.to_owned(),
-            claude_code_command: DEFAULT_CLAUDE_CODE_AGENT_COMMAND.to_owned(),
-            working_directory: None,
-            auto_approve: DEFAULT_AGENT_AUTO_APPROVE,
-        }
-    }
-}
-
-#[cfg(feature = "agent-pane")]
-impl AgentConfig {
-    pub(crate) fn command_for(&self, provider: zz_protocol::AgentProvider) -> &str {
-        use zz_protocol::AgentProvider;
-        match provider {
-            AgentProvider::Codex => &self.command,
-            AgentProvider::ClaudeCode => &self.claude_code_command,
-        }
-    }
-
-    pub(crate) const fn key_for(provider: zz_protocol::AgentProvider) -> &'static str {
-        match provider {
-            zz_protocol::AgentProvider::Codex => "agent-command",
-            zz_protocol::AgentProvider::ClaudeCode => "agent-claude-code-command",
-        }
-    }
 }
 
 impl Global for AgentConfig {}
@@ -589,7 +548,7 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
 
     log::info!(
         target: "zz::config",
-        "application configuration path={} pane_gaps={} pane_corner_radius={} pane_margin={} pane_border_width={} widget_corner_radius={} window_corner_radius={} editor_font_size={} editor_line_numbers={} editor_relative_line_numbers={} editor_soft_wrap={} editor_vim_mode={} browser_element_selector_hotkey={} browser_search_provider={} browser_egress={} use_system_titlebar={} window_background_blur={} animations={} tray={} show_fps={} quit_daemon_on_exit={} auto_restart_stale_daemon={} agent_command_overridden={} claude_code_agent_command_overridden={} agent_working_directory={:?} daemon_override_entries={}",
+        "application configuration path={} pane_gaps={} pane_corner_radius={} pane_margin={} pane_border_width={} widget_corner_radius={} window_corner_radius={} editor_font_size={} editor_line_numbers={} editor_relative_line_numbers={} editor_soft_wrap={} editor_vim_mode={} browser_element_selector_hotkey={} browser_search_provider={} browser_egress={} use_system_titlebar={} window_background_blur={} animations={} tray={} show_fps={} quit_daemon_on_exit={} auto_restart_stale_daemon={} agent_working_directory={:?} daemon_override_entries={}",
         path.display(),
         parsed.config.pane_gaps.value,
         parsed.config.pane_corner_radius.value,
@@ -612,8 +571,6 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
         parsed.config.show_fps.value,
         parsed.config.quit_daemon_on_exit.value,
         parsed.config.auto_restart_stale_daemon.value,
-        parsed.agent.command != DEFAULT_AGENT_COMMAND,
-        parsed.agent.claude_code_command != DEFAULT_CLAUDE_CODE_AGENT_COMMAND,
         parsed.agent.working_directory,
         parsed.daemon_entries.len(),
     );
@@ -1526,18 +1483,6 @@ fn apply_agent_key(
     };
     let string_value = || parse_config_string(value);
     match agent_key {
-        AgentConfigKey::AutoApprove => match parse_boolean(value) {
-            Ok(parsed) => agent.auto_approve = parsed,
-            Err(message) => return invalid(&message),
-        },
-        AgentConfigKey::Command => match string_value() {
-            Ok(value) => agent.command = value,
-            Err(message) => return invalid(&message),
-        },
-        AgentConfigKey::ClaudeCodeCommand => match string_value() {
-            Ok(value) => agent.claude_code_command = value,
-            Err(message) => return invalid(&message),
-        },
         AgentConfigKey::WorkingDirectory => match string_value() {
             Ok(value) => {
                 let path = PathBuf::from(value);
@@ -2752,64 +2697,52 @@ mod tests {
     }
 
     #[test]
-    fn parser_accepts_agent_stdio_configuration_and_absolute_working_directory() {
+    fn agent_adapter_keys_reach_the_daemon_while_the_working_directory_stays_local() {
         let working_directory = absolute_test_root("agent project");
         let parsed = parse_config(&format!(
             "agent-command = {{\"command\":\"node\",\"args\":[\"agent.js\"],\"env\":{{\"TOKEN\":\"#not-a-comment\"}}}} # command comment\n\
              agent-claude-code-command = claude-agent-acp --stdio\n\
+             agent-auto-approve = false\n\
              agent-working-directory = {}\n",
             working_directory.display()
         ));
 
         assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
-        assert_eq!(
-            parsed.agent.command,
-            "{\"command\":\"node\",\"args\":[\"agent.js\"],\"env\":{\"TOKEN\":\"#not-a-comment\"}}"
-        );
-        assert_eq!(parsed.agent.claude_code_command, "claude-agent-acp --stdio");
         assert_eq!(parsed.agent.working_directory, Some(working_directory));
-        assert!(parsed.agent.auto_approve);
-    }
-
-    #[test]
-    fn agent_auto_approve_defaults_on_and_rejects_non_boolean_values() {
-        assert!(parse_config("").agent.auto_approve);
-        assert!(
-            !parse_config("agent-auto-approve = false\n")
-                .agent
-                .auto_approve
-        );
-
-        let parsed = parse_config("agent-auto-approve = false\nagent-auto-approve = maybe\n");
-        assert!(!parsed.agent.auto_approve);
-        assert_eq!(parsed.diagnostics.len(), 1);
-        assert!(
-            parsed.diagnostics[0]
-                .message
-                .contains("invalid `agent-auto-approve`: expected `true` or `false`")
+        assert_eq!(
+            parsed.daemon_entries,
+            [
+                (
+                    "agent-command".to_owned(),
+                    "{\"command\":\"node\",\"args\":[\"agent.js\"],\"env\":{\"TOKEN\":\"#not-a-comment\"}}"
+                        .to_owned()
+                ),
+                (
+                    "agent-claude-code-command".to_owned(),
+                    "claude-agent-acp --stdio".to_owned()
+                ),
+                ("agent-auto-approve".to_owned(), "false".to_owned()),
+            ],
+            "the daemon spawns the adapter, so its keys travel as mux options"
         );
     }
 
     #[test]
-    fn invalid_agent_configuration_keeps_the_last_valid_values() {
+    fn invalid_agent_working_directory_keeps_the_last_valid_value() {
         let valid_working_directory = absolute_test_root("valid-agent-directory");
         let parsed = parse_config(&format!(
-            "agent-command = custom-acp --stdio\n\
-             agent-command = ''\n\
-             agent-working-directory = {}\n\
+            "agent-working-directory = {}\n\
              agent-working-directory = relative/path\n",
             valid_working_directory.display()
         ));
 
-        assert_eq!(parsed.agent.command, "custom-acp --stdio");
         assert_eq!(
             parsed.agent.working_directory,
             Some(valid_working_directory)
         );
-        assert_eq!(parsed.diagnostics.len(), 2);
-        assert!(parsed.diagnostics[0].message.contains("must not be empty"));
+        assert_eq!(parsed.diagnostics.len(), 1);
         assert!(
-            parsed.diagnostics[1]
+            parsed.diagnostics[0]
                 .message
                 .contains("expected an absolute path")
         );

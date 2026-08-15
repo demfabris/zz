@@ -121,7 +121,7 @@ daemon for you, and they also work from `zz/mux.conf` or `zz set-option -g`:
 | Key | Set on | Default | Effect |
 | --- | --- | --- | --- |
 | `agent-auto-approve` | daemon | `true` | Answer permission requests with the agent's preferred allow option. Off means you answer them |
-| `agent-command` | daemon | pinned `codex-acp` | Command line or raw ACP stdio JSON for Codex panes |
+| `agent-command` | daemon | pinned `codex-acp` | Command line, or a launch-config JSON object `{"command", "args", "env"}`, for Codex panes |
 | `agent-claude-code-command` | daemon | pinned `claude-agent-acp` | Same, for Claude Code panes |
 | `agent-working-directory` | app | the donor pane's cwd | Absolute path for brand-new sessions |
 

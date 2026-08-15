@@ -379,8 +379,8 @@ a daemon diagnostic without blocking later entries.
 | `experimental-agent-pane` | `off` | flag value (`on`/`off`/`true`/`false`/…); gates `select-pane-kind agent` in the engine |
 | `experimental-editor-pane` | `off` | flag value; gates `select-pane-kind editor` in the engine |
 | `history-trickle` | `2000` | integer `0..=10000`; background scrollback backfill budget. `0` disables trickle and leaves scroll-driven prefetch intact |
-| `agent-command` | `npx -y @agentclientprotocol/codex-acp@1.1.7` | Nonempty command string or raw ACP stdio JSON, up to 4 KiB; what the daemon spawns for a Codex pane |
-| `agent-claude-code-command` | `npx -y @agentclientprotocol/claude-agent-acp@0.63.0` | Same, for Claude Code panes |
+| `agent-command` | `npx -y @agentclientprotocol/codex-acp@1.3.0` | Nonempty command string or an `AcpAgentConfig` JSON object (`{"command", "args", "env"}`), up to 4 KiB; what the daemon spawns for a Codex pane |
+| `agent-claude-code-command` | `npx -y @agentclientprotocol/claude-agent-acp@0.68.0` | Same, for Claude Code panes |
 | `agent-auto-approve` | `on` | flag value; when on, a kinded `session/request_permission` is answered daemon-side with the agent's preferred allow option (`allow_always`, else `allow_once`) and the tool call is still published to the stream. A request with no allow option always falls through to the permission wizard |
 
 The three agent keys became mux options when the [Agent pane](/concepts/agent-pane.md)'s ACP runtime

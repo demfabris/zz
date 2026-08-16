@@ -258,7 +258,7 @@ pub fn start_app_state_sampler(
     if !enabled() {
         return;
     }
-    let trace_state_changed = profiler::set_frame_trace_enabled(true);
+    let trace_state_changed = profiler::set_trace_enabled(true);
     let mut frame_collector = FrameTimingCollector::new();
     let mut frame_sample_started = Instant::now();
     log::info!(
@@ -272,7 +272,14 @@ pub fn start_app_state_sampler(
             cx.background_executor()
                 .timer(APP_STATE_SAMPLE_INTERVAL)
                 .await;
-            let frames = frame_collector.collect_unseen();
+            let frames: Vec<_> = frame_collector
+                .collect_unseen()
+                .into_iter()
+                .filter_map(|event| match event {
+                    profiler::FrameEvent::Draw(timing) => Some(timing),
+                    profiler::FrameEvent::Present(_) => None,
+                })
+                .collect();
             let sample_ended = Instant::now();
             let sample_duration = sample_ended.duration_since(frame_sample_started);
             frame_sample_started = sample_ended;

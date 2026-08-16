@@ -13,7 +13,7 @@ commits on top of a pinned upstream rev. The manifest of all such forks is
 Current forks and why:
 
 - **zed** (`demfabris/zed`, branch `zz-patches`): carried commits (authoritative
-  list: `git log` on the branch; thirty-five as of 2026-08-05), each upstream-able
+  list: `git log` on the branch; forty-two as of 2026-08-16), each upstream-able
   as a small Zed PR; if Zed merges equivalents, drop them and eventually the fork
   branch. The core five:
   1. `RenderImage::into_frames()` — retired browser frames return their pixel
@@ -61,6 +61,36 @@ Current forks and why:
   `KeystrokeEvent::is_held` (the OS autorepeat flag carried through to
   keystroke observers/interceptors — zz's prefix layer swallows repeats by
   this flag instead of held-set inference, which a lost macOS keyUp desyncs).
+
+  Rebase gotchas learned on the 2026-08-16 rebase (base 90d024b → f543a76):
+
+  - The wgpu 30 bump patch is load-bearing, not droppable: upstream still pins
+    wgpu 29, but zz's own lock (and the showcase's) resolve wgpu 30 through
+    the fork's bump; dropping it downgrades zz. Re-port it (Cargo.toml bump +
+    `color_space: SurfaceColorSpace::Auto` on both `SurfaceConfiguration`s +
+    `Queue::present(frame)` instead of `frame.present()`). Its companion
+    `apply_limit_buckets` patch only compiles against 30. Beware mid-rebase
+    reads: a conflicted working tree shows the patch's own Cargo.toml, which
+    can masquerade as upstream having done the bump.
+  - Upstream split wgpu instance loading into `shaders_storage.wgsl` /
+    `shaders_webgl.wgsl` with per-record `load_*` functions. The storage
+    variant reads the WGSL structs directly and follows them, but the WebGL
+    loaders hard-code word strides and read sequences — every carried patch
+    that widens a scene struct (Quad, Shadow, PolychromeSprite, SurfaceParams)
+    must also touch those loaders, and auto-merges won't do it.
+  - Cargo.lock auto-merges across the rebase produce silently stale entries
+    (a wgpu 29/30 chimera, missing new gpui deps). Diff the lock against
+    upstream's when done; the only legitimate drift is gpui gaining `wgpu` as
+    a dependency from the device-context patch.
+  - The showcase's excluded lock needs its own `Cargo.toml` rev bump plus a
+    `cargo metadata` re-resolve, and can need a second re-resolve to pick up
+    brand-new transitive deps (hdrhistogram, crossbeam-channel from the
+    profiler feature) — verify `just showcase-build` passes, since `--locked`
+    is what catches it.
+  - Upstream unified perf tracking under gpui's `profiler` feature: zz must
+    enable it on the workspace `gpui` dep, `set_frame_trace_enabled` became
+    the shared `set_trace_enabled`, and collectors now yield
+    `FrameEvent::{Draw,Present}` instead of bare `FrameTiming`.
 
   Adding a carried patch is not a rebase: when `just forks` reports LOCK
   "in sync", commit on the branch tip in the local checkout, push, then repin

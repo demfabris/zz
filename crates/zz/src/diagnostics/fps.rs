@@ -113,7 +113,7 @@ impl AppFpsMeter {
         self.sampled_at = Instant::now();
         self._sample_task = Task::ready(());
         if enabled {
-            profiler::set_frame_trace_enabled(true);
+            profiler::set_trace_enabled(true);
             self._sample_task = cx.spawn(async move |this, cx| {
                 loop {
                     cx.background_executor().timer(FPS_SAMPLE_INTERVAL).await;
@@ -123,7 +123,7 @@ impl AppFpsMeter {
                 }
             });
         } else if !diagnostics::enabled() {
-            profiler::set_frame_trace_enabled(false);
+            profiler::set_trace_enabled(false);
         }
         self.collector = FrameTimingCollector::new();
     }
@@ -138,6 +138,10 @@ impl AppFpsMeter {
             .collector
             .collect_unseen()
             .into_iter()
+            .filter_map(|event| match event {
+                profiler::FrameEvent::Draw(timing) => Some(timing),
+                profiler::FrameEvent::Present(_) => None,
+            })
             .filter(|timing| timing.window_id.as_u64() == self.window_id)
             .count();
         self.sampled_at = now;

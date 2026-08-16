@@ -1392,7 +1392,7 @@ dependencies = [
 [[package]]
 name = "collections"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "gpui_util",
  "indexmap 2.14.0",
@@ -2099,7 +2099,7 @@ dependencies = [
 [[package]]
 name = "derive_refineable"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2559,7 +2559,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3229,13 +3229,13 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.20",
- "windows 0.62.2",
+ "windows 0.59.0",
 ]
 
 [[package]]
 name = "gpui"
 version = "0.2.2"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -3266,6 +3266,7 @@ dependencies = [
  "gpui_macros",
  "gpui_shared_string",
  "gpui_util",
+ "hdrhistogram",
  "heapless 0.9.3",
  "http_client",
  "image",
@@ -3304,6 +3305,7 @@ dependencies = [
  "sum_tree",
  "taffy",
  "thiserror 2.0.20",
+ "tracing",
  "ttf-parser",
  "url",
  "usvg",
@@ -3315,12 +3317,36 @@ dependencies = [
  "windows 0.61.3",
  "zed-font-kit",
  "zed-scap",
+ "ztracing",
+]
+
+[[package]]
+name = "gpui_apple"
+version = "0.1.0"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
+dependencies = [
+ "anyhow",
+ "block",
+ "cbindgen",
+ "cocoa 0.26.0",
+ "collections",
+ "core-foundation 0.10.1",
+ "core-video",
+ "derive_more",
+ "etagere",
+ "foreign-types",
+ "gpui",
+ "image",
+ "log",
+ "metal",
+ "objc",
+ "parking_lot",
 ]
 
 [[package]]
 name = "gpui_linux"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -3372,7 +3398,7 @@ dependencies = [
 [[package]]
 name = "gpui_macos"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -3380,21 +3406,18 @@ dependencies = [
  "async-task",
  "block",
  "block2 0.6.2",
- "cbindgen",
  "cocoa 0.26.0",
  "collections",
  "core-foundation 0.10.1",
  "core-foundation-sys",
  "core-graphics 0.24.0",
  "core-text",
- "core-video",
  "ctor",
- "derive_more",
  "dispatch2",
- "etagere",
  "foreign-types",
  "futures",
  "gpui",
+ "gpui_apple",
  "gpui_util",
  "image",
  "itertools 0.14.0",
@@ -3421,7 +3444,7 @@ dependencies = [
 [[package]]
 name = "gpui_macros"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -3432,7 +3455,7 @@ dependencies = [
 [[package]]
 name = "gpui_platform"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "console_error_panic_hook",
  "gpui",
@@ -3445,7 +3468,7 @@ dependencies = [
 [[package]]
 name = "gpui_shared_string"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "schemars 1.2.2",
  "serde",
@@ -3455,7 +3478,7 @@ dependencies = [
 [[package]]
 name = "gpui_util"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "anyhow",
  "log",
@@ -3465,7 +3488,7 @@ dependencies = [
 [[package]]
 name = "gpui_web"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -3488,7 +3511,7 @@ dependencies = [
 [[package]]
 name = "gpui_wgpu"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -3518,7 +3541,7 @@ dependencies = [
 [[package]]
 name = "gpui_windows"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -3542,12 +3565,6 @@ dependencies = [
  "windows-numerics 0.2.0",
  "windows-registry",
 ]
-
-[[package]]
-name = "grid"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b40ca9252762c466af32d0b1002e91e4e1bc5398f77455e55474deb466355ff5"
 
 [[package]]
 name = "group"
@@ -3635,6 +3652,20 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash",
+]
+
+[[package]]
+name = "hdrhistogram"
+version = "7.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f49d1053f4708f0af3cf9fc5bffc7e68a914a3c45becb231c80068c9c3f78bea"
+dependencies = [
+ "base64 0.22.1",
+ "byteorder",
+ "crossbeam-channel",
+ "flate2",
+ "nom 8.0.0",
+ "num-traits",
 ]
 
 [[package]]
@@ -3754,7 +3785,7 @@ dependencies = [
 [[package]]
 name = "http_client"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -3798,7 +3829,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.59.0",
 ]
 
 [[package]]
@@ -4761,7 +4792,7 @@ checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
 [[package]]
 name = "media"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "anyhow",
  "bindgen",
@@ -5816,7 +5847,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 [[package]]
 name = "perf"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "collections",
  "serde",
@@ -6261,26 +6292,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
 dependencies = [
  "toml_edit 0.25.13+spec-1.1.0",
-]
-
-[[package]]
-name = "proc-macro-error-attr2"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5"
-dependencies = [
- "proc-macro2",
- "quote",
-]
-
-[[package]]
-name = "proc-macro-error2"
-version = "2.0.1"
-dependencies = [
- "proc-macro-error-attr2",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -6732,7 +6743,7 @@ dependencies = [
 [[package]]
 name = "refineable"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "derive_refineable",
 ]
@@ -7056,7 +7067,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7069,7 +7080,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7185,7 +7196,7 @@ dependencies = [
 [[package]]
 name = "scheduler"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "async-task",
  "backtrace",
@@ -7870,9 +7881,9 @@ dependencies = [
 
 [[package]]
 name = "stacksafe"
-version = "0.1.4"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d9c1172965d317e87ddb6d364a040d958b40a1db82b6ef97da26253a8b3d090"
+checksum = "95f9c34983ac74195c710c473db6fdf1085f64a47dbaa0090d1bea03be70da66"
 dependencies = [
  "stacker",
  "stacksafe-macro",
@@ -7880,13 +7891,13 @@ dependencies = [
 
 [[package]]
 name = "stacksafe-macro"
-version = "0.1.4"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "172175341049678163e979d9107ca3508046d4d2a7c6682bee46ac541b17db69"
+checksum = "6feeae42a2d6b0dcb8aeb2f08d9e48cdac600239cf8a20fc59f9e252e86bdfe1"
 dependencies = [
- "proc-macro-error2",
+ "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -7991,7 +8002,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sum_tree"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "heapless 0.9.3",
  "log",
@@ -8195,14 +8206,14 @@ dependencies = [
 
 [[package]]
 name = "taffy"
-version = "0.12.2"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "340a09581f29809fc0df82a3955501dc7f2a21f887e5d1c13dbe288fe1c0bef4"
+checksum = "c034e05f6ee85a12daa63863c2245797715075c70649947aa0da54f3f2ab1d0f"
 dependencies = [
  "arrayvec",
- "grid",
  "serde",
  "slotmap",
+ "smallvec",
 ]
 
 [[package]]
@@ -8258,7 +8269,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8932,7 +8943,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "util_macros"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "perf",
  "quote",
@@ -9334,6 +9345,7 @@ dependencies = [
  "thiserror 2.0.20",
  "wgpu-core-deps-apple",
  "wgpu-core-deps-emscripten",
+ "wgpu-core-deps-wasm",
  "wgpu-core-deps-windows-linux-android",
  "wgpu-hal",
  "wgpu-naga-bridge",
@@ -9354,6 +9366,15 @@ name = "wgpu-core-deps-emscripten"
 version = "30.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85dcf2b2e5c2afb9eda64c570a87a4e570304bf39e52eddbaaf222d655b656ad"
+dependencies = [
+ "wgpu-hal",
+]
+
+[[package]]
+name = "wgpu-core-deps-wasm"
+version = "30.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b6c13228950f36a56023976a6c4ee6714b27fb40e3d52a33f7d3bb6d109c0b1"
 dependencies = [
  "wgpu-hal",
 ]
@@ -9499,7 +9520,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -10501,7 +10522,7 @@ dependencies = [
 [[package]]
 name = "zlog"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "anyhow",
  "chrono",
@@ -10518,7 +10539,7 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 [[package]]
 name = "ztracing"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 dependencies = [
  "tracing",
  "tracing-subscriber",
@@ -10529,7 +10550,7 @@ dependencies = [
 [[package]]
 name = "ztracing_macro"
 version = "0.1.0"
-source = "git+https://github.com/demfabris/zed?rev=71bcbb21d5c1a14cf126b49ae1c8408da317b4ed#71bcbb21d5c1a14cf126b49ae1c8408da317b4ed"
+source = "git+https://github.com/demfabris/zed?rev=f2b9f1f06f9f6874a846255a798d0c1c7b762540#f2b9f1f06f9f6874a846255a798d0c1c7b762540"
 
 [[package]]
 name = "zune-core"
@@ -10849,3 +10870,7 @@ dependencies = [
  "editpe",
  "plist",
 ]
+
+[[patch.unused]]
+name = "proc-macro-error2"
+version = "2.0.1"

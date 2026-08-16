@@ -38,8 +38,8 @@ status() {
         tip=$(gh api "repos/$fork/branches/$branch" --jq .commit.sha)
         # Patch entries pin either `branch = "…"` or an explicit `rev = "…"`;
         # both serialize into Cargo.lock as `?<kind>=<value>#<full-sha>`.
-        locked=$(grep -m1 -oP "github.com/$fork\?(branch=$branch|rev=[0-9a-f]+)#\K[0-9a-f]+" \
-            "$REPO_ROOT/Cargo.lock" || true)
+        locked=$(grep -m1 -oE "github.com/$fork\?(branch=$branch|rev=[0-9a-f]+)#[0-9a-f]+" \
+            "$REPO_ROOT/Cargo.lock" | sed 's/.*#//' || true)
         if [[ -z "$locked" ]]; then
             lock_state="not in Cargo.lock"
         elif [[ "$locked" == "$tip" ]]; then

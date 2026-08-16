@@ -2476,12 +2476,7 @@ impl Shared {
                                 action: action.clone(),
                             });
                             if terminal_view_action_enters_copy_mode(action) {
-                                enter_copy_session(
-                                    &mut inner,
-                                    target,
-                                    *pane,
-                                    terminal_view_action_arms_scroll_exit(action),
-                                )?;
+                                enter_copy_session(&mut inner, target, *pane)?;
                             } else if terminal_view_action_exits_copy_mode(action) {
                                 exit_copy_session(&mut inner, target);
                             } else if terminal_view_action_arms_scroll_exit(action)
@@ -9341,7 +9336,6 @@ fn enter_copy_session(
     inner: &mut ServerState,
     client: ClientId,
     pane: PaneId,
-    scroll_exit: bool,
 ) -> Result<(), ServerError> {
     let table = inner.engine.copy_mode_table_for_pane(pane)?.to_owned();
     inner
@@ -9354,7 +9348,7 @@ fn enter_copy_session(
         CopySession {
             pane,
             observed: false,
-            scroll_exit,
+            scroll_exit: false,
         },
     );
     Ok(())
@@ -9363,10 +9357,7 @@ fn enter_copy_session(
 fn terminal_view_action_arms_scroll_exit(action: &zz_terminal::TerminalViewAction) -> bool {
     matches!(
         action,
-        zz_terminal::TerminalViewAction::EnterCopyModeScrollExit
-            | zz_terminal::TerminalViewAction::CopyMode(
-                zz_terminal::CopyModeAction::PageDownScrollExit
-            )
+        zz_terminal::TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::PageDownScrollExit)
     )
 }
 
@@ -9386,12 +9377,7 @@ fn sync_copy_session_for_view_action(
     action: &zz_terminal::TerminalViewAction,
 ) -> Result<(), ServerError> {
     if terminal_view_action_enters_copy_mode(action) {
-        enter_copy_session(
-            inner,
-            client,
-            pane,
-            terminal_view_action_arms_scroll_exit(action),
-        )?;
+        enter_copy_session(inner, client, pane)?;
     } else if terminal_view_action_exits_copy_mode(action) {
         exit_copy_session(inner, client);
     } else if terminal_view_action_arms_scroll_exit(action)

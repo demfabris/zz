@@ -47,8 +47,8 @@ A program rings BEL in a pane:
   on macOS, urgency hint on Linux, taskbar flash on Windows. gpui already no-ops the call
   when the window is key, so a bell in the window you are typing in stays silent at the OS
   level.
-* The flag clears when the pane receives input (any PTY write from a client) or becomes
-  the active pane. Both events are daemon-visible, so clearing needs no knowledge of
+* The flag clears when the pane receives input (any PTY write from a client), becomes
+  the active pane, or its window becomes the active window (tmux's activation-clear). Both events are daemon-visible, so clearing needs no knowledge of
   client focus. This approximates Ghostty's clear-on-focus-or-input with the two signals a
   multiplexer daemon actually has.
 
@@ -75,8 +75,9 @@ Flow:
    clipboard writes.
 2. The daemon sets `bell: true` on the pane in mux state and publishes the edge event to every
    subscribed interactive client, including clients currently attached to another session.
-3. The daemon clears the flag on PTY input to that pane or on pane-selection change, and
-   the next snapshot reflects it.
+3. The daemon clears the flag on PTY input to that pane, on pane-selection change, or on
+   window activation (including `kill-session -C`), releasing the terminal bell latch on the
+   same transition, and the next snapshot reflects it.
 
 Flood safety: the bell latches at the session layer. When the pane's flag is already
 pending, the `on_bell` callback returns after one bool check, and the daemon publishes the
@@ -116,7 +117,8 @@ Two small pieces, no client-held bell state:
 
 * `zz-terminal`: feed `\x07` through a session, assert the bell event surfaces . mirror of
   the clipboard-write tests.
-* Daemon: set/clear transitions (bell then input clears; bell then select-pane clears), snapshot
+* Daemon: set/clear transitions (bell then input clears; bell then select-pane clears; bell
+  then window activation clears and releases the latch), snapshot
   carriage of the flag, and edge delivery to an un-attached subscriber.
 * Client/sidebar: background-host edges advance attention and cached remote snapshot flags bubble
   through collapsed ancestors.

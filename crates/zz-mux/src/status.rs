@@ -236,13 +236,14 @@ impl StatusContext {
     /// resolves against the current window. Command/list rows set the real
     /// per-row value.
     fn window_flags(&self) -> String {
-        // tmux's flag order: current, bell, zoomed.
+        // tmux's flag order: activity, bell, silence, current, last, marked,
+        // zoomed; zz models bell, current, and zoomed.
         let mut flags = String::new();
-        if self.window_active.unwrap_or(true) {
-            flags.push('*');
-        }
         if self.window_bell {
             flags.push('!');
+        }
+        if self.window_active.unwrap_or(true) {
+            flags.push('*');
         }
         if self.window_zoomed {
             flags.push('Z');
@@ -798,9 +799,9 @@ mod tests {
             )
         };
         assert_eq!(flags(false, false), "*");
-        assert_eq!(flags(true, false), "*!");
+        assert_eq!(flags(true, false), "!*");
         assert_eq!(flags(false, true), "*Z");
-        assert_eq!(flags(true, true), "*!Z");
+        assert_eq!(flags(true, true), "!*Z");
         assert_eq!(
             expand_status(
                 "#F",
@@ -811,7 +812,7 @@ mod tests {
                 },
                 &mut Stub,
             ),
-            "*!"
+            "!*"
         );
         assert_eq!(
             expand_status(

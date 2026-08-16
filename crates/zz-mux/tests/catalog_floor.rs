@@ -94,3 +94,50 @@ fn catalogued_unsupported_value_keeps_the_unsupported_error_shape() {
         ServerError::UnsupportedCommand("new-session -x".to_owned())
     );
 }
+
+#[test]
+fn clustered_flags_reject_an_unknown_member() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    let error = engine
+        .execute(&mut context, &command("new-session", &["-dq"]))
+        .unwrap_err();
+
+    assert_unknown_flag("new-session", "-q", &error);
+}
+
+#[test]
+fn double_dash_allows_a_positional_starting_with_dash() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+
+    engine
+        .execute(&mut context, &command("rename-session", &["--", "-weird"]))
+        .unwrap();
+
+    assert!(
+        engine
+            .state
+            .sessions
+            .values()
+            .any(|session| session.name == "-weird")
+    );
+}
+
+#[test]
+fn option_value_starting_with_dash_is_not_validated_as_a_flag() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+
+    let error = engine
+        .execute(&mut context, &command("send-keys", &["-t", "-1"]))
+        .unwrap_err();
+
+    assert_eq!(error, ServerError::InvalidTarget("-1".to_owned()));
+}

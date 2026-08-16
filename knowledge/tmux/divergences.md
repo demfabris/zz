@@ -102,7 +102,7 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | `select-window` | Accepts a positional target tmux bounds at zero arguments. | zz-lax |
 | `set -o` | Errors where tmux's `-o`+`-u` combination silently ignores `-o`; `-q` doesn't silence invalid option names. | loud |
 | Brace blocks | Empty `{}` and a trailing `\;` error; tmux accepts both. | loud |
-| Unguarded commands | Unknown flags are still swallowed wherever no hand-rolled allowlist exists (36 allowlist sites in `command.rs` today); the systemic catalog-driven rejection is the [drop-in plan](/designs/tmux-drop-in.md)'s phase 0. | **silent** |
+| Unguarded commands | Closed by the [drop-in plan](/designs/tmux-drop-in.md)'s phase 0: every engine command rejects options centrally from its catalog `CommandSpec` — flags tmux has at the pin but zz lacks error as unsupported (and count in config-import skip reports); flags tmux doesn't have error as invalid. Residual: the daemon-side `capture-pane`/buffer family still hand-rolls parsing. | loud |
 | `bind-key` payloads | Bound commands are stored without validation; an unsupported command inside a binding fails only at keypress and never counts as a skipped config line. | **silent** |
 | Error strings | Several differ (zz `index in use: 2` vs tmux `create window failed: index 2 in use`). | cosmetic |
 | `new-pane` | The pinned tmux ships its own `new-pane`/`newp` (floating panes); zz's picker verb sits on the name with different semantics — the one remaining silent third-meaning, pending a product decision. | **silent** |

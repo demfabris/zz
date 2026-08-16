@@ -480,7 +480,7 @@ impl MuxEngine {
             "set-window-option" => self.set_option(context, &command.args, true)?,
             "source-file" => Self::source_file(&command.args)?,
             "reload-config" => {
-                let _ = parse_command_options("reload-config", &command.args)?;
+                parse_command_options("reload-config", &command.args)?;
                 if command.args.is_empty() {
                     Execution::effect(MuxEffect::ReloadConfig)
                 } else {
@@ -490,7 +490,7 @@ impl MuxEngine {
                 }
             }
             "kill-server" => {
-                let _ = parse_command_options("kill-server", &command.args)?;
+                parse_command_options("kill-server", &command.args)?;
                 Execution::effect(MuxEffect::KillServer)
             }
             _ => return Err(ServerError::UnsupportedCommand(command.name.clone())),
@@ -2205,11 +2205,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, _) = parse_command_options("clear-history", args)?;
-        if options.has("-H") {
-            return Err(ServerError::UnsupportedCommand(
-                "clear-history -H".to_owned(),
-            ));
-        }
         let pane = self
             .state
             .resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -2371,9 +2366,6 @@ impl MuxEngine {
 
     fn unbind_key(&mut self, args: &[String]) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("unbind-key", args)?;
-        if options.has("-a") {
-            return Err(ServerError::UnsupportedCommand("unbind-key -a".to_owned()));
-        }
         let table = key_table(&options);
         let key = required_arg(&positional, 0, "key")?;
         self.keys.unbind(table, key);
@@ -2439,7 +2431,6 @@ impl MuxEngine {
                 context,
                 positional.get(1).map(String::as_str),
                 &options,
-                force_window,
             );
         }
         if option == "buffer-limit" {
@@ -2473,12 +2464,7 @@ impl MuxEngine {
             );
         }
         if option == "mode-keys" {
-            return self.set_mode_keys(
-                context,
-                positional.get(1).map(String::as_str),
-                &options,
-                force_window,
-            );
+            return self.set_mode_keys(context, positional.get(1).map(String::as_str), &options);
         }
         if let Some(status) = StatusOption::from_name(option) {
             return self.set_status_option(status, positional.get(1).map(String::as_str), &options);
@@ -2873,7 +2859,6 @@ impl MuxEngine {
         context: &ExecutionContext,
         value: Option<&str>,
         options: &Options,
-        force_window: bool,
     ) -> Result<Execution, ServerError> {
         if let Some(flag) = options
             .flags
@@ -2883,11 +2868,6 @@ impl MuxEngine {
             return Err(ServerError::UnsupportedCommand(format!(
                 "set-option {flag} mode-keys"
             )));
-        }
-        if force_window && options.has("-w") {
-            return Err(ServerError::UnsupportedCommand(
-                "set-window-option -w mode-keys".to_owned(),
-            ));
         }
         if options.has("-o") && options.has("-u") {
             return Err(ServerError::InvalidCommand(
@@ -2943,7 +2923,6 @@ impl MuxEngine {
         context: &ExecutionContext,
         value: Option<&str>,
         options: &Options,
-        force_window: bool,
     ) -> Result<Execution, ServerError> {
         for flag in &options.flags {
             if !matches!(
@@ -2954,19 +2933,6 @@ impl MuxEngine {
                     "set-option {flag} synchronize-panes"
                 )));
             }
-        }
-        let scope_flags = usize::from(options.has("-g"))
-            + usize::from(options.has("-w"))
-            + usize::from(options.has("-p"));
-        if scope_flags > 1 || force_window && options.has("-p") {
-            return Err(ServerError::InvalidCommand(
-                "synchronize-panes has conflicting scopes".to_owned(),
-            ));
-        }
-        if force_window && (options.has("-w") || options.has("-U")) {
-            return Err(ServerError::UnsupportedCommand(
-                "set-window-option synchronize-panes scope flag".to_owned(),
-            ));
         }
         if (options.has("-u") || options.has("-U")) && value.is_some() {
             return Err(ServerError::InvalidCommand(
@@ -6107,7 +6073,7 @@ mod tests {
                 &mut context,
                 &command(
                     "set-option",
-                    &["-w", "-t", &first_window.to_string(), "mode-keys"],
+                    &["-t", &first_window.to_string(), "mode-keys"],
                 ),
             )
             .expect("toggle choice");
@@ -6119,7 +6085,7 @@ mod tests {
         let global = engine
             .execute(
                 &mut context,
-                &command("set-option", &["-gw", "mode-keys", "vi"]),
+                &command("set-window-option", &["-g", "mode-keys", "vi"]),
             )
             .expect("global window default");
         assert_eq!(
@@ -6180,7 +6146,6 @@ mod tests {
 
         for invalid in [
             command("set-option", &["-p", "mode-keys", "vi"]),
-            command("set-window-option", &["-w", "mode-keys", "vi"]),
             command("set-option", &["mode-keys", "unknown"]),
             command("set-option", &["-u", "mode-keys", "vi"]),
         ] {
@@ -6208,7 +6173,7 @@ mod tests {
         let changed = engine
             .execute(
                 &mut context,
-                &command("set-option", &["-w", "synchronize-panes", "on"]),
+                &command("set-window-option", &["synchronize-panes", "on"]),
             )
             .unwrap();
         assert!(changed.effects.contains(&MuxEffect::SnapshotChanged));
@@ -6220,36 +6185,11 @@ mod tests {
         engine
             .execute(
                 &mut context,
-                &command(
-                    "set-option",
-                    &["-p", "-t", &second.to_string(), "synchronize-panes", "off"],
-                ),
+                &command("set-window-option", &["synchronize-panes"]),
             )
             .unwrap();
         assert_eq!(engine.synchronized_input_targets(first).unwrap(), [first]);
         assert_eq!(engine.synchronized_input_targets(second).unwrap(), [second]);
-
-        engine
-            .execute(
-                &mut context,
-                &command(
-                    "set-option",
-                    &["-p", "-u", "-t", &second.to_string(), "synchronize-panes"],
-                ),
-            )
-            .unwrap();
-        assert_eq!(
-            engine.synchronized_input_targets(second).unwrap(),
-            [first, second]
-        );
-
-        engine
-            .execute(
-                &mut context,
-                &command("set-option", &["-w", "synchronize-panes"]),
-            )
-            .unwrap();
-        assert_eq!(engine.synchronized_input_targets(first).unwrap(), [first]);
 
         engine
             .execute(
@@ -6260,16 +6200,7 @@ mod tests {
         engine
             .execute(
                 &mut context,
-                &command(
-                    "set-option",
-                    &["-p", "-t", &second.to_string(), "synchronize-panes", "off"],
-                ),
-            )
-            .unwrap();
-        engine
-            .execute(
-                &mut context,
-                &command("set-option", &["-U", "synchronize-panes"]),
+                &command("set-window-option", &["-u", "synchronize-panes"]),
             )
             .unwrap();
         assert_eq!(
@@ -6335,8 +6266,8 @@ mod tests {
                 &mut context,
                 &command("command-prompt", &["-F", "unsupported"]),
             ),
-            Err(ServerError::InvalidCommand(message))
-                if message == "command-prompt does not support -F"
+            Err(ServerError::UnsupportedCommand(message))
+                if message == "command-prompt -F"
         ));
     }
 
@@ -6408,7 +6339,8 @@ mod tests {
                 &mut context,
                 &command("choose-buffer", &["-F", "#{buffer_name}"])
             ),
-            Err(ServerError::InvalidCommand(_))
+            Err(ServerError::UnsupportedCommand(message))
+                if message == "choose-buffer -F"
         ));
         assert!(matches!(
             engine.execute(
@@ -6440,11 +6372,12 @@ mod tests {
             );
         }
 
-        for args in [
-            vec!["-N"],
-            vec!["select-pane", "-t", "%%%"],
-            vec!["-d", "forever"],
-        ] {
+        assert!(matches!(
+            engine.execute(&mut context, &command("display-panes", &["-N"])),
+            Err(ServerError::UnsupportedCommand(message))
+                if message == "display-panes -N"
+        ));
+        for args in [vec!["select-pane", "-t", "%%%"], vec!["-d", "forever"]] {
             assert!(matches!(
                 engine.execute(&mut context, &command("display-panes", &args)),
                 Err(ServerError::InvalidCommand(_))
@@ -6585,7 +6518,8 @@ mod tests {
 
         assert!(matches!(
             engine.execute(&mut context, &command("last-pane", &["-d"])),
-            Err(ServerError::InvalidCommand(_))
+            Err(ServerError::UnsupportedCommand(message))
+                if message == "last-pane -d"
         ));
     }
 
@@ -6862,8 +6796,8 @@ mod tests {
         ));
         assert!(matches!(
             engine.execute(&mut context, &command("break-pane", &["-W"])),
-            Err(ServerError::InvalidCommand(message))
-                if message == "break-pane does not support -W"
+            Err(ServerError::UnsupportedCommand(message))
+                if message == "break-pane -W"
         ));
     }
 
@@ -7043,8 +6977,8 @@ mod tests {
         ));
         assert!(matches!(
             engine.execute(&mut context, &command("select-pane", &["-m"])),
-            Err(ServerError::InvalidCommand(message))
-                if message == "select-pane does not support -m"
+            Err(ServerError::UnsupportedCommand(message))
+                if message == "select-pane -m"
         ));
     }
 }

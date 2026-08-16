@@ -129,8 +129,10 @@ The ones real dotfiles set most, roughly by frequency: `base-index`, `pane-base-
 
 # Related
 
+- [tmux drop-in plan](/designs/tmux-drop-in.md) — the 2026-08-16 plan that closes almost every
+  row in this matrix; only linked windows/session groups and real-tmux socket interop stay.
 - [tmux compatibility philosophy](/tmux/tmux-compat.md) — the contract these divergences are
   measured against.
-- [tmux superset roadmap](/designs/tmux-superset-roadmap.md) — the tier ladder and the never-list
-  doctrine that decides which rows here are permanent.
+- [tmux superset roadmap](/designs/tmux-superset-roadmap.md) — the tier ladder and the amended
+  never-list.
 - [commands](/tmux/commands.md) — the implemented verb-by-verb reference.

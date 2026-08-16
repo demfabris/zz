@@ -86,17 +86,17 @@ done | fzf
 refused. Remaining TUI work is that design's open rungs (agent panes), not a
 missing verb. Shares its client seams with the [iOS client](/designs/ios-client.md).
 
-# Never (by design, not backlog)
+# Never (amended 2026-08-16 by the drop-in plan)
 
-- `run-shell` / `if-shell` / `set-hook` / `wait-for` — the command catalog is the
-  security boundary; these reopen arbitrary process execution from config, and they
-  are the load-bearing wall of tmux's plugin ecosystem. zz's answer to plugins is
-  native features. `if-shell` stays parse-and-skip for import compat.
-- Control mode (`-CC`) — exists so a GUI can front a tmux server; zz owns both ends.
-- Serialized layout strings — `LayoutNode` with stable `SplitId`s is strictly
-  richer; dump/restore, if ever, is native.
-- `-L` named sockets, session groups, linked windows, `status-style`/`#[…]`
-  styling, the ~155 unimplemented options — GUI-native features or legacy baggage.
+Most of the original never-list was unwound by the [tmux drop-in plan](/designs/tmux-drop-in.md):
+the exec family returns behind a consent gate, control mode becomes the differential-testing
+harness, layout strings ride the cell-authoritative layout rework, and `-L`/the options sprawl
+join the grind. What survives as never:
+
+- Linked windows and session groups — one window belongs to one session; `new-session -t`
+  stays a loud rejection (drop-in plan, decision 3).
+- Speaking tmux's private client-server socket protocol — the alias model (`alias tmux=zz`)
+  makes real-tmux-binary interop a non-goal (drop-in plan, decision 4).
 - Fleet broadcast (`--all`) — composition over features: a shell loop over
   `fleet list -F` is the unix answer. The one conceivable exception is a read-only
   `fleet status` reachability probe, which is not composable from outside.
@@ -113,6 +113,9 @@ missing verb. Shares its client seams with the [iOS client](/designs/ios-client.
   live daemon the same day (all suites green; the real ssh `--host` hop remains
   unsmoked pending a machine with fleet hosts configured). `--host` guards:
   refuses `daemon`/`proxy`/`fleet`/`attach` and conflicts with `--socket`.
+- 2026-08-16: the drop-in pivot — goal upgraded from honest-subset-plus-superset
+  to `alias tmux=zz`. The never-list shrank to the three items above; everything
+  else moved into the [tmux drop-in plan](/designs/tmux-drop-in.md)'s six phases.
 
 # Related
 

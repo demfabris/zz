@@ -81,7 +81,7 @@ AgentController reducer ──────▶ AgentTimeline + controls          
 - A replay deliberately overlaps the live tail; the client's per-pane sequence cursor is what makes
   that idempotent. A lane overflow sends `AgentLagged` rather than closing the connection, and the
   client answers with `AgentReplay` from its cursor.
-- Slash completion consumes `AvailableCommandsUpdate`; `$`-prefixed entries are presented as skills.
+- Slash completion consumes `AvailableCommandsUpdate` with one `/` sigil for every provider.
   Permission mode, model, and effort controls send the agent's exact config-option IDs and values as
   `AgentSetConfigOption`/`AgentSetMode`, falling back to legacy ACP session modes when generic config
   options are unavailable.

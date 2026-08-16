@@ -21,7 +21,7 @@ The crate is small and dependency-light: five dependencies, `postcard`, `serde`,
 `thiserror`, and `zz-terminal` (for `TerminalViewport`, `TerminalAppearance`, `PackedCell`, and
 friends that ride the terminal lane). It has no cargo features at all since v43 retired `compress` and its optional
 `zstd`. Because it encodes the wire format, **any encoding-affecting change requires bumping
-`PROTOCOL_VERSION`**, currently 55. See [the wire protocol](/protocol/wire-protocol.md).
+`PROTOCOL_VERSION`**, currently 56. See [the wire protocol](/protocol/wire-protocol.md).
 
 # What it exports
 
@@ -109,7 +109,7 @@ or names a window that no longer exists, so removing a focused window needs no s
 | `crates/zz-protocol/src/catalog.rs` | Canonical command names, aliases, descriptions, accepted options, and completion value kinds |
 | `crates/zz-protocol/src/framing.rs` | Length-prefixed envelope, `Lane` tag, reserved flags byte, version check, `ProtocolError`, control-lane `encode/decode/read/write` |
 | `crates/zz-protocol/src/key.rs` | Shared `KeyTables`/`KeyEngine` model, default pane and overlay tables, key folding, typed-text precedence, bind/unbind, and snapshots |
-| `crates/zz-protocol/src/message.rs` | `PROTOCOL_VERSION = 55`, `ProtocolMessage` (including `RequestFull`, `HistoryRequest`, stable client identity, and the Agent runtime messages), `MuxOptionKey`/`MuxOptions` (fourteen keys, including the three agent adapter options), ordered configuration override entries, appearance provenance payloads, `Event`/`EventPayload` (including `KeyTablesChanged`, `HistoryChunk`, `Detached`, and the Agent payloads), `AgentPaneWire` and its `validate`, `InputMessage`, hello/command/error/UI-state types and their byte bounds |
+| `crates/zz-protocol/src/message.rs` | `PROTOCOL_VERSION = 56`, `ProtocolMessage` (including `RequestFull`, `HistoryRequest`, stable client identity, and the Agent runtime messages), `MuxOptionKey`/`MuxOptions` (fourteen keys, including the three agent adapter options), ordered configuration override entries, appearance provenance payloads, `Event`/`EventPayload` (including `KeyTablesChanged`, `HistoryChunk`, `Detached`, and the Agent payloads), `AgentPaneWire` and its `validate`, `InputMessage`, hello/command/error/UI-state types and their byte bounds |
 | `crates/zz-protocol/src/id.rs` | The `stable_id!` macro and the five sigil-prefixed `u64` newtype IDs |
 | `crates/zz-protocol/src/terminal_codec.rs` | Terminal-lane packer/unpacker for viewports and patches, plus lane-selecting encode/decode entrypoints and validation |
 | `crates/zz-protocol/src/snapshot.rs` | `MuxSnapshot` and the session/window/pane/layout tree it carries, plus per-client window focus and `SessionViewer` presence |

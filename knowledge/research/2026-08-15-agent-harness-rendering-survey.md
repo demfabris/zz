@@ -1,7 +1,7 @@
 ---
 type: Research Report
 title: Rendering multi-harness agent output — industry survey
-description: How comet, opencode, t3code, Zed, and ~40 other agent clients integrate and render Claude Code, Codex, and other harnesses; the state of ACP v1/v2; why zz's per-provider seams are the industry norm; and the ranked fixes for zz's dangling-spinner and settling bugs.
+description: How comet, opencode, t3code, Zed, and other agent clients render multi-harness output, followed by zz's decision to adopt a flat ACP v1 contract.
 tags:
 - agent
 - acp
@@ -23,6 +23,17 @@ passthrough, spinner force-settling, placeholder-title denylists) feel unmaintai
 **Answer: no. The architecture is correct and industry-standard; the pain is the state of the
 art, not a zz defect.** Every high-fidelity client carries the same seams. The wins available
 are narrow, specific, and listed at the bottom.
+
+# Decision on 2026-08-16
+
+zz chose the lower-fidelity ACP v1 boundary after this survey. Protocol v56 removed provider task
+events, raw Claude SDK parsing, background-task reconciliation, quiescence parking, nested agent
+transcripts, notification cards, sticky agent rows, and transcript tool animation. The pane now
+renders five flat transcript shapes and treats vendor `_meta` as inert. `session/prompt` response,
+explicit cancellation, and failure define turn state.
+
+The sections below preserve the evidence and the rejected high-fidelity option. Statements about
+features zz shipped describe the v55 implementation captured on 2026-08-15.
 
 # The three-layer contract everyone converged on
 

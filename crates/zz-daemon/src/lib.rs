@@ -38,13 +38,8 @@ mod status;
 mod transport;
 pub mod user_data;
 
-/// The agent stream vocabulary, so a client deserializes the JSON items the
-/// daemon journals and fans out without redeclaring their shapes. The
-/// ext-notification parser rides along so a client-side replay drives the same
-/// classification the runtime does rather than a transcription of it.
 #[cfg(feature = "agent")]
 pub use agent::{
-    profile::{ProviderProfile, SdkMessage, SdkTaskEvent, TaskNotification},
     stream::{
         AgentAuthMethod, AgentImage as AgentStreamImage, AgentPrompt, AgentPromptOutcome,
         AgentSessionCapabilities, AgentSessionSummary, AgentStreamItem, AgentStreamPayload,

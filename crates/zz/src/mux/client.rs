@@ -6204,7 +6204,7 @@ mod tests {
     fn agent_blob(seq: u64) -> Vec<u8> {
         serde_json::to_vec(&zz_daemon::AgentStreamItem {
             seq,
-            payload: zz_daemon::AgentStreamPayload::Parked,
+            payload: zz_daemon::AgentStreamPayload::PromptAccepted { turn_id: seq },
         })
         .expect("a stream item encodes")
     }

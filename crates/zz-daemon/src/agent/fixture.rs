@@ -57,44 +57,12 @@ pub(crate) fn fixture_runner(
     })
 }
 
-pub(crate) fn fixture_runner_with_cancellations(
-    provider: AgentProvider,
-    behavior: Behavior,
-    cancellations: Arc<AtomicUsize>,
-) -> PaneRunner {
-    Box::new(move |channels: RuntimeChannels| {
-        Box::pin(run_agent_connection(
-            provider,
-            false,
-            fixture_agent_with_cancellations(behavior, true, Some(cancellations)),
-            channels.permission_ids,
-            channels.journal,
-            channels.commands,
-            channels.controls,
-            channels.events,
-        ))
-    })
-}
-
 pub(crate) fn fixture_agent(behavior: Behavior, load: bool) -> impl ConnectTo<AcpClientRole> {
-    fixture_agent_with_cancellations(behavior, load, None)
-}
-
-fn fixture_agent_with_cancellations(
-    behavior: Behavior,
-    load: bool,
-    cancellations: Option<Arc<AtomicUsize>>,
-) -> impl ConnectTo<AcpClientRole> {
     let prompts = Arc::new(AtomicUsize::new(0));
     Agent
         .builder()
         .on_receive_notification(
-            async move |_: CancelRequestNotification, _| {
-                if let Some(cancellations) = cancellations.as_ref() {
-                    cancellations.fetch_add(1, Ordering::Relaxed);
-                }
-                Ok(())
-            },
+            async move |_: CancelRequestNotification, _| Ok(()),
             agent_client_protocol::on_receive_notification!(),
         )
         .on_receive_request(

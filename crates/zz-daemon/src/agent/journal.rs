@@ -1,26 +1,3 @@
-//! Append-only per-pane JSONL journal of ACP session traffic, for replay when
-//! `session/load` is unavailable.
-//!
-//! One file per ACP session id under a caller-supplied directory. A line is
-//! either `{"seq": n, "update": <session/update payload>}` or
-//! `{"seq": n, "task": <background-task event>}`, with `seq` counting from 1
-//! across both: the two shapes share one stream order, because a task bookend
-//! only means anything in the position the transcript put it. The key names the
-//! shape, so a journal written before task events existed reads exactly as it
-//! always did.
-//!
-//! Adapters own the session-id string, so it is jailed into a file stem before
-//! it reaches the filesystem, and a crash mid-write leaves a torn trailing line
-//! that readers skip and the next append isolates behind a fresh newline.
-//!
-//! Agents stream token by token, so one assistant message arrives as hundreds
-//! of chunk updates. Adjacent chunks of the same logical stream are coalesced
-//! into a single record before it reaches the file, which keeps the journal
-//! O(messages) instead of O(tokens) in records, bytes and replay cost. Only the
-//! shapes proven equivalent under the client reducer are merged; everything
-//! else is still written verbatim, one record per update, so old journals
-//! replay byte-identically.
-
 use std::{
     collections::{HashMap, hash_map::Entry},
     ffi::OsStr,
@@ -36,10 +13,7 @@ use serde_json::Value;
 use thiserror::Error;
 use zz_protocol::AgentProvider;
 
-use crate::{
-    agent::profile::SdkTaskEvent,
-    user_data::{restrict_directory_to_current_user, restrict_to_current_user},
-};
+use crate::user_data::{restrict_directory_to_current_user, restrict_to_current_user};
 
 const JOURNAL_EXTENSION: &str = "jsonl";
 
@@ -80,13 +54,9 @@ pub(crate) enum JournalError {
     Full { bytes: u64, records: usize },
 }
 
-/// What one record holds, once it is back off disk. Both shapes count as
-/// records and share one seq line, so their relative order is the order they
-/// arrived in.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum JournalEntry {
     Update(Value),
-    Task(SdkTaskEvent),
 }
 
 #[derive(Serialize)]
@@ -101,7 +71,6 @@ struct JournalRecord<'a> {
 #[serde(rename_all = "lowercase")]
 enum RecordBody<'a> {
     Update(&'a Value),
-    Task(&'a Value),
 }
 
 #[derive(Deserialize)]
@@ -163,14 +132,6 @@ impl OpenJournal {
         let seq = self.open_pending(update)?;
         self.settle_pending()?;
         Ok(seq)
-    }
-
-    /// Take one task event into the journal. It never coalesces, and it must
-    /// never overtake the text it followed, so whatever is still being merged
-    /// goes to disk before this record is appended.
-    fn record_task(&mut self, task: &Value) -> Result<u64, JournalError> {
-        self.flush_pending()?;
-        self.write_verbatim(RecordBody::Task(task))
     }
 
     /// Merge `next` into the open record when it continues the same stream.
@@ -445,19 +406,6 @@ impl AgentJournal {
         self.record_into(provider, session_id, |journal| journal.record(update))
     }
 
-    /// Record one background-task event in the position the stream put it, and
-    /// answer the seq of its record. Task events never coalesce, so this is
-    /// always a record of its own.
-    pub(crate) fn append_task_for(
-        &self,
-        provider: AgentProvider,
-        session_id: &str,
-        event: &SdkTaskEvent,
-    ) -> Result<u64, JournalError> {
-        let task = serde_json::to_value(event)?;
-        self.record_into(provider, session_id, |journal| journal.record_task(&task))
-    }
-
     fn record_into(
         &self,
         provider: AgentProvider,
@@ -555,15 +503,6 @@ impl AgentJournal {
     #[cfg(test)]
     pub(crate) fn append(&self, session_id: &str, update: &Value) -> Result<u64, JournalError> {
         self.append_for(AgentProvider::Codex, session_id, update)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn append_task(
-        &self,
-        session_id: &str,
-        event: &SdkTaskEvent,
-    ) -> Result<u64, JournalError> {
-        self.append_task_for(AgentProvider::Codex, session_id, event)
     }
 
     #[cfg(test)]
@@ -728,18 +667,10 @@ fn read_records(path: &Path) -> Result<Vec<(u64, JournalEntry)>, JournalError> {
         };
         let entry = match record.body {
             StoredBody::Update(update) => JournalEntry::Update(update),
-            StoredBody::Task(task) => match serde_json::from_value::<SdkTaskEvent>(task) {
-                Ok(event) => JournalEntry::Task(event),
-                Err(error) => {
-                    log::warn!(
-                        target: "zz::agent::journal",
-                        "skipping unreadable journalled task {} path={} error={error}",
-                        record.seq,
-                        path.display(),
-                    );
-                    continue;
-                }
-            },
+            StoredBody::Task(task) => {
+                drop(task);
+                continue;
+            }
         };
         records.push((record.seq, entry));
     }
@@ -752,34 +683,10 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::agent::profile::TaskNotification;
-
-    /// The update a record holds. Every record is an update unless the test
-    /// journalled a task event, so anything else is that test's own bug.
     fn journaled(entry: &JournalEntry) -> &Value {
         match entry {
             JournalEntry::Update(update) => update,
-            JournalEntry::Task(event) => panic!("expected an update record, got {event:?}"),
         }
-    }
-
-    fn started(task_id: &str) -> SdkTaskEvent {
-        SdkTaskEvent::Started {
-            task_id: task_id.to_owned(),
-            tool_use_id: format!("toolu_{task_id}"),
-            is_agent: true,
-        }
-    }
-
-    fn notification(task_id: &str) -> SdkTaskEvent {
-        SdkTaskEvent::Notification(TaskNotification {
-            task_id: task_id.to_owned(),
-            tool_use_id: format!("toolu_{task_id}"),
-            agent_task: true,
-            status: "completed".to_owned(),
-            summary: "done".to_owned(),
-            result_markdown: String::new(),
-        })
     }
 
     /// A chunk that never coalesces with another, because its id is its text.
@@ -1618,47 +1525,6 @@ mod tests {
     }
 
     #[test]
-    fn task_records_round_trip_beside_updates_in_stream_order() {
-        let directory = tempdir().expect("temporary directory");
-        let journal = AgentJournal::open(directory.path()).expect("open journal");
-
-        assert_eq!(journal.append("sess-1", &update("a")).expect("update"), 1);
-        assert_eq!(
-            journal
-                .append_task("sess-1", &started("t-1"))
-                .expect("started"),
-            2
-        );
-        assert_eq!(journal.append("sess-1", &update("b")).expect("update"), 3);
-        assert_eq!(
-            journal
-                .append_task("sess-1", &notification("t-1"))
-                .expect("notification"),
-            4
-        );
-
-        assert_eq!(
-            journal.replay("sess-1").expect("replay"),
-            vec![
-                (1, JournalEntry::Update(update("a"))),
-                (2, JournalEntry::Task(started("t-1"))),
-                (3, JournalEntry::Update(update("b"))),
-                (4, JournalEntry::Task(notification("t-1"))),
-            ]
-        );
-        assert_eq!(journal.last_seq("sess-1").expect("last seq"), 4);
-
-        let lines = fs::read_to_string(journal_path(directory.path(), "sess-1"))
-            .expect("read journal")
-            .lines()
-            .map(|line| serde_json::from_str::<Value>(line).expect("record"))
-            .collect::<Vec<_>>();
-        assert!(lines[0].get("update").is_some() && lines[0].get("task").is_none());
-        assert!(lines[1].get("task").is_some() && lines[1].get("update").is_none());
-        assert_eq!(lines[1]["task"]["kind"], json!("started"));
-    }
-
-    #[test]
     fn a_journal_of_updates_alone_reads_exactly_as_it_did() {
         let directory = tempdir().expect("temporary directory");
         let path = journal_path(directory.path(), "sess-1");
@@ -1670,7 +1536,7 @@ mod tests {
                 json!({"seq": 2, "update": tool_call("t-1")}),
             ),
         )
-        .expect("write a journal from before task records");
+        .expect("write journal");
 
         let journal = AgentJournal::open(directory.path()).expect("open journal");
         assert_eq!(
@@ -1682,81 +1548,14 @@ mod tests {
         );
         assert_eq!(journal.last_seq("sess-1").expect("last seq"), 2);
         assert_eq!(
-            journal
-                .append_task("sess-1", &started("t-1"))
-                .expect("task"),
+            journal.append("sess-1", &update("b")).expect("append"),
             3,
             "an old journal keeps counting where it left off"
         );
     }
 
     #[test]
-    fn a_task_record_flushes_the_message_it_followed() {
-        let directory = tempdir().expect("temporary directory");
-        let journal = AgentJournal::open(directory.path()).expect("open journal");
-
-        journal
-            .append("sess-1", &chunk("msg-1", "spawning "))
-            .expect("a");
-        journal
-            .append("sess-1", &chunk("msg-1", "a task"))
-            .expect("b");
-        assert!(
-            stored(directory.path(), "sess-1").is_empty(),
-            "the message is still being coalesced"
-        );
-
-        assert_eq!(
-            journal
-                .append_task("sess-1", &started("t-1"))
-                .expect("task"),
-            2
-        );
-        assert_eq!(
-            stored(directory.path(), "sess-1"),
-            vec![
-                (1, JournalEntry::Update(chunk("msg-1", "spawning a task"))),
-                (2, JournalEntry::Task(started("t-1"))),
-            ],
-            "a task event can never be reordered ahead of the text it followed"
-        );
-
-        journal.append("sess-1", &chunk("msg-1", "!")).expect("c");
-        assert_eq!(
-            journal.replay("sess-1").expect("replay").last(),
-            Some(&(3, JournalEntry::Update(chunk("msg-1", "!")))),
-            "the flushed message never reopens across the task record"
-        );
-    }
-
-    #[test]
-    fn a_task_record_counts_against_the_record_cap() {
-        let directory = tempdir().expect("temporary directory");
-        let journal = AgentJournal::open(directory.path()).expect("open journal");
-        for index in 0..MAX_JOURNAL_RECORDS - 1 {
-            journal
-                .append("sess-1", &update(&index.to_string()))
-                .expect("append");
-        }
-
-        assert_eq!(
-            journal
-                .append_task("sess-1", &started("t-1"))
-                .expect("task"),
-            u64::try_from(MAX_JOURNAL_RECORDS).expect("cap")
-        );
-        assert!(matches!(
-            journal.append_task("sess-1", &notification("t-1")),
-            Err(JournalError::Full { records, .. }) if records == MAX_JOURNAL_RECORDS
-        ));
-        assert_eq!(
-            journal.replay("sess-1").expect("replay").len(),
-            MAX_JOURNAL_RECORDS
-        );
-    }
-
-    #[test]
-    fn a_task_record_this_build_cannot_read_costs_only_itself() {
+    fn legacy_task_records_are_skipped_without_hiding_later_updates() {
         let directory = tempdir().expect("temporary directory");
         let path = journal_path(directory.path(), "sess-1");
         fs::write(
@@ -1781,7 +1580,7 @@ mod tests {
         assert_eq!(
             journal.last_seq("sess-1").expect("last seq"),
             3,
-            "an unreadable record still holds its place in the sequence"
+            "a legacy record still holds its place in the sequence"
         );
     }
 }

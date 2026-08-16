@@ -1,27 +1,16 @@
-//! The daemon's agent runtimes: one thread per open pane, a shared park
-//! ticker, and a single sink every stream item leaves through.
-//!
-//! The host owns what the desktop's controller owned below its reducer —
-//! prompt queueing, the quiesce park, turn snapshots, permission bookkeeping —
-//! and nothing above it. It never renders, so it keeps no transcript: the raw
-//! items are journalled on the way past and handed to the sink, and whoever
-//! attached rebuilds the conversation from them.
-
+#[cfg(test)]
+use std::time::{Duration, Instant};
 use std::{
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{BTreeMap, VecDeque},
     future::Future,
     path::PathBuf,
     pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+    sync::{Arc, atomic::AtomicU64},
     thread::JoinHandle,
-    time::{Duration, Instant},
 };
 
 use async_channel::{Receiver, Sender};
-use parking_lot::{Condvar, Mutex};
+use parking_lot::Mutex;
 use serde_json::Value;
 #[cfg(test)]
 use zz_protocol::ClientInstanceId;
@@ -32,11 +21,7 @@ use zz_protocol::{
 use crate::agent::{
     environment::{AgentWorkspaceEnvironment, warm_adapter_cache},
     journal::AgentJournal,
-    profile::SdkTaskEvent,
-    runtime::{
-        AgentSpawnConfig, RuntimeCommand, RuntimeControl, quiesce_window, run_agent_runtime,
-        should_park_turn,
-    },
+    runtime::{AgentSpawnConfig, RuntimeCommand, RuntimeControl, run_agent_runtime},
     stream::{
         AgentAuthMethod, AgentPrompt, AgentPromptOutcome, AgentSessionCapabilities,
         AgentSessionSummary, AgentStreamItem, AgentStreamPayload, AgentTurnDiffOutcome,
@@ -44,16 +29,10 @@ use crate::agent::{
     turn_snapshot::{self, TurnTree},
 };
 
-/// How often the shared ticker looks at the open panes. The quiesce window is
-/// measured in minutes, so second resolution is plenty and the thread is
-/// parked outright whenever no pane is open.
-const PARK_TICK: Duration = Duration::from_secs(1);
 const PANE_INBOX_CAPACITY: usize = 64;
 const RUNTIME_COMMAND_CAPACITY: usize = 32;
 const RUNTIME_CONTROL_CAPACITY: usize = 32;
 const RUNTIME_EVENT_CAPACITY: usize = 64;
-const MAX_LIVE_OPERATION_IDS: usize = 256;
-const MAX_LIVE_OPERATION_ID_BYTES: usize = 256 * 1024;
 
 /// Where every item a pane produces goes, with the pane state it left behind.
 /// A call carrying no item is a state-only change — a queued prompt, say —
@@ -61,8 +40,6 @@ const MAX_LIVE_OPERATION_ID_BYTES: usize = 256 * 1024;
 pub(crate) type AgentStreamSink =
     Box<dyn Fn(PaneId, u64, AgentPaneState, Option<AgentStreamItem>) + Send + Sync>;
 
-/// What the host is asked to do with an open pane. Everything a client can
-/// send lands here, plus the park the ticker injects.
 #[derive(Debug)]
 pub(crate) enum HostCommand {
     Prompt(AgentPrompt),
@@ -103,7 +80,6 @@ pub(crate) enum HostCommand {
         client: ClientId,
         request_id: u64,
     },
-    Park,
 }
 
 /// What an agent pane is opened against.
@@ -158,11 +134,6 @@ pub(crate) struct AgentPaneState {
     pub(crate) pending_permissions: Vec<AgentPendingPermission>,
     pub(crate) error: Option<String>,
     pub(crate) last_seq: u64,
-    last_activity: Instant,
-    live_tools: HashSet<String>,
-    live_tasks: HashSet<String>,
-    live_operation_bytes: usize,
-    live_operations_overflowed: bool,
 }
 
 impl AgentPaneState {
@@ -179,11 +150,6 @@ impl AgentPaneState {
             pending_permissions: Vec::new(),
             error: None,
             last_seq: 0,
-            last_activity: Instant::now(),
-            live_tools: HashSet::new(),
-            live_tasks: HashSet::new(),
-            live_operation_bytes: 0,
-            live_operations_overflowed: false,
         }
     }
 
@@ -195,21 +161,6 @@ impl AgentPaneState {
             resume_session: None,
             workspace: AgentWorkspaceEnvironment::default(),
         })
-    }
-
-    /// What the quiesce watchdog refuses to park through: a permission the user
-    /// still owes an answer to, a subagent task still reporting, or a tool call
-    /// the agent has not resolved.
-    fn turn_in_flight(&self) -> bool {
-        !self.pending_permissions.is_empty()
-            || !self.live_tasks.is_empty()
-            || !self.live_tools.is_empty()
-            || self.live_operations_overflowed
-    }
-
-    fn park_due(&self, window: Option<Duration>) -> bool {
-        self.phase == AgentConnectionPhase::Running
-            && should_park_turn(window, self.last_activity.elapsed(), self.turn_in_flight())
     }
 }
 
@@ -228,13 +179,9 @@ struct PaneHandle {
     thread: JoinHandle<()>,
 }
 
-/// The open panes, and the gate the ticker parks on. Nothing polls while the
-/// map is empty.
 #[derive(Default)]
 struct PaneRegistry {
     panes: Mutex<BTreeMap<PaneId, PaneHandle>>,
-    wake: Condvar,
-    stopped: AtomicBool,
 }
 
 pub(crate) struct AgentHost {
@@ -243,10 +190,6 @@ pub(crate) struct AgentHost {
     journal: Option<Arc<AgentJournal>>,
     registry: Arc<PaneRegistry>,
     permission_ids: Arc<AtomicU64>,
-    /// Shared with every pane and with the ticker, so both sides of a park
-    /// decision always read the same window.
-    park_window: Arc<Mutex<Option<Duration>>>,
-    ticker: Mutex<Option<JoinHandle<()>>>,
     #[cfg(test)]
     runner_factory: Mutex<Option<PaneRunnerFactory>>,
 }
@@ -286,8 +229,6 @@ impl AgentHost {
             journal,
             registry: Arc::new(PaneRegistry::default()),
             permission_ids: Arc::new(AtomicU64::new(1)),
-            park_window: Arc::new(Mutex::new(quiesce_window())),
-            ticker: Mutex::new(None),
             #[cfg(test)]
             runner_factory: Mutex::new(None),
         }
@@ -369,7 +310,6 @@ impl AgentHost {
         let sink = Arc::clone(&self.sink);
         let permission_ids = Arc::clone(&self.permission_ids);
         let journal = self.journal.clone();
-        let park_window = Arc::clone(&self.park_window);
         let (inbox_tx, inbox_rx) = async_channel::bounded(PANE_INBOX_CAPACITY);
         let (control_tx, control_rx) = async_channel::bounded(RUNTIME_CONTROL_CAPACITY);
         let (prompt_tx, prompt_rx) = async_channel::bounded(MAX_AGENT_QUEUED_PROMPTS);
@@ -385,7 +325,6 @@ impl AgentHost {
                     spec,
                     pane_state,
                     sink,
-                    park_window,
                     runner,
                     permission_ids,
                     journal,
@@ -415,9 +354,6 @@ impl AgentHost {
                 thread,
             },
         );
-        drop(panes);
-        self.registry.wake.notify_all();
-        self.ensure_ticker();
         true
     }
 
@@ -472,72 +408,12 @@ impl AgentHost {
         for handle in handles.into_values() {
             let _ = handle.thread.join();
         }
-        self.registry.stopped.store(true, Ordering::Release);
-        self.registry.wake.notify_all();
-        if let Some(ticker) = self.ticker.lock().take() {
-            let _ = ticker.join();
-        }
-    }
-
-    /// Narrow the quiesce window a pane runs under. Tests drive the park
-    /// decision directly rather than waiting out the process-wide window.
-    #[cfg(test)]
-    pub(crate) fn set_park_window(&self, window: Option<Duration>) {
-        *self.park_window.lock() = window;
-    }
-
-    fn ensure_ticker(&self) {
-        if self.park_window.lock().is_none() {
-            return;
-        }
-        let mut ticker = self.ticker.lock();
-        if ticker.is_some() {
-            return;
-        }
-        let registry = Arc::clone(&self.registry);
-        let window = Arc::clone(&self.park_window);
-        *ticker = std::thread::Builder::new()
-            .name("zz-agent-park".to_owned())
-            .spawn(move || run_park_ticker(&registry, &window))
-            .map_err(|error| {
-                log::error!(target: "zz::agent", "could not start the agent park ticker: {error}");
-            })
-            .ok();
     }
 }
 
 impl Drop for AgentHost {
     fn drop(&mut self) {
         self.shutdown();
-    }
-}
-
-/// The one clock the agent host runs, shared by every pane and parked outright
-/// while none is open.
-fn run_park_ticker(registry: &Arc<PaneRegistry>, window: &Mutex<Option<Duration>>) {
-    loop {
-        let mut panes = registry.panes.lock();
-        while panes.is_empty() && !registry.stopped.load(Ordering::Acquire) {
-            registry.wake.wait(&mut panes);
-        }
-        if registry.stopped.load(Ordering::Acquire) {
-            return;
-        }
-        let window = *window.lock();
-        let due = panes
-            .values()
-            .filter(|handle| handle.state.lock().park_due(window))
-            .map(|handle| handle.inbox.clone())
-            .collect::<Vec<_>>();
-        drop(panes);
-        for inbox in due {
-            let _ = inbox.try_send(PaneInput::Command(HostCommand::Park));
-        }
-        let mut panes = registry.panes.lock();
-        registry.wake.wait_for(&mut panes, PARK_TICK);
-        if registry.stopped.load(Ordering::Acquire) {
-            return;
-        }
     }
 }
 
@@ -549,7 +425,6 @@ async fn run_pane(
     spec: AgentPaneSpec,
     state: Arc<Mutex<AgentPaneState>>,
     sink: Arc<AgentStreamSink>,
-    park_window: Arc<Mutex<Option<Duration>>>,
     runner: PaneRunner,
     permission_ids: Arc<AtomicU64>,
     journal: Option<Arc<AgentJournal>>,
@@ -610,13 +485,11 @@ async fn run_pane(
         commands: command_tx,
         controls: runtime_control_tx,
         close: close_tx,
-        park_window,
         seq: 0,
         queue: VecDeque::new(),
         turn_base: None,
         next_turn_id: 0,
         active_turn: None,
-        parking_turn: None,
         dispatched_prompt: None,
         closing: false,
     };
@@ -639,13 +512,11 @@ struct PanePump {
     commands: Sender<RuntimeCommand>,
     controls: Sender<RuntimeControl>,
     close: Sender<()>,
-    park_window: Arc<Mutex<Option<Duration>>>,
     seq: u64,
     queue: VecDeque<AgentPrompt>,
     turn_base: Option<TurnTree>,
     next_turn_id: u64,
     active_turn: Option<u64>,
-    parking_turn: Option<u64>,
     dispatched_prompt: Option<(u64, AgentPrompt)>,
     closing: bool,
 }
@@ -807,7 +678,6 @@ impl PanePump {
                 }
             }
             HostCommand::TurnDiff { client, request_id } => self.turn_diff(client, request_id),
-            HostCommand::Park => self.park(),
         }
     }
 
@@ -844,28 +714,9 @@ impl PanePump {
         if matches!(&payload, AgentStreamPayload::PromptAccepted { .. }) {
             return;
         }
-        if let AgentStreamPayload::TurnAbandoned { turn_id } = &payload {
-            if self.parking_turn != Some(*turn_id) || self.active_turn != Some(*turn_id) {
-                return;
-            }
-            self.parking_turn = None;
-            self.active_turn = None;
-            self.dispatched_prompt = None;
-            {
-                let mut state = self.state.lock();
-                state.phase = AgentConnectionPhase::Ready;
-                settle_turn(&mut state);
-            }
-            self.emit(AgentStreamPayload::Parked);
-            self.dispatch_next();
-            return;
-        }
         if let AgentStreamPayload::PromptFinished { turn_id, .. } = &payload
             && self.active_turn != Some(*turn_id)
         {
-            return;
-        }
-        if matches!(&payload, AgentStreamPayload::Parked) && !self.settleable_out_of_turn() {
             return;
         }
         if matches!(
@@ -881,12 +732,10 @@ impl PanePump {
         ) {
             self.turn_base = None;
             self.active_turn = None;
-            self.parking_turn = None;
             self.reclaim_dispatched_prompt();
         }
         {
             let mut state = self.state.lock();
-            state.last_activity = Instant::now();
             match &payload {
                 AgentStreamPayload::Ready {
                     agent_name,
@@ -924,8 +773,7 @@ impl PanePump {
                     settle_turn(&mut state);
                     follow = FollowUp::DrainQueue;
                 }
-                AgentStreamPayload::PromptAccepted { .. }
-                | AgentStreamPayload::TurnAbandoned { .. } => unreachable!(),
+                AgentStreamPayload::PromptAccepted { .. } => unreachable!(),
                 AgentStreamPayload::SessionSwitchFailed { message } => {
                     state.phase = AgentConnectionPhase::Ready;
                     state.error = Some(message.clone());
@@ -934,8 +782,6 @@ impl PanePump {
                 AgentStreamPayload::SettingFailed { message, .. } => {
                     state.error = Some(message.clone());
                 }
-                AgentStreamPayload::Update { update } => track_tool_call(&mut state, update),
-                AgentStreamPayload::TaskEvent { event } => track_task(&mut state, event),
                 AgentStreamPayload::PermissionRequested {
                     request_id,
                     tool_call,
@@ -950,7 +796,6 @@ impl PanePump {
                     .retain(|pending| pending.request_id != *request_id),
                 AgentStreamPayload::PromptFinished { outcome, .. } => {
                     self.active_turn = None;
-                    self.parking_turn = None;
                     self.dispatched_prompt = None;
                     match outcome {
                         AgentPromptOutcome::Finished { stop_reason } => {
@@ -984,11 +829,8 @@ impl PanePump {
                 }
                 AgentStreamPayload::ConfigOptionsChanged { .. }
                 | AgentStreamPayload::ModeChanged { .. } => state.error = None,
-                AgentStreamPayload::Parked => {
-                    settle_turn(&mut state);
-                    follow = FollowUp::DrainQueue;
-                }
-                AgentStreamPayload::StateSynced { .. }
+                AgentStreamPayload::Update { .. }
+                | AgentStreamPayload::StateSynced { .. }
                 | AgentStreamPayload::TurnStarted { .. }
                 | AgentStreamPayload::SessionsListed { .. }
                 | AgentStreamPayload::SessionListFailed { .. }
@@ -1065,7 +907,6 @@ impl PanePump {
             let mut state = self.state.lock();
             state.phase = AgentConnectionPhase::Running;
             state.error = None;
-            state.last_activity = Instant::now();
         }
         let retained = prompt.clone();
         match self
@@ -1091,18 +932,6 @@ impl PanePump {
                 self.reclaim_queue();
             }
         }
-    }
-
-    /// Whether a turn-over signal arriving outside a prompt has anything to
-    /// settle. A prompt in flight owns its own turn boundary and its response
-    /// is authoritative; a pane with nothing outstanding would only be
-    /// publishing noise, which also dedupes the SDK's per-cycle idles.
-    fn settleable_out_of_turn(&self) -> bool {
-        if self.active_turn.is_some() {
-            return false;
-        }
-        let state = self.state.lock();
-        state.phase == AgentConnectionPhase::Ready && state.turn_in_flight()
     }
 
     /// Start the next queued prompt now that the pane accepts prompts again.
@@ -1143,30 +972,6 @@ impl PanePump {
         }
         self.state.lock().phase = AgentConnectionPhase::Cancelling;
         self.reclaim_queue();
-    }
-
-    /// Finalize a turn the agent went quiet on without touching the child: the
-    /// pane accepts prompts again and the queue moves on.
-    fn park(&mut self) {
-        let window = *self.park_window.lock();
-        if !self.state.lock().park_due(window) {
-            return;
-        }
-        if self.parking_turn.is_some() {
-            return;
-        }
-        if let Some(turn_id) = self.active_turn
-            && !self.send_control(RuntimeControl::AbandonTurn { turn_id })
-        {
-            self.fail_control();
-            return;
-        }
-        self.parking_turn = self.active_turn;
-        log::info!(
-            target: "zz::agent",
-            "parking quiet turn for pane {}; agent process left alone",
-            self.pane
-        );
     }
 
     fn turn_diff(&mut self, client: ClientId, request_id: u64) {
@@ -1299,115 +1104,18 @@ impl PanePump {
 /// A turn is over: nothing the agent still owes an answer for survives it.
 fn settle_turn(state: &mut AgentPaneState) {
     state.pending_permissions.clear();
-    state.live_tools.clear();
-    state.live_tasks.clear();
-    state.live_operation_bytes = 0;
-    state.live_operations_overflowed = false;
-}
-
-fn track_live_operation(state: &mut AgentPaneState, id: &str, task: bool) {
-    let already_tracked = if task {
-        state.live_tasks.contains(id)
-    } else {
-        state.live_tools.contains(id)
-    };
-    if already_tracked {
-        return;
-    }
-    if state
-        .live_tools
-        .len()
-        .saturating_add(state.live_tasks.len())
-        >= MAX_LIVE_OPERATION_IDS
-        || state.live_operation_bytes.saturating_add(id.len()) > MAX_LIVE_OPERATION_ID_BYTES
-    {
-        state.live_operations_overflowed = true;
-        return;
-    }
-    if task {
-        state.live_tasks.insert(id.to_owned());
-    } else {
-        state.live_tools.insert(id.to_owned());
-    }
-    state.live_operation_bytes += id.len();
-}
-
-fn settle_live_operation(state: &mut AgentPaneState, id: &str, task: bool) {
-    let removed = if task {
-        state.live_tasks.remove(id)
-    } else {
-        state.live_tools.remove(id)
-    };
-    if removed {
-        state.live_operation_bytes = state.live_operation_bytes.saturating_sub(id.len());
-    }
-}
-
-fn track_tool_call(state: &mut AgentPaneState, update: &Value) {
-    let Some(kind) = update.get("sessionUpdate").and_then(Value::as_str) else {
-        return;
-    };
-    if kind != "tool_call" && kind != "tool_call_update" {
-        return;
-    }
-    let Some(id) = update.get("toolCallId").and_then(Value::as_str) else {
-        return;
-    };
-    match update.get("status").and_then(Value::as_str) {
-        Some("pending" | "in_progress") => {
-            track_live_operation(state, id, false);
-        }
-        Some(_) => {
-            settle_live_operation(state, id, false);
-        }
-        // A tool call announced without a status is pending by definition; an
-        // update without one only carries output.
-        None if kind == "tool_call" => {
-            track_live_operation(state, id, false);
-        }
-        None => {}
-    }
-}
-
-fn track_task(state: &mut AgentPaneState, event: &SdkTaskEvent) {
-    match event {
-        SdkTaskEvent::Started { task_id, .. } => {
-            track_live_operation(state, task_id, true);
-        }
-        SdkTaskEvent::Notification(notification) => {
-            settle_live_operation(state, &notification.task_id, true);
-        }
-        SdkTaskEvent::Settled { task_id, .. } => {
-            settle_live_operation(state, task_id, true);
-        }
-        // The reconciled set carries no attribution, so it may only retire
-        // tasks the pane already tracks, never introduce new ones.
-        SdkTaskEvent::Reconcile { task_ids } => {
-            let ended = state
-                .live_tasks
-                .iter()
-                .filter(|task_id| !task_ids.contains(task_id))
-                .cloned()
-                .collect::<Vec<_>>();
-            for task_id in ended {
-                settle_live_operation(state, &task_id, true);
-            }
-        }
-        SdkTaskEvent::ToolProgress { .. } | SdkTaskEvent::TaskProgress { .. } => {}
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use agent_client_protocol::schema::v1::{
-        ContentBlock, ContentChunk, MessageId, SessionUpdate, TextContent, ToolCall,
-        ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
+        ContentBlock, ContentChunk, MessageId, SessionUpdate, TextContent,
     };
 
     use super::*;
     use crate::agent::{
-        fixture::{Behavior, fixture_runner, fixture_runner_with_cancellations},
-        journal::{AgentJournal, JournalEntry},
+        fixture::{Behavior, fixture_runner},
+        journal::AgentJournal,
         stream::{AgentImage, AgentStreamPayload},
     };
 
@@ -1524,15 +1232,6 @@ mod tests {
             assert!(self.host.command(self.pane, command).is_ok());
         }
 
-        fn inject(&self, payload: AgentStreamPayload) {
-            let panes = self.host.registry.panes.lock();
-            let handle = panes.get(&self.pane).expect("pane handle");
-            handle
-                .inbox
-                .try_send(PaneInput::Event(payload))
-                .expect("inject runtime event");
-        }
-
         fn prompt(&self, text: &str) {
             self.command(HostCommand::Prompt(AgentPrompt {
                 owner: ClientInstanceId::default(),
@@ -1562,38 +1261,6 @@ mod tests {
         payloads
             .iter()
             .filter_map(|payload| chunk_text(payload).map(ToOwned::to_owned))
-            .collect()
-    }
-
-    /// The transcript a restore produced, in order: the message chunks and the
-    /// task bookends between them, with the session scaffolding left out.
-    fn restored_transcript(payloads: &[AgentStreamPayload]) -> Vec<String> {
-        payloads
-            .iter()
-            .filter_map(|payload| match payload {
-                AgentStreamPayload::Update { .. } => {
-                    chunk_text(payload).map(|text| format!("update:{text}"))
-                }
-                AgentStreamPayload::TaskEvent { event } => Some(format!("task:{}", event.kind())),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// The same description, read back off the journal.
-    fn journalled_transcript(records: &[(u64, JournalEntry)]) -> Vec<String> {
-        records
-            .iter()
-            .map(|(_, entry)| match entry {
-                JournalEntry::Update(update) => format!(
-                    "update:{}",
-                    update
-                        .pointer("/content/text")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                ),
-                JournalEntry::Task(event) => format!("task:{}", event.kind()),
-            })
             .collect()
     }
 
@@ -1803,59 +1470,6 @@ mod tests {
     }
 
     #[test]
-    fn a_late_parked_turn_finish_cannot_settle_the_next_turn() {
-        let fixture = Fixture::open(Behavior::Hang, false);
-        fixture.host.set_park_window(Some(Duration::ZERO));
-        fixture.wait_for_session();
-        fixture.prompt("first");
-        fixture.recorder.wait("the first turn", |payload| {
-            chunk_text(payload) == Some("turn 0")
-        });
-        fixture.prompt("second");
-        fixture.command(HostCommand::Park);
-        fixture.recorder.wait("the second turn", |payload| {
-            chunk_text(payload) == Some("turn 1")
-        });
-        fixture.prompt("third");
-
-        let deadline = Instant::now() + DEADLINE;
-        while fixture.state().queued_prompts == 0 && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(2));
-        }
-        fixture.inject(AgentStreamPayload::PromptFinished {
-            turn_id: 1,
-            outcome: AgentPromptOutcome::Finished {
-                stop_reason: serde_json::json!("end_turn"),
-            },
-        });
-        fixture.command(HostCommand::Unqueue);
-        let payloads = fixture
-            .recorder
-            .wait("the third prompt to be reclaimed", |payload| {
-                matches!(payload, AgentStreamPayload::PromptsReclaimed { .. })
-            });
-        assert_eq!(queued_prompt_texts(&payloads), ["third"]);
-        assert_eq!(fixture.state().phase, AgentConnectionPhase::Running);
-
-        fixture.inject(AgentStreamPayload::PromptFinished {
-            turn_id: 2,
-            outcome: AgentPromptOutcome::Finished {
-                stop_reason: serde_json::json!("end_turn"),
-            },
-        });
-        fixture
-            .recorder
-            .wait("the current turn to finish", |payload| {
-                matches!(
-                    payload,
-                    AgentStreamPayload::PromptFinished { turn_id: 2, .. }
-                )
-            });
-        assert_eq!(fixture.state().phase, AgentConnectionPhase::Ready);
-        fixture.close();
-    }
-
-    #[test]
     fn a_session_change_cannot_cross_an_active_turn() {
         let fixture = Fixture::open(Behavior::Hang, false);
         fixture.wait_for_session();
@@ -2005,10 +1619,28 @@ mod tests {
                 .is_ok()
             );
         }
-        for _ in 0..PANE_INBOX_CAPACITY {
-            assert!(host.command(pane, HostCommand::Park).is_ok());
+        for request_id in 0..PANE_INBOX_CAPACITY {
+            assert!(
+                host.command(
+                    pane,
+                    HostCommand::TurnDiff {
+                        client: ClientId(1),
+                        request_id: request_id as u64,
+                    }
+                )
+                .is_ok()
+            );
         }
-        assert!(host.command(pane, HostCommand::Park).is_err());
+        assert!(
+            host.command(
+                pane,
+                HostCommand::TurnDiff {
+                    client: ClientId(1),
+                    request_id: PANE_INBOX_CAPACITY as u64,
+                }
+            )
+            .is_err()
+        );
         assert!(host.command(pane, HostCommand::Cancel).is_ok());
         assert!(
             host.command(
@@ -2106,107 +1738,6 @@ mod tests {
     }
 
     #[test]
-    fn a_quiet_turn_parks_and_lets_the_queue_move_on() {
-        let fixture = Fixture::open(Behavior::Hang, false);
-        fixture.wait_for_session();
-        fixture.prompt("running");
-        fixture.recorder.wait("the turn to start", |payload| {
-            matches!(
-                payload,
-                AgentStreamPayload::Update { update }
-                    if update.get("content").and_then(|content| content.get("text"))
-                        .and_then(Value::as_str) == Some("turn 0")
-            )
-        });
-        fixture.prompt("queued");
-
-        // The window the ticker would use is process-wide; the park decision
-        // itself is what this exercises, so it is driven directly.
-        let deadline = Instant::now() + DEADLINE;
-        while fixture.state().phase != AgentConnectionPhase::Running && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(2));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-        assert!(fixture.state().park_due(Some(Duration::from_millis(10))));
-        fixture
-            .host
-            .set_park_window(Some(Duration::from_millis(10)));
-        fixture.command(HostCommand::Park);
-
-        let payloads = fixture.recorder.wait("the parked turn", |payload| {
-            matches!(payload, AgentStreamPayload::Parked)
-        });
-        assert_eq!(chunk_texts(&payloads), ["turn 0"]);
-        let payloads = fixture.recorder.wait("the queued turn", |payload| {
-            matches!(
-                payload,
-                AgentStreamPayload::Update { update }
-                    if update.get("content").and_then(|content| content.get("text"))
-                        .and_then(Value::as_str) == Some("turn 1")
-            )
-        });
-        assert_eq!(chunk_texts(&payloads), ["turn 0", "turn 1"]);
-        fixture.close();
-    }
-
-    #[test]
-    fn parking_cancels_each_retired_acp_request() {
-        let cancellations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let fixture = Fixture::open_with_runner(fixture_runner_with_cancellations(
-            AgentProvider::Codex,
-            Behavior::Hang,
-            Arc::clone(&cancellations),
-        ));
-        fixture.host.set_park_window(Some(Duration::ZERO));
-        fixture.wait_for_session();
-        fixture.prompt("first");
-        fixture.recorder.wait("the first turn", |payload| {
-            chunk_text(payload) == Some("turn 0")
-        });
-        fixture.prompt("second");
-        fixture.command(HostCommand::Park);
-        fixture.recorder.wait("the second turn", |payload| {
-            chunk_text(payload) == Some("turn 1")
-        });
-        assert_eq!(cancellations.load(Ordering::Relaxed), 1);
-
-        fixture.prompt("third");
-        fixture.command(HostCommand::Park);
-        fixture.recorder.wait("the third turn", |payload| {
-            chunk_text(payload) == Some("turn 2")
-        });
-        assert_eq!(cancellations.load(Ordering::Relaxed), 2);
-        fixture.close();
-    }
-
-    #[test]
-    fn a_park_is_refused_while_the_agent_still_owes_an_answer() {
-        let fixture = Fixture::open(Behavior::AskPermission, false);
-        fixture.wait_for_session();
-        fixture.prompt("go");
-        fixture.recorder.wait("the permission request", |payload| {
-            matches!(payload, AgentStreamPayload::PermissionRequested { .. })
-        });
-        std::thread::sleep(Duration::from_millis(20));
-
-        assert!(!fixture.state().park_due(Some(Duration::from_millis(10))));
-        fixture
-            .host
-            .set_park_window(Some(Duration::from_millis(10)));
-        fixture.command(HostCommand::Park);
-        std::thread::sleep(Duration::from_millis(20));
-        assert!(
-            !fixture
-                .recorder
-                .payloads()
-                .iter()
-                .any(|payload| matches!(payload, AgentStreamPayload::Parked)),
-            "a pending permission holds the turn open"
-        );
-        fixture.close();
-    }
-
-    #[test]
     fn a_session_the_agent_cannot_load_is_replayed_out_of_the_journal() {
         let directory = tempfile::tempdir().expect("journal directory");
         let journal = Arc::new(AgentJournal::open(directory.path()).expect("open journal"));
@@ -2255,69 +1786,6 @@ mod tests {
             "the superseded journal is not left behind to be restored twice"
         );
         assert_eq!(fixture.state().phase, AgentConnectionPhase::Ready);
-        fixture.close();
-    }
-
-    #[test]
-    fn a_restored_session_replays_its_task_bookends_and_journals_them_again() {
-        let directory = tempfile::tempdir().expect("journal directory");
-        let journal = Arc::new(AgentJournal::open(directory.path()).expect("open journal"));
-        let started = SdkTaskEvent::Started {
-            task_id: "t-1".to_owned(),
-            tool_use_id: "toolu_1".to_owned(),
-            is_agent: true,
-        };
-        let settled = SdkTaskEvent::Settled {
-            task_id: "t-1".to_owned(),
-            status: "completed".to_owned(),
-        };
-        let chunk = |index: usize, text: &str| {
-            let mut chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(text)));
-            chunk.message_id = Some(MessageId::new(format!("restored-{index}")));
-            serde_json::to_value(SessionUpdate::AgentMessageChunk(chunk)).expect("encode update")
-        };
-        journal
-            .append("stale-session", &chunk(0, "spawning"))
-            .expect("append");
-        journal
-            .append_task("stale-session", &started)
-            .expect("append task");
-        journal
-            .append("stale-session", &chunk(1, "waiting"))
-            .expect("append");
-        journal
-            .append_task("stale-session", &settled)
-            .expect("append task");
-
-        let fixture = Fixture::build(
-            Behavior::Chunk,
-            false,
-            false,
-            Some(&journal),
-            Some("stale-session".to_owned()),
-            None,
-        );
-        let payloads = fixture.recorder.wait("the restored session", |payload| {
-            matches!(payload, AgentStreamPayload::SessionReady { .. })
-        });
-
-        let expected = [
-            "update:spawning",
-            "task:task-started",
-            "update:waiting",
-            "task:task-settled",
-        ];
-        assert_eq!(
-            restored_transcript(&payloads),
-            expected,
-            "the bookends replay in the places the transcript gave them"
-        );
-        assert_eq!(
-            journalled_transcript(&journal.replay("fixture-session").expect("replay")),
-            expected,
-            "and are journalled again under the session that took over"
-        );
-        assert!(journal.replay("stale-session").expect("replay").is_empty());
         fixture.close();
     }
 
@@ -2395,214 +1863,5 @@ mod tests {
             "closing on purpose is not a failure: {payloads:?}"
         );
         assert!(fixture.host.snapshot_state(pane).is_none());
-    }
-
-    #[test]
-    fn tool_calls_and_tasks_hold_a_turn_open_until_they_settle() {
-        let mut state = AgentPaneState::new(&AgentPaneSpec {
-            provider: AgentProvider::Codex,
-            cwd: PathBuf::from("/"),
-            resume_session: None,
-            workspace: AgentWorkspaceEnvironment::default(),
-        });
-        let call = serde_json::to_value(SessionUpdate::ToolCall(
-            ToolCall::new("tool-1", "run it").status(ToolCallStatus::Pending),
-        ))
-        .expect("encode tool call");
-        let done = serde_json::to_value(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
-            "tool-1",
-            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
-        )))
-        .expect("encode tool call update");
-
-        track_tool_call(&mut state, &call);
-        assert!(state.turn_in_flight(), "an unresolved tool call: {call}");
-        track_tool_call(&mut state, &done);
-        assert!(!state.turn_in_flight(), "a settled tool call: {done}");
-
-        track_task(
-            &mut state,
-            &SdkTaskEvent::Started {
-                task_id: "t-1".to_owned(),
-                tool_use_id: "u-1".to_owned(),
-                is_agent: true,
-            },
-        );
-        assert!(state.turn_in_flight());
-        track_task(
-            &mut state,
-            &SdkTaskEvent::Settled {
-                task_id: "t-1".to_owned(),
-                status: "completed".to_owned(),
-            },
-        );
-        assert!(!state.turn_in_flight());
-    }
-
-    #[test]
-    fn a_reconciled_set_retires_the_tasks_it_leaves_out_and_adopts_none() {
-        let mut state = AgentPaneState::for_test();
-        for task_id in ["a5ee", "bc5s"] {
-            track_task(
-                &mut state,
-                &SdkTaskEvent::Started {
-                    task_id: task_id.to_owned(),
-                    tool_use_id: format!("toolu_{task_id}"),
-                    is_agent: true,
-                },
-            );
-        }
-
-        track_task(
-            &mut state,
-            &SdkTaskEvent::Reconcile {
-                task_ids: vec!["a5ee".to_owned(), "never-started".to_owned()],
-            },
-        );
-        assert_eq!(
-            state.live_tasks,
-            HashSet::from(["a5ee".to_owned()]),
-            "the set retires what it omits and adopts nothing it invents"
-        );
-        assert!(state.turn_in_flight());
-
-        track_task(
-            &mut state,
-            &SdkTaskEvent::Reconcile {
-                task_ids: Vec::new(),
-            },
-        );
-        assert!(state.live_tasks.is_empty());
-        assert!(!state.turn_in_flight());
-    }
-
-    #[test]
-    fn progress_heartbeats_leave_the_tracked_operations_alone() {
-        let mut state = AgentPaneState::for_test();
-
-        track_task(
-            &mut state,
-            &SdkTaskEvent::ToolProgress {
-                tool_use_id: "toolu_01BashRun".to_owned(),
-                parent_tool_use_id: None,
-                elapsed_seconds: 30.0,
-                subagent_type: None,
-            },
-        );
-        track_task(
-            &mut state,
-            &SdkTaskEvent::TaskProgress {
-                task_id: "a5ee".to_owned(),
-                tool_use_id: None,
-                description: "explore".to_owned(),
-                last_tool_name: Some("Grep".to_owned()),
-                subagent_type: Some("Explore".to_owned()),
-            },
-        );
-
-        assert!(
-            !state.turn_in_flight(),
-            "liveness alone must not open a turn: {:?}",
-            state.live_tasks
-        );
-    }
-
-    #[test]
-    fn an_autonomous_turn_settles_at_the_idle_signal_but_a_prompt_owns_its_own() {
-        let fixture = Fixture::open(Behavior::Hang, false);
-        fixture.wait_for_session();
-
-        // Nothing outstanding: the pane has no reason to publish a park.
-        fixture.inject(AgentStreamPayload::Parked);
-        fixture.inject(AgentStreamPayload::Update {
-            update: serde_json::json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "tool-1",
-                "status": "pending",
-            }),
-        });
-        let payloads = fixture
-            .recorder
-            .wait("the autonomous tool call", |payload| {
-                matches!(payload, AgentStreamPayload::Update { .. })
-            });
-        assert!(
-            !payloads
-                .iter()
-                .any(|payload| matches!(payload, AgentStreamPayload::Parked)),
-            "an idle with nothing to settle is noise: {payloads:?}"
-        );
-
-        fixture.inject(AgentStreamPayload::Parked);
-        fixture
-            .recorder
-            .wait("the settled autonomous turn", |payload| {
-                matches!(payload, AgentStreamPayload::Parked)
-            });
-        assert_eq!(fixture.state().phase, AgentConnectionPhase::Ready);
-        assert!(!fixture.state().turn_in_flight());
-
-        // A prompt owns its turn boundary: its response is authoritative, so a
-        // racing idle cannot settle it early.
-        fixture.prompt("running");
-        fixture.recorder.wait("the turn to start", |payload| {
-            chunk_text(payload) == Some("turn 0")
-        });
-        fixture.inject(AgentStreamPayload::Parked);
-        fixture.inject(AgentStreamPayload::Update {
-            update: serde_json::json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "tool-2",
-                "status": "pending",
-            }),
-        });
-        fixture.recorder.wait("the in-turn tool call", |payload| {
-            matches!(
-                payload,
-                AgentStreamPayload::Update { update }
-                    if update.get("toolCallId").and_then(Value::as_str) == Some("tool-2")
-            )
-        });
-        assert_eq!(fixture.state().phase, AgentConnectionPhase::Running);
-        assert_eq!(
-            fixture
-                .recorder
-                .payloads()
-                .iter()
-                .filter(|payload| matches!(payload, AgentStreamPayload::Parked))
-                .count(),
-            1,
-            "the racing idle must not park a running turn"
-        );
-        fixture.close();
-    }
-
-    #[test]
-    fn excess_live_operations_stay_bounded_and_keep_the_turn_open() {
-        let mut state = AgentPaneState::new(&AgentPaneSpec {
-            provider: AgentProvider::Codex,
-            cwd: PathBuf::from("/"),
-            resume_session: None,
-            workspace: AgentWorkspaceEnvironment::default(),
-        });
-        for index in 0..=MAX_LIVE_OPERATION_IDS {
-            track_task(
-                &mut state,
-                &SdkTaskEvent::Started {
-                    task_id: format!("task-{index}"),
-                    tool_use_id: format!("tool-{index}"),
-                    is_agent: true,
-                },
-            );
-        }
-
-        assert_eq!(state.live_tasks.len(), MAX_LIVE_OPERATION_IDS);
-        assert!(state.live_operations_overflowed);
-        assert!(state.turn_in_flight());
-
-        settle_turn(&mut state);
-        assert!(state.live_tasks.is_empty());
-        assert!(!state.live_operations_overflowed);
-        assert!(!state.turn_in_flight());
     }
 }

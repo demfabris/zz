@@ -12,7 +12,7 @@ use std::{
     path::PathBuf,
     str::FromStr as _,
     sync::{
-        Arc, OnceLock,
+        Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
@@ -51,7 +51,6 @@ use crate::agent::{
         AgentWorkspaceEnvironment, with_platform_environment, with_workspace_environment,
     },
     journal::{AgentJournal, JournalEntry},
-    profile::{ProviderProfile, SdkMessage, SdkTaskEvent},
     stream::{
         AgentAuthMethod, AgentPrompt, AgentPromptOutcome, AgentSessionCapabilities,
         AgentSessionSummary, AgentStreamPayload,
@@ -71,10 +70,6 @@ const MAX_STAGED_UPDATES: usize = 4096;
 const MAX_STAGED_UPDATE_BYTES: usize = 2 * MAX_AGENT_UPDATES_BYTES;
 const MAX_PENDING_PERMISSIONS: usize = 64;
 const MAX_PENDING_PERMISSION_BYTES: usize = MAX_PENDING_PERMISSIONS * MAX_AGENT_PERMISSION_BYTES;
-/// How long a turn may go silent before the watchdog parks it. Agents think
-/// for minutes on end, so this is deliberately generous and parking never
-/// touches the child; `ZZ_AGENT_QUIESCE_MS=0` disables the watchdog.
-const DEFAULT_QUIESCE_MS: u64 = 120_000;
 const JOURNAL_RETENTION_DAYS: u64 = 30;
 
 /// What a pane's runtime is asked to do. Everything a client sends arrives
@@ -120,9 +115,6 @@ pub(crate) enum RuntimeCommand {
 
 #[derive(Debug)]
 pub(crate) enum RuntimeControl {
-    AbandonTurn {
-        turn_id: u64,
-    },
     Cancel {
         turn_id: u64,
         session_id: Option<String>,
@@ -143,16 +135,10 @@ struct PendingPromptCancellation {
     done: Receiver<()>,
 }
 
-#[derive(Clone, Copy)]
-enum DeferredPromptControl {
-    Abandon,
-    Cancel,
-}
-
 #[derive(Default)]
 struct PromptControls {
     pending: HashMap<u64, PendingPromptCancellation>,
-    deferred: HashMap<u64, DeferredPromptControl>,
+    deferred: HashSet<u64>,
     last_consumed: u64,
 }
 
@@ -375,20 +361,12 @@ fn exit_status_detail(error: &str) -> Option<String> {
     (!status.is_empty()).then_some(status)
 }
 
-fn new_session_request(profile: &ProviderProfile, cwd: PathBuf) -> NewSessionRequest {
-    let mut request = NewSessionRequest::new(cwd);
-    request.meta = profile.session_meta();
-    request
+fn new_session_request(cwd: PathBuf) -> NewSessionRequest {
+    NewSessionRequest::new(cwd)
 }
 
-fn load_session_request(
-    profile: &ProviderProfile,
-    session_id: AcpSessionId,
-    cwd: PathBuf,
-) -> LoadSessionRequest {
-    let mut request = LoadSessionRequest::new(session_id, cwd);
-    request.meta = profile.session_meta();
-    request
+fn load_session_request(session_id: AcpSessionId, cwd: PathBuf) -> LoadSessionRequest {
+    LoadSessionRequest::new(session_id, cwd)
 }
 
 /// The daemon's journal, opened once and pruned on the way in.
@@ -456,50 +434,20 @@ fn record_update(
     }
 }
 
-/// Record a task event in the position the stream put it. Heartbeats are not
-/// history, so only what [`SdkTaskEvent::is_history`] admits reaches the file.
-fn record_task(
-    journal: Option<&AgentJournal>,
-    provider: AgentProvider,
-    session_id: &str,
-    event: &SdkTaskEvent,
-) {
-    let Some(journal) = journal.filter(|_| event.is_history()) else {
-        return;
-    };
-    if let Err(error) = journal.append_task_for(provider, session_id, event) {
-        report_journal_error(session_id, &error.to_string());
-    }
-}
-
-/// One journalled item on its way back into a pane: a `session/update` the
-/// reducer applies like any other, or the background-task event that stood
-/// between two of them.
 enum ReplayItem {
-    /// Boxed because a `SessionUpdate` dwarfs a task event, and a restore holds
-    /// thousands of these at once.
     Update(Box<SessionUpdate>),
-    Task(SdkTaskEvent),
 }
 
 impl ReplayItem {
     fn payload(&self) -> Result<AgentStreamPayload, agent_client_protocol::Error> {
         match self {
             Self::Update(update) => update_payload(update),
-            Self::Task(event) => {
-                let payload = AgentStreamPayload::TaskEvent {
-                    event: event.clone(),
-                };
-                validate_payload(&payload)?;
-                Ok(payload)
-            }
         }
     }
 
     fn record(&self, journal: Option<&AgentJournal>, provider: AgentProvider, session_id: &str) {
         match self {
             Self::Update(update) => record_update(journal, provider, session_id, update),
-            Self::Task(event) => record_task(journal, provider, session_id, event),
         }
     }
 }
@@ -538,7 +486,6 @@ fn journal_replay(
                         }
                     }
                 }
-                JournalEntry::Task(event) => ReplayItem::Task(event),
             };
             match item.payload() {
                 Ok(_) => Some(item),
@@ -658,15 +605,12 @@ pub(crate) async fn run_agent_connection(
     control_rx: Receiver<RuntimeControl>,
     event_tx: Sender<AgentStreamPayload>,
 ) -> Result<(), String> {
-    let profile = ProviderProfile::of(provider);
     let routing = Arc::new(Mutex::new(RuntimeRouting::default()));
     let prompt_controls = Arc::new(Mutex::new(PromptControls::default()));
 
     let notification_journal = journal.clone();
     let notification_routing = Arc::clone(&routing);
     let notification_events = event_tx.clone();
-    let ext_routing = Arc::clone(&routing);
-    let ext_events = event_tx.clone();
     let permission_routing = Arc::clone(&routing);
     let permission_events = event_tx.clone();
 
@@ -700,53 +644,6 @@ pub(crate) async fn run_agent_connection(
                                 );
                             }
                             send_payload(&notification_events, payload).await?;
-                        }
-                        Ok(())
-                    }
-                    AgentNotification::ExtNotification(notification) => {
-                        let Some((session_id, message)) = profile
-                            .ext_message(notification.method.as_ref(), notification.params.get())
-                        else {
-                            return Ok(());
-                        };
-                        let (live, staged, journaled) = {
-                            let routing = ext_routing.lock();
-                            (
-                                routing.live_sessions.contains(&session_id),
-                                routing.staged_updates.contains_key(&session_id),
-                                routing.journaled.contains(&session_id),
-                            )
-                        };
-                        log::debug!(
-                            target: "zz::agent",
-                            "sdk passthrough {} for session {session_id}: live={live} staged={staged}",
-                            message.kind()
-                        );
-                        if staged {
-                            return Ok(());
-                        }
-                        if live {
-                            // A turn the agent continued on its own never
-                            // reaches a prompt reply, so its turn-over signal
-                            // is what settles the pane.
-                            let payload = match message {
-                                SdkMessage::Task(event) => {
-                                    // The bookends only mean anything where the
-                                    // transcript put them, so they are recorded
-                                    // in line with the updates around them.
-                                    if journaled {
-                                        record_task(
-                                            notification_journal.as_deref(),
-                                            provider,
-                                            &session_id,
-                                            &event,
-                                        );
-                                    }
-                                    AgentStreamPayload::TaskEvent { event }
-                                }
-                                SdkMessage::TurnIdle => AgentStreamPayload::Parked,
-                            };
-                            send_payload(&ext_events, payload).await?;
                         }
                         Ok(())
                     }
@@ -847,12 +744,10 @@ pub(crate) async fn run_agent_connection(
         .connect_with(agent, async move |connection: ConnectionTo<Agent>| {
             let initialize = InitializeRequest::new(ProtocolVersion::V1)
                 .client_capabilities(
-                    ClientCapabilities::new()
-                        .session(
-                            ClientSessionCapabilities::new()
-                                .config_options(SessionConfigOptionsCapabilities::new()),
-                        )
-                        .meta(profile.client_meta_caps()),
+                    ClientCapabilities::new().session(
+                        ClientSessionCapabilities::new()
+                            .config_options(SessionConfigOptionsCapabilities::new()),
+                    ),
                 )
                 .client_info(Implementation::new("zz", env!("CARGO_PKG_VERSION")).title("zz"));
             let response = await_rpc(
@@ -918,31 +813,6 @@ pub(crate) async fn run_agent_connection(
             connection.spawn(async move {
                 while let Ok(control) = control_rx.recv().await {
                     match control {
-                        RuntimeControl::AbandonTurn { turn_id } => {
-                            let (pending, deferred) = {
-                                let mut prompts = control_prompts.lock();
-                                let pending = prompts.pending.remove(&turn_id);
-                                let deferred = pending.is_none() && turn_id > prompts.last_consumed;
-                                if deferred {
-                                    prompts
-                                        .deferred
-                                        .insert(turn_id, DeferredPromptControl::Abandon);
-                                }
-                                (pending, deferred)
-                            };
-                            if let Some(pending) = pending {
-                                pending.cancel.close();
-                                let _ = pending.done.recv().await;
-                            }
-                            if deferred {
-                                continue;
-                            }
-                            send_payload(
-                                &control_events,
-                                AgentStreamPayload::TurnAbandoned { turn_id },
-                            )
-                            .await?;
-                        }
                         RuntimeControl::Cancel {
                             turn_id,
                             session_id,
@@ -951,9 +821,7 @@ pub(crate) async fn run_agent_connection(
                                 let mut prompts = control_prompts.lock();
                                 let pending = prompts.pending.remove(&turn_id);
                                 if pending.is_none() && turn_id > prompts.last_consumed {
-                                    prompts
-                                        .deferred
-                                        .insert(turn_id, DeferredPromptControl::Cancel);
+                                    prompts.deferred.insert(turn_id);
                                 }
                                 pending
                             };
@@ -1034,7 +902,6 @@ pub(crate) async fn run_agent_connection(
                             routing.lock().begin_staging(session_id.0.as_ref());
                             match await_rpc(
                                 connection.send_request(load_session_request(
-                                    profile,
                                     session_id.clone(),
                                     cwd.clone(),
                                 ))
@@ -1065,10 +932,7 @@ pub(crate) async fn run_agent_connection(
                                     routing.lock().begin_new_session();
                                     let response = await_rpc(
                                         connection
-                                            .send_request(new_session_request(
-                                                profile,
-                                                cwd.clone(),
-                                            ))
+                                            .send_request(new_session_request(cwd.clone()))
                                             .block_task(),
                                         RPC_TIMEOUT,
                                         "ACP session creation",
@@ -1090,7 +954,7 @@ pub(crate) async fn run_agent_connection(
                             routing.lock().begin_new_session();
                             let response = await_rpc(
                                 connection
-                                    .send_request(new_session_request(profile, cwd.clone()))
+                                    .send_request(new_session_request(cwd.clone()))
                                     .block_task(),
                                 RPC_TIMEOUT,
                                 "ACP session creation",
@@ -1247,7 +1111,7 @@ pub(crate) async fn run_agent_connection(
                         let session_id = AcpSessionId::new(target.session_id.clone());
                         routing.lock().begin_staging(&target.session_id);
                         let mut request =
-                            load_session_request(profile, session_id.clone(), target.cwd.clone());
+                            load_session_request(session_id.clone(), target.cwd.clone());
                         if capabilities.additional_directories {
                             request = request
                                 .additional_directories(target.additional_directories.clone());
@@ -1329,7 +1193,7 @@ pub(crate) async fn run_agent_connection(
                         routing.lock().begin_new_session();
                         match await_rpc(
                             connection
-                                .send_request(new_session_request(profile, cwd.clone()))
+                                .send_request(new_session_request(cwd.clone()))
                                 .block_task(),
                             RPC_TIMEOUT,
                             "ACP session creation",
@@ -1474,8 +1338,8 @@ pub(crate) async fn run_agent_connection(
                         let deferred = {
                             let mut prompts = prompt_controls.lock();
                             prompts.last_consumed = prompts.last_consumed.max(turn_id);
-                            if let Some(deferred) = prompts.deferred.remove(&turn_id) {
-                                Some(deferred)
+                            if prompts.deferred.remove(&turn_id) {
+                                true
                             } else {
                                 prompts.pending.insert(
                                     turn_id,
@@ -1484,36 +1348,25 @@ pub(crate) async fn run_agent_connection(
                                         done: done_rx,
                                     },
                                 );
-                                None
+                                false
                             }
                         };
-                        if let Some(deferred) = deferred {
+                        if deferred {
                             send_payload(
                                 &event_tx,
                                 AgentStreamPayload::PromptAccepted { turn_id },
                             )
                             .await?;
-                            match deferred {
-                                DeferredPromptControl::Cancel => {
-                                    send_payload(
-                                        &event_tx,
-                                        AgentStreamPayload::PromptFinished {
-                                            turn_id,
-                                            outcome: AgentPromptOutcome::Finished {
-                                                stop_reason: Value::String("cancelled".to_owned()),
-                                            },
-                                        },
-                                    )
-                                    .await?;
-                                }
-                                DeferredPromptControl::Abandon => {
-                                    send_payload(
-                                        &event_tx,
-                                        AgentStreamPayload::TurnAbandoned { turn_id },
-                                    )
-                                    .await?;
-                                }
-                            }
+                            send_payload(
+                                &event_tx,
+                                AgentStreamPayload::PromptFinished {
+                                    turn_id,
+                                    outcome: AgentPromptOutcome::Finished {
+                                        stop_reason: Value::String("cancelled".to_owned()),
+                                    },
+                                },
+                            )
+                            .await?;
                             continue;
                         }
                         let task_prompts = Arc::clone(&prompt_controls);
@@ -1889,34 +1742,6 @@ fn prompt_blocks(prompt: AgentPrompt) -> Vec<ContentBlock> {
     blocks
 }
 
-/// The quiesce window, read once per process. Absent or unparseable falls back
-/// to the default; `0` disables the watchdog.
-pub(crate) fn quiesce_window() -> Option<Duration> {
-    static WINDOW: OnceLock<Option<Duration>> = OnceLock::new();
-
-    *WINDOW.get_or_init(|| parse_quiesce_window(std::env::var_os("ZZ_AGENT_QUIESCE_MS").as_deref()))
-}
-
-fn parse_quiesce_window(value: Option<&std::ffi::OsStr>) -> Option<Duration> {
-    let millis = value
-        .and_then(std::ffi::OsStr::to_str)
-        .map(str::trim)
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_QUIESCE_MS);
-    (millis > 0).then(|| Duration::from_millis(millis))
-}
-
-/// Silence alone never ends a run: a live child is the working signal, so the
-/// watchdog parks only once the turn has been quiet past `window` with nothing
-/// outstanding. A false trip costs a status dip, never data.
-pub(crate) fn should_park_turn(
-    window: Option<Duration>,
-    silence: Duration,
-    in_flight: bool,
-) -> bool {
-    window.is_some_and(|window| !in_flight && silence >= window)
-}
-
 fn capped(mut text: String, max_bytes: usize) -> String {
     truncate_payload(&mut text, max_bytes);
     text
@@ -1938,8 +1763,6 @@ fn truncate_payload(text: &mut String, max_bytes: usize) {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsStr;
-
     use agent_client_protocol::schema::v1::{PermissionOptionId, PermissionOptionKind};
 
     use super::*;
@@ -2001,48 +1824,6 @@ mod tests {
     }
 
     #[test]
-    fn the_quiesce_window_falls_back_to_the_default_and_zero_disables_it() {
-        assert_eq!(
-            parse_quiesce_window(None),
-            Some(Duration::from_millis(DEFAULT_QUIESCE_MS))
-        );
-        assert_eq!(
-            parse_quiesce_window(Some(OsStr::new("not a number"))),
-            Some(Duration::from_millis(DEFAULT_QUIESCE_MS))
-        );
-        assert_eq!(
-            parse_quiesce_window(Some(OsStr::new(" 500 "))),
-            Some(Duration::from_millis(500))
-        );
-        assert_eq!(parse_quiesce_window(Some(OsStr::new("0"))), None);
-        assert!(!should_park_turn(
-            parse_quiesce_window(Some(OsStr::new("0"))),
-            Duration::from_hours(1),
-            false
-        ));
-    }
-
-    #[test]
-    fn a_turn_parks_only_when_it_is_quiet_and_nothing_is_outstanding() {
-        let window = Duration::from_millis(100);
-        assert!(should_park_turn(
-            Some(window),
-            Duration::from_millis(150),
-            false
-        ));
-        assert!(!should_park_turn(
-            Some(window),
-            Duration::from_millis(150),
-            true
-        ));
-        assert!(!should_park_turn(
-            Some(window),
-            Duration::from_millis(50),
-            false
-        ));
-    }
-
-    #[test]
     fn a_prompt_carries_its_text_then_its_images() {
         let blocks = prompt_blocks(AgentPrompt {
             owner: ClientInstanceId::default(),
@@ -2084,79 +1865,6 @@ mod tests {
             runtime_failure_message("Codex", "the pipe broke\nand then some", None),
             "Codex exited unexpectedly (the pipe broke)"
         );
-    }
-
-    #[test]
-    fn only_task_events_that_are_history_are_journalled_and_they_keep_their_place() {
-        use agent_client_protocol::schema::v1::{ContentBlock, ContentChunk, TextContent};
-
-        let directory = tempfile::tempdir().expect("journal directory");
-        let journal = AgentJournal::open(directory.path()).expect("open journal");
-        let provider = AgentProvider::ClaudeCode;
-        let chunk = |text: &str| {
-            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
-                TextContent::new(text),
-            )))
-        };
-        let started = SdkTaskEvent::Started {
-            task_id: "t-1".to_owned(),
-            tool_use_id: "toolu_1".to_owned(),
-            is_agent: true,
-        };
-        let settled = SdkTaskEvent::Settled {
-            task_id: "t-1".to_owned(),
-            status: "completed".to_owned(),
-        };
-
-        record_update(Some(&journal), provider, "s-1", &chunk("spawning"));
-        record_task(
-            Some(&journal),
-            provider,
-            "s-1",
-            &SdkTaskEvent::ToolProgress {
-                tool_use_id: "toolu_1".to_owned(),
-                parent_tool_use_id: None,
-                elapsed_seconds: 3.0,
-                subagent_type: Some("Explore".to_owned()),
-            },
-        );
-        record_task(Some(&journal), provider, "s-1", &started);
-        record_task(
-            Some(&journal),
-            provider,
-            "s-1",
-            &SdkTaskEvent::TaskProgress {
-                task_id: "t-1".to_owned(),
-                tool_use_id: Some("toolu_1".to_owned()),
-                description: "exploring".to_owned(),
-                last_tool_name: Some("Grep".to_owned()),
-                subagent_type: Some("Explore".to_owned()),
-            },
-        );
-        record_update(Some(&journal), provider, "s-1", &chunk("waiting"));
-        record_task(Some(&journal), provider, "s-1", &settled);
-
-        let replayed = journal_replay(Some(&journal), provider, Some("s-1"));
-        let shapes = replayed
-            .iter()
-            .map(|item| match item {
-                ReplayItem::Update(_) => "update".to_owned(),
-                ReplayItem::Task(event) => event.kind().to_owned(),
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            shapes,
-            ["update", "task-started", "update", "task-settled"],
-            "heartbeats are liveness; the bookends keep the place the stream gave them"
-        );
-        assert!(matches!(
-            replayed.get(1),
-            Some(ReplayItem::Task(event)) if *event == started
-        ));
-        assert!(matches!(
-            replayed[1].payload().expect("payload"),
-            AgentStreamPayload::TaskEvent { event } if event == started
-        ));
     }
 
     #[test]

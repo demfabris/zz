@@ -58,7 +58,7 @@ pub(super) fn render(cx: &mut Context<Showcase>) -> AnyElement {
         (
             IconName::Bot,
             "Agent",
-            "The pane header, the thread timeline rows, and subagent threads.",
+            "The pane header and flat ACP transcript rows.",
         ),
         (
             IconName::Settings,

@@ -1,9 +1,9 @@
 ---
 type: Concept
 title: Native Agent pane
-description: The daemon-addressable Agent pane, its daemon-owned Codex/Claude Code ACP runtime streamed to client viewports, provider artifact profiles, nested subagent and terminal streams, sticky controls, approvals, and restore metadata.
+description: The daemon-addressable Agent pane, its daemon-owned ACP v1 runtime, flat transcript, approvals, session controls, and restore metadata.
 resource: crates/zz/src/agent/controller.rs
-tags: [agent, gpui, markdown, mermaid, acp, pane, sessions, persistence, keyboard, subagent, terminal]
+tags: [agent, gpui, markdown, mermaid, acp, pane, sessions, persistence, keyboard]
 timestamp: 2026-08-15T00:00:00Z
 ---
 
@@ -24,10 +24,10 @@ JSON blob with a byte cap, which the client deserializes into the shape its redu
 
 | Layer | Representation | Responsibility |
 | --- | --- | --- |
-| protocol | `PaneKindSnapshot::Agent(AgentDescriptor)` | Versioned pane identity plus `provider`, `cwd`, and opaque ACP `session_id`; introduced across v22–v32. The live wire version is `PROTOCOL_VERSION` (55), which adds stable client ownership and acknowledgement for recovered drafts |
+| protocol | `PaneKindSnapshot::Agent(AgentDescriptor)` | Versioned pane identity plus `provider`, `cwd`, and opaque ACP `session_id`; introduced across v22–v32. The live wire version is `PROTOCOL_VERSION` (56) |
 | mux | `PaneKind::Agent(AgentDescriptor)` | Stable layout leaf, targeting, titles, and validated restore-metadata updates |
-| server | one ACP adapter child per pane, on its own thread | Spawns and owns the child (`zz-daemon/src/agent/host.rs`), auto-approves permissions, queues mid-turn prompts, parks quiet turns, snapshots turn bases, journals every stream item, adopts the session ID the adapter returns, and coalesces the stream onto a per-pane outbound lane (`fanout.rs`) |
-| app | shared `Entity<AgentController>` | Reduces the daemon's stream into a transcript, tracks the per-pane replay cursor, restores sticky settings, normalizes pasted attachments, and turns user gestures into `AgentRequest` sends |
+| server | one ACP adapter child per pane, on its own thread | Spawns and owns the child (`zz-daemon/src/agent/host.rs`), auto-approves permissions, queues mid-turn prompts, snapshots turn bases, journals standard session updates, adopts the session ID the adapter returns, and coalesces the stream onto a per-pane outbound lane (`fanout.rs`) |
+| app | shared `Entity<AgentController>` | Reduces the daemon's stream into a flat transcript, tracks the per-pane replay cursor, restores selector preferences, normalizes pasted attachments, and turns user gestures into `AgentRequest` sends |
 | view/UI | `AgentView`, `AgentTimeline`, `AgentEntry` | History picker, composer, cancellation, approval/auth actions, Markdown, reasoning, plans, tools, and Mermaid |
 
 The daemon builds its agent runtime lazily, on the first agent pane it opens; that build also opens
@@ -94,11 +94,9 @@ connection produces leaves through one sink that journals it and hands it to the
    login session, or `zz` itself can still resolve Homebrew, user-local, and version-manager
    executables without replacing an explicit command environment. Only stderr is sent to zz logs;
    stdout remains ACP JSON-RPC.
-2. Send `initialize` with zz client information and generic session-config-option support. Both
-   provider profiles advertise the de-facto `_meta.terminal_output = true` stream convention, and
-   Claude Code additionally advertises `_meta["subagent-transcript"] = true`. zz still advertises
-   neither standard filesystem nor client-owned terminal methods, so agents must not request those
-   ACP operations.
+2. Send `initialize` with zz client information and generic session-config-option support. zz does
+   not advertise provider `_meta` extensions, standard filesystem methods, or client-owned terminal
+   methods. Agents must stay inside the capabilities in the handshake.
 3. For each pane, prefer `session/load` when the agent advertises it and the descriptor has a
    session ID. Routing is installed before the load request so replay notifications are retained.
 4. If load is unsupported or fails, create a new session in the resolved absolute working
@@ -354,19 +352,20 @@ tmux command palette's outlined keyboard-hint badges.
 
 The controller reduces the daemon's stream into provider-neutral entries with stable native IDs. Its
 input is `AgentStreamPayload` (`crates/zz-daemon/src/agent/stream.rs`, re-exported from the crate
-root so a client never redeclares the shapes): `Update` wrapping a raw ACP `SessionUpdate`,
-`SessionReady`/`SessionSwitched`/`SessionReset`, `PermissionRequested`/`PermissionResolved`,
-`TaskEvent`, `PromptFinished`, `Parked`, `PromptsReclaimed`, and the failure variants.
-`translate_stream_payload` (`controller.rs:3212`) turns each into the same event the old in-process
-runtime produced and feeds `handle_runtime_event`, so everything downstream . the reducer, view,
-wizard, badges, mend, and spring . is unchanged. What it reduces to is a flat list of entries:
+root so a client never redeclares the shapes): `Update` wrapping a raw ACP `SessionUpdate`, session
+boundaries, permission requests, prompt boundaries, reclaimed prompts, and failures. The reducer
+has five transcript shapes:
 
 - `User { id, markdown, images }`
-- `Assistant { id, markdown, memory_citations }`
+- `Assistant { id, markdown }`
 - `Reasoning { id, label, markdown, default_expanded }`
 - `Plan { id, markdown }`
-- `Tool { id, protocol_id, kind, status, label, location, input, output, default_expanded, subagent, children }`
-- `Notification { id, task_id, tool_use_id, status, summary, result_markdown }` (reducer upserts join on `tool_use_id` first and fall back to `task_id` when either side lacks one; both IDs are dropped at the UI boundary)
+- `Tool { id, protocol_id, kind, status, label, location, input, output, default_expanded }`
+
+The reducer reads standard ACP v1 fields only. Provider `_meta` remains opaque and cannot change an
+entry's type, title, status, nesting, animation, pane state, or journal lifecycle. A provider may
+represent agent orchestration as an ordinary tool call; zz renders that call with the same flat row
+as any other tool. Custom extension notifications do not enter the transcript.
 
 Tool input and output use the provider-neutral `ToolPayload` variants `Diff { path, old, new }`,
 `Text`, `Json`, and `Terminal`. ACP diff and terminal content stay typed instead of being serialized
@@ -375,85 +374,22 @@ and unsupported content become pretty JSON without Markdown fences. Structured c
 over `raw_output`, including when a later raw-output update arrives; raw output is displayed only
 while the structured content collection is empty.
 
-A tool payload lives as long as its pane, and agents happily emit megabytes, so the reducer caps what
-it retains: `MAX_TOOL_PAYLOAD_BYTES` (512 KiB, `controller.rs:49`) on text, JSON, and accumulated
-terminal output, and `MAX_DIFF_SIDE_BYTES` (1 MiB, `:50`) on each side of a diff independently.
-`truncate_payload` (`:4426`) backs up to a char boundary and appends `TRUNCATION_MARKER`
+A tool payload lives as long as its pane, so the reducer caps what it retains:
+`MAX_TOOL_PAYLOAD_BYTES` (512 KiB) on text and JSON, and `MAX_DIFF_SIDE_BYTES` (1 MiB) on each side
+of a diff. `capped` backs up to a char boundary and appends `TRUNCATION_MARKER`
 (`"… [truncated]"`), so the cut is visible in the payload rather than silent. These caps are in-memory
 only; the journal writes the update as it arrived, except that adjacent text chunks of one message
 coalesce into a single record before they land (see the persistence boundary below).
 
-Only some updates may re-type a tool. `update_carries_tool_shape` (`controller.rs:4244`) accepts a
-title, raw input, locations, or diff content as shape; `reclassifies_tool` (`:4257`) then allows a
+Only some updates may re-type a tool. `update_carries_tool_shape` accepts a title, raw input,
+locations, or diff content as shape; `reclassifies_tool` then allows a
 kind change only when the update carries shape, when the current kind is already `Other`, or when the
 new kind is something better than `Other`. Without that gate a completion update repeating ACP's
 default `other` kind would downgrade an already-typed tool into a generic one, and an empty title
-would blank a good label. A second denylist, `PLACEHOLDER_TOOL_TITLES` (`:4194`, sixteen entries such
-as `terminal`, `read file`, `subagent task`), keeps a generic adapter title from being rendered as
-the `$ <command>` line of a terminal payload: `command_from_title` (`:4221`) prefers a backtick-quoted
-span and returns nothing for a placeholder, so the payload falls back to `[terminal <id>]`.
+would blank a good label.
 
-`agent/profile.rs` is the only provider-artifact recognition seam. Its streaming scanner carries
-partial opening markers across ACP chunk boundaries and recognizes the explicit table:
-Claude's `<task-notification>` and `<system-reminder>`, and Codex's `<oai-mem-citation>`,
-`::git-stage{...}`, and `::git-commit{...}`. Unknown XML and directives remain literal. Beyond the
-scanner table, `profile.rs` also recognizes Codex collaboration/subagent tooling: `_meta.codex.subagent`
-markers and `collaboration.tool` values (`spawnAgent`/`resumeAgent`/`sendInput`/`wait`/`closeAgent`)
-are parsed, labeled, and formatted for the timeline (`codex_collaboration`, `codex_tool_subagent`,
-`codex_collab_label`). Task
-notifications become durable transcript cards even when they arrive as pseudo-user text during
-local user-echo suppression; reminders and app-control directives are removed. Memory citation
-entries are parsed and retained on the owning assistant entry for provenance, without a citation
-chip UI. At the end of a loaded replay, adjacent identical sanitized assistant answers are
-deduplicated and their citations merged; live turns are never deduplicated.
-
-The envelope only exists in replayed history: live, the claude adapter never forwards it. Live
-cards come from the raw SDK passthrough instead . `session/new` and `session/load` carry
-`_meta.claudeCode.emitRawSDKMessages` filters for `task_started`, `task_updated`,
-`task_notification`, `task_progress`, `background_tasks_changed`, `session_state_changed`, and the
-top-level `tool_progress` type (the adapter matches `type` exactly and treats an omitted `subtype`
-as a wildcard), and the resulting `_claude/sdkMessage` extension notifications (whose method
-arrives with the reserved `_` prefix stripped by the ACP crate's enum parser . matched
-prefix-insensitively) parse in `zz-daemon/src/agent/profile.rs`. A `task_started` for an agent task
-(a non-empty `subagent_type`, with `task_type: "local_agent"` as the legacy fallback; background
-shells are excluded) registers the live task and holds its Task tool at Running . async Task tools
-otherwise report `completed` at launch . through later tool updates and through turn-end
-force-settling, until the task's notification or terminal `task_updated` patch lands the real
-status. Registration itself is guarded against resurrection: the SDK re-emits `task_started` when
-a task re-attaches, and a fast task's notification can outrun its own start, so a start for a task
-that already settled (a bounded tombstone set, recorded even when the settle beat the start), or
-that names a tool already showing an outcome, or that arrives after the pane returned to ready,
-never registers a hold (`registrable_task`, `controller.rs`). Three passthrough messages harden
-that registry rather than render: `task_progress` is the
-repair for a lost `task_started` (it may adopt a still-open Task tool, never a settled one),
-`tool_progress` with a `subagent_type` lifts a Pending subagent tool to Running and nothing else,
-and `background_tasks_changed` is the REPLACE-semantics backstop . the daemon and the reducer both
-retire every tracked task absent from its set (settled as completed), and neither ever registers
-from it, because its entries carry no subagent attribution. An oversized set (past 256 tasks) is
-dropped whole rather than truncated, since a short authoritative set would settle running work.
-`session_state_changed` with `state: "idle"` is the SDK's authoritative turn-over signal: the
-daemon maps it to `Parked`, which settles a turn the agent continued on its own . one no
-`session/prompt` response can ever settle . gated in the host so a prompt in flight keeps owning
-its boundary and repeat idles publish nothing. Notification cards upsert through the two-key join
-above, so the live SDK event and a later replayed envelope share one card whichever lands first,
-without either source blanking what the other filled: the structural event never carries
-`result_markdown` (the prose envelope is its only source), and a card whose source supplied no
-summary synthesizes one from the spawn label ("Agent \"label\" finished") instead of rendering an
-empty card. Only notifications carrying an `output_file` (agents, not background shells) become
-cards at all.
-
-Claude Task tools carry `_meta.claudeCode.subagent = true`. When a later session update carries
-`_meta.claudeCode.parentToolUseId`, the reducer attaches the resulting entry to that tool's
-`children` instead of the top-level transcript. A nested Task ID maps back to the same root, so
-deeper descendants flatten into one depth-1 child timeline; an unknown parent falls back to the
-top level rather than losing output. Child mutations bump the owning root tool's revision, and its
-disclosure renders the children through the normal entry renderers as an indented mini-timeline.
-
-Terminal-capable tool calls initialize `ToolPayload::Terminal` from `_meta.terminal_info` and the
-tool's raw command/cwd, append exact `_meta.terminal_output.data` frames, and add the
-`terminal_exit` code/signal without allowing the final structured Terminal content to overwrite
-the accumulated stream. The convention is metadata-only: zz does not advertise or implement
-client-owned ACP `terminal/*` methods.
+Standard ACP terminal references render as static payloads. zz does not reconstruct terminal output
+from metadata or advertise client-owned ACP `terminal/*` methods.
 
 Message chunks coalesce by ACP `message_id`; chunks without one coalesce only while their role stays
 active. The locally inserted user entry suppresses the matching streamed echo for that prompt.
@@ -461,26 +397,16 @@ Tool calls retain one native entry across incremental updates, map ACP kind/stat
 first affected location, and render structured output. Plan notifications replace one checklist
 entry instead of appending duplicates. Session title, current mode, generic config, available
 command, and usage updates feed the header/composer; a title update also becomes daemon pane-title
-metadata. A successful prompt or completed history replay settles any tool still marked pending,
-running, or awaiting approval to completed; prompt failure settles those tools to failed, while
-cancellation keeps the canceled terminal state. The same boundary rewrites any Notification entry
-whose status string is not a recognized outcome (`TERMINAL_NOTIFICATION_STATUSES`,
-`controller.rs`) to `completed`, so a card with an unreadable status cannot keep a spinner either.
-This boundary prevents an adapter that omits a final per-tool update from leaving a permanent
-spinner in an otherwise finished turn. Tool updates that arrive after the pane has already returned
-to ready are treated as late replay and settled to completed immediately, and progress heartbeats
-obey the same non-resurrection rule . a settled row is never reopened, and nothing registers or
-holds after ready; live turn updates remain non-terminal while the pane is running.
-Codex context compaction is tracked through `_meta.contextCompaction`; its terminal update renames
-the row to **Context compacted**, and the first following assistant message settles the same row if
-that terminal update was lost in transit.
+metadata. Prompt failure settles open tools to failed, while cancellation keeps the canceled local
+state. A successful `PromptFinished` ends pane activity without fabricating a completed tool
+status. Standard updates that arrive after the prompt response still update transcript data, but
+they do not revive pane activity.
 
 The daemon has already coalesced the burst, so the client's job is just to stay ordered: `MuxClient`
 buffers whole batches per pane, `AppView::drain_agent_events` hands them over on a mux observation,
 and `apply_stream_items` folds one batch into a single controller transaction and one pane
-notification. Each thread
-maintains a stable ID-to-index map and a monotonic revision per entry. The reducer remains flat;
-the sole structural exception is the depth-1 `children` vector owned by a subagent tool.
+notification. Each thread maintains a stable ID-to-index map and a monotonic revision per entry.
+The reducer remains flat.
 `AgentView` folds top-level entries into presentation-only `TimelineRow` values and retains an
 entry-index-to-row-index map. Two entry kinds fold (`Tool` and `Reasoning`, the ones that repeat),
 and an uninterrupted run of either shares one row once it has at least two members. Any entry of a
@@ -544,16 +470,12 @@ lines in a 28px row and the row's own overflow mask cuts both in half.
 Agents send such labels routinely (one Bash call with two
 commands arrives as one title with a newline between them), so every label bound for a fixed-height
 row goes through `single_line`, which joins the pieces with ` · `. Clickable rows retain a
-pointer cursor without painting a hover background. An in-flight status earns motion only where it
-reports something real: a subagent Task tool, a tool with a Terminal payload, or an approval
-waiting on the user animate, while every other pending or running row shows nothing in the status
-column and rides on the kind icon it already carries (`tool_animates`, `zz-ui/src/agent.rs`) . so
-an adapter that never settles a generic tool leaves no dangling spinner, only a row that quietly
-gains its checkmark at the turn boundary. Completed uses a checkmark; failed and canceled use an X.
-A folded group header animates only while one of its members would. Pane-level busy chrome derives
-from the connection phase alone (`pane_is_busy`, `view.rs`), never from tool rows. Agent-pane busy
-indicators use the same leased pulse clock, including startup, the Changes overlay, and the sticky
-subagent strip. No mounted agent spinner starts a display-rate `gpui::Animation`. A run of two or more
+pointer cursor without painting a hover background. Tool and folded-group statuses use static
+glyphs. Pending and running rows never animate, so an adapter can leave a status unresolved without
+leaving a spinner behind. Completed uses a checkmark; failed and canceled use an X. Pane-level busy
+chrome derives from the connection phase alone (`pane_is_busy`, `view.rs`), never from tool rows.
+Pane activity, startup, the Changes overlay, and permissions share the leased pulse clock. No
+mounted agent spinner starts a display-rate `gpui::Animation`. A run of two or more
 adjacent tools, regardless of label or action, renders one collapsed group header with the first
 member's icon and a first-seen, count-aware action summary such as **Ran command, Edit files, Read
 file**. Aggregate status uses worst-first precedence: Failed, Canceled, NeedsApproval, Running,
@@ -603,10 +525,9 @@ target, scaled by an EMA of how fast the target is growing, and teleports whatev
 Spinners share one clock. A mounted repeating `gpui::Animation` pins the entire window to display
 refresh rate, because any notify repaints the whole window; `pulse.rs` instead runs a single ~30 fps
 tick and notifies only its leaseholders. A lease is taken by reading `pulse_phase` and lapses 300 ms
-later . there is no release call . and the loop parks itself once the lease set empties. Only
-indicators that actually animate lease it . a subagent, terminal, or approval spinner and visible
-agent busy states; a generic in-flight tool row, like a settled or hidden indicator, mounts nothing
-. so an idle pane ticks nothing even while a dangling row sits unsettled. Reduced motion returns phase `0.0` and schedules nothing at all.
+later . there is no release call . and the loop parks itself once the lease set empties. Pane-level
+activity and approval controls lease it; transcript tool rows do not. Reduced motion returns phase
+`0.0` and schedules nothing.
 
 While an entry is still streaming, its *display* copy is repaired by `zz-ui/src/mend.rs`. Markdown
 arriving a token at a time is briefly ill-formed . a half-written `**bold`, an inline span with one
@@ -638,8 +559,8 @@ composer confirms the highlighted permission option rather than killing the turn
 
 The queue's invariant is at-least-once, and it is enforced daemon-side now, so it survives the client
 that typed it: a prompt is either sent or handed back, never silently dropped, images included. The
-host's `dispatch_next` pops the front prompt when a turn settles . on normal completion and after a
-quiesce park . while `reclaim_queue` emits `PromptsReclaimed` on cancel, on a lost runtime, on an
+host's `dispatch_next` pops the front prompt after the active `session/prompt` request returns.
+`reclaim_queue` emits `PromptsReclaimed` on cancel, on a lost runtime, on an
 unexpected child death, and for the remainder after a failed dispatch. The composer refills from that
 stream payload. While anything is queued the composer shows an "N queued" chip whose click sends
 `AgentUnqueue` and hands it all back. `AgentPaneWire.queued_prompts` carries the depth to every
@@ -671,16 +592,6 @@ agent asked still sees the question. The answer goes back as `AgentRespondPermis
 option_id }` with `None` meaning cancel; the first answer wins and a late one from a second device is
 a no-op rather than an error. Closing the pane or losing the adapter resolves everything outstanding
 as cancelled.
-
-A view-local sticky strip (`zz_ui::agent::agent_sticky_strip`, derived by the view's
-`sticky_agent_rows`) occupies the absolute composer overlay immediately above the card. It shows
-exactly one thing: a spinning row per subagent Task tool that is still Pending, Running, or
-awaiting approval (held at Running for the whole background life of an async agent by the
-live-task registry). Settled work never appears there . notifications and outcomes already read
-off the transcript, so the strip mirrors nothing, carries no dismiss controls, and empties itself
-the moment nothing is running. An empty strip mounts nothing and contributes zero clearance,
-leaving the composer pixel-identical to the no-alert state; all strip chrome uses existing theme
-tokens.
 
 Pasting an image attaches it to the draft. A text field has nowhere to put one, so `InputState`
 forwards it as `InputEvent::PasteImages` instead of dropping it, and the composer holds the
@@ -745,13 +656,13 @@ answers, so a failed switch keeps the pane where it was. The header carries no c
 liveness reads off the composer, whose action morphs to Stop or Queue during a turn, and off the
 error cards.
 
-ACP `AvailableCommandsUpdate` notifications drive the command-completion popover. Codex uses `$`
-as its completion sigil while Claude Code uses `/`; either opens only at the start of a line or after
-whitespace. Every matching item advertised by the agent remains available in a bounded, vertically
+ACP `AvailableCommandsUpdate` notifications drive the command-completion popover. `/` opens it at
+the start of a line or after whitespace for every provider. Every matching item advertised by the
+agent remains available in a bounded, vertically
 scrollable menu backed by a uniform virtual list, while only six rows are mounted at once. Up/Down
 actions are captured before the multiline input so they select a result and keep it visible; Tab or
 Enter accepts, Escape dismisses, and unstructured command input hints remain visible after
-insertion. The description column consumes the width left by the type badge before truncating.
+insertion. The description column truncates to the available width.
 Ellipsis-only ACP description placeholders are suppressed while meaningful descriptions remain
 visible. The menu closes once the user begins the command argument.
 
@@ -815,25 +726,13 @@ so a client that was not attached when the child died still gets the real reason
 shutdown, not app quit, is what closes the sessions: it sends `session/close` where the adapter
 supports it and cancellation otherwise, resolves approvals, and lets the ACP child guard reap.
 
-Parking has a second, deterministic trigger besides the watchdog: the claude adapter's SDK
-passthrough carries `session_state_changed`, and an `idle` state with no prompt in flight is the
-SDK's own statement that a self-continued turn is over. The runtime maps it to the same `Parked`
-payload, so both paths settle identically and the watchdog remains the fallback for adapters that
-send no such signal.
+The `session/prompt` response is the sole normal turn boundary. The daemon keeps the pane Working
+until that request returns, the user cancels it, or the adapter fails. It does not infer idleness
+from silence, unresolved tool calls, provider notifications, or `_meta`. An adapter that never
+returns keeps the pane Working until the user stops or retries it.
 
-An adapter that stops talking mid-turn is parked, not killed. `quiesce_window`
-(`zz-daemon/src/agent/runtime.rs:1314`) reads `ZZ_AGENT_QUIESCE_MS` once per **daemon** process,
-defaulting to 120 s, and `0` disables the watchdog entirely . setting it in the shell that launches
-the GUI no longer does anything. `should_park_turn` (`:1332`) trips only when the pane has been
-silent that long *and* nothing is outstanding . `turn_in_flight` (`host.rs:181`) counts unanswered
-permissions, live subagent tasks, and any tool the agent has not resolved, so a long-running Bash
-call or a background agent never trips it. One shared `PARK_TICK` ticker (one second, since the
-window is minutes) walks the open panes and parks itself outright while none is open. Parking
-(`host.rs` `park`) settles the in-flight tools to completed, returns the pane to Ready, emits
-`Parked` on the stream, and starts the next queued prompt. It does not signal, cancel, or reap the
-child: the process keeps running, and output that arrives afterwards opens a fresh segment rather
-than reviving the settled one. The point is that a wedged turn costs a pane its spinner, not its
-session.
+Standard session updates may arrive after the prompt response because ACP v1 has no notification
+flush barrier. The reducer applies those updates to transcript data without reopening the turn.
 
 ## What this turn changed
 
@@ -905,14 +804,9 @@ separate from the GUI's `<data>/zz` so the two never collide on one machine . wi
 directory and file modes. Adapters own the session-ID string, so it is jailed into a file stem before
 it reaches the filesystem: everything outside `[A-Za-z0-9_-]` becomes `_`, and an id that was altered,
 empty, or longer than 96 bytes is truncated and tagged with an FNV-1a digest of the original so two
-hostile ids cannot land on one file. Lines are `{"seq": n, "update": …}` or, for Claude task
-lifecycle events, `{"seq": n, "task": …}` . `Started`, `Notification`, `Settled`, and `Reconcile`
-are journalled in stream order (a task record flushes the coalescing buffer first, so it can never
-overtake the text it followed), while `ToolProgress`/`TaskProgress` heartbeats are liveness and
-deliberately are not (`SdkTaskEvent::is_history`). Both replay paths . the fanout journal floor
-and the daemon restore . re-emit task records as `TaskEvent` payloads in their journalled
-positions, so a rebuilt pane can hold and release its subagent rows exactly as the live stream
-did. `seq` counts from 1;
+hostile ids cannot land on one file. Current records use `{"seq": n, "update": …}`. Readers accept
+legacy `{"seq": n, "task": …}` rows and skip them, preserving later standard updates and their
+sequence order. `seq` counts from 1;
 a crash mid-write leaves a torn trailing line that readers skip and the next append isolates behind
 a fresh newline. Token-level streaming is collapsed before it lands: adjacent
 `agent_message_chunk`/`agent_thought_chunk` updates with one coalescing identity (same kind,
@@ -951,23 +845,18 @@ prompts, credentials, approval decisions, or a copy of provider session files.
 
 # Verification
 
-- Reducer tests cover message coalescing, artifact chunk boundaries, notification routing, replay
-  deduplication, parent/orphan/depth-flattened subagent routing, terminal info/output/exit frames,
-  entry revision/index alignment, stable tool IDs, plan replacement, permission state,
-  command/skill discovery, generic options, and session-ID bounds;
-  UI tests cover append-only UTF-8 Markdown detection and Mermaid output; composer tests cover
-  provider-specific completion sigils, matching `$` skills without requiring the stored prefix,
-  complete result sets, suppression of ellipsis-only description placeholders, and real GPUI
-  Up/Down/Tab routing ahead of the multiline input.
+- Reducer tests cover the five flat transcript shapes, inert vendor metadata, prompt completion
+  without fabricated tool completion, late updates without activity revival, message coalescing,
+  replay deduplication, entry revisions, stable tool IDs, plan replacement, permissions, generic
+  options, slash commands, and session-ID bounds. UI tests pin static tool status glyphs, Markdown,
+  Mermaid, and completion-key routing.
 - The ACP peer tests moved to the daemon with the runtime. `zz-daemon/src/agent/fixture.rs` is an
   in-process ACP agent both the host's own tests and the daemon's end-to-end wiring tests open panes
   against, in place of spawning a child. Host tests cover the whole arc . spawn through prompt to a
   finished turn, an auto-approved tool never reaching a client, a surfaced permission waiting for an
-  answer, a mid-turn prompt queueing and dispatching when the turn settles, unqueueing handing
-  prompts back with their images, a quiet turn parking and letting the queue move on, a park refused
-  while the agent still owes an answer, a session the agent cannot load being replayed out of the
-  journal, a pane outside a worktree reporting no turn to diff, closing a pane cancelling what it
-  owed, and tool calls and tasks holding a turn open until they settle.
+  answer, a mid-turn prompt queueing and dispatching after the prompt response, unqueueing handing
+  prompts back with their images, a session the agent cannot load being replayed out of the journal,
+  a pane outside a worktree reporting no turn to diff, and pane closure cancelling what it owed.
 - Fanout tests pin the lane's contract: a window of items leaving as one frame numbered from the
   first, a replay inside the ring serving only what the client missed, a replay older than the ring
   restoring Ready/reset/journal/SessionReady in order, request replies leaving the stream without
@@ -1003,10 +892,6 @@ prompts, credentials, approval decisions, or a copy of provider session files.
   the reason the question branch is unreachable rather than merely untested. Wizard tests cover
   page advance, an answered page latching until the controller drops it, page stability when another
   request resolves elsewhere, out-of-range and composer-engaged digits, and confirm/cancel.
-- Watchdog tests are split: the daemon owns the park itself and each thing that blocks it (an
-  unresolved tool call, a pending permission, a reporting subagent) plus the window's
-  default/zero/whitespace parsing, while the client keeps the reducer half . that a parked tool
-  settles completed rather than failed, and that output after a park opens a new segment.
 - Journal tests cover ordered round trips with `0o600`/`0o700` modes, sequence continuity across a
   reopen, a tolerated torn trailing line, hostile session IDs staying inside the directory, refusal
   past the size cap, and retention pruning; a host test replays a session the agent cannot load out

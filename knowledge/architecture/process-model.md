@@ -12,7 +12,8 @@ timestamp: 2026-08-14T00:00:00Z
 zz runs as several cooperating processes rather than one monolith. A single persistent **daemon**
 owns durable multiplexer state and PTYs; **GUI clients** and **CLI clients** attach to it over an
 owner-only local IPC endpoint; the browser runs as its own tree of **CEF subprocesses**, and each
-Agent pane owns an **ACP child process** inside its GUI process. The separation lets terminals
+Agent pane owns an **ACP child process** inside the daemon. The separation lets terminal and agent
+sessions
 survive GUI detach while keeping the mux state a single source of truth.
 
 # Processes
@@ -23,7 +24,7 @@ survive GUI detach while keeping the mux state a single source of truth.
 | GUI client ([app](/crates/zz.md)) | GPUI windows, rendering, local CEF sessions, ACP controller/session reducers | attached to at most one session; a session takes as many clients as devices attach |
 | CLI client | one short-lived command (`list-sessions`, `send-keys`, …) | request/response, then exits |
 | CEF browser process | Chromium main/GPU/renderer/utility (zygote) tree | spawned inside a GUI process; not kept alive without a GUI |
-| ACP agent process | Codex or Claude Code reached over stdio JSON-RPC; one process and ACP session belong to one Agent pane | spawned when the pane appears; replaced on provider/config changes; stopped with the pane or GUI |
+| ACP agent process | Codex or Claude Code reached over stdio JSON-RPC; one process and ACP session belong to one Agent pane | spawned when the pane appears; replaced on provider/config changes; stopped with the pane or daemon |
 
 The daemon's exit rule deliberately differs from tmux's `exit-empty`: destroying the last session is
 not enough while a GUI client is still attached, because that client outlives its last pane and must
@@ -100,11 +101,10 @@ each rendered against that view's own scroll, selection, copy-mode, and search s
 to that view's client. See [PTY worker](/concepts/pty-worker.md) for the ownership boundary between
 server and zz-terminal.
 
-Agent panes follow the same shape with three threads of their own: one `zz-agent-{n}` per pane
-blocking on that pane's ACP connection, one shared `zz-agent-park` ticker for the quiesce watchdog,
-and one shared `zz-agent-flush` closing the fanout's 25 ms coalescing windows. Both shared threads
-park outright when nothing is open or nothing is gathered, and the whole runtime is built lazily on
-the first agent pane, so a daemon that never runs an agent spawns none of them.
+Agent panes use one `zz-agent-{n}` thread per pane to block on the ACP connection and one shared
+`zz-agent-flush` thread to close the fanout's 25 ms coalescing windows. The flusher parks while no
+pane has gathered output. The daemon builds the runtime on the first agent pane, so a daemon that
+never runs an agent spawns none of these threads.
 
 # Related
 

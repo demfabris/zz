@@ -13,7 +13,6 @@ pub(crate) mod fixture;
 pub(crate) mod host;
 pub(crate) mod journal;
 pub(crate) mod paths;
-pub(crate) mod profile;
 pub(crate) mod runtime;
 pub(crate) mod stream;
 pub(crate) mod turn_snapshot;

@@ -51,7 +51,7 @@ send-keys, and client events. It contains no GPUI or CEF code; live browser rend
 
 | Module (`crates/zz-daemon/src/`) | Public surface | Role |
 |-------------------------------|----------------|------|
-| `lib.rs` | re-exports `Daemon`, `DaemonError`, `CommandClient`, `InteractiveClient`, `short_device_name`, `agent_send_reads_stdin`, `default_socket_path`, `default_mux_config`, `mux_config_candidates`, `mux_config_write_path`, `RecoveredDaemon`, `DaemonRecoveryError`, `terminate_incompatible_daemon`, `daemon_identity_protocol_version`, `classify_local_connect_error`, `Endpoint`, `EndpointError`, `SshEndpoint`, `SshPrompts`, `AskpassPrompt`, `AskpassPromptKind`, `AskpassReply`, `ASKPASS_SOCKET_ENV`, `run_helper`, the `user_data` module, and (feature `agent`) the agent stream vocabulary a client deserializes against . `AgentStreamItem`, `AgentStreamPayload`, `AgentPrompt`, `AgentPromptOutcome`, `AgentSessionSummary`, `AgentSessionCapabilities`, `AgentAuthMethod`, `AgentTurnDiffOutcome`, `TurnDiff`/`TurnFile`/`TurnFileStatus`, `SdkTaskEvent`, `TaskNotification` | Crate root; the whole public API |
+| `lib.rs` | re-exports `Daemon`, `DaemonError`, `CommandClient`, `InteractiveClient`, `short_device_name`, `agent_send_reads_stdin`, `default_socket_path`, `default_mux_config`, `mux_config_candidates`, `mux_config_write_path`, `RecoveredDaemon`, `DaemonRecoveryError`, `terminate_incompatible_daemon`, `daemon_identity_protocol_version`, `classify_local_connect_error`, `Endpoint`, `EndpointError`, `SshEndpoint`, `SshPrompts`, `AskpassPrompt`, `AskpassPromptKind`, `AskpassReply`, `ASKPASS_SOCKET_ENV`, `run_helper`, the `user_data` module, and (feature `agent`) the agent stream vocabulary a client deserializes against . `AgentStreamItem`, `AgentStreamPayload`, `AgentPrompt`, `AgentPromptOutcome`, `AgentSessionSummary`, `AgentSessionCapabilities`, `AgentAuthMethod`, `AgentTurnDiffOutcome`, `TurnDiff`/`TurnFile`/`TurnFileStatus` | Crate root; the whole public API |
 | `daemon.rs` | `Daemon`, `DaemonError`, `agent_send_reads_stdin` | The server itself: local accept loop, `Shared`/`ServerState`, command execution, `OutboundMailbox` fan-out, terminal watching, attach/detach, input routing. It binds exactly one endpoint . the owner-only local socket |
 | `transport.rs` | `default_socket_path` | Platform IPC: wraps `interprocess` into `LocalListener`/`LocalStream`, per-platform endpoint paths, peer-credential capture |
 | `client.rs` | `CommandClient`, `InteractiveClient`, `short_device_name` | Client halves of the protocol: connect + handshake (`connect_endpoint` for an `ssh://` endpoint), framed `ProtocolSender`/`ProtocolReceiver`, request/response and attach/detach/input helpers |
@@ -62,7 +62,7 @@ send-keys, and client events. It contains no GPUI or CEF code; live browser rend
 | `keys.rs` | (crate-internal) `input_key_name`, `send_tokens` | tmux key spelling ↔ `KeyInput`; named-key/literal fan-out for `send-keys` |
 | `status.rs` | (crate-internal) `StatusRenderer`, `status_context` | Expands the [tmux status line](/tmux/status-line.md) per client: strftime, bounded `#()` execution with an output cache, change diffing |
 | `user_data.rs` | `platform_data_dir`, `restrict_to_current_user`, `restrict_directory_to_current_user` | Where user-owned application data lives and how it is permission-hardened. The policy sits here because the daemon's agent journal answers to it too; `crates/zz/src/user_data.rs` is now a re-export of this module |
-| `agent/` (feature `agent`) | `AgentStreamItem`/`AgentStreamPayload` and friends via the crate root | The daemon-owned Agent runtime, over eight submodules: `host` (one thread per pane, prompt queue, park watchdog, permission bookkeeping), `runtime` (the ACP connection itself), `fanout` (coalescing, wire sequence, replay ring, pane state), `journal`, `turn_snapshot`, `environment` (ACP child PATH repair and workspace identity), `profile` (provider `_meta` opt-ins and the claude SDK passthrough), `paths`, plus a test-only in-process `fixture` |
+| `agent/` (feature `agent`) | `AgentStreamItem`/`AgentStreamPayload` and friends via the crate root | The daemon-owned Agent runtime: `host` (one thread per pane, prompt queue, permission bookkeeping), `runtime` (the ACP connection), `fanout` (coalescing, wire sequence, replay ring, pane state), `journal`, `turn_snapshot`, `environment` (ACP child PATH repair and workspace identity), `paths`, plus a test-only in-process `fixture` |
 
 # How the daemon runs
 
@@ -207,7 +207,6 @@ The daemon is thread-per-connection with dedicated writer and per-pane watcher t
 | `zz-daemon-signals` (Unix) | `DaemonSignalGuard` | Wait for `SIGTERM`/`SIGINT` or ordinary shutdown cancellation, then request the same graceful stop as `kill-server` |
 | `zz-copy-pipe` | `spawn_copy_pipe` | Run a `copy-pipe` child, feed selection on stdin (bounded pool) |
 | `zz-agent-{n}` | `AgentHost::open` | Block on one pane's ACP connection: adapter child stdio, prompt dispatch, permission responders, turn snapshots, journal appends |
-| `zz-agent-park` | `AgentHost::ensure_ticker` | The one quiesce clock, ticking every second over the open panes and parking outright while none is open |
 | `zz-agent-flush` | `AgentFanout::ensure_flusher` | Close 25 ms coalescing windows and hand finished frames to the publisher; parks whenever no pane has anything gathered |
 
 That is the whole inventory. The QUIC egress accept loop, the two pairing-request threads, the
@@ -406,8 +405,8 @@ send-keys data flow (CLI → PTY):
 | `crates/zz-daemon/src/lifecycle.rs` | `DaemonIdentityGuard`, `terminate_incompatible_daemon`, identity-file + guarded shutdown |
 | `crates/zz-daemon/src/keys.rs` | `input_key_name` (KeyInput → tmux spelling), `send_tokens` (named-key/literal fan-out) |
 | `crates/zz-daemon/src/user_data.rs` | `platform_data_dir` per OS and the Unix `0o600`/`0o700` hardening helpers, shared with the GUI |
-| `crates/zz-daemon/src/agent/host.rs` | `AgentHost`, `AgentPaneSpec`, `AgentPaneState`, `HostCommand`, the per-pane `PanePump`, and the shared park ticker |
-| `crates/zz-daemon/src/agent/runtime.rs` | `run_agent_runtime` / `run_agent_connection`, the ACP client role, auto-approve (`is_user_question`, `preferred_allow_option`), `StderrTail`, `quiesce_window`, `load_persistent_journal` |
+| `crates/zz-daemon/src/agent/host.rs` | `AgentHost`, `AgentPaneSpec`, `AgentPaneState`, `HostCommand`, and the per-pane `PanePump` |
+| `crates/zz-daemon/src/agent/runtime.rs` | `run_agent_runtime` / `run_agent_connection`, the ACP client role, auto-approve (`is_user_question`, `preferred_allow_option`), `StderrTail`, and `load_persistent_journal` |
 | `crates/zz-daemon/src/agent/fanout.rs` | `AgentRuntime` (what the daemon holds), the `AgentPublisher` trait, per-pane coalescing, wire sequencing, the replay ring, `AgentPaneWire` derivation, and first-prompt pane titles |
 | `crates/zz-daemon/src/agent/journal.rs` | Per-ACP-session JSONL append/replay/prune, session-ID jailing, the 32 MiB cap |
 | `crates/zz-daemon/src/agent/turn_snapshot.rs` | `snapshot_tree` and the bounded `git diff-tree` capture behind the "changes this turn" overlay |

@@ -126,7 +126,7 @@ impl StoryId {
             Self::Browser => "Toolbar buttons, the address bar, recent rows, and recovery states.",
             Self::Editor => "The native rope-backed editor with Rust syntax highlighting.",
             Self::Agent => {
-                "The agent pane header, the thread timeline rows, and the subagent and notification entries."
+                "The agent pane header and its flat ACP transcript rows."
             }
             Self::Settings => "Navigation buttons, setting cards, rows, badges, and reset actions.",
             Self::Feedback => {
@@ -172,7 +172,7 @@ impl StoryId {
             Self::Browser => "browser toolbar address url recent empty error picker menu",
             Self::Editor => "editor code rust rope line numbers syntax highlight text",
             Self::Agent => {
-                "agent thread timeline tool diff reasoning plan markdown codex claude subagent task notification"
+                "agent acp thread timeline tool diff reasoning plan markdown codex claude"
             }
             Self::Settings => "settings card row provenance reset select switch number nav",
             Self::Feedback => {

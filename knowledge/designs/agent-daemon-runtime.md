@@ -26,10 +26,10 @@ runs on the daemon's machine, which is the correct machine).
 
 # Ownership shift
 
-| Concern | Before (v52) | Current (v55) |
+| Concern | Before (v52) | Current (v56) |
 | --- | --- | --- |
 | Adapter child, stdio, ACP session | GUI (`AgentController` runtime tasks) | daemon `agent::host`, one thread per pane |
-| Auto-approve, quiesce park, queued prompts, stderr tail, session ops | GUI runtime half | daemon `agent::host` |
+| Auto-approve, queued prompts, stderr tail, session ops | GUI runtime half | daemon `agent::host` |
 | Journal | GUI `<data>/zz/agent-journal` | daemon `<data>/zz/daemon/agent-journal` |
 | Turn snapshots (git write-tree at dispatch) | GUI background executor | daemon (correct for remote daemons) |
 | Transcript reducer (`AgentThread`), view, composer, wizard, badges, mend, spring | GUI | GUI, unchanged |
@@ -37,11 +37,12 @@ runs on the daemon's machine, which is the correct machine).
 | `agent-send --submit` | daemon → GUI round-trip (`request_from_gui`) | daemon dispatches directly into the host; `ComposerAppend` keeps the GUI round-trip |
 | Adopting the ACP session ID, naming a pane after its first prompt | GUI, via `set-agent-session` / `select-pane -T` round trips | daemon (`adopt_agent_session`, `title_agent_pane`); the GUI keeps its own titling for the pane it drives |
 
-# Wire surface (v55)
+# Wire surface (v56)
 
 v53 moved the runtime into the daemon. v54 completed its session and restart controls. v55 gives
 each client process a stable identity and acknowledges restored prompts so reconnects remain
-owner-specific and do not resurrect consumed drafts. Postcard
+owner-specific and do not resurrect consumed drafts. v56 removes the provider task-event, parked,
+and abandoned-turn stream vocabulary. Postcard
 cannot carry the ACP SDK's JSON-shaped types
 (`serde_json::Map` metas, `RawValue` params), so every stream item crosses as an opaque JSON
 blob with a byte cap, and the client deserializes into the same `RuntimeEvent`-shaped enum the
@@ -151,18 +152,16 @@ depend on `zz-daemon` with `default-features = false` and never inherit
 - The ported logic is the revival's runtime half, moved nearly verbatim from
   `crates/zz/src/agent/controller.rs`: `run_agent_runtime` / `run_agent_connection`,
   `RuntimeCommand`/`RuntimeEvent` (becoming `AgentStreamItem`), `RuntimeRouting`, `StderrTail`,
-  auto-approve (`is_user_question` + preferred allow), queued prompts with reclaim, quiesce
-  park (`ZZ_AGENT_QUIESCE_MS`, read once per daemon process), session-id validation, journal,
+  auto-approve (`is_user_question` + preferred allow), queued prompts with reclaim,
+  session-id validation, journal,
   and `environment.rs`'s PATH repair (the pure-std `login_shell` module moved wholesale).
-  The park is one shared `PARK_TICK` ticker at second resolution — the window is minutes — and
-  it parks outright while no pane is open.
 - The runtime is built lazily, on the first agent pane the daemon opens rather than at daemon
   start; building it opens and prunes the journal and calls `prewarm`, which takes the
   login-shell PATH snapshot and warms the npx cache for the configured adapter packages off the
   spawn path.
 - A prompt that arrives while the pane is not `Ready` **queues**; it is never rejected. The
-  host dispatches the queue head as each turn settles — on completion and after a quiesce park
-  — and hands the whole queue back through `PromptsReclaimed` on cancel, on a lost runtime, and
+  host dispatches the queue head after the active `session/prompt` request returns and hands the
+  whole queue back through `PromptsReclaimed` on cancel, on a lost runtime, and
   on a failed dispatch. That is the same at-least-once rule the GUI had, now enforced
   daemon-side, so a prompt survives the client that typed it.
 - Prompt images arrive as bytes+format on the wire and convert to ACP `ContentBlock`s

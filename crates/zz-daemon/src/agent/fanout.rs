@@ -559,12 +559,11 @@ impl AgentFanout {
             HostCommand::Prompt(prompt) => {
                 return self.reclaim_prompt(pane, prompt);
             }
-            HostCommand::Cancel
-            | HostCommand::Unqueue
-            | HostCommand::RespondPermission { .. }
-            | HostCommand::Park => AgentStreamPayload::PaneFailed {
-                message: "agent control queue is busy".to_owned(),
-            },
+            HostCommand::Cancel | HostCommand::Unqueue | HostCommand::RespondPermission { .. } => {
+                AgentStreamPayload::PaneFailed {
+                    message: "agent control queue is busy".to_owned(),
+                }
+            }
         };
         let mut lanes = self.lanes.lock();
         let Some(lane) = lanes.get_mut(&pane) else {
@@ -838,11 +837,8 @@ impl AgentFanout {
             lane.synthesize(pane, ready, &mut synthesized);
         }
         for (_, entry) in replay {
-            // Both shapes ride one journal in stream order, so a task bookend
-            // is synthesized where the transcript left it rather than after it.
             let payload = match entry {
                 JournalEntry::Update(update) => AgentStreamPayload::Update { update },
-                JournalEntry::Task(event) => AgentStreamPayload::TaskEvent { event },
             };
             lane.synthesize(pane, payload, &mut synthesized);
         }
@@ -1235,7 +1231,6 @@ mod tests {
     use super::*;
     use crate::agent::{
         fixture::{Behavior, fixture_runner},
-        profile::SdkTaskEvent,
         stream::{AgentImage, AgentSessionCapabilities, AgentSessionSummary, AgentTurnDiffOutcome},
     };
 
@@ -1430,34 +1425,6 @@ mod tests {
         let mut state = AgentPaneState::for_test();
         state.phase = phase;
         state
-    }
-
-    fn message(text: &str) -> Value {
-        json!({
-            "sessionUpdate": "agent_message_chunk",
-            "messageId": text,
-            "content": { "type": "text", "text": text }
-        })
-    }
-
-    /// The transcript items of a stream, in order, as strings a comparison can
-    /// point at: everything that is neither an update nor a task event is
-    /// scaffolding the two replay paths are free to differ on.
-    fn transcript_of(items: &[AgentStreamItem]) -> Vec<String> {
-        items
-            .iter()
-            .filter_map(|item| match &item.payload {
-                AgentStreamPayload::Update { .. } => {
-                    text_of(item).map(|text| format!("update:{text}"))
-                }
-                AgentStreamPayload::TaskEvent { event } => Some(format!(
-                    "task:{}:{}",
-                    event.kind(),
-                    event.task_id().unwrap_or("-")
-                )),
-                _ => None,
-            })
-            .collect()
     }
 
     fn text_of(item: &AgentStreamItem) -> Option<String> {
@@ -1667,113 +1634,6 @@ mod tests {
             replayed.iter().map(|item| item.seq).collect::<Vec<_>>(),
             (replayed[0].seq..replayed[0].seq + 6).collect::<Vec<_>>(),
             "and stays contiguous for every client on the pane"
-        );
-    }
-
-    #[test]
-    fn replaying_from_the_journal_carries_the_task_bookends_the_ring_would_have() {
-        let directory = tempfile::tempdir().expect("journal directory");
-        let journal = Arc::new(AgentJournal::open(directory.path()).expect("open journal"));
-        let started = SdkTaskEvent::Started {
-            task_id: "t-1".to_owned(),
-            tool_use_id: "toolu_1".to_owned(),
-            is_agent: true,
-        };
-        let settled = SdkTaskEvent::Settled {
-            task_id: "t-1".to_owned(),
-            status: "completed".to_owned(),
-        };
-        let transcript = [
-            AgentStreamPayload::Update {
-                update: message("spawning"),
-            },
-            AgentStreamPayload::TaskEvent {
-                event: started.clone(),
-            },
-            AgentStreamPayload::Update {
-                update: message("waiting"),
-            },
-            AgentStreamPayload::TaskEvent {
-                event: settled.clone(),
-            },
-            AgentStreamPayload::Update {
-                update: message("done"),
-            },
-        ];
-        for payload in &transcript {
-            match payload {
-                AgentStreamPayload::Update { update } => {
-                    journal.append("s-1", update).expect("append");
-                }
-                AgentStreamPayload::TaskEvent { event } => {
-                    journal.append_task("s-1", event).expect("append task");
-                }
-                _ => unreachable!(),
-            }
-        }
-
-        let fixture = Fixture::open(Some(journal), Some("s-1"));
-        fixture.accept(AgentStreamPayload::SessionReady {
-            session_id: "s-1".to_owned(),
-            modes: None,
-            config_options: None,
-        });
-        for payload in transcript.clone() {
-            fixture.accept(payload);
-        }
-        fixture.recorder.wait_for_items(6);
-
-        // The ring still holds everything, so this replay is the live one.
-        fixture.fanout.replay(ClientId(3), fixture.pane, 1);
-        let from_ring = fixture
-            .recorder
-            .direct
-            .lock()
-            .iter()
-            .flat_map(|(_, _, _, items)| items.clone())
-            .map(|item| serde_json::from_slice::<AgentStreamItem>(&item).expect("decode"))
-            .collect::<Vec<_>>();
-
-        fixture
-            .fanout
-            .lanes
-            .lock()
-            .get_mut(&fixture.pane)
-            .expect("lane")
-            .evicted_seq = u64::MAX - 1;
-        fixture.fanout.replay(ClientId(4), fixture.pane, 1);
-        let from_journal = fixture
-            .recorder
-            .broadcast
-            .lock()
-            .iter()
-            .filter(|(_, _, _, also)| *also == Some(ClientId(4)))
-            .flat_map(|(_, _, items, _)| items.clone())
-            .map(|item| serde_json::from_slice::<AgentStreamItem>(&item).expect("decode"))
-            .collect::<Vec<_>>();
-
-        let expected = [
-            "update:spawning",
-            "task:task-started:t-1",
-            "update:waiting",
-            "task:task-settled:t-1",
-            "update:done",
-        ];
-        assert_eq!(transcript_of(&from_journal), expected);
-        assert_eq!(
-            transcript_of(&from_ring),
-            transcript_of(&from_journal),
-            "the two replay paths owe a client the same stream"
-        );
-        assert!(matches!(
-            from_journal.first().map(|item| &item.payload),
-            Some(AgentStreamPayload::SessionReset { restoring: true })
-        ));
-        assert!(
-            from_journal
-                .windows(2)
-                .all(|items| items[1].seq == items[0].seq + 1),
-            "the synthesized replay stays contiguous"
         );
     }
 

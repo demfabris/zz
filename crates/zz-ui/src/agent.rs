@@ -16,7 +16,6 @@ use crate::{
     button::{Button, ButtonVariants as _},
     control_shadow, h_flex,
     mend::{PENDING_LINK_URL, mend},
-    pulse::pulse_phase,
     scroll::ScrollableElement as _,
     text::{
         MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, TextView,
@@ -25,12 +24,12 @@ use crate::{
     v_flex,
 };
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, DispatchPhase, Div, ElementId, Entity, EntityId,
-    FollowMode, FontStyle, FontWeight, Global, HighlightStyle, Hsla, Image, ImageSource,
-    InteractiveText, IntoElement, ListSizingBehavior, ListState, ObjectFit, Pixels, RenderImage,
-    Rgba, ScrollStrategy, ScrollWheelEvent, SharedString, Stateful, StyledText, Task,
-    Transformation, UniformListScrollHandle, Window, canvas, div, ease_in_out, img, list,
-    percentage, prelude::*, px, relative, uniform_list,
+    AnyElement, App, ClipboardItem, Context, DispatchPhase, Div, ElementId, Entity, FollowMode,
+    FontStyle, FontWeight, Global, HighlightStyle, Hsla, Image, ImageSource, InteractiveText,
+    IntoElement, ListSizingBehavior, ListState, ObjectFit, Pixels, RenderImage, Rgba,
+    ScrollStrategy, ScrollWheelEvent, SharedString, Stateful, StyledText, Task,
+    UniformListScrollHandle, Window, canvas, div, img, list, prelude::*, px, relative,
+    uniform_list,
 };
 use parking_lot::RwLock;
 use similar::{ChangeTag, TextDiff};
@@ -52,8 +51,6 @@ const MARKDOWN_PREVIEW_MAX_LINES: usize = 512;
 const MARKDOWN_PREVIEW_HEIGHT: f32 = 420.0;
 const MARKDOWN_PREVIEW_MARKER: &str =
     "\n\n… [large message preview stopped; copy the full message below]";
-/// One rotation of the in-flight tool indicator.
-const TOOL_SPINNER_PERIOD: Duration = Duration::from_millis(800);
 /// Where a link whose URL is still streaming is pointed. The renderer refuses
 /// to open `data:` URLs, which is what keeps the mend sentinel inert.
 const INERT_LINK_URL: &str = "data:,";
@@ -204,10 +201,6 @@ pub enum AgentToolPayload {
 }
 
 impl AgentToolPayload {
-    const fn is_terminal(&self) -> bool {
-        matches!(self, Self::Terminal(_))
-    }
-
     fn revisions(&self) -> ((u64, u64), (u64, u64)) {
         match self {
             Self::Diff { old, new, .. } => (
@@ -260,7 +253,6 @@ pub enum DisclosureKind {
     Reasoning,
     Tool,
     Group,
-    Notification,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -874,13 +866,6 @@ pub enum AgentEntry {
         id: u64,
         markdown: AgentMarkdown,
     },
-    Notification {
-        id: u64,
-        task_id: SharedString,
-        status: SharedString,
-        summary: SharedString,
-        result_markdown: AgentMarkdown,
-    },
     Tool(AgentToolEntry),
 }
 
@@ -894,8 +879,6 @@ pub struct AgentToolEntry {
     pub input: Option<AgentToolPayload>,
     pub output: Arc<[AgentToolPayload]>,
     pub default_expanded: bool,
-    pub subagent: bool,
-    pub children: Arc<[AgentEntry]>,
 }
 
 impl AgentEntry {
@@ -905,8 +888,7 @@ impl AgentEntry {
             Self::User { id, .. }
             | Self::Assistant { id, .. }
             | Self::Reasoning { id, .. }
-            | Self::Plan { id, .. }
-            | Self::Notification { id, .. } => *id,
+            | Self::Plan { id, .. } => *id,
             Self::Tool(tool) => tool.id,
         }
     }
@@ -1441,7 +1423,6 @@ fn render_group(
     members: &[AgentEntry],
     cx: &mut App,
 ) -> AnyElement {
-    let view = store.entity_id();
     let expanded = store.update(cx, |store, _| {
         store.expanded(id, DisclosureKind::Group, false)
     });
@@ -1455,12 +1436,7 @@ fn render_group(
                     .unwrap_or(AgentToolKind::Other),
             ),
             tool_group_label(members),
-            tool_status(
-                aggregate_tool_status(members),
-                tool_group_animates(members),
-                view,
-                cx,
-            ),
+            Some(tool_status(aggregate_tool_status(members), cx)),
         ),
         TimelineGroupKind::Reasoning => (
             IconName::Cpu,
@@ -1618,38 +1594,6 @@ fn single_line(text: SharedString) -> SharedString {
         .collect::<Vec<_>>()
         .join(" · ")
         .into()
-}
-
-/// Whether an unsettled tool row earns motion. An adapter that omits a final
-/// tool update leaves a row Pending or Running for the life of the pane, so a
-/// spinner is reserved for the rows where it reports something real: a
-/// subagent, a live terminal stream, and an approval the user has to answer.
-/// Every other in-flight tool rides on the static kind icon it already carries.
-fn tool_animates(tool: &AgentToolEntry) -> bool {
-    match tool.status {
-        AgentToolStatus::NeedsApproval => true,
-        AgentToolStatus::Pending | AgentToolStatus::Running => {
-            tool.subagent
-                || tool
-                    .input
-                    .as_ref()
-                    .is_some_and(AgentToolPayload::is_terminal)
-                || tool.output.iter().any(AgentToolPayload::is_terminal)
-        }
-        AgentToolStatus::Completed | AgentToolStatus::Failed | AgentToolStatus::Canceled => false,
-    }
-}
-
-/// A folded group animates only where one of its members would, so a run of
-/// generic tools stays still no matter how its aggregate status reads.
-fn tool_group_animates(tools: &[AgentEntry]) -> bool {
-    tools
-        .iter()
-        .filter_map(|entry| match entry {
-            AgentEntry::Tool(tool) => Some(tool),
-            _ => None,
-        })
-        .any(tool_animates)
 }
 
 fn aggregate_tool_status(tools: &[AgentEntry]) -> AgentToolStatus {
@@ -1822,96 +1766,6 @@ fn render_entry(
                     .child(markdown_view(store, id, MarkdownSlot::Body, markdown, cx)),
             )
             .into_any_element(),
-        AgentEntry::Notification {
-            id,
-            task_id,
-            status,
-            summary,
-            result_markdown,
-        } => {
-            let view = store.entity_id();
-            let expandable = !result_markdown.trim_is_empty();
-            let expanded = expandable
-                && store.update(cx, |store, _| {
-                    store.expanded(id, DisclosureKind::Notification, false)
-                });
-            let toggle = store.clone();
-            let label = if summary.is_empty() { task_id } else { summary };
-            v_flex()
-                .id(("agent-notification-entry", id))
-                .w_full()
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(cx.theme().border)
-                .px_2()
-                .py_1()
-                .child(
-                    h_flex()
-                        .id(("agent-notification-toggle", id))
-                        .w_full()
-                        .h(px(28.0))
-                        .items_center()
-                        .justify_between()
-                        .gap_2()
-                        .overflow_hidden()
-                        .when(expandable, gpui::Styled::cursor_pointer)
-                        .child(
-                            h_flex()
-                                .min_w_0()
-                                .flex_1()
-                                .gap_2()
-                                .overflow_hidden()
-                                .children(tool_status(notification_status(&status), true, view, cx))
-                                .child(
-                                    div()
-                                        .min_w_0()
-                                        .flex_1()
-                                        .overflow_hidden()
-                                        .text_ellipsis()
-                                        .whitespace_nowrap()
-                                        .text_size(crate::rems_from_px(13.0))
-                                        .text_color(cx.theme().foreground.muted())
-                                        .child(single_line(label)),
-                                ),
-                        )
-                        .when(expandable, |this| {
-                            this.child(
-                                Icon::new(if expanded {
-                                    IconName::ChevronUp
-                                } else {
-                                    IconName::ChevronDown
-                                })
-                                .xsmall()
-                                .text_color(cx.theme().foreground.muted()),
-                            )
-                        })
-                        .when(expandable, |this| {
-                            this.on_click(move |_, _, cx| {
-                                toggle.update(cx, |store, cx| {
-                                    store.toggle_expanded(
-                                        id,
-                                        DisclosureKind::Notification,
-                                        false,
-                                        cx,
-                                    );
-                                });
-                            })
-                        }),
-                )
-                .when(expanded, |this| {
-                    this.child(
-                        div()
-                            .ml_1()
-                            .pl_4()
-                            .py_1()
-                            .border_l_1()
-                            .border_color(cx.theme().border)
-                            .text_size(crate::rems_from_px(12.0))
-                            .child(assistant_markdown_view(store, id, result_markdown, cx)),
-                    )
-                })
-                .into_any_element()
-        }
         AgentEntry::Tool(tool) => render_tool_entry(timeline_scroll, store, tool, cx),
     }
 }
@@ -1922,7 +1776,6 @@ fn render_tool_entry(
     tool: AgentToolEntry,
     cx: &mut App,
 ) -> AnyElement {
-    let animated = tool_animates(&tool);
     let AgentToolEntry {
         id,
         kind,
@@ -1932,12 +1785,8 @@ fn render_tool_entry(
         input,
         output,
         default_expanded,
-        subagent: _,
-        children,
     } = tool;
-    let view = store.entity_id();
-    let expandable =
-        location.is_some() || input.is_some() || !output.is_empty() || !children.is_empty();
+    let expandable = location.is_some() || input.is_some() || !output.is_empty();
     let expanded = expandable
         && store.update(cx, |store, _| {
             store.expanded(id, DisclosureKind::Tool, default_expanded)
@@ -1946,24 +1795,6 @@ fn render_tool_entry(
         store.update(cx, |store, _| {
             store.tool_content(id, location, input, output)
         })
-    });
-    let nested_timeline = (expanded && !children.is_empty()).then(|| {
-        v_flex()
-            .w_full()
-            .gap_1()
-            .ml_2()
-            .pl_3()
-            .py_1()
-            .border_l_1()
-            .border_color(cx.theme().border)
-            .children(
-                children
-                    .iter()
-                    .cloned()
-                    .map(|entry| render_entry(timeline_scroll, store, entry, cx))
-                    .collect::<Vec<_>>(),
-            )
-            .into_any_element()
     });
     let toggle = store.clone();
 
@@ -2011,7 +1842,7 @@ fn render_tool_entry(
                     h_flex()
                         .flex_none()
                         .gap_1()
-                        .children(tool_status(status, animated, view, cx))
+                        .child(tool_status(status, cx))
                         .when(expandable, |this| {
                             this.child(
                                 Icon::new(if expanded {
@@ -2044,9 +1875,6 @@ fn render_tool_entry(
                 ))
             },
         )
-        .when_some(nested_timeline, |this, nested_timeline| {
-            this.child(nested_timeline)
-        })
         .into_any_element()
 }
 
@@ -2548,68 +2376,28 @@ fn tool_icon(kind: AgentToolKind) -> IconName {
     }
 }
 
-/// The rotating in-flight indicator, driven by the shared pulse clock rather
-/// than a repeating animation: one mounted `Spinner` would redraw the window on
-/// every display frame for as long as a tool runs.
-fn tool_spinner(color: Hsla, view: EntityId, cx: &mut App) -> AnyElement {
-    let phase = ease_in_out(pulse_phase(TOOL_SPINNER_PERIOD, view, cx));
-    Icon::new(IconName::Loader)
+const fn tool_status_icon(status: AgentToolStatus) -> IconName {
+    match status {
+        AgentToolStatus::Pending | AgentToolStatus::Running => IconName::Ellipsis,
+        AgentToolStatus::NeedsApproval => IconName::TriangleAlert,
+        AgentToolStatus::Completed => IconName::Check,
+        AgentToolStatus::Failed | AgentToolStatus::Canceled => IconName::Close,
+    }
+}
+
+fn tool_status(status: AgentToolStatus, cx: &App) -> AnyElement {
+    let color = match status {
+        AgentToolStatus::Running => cx.theme().foreground,
+        AgentToolStatus::NeedsApproval => cx.theme().warning,
+        AgentToolStatus::Pending | AgentToolStatus::Completed | AgentToolStatus::Canceled => {
+            cx.theme().foreground.muted()
+        }
+        AgentToolStatus::Failed => cx.theme().danger,
+    };
+    Icon::new(tool_status_icon(status))
         .xsmall()
         .text_color(color)
-        .transform(Transformation::rotate(percentage(phase)))
         .into_any_element()
-}
-
-/// The status column for one row, empty where an in-flight status has no
-/// motion to earn: a frozen spinner would read as a stall, so a static
-/// Pending or Running row shows nothing and takes no pulse lease. An approval
-/// always animates — asking for the user is the whole point of the state.
-fn tool_status(
-    status: AgentToolStatus,
-    animated: bool,
-    view: EntityId,
-    cx: &mut App,
-) -> Option<AnyElement> {
-    match status {
-        AgentToolStatus::Pending => {
-            animated.then(|| tool_spinner(cx.theme().foreground.muted(), view, cx))
-        }
-        AgentToolStatus::Running => animated.then(|| tool_spinner(cx.theme().foreground, view, cx)),
-        AgentToolStatus::NeedsApproval => Some(tool_spinner(cx.theme().warning, view, cx)),
-        AgentToolStatus::Completed => Some(
-            Icon::new(IconName::Check)
-                .xsmall()
-                .text_color(cx.theme().foreground.muted())
-                .into_any_element(),
-        ),
-        AgentToolStatus::Failed => Some(
-            Icon::new(IconName::Close)
-                .xsmall()
-                .text_color(cx.theme().danger)
-                .into_any_element(),
-        ),
-        AgentToolStatus::Canceled => Some(
-            Icon::new(IconName::Close)
-                .xsmall()
-                .text_color(cx.theme().foreground.muted())
-                .into_any_element(),
-        ),
-    }
-}
-
-/// Settled unless the status says otherwise. A notification card is written
-/// when a task reports, and only the handful of values below mean it is still
-/// working — a string this does not know is a card nothing will ever come back
-/// to settle, so it takes the static presentation rather than a permanent
-/// spinner.
-fn notification_status(status: &str) -> AgentToolStatus {
-    match status.trim().to_ascii_lowercase().as_str() {
-        "failed" | "error" | "killed" => AgentToolStatus::Failed,
-        "cancelled" | "canceled" | "interrupted" => AgentToolStatus::Canceled,
-        "running" | "in_progress" | "in-progress" => AgentToolStatus::Running,
-        "pending" => AgentToolStatus::Pending,
-        _ => AgentToolStatus::Completed,
-    }
 }
 
 fn markdown_view(
@@ -3785,80 +3573,6 @@ pub fn agent_pane_header(
         .child(div().flex_none().child(trailing))
 }
 
-/// Height of one row in the strip pinned above the composer.
-pub const AGENT_STICKY_ROW_HEIGHT: f32 = 32.0;
-
-/// One row of the sticky strip. The caller derives the rows from its thread and
-/// owns derivation; the strip only draws what it is handed.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AgentStickyRow {
-    Subagent {
-        id: u64,
-        status: AgentToolStatus,
-        label: SharedString,
-    },
-}
-
-/// The strip above the composer: a spinning row per live subagent, nothing
-/// else — settled work already reads off the transcript, so the strip empties
-/// itself the moment nothing is running. `view` is the entity whose notify
-/// repaints the strip, which the spinner leases on the shared pulse clock.
-/// No rows, no strip.
-#[must_use]
-pub fn agent_sticky_strip(
-    rows: &[AgentStickyRow],
-    view: EntityId,
-    cx: &mut App,
-) -> Option<AnyElement> {
-    if rows.is_empty() {
-        return None;
-    }
-    Some(
-        v_flex()
-            .w_full()
-            .gap_1()
-            .rounded(cx.theme().radius)
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().background.raised(1))
-            .p_1()
-            .children(rows.iter().map(|row| match row {
-                AgentStickyRow::Subagent { id, status, label } => {
-                    let spinner_color = if *status == AgentToolStatus::NeedsApproval {
-                        cx.theme().warning
-                    } else {
-                        cx.theme().foreground.muted()
-                    };
-                    h_flex()
-                        .id(("agent-sticky-subagent", *id))
-                        .w_full()
-                        .h(px(AGENT_STICKY_ROW_HEIGHT))
-                        .items_center()
-                        .gap_2()
-                        .px_2()
-                        .child(
-                            div()
-                                .flex_none()
-                                .child(tool_spinner(spinner_color, view, cx)),
-                        )
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex_1()
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .whitespace_nowrap()
-                                .text_size(crate::rems_from_px(12.0))
-                                .text_color(cx.theme().foreground.muted())
-                                .child(single_line(label.clone())),
-                        )
-                        .into_any_element()
-                }
-            }))
-            .into_any_element(),
-    )
-}
-
 #[cfg(test)]
 mod workspace_link_tests {
     use super::{INERT_LINK_URL, PENDING_LINK_URL, file_url, resolve_workspace_link};
@@ -4072,8 +3786,6 @@ mod tests {
             input: None,
             output: Arc::from([]),
             default_expanded: false,
-            subagent: false,
-            children: Arc::from([]),
         }
     }
 
@@ -4230,113 +3942,26 @@ mod tests {
     }
 
     #[test]
-    fn a_generic_in_flight_tool_never_animates() {
-        for status in [AgentToolStatus::Pending, AgentToolStatus::Running] {
-            let tool = test_tool_entry(1, "Ran command", AgentToolKind::Execute, status);
-            assert!(
-                !tool_animates(&tool),
-                "a generic {status:?} tool an adapter may never settle must stay still"
-            );
-        }
-    }
-
-    #[test]
-    fn subagents_terminals_and_approvals_keep_their_spinner() {
-        let mut subagent = test_tool_entry(
-            1,
-            "Research",
-            AgentToolKind::Other,
-            AgentToolStatus::Running,
-        );
-        subagent.subagent = true;
-        assert!(tool_animates(&subagent));
-
-        let mut terminal = test_tool_entry(
-            2,
-            "Ran command",
-            AgentToolKind::Execute,
-            AgentToolStatus::Running,
-        );
-        terminal.output = Arc::from([AgentToolPayload::Terminal("$ cargo test".into())]);
-        assert!(tool_animates(&terminal));
-
-        assert!(tool_animates(&test_tool_entry(
-            3,
-            "Write file",
-            AgentToolKind::Edit,
-            AgentToolStatus::NeedsApproval,
-        )));
-    }
-
-    #[test]
-    fn a_settled_tool_never_animates() {
-        for status in [
-            AgentToolStatus::Completed,
-            AgentToolStatus::Failed,
-            AgentToolStatus::Canceled,
-        ] {
-            let mut tool = test_tool_entry(1, "Research", AgentToolKind::Other, status);
-            tool.subagent = true;
-            tool.output = Arc::from([AgentToolPayload::Terminal("$ cargo test".into())]);
-            assert!(!tool_animates(&tool), "{status:?} is an outcome, not work");
-        }
-    }
-
-    #[test]
-    fn a_notification_animates_only_while_its_status_says_it_is_working() {
-        for status in ["pending", "running", "in_progress", "IN-PROGRESS"] {
-            assert!(
-                matches!(
-                    notification_status(status),
-                    AgentToolStatus::Pending | AgentToolStatus::Running
-                ),
-                "{status} is work in flight"
-            );
-        }
-
+    fn transcript_tool_statuses_use_static_icons() {
         assert_eq!(
-            notification_status(" Completed "),
-            AgentToolStatus::Completed
-        );
-        assert_eq!(notification_status("killed"), AgentToolStatus::Failed);
-        assert_eq!(
-            notification_status("interrupted"),
-            AgentToolStatus::Canceled
-        );
-
-        for status in ["", "queued", "task_notification"] {
-            assert_eq!(
-                notification_status(status),
+            [
+                AgentToolStatus::Pending,
+                AgentToolStatus::Running,
+                AgentToolStatus::NeedsApproval,
                 AgentToolStatus::Completed,
-                "a status nothing will come back to settle must not spin"
-            );
-        }
-    }
-
-    #[test]
-    fn a_group_animates_only_where_one_of_its_members_would() {
-        let generic = vec![
-            test_tool(1, "Editing files", AgentToolStatus::Completed),
-            test_tool(2, "Editing files", AgentToolStatus::Running),
-        ];
-        assert_eq!(aggregate_tool_status(&generic), AgentToolStatus::Running);
-        assert!(
-            !tool_group_animates(&generic),
-            "a running aggregate over generic members is not observable work"
+                AgentToolStatus::Failed,
+                AgentToolStatus::Canceled,
+            ]
+            .map(tool_status_icon),
+            [
+                IconName::Ellipsis,
+                IconName::Ellipsis,
+                IconName::TriangleAlert,
+                IconName::Check,
+                IconName::Close,
+                IconName::Close,
+            ]
         );
-
-        let mut subagent = test_tool_entry(
-            3,
-            "Research",
-            AgentToolKind::Other,
-            AgentToolStatus::Running,
-        );
-        subagent.subagent = true;
-        let live = vec![
-            test_tool(1, "Editing files", AgentToolStatus::Completed),
-            AgentEntry::Tool(subagent),
-        ];
-        assert!(tool_group_animates(&live));
     }
 
     #[gpui::test]

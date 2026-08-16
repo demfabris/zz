@@ -1,8 +1,8 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use agent_client_protocol::schema::{
@@ -20,7 +20,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use gpui::{App, Context, Entity, EventEmitter, Image, ImageFormat, Task};
 use zz_daemon::{
     AgentAuthMethod as StreamAuthMethod, AgentPromptOutcome, AgentStreamItem, AgentStreamPayload,
-    AgentTurnDiffOutcome, SdkTaskEvent, TurnDiff,
+    AgentTurnDiffOutcome, TurnDiff,
 };
 use zz_protocol::{
     AgentConnectionPhase, AgentDescriptor, AgentPaneWire, AgentProvider, AgentSessionOpKind,
@@ -33,11 +33,6 @@ use zz_protocol::{
 use crate::{
     agent::attachment,
     agent::preferences::{AgentPreferenceKind, AgentPreferences},
-    agent::profile::{
-        CodexCollaboration, MemoryCitation, Segment, TaskNotification, codex_collab_label,
-        codex_collaboration, codex_subagent_activity, codex_tool_subagent,
-        format_codex_collaboration, scan_text,
-    },
     agent::sound::AgentPaneStatus,
     config::AgentConfig,
     mux::client::{AgentRequest, MuxClient},
@@ -57,7 +52,6 @@ const UNTAGGED_SESSION_UPDATE: &str = "<untagged>";
 /// Tool payloads live in the thread for as long as the pane does, so the
 /// reducer caps what it keeps: agents happily emit multi-megabyte outputs.
 const MAX_TOOL_PAYLOAD_BYTES: usize = 512 * 1024;
-const MAX_SETTLED_TASK_TOMBSTONES: usize = 256;
 const MAX_DIFF_SIDE_BYTES: usize = 1024 * 1024;
 const TRUNCATION_MARKER: &str = "… [truncated]";
 /// A derived pane title is the opening words of the first prompt: enough to
@@ -148,7 +142,6 @@ pub(crate) enum AgentThreadEntry {
     Assistant {
         id: u64,
         markdown: String,
-        memory_citations: Vec<MemoryCitation>,
     },
     Reasoning {
         id: u64,
@@ -166,20 +159,10 @@ pub(crate) enum AgentThreadEntry {
         input: Option<ToolPayload>,
         output: Vec<ToolPayload>,
         default_expanded: bool,
-        subagent: bool,
-        children: Vec<AgentThreadEntry>,
     },
     Plan {
         id: u64,
         markdown: String,
-    },
-    Notification {
-        id: u64,
-        task_id: String,
-        tool_use_id: String,
-        status: String,
-        summary: String,
-        result_markdown: String,
     },
 }
 
@@ -190,8 +173,7 @@ impl AgentThreadEntry {
             | Self::Assistant { id, .. }
             | Self::Reasoning { id, .. }
             | Self::Tool { id, .. }
-            | Self::Plan { id, .. }
-            | Self::Notification { id, .. } => *id,
+            | Self::Plan { id, .. } => *id,
         }
     }
 }
@@ -233,18 +215,11 @@ pub(crate) struct AgentAuthMethod {
     pub(crate) description: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum AgentCommandKind {
-    Skill,
-    Command,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct AgentCommand {
     pub(crate) name: String,
     pub(crate) description: String,
     pub(crate) input_hint: Option<String>,
-    pub(crate) kind: AgentCommandKind,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -370,7 +345,6 @@ struct AgentThread {
     entry_indices: HashMap<u64, usize>,
     entry_changes: VecDeque<(u64, usize)>,
     entry_change_floor: u64,
-    child_entry_revisions: HashMap<u64, u64>,
     pending_permissions: Arc<[AgentPermissionRequest]>,
     auth_methods: Arc<[AgentAuthMethod]>,
     error: Option<Arc<str>>,
@@ -393,30 +367,13 @@ struct AgentThread {
     next_entry_revision: u64,
     message_entries: BTreeMap<(StreamRole, String), u64>,
     active_stream: Option<(StreamRole, u64)>,
-    text_carries: BTreeMap<(StreamRole, Option<String>), String>,
-    active_text_stream: Option<(StreamRole, Option<String>)>,
     tool_entries: HashMap<String, u64>,
     structured_tool_outputs: BTreeSet<String>,
     plan_entry: Option<u64>,
-    child_message_entries: BTreeMap<(String, StreamRole, String), u64>,
-    child_active_streams: HashMap<String, (StreamRole, u64)>,
-    child_text_carries: BTreeMap<(String, StreamRole, Option<String>), String>,
-    child_active_text_streams: HashMap<String, (StreamRole, Option<String>)>,
-    child_tool_entries: HashMap<String, u64>,
-    child_tool_roots: HashMap<String, String>,
-    child_structured_tool_outputs: BTreeSet<String>,
-    child_plan_entries: HashMap<String, u64>,
-    live_task_tools: HashMap<String, String>,
-    settled_tasks: HashSet<String>,
-    task_labels: HashMap<String, String>,
-    active_context_compaction: Option<String>,
     suppress_user_echo: bool,
     /// Set once the session's first prompt named the pane. A title is derived
     /// exactly once per session, so a later rename is never overwritten.
     auto_titled: bool,
-    /// When the pane last heard from the agent. Stamped by the reducer, which
-    /// sees every runtime event, so the quiesce watchdog only ever reads it.
-    last_activity: Instant,
     /// How many `session/update`s this build could not read. ACP reserves
     /// unknown `sessionUpdate` values for future variants, so skipping one is
     /// forward compatibility rather than a fault — the running count is what
@@ -435,7 +392,6 @@ impl AgentThread {
             entry_indices: HashMap::new(),
             entry_changes: VecDeque::new(),
             entry_change_floor: 1,
-            child_entry_revisions: HashMap::new(),
             pending_permissions: Arc::from([]),
             auth_methods: Arc::from([]),
             error: None,
@@ -458,26 +414,11 @@ impl AgentThread {
             next_entry_revision: 1,
             message_entries: BTreeMap::new(),
             active_stream: None,
-            text_carries: BTreeMap::new(),
-            active_text_stream: None,
             tool_entries: HashMap::new(),
             structured_tool_outputs: BTreeSet::new(),
             plan_entry: None,
-            child_message_entries: BTreeMap::new(),
-            child_active_streams: HashMap::new(),
-            child_text_carries: BTreeMap::new(),
-            child_active_text_streams: HashMap::new(),
-            child_tool_entries: HashMap::new(),
-            child_tool_roots: HashMap::new(),
-            child_structured_tool_outputs: BTreeSet::new(),
-            child_plan_entries: HashMap::new(),
-            live_task_tools: HashMap::new(),
-            settled_tasks: HashSet::new(),
-            task_labels: HashMap::new(),
-            active_context_compaction: None,
             suppress_user_echo: false,
             auto_titled: false,
-            last_activity: Instant::now(),
             unknown_updates: 0,
         }
     }
@@ -518,7 +459,6 @@ impl AgentThread {
         self.entry_indices.clear();
         self.entry_changes.clear();
         self.entry_change_floor = self.next_entry_revision;
-        self.child_entry_revisions.clear();
         self.pending_permissions = Arc::from([]);
         self.error = None;
         self.title = None;
@@ -533,26 +473,11 @@ impl AgentThread {
         self.next_entry_id = 1;
         self.message_entries.clear();
         self.active_stream = None;
-        self.text_carries.clear();
-        self.active_text_stream = None;
         self.tool_entries.clear();
         self.structured_tool_outputs.clear();
         self.plan_entry = None;
-        self.child_message_entries.clear();
-        self.child_active_streams.clear();
-        self.child_text_carries.clear();
-        self.child_active_text_streams.clear();
-        self.child_tool_entries.clear();
-        self.child_tool_roots.clear();
-        self.child_structured_tool_outputs.clear();
-        self.child_plan_entries.clear();
-        self.live_task_tools.clear();
-        self.settled_tasks.clear();
-        self.task_labels.clear();
-        self.active_context_compaction = None;
         self.suppress_user_echo = false;
         self.auto_titled = false;
-        self.last_activity = Instant::now();
     }
 
     fn set_session_configuration(
@@ -625,11 +550,6 @@ impl AgentThread {
         self.entry_changes.push_back((revision, index));
     }
 
-    fn touch_child_entry(&mut self, id: u64) {
-        let revision = self.allocate_entry_revision();
-        self.child_entry_revisions.insert(id, revision);
-    }
-
     fn prompt_refusal(&self, has_images: bool) -> Option<Arc<str>> {
         if !self.connection.accepts_prompt() {
             return Some(Arc::from(format!(
@@ -658,50 +578,32 @@ impl AgentThread {
         self.connection = AgentConnectionState::Running;
         self.error = None;
         self.suppress_user_echo = true;
-        self.last_activity = Instant::now();
     }
 
     fn apply_update(&mut self, update: SessionUpdate) {
-        let parent_tool_use_id = (self.provider == AgentProvider::ClaudeCode)
-            .then(|| session_update_parent_tool_use_id(&update))
-            .flatten()
-            .map(str::to_owned);
-        if let Some(parent_tool_use_id) = parent_tool_use_id
-            && let Some(root_tool_id) = self.child_root_for_parent(&parent_tool_use_id)
-        {
-            self.child_tool_roots
-                .insert(parent_tool_use_id.clone(), root_tool_id.clone());
-            self.apply_child_update(&root_tool_id, &parent_tool_use_id, update);
-            return;
-        }
         self.apply_flat_update(update);
     }
 
     fn apply_flat_update(&mut self, update: SessionUpdate) {
         match update {
             SessionUpdate::UserMessageChunk(chunk) => {
-                self.apply_profiled_chunk(StreamRole::User, chunk);
+                self.apply_message_chunk(StreamRole::User, chunk);
             }
             SessionUpdate::AgentMessageChunk(chunk) => {
-                self.settle_context_compaction();
-                self.apply_profiled_chunk(StreamRole::Assistant, chunk);
+                self.apply_message_chunk(StreamRole::Assistant, chunk);
             }
             SessionUpdate::AgentThoughtChunk(chunk) => {
-                self.flush_active_text_stream();
                 self.append_chunk(StreamRole::Reasoning, chunk);
             }
             SessionUpdate::ToolCall(tool) => {
-                self.flush_active_text_stream();
                 self.active_stream = None;
                 self.upsert_tool(tool);
             }
             SessionUpdate::ToolCallUpdate(update) => {
-                self.flush_active_text_stream();
                 self.active_stream = None;
                 self.apply_tool_update(update);
             }
             SessionUpdate::Plan(plan) => {
-                self.flush_active_text_stream();
                 self.active_stream = None;
                 self.apply_plan(&plan);
             }
@@ -732,517 +634,15 @@ impl AgentThread {
         }
     }
 
-    fn child_root_for_parent(&self, parent_tool_use_id: &str) -> Option<String> {
-        self.child_tool_roots
-            .get(parent_tool_use_id)
-            .cloned()
-            .or_else(|| {
-                self.tool_entries
-                    .contains_key(parent_tool_use_id)
-                    .then(|| parent_tool_use_id.to_owned())
-            })
-    }
-
-    fn apply_profiled_chunk(&mut self, role: StreamRole, chunk: ContentChunk) {
-        if !matches!(&chunk.content, ContentBlock::Text(_)) {
-            self.flush_active_text_stream();
-            if role != StreamRole::User || !self.suppress_user_echo {
-                self.append_chunk(role, chunk);
-            }
-            return;
-        }
-
-        let message_id = chunk
-            .message_id
-            .as_ref()
-            .map(|message_id| message_id.0.to_string());
-        let stream_key = (role, message_id.clone());
-        if self.active_text_stream.as_ref() != Some(&stream_key) {
-            self.flush_active_text_stream();
-            self.active_text_stream = Some(stream_key.clone());
-        }
-        let mut carry = self.text_carries.remove(&stream_key).unwrap_or_default();
-        let text = content_block_markdown(&chunk.content);
-        let segments = scan_text(self.provider, &text, &mut carry);
-        if !carry.is_empty() {
-            self.text_carries.insert(stream_key, carry);
-        }
-
-        for segment in segments {
-            match segment {
-                Segment::Clean(markdown) => {
-                    self.append_profiled_clean(role, message_id.clone(), &markdown);
-                }
-                Segment::Notification(notification) => {
-                    self.push_notification(notification);
-                    self.break_message_stream(role, message_id.as_deref());
-                }
-                Segment::Stripped {
-                    kind,
-                    memory_citations,
-                } => {
-                    if !memory_citations.is_empty() {
-                        self.attach_memory_citations(role, message_id.as_deref(), memory_citations);
-                    }
-                    log::trace!(
-                        target: "zz::agent::profile",
-                        "stripped {kind} artifact from {:?} agent stream",
-                        self.provider
-                    );
-                }
-            }
-        }
-    }
-
-    fn append_profiled_clean(
-        &mut self,
-        role: StreamRole,
-        message_id: Option<String>,
-        markdown: &str,
-    ) {
+    fn apply_message_chunk(&mut self, role: StreamRole, chunk: ContentChunk) {
         if role == StreamRole::User && self.suppress_user_echo {
             return;
         }
-        let (markdown, images) = if role == StreamRole::User {
-            split_inline_images(markdown)
-        } else {
-            (markdown.to_owned(), Vec::new())
-        };
-        self.append_stream_content(role, message_id, &markdown, images);
-    }
-
-    fn apply_task_event(&mut self, event: SdkTaskEvent) {
-        log::debug!(
-            target: "zz::agent",
-            "task event {} for task {}",
-            event.kind(),
-            event.task_id().unwrap_or("-")
-        );
-        match event {
-            SdkTaskEvent::Started {
-                task_id,
-                tool_use_id,
-                is_agent,
-            } => {
-                if !is_agent || !self.registrable_task(&task_id, &tool_use_id) {
-                    return;
-                }
-                self.live_task_tools.insert(task_id, tool_use_id.clone());
-                self.set_task_tool_status(&tool_use_id, AgentToolStatusModel::Running);
-            }
-            SdkTaskEvent::Notification(notification) => {
-                self.settle_task(&notification.task_id, &notification.status);
-                self.push_notification(notification);
-            }
-            SdkTaskEvent::Settled { task_id, status } => {
-                self.settle_task(&task_id, &status);
-            }
-            SdkTaskEvent::TaskProgress {
-                task_id,
-                tool_use_id,
-                ..
-            } => {
-                self.apply_task_progress(&task_id, tool_use_id.as_deref());
-            }
-            SdkTaskEvent::ToolProgress {
-                tool_use_id,
-                subagent_type,
-                ..
-            } => {
-                if subagent_type.is_some() {
-                    self.hold_progressing_tool(&tool_use_id);
-                }
-            }
-            SdkTaskEvent::Reconcile { task_ids } => self.retire_absent_tasks(&task_ids),
-        }
-    }
-
-    /// A task heartbeat, which is also the only repair for a `task_started`
-    /// that never arrived: it may adopt the tool the task names, but never one
-    /// this turn has already settled.
-    fn apply_task_progress(&mut self, task_id: &str, tool_use_id: Option<&str>) {
-        if let Some(registered) = self.live_task_tools.get(task_id).cloned() {
-            self.hold_progressing_tool(&registered);
-            return;
-        }
-        let Some(tool_use_id) = tool_use_id else {
-            return;
-        };
-        if !self.adoptable_task_tool(tool_use_id) {
-            return;
-        }
-        self.live_task_tools
-            .insert(task_id.to_owned(), tool_use_id.to_owned());
-        self.hold_progressing_tool(tool_use_id);
-    }
-
-    /// Whether a lost `task_started` may be repaired against this tool. A
-    /// settled row is never reopened, and a heartbeat that arrives after the
-    /// pane returned to ready is the same late echo the tool-update path
-    /// already treats as finished.
-    fn adoptable_task_tool(&self, protocol_id: &str) -> bool {
-        !self.connection.accepts_prompt()
-            && matches!(
-                self.task_tool_status(protocol_id),
-                Some(AgentToolStatusModel::Pending | AgentToolStatusModel::Running)
-            )
-    }
-
-    /// The one status change a progress event may make. Progress is liveness,
-    /// not state: it lifts a tool out of Pending and says nothing else.
-    fn hold_progressing_tool(&mut self, protocol_id: &str) {
-        if self.connection.accepts_prompt()
-            || self.task_tool_status(protocol_id) != Some(AgentToolStatusModel::Pending)
-        {
-            return;
-        }
-        self.set_task_tool_status(protocol_id, AgentToolStatusModel::Running);
-    }
-
-    /// REPLACE semantics over the whole live set. The payload carries no
-    /// attribution, so it may only retire tasks this thread already tracks.
-    fn retire_absent_tasks(&mut self, task_ids: &[String]) {
-        let ended = self
-            .live_task_tools
-            .keys()
-            .filter(|task_id| !task_ids.contains(task_id))
-            .cloned()
-            .collect::<Vec<_>>();
-        for task_id in ended {
-            self.settle_task(&task_id, "completed");
-        }
-    }
-
-    fn apply_codex_collaboration(&mut self, protocol_id: &str, collab: &CodexCollaboration) {
-        if matches!(collab.tool.as_str(), "spawnAgent" | "resumeAgent") {
-            for thread in &collab.receiver_thread_ids {
-                self.live_task_tools
-                    .insert(thread.clone(), protocol_id.to_owned());
-                if let Some(prompt) = collab
-                    .prompt
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|prompt| !prompt.is_empty())
-                {
-                    let snippet: String = prompt
-                        .lines()
-                        .next()
-                        .unwrap_or_default()
-                        .chars()
-                        .take(60)
-                        .collect();
-                    self.task_labels.entry(thread.clone()).or_insert(snippet);
-                }
-            }
-            if !collab.receiver_thread_ids.is_empty() {
-                self.set_task_tool_status(protocol_id, AgentToolStatusModel::Running);
-            }
-        }
-        for (thread, state) in &collab.agents_states {
-            match state.status.as_str() {
-                "completed" | "errored" => {
-                    self.settle_task(thread, &state.status);
-                    let subject = self.subagent_outcome(thread, &state.status);
-                    let summary = match state
-                        .message
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|message| !message.is_empty())
-                    {
-                        Some(message) => format!("{subject} \u{2014} {message}"),
-                        None => subject,
-                    };
-                    self.push_notification(TaskNotification {
-                        task_id: thread.clone(),
-                        tool_use_id: thread.clone(),
-                        agent_task: true,
-                        status: if state.status == "errored" {
-                            "failed".to_owned()
-                        } else {
-                            state.status.clone()
-                        },
-                        summary,
-                        result_markdown: String::new(),
-                    });
-                }
-                "interrupted" | "shutdown" | "notFound" => {
-                    self.settle_task(thread, "interrupted");
-                }
-                _ => {}
-            }
-        }
-    }
-
-    /// A `task_started` fires again when an existing task re-attaches, and a
-    /// fast task's notification can outrun its own start. Registering in
-    /// either case would re-hold a tool no later event will ever release, so
-    /// a task that has already settled — or names a tool already showing an
-    /// outcome, or arrives after the pane returned to ready — never registers.
-    fn registrable_task(&self, task_id: &str, tool_use_id: &str) -> bool {
-        !self.settled_tasks.contains(task_id)
-            && !self.connection.accepts_prompt()
-            && !matches!(
-                self.task_tool_status(tool_use_id),
-                Some(
-                    AgentToolStatusModel::Completed
-                        | AgentToolStatusModel::Failed
-                        | AgentToolStatusModel::Canceled
-                )
-            )
-    }
-
-    /// The tombstone is recorded even when the task was never registered:
-    /// that is exactly the notification-before-start race the tombstone
-    /// exists to close.
-    fn remember_settled_task(&mut self, task_id: &str) {
-        if self.settled_tasks.len() >= MAX_SETTLED_TASK_TOMBSTONES {
-            self.settled_tasks.clear();
-        }
-        self.settled_tasks.insert(task_id.to_owned());
-    }
-
-    fn settle_task(&mut self, task_id: &str, status: &str) {
-        self.remember_settled_task(task_id);
-        let Some(tool_use_id) = self.live_task_tools.remove(task_id) else {
-            return;
-        };
-        let settled = match status {
-            "failed" | "killed" | "errored" => AgentToolStatusModel::Failed,
-            "interrupted" => AgentToolStatusModel::Canceled,
-            _ => AgentToolStatusModel::Completed,
-        };
-        self.set_task_tool_status(&tool_use_id, settled);
-    }
-
-    fn set_task_tool_status(&mut self, protocol_id: &str, next: AgentToolStatusModel) {
-        let Some(entry_id) = self.tool_entries.get(protocol_id).copied() else {
-            return;
-        };
-        let Some(index) = self.entry_index(entry_id) else {
-            return;
-        };
-        let changed = if let AgentThreadEntry::Tool { status, .. } = &mut self.entries[index]
-            && *status != next
-        {
-            *status = next;
-            true
-        } else {
-            false
-        };
-        if changed {
-            self.touch_entry(index);
-        }
-    }
-
-    fn tool_status_held(&self, protocol_id: &str) -> bool {
-        self.live_task_tools
-            .values()
-            .any(|tool| tool == protocol_id)
-    }
-
-    fn task_tool_status(&self, protocol_id: &str) -> Option<AgentToolStatusModel> {
-        let entry_id = self.tool_entries.get(protocol_id).copied()?;
-        let index = self.entry_index(entry_id)?;
-        match self.entries.get(index)? {
-            AgentThreadEntry::Tool { status, .. } => Some(*status),
-            _ => None,
-        }
-    }
-
-    /// The card title for a notification whose source supplied none: the label
-    /// the spawn taught us when there is one, and the outcome either way. An
-    /// empty summary would otherwise render a card that says nothing.
-    fn subagent_outcome(&self, task_id: &str, status: &str) -> String {
-        let verb = if matches!(status.trim(), "failed" | "errored" | "killed") {
-            "failed"
-        } else {
-            "finished"
-        };
-        self.task_labels.get(task_id).map_or_else(
-            || format!("Subagent {verb}"),
-            |label| format!("Agent \"{label}\" {verb}"),
-        )
-    }
-
-    /// The card this notification belongs to. A task reports from two sources
-    /// — the daemon's structural SDK event and the prose envelope a replay
-    /// carries — so either key joins them: `tool_use_id` when both sides have
-    /// one, `task_id` when one side does not.
-    fn notification_index(&self, task_id: &str, tool_use_id: &str) -> Option<usize> {
-        self.entries
-            .iter()
-            .position(|entry| {
-                matches!(
-                    entry,
-                    AgentThreadEntry::Notification { tool_use_id: existing, .. }
-                        if !existing.is_empty() && *existing == *tool_use_id
-                )
-            })
-            .or_else(|| {
-                if task_id.is_empty() {
-                    return None;
-                }
-                self.entries.iter().position(|entry| {
-                    matches!(
-                        entry,
-                        AgentThreadEntry::Notification {
-                            task_id: existing,
-                            tool_use_id: existing_tool,
-                            ..
-                        } if *existing == *task_id
-                            && (existing_tool.is_empty() || tool_use_id.is_empty())
-                    )
-                })
-            })
-    }
-
-    /// Upsert one notification card. Its two sources merge rather than
-    /// overwrite: neither may blank a field the other filled, and a summary
-    /// synthesized here never displaces one the harness wrote.
-    fn push_notification(&mut self, notification: TaskNotification) {
-        if !notification.agent_task {
-            log::trace!(
-                target: "zz::agent",
-                "skipping non-agent task notification: {}",
-                notification.summary
-            );
-            return;
-        }
-        let synthesized = notification.summary.trim().is_empty();
-        let summary = if synthesized {
-            self.subagent_outcome(&notification.task_id, &notification.status)
-        } else {
-            notification.summary
-        };
-        if let Some(index) =
-            self.notification_index(&notification.task_id, &notification.tool_use_id)
-        {
-            if let AgentThreadEntry::Notification {
-                task_id,
-                tool_use_id,
-                status,
-                summary: existing_summary,
-                result_markdown,
-                ..
-            } = &mut self.entries[index]
-            {
-                if !notification.task_id.is_empty() {
-                    *task_id = notification.task_id;
-                }
-                if !notification.tool_use_id.is_empty() {
-                    *tool_use_id = notification.tool_use_id;
-                }
-                if !notification.status.is_empty() {
-                    *status = notification.status;
-                }
-                if !synthesized || existing_summary.trim().is_empty() {
-                    *existing_summary = summary;
-                }
-                if !notification.result_markdown.is_empty() {
-                    *result_markdown = notification.result_markdown;
-                }
-            }
-            self.touch_entry(index);
-            return;
-        }
-        let id = self.allocate_entry_id();
-        self.push_entry(AgentThreadEntry::Notification {
-            id,
-            task_id: notification.task_id,
-            tool_use_id: notification.tool_use_id,
-            status: notification.status,
-            summary,
-            result_markdown: notification.result_markdown,
-        });
-    }
-
-    fn break_message_stream(&mut self, role: StreamRole, message_id: Option<&str>) {
-        if let Some(message_id) = message_id {
-            self.message_entries.remove(&(role, message_id.to_owned()));
-        }
-        if self
-            .active_stream
-            .is_some_and(|(active_role, _)| active_role == role)
-        {
-            self.active_stream = None;
-        }
-    }
-
-    fn attach_memory_citations(
-        &mut self,
-        role: StreamRole,
-        message_id: Option<&str>,
-        citations: Vec<MemoryCitation>,
-    ) {
-        let entry_id = message_id
-            .and_then(|message_id| {
-                self.message_entries
-                    .get(&(role, message_id.to_owned()))
-                    .copied()
-            })
-            .or_else(|| {
-                self.active_stream
-                    .filter(|(active_role, _)| *active_role == role)
-                    .map(|(_, id)| id)
-            })
-            .or_else(|| {
-                self.entries.iter().rev().find_map(|entry| match entry {
-                    AgentThreadEntry::Assistant { id, .. } => Some(*id),
-                    _ => None,
-                })
-            });
-        let Some(entry_id) = entry_id else {
-            return;
-        };
-        let Some(index) = self.entry_index(entry_id) else {
-            return;
-        };
-        let AgentThreadEntry::Assistant {
-            memory_citations, ..
-        } = &mut self.entries[index]
-        else {
-            return;
-        };
-        for citation in citations {
-            if !memory_citations.contains(&citation) {
-                memory_citations.push(citation);
-            }
-        }
-        self.touch_entry(index);
-    }
-
-    fn flush_active_text_stream(&mut self) {
-        let Some((role, message_id)) = self.active_text_stream.take() else {
-            return;
-        };
-        let Some(carry) = self.text_carries.remove(&(role, message_id.clone())) else {
-            return;
-        };
-        if !carry.is_empty() {
-            self.append_profiled_clean(role, message_id, &carry);
-        }
-    }
-
-    fn finish_text_streams(&mut self) {
-        self.flush_active_text_stream();
-        let carries = std::mem::take(&mut self.text_carries);
-        for ((role, message_id), carry) in carries {
-            if !carry.is_empty() {
-                self.append_profiled_clean(role, message_id, &carry);
-            }
-        }
+        self.append_chunk(role, chunk);
     }
 
     fn apply_runtime_update(&mut self, update: SessionUpdate) {
-        let settle_after_update = self.connection.accepts_prompt()
-            && matches!(
-                &update,
-                SessionUpdate::ToolCall(_) | SessionUpdate::ToolCallUpdate(_)
-            );
         self.apply_update(update);
-        if settle_after_update {
-            self.settle_inflight(AgentToolStatusModel::Completed);
-        }
     }
 
     fn append_chunk(&mut self, role: StreamRole, chunk: ContentChunk) {
@@ -1306,9 +706,7 @@ impl AgentThread {
                     text.push_str(markdown);
                     true
                 }
-                AgentThreadEntry::Tool { .. }
-                | AgentThreadEntry::Plan { .. }
-                | AgentThreadEntry::Notification { .. } => false,
+                AgentThreadEntry::Tool { .. } | AgentThreadEntry::Plan { .. } => false,
             };
             if changed {
                 self.touch_entry(index);
@@ -1327,7 +725,6 @@ impl AgentThread {
             StreamRole::Assistant => AgentThreadEntry::Assistant {
                 id,
                 markdown: String::new(),
-                memory_citations: Vec::new(),
             },
             StreamRole::Reasoning => AgentThreadEntry::Reasoning {
                 id,
@@ -1342,51 +739,14 @@ impl AgentThread {
 
     fn upsert_tool(&mut self, tool: ToolCall) {
         let protocol_id = tool.tool_call_id.0.to_string();
-        let context_compaction = context_compaction(tool.meta.as_ref());
-        if context_compaction {
-            self.active_context_compaction = if matches!(
-                tool.status,
-                ToolCallStatus::Completed | ToolCallStatus::Failed
-            ) {
-                None
-            } else {
-                Some(protocol_id.clone())
-            };
-        }
-        let subagent = match self.provider {
-            AgentProvider::ClaudeCode => claude_tool_subagent(tool.meta.as_ref()).unwrap_or(false),
-            AgentProvider::Codex => codex_tool_subagent(tool.meta.as_ref()),
-        };
-        let collaboration = (self.provider == AgentProvider::Codex)
-            .then(|| codex_collaboration(tool.meta.as_ref(), tool.raw_input.as_ref()))
-            .flatten();
-        if self.provider == AgentProvider::Codex
-            && let Some(activity) = codex_subagent_activity(tool.meta.as_ref())
-        {
-            self.task_labels.insert(activity.thread_id, activity.name);
-        }
         if tool.content.is_empty() {
             self.structured_tool_outputs.remove(&protocol_id);
         } else {
             self.structured_tool_outputs.insert(protocol_id.clone());
         }
         let location = tool_location(&tool);
-        let input = collaboration
-            .as_ref()
-            .and_then(format_codex_collaboration)
-            .map(ToolPayload::Text)
-            .or_else(|| tool_input(&tool));
-        let mut output = tool_output(&tool);
-        apply_terminal_frame(
-            &mut output,
-            TerminalFrame::from_meta(tool.meta.as_ref(), tool.raw_input.as_ref(), Some(&self.cwd)),
-            &tool.title,
-        );
-        let title = collaboration
-            .as_ref()
-            .and_then(codex_collab_label)
-            .unwrap_or(tool.title);
-        let held = self.tool_status_held(&protocol_id);
+        let input = tool_input(&tool);
+        let output = tool_output(&tool);
         if let Some(entry_id) = self.tool_entries.get(&protocol_id).copied()
             && let Some(index) = self.entry_index(entry_id)
             && let AgentThreadEntry::Tool {
@@ -1396,29 +756,16 @@ impl AgentThread {
                 location: entry_location,
                 input: entry_input,
                 output: entry_output,
-                subagent: entry_subagent,
                 ..
             } = &mut self.entries[index]
         {
             *kind = map_tool_kind(tool.kind);
-            *status = if held {
-                AgentToolStatusModel::Running
-            } else {
-                map_tool_status(tool.status)
-            };
-            *label = title;
+            *status = map_tool_status(tool.status);
+            *label = tool.title;
             *entry_location = location;
             *entry_input = input;
             *entry_output = output;
-            *entry_subagent = subagent;
             self.touch_entry(index);
-            if subagent {
-                self.child_tool_roots
-                    .insert(protocol_id.clone(), protocol_id.clone());
-            }
-            if let Some(collaboration) = &collaboration {
-                self.apply_codex_collaboration(&protocol_id, collaboration);
-            }
             return;
         }
         let id = self.allocate_entry_id();
@@ -1427,54 +774,17 @@ impl AgentThread {
             id,
             protocol_id: protocol_id.clone(),
             kind: map_tool_kind(tool.kind),
-            status: if held {
-                AgentToolStatusModel::Running
-            } else {
-                map_tool_status(tool.status)
-            },
-            label: title,
+            status: map_tool_status(tool.status),
+            label: tool.title,
             location,
             input,
             output,
             default_expanded: matches!(tool.status, ToolCallStatus::Failed),
-            subagent,
-            children: Vec::new(),
         });
-        if subagent {
-            self.child_tool_roots
-                .insert(protocol_id.clone(), protocol_id.clone());
-        }
-        if let Some(collaboration) = &collaboration {
-            self.apply_codex_collaboration(&protocol_id, collaboration);
-        }
     }
 
     fn apply_tool_update(&mut self, update: ToolCallUpdate) {
         let protocol_id = update.tool_call_id.0.to_string();
-        let context_compaction = context_compaction(update.meta.as_ref())
-            || self.active_context_compaction.as_deref() == Some(protocol_id.as_str());
-        let context_compaction_finished = context_compaction
-            && update.fields.status.as_ref().is_some_and(|status| {
-                matches!(status, ToolCallStatus::Completed | ToolCallStatus::Failed)
-            });
-        let subagent = match self.provider {
-            AgentProvider::ClaudeCode => claude_tool_subagent(update.meta.as_ref()),
-            AgentProvider::Codex => codex_tool_subagent(update.meta.as_ref()).then_some(true),
-        };
-        let collaboration = (self.provider == AgentProvider::Codex)
-            .then(|| codex_collaboration(update.meta.as_ref(), update.fields.raw_input.as_ref()))
-            .flatten();
-        if self.provider == AgentProvider::Codex
-            && let Some(activity) = codex_subagent_activity(update.meta.as_ref())
-        {
-            self.task_labels.insert(activity.thread_id, activity.name);
-        }
-        let terminal_frame = TerminalFrame::from_meta(
-            update.meta.as_ref(),
-            update.fields.raw_input.as_ref(),
-            Some(&self.cwd),
-        );
-        let has_terminal_frame = !terminal_frame.is_empty();
         let carries_shape = update_carries_tool_shape(&update.fields);
         let Some(entry_id) = self.tool_entries.get(&protocol_id).copied() else {
             if let Ok(tool) = ToolCall::try_from(update) {
@@ -1486,7 +796,6 @@ impl AgentThread {
             return;
         };
         let had_structured_output = self.structured_tool_outputs.contains(&protocol_id);
-        let held = self.tool_status_held(&protocol_id);
         let AgentThreadEntry::Tool {
             kind,
             status,
@@ -1494,7 +803,6 @@ impl AgentThread {
             location,
             input,
             output,
-            subagent: entry_subagent,
             ..
         } = &mut self.entries[index]
         else {
@@ -1508,30 +816,15 @@ impl AgentThread {
             changed = true;
         }
         if let Some(next) = update.fields.status {
-            *status = if held {
-                AgentToolStatusModel::Running
-            } else {
-                map_tool_status(next)
-            };
+            *status = map_tool_status(next);
             changed = true;
         }
         if let Some(next) = update.fields.title.filter(|title| !title.trim().is_empty()) {
-            *label = collaboration
-                .as_ref()
-                .and_then(codex_collab_label)
-                .unwrap_or(next);
-            changed = true;
-        }
-        if let Some(next) = subagent {
-            *entry_subagent = next;
+            *label = next;
             changed = true;
         }
         if let Some(raw_input) = update.fields.raw_input {
-            *input = collaboration
-                .as_ref()
-                .and_then(format_codex_collaboration)
-                .map(|text| ToolPayload::Text(capped_payload(text)))
-                .or_else(|| json_payload(&raw_input));
+            *input = json_payload(&raw_input);
             changed = true;
         }
         if let Some(locations) = update.fields.locations {
@@ -1548,46 +841,26 @@ impl AgentThread {
             .raw_output
             .and_then(|raw_output| json_payload(&raw_output));
         if let Some(content) = update.fields.content {
-            let terminal_content = content
-                .iter()
-                .any(|content| matches!(content, ToolCallContent::Terminal(_)));
             let structured = tool_content_payloads(&content);
             if structured.is_empty() {
                 self.structured_tool_outputs.remove(&protocol_id);
             } else {
                 self.structured_tool_outputs.insert(protocol_id.clone());
             }
-            if !(terminal_content && (has_terminal_frame || has_terminal_payload(output))) {
-                *output = if structured.is_empty() {
-                    raw_output.into_iter().collect()
-                } else {
-                    structured
-                };
-            }
+            *output = if structured.is_empty() {
+                raw_output.into_iter().collect()
+            } else {
+                structured
+            };
             changed = true;
         } else if let Some(raw_output) = raw_output {
-            if !had_structured_output && !has_terminal_frame && !has_terminal_payload(output) {
+            if !had_structured_output {
                 *output = vec![raw_output];
             }
             changed = true;
         }
-        if apply_terminal_frame(output, terminal_frame, label) {
-            changed = true;
-        }
         if changed {
             self.touch_entry(index);
-        }
-        if context_compaction_finished {
-            self.active_context_compaction = None;
-        } else if context_compaction {
-            self.active_context_compaction = Some(protocol_id.clone());
-        }
-        if subagent == Some(true) {
-            self.child_tool_roots
-                .insert(protocol_id.clone(), protocol_id.clone());
-        }
-        if let Some(collaboration) = &collaboration {
-            self.apply_codex_collaboration(&protocol_id, collaboration);
         }
     }
 
@@ -1620,579 +893,6 @@ impl AgentThread {
         let id = self.allocate_entry_id();
         self.plan_entry = Some(id);
         self.push_entry(AgentThreadEntry::Plan { id, markdown });
-    }
-
-    fn apply_child_update(
-        &mut self,
-        root_tool_id: &str,
-        parent_tool_use_id: &str,
-        update: SessionUpdate,
-    ) {
-        match update {
-            SessionUpdate::UserMessageChunk(chunk) => {
-                self.apply_child_profiled_chunk(
-                    root_tool_id,
-                    parent_tool_use_id,
-                    StreamRole::User,
-                    chunk,
-                );
-            }
-            SessionUpdate::AgentMessageChunk(chunk) => {
-                self.apply_child_profiled_chunk(
-                    root_tool_id,
-                    parent_tool_use_id,
-                    StreamRole::Assistant,
-                    chunk,
-                );
-            }
-            SessionUpdate::AgentThoughtChunk(chunk) => {
-                self.flush_child_active_text_stream(root_tool_id, parent_tool_use_id);
-                self.append_child_chunk(
-                    root_tool_id,
-                    parent_tool_use_id,
-                    StreamRole::Reasoning,
-                    chunk,
-                );
-            }
-            SessionUpdate::ToolCall(tool) => {
-                self.flush_child_active_text_stream(root_tool_id, parent_tool_use_id);
-                self.child_active_streams.remove(parent_tool_use_id);
-                self.upsert_child_tool(root_tool_id, tool);
-            }
-            SessionUpdate::ToolCallUpdate(update) => {
-                self.flush_child_active_text_stream(root_tool_id, parent_tool_use_id);
-                self.child_active_streams.remove(parent_tool_use_id);
-                self.apply_child_tool_update(root_tool_id, update);
-            }
-            SessionUpdate::Plan(plan) => {
-                self.flush_child_active_text_stream(root_tool_id, parent_tool_use_id);
-                self.child_active_streams.remove(parent_tool_use_id);
-                self.apply_child_plan(root_tool_id, &plan);
-            }
-            _ => {}
-        }
-    }
-
-    fn apply_child_profiled_chunk(
-        &mut self,
-        root_tool_id: &str,
-        parent_tool_use_id: &str,
-        role: StreamRole,
-        chunk: ContentChunk,
-    ) {
-        if !matches!(&chunk.content, ContentBlock::Text(_)) {
-            self.flush_child_active_text_stream(root_tool_id, parent_tool_use_id);
-            self.append_child_chunk(root_tool_id, parent_tool_use_id, role, chunk);
-            return;
-        }
-
-        let message_id = chunk
-            .message_id
-            .as_ref()
-            .map(|message_id| message_id.0.to_string());
-        let stream = (role, message_id.clone());
-        if self.child_active_text_streams.get(parent_tool_use_id) != Some(&stream) {
-            self.flush_child_active_text_stream(root_tool_id, parent_tool_use_id);
-            self.child_active_text_streams
-                .insert(parent_tool_use_id.to_owned(), stream);
-        }
-        let carry_key = (parent_tool_use_id.to_owned(), role, message_id.clone());
-        let mut carry = self
-            .child_text_carries
-            .remove(&carry_key)
-            .unwrap_or_default();
-        let text = content_block_markdown(&chunk.content);
-        let segments = scan_text(self.provider, &text, &mut carry);
-        if !carry.is_empty() {
-            self.child_text_carries.insert(carry_key, carry);
-        }
-
-        for segment in segments {
-            match segment {
-                Segment::Clean(markdown) => self.append_child_stream_content(
-                    root_tool_id,
-                    parent_tool_use_id,
-                    role,
-                    message_id.clone(),
-                    &markdown,
-                    Vec::new(),
-                ),
-                Segment::Notification(notification) => {
-                    self.push_child_notification(root_tool_id, notification);
-                    self.break_child_message_stream(
-                        parent_tool_use_id,
-                        role,
-                        message_id.as_deref(),
-                    );
-                }
-                Segment::Stripped { kind, .. } => {
-                    log::trace!(
-                        target: "zz::agent::profile",
-                        "stripped {kind} artifact from nested {:?} agent stream",
-                        self.provider
-                    );
-                }
-            }
-        }
-    }
-
-    fn append_child_chunk(
-        &mut self,
-        root_tool_id: &str,
-        parent_tool_use_id: &str,
-        role: StreamRole,
-        chunk: ContentChunk,
-    ) {
-        let (markdown, images) = match (role, &chunk.content) {
-            (StreamRole::User, ContentBlock::Image(image)) => match inbound_image(image) {
-                Some(image) => (String::new(), vec![image]),
-                None => (content_block_markdown(&chunk.content), Vec::new()),
-            },
-            (StreamRole::User, content) => split_inline_images(&content_block_markdown(content)),
-            (_, content) => (content_block_markdown(content), Vec::new()),
-        };
-        let message_id = chunk.message_id.map(|message_id| message_id.0.to_string());
-        self.append_child_stream_content(
-            root_tool_id,
-            parent_tool_use_id,
-            role,
-            message_id,
-            &markdown,
-            images,
-        );
-    }
-
-    fn append_child_stream_content(
-        &mut self,
-        root_tool_id: &str,
-        parent_tool_use_id: &str,
-        role: StreamRole,
-        message_id: Option<String>,
-        markdown: &str,
-        images: Vec<Arc<Image>>,
-    ) {
-        if markdown.is_empty() && images.is_empty() {
-            return;
-        }
-        let message_key =
-            message_id.map(|message_id| (parent_tool_use_id.to_owned(), role, message_id));
-        let entry_id = if let Some(key) = message_key.as_ref() {
-            if let Some(id) = self.child_message_entries.get(key).copied() {
-                id
-            } else {
-                let id = self.push_child_stream_entry(root_tool_id, role);
-                if id == 0 {
-                    return;
-                }
-                self.child_message_entries.insert(key.clone(), id);
-                id
-            }
-        } else if let Some((active_role, id)) =
-            self.child_active_streams.get(parent_tool_use_id).copied()
-        {
-            if active_role == role {
-                id
-            } else {
-                self.push_child_stream_entry(root_tool_id, role)
-            }
-        } else {
-            self.push_child_stream_entry(root_tool_id, role)
-        };
-        if entry_id == 0 {
-            return;
-        }
-        self.child_active_streams
-            .insert(parent_tool_use_id.to_owned(), (role, entry_id));
-        let Some((root_index, child_index)) = self.child_entry_position(root_tool_id, entry_id)
-        else {
-            return;
-        };
-        let changed = match &mut self.entries[root_index] {
-            AgentThreadEntry::Tool { children, .. } => match &mut children[child_index] {
-                AgentThreadEntry::User {
-                    markdown: text,
-                    images: attached,
-                    ..
-                } => {
-                    attached.extend(images);
-                    text.push_str(markdown);
-                    true
-                }
-                AgentThreadEntry::Assistant { markdown: text, .. }
-                | AgentThreadEntry::Reasoning { markdown: text, .. } => {
-                    text.push_str(markdown);
-                    true
-                }
-                AgentThreadEntry::Tool { .. }
-                | AgentThreadEntry::Plan { .. }
-                | AgentThreadEntry::Notification { .. } => false,
-            },
-            _ => false,
-        };
-        if changed {
-            self.touch_child_entry(entry_id);
-            self.touch_entry(root_index);
-        }
-    }
-
-    fn push_child_stream_entry(&mut self, root_tool_id: &str, role: StreamRole) -> u64 {
-        let id = self.allocate_entry_id();
-        let entry = match role {
-            StreamRole::User => AgentThreadEntry::User {
-                id,
-                markdown: String::new(),
-                images: Vec::new(),
-            },
-            StreamRole::Assistant => AgentThreadEntry::Assistant {
-                id,
-                markdown: String::new(),
-                memory_citations: Vec::new(),
-            },
-            StreamRole::Reasoning => AgentThreadEntry::Reasoning {
-                id,
-                label: "Reasoning".to_owned(),
-                markdown: String::new(),
-                default_expanded: false,
-            },
-        };
-        if self.push_child_entry(root_tool_id, entry) {
-            id
-        } else {
-            0
-        }
-    }
-
-    fn push_child_notification(&mut self, root_tool_id: &str, notification: TaskNotification) {
-        let id = self.allocate_entry_id();
-        let summary = if notification.summary.trim().is_empty() {
-            self.subagent_outcome(&notification.task_id, &notification.status)
-        } else {
-            notification.summary
-        };
-        self.push_child_entry(
-            root_tool_id,
-            AgentThreadEntry::Notification {
-                id,
-                task_id: notification.task_id,
-                tool_use_id: notification.tool_use_id,
-                status: notification.status,
-                summary,
-                result_markdown: notification.result_markdown,
-            },
-        );
-    }
-
-    fn break_child_message_stream(
-        &mut self,
-        parent_tool_use_id: &str,
-        role: StreamRole,
-        message_id: Option<&str>,
-    ) {
-        if let Some(message_id) = message_id {
-            self.child_message_entries.remove(&(
-                parent_tool_use_id.to_owned(),
-                role,
-                message_id.to_owned(),
-            ));
-        }
-        if self
-            .child_active_streams
-            .get(parent_tool_use_id)
-            .is_some_and(|(active_role, _)| *active_role == role)
-        {
-            self.child_active_streams.remove(parent_tool_use_id);
-        }
-    }
-
-    fn flush_child_active_text_stream(&mut self, root_tool_id: &str, parent_tool_use_id: &str) {
-        let Some((role, message_id)) = self.child_active_text_streams.remove(parent_tool_use_id)
-        else {
-            return;
-        };
-        let carry_key = (parent_tool_use_id.to_owned(), role, message_id.clone());
-        let Some(carry) = self.child_text_carries.remove(&carry_key) else {
-            return;
-        };
-        if !carry.is_empty() {
-            self.append_child_stream_content(
-                root_tool_id,
-                parent_tool_use_id,
-                role,
-                message_id,
-                &carry,
-                Vec::new(),
-            );
-        }
-    }
-
-    fn finish_child_text_streams(&mut self) {
-        let parents = self
-            .child_active_text_streams
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        for parent_tool_use_id in parents {
-            if let Some(root_tool_id) = self.child_root_for_parent(&parent_tool_use_id) {
-                self.flush_child_active_text_stream(&root_tool_id, &parent_tool_use_id);
-            }
-        }
-        let carries = std::mem::take(&mut self.child_text_carries);
-        for ((parent_tool_use_id, role, message_id), carry) in carries {
-            if carry.is_empty() {
-                continue;
-            }
-            if let Some(root_tool_id) = self.child_root_for_parent(&parent_tool_use_id) {
-                self.append_child_stream_content(
-                    &root_tool_id,
-                    &parent_tool_use_id,
-                    role,
-                    message_id,
-                    &carry,
-                    Vec::new(),
-                );
-            }
-        }
-    }
-
-    fn upsert_child_tool(&mut self, root_tool_id: &str, tool: ToolCall) {
-        let protocol_id = tool.tool_call_id.0.to_string();
-        let subagent = self.provider == AgentProvider::ClaudeCode
-            && claude_tool_subagent(tool.meta.as_ref()).unwrap_or(false);
-        if tool.content.is_empty() {
-            self.child_structured_tool_outputs.remove(&protocol_id);
-        } else {
-            self.child_structured_tool_outputs
-                .insert(protocol_id.clone());
-        }
-        let location = tool_location(&tool);
-        let input = tool_input(&tool);
-        let mut output = tool_output(&tool);
-        apply_terminal_frame(
-            &mut output,
-            TerminalFrame::from_meta(tool.meta.as_ref(), tool.raw_input.as_ref(), Some(&self.cwd)),
-            &tool.title,
-        );
-        if let Some(entry_id) = self.child_tool_entries.get(&protocol_id).copied()
-            && let Some((root_index, child_index)) =
-                self.child_entry_position(root_tool_id, entry_id)
-            && let AgentThreadEntry::Tool { children, .. } = &mut self.entries[root_index]
-            && let AgentThreadEntry::Tool {
-                kind,
-                status,
-                label,
-                location: entry_location,
-                input: entry_input,
-                output: entry_output,
-                subagent: entry_subagent,
-                ..
-            } = &mut children[child_index]
-        {
-            *kind = map_tool_kind(tool.kind);
-            *status = map_tool_status(tool.status);
-            *label = tool.title;
-            *entry_location = location;
-            *entry_input = input;
-            *entry_output = output;
-            *entry_subagent = subagent;
-            self.touch_child_entry(entry_id);
-            self.touch_entry(root_index);
-            self.child_tool_roots
-                .insert(protocol_id, root_tool_id.to_owned());
-            return;
-        }
-        let id = self.allocate_entry_id();
-        self.child_tool_entries.insert(protocol_id.clone(), id);
-        self.child_tool_roots
-            .insert(protocol_id.clone(), root_tool_id.to_owned());
-        self.push_child_entry(
-            root_tool_id,
-            AgentThreadEntry::Tool {
-                id,
-                protocol_id,
-                kind: map_tool_kind(tool.kind),
-                status: map_tool_status(tool.status),
-                label: tool.title,
-                location,
-                input,
-                output,
-                default_expanded: matches!(tool.status, ToolCallStatus::Failed),
-                subagent,
-                children: Vec::new(),
-            },
-        );
-    }
-
-    fn apply_child_tool_update(&mut self, root_tool_id: &str, update: ToolCallUpdate) {
-        let protocol_id = update.tool_call_id.0.to_string();
-        let subagent = (self.provider == AgentProvider::ClaudeCode)
-            .then(|| claude_tool_subagent(update.meta.as_ref()))
-            .flatten();
-        let terminal_frame = TerminalFrame::from_meta(
-            update.meta.as_ref(),
-            update.fields.raw_input.as_ref(),
-            Some(&self.cwd),
-        );
-        let has_terminal_frame = !terminal_frame.is_empty();
-        let carries_shape = update_carries_tool_shape(&update.fields);
-        let Some(entry_id) = self.child_tool_entries.get(&protocol_id).copied() else {
-            if let Ok(tool) = ToolCall::try_from(update) {
-                self.upsert_child_tool(root_tool_id, tool);
-            }
-            return;
-        };
-        let Some((root_index, child_index)) = self.child_entry_position(root_tool_id, entry_id)
-        else {
-            return;
-        };
-        let had_structured_output = self.child_structured_tool_outputs.contains(&protocol_id);
-        let AgentThreadEntry::Tool { children, .. } = &mut self.entries[root_index] else {
-            return;
-        };
-        let AgentThreadEntry::Tool {
-            kind,
-            status,
-            label,
-            location,
-            input,
-            output,
-            subagent: entry_subagent,
-            ..
-        } = &mut children[child_index]
-        else {
-            return;
-        };
-        let mut changed = false;
-        if let Some(next) = update.fields.kind
-            && reclassifies_tool(*kind, next, carries_shape)
-        {
-            *kind = map_tool_kind(next);
-            changed = true;
-        }
-        if let Some(next) = update.fields.status {
-            *status = map_tool_status(next);
-            changed = true;
-        }
-        if let Some(next) = update.fields.title.filter(|title| !title.trim().is_empty()) {
-            *label = next;
-            changed = true;
-        }
-        if let Some(next) = subagent {
-            *entry_subagent = next;
-            changed = true;
-        }
-        if let Some(raw_input) = update.fields.raw_input {
-            *input = json_payload(&raw_input);
-            changed = true;
-        }
-        if let Some(locations) = update.fields.locations {
-            *location = locations.first().map(|location| {
-                location.line.map_or_else(
-                    || location.path.display().to_string(),
-                    |line| format!("{}:{line}", location.path.display()),
-                )
-            });
-            changed = true;
-        }
-        let raw_output = update
-            .fields
-            .raw_output
-            .and_then(|raw_output| json_payload(&raw_output));
-        if let Some(content) = update.fields.content {
-            let terminal_content = content
-                .iter()
-                .any(|content| matches!(content, ToolCallContent::Terminal(_)));
-            let structured = tool_content_payloads(&content);
-            if structured.is_empty() {
-                self.child_structured_tool_outputs.remove(&protocol_id);
-            } else {
-                self.child_structured_tool_outputs
-                    .insert(protocol_id.clone());
-            }
-            if !(terminal_content && (has_terminal_frame || has_terminal_payload(output))) {
-                *output = if structured.is_empty() {
-                    raw_output.into_iter().collect()
-                } else {
-                    structured
-                };
-            }
-            changed = true;
-        } else if let Some(raw_output) = raw_output {
-            if !had_structured_output && !has_terminal_frame && !has_terminal_payload(output) {
-                *output = vec![raw_output];
-            }
-            changed = true;
-        }
-        if apply_terminal_frame(output, terminal_frame, label) {
-            changed = true;
-        }
-        if changed {
-            self.touch_child_entry(entry_id);
-            self.touch_entry(root_index);
-        }
-        self.child_tool_roots
-            .insert(protocol_id, root_tool_id.to_owned());
-    }
-
-    fn apply_child_plan(&mut self, root_tool_id: &str, plan: &Plan) {
-        let markdown = plan
-            .entries
-            .iter()
-            .map(|entry| {
-                let marker = match entry.status {
-                    PlanEntryStatus::InProgress => "~",
-                    PlanEntryStatus::Completed => "x",
-                    _ => " ",
-                };
-                format!("- [{marker}] {}", entry.content)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        if let Some(id) = self.child_plan_entries.get(root_tool_id).copied()
-            && let Some((root_index, child_index)) = self.child_entry_position(root_tool_id, id)
-            && let AgentThreadEntry::Tool { children, .. } = &mut self.entries[root_index]
-            && let AgentThreadEntry::Plan {
-                markdown: current, ..
-            } = &mut children[child_index]
-        {
-            if *current != markdown {
-                *current = markdown;
-                self.touch_child_entry(id);
-                self.touch_entry(root_index);
-            }
-            return;
-        }
-        let id = self.allocate_entry_id();
-        self.child_plan_entries.insert(root_tool_id.to_owned(), id);
-        self.push_child_entry(root_tool_id, AgentThreadEntry::Plan { id, markdown });
-    }
-
-    fn push_child_entry(&mut self, root_tool_id: &str, entry: AgentThreadEntry) -> bool {
-        let Some(root_index) = self.root_tool_index(root_tool_id) else {
-            return false;
-        };
-        let entry_id = entry.id();
-        let AgentThreadEntry::Tool { children, .. } = &mut self.entries[root_index] else {
-            return false;
-        };
-        children.push(entry);
-        self.touch_child_entry(entry_id);
-        self.touch_entry(root_index);
-        true
-    }
-
-    fn root_tool_index(&self, root_tool_id: &str) -> Option<usize> {
-        self.tool_entries
-            .get(root_tool_id)
-            .and_then(|id| self.entry_index(*id))
-    }
-
-    fn child_entry_position(&self, root_tool_id: &str, entry_id: u64) -> Option<(usize, usize)> {
-        let root_index = self.root_tool_index(root_tool_id)?;
-        let AgentThreadEntry::Tool { children, .. } = &self.entries[root_index] else {
-            return None;
-        };
-        let child_index = children.iter().position(|entry| entry.id() == entry_id)?;
-        Some((root_index, child_index))
     }
 
     fn request_permission(
@@ -2281,83 +981,20 @@ impl AgentThread {
         self.settle_inflight(AgentToolStatusModel::Canceled);
     }
 
-    fn settle_context_compaction(&mut self) {
-        let Some(protocol_id) = self.active_context_compaction.take() else {
-            return;
-        };
-        let Some(entry_id) = self.tool_entries.get(&protocol_id).copied() else {
-            return;
-        };
-        let Some(index) = self.entry_index(entry_id) else {
-            return;
-        };
-        let changed = if let AgentThreadEntry::Tool { status, label, .. } = &mut self.entries[index]
-        {
-            let mut changed = false;
-            if matches!(
-                status,
-                AgentToolStatusModel::Pending | AgentToolStatusModel::Running
-            ) {
-                *status = AgentToolStatusModel::Completed;
-                changed = true;
-            }
-            if label == "Context compacting" {
-                "Context compacted".clone_into(label);
-                changed = true;
-            }
-            changed
-        } else {
-            false
-        };
-        if changed {
-            self.touch_entry(index);
-        }
-    }
-
-    /// What the quiesce watchdog refuses to park through: a permission the user
-    /// still owes an answer to (a question is one), a subagent task still
-    /// reporting, or any tool call the agent has not resolved.
-    /// Finalize a turn the agent went quiet on without touching the child: the
-    /// streaming entries settle, the pane accepts prompts again, and any later
-    /// output opens a fresh segment because `active_stream` is cleared.
-    fn park_turn(&mut self) {
-        self.settle_inflight(AgentToolStatusModel::Completed);
-        self.connection = AgentConnectionState::Ready;
+    fn finish_turn(&mut self) {
+        self.pending_permissions = Arc::from([]);
+        self.suppress_user_echo = false;
+        self.active_stream = None;
     }
 
     fn settle_inflight(&mut self, settled_status: AgentToolStatusModel) {
         debug_assert!(matches!(
             settled_status,
-            AgentToolStatusModel::Completed
-                | AgentToolStatusModel::Failed
-                | AgentToolStatusModel::Canceled
+            AgentToolStatusModel::Failed | AgentToolStatusModel::Canceled
         ));
-        self.finish_text_streams();
-        self.finish_child_text_streams();
-        if settled_status == AgentToolStatusModel::Completed {
-            self.settle_context_compaction();
-        } else {
-            self.active_context_compaction = None;
-        }
-        self.pending_permissions = Arc::from([]);
-        self.suppress_user_echo = false;
-        self.active_stream = None;
-        self.settle_notifications();
-        let held: std::collections::HashSet<String> =
-            self.live_task_tools.values().cloned().collect();
+        self.finish_turn();
         for index in 0..self.entries.len() {
-            let mut changed_children = Vec::new();
-            let changed = if let AgentThreadEntry::Tool {
-                protocol_id,
-                status,
-                children,
-                ..
-            } = &mut self.entries[index]
-            {
-                if held.contains(protocol_id.as_str()) {
-                    continue;
-                }
-                let mut changed = false;
+            let changed = if let AgentThreadEntry::Tool { status, .. } = &mut self.entries[index] {
                 if matches!(
                     status,
                     AgentToolStatusModel::Pending
@@ -2365,105 +1002,26 @@ impl AgentThread {
                         | AgentToolStatusModel::NeedsApproval
                 ) {
                     *status = settled_status;
-                    changed = true;
+                    true
+                } else {
+                    false
                 }
-                for child in children {
-                    if let AgentThreadEntry::Tool { id, status, .. } = child
-                        && matches!(
-                            status,
-                            AgentToolStatusModel::Pending
-                                | AgentToolStatusModel::Running
-                                | AgentToolStatusModel::NeedsApproval
-                        )
-                    {
-                        *status = settled_status;
-                        changed_children.push(*id);
-                        changed = true;
-                    }
-                }
-                changed
             } else {
                 false
             };
-            for id in changed_children {
-                self.touch_child_entry(id);
-            }
             if changed {
                 self.touch_entry(index);
             }
         }
     }
 
-    /// A notification whose status the row presentation cannot read as an
-    /// outcome would keep its spinner for the life of the pane, so the turn
-    /// boundary settles it the way it settles an unresolved tool.
-    fn settle_notifications(&mut self) {
-        for index in 0..self.entries.len() {
-            let AgentThreadEntry::Notification { status, .. } = &mut self.entries[index] else {
-                continue;
-            };
-            if terminal_notification_status(status) {
-                continue;
-            }
-            "completed".clone_into(status);
-            self.touch_entry(index);
-        }
-    }
-
     fn fail_inflight(&mut self) {
-        self.live_task_tools.clear();
         self.settle_inflight(AgentToolStatusModel::Failed);
     }
 
     fn finish_replay(&mut self) {
-        self.finish_text_streams();
-        self.finish_child_text_streams();
-        self.dedupe_replayed_assistant_entries();
         self.message_entries.clear();
         self.active_stream = None;
-    }
-
-    fn dedupe_replayed_assistant_entries(&mut self) {
-        let mut index = 1;
-        while index < self.entries.len() {
-            let duplicate_citations = match (&self.entries[index - 1], &self.entries[index]) {
-                (
-                    AgentThreadEntry::Assistant {
-                        markdown: previous, ..
-                    },
-                    AgentThreadEntry::Assistant {
-                        markdown: current,
-                        memory_citations,
-                        ..
-                    },
-                ) if previous == current => Some(memory_citations.clone()),
-                _ => None,
-            };
-            let Some(citations) = duplicate_citations else {
-                index += 1;
-                continue;
-            };
-
-            if let AgentThreadEntry::Assistant {
-                memory_citations, ..
-            } = &mut self.entries[index - 1]
-            {
-                for citation in citations {
-                    if !memory_citations.contains(&citation) {
-                        memory_citations.push(citation);
-                    }
-                }
-            }
-            self.entries.remove(index);
-            self.entry_revisions.remove(index);
-            self.entry_changes.clear();
-            self.entry_change_floor = self.next_entry_revision;
-        }
-
-        self.entry_indices.clear();
-        for (index, entry) in self.entries.iter().enumerate() {
-            self.entry_indices.insert(entry.id(), index);
-        }
     }
 }
 
@@ -2482,9 +1040,6 @@ pub(crate) enum AgentControllerEvent {
     },
 }
 
-/// The reducer's input shape. The daemon owns the adapter now, so every one of
-/// these is translated from an [`AgentStreamPayload`] the wire carried; the
-/// enum stays because it is what [`AgentThread`] has always been fed.
 #[derive(Debug)]
 enum RuntimeEvent {
     Ready {
@@ -2538,10 +1093,6 @@ enum RuntimeEvent {
         pane: PaneId,
         update: SessionUpdate,
     },
-    TaskEvent {
-        pane: PaneId,
-        event: SdkTaskEvent,
-    },
     PermissionRequested {
         pane: PaneId,
         request_id: u64,
@@ -2585,11 +1136,6 @@ enum RuntimeEvent {
         pane: PaneId,
         message: String,
     },
-    /// The daemon settled a turn that went quiet past its quiesce window.
-    Parked {
-        pane: PaneId,
-    },
-    /// Prompts the daemon queued and is handing back, so the composer refills.
     PromptsReclaimed {
         pane: PaneId,
         count: usize,
@@ -2624,23 +1170,11 @@ struct AgentSettingRequest {
     origin: AgentSettingOrigin,
 }
 
-/// A pane's viewport onto the daemon-owned runtime: where its stream has been
-/// applied to, and the request bookkeeping the reducer's inputs need answered.
 #[derive(Default)]
 struct PaneViewport {
-    /// Highest stream seq reduced into this pane's transcript. Not the replay
-    /// cursor — `MuxClient::agent_cursors` is what the daemon is asked from —
-    /// but the receipt that keeps reduction idempotent when that cursor is
-    /// cleared and the stream replays over entries this pane still holds.
     last_applied: u64,
-    /// The setting request in flight, so the acknowledgement can be paired with
-    /// the origin that asked for it: a user's pick reports failures, a sticky
-    /// preference restores quietly.
     pending_setting: Option<AgentSettingRequest>,
-    /// How many prompts the daemon is holding behind the live turn.
     queued_prompts: usize,
-    /// Whether a turn has been dispatched, which is when the daemon takes the
-    /// worktree snapshot the turn diff is measured against.
     turn_dispatched: bool,
     turn_generation: u64,
     last_turn_id: Option<u64>,
@@ -2661,25 +1195,18 @@ enum LifecycleRequest {
 pub struct AgentController {
     config: AgentConfig,
     preferences: AgentPreferences,
-    /// The wire. Installed by the workspace once the mux client exists; a
-    /// controller without one accepts no sends, which is how the composer
-    /// reports a disconnected daemon.
     mux: Option<Entity<MuxClient>>,
     panes: BTreeMap<PaneId, AgentThread>,
     viewports: BTreeMap<PaneId, PaneViewport>,
     pending_composer: BTreeMap<PaneId, String>,
-    /// Images reclaimed from queued prompts, waiting for the pane's view to
-    /// re-attach them beside the reclaimed text.
     pending_images: BTreeMap<PaneId, Vec<Arc<Image>>>,
     retained_panes: BTreeSet<PaneId>,
-    /// Turn-diff captures waiting on the daemon's answer, keyed by request.
     turn_diffs: BTreeMap<u64, (PaneId, u64, Sender<Result<TurnDiff, String>>)>,
     next_turn_diff_request: u64,
     shutting_down: bool,
 }
 
 impl AgentController {
-    /// A controller with no wire: view tests that only need a sidebar.
     #[cfg(test)]
     pub(crate) fn new(config: AgentConfig) -> Self {
         Self::build(config, AgentPreferences::default())
@@ -2705,8 +1232,6 @@ impl AgentController {
         }
     }
 
-    /// Point the controller at the daemon connection. Every agent request goes
-    /// out through the mux client, so this is what turns the proxy on.
     pub(crate) fn attach_mux(&mut self, mux: Entity<MuxClient>) {
         self.mux = Some(mux);
     }
@@ -2727,17 +1252,12 @@ impl AgentController {
         })
     }
 
-    /// How many prompts the daemon is holding behind the pane's live turn, as
-    /// its last published state reported.
     pub(crate) fn queued_count(&self, pane: PaneId) -> usize {
         self.viewports
             .get(&pane)
             .map_or(0, |viewport| viewport.queued_prompts)
     }
 
-    /// Whether the pane has a turn to diff against. The daemon snapshots the
-    /// worktree at dispatch, so a pane that has never prompted has no base and
-    /// a pane outside a worktree learns so from the capture itself.
     pub(crate) fn has_turn_base(&self, pane: PaneId) -> bool {
         self.viewports
             .get(&pane)
@@ -2756,9 +1276,6 @@ impl AgentController {
             .map_or(0, |viewport| viewport.conversation_epoch)
     }
 
-    /// Ask the daemon to diff the pane's worktree against the base its turn
-    /// started from. Git runs on the daemon's machine — which is the machine
-    /// the worktree is on — and the task carries the answer back.
     pub(crate) fn capture_turn_diff(
         &mut self,
         pane: PaneId,
@@ -2796,7 +1313,6 @@ impl AgentController {
         }))
     }
 
-    /// Answer one outstanding turn-diff capture.
     fn resolve_turn_diff(
         &mut self,
         pane: PaneId,
@@ -2837,8 +1353,6 @@ impl AgentController {
         changed
     }
 
-    /// Which bucket one pane lands in, in the same order the fleet rollup uses.
-    /// The sidebar reads this per agent pane instead of cloning whole states.
     pub(crate) fn pane_status(&self, pane: PaneId) -> Option<AgentPaneStatus> {
         let thread = self.panes.get(&pane)?;
         Some(if !thread.pending_permissions.is_empty() {
@@ -2869,15 +1383,11 @@ impl AgentController {
         attention
     }
 
-    pub(crate) fn pane_entries(
-        &self,
-        pane: PaneId,
-    ) -> Option<(&[AgentThreadEntry], &[u64], &HashMap<u64, u64>, u64)> {
+    pub(crate) fn pane_entries(&self, pane: PaneId) -> Option<(&[AgentThreadEntry], &[u64], u64)> {
         self.panes.get(&pane).map(|thread| {
             (
                 thread.entries.as_slice(),
                 thread.entry_revisions.as_slice(),
-                &thread.child_entry_revisions,
                 thread.next_entry_revision,
             )
         })
@@ -3843,9 +2353,9 @@ impl AgentController {
                 modes: decode_json(modes),
                 config_options: decode_json(config_options),
             },
-            AgentStreamPayload::StateSynced { .. }
-            | AgentStreamPayload::TurnAbandoned { .. }
-            | AgentStreamPayload::PromptAccepted { .. } => return None,
+            AgentStreamPayload::StateSynced { .. } | AgentStreamPayload::PromptAccepted { .. } => {
+                return None;
+            }
             AgentStreamPayload::SessionsListed {
                 sessions,
                 next_cursor,
@@ -3901,7 +2411,6 @@ impl AgentController {
                 pane,
                 update: self.decode_session_update(pane, update)?,
             },
-            AgentStreamPayload::TaskEvent { event } => RuntimeEvent::TaskEvent { pane, event },
             AgentStreamPayload::PermissionRequested {
                 request_id,
                 tool_call,
@@ -3967,7 +2476,6 @@ impl AgentController {
             AgentStreamPayload::PaneFailed { message } => {
                 RuntimeEvent::PaneFailed { pane, message }
             }
-            AgentStreamPayload::Parked => RuntimeEvent::Parked { pane },
             AgentStreamPayload::PromptsReclaimed { prompts } => {
                 let count = prompts.len();
                 let mut text = String::new();
@@ -4136,7 +2644,7 @@ impl AgentController {
                         thread.finish_replay();
                     }
                     thread.session_reset = false;
-                    thread.settle_inflight(AgentToolStatusModel::Completed);
+                    thread.finish_turn();
                     thread.connection = AgentConnectionState::Ready;
                     thread.error = None;
                     changed_pane = Some(pane);
@@ -4212,7 +2720,7 @@ impl AgentController {
                     }
                     thread.finish_replay();
                     thread.session_reset = false;
-                    thread.settle_inflight(AgentToolStatusModel::Completed);
+                    thread.finish_turn();
                     let session_id: Arc<str> = Arc::from(session_id);
                     thread.session_id = Some(session_id.clone());
                     thread.set_session_configuration(modes, config_options);
@@ -4274,12 +2782,6 @@ impl AgentController {
                     }
                 }
             }
-            RuntimeEvent::TaskEvent { pane, event } => {
-                if let Some(thread) = self.panes.get_mut(&pane) {
-                    thread.apply_task_event(event);
-                    changed_pane = Some(pane);
-                }
-            }
             RuntimeEvent::PermissionRequested {
                 pane,
                 request_id,
@@ -4304,9 +2806,6 @@ impl AgentController {
             RuntimeEvent::PromptFinished { pane, result } => {
                 let mut failed = false;
                 if let Some(thread) = self.panes.get_mut(&pane) {
-                    thread.finish_text_streams();
-                    thread.suppress_user_echo = false;
-                    thread.active_stream = None;
                     match result {
                         Ok(StopReason::Cancelled) => {
                             thread.connection = AgentConnectionState::Ready;
@@ -4316,7 +2815,7 @@ impl AgentController {
                         Ok(_) => {
                             thread.connection = AgentConnectionState::Ready;
                             thread.error = None;
-                            thread.settle_inflight(AgentToolStatusModel::Completed);
+                            thread.finish_turn();
                         }
                         Err(error) => {
                             thread.connection = AgentConnectionState::Failed;
@@ -4471,13 +2970,6 @@ impl AgentController {
                     changed_pane = Some(pane);
                 }
             }
-            RuntimeEvent::Parked { pane } => {
-                if let Some(thread) = self.panes.get_mut(&pane) {
-                    thread.park_turn();
-                    changed_pane = Some(pane);
-                    reconcile_pane = Some(pane);
-                }
-            }
             RuntimeEvent::PromptsReclaimed {
                 pane,
                 count,
@@ -4499,9 +2991,6 @@ impl AgentController {
         }
         if let Some(pane) = reconcile_pane {
             self.reconcile_preferences(pane, cx);
-        }
-        if let Some(thread) = changed_pane.and_then(|pane| self.panes.get_mut(&pane)) {
-            thread.last_activity = Instant::now();
         }
         changed_pane.is_some()
     }
@@ -4588,10 +3077,6 @@ fn preferred_setting_command(
     None
 }
 
-/// Re-type one JSON value the stream carried verbatim. A payload that does not
-/// survive is dropped rather than half-applied: the ACP schema is the contract
-/// between the daemon and the adapter, and a shape zz cannot read is a shape it
-/// has nothing to render.
 fn decode_value<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Option<T> {
     serde_json::from_value(value)
         .map_err(|error| {
@@ -4608,7 +3093,6 @@ fn decode_json<T: serde::de::DeserializeOwned>(value: Option<serde_json::Value>)
     value.and_then(decode_value)
 }
 
-/// The `sessionUpdate` discriminant an update declares, ready for a log line.
 fn session_update_tag(update: &serde_json::Value) -> String {
     log_excerpt(
         update
@@ -4619,9 +3103,6 @@ fn session_update_tag(update: &serde_json::Value) -> String {
     )
 }
 
-/// One log line's worth of adapter-supplied text: control characters dropped so
-/// a payload cannot forge log lines, then cut to `max_bytes` so a serde error
-/// that quotes what it choked on cannot carry the payload into the log.
 fn log_excerpt(text: &str, max_bytes: usize) -> String {
     capped(
         text.chars()
@@ -4631,7 +3112,6 @@ fn log_excerpt(text: &str, max_bytes: usize) -> String {
     )
 }
 
-/// Read one of [`AgentPaneWire`]'s JSON blobs. Empty means "not published".
 fn decode_state_blob<T: serde::de::DeserializeOwned>(blob: &str) -> Option<T> {
     if blob.is_empty() {
         return None;
@@ -4643,8 +3123,6 @@ fn decode_state_blob<T: serde::de::DeserializeOwned>(blob: &str) -> Option<T> {
         .ok()
 }
 
-/// The parked permission request rides the pane state so a client that attaches
-/// mid-question still sees it.
 fn decode_permission_payload(payload: &str) -> Option<(ToolCallUpdate, Vec<PermissionOption>)> {
     let value = decode_state_blob::<serde_json::Value>(payload)?;
     let tool_call = decode_value(value.get("toolCall")?.clone())?;
@@ -4703,16 +3181,10 @@ fn agent_command_model(command: AvailableCommand) -> AgentCommand {
         AvailableCommandInput::Unstructured(input) => Some(input.hint),
         _ => None,
     });
-    let kind = if command.name.starts_with('$') {
-        AgentCommandKind::Skill
-    } else {
-        AgentCommandKind::Command
-    };
     AgentCommand {
         name: command.name,
         description: command.description,
         input_hint,
-        kind,
     }
 }
 
@@ -4771,265 +3243,6 @@ fn map_permission_kind(kind: PermissionOptionKind) -> AgentPermissionKind {
     }
 }
 
-fn session_update_parent_tool_use_id(update: &SessionUpdate) -> Option<&str> {
-    let meta = match update {
-        SessionUpdate::UserMessageChunk(update)
-        | SessionUpdate::AgentMessageChunk(update)
-        | SessionUpdate::AgentThoughtChunk(update) => update.meta.as_ref(),
-        SessionUpdate::ToolCall(update) => update.meta.as_ref(),
-        SessionUpdate::ToolCallUpdate(update) => update.meta.as_ref(),
-        SessionUpdate::Plan(update) => update.meta.as_ref(),
-        SessionUpdate::AvailableCommandsUpdate(update) => update.meta.as_ref(),
-        SessionUpdate::CurrentModeUpdate(update) => update.meta.as_ref(),
-        SessionUpdate::ConfigOptionUpdate(update) => update.meta.as_ref(),
-        SessionUpdate::SessionInfoUpdate(update) => update.meta.as_ref(),
-        SessionUpdate::UsageUpdate(update) => update.meta.as_ref(),
-        _ => None,
-    }?;
-    meta.get("claudeCode")?
-        .as_object()?
-        .get("parentToolUseId")?
-        .as_str()
-}
-
-fn context_compaction(meta: Option<&serde_json::Map<String, serde_json::Value>>) -> bool {
-    meta.and_then(|meta| meta.get("contextCompaction"))
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-}
-
-fn claude_tool_subagent(meta: Option<&serde_json::Map<String, serde_json::Value>>) -> Option<bool> {
-    meta?
-        .get("claudeCode")?
-        .as_object()?
-        .get("subagent")?
-        .as_bool()
-}
-
-#[derive(Default)]
-struct TerminalFrame {
-    info: Option<TerminalInfoFrame>,
-    output: Option<String>,
-    exit: Option<TerminalExitFrame>,
-}
-
-struct TerminalInfoFrame {
-    terminal_id: String,
-    command: Option<String>,
-    cwd: Option<String>,
-}
-
-struct TerminalExitFrame {
-    exit_code: Option<String>,
-    signal: Option<String>,
-}
-
-impl TerminalFrame {
-    fn from_meta(
-        meta: Option<&serde_json::Map<String, serde_json::Value>>,
-        raw_input: Option<&serde_json::Value>,
-        fallback_cwd: Option<&std::path::Path>,
-    ) -> Self {
-        let Some(meta) = meta else {
-            return Self::default();
-        };
-        let info = meta
-            .get("terminal_info")
-            .and_then(serde_json::Value::as_object)
-            .and_then(|info| {
-                let terminal_id = info.get("terminal_id")?.as_str()?.to_owned();
-                let command = json_command(
-                    info.get("command")
-                        .or_else(|| raw_input.and_then(|input| input.get("command"))),
-                );
-                let cwd = info
-                    .get("cwd")
-                    .or_else(|| raw_input.and_then(|input| input.get("cwd")))
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned)
-                    .or_else(|| fallback_cwd.map(|cwd| cwd.display().to_string()));
-                Some(TerminalInfoFrame {
-                    terminal_id,
-                    command,
-                    cwd,
-                })
-            });
-        let output = meta
-            .get("terminal_output")
-            .and_then(serde_json::Value::as_object)
-            .filter(|output| {
-                output
-                    .get("terminal_id")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some()
-            })
-            .and_then(|output| output.get("data"))
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned);
-        let exit = meta
-            .get("terminal_exit")
-            .and_then(serde_json::Value::as_object)
-            .filter(|exit| {
-                exit.get("terminal_id")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some()
-            })
-            .map(|exit| TerminalExitFrame {
-                exit_code: exit.get("exit_code").and_then(json_integer),
-                signal: exit
-                    .get("signal")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned),
-            });
-        Self { info, output, exit }
-    }
-
-    const fn is_empty(&self) -> bool {
-        self.info.is_none() && self.output.is_none() && self.exit.is_none()
-    }
-}
-
-fn json_command(value: Option<&serde_json::Value>) -> Option<String> {
-    match value? {
-        serde_json::Value::String(command) => Some(command.clone()),
-        serde_json::Value::Array(arguments) => {
-            let arguments = arguments
-                .iter()
-                .map(serde_json::Value::as_str)
-                .collect::<Option<Vec<_>>>()?;
-            Some(arguments.join(" "))
-        }
-        _ => None,
-    }
-}
-
-fn json_integer(value: &serde_json::Value) -> Option<String> {
-    value
-        .as_i64()
-        .map(|value| value.to_string())
-        .or_else(|| value.as_u64().map(|value| value.to_string()))
-}
-
-fn has_terminal_payload(output: &[ToolPayload]) -> bool {
-    output
-        .iter()
-        .any(|payload| matches!(payload, ToolPayload::Terminal(_)))
-}
-
-fn apply_terminal_frame(
-    output: &mut Vec<ToolPayload>,
-    frame: TerminalFrame,
-    fallback_label: &str,
-) -> bool {
-    if frame.is_empty() {
-        return false;
-    }
-    let index = output
-        .iter()
-        .position(|payload| matches!(payload, ToolPayload::Terminal(_)))
-        .unwrap_or_else(|| {
-            output.push(ToolPayload::Terminal(String::new()));
-            output.len() - 1
-        });
-    let ToolPayload::Terminal(terminal) = &mut output[index] else {
-        unreachable!();
-    };
-    if let Some(info) = frame.info {
-        let command = info
-            .command
-            .as_deref()
-            .and_then(command_from_title)
-            .or_else(|| command_from_title(fallback_label));
-        terminal.clear();
-        if let Some(command) = command {
-            terminal.push_str("$ ");
-            terminal.push_str(&command);
-            terminal.push('\n');
-        }
-        if let Some(cwd) = info.cwd.filter(|cwd| !cwd.trim().is_empty()) {
-            terminal.push_str("cwd: ");
-            terminal.push_str(cwd.trim());
-            terminal.push('\n');
-        }
-        if terminal.is_empty() {
-            terminal.push_str("[terminal ");
-            terminal.push_str(&info.terminal_id);
-            terminal.push_str("]\n");
-        }
-        terminal.push('\n');
-    }
-    if let Some(data) = frame.output {
-        terminal.push_str(&data);
-    }
-    if let Some(exit) = frame.exit {
-        if !terminal.is_empty() && !terminal.ends_with('\n') {
-            terminal.push('\n');
-        }
-        terminal.push_str("[exit status: ");
-        terminal.push_str(exit.exit_code.as_deref().unwrap_or("unknown"));
-        if let Some(signal) = exit.signal.filter(|signal| !signal.is_empty()) {
-            terminal.push_str(", signal: ");
-            terminal.push_str(&signal);
-        }
-        terminal.push(']');
-    }
-    truncate_payload(terminal, MAX_TOOL_PAYLOAD_BYTES);
-    true
-}
-
-/// Generic display titles agents attach before (or instead of) real arguments.
-/// They are labels, not commands: rendering one as `$ Terminal` puts a lie in
-/// the transcript.
-const PLACEHOLDER_TOOL_TITLES: [&str; 16] = [
-    "grep",
-    "find",
-    "terminal",
-    "shell",
-    "read file",
-    "edit file",
-    "delete file",
-    "write file",
-    "web search",
-    "web fetch",
-    "codebase search",
-    "read todos",
-    "update todos",
-    "read lints",
-    "subagent task",
-    "task: subagent task",
-];
-
-fn is_placeholder_title(title: &str) -> bool {
-    PLACEHOLDER_TOOL_TITLES
-        .iter()
-        .any(|placeholder| title.trim().eq_ignore_ascii_case(placeholder))
-}
-
-/// A title usable as a shell command: unwrapped from its markdown code span
-/// when it wears one, and never a generic placeholder label.
-fn command_from_title(title: &str) -> Option<String> {
-    let command = unwrap_command_span(title).unwrap_or_else(|| title.trim().to_owned());
-    (!command.is_empty() && !is_placeholder_title(&command)).then_some(command)
-}
-
-fn unwrap_command_span(title: &str) -> Option<String> {
-    let inner = title.trim().strip_prefix('`')?.strip_suffix('`')?;
-    let mut command = String::with_capacity(inner.len());
-    let mut characters = inner.chars().peekable();
-    while let Some(character) = characters.next() {
-        if character == '\\' && characters.peek() == Some(&'`') {
-            characters.next();
-            command.push('`');
-        } else {
-            command.push(character);
-        }
-    }
-    Some(command.trim().to_owned())
-}
-
-/// Does this update carry tool *shape* (what the call is) rather than only its
-/// result? Status-and-output updates arrive after the shape is settled, so they
-/// must not re-type the call.
 fn update_carries_tool_shape(fields: &ToolCallUpdateFields) -> bool {
     fields.title.is_some()
         || fields.raw_input.is_some()
@@ -5041,8 +3254,6 @@ fn update_carries_tool_shape(fields: &ToolCallUpdateFields) -> bool {
         })
 }
 
-/// A completion update that repeats the default `other` kind would otherwise
-/// downgrade an already-typed tool into a generic one.
 fn reclassifies_tool(current: AgentToolKindModel, next: ToolKind, carries_shape: bool) -> bool {
     carries_shape
         || current == AgentToolKindModel::Other
@@ -5062,29 +3273,6 @@ fn map_tool_kind(kind: ToolKind) -> AgentToolKindModel {
         ToolKind::SwitchMode => AgentToolKindModel::SwitchMode,
         _ => AgentToolKindModel::Other,
     }
-}
-
-/// The notification statuses the row presentation reads as an outcome, paired
-/// with `zz_ui::agent::notification_status`. Everything else is in flight or
-/// unrecognized, and a turn boundary rewrites it rather than leaving a card
-/// the reducer can never settle.
-const TERMINAL_NOTIFICATION_STATUSES: [&str; 9] = [
-    "completed",
-    "succeeded",
-    "success",
-    "failed",
-    "error",
-    "killed",
-    "cancelled",
-    "canceled",
-    "interrupted",
-];
-
-fn terminal_notification_status(status: &str) -> bool {
-    let status = status.trim();
-    TERMINAL_NOTIFICATION_STATUSES
-        .iter()
-        .any(|terminal| status.eq_ignore_ascii_case(terminal))
 }
 
 fn map_tool_status(status: ToolCallStatus) -> AgentToolStatusModel {
@@ -5237,8 +3425,6 @@ fn capped(mut text: String, max_bytes: usize) -> String {
     text
 }
 
-/// Cut `text` to `max_bytes` on a char boundary, leaving a visible marker. The
-/// marker is budgeted inside the cap, so the result never exceeds it.
 fn truncate_payload(text: &mut String, max_bytes: usize) {
     if text.len() <= max_bytes {
         return;
@@ -5406,1215 +3592,7 @@ mod tests {
     }
 
     #[test]
-    fn context_compaction_completion_stops_its_spinner() {
-        let mut thread = thread();
-        let meta = claude_meta(&serde_json::json!({"contextCompaction": true}));
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("compact-1", "Context compacting")
-                .status(ToolCallStatus::InProgress)
-                .meta(meta.clone()),
-        ));
-        thread.apply_update(SessionUpdate::ToolCallUpdate(
-            ToolCallUpdate::new(
-                "compact-1",
-                ToolCallUpdateFields::new()
-                    .title("Context compacted")
-                    .status(ToolCallStatus::Completed),
-            )
-            .meta(meta),
-        ));
-
-        assert!(matches!(
-            &thread.entries[0],
-            AgentThreadEntry::Tool {
-                status: AgentToolStatusModel::Completed,
-                label,
-                ..
-            } if label == "Context compacted"
-        ));
-        assert!(thread.active_context_compaction.is_none());
-    }
-
-    #[test]
-    fn following_answer_settles_a_compaction_with_a_lost_completion() {
-        let mut thread = thread();
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("compact-1", "Context compacting")
-                .status(ToolCallStatus::InProgress)
-                .meta(claude_meta(&serde_json::json!({"contextCompaction": true}))),
-        ));
-        thread.apply_update(SessionUpdate::AgentMessageChunk(ContentChunk::new(
-            ContentBlock::Text(TextContent::new("The answer")),
-        )));
-
-        assert!(matches!(
-            &thread.entries[0],
-            AgentThreadEntry::Tool {
-                status: AgentToolStatusModel::Completed,
-                label,
-                ..
-            } if label == "Context compacted"
-        ));
-        assert!(matches!(
-            &thread.entries[1],
-            AgentThreadEntry::Assistant { markdown, .. } if markdown == "The answer"
-        ));
-    }
-
-    #[test]
-    fn reducer_keeps_large_markdown_blocks_in_one_protocol_message() {
-        let mut thread = thread();
-        let opening = format!("```text\n{}", "long line\n".repeat(8_000));
-        thread.apply_update(SessionUpdate::AgentMessageChunk(
-            ContentChunk::new(ContentBlock::Text(TextContent::new(opening.clone())))
-                .message_id(MessageId::new("large-message")),
-        ));
-        thread.apply_update(SessionUpdate::AgentMessageChunk(
-            ContentChunk::new(ContentBlock::Text(TextContent::new("```")))
-                .message_id(MessageId::new("large-message")),
-        ));
-
-        assert_eq!(thread.entries.len(), 1);
-        assert!(matches!(
-            &thread.entries[0],
-            AgentThreadEntry::Assistant { markdown, .. }
-                if markdown == &format!("{opening}```")
-        ));
-    }
-
-    #[test]
-    fn reducer_routes_mid_turn_notification_despite_user_echo_suppression() {
-        let mut thread =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        thread.begin_prompt("run the task".to_owned(), Vec::new());
-        thread.apply_update(SessionUpdate::UserMessageChunk(ContentChunk::new(
-            ContentBlock::Text(TextContent::new(
-                r#"<task-notification>
-<task-id>a27cef9442328a156</task-id>
-<tool-use-id>toolu_01U1bVbZb8V55Vx3eLB9Zaxb</tool-use-id>
-<output-file>/private/tmp/claude-501/.../tasks/a27cef9442328a156.output</output-file>
-<status>completed</status>
-<summary>Agent "Fix zz-daemon/zz-terminal slop findings" finished</summary>
-<note>A task-notification fires each time this agent stops...</note>
-<result>All 12 findings addressed. ...</result>
-</task-notification>"#,
-            )),
-        )));
-
-        assert_eq!(thread.entries.len(), 2);
-        assert!(matches!(thread.entries[0], AgentThreadEntry::User { .. }));
-        assert!(matches!(
-            &thread.entries[1],
-            AgentThreadEntry::Notification {
-                task_id,
-                status,
-                summary,
-                result_markdown,
-                ..
-            } if task_id == "a27cef9442328a156"
-                && status == "completed"
-                && summary == "Agent \"Fix zz-daemon/zz-terminal slop findings\" finished"
-                && result_markdown == "All 12 findings addressed. ..."
-        ));
-    }
-
-    #[test]
-    fn live_sdk_notification_and_replayed_envelope_share_one_card() {
-        let mut thread =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        thread.push_notification(TaskNotification {
-            task_id: "a27cef9442328a156".to_owned(),
-            tool_use_id: "toolu_01U1bVbZb8V55Vx3eLB9Zaxb".to_owned(),
-            agent_task: true,
-            status: "completed".to_owned(),
-            summary: "Agent finished".to_owned(),
-            result_markdown: String::new(),
-        });
-        thread.push_notification(TaskNotification {
-            task_id: "a27cef9442328a156".to_owned(),
-            tool_use_id: "toolu_01U1bVbZb8V55Vx3eLB9Zaxb".to_owned(),
-            agent_task: true,
-            status: "completed".to_owned(),
-            summary: "Agent \"Fix findings\" finished".to_owned(),
-            result_markdown: "All 12 findings addressed.".to_owned(),
-        });
-
-        assert_eq!(thread.entries.len(), 1);
-        assert!(matches!(
-            &thread.entries[0],
-            AgentThreadEntry::Notification {
-                summary,
-                result_markdown,
-                ..
-            } if summary == "Agent \"Fix findings\" finished"
-                && result_markdown == "All 12 findings addressed."
-        ));
-
-        thread.push_notification(TaskNotification {
-            task_id: "other".to_owned(),
-            tool_use_id: "toolu_other".to_owned(),
-            agent_task: true,
-            status: "completed".to_owned(),
-            summary: "Another agent finished".to_owned(),
-            result_markdown: String::new(),
-        });
-        assert_eq!(thread.entries.len(), 2);
-    }
-
-    /// What the daemon publishes for a settled task: never a result body, and
-    /// often no summary either.
-    fn structural_notification(task_id: &str, tool_use_id: &str, status: &str) -> SdkTaskEvent {
-        SdkTaskEvent::Notification(TaskNotification {
-            task_id: task_id.to_owned(),
-            tool_use_id: tool_use_id.to_owned(),
-            agent_task: true,
-            status: status.to_owned(),
-            summary: String::new(),
-            result_markdown: String::new(),
-        })
-    }
-
-    /// The prose envelope a replayed transcript carries, which is the only
-    /// source of a notification's result body.
-    fn prose_notification(
-        task_id: &str,
-        tool_use_id: &str,
-        summary: &str,
-        result: &str,
-    ) -> SessionUpdate {
-        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
-            format!(
-                "<task-notification>\n\
-                 <task-id>{task_id}</task-id>\n\
-                 <tool-use-id>{tool_use_id}</tool-use-id>\n\
-                 <output-file>/tmp/tasks/{task_id}.output</output-file>\n\
-                 <status>completed</status>\n\
-                 <summary>{summary}</summary>\n\
-                 <result>{result}</result>\n\
-                 </task-notification>"
-            ),
-        ))))
-    }
-
-    fn notification_card(thread: &AgentThread, index: usize) -> (&str, &str, &str, &str) {
-        match &thread.entries[index] {
-            AgentThreadEntry::Notification {
-                tool_use_id,
-                status,
-                summary,
-                result_markdown,
-                ..
-            } => (tool_use_id, status, summary, result_markdown),
-            other => panic!("expected a notification entry, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn a_summaryless_notification_names_the_subagent_instead_of_nothing() {
-        let mut thread =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        thread.apply_task_event(structural_notification("a5ee", "toolu_a", "completed"));
-        let (.., summary, _) = notification_card(&thread, 0);
-        assert_eq!(summary, "Subagent finished");
-
-        thread
-            .task_labels
-            .insert("bc5s".to_owned(), "Pauli".to_owned());
-        thread.apply_task_event(structural_notification("bc5s", "toolu_b", "failed"));
-        let (.., summary, _) = notification_card(&thread, 1);
-        assert_eq!(summary, "Agent \"Pauli\" failed");
-    }
-
-    #[test]
-    fn a_prose_envelope_after_the_sdk_event_fills_the_same_card() {
-        let mut thread =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        thread.apply_task_event(structural_notification("a5ee", "toolu_a", "completed"));
-        thread.apply_update(prose_notification(
-            "a5ee",
-            "toolu_a",
-            "Agent \"Fix findings\" finished",
-            "All 12 findings addressed.",
-        ));
-
-        assert_eq!(thread.entries.len(), 1);
-        assert_eq!(
-            notification_card(&thread, 0),
-            (
-                "toolu_a",
-                "completed",
-                "Agent \"Fix findings\" finished",
-                "All 12 findings addressed."
-            )
-        );
-    }
-
-    #[test]
-    fn a_late_sdk_event_keeps_what_the_prose_envelope_filled() {
-        let mut thread =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        thread.apply_update(prose_notification(
-            "a5ee",
-            "toolu_a",
-            "Agent \"Fix findings\" finished",
-            "All 12 findings addressed.",
-        ));
-        thread.apply_task_event(structural_notification("a5ee", "toolu_a", "completed"));
-
-        assert_eq!(thread.entries.len(), 1);
-        assert_eq!(
-            notification_card(&thread, 0),
-            (
-                "toolu_a",
-                "completed",
-                "Agent \"Fix findings\" finished",
-                "All 12 findings addressed."
-            ),
-            "a structural echo may not blank a result or downgrade a real summary"
-        );
-    }
-
-    #[test]
-    fn a_notification_missing_one_key_still_joins_its_card_by_the_other() {
-        let mut thread =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        thread.apply_task_event(structural_notification("a5ee", "", "completed"));
-        thread.apply_update(prose_notification("a5ee", "toolu_a", "Agent done", "body"));
-
-        assert_eq!(thread.entries.len(), 1);
-        assert_eq!(
-            notification_card(&thread, 0),
-            ("toolu_a", "completed", "Agent done", "body"),
-            "the tool use id the second source knew joins and lands on the card"
-        );
-
-        let mut reversed =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        reversed.apply_update(prose_notification("a5ee", "toolu_a", "Agent done", "body"));
-        reversed.apply_task_event(structural_notification("a5ee", "", "failed"));
-
-        assert_eq!(reversed.entries.len(), 1);
-        assert_eq!(
-            notification_card(&reversed, 0),
-            ("toolu_a", "failed", "Agent done", "body")
-        );
-    }
-
-    #[test]
-    fn only_an_outcome_counts_as_a_settled_notification_status() {
-        for status in [
-            "completed",
-            "Succeeded",
-            " success ",
-            "failed",
-            "error",
-            "killed",
-            "cancelled",
-            "canceled",
-            "interrupted",
-        ] {
-            assert!(terminal_notification_status(status), "{status} is settled");
-        }
-        for status in ["", "  ", "pending", "running", "in_progress", "queued"] {
-            assert!(
-                !terminal_notification_status(status),
-                "{status} is not an outcome"
-            );
-        }
-    }
-
-    #[test]
-    fn a_settled_turn_makes_an_unreadable_notification_status_static() {
-        let mut thread =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        for (task_id, status) in [("a5ee", "queued"), ("bc5s", "failed")] {
-            thread.push_notification(TaskNotification {
-                task_id: task_id.to_owned(),
-                tool_use_id: format!("toolu_{task_id}"),
-                agent_task: true,
-                status: status.to_owned(),
-                summary: "Agent finished".to_owned(),
-                result_markdown: String::new(),
-            });
-        }
-
-        thread.settle_inflight(AgentToolStatusModel::Completed);
-
-        let (_, unreadable, ..) = notification_card(&thread, 0);
-        assert_eq!(unreadable, "completed");
-        let (_, outcome, ..) = notification_card(&thread, 1);
-        assert_eq!(
-            outcome, "failed",
-            "an outcome the presentation already reads is left alone"
-        );
-    }
-
-    #[test]
-    fn codex_spawned_agent_holds_the_spawn_row_and_cards_on_completion() {
-        let mut thread = AgentThread::new(AgentProvider::Codex, PathBuf::from("/workspace"), None);
-        let collab_meta =
-            |value: serde_json::Value| value.as_object().expect("collab meta object").clone();
-
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("spawn-1", "spawnAgent")
-                .status(ToolCallStatus::Completed)
-                .raw_input(serde_json::json!({"prompt": "sleep 5s and return done"}))
-                .meta(collab_meta(serde_json::json!({
-                    "codex": {"collaboration": {
-                        "tool": "spawnAgent",
-                        "receiverThreadIds": ["thread-1"],
-                    }},
-                }))),
-        ));
-        assert!(matches!(
-            &thread.entries[0],
-            AgentThreadEntry::Tool {
-                status: AgentToolStatusModel::Running,
-                subagent: true,
-                label,
-                ..
-            } if label == "Spawn subagent \u{2014} sleep 5s and return done"
-        ));
-
-        thread.settle_inflight(AgentToolStatusModel::Completed);
-        assert!(matches!(
-            &thread.entries[0],
-            AgentThreadEntry::Tool {
-                status: AgentToolStatusModel::Running,
-                ..
-            }
-        ));
-
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("act-1", "Start subagent Pauli")
-                .status(ToolCallStatus::Completed)
-                .meta(collab_meta(serde_json::json!({
-                    "codex": {"subagent": {
-                        "threadId": "thread-1",
-                        "path": "agents/Pauli",
-                        "activity": "started",
-                    }},
-                }))),
-        ));
-
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("wait-1", "wait")
-                .status(ToolCallStatus::Completed)
-                .raw_input(serde_json::json!({
-                    "agentsStates": {"thread-1": {"status": "completed", "message": "done"}},
-                }))
-                .meta(collab_meta(serde_json::json!({
-                    "codex": {"collaboration": {
-                        "tool": "wait",
-                        "receiverThreadIds": ["thread-1"],
-                    }},
-                }))),
-        ));
-        assert!(matches!(
-            &thread.entries[0],
-            AgentThreadEntry::Tool {
-                status: AgentToolStatusModel::Completed,
-                ..
-            }
-        ));
-        assert!(matches!(
-            &thread.entries[2],
-            AgentThreadEntry::Tool {
-                label,
-                subagent: false,
-                input: Some(ToolPayload::Text(text)),
-                ..
-            } if label == "Wait for subagents" && text == "agent thread-1\u{2026} completed: done"
-        ));
-        assert!(matches!(
-            &thread.entries[3],
-            AgentThreadEntry::Notification { summary, task_id, .. }
-                if summary == "Agent \"Pauli\" finished \u{2014} done" && task_id == "thread-1"
-        ));
-
-        thread.apply_update(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
-            "wait-1",
-            ToolCallUpdateFields::new().raw_input(serde_json::json!({
-                "agentsStates": {"thread-1": {"status": "completed", "message": "done"}},
-            })),
-        )));
-        assert_eq!(
-            thread
-                .entries
-                .iter()
-                .filter(|entry| matches!(entry, AgentThreadEntry::Notification { .. }))
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn shell_task_notifications_do_not_become_cards() {
-        let mut thread =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        thread.push_notification(TaskNotification {
-            task_id: "bckbkz157".to_owned(),
-            tool_use_id: "toolu_01TLXpbaj3Mw71nx3e1VbHVS".to_owned(),
-            agent_task: false,
-            status: "completed".to_owned(),
-            summary: "sleep 5".to_owned(),
-            result_markdown: String::new(),
-        });
-        assert!(thread.entries.is_empty());
-    }
-
-    fn claude_meta(value: &serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
-        value
-            .as_object()
-            .expect("fixture metadata must be an object")
-            .clone()
-    }
-
-    #[test]
-    fn reducer_attaches_parented_subagent_updates_to_the_task_tool() {
-        let mut thread =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("task-tool", "Research")
-                .kind(ToolKind::Think)
-                .status(ToolCallStatus::InProgress)
-                .meta(claude_meta(&serde_json::json!({
-                    "claudeCode": {"subagent": true}
-                }))),
-        ));
-        let first_revision = thread.entry_revisions[0];
-        thread.apply_update(SessionUpdate::AgentMessageChunk(
-            ContentChunk::new(ContentBlock::Text(TextContent::new("nested answer"))).meta(
-                claude_meta(&serde_json::json!({
-                    "claudeCode": {"parentToolUseId": "task-tool"}
-                })),
-            ),
-        ));
-
-        assert_eq!(thread.entries.len(), 1);
-        assert!(thread.entry_revisions[0] > first_revision);
-        assert!(matches!(
-            &thread.entries[0],
-            AgentThreadEntry::Tool {
-                subagent: true,
-                children,
-                ..
-            } if matches!(
-                children.as_slice(),
-                [AgentThreadEntry::Assistant { markdown, .. }] if markdown == "nested answer"
-            )
-        ));
-    }
-
-    #[test]
-    fn async_subagent_tool_stays_running_until_its_task_settles() {
-        let mut thread =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("task-tool", "Sleep 5 then return done")
-                .kind(ToolKind::Think)
-                .status(ToolCallStatus::InProgress)
-                .meta(claude_meta(&serde_json::json!({
-                    "claudeCode": {"subagent": true}
-                }))),
-        ));
-        thread.apply_task_event(SdkTaskEvent::Started {
-            task_id: "a5ee3d5032432ddf6".to_owned(),
-            tool_use_id: "task-tool".to_owned(),
-            is_agent: true,
-        });
-        thread.apply_update(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
-            "task-tool",
-            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
-        )));
-        assert!(matches!(
-            &thread.entries[0],
-            AgentThreadEntry::Tool {
-                status: AgentToolStatusModel::Running,
-                ..
-            }
-        ));
-
-        thread.settle_inflight(AgentToolStatusModel::Completed);
-        assert!(matches!(
-            &thread.entries[0],
-            AgentThreadEntry::Tool {
-                status: AgentToolStatusModel::Running,
-                ..
-            }
-        ));
-
-        thread.apply_task_event(SdkTaskEvent::Notification(TaskNotification {
-            task_id: "a5ee3d5032432ddf6".to_owned(),
-            tool_use_id: "task-tool".to_owned(),
-            agent_task: true,
-            status: "completed".to_owned(),
-            summary: "done".to_owned(),
-            result_markdown: String::new(),
-        }));
-        assert!(matches!(
-            &thread.entries[0],
-            AgentThreadEntry::Tool {
-                status: AgentToolStatusModel::Completed,
-                ..
-            }
-        ));
-        assert!(matches!(
-            &thread.entries[1],
-            AgentThreadEntry::Notification { summary, .. } if summary == "done"
-        ));
-
-        thread.apply_task_event(SdkTaskEvent::Started {
-            task_id: "bc5stcnro".to_owned(),
-            tool_use_id: "bash-tool".to_owned(),
-            is_agent: false,
-        });
-        assert!(thread.live_task_tools.is_empty());
-    }
-
-    /// A mid-turn claude pane holding one pending subagent Task tool.
-    fn claude_task_thread(protocol_id: &'static str) -> AgentThread {
-        let mut thread =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        thread.connection = AgentConnectionState::Running;
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new(protocol_id, "Research")
-                .kind(ToolKind::Think)
-                .status(ToolCallStatus::Pending)
-                .meta(claude_meta(&serde_json::json!({
-                    "claudeCode": {"subagent": true}
-                }))),
-        ));
-        thread
-    }
-
-    fn task_progress(task_id: &str, tool_use_id: Option<&str>) -> SdkTaskEvent {
-        SdkTaskEvent::TaskProgress {
-            task_id: task_id.to_owned(),
-            tool_use_id: tool_use_id.map(ToOwned::to_owned),
-            description: "Explore the project".to_owned(),
-            last_tool_name: Some("Grep".to_owned()),
-            subagent_type: Some("Explore".to_owned()),
-        }
-    }
-
-    fn tool_progress(tool_use_id: &str, subagent_type: Option<&str>) -> SdkTaskEvent {
-        SdkTaskEvent::ToolProgress {
-            tool_use_id: tool_use_id.to_owned(),
-            parent_tool_use_id: None,
-            elapsed_seconds: 30.0,
-            subagent_type: subagent_type.map(ToOwned::to_owned),
-        }
-    }
-
-    fn tool_status(thread: &AgentThread, index: usize) -> AgentToolStatusModel {
-        match &thread.entries[index] {
-            AgentThreadEntry::Tool { status, .. } => *status,
-            other => panic!("expected a tool entry, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn a_notification_that_outruns_its_task_started_leaves_no_hold() {
-        let mut thread = claude_task_thread("task-one");
-        thread.apply_task_event(SdkTaskEvent::Notification(TaskNotification {
-            task_id: "a5ee".to_owned(),
-            tool_use_id: "task-one".to_owned(),
-            agent_task: true,
-            status: "completed".to_owned(),
-            summary: "noop-1 done".to_owned(),
-            result_markdown: String::new(),
-        }));
-        thread.apply_task_event(SdkTaskEvent::Started {
-            task_id: "a5ee".to_owned(),
-            tool_use_id: "task-one".to_owned(),
-            is_agent: true,
-        });
-        assert!(
-            thread.live_task_tools.is_empty(),
-            "a start arriving after its own settle must not re-hold the tool"
-        );
-        thread.apply_update(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
-            "task-one",
-            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
-        )));
-        assert_eq!(tool_status(&thread, 0), AgentToolStatusModel::Completed);
-    }
-
-    #[test]
-    fn a_reattach_task_started_never_resurrects_a_settled_tool() {
-        let mut thread = claude_task_thread("task-one");
-        thread.apply_task_event(SdkTaskEvent::Started {
-            task_id: "a5ee".to_owned(),
-            tool_use_id: "task-one".to_owned(),
-            is_agent: true,
-        });
-        thread.apply_task_event(SdkTaskEvent::Settled {
-            task_id: "a5ee".to_owned(),
-            status: "completed".to_owned(),
-        });
-        thread.apply_task_event(SdkTaskEvent::Started {
-            task_id: "a5ee".to_owned(),
-            tool_use_id: "task-one".to_owned(),
-            is_agent: true,
-        });
-        assert!(thread.live_task_tools.is_empty());
-        assert_eq!(
-            tool_status(&thread, 0),
-            AgentToolStatusModel::Completed,
-            "a re-attach start for a settled task must not flip its tool back to running"
-        );
-    }
-
-    #[test]
-    fn a_task_started_after_the_pane_returned_to_ready_holds_nothing() {
-        let mut thread = claude_task_thread("task-one");
-        thread.connection = AgentConnectionState::Ready;
-        thread.apply_task_event(SdkTaskEvent::Started {
-            task_id: "a5ee".to_owned(),
-            tool_use_id: "task-one".to_owned(),
-            is_agent: true,
-        });
-        assert!(
-            thread.live_task_tools.is_empty(),
-            "a start echo after ready is late replay, not a live task"
-        );
-    }
-
-    #[test]
-    fn a_reconciled_set_retires_the_tasks_it_omits_and_adopts_none() {
-        let mut thread = claude_task_thread("task-one");
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("task-two", "Research")
-                .status(ToolCallStatus::InProgress)
-                .meta(claude_meta(&serde_json::json!({
-                    "claudeCode": {"subagent": true}
-                }))),
-        ));
-        for (task_id, tool_use_id) in [("a5ee", "task-one"), ("bc5s", "task-two")] {
-            thread.apply_task_event(SdkTaskEvent::Started {
-                task_id: task_id.to_owned(),
-                tool_use_id: tool_use_id.to_owned(),
-                is_agent: true,
-            });
-        }
-
-        thread.apply_task_event(SdkTaskEvent::Reconcile {
-            task_ids: vec!["a5ee".to_owned(), "never-started".to_owned()],
-        });
-
-        assert_eq!(
-            thread.live_task_tools,
-            HashMap::from([("a5ee".to_owned(), "task-one".to_owned())]),
-            "the set retires what it omits and introduces nothing it names"
-        );
-        assert_eq!(tool_status(&thread, 0), AgentToolStatusModel::Running);
-        assert_eq!(tool_status(&thread, 1), AgentToolStatusModel::Completed);
-    }
-
-    #[test]
-    fn task_progress_repairs_a_task_start_that_never_arrived() {
-        let mut thread = claude_task_thread("task-tool");
-        thread.apply_task_event(task_progress("a5ee", Some("task-tool")));
-
-        assert_eq!(
-            thread.live_task_tools.get("a5ee").map(String::as_str),
-            Some("task-tool")
-        );
-        assert_eq!(tool_status(&thread, 0), AgentToolStatusModel::Running);
-
-        thread.settle_inflight(AgentToolStatusModel::Completed);
-        assert_eq!(
-            tool_status(&thread, 0),
-            AgentToolStatusModel::Running,
-            "an adopted task holds its row through the turn boundary"
-        );
-
-        thread.apply_task_event(task_progress("bc5s", None));
-        thread.apply_task_event(task_progress("bc5s", Some("never-called")));
-        assert!(
-            !thread.live_task_tools.contains_key("bc5s"),
-            "a task with no reachable tool entry registers nothing"
-        );
-    }
-
-    #[test]
-    fn progress_never_resurrects_a_settled_tool() {
-        for settled in [
-            AgentToolStatusModel::Completed,
-            AgentToolStatusModel::Failed,
-            AgentToolStatusModel::Canceled,
-        ] {
-            let mut thread = claude_task_thread("task-tool");
-            thread.set_task_tool_status("task-tool", settled);
-
-            thread.apply_task_event(task_progress("a5ee", Some("task-tool")));
-            thread.apply_task_event(tool_progress("task-tool", Some("Explore")));
-
-            assert!(
-                thread.live_task_tools.is_empty(),
-                "{settled:?} is an outcome, so no task may be registered against it"
-            );
-            assert_eq!(tool_status(&thread, 0), settled);
-        }
-    }
-
-    #[test]
-    fn progress_after_the_pane_returns_to_ready_holds_nothing() {
-        let mut thread = claude_task_thread("task-tool");
-        thread.connection = AgentConnectionState::Ready;
-
-        thread.apply_task_event(task_progress("a5ee", Some("task-tool")));
-        thread.apply_task_event(tool_progress("task-tool", Some("Explore")));
-
-        assert!(thread.live_task_tools.is_empty());
-        assert_eq!(
-            tool_status(&thread, 0),
-            AgentToolStatusModel::Pending,
-            "a heartbeat after the turn ended is late replay, not work"
-        );
-    }
-
-    #[test]
-    fn tool_progress_only_lifts_a_pending_subagent_tool_to_running() {
-        let mut thread = claude_task_thread("task-tool");
-
-        thread.apply_task_event(tool_progress("task-tool", None));
-        assert_eq!(tool_status(&thread, 0), AgentToolStatusModel::Pending);
-
-        thread.apply_task_event(tool_progress("missing-tool", Some("Explore")));
-        assert_eq!(thread.entries.len(), 1);
-
-        thread.apply_task_event(tool_progress("task-tool", Some("Explore")));
-        assert_eq!(tool_status(&thread, 0), AgentToolStatusModel::Running);
-        assert!(
-            thread.live_task_tools.is_empty(),
-            "liveness alone never registers a task"
-        );
-    }
-
-    /// One item of the captured turn: either an ACP `session/update` the
-    /// adapter emitted, or the raw SDK message a `_claude/sdkMessage`
-    /// passthrough carried.
-    enum ReplayStep {
-        Acp(Box<SessionUpdate>),
-        Sdk(serde_json::Value),
-    }
-
-    const REPLAY_SESSION: &str = "6e1e630a-b654-468b-98ac-cc2afb6fad25";
-    const NOOP1_TOOL: &str = "toolu_01UPTSiDoNMRa34eD3uGi6Ds";
-    const NOOP2_TOOL: &str = "toolu_018UFVtfmc5ynnQCd31vAe1C";
-    const NOOP3_TOOL: &str = "toolu_01DELDKBT2EbqkTTX25mqUjq";
-    const NOOP1_TASK: &str = "a5f23bb8527ea0680";
-    const NOOP2_TASK: &str = "a0fbb51f33f8bf4a0";
-    const NOOP3_TASK: &str = "ade2b0e099b1b7d10";
-    const BASH1_TOOL: &str = "toolu_016Kx7g8QM5YJta9Ys1tShTf";
-    const BASH2_TOOL: &str = "toolu_01CVhyXZYmZPUPqVJD3LHN8H";
-    const BASH3_TOOL: &str = "toolu_01EP6WGuSDKo5tiB1vk8uVen";
-    const BASH1_TASK: &str = "b714txtc1";
-    const BASH2_TASK: &str = "bzq48vxw3";
-    const BASH3_TASK: &str = "b2a2tqak4";
-
-    /// A captured passthrough, classified by the daemon's own parser rather
-    /// than a transcription of what it would decide.
-    fn replay_sdk_event(message: &serde_json::Value) -> SdkTaskEvent {
-        let params =
-            serde_json::json!({"sessionId": REPLAY_SESSION, "message": message}).to_string();
-        let (session_id, parsed) = zz_daemon::ProviderProfile::of(AgentProvider::ClaudeCode)
-            .ext_message("_claude/sdkMessage", &params)
-            .expect("the daemon classifies every opted-in passthrough");
-        assert_eq!(session_id, REPLAY_SESSION);
-        match parsed {
-            zz_daemon::SdkMessage::Task(event) => event,
-            zz_daemon::SdkMessage::TurnIdle => panic!("this capture carries no idle marker"),
-        }
-    }
-
-    fn agent_tool_meta(extra: &serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
-        claude_meta(&serde_json::json!({"claudeCode": extra}))
-    }
-
-    fn task_tool_call(tool_use_id: &'static str) -> ReplayStep {
-        ReplayStep::Acp(Box::new(SessionUpdate::ToolCall(
-            ToolCall::new(tool_use_id, "Task")
-                .kind(ToolKind::Think)
-                .meta(agent_tool_meta(
-                    &serde_json::json!({"toolName": "Agent", "subagent": true}),
-                )),
-        )))
-    }
-
-    fn task_tool_title(tool_use_id: &'static str, title: &str) -> ReplayStep {
-        ReplayStep::Acp(Box::new(SessionUpdate::ToolCallUpdate(
-            ToolCallUpdate::new(
-                tool_use_id,
-                ToolCallUpdateFields::new()
-                    .kind(ToolKind::Think)
-                    .title(title.to_owned()),
-            )
-            .meta(agent_tool_meta(
-                &serde_json::json!({"toolName": "Agent", "subagent": true}),
-            )),
-        )))
-    }
-
-    /// The async launch acknowledgement. It is a terminal wire status that
-    /// lands while the subagent it launched is still running, which is why the
-    /// registered task rather than the wire owns the row's outcome.
-    fn task_tool_completed(tool_use_id: &'static str) -> ReplayStep {
-        ReplayStep::Acp(Box::new(SessionUpdate::ToolCallUpdate(
-            ToolCallUpdate::new(
-                tool_use_id,
-                ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
-            )
-            .meta(agent_tool_meta(&serde_json::json!({"toolName": "Agent"}))),
-        )))
-    }
-
-    fn bash_tool_call(tool_use_id: &'static str, parent: &str) -> ReplayStep {
-        ReplayStep::Acp(Box::new(SessionUpdate::ToolCall(
-            ToolCall::new(tool_use_id, "sleep 5")
-                .kind(ToolKind::Execute)
-                .meta(agent_tool_meta(
-                    &serde_json::json!({"toolName": "Bash", "parentToolUseId": parent}),
-                )),
-        )))
-    }
-
-    fn bash_tool_completed(tool_use_id: &'static str, parent: &str) -> ReplayStep {
-        ReplayStep::Acp(Box::new(SessionUpdate::ToolCallUpdate(
-            ToolCallUpdate::new(
-                tool_use_id,
-                ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
-            )
-            .meta(agent_tool_meta(
-                &serde_json::json!({"toolName": "Bash", "parentToolUseId": parent}),
-            )),
-        )))
-    }
-
-    fn sdk_agent_started(task_id: &str, tool_use_id: &str, description: &str) -> ReplayStep {
-        ReplayStep::Sdk(serde_json::json!({
-            "type": "system",
-            "subtype": "task_started",
-            "task_id": task_id,
-            "tool_use_id": tool_use_id,
-            "description": description,
-            "subagent_type": "general-purpose",
-            "task_type": "local_agent",
-            "session_id": REPLAY_SESSION,
-        }))
-    }
-
-    fn sdk_bash_started(task_id: &str, tool_use_id: &str) -> ReplayStep {
-        ReplayStep::Sdk(serde_json::json!({
-            "type": "system",
-            "subtype": "task_started",
-            "task_id": task_id,
-            "owned_by_subagent": true,
-            "tool_use_id": tool_use_id,
-            "description": "Sleep for 5 seconds",
-            "task_type": "local_bash",
-            "session_id": REPLAY_SESSION,
-        }))
-    }
-
-    fn sdk_task_progress(task_id: &str, tool_use_id: &str) -> ReplayStep {
-        ReplayStep::Sdk(serde_json::json!({
-            "type": "system",
-            "subtype": "task_progress",
-            "task_id": task_id,
-            "tool_use_id": tool_use_id,
-            "description": "Running Sleep for 5 seconds",
-            "subagent_type": "general-purpose",
-            "usage": {"total_tokens": 16_170, "tool_uses": 1, "duration_ms": 4_101},
-            "last_tool_name": "Bash",
-            "session_id": REPLAY_SESSION,
-        }))
-    }
-
-    fn sdk_task_updated(task_id: &str) -> ReplayStep {
-        ReplayStep::Sdk(serde_json::json!({
-            "type": "system",
-            "subtype": "task_updated",
-            "task_id": task_id,
-            "patch": {"status": "completed", "end_time": 1_786_826_068_890u64},
-            "session_id": REPLAY_SESSION,
-        }))
-    }
-
-    fn sdk_agent_notification(task_id: &str, tool_use_id: &str, summary: &str) -> ReplayStep {
-        ReplayStep::Sdk(serde_json::json!({
-            "type": "system",
-            "subtype": "task_notification",
-            "task_id": task_id,
-            "tool_use_id": tool_use_id,
-            "status": "completed",
-            "output_file": format!("/tmp/tasks/{task_id}.output"),
-            "summary": summary,
-            "usage": {"total_tokens": 18_004, "tool_uses": 1, "duration_ms": 11_931},
-            "session_id": REPLAY_SESSION,
-        }))
-    }
-
-    fn sdk_bash_notification(task_id: &str, tool_use_id: &str) -> ReplayStep {
-        ReplayStep::Sdk(serde_json::json!({
-            "type": "system",
-            "subtype": "task_notification",
-            "task_id": task_id,
-            "tool_use_id": tool_use_id,
-            "status": "completed",
-            "output_file": "",
-            "summary": "Sleep for 5 seconds",
-            "session_id": REPLAY_SESSION,
-        }))
-    }
-
-    /// One real turn that launched three subagents, each of which ran one
-    /// background shell, in the order the wire delivered it: the async launch
-    /// acknowledgement is a terminal wire status that precedes every task
-    /// bookend, the shell notifications precede the agent ones, and a task
-    /// heartbeat lands between registration and the tool updates it describes.
-    fn captured_subagent_turn() -> Vec<ReplayStep> {
-        vec![
-            task_tool_call(NOOP1_TOOL),
-            task_tool_title(NOOP1_TOOL, "noop-1"),
-            task_tool_call(NOOP2_TOOL),
-            task_tool_title(NOOP2_TOOL, "noop-2"),
-            sdk_agent_started(NOOP1_TASK, NOOP1_TOOL, "noop-1 sleep 5s"),
-            task_tool_completed(NOOP1_TOOL),
-            task_tool_call(NOOP3_TOOL),
-            task_tool_title(NOOP3_TOOL, "noop-3"),
-            sdk_agent_started(NOOP2_TASK, NOOP2_TOOL, "noop-2 sleep 5s"),
-            task_tool_completed(NOOP2_TOOL),
-            sdk_agent_started(NOOP3_TASK, NOOP3_TOOL, "noop-3 sleep 5s"),
-            task_tool_completed(NOOP3_TOOL),
-            sdk_task_progress(NOOP1_TASK, NOOP1_TOOL),
-            bash_tool_call(BASH1_TOOL, NOOP1_TOOL),
-            sdk_task_progress(NOOP2_TASK, NOOP2_TOOL),
-            bash_tool_call(BASH2_TOOL, NOOP2_TOOL),
-            sdk_bash_started(BASH1_TASK, BASH1_TOOL),
-            sdk_bash_started(BASH2_TASK, BASH2_TOOL),
-            sdk_task_progress(NOOP3_TASK, NOOP3_TOOL),
-            bash_tool_call(BASH3_TOOL, NOOP3_TOOL),
-            sdk_bash_notification(BASH1_TASK, BASH1_TOOL),
-            bash_tool_completed(BASH1_TOOL, NOOP1_TOOL),
-            sdk_bash_notification(BASH2_TASK, BASH2_TOOL),
-            bash_tool_completed(BASH2_TOOL, NOOP2_TOOL),
-            sdk_bash_started(BASH3_TASK, BASH3_TOOL),
-            sdk_task_updated(NOOP1_TASK),
-            sdk_agent_notification(NOOP1_TASK, NOOP1_TOOL, "noop-1 done"),
-            sdk_bash_notification(BASH3_TASK, BASH3_TOOL),
-            bash_tool_completed(BASH3_TOOL, NOOP3_TOOL),
-            sdk_task_updated(NOOP2_TASK),
-            sdk_agent_notification(NOOP2_TASK, NOOP2_TOOL, "noop-2 done"),
-            sdk_task_updated(NOOP3_TASK),
-            sdk_agent_notification(NOOP3_TASK, NOOP3_TOOL, "noop-3 done"),
-        ]
-    }
-
-    fn replay_captured_subagent_turn() -> AgentThread {
-        let mut thread =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        thread.connection = AgentConnectionState::Running;
-        for step in captured_subagent_turn() {
-            match step {
-                ReplayStep::Acp(update) => thread.apply_runtime_update(*update),
-                ReplayStep::Sdk(message) => thread.apply_task_event(replay_sdk_event(&message)),
-            }
-        }
-        thread
-    }
-
-    /// What the sticky strip gates on: a subagent tool row that has not
-    /// reached an outcome still renders a spinner.
-    fn spinning_subagent_tools(thread: &AgentThread) -> Vec<&str> {
-        thread
-            .entries
-            .iter()
-            .filter_map(|entry| match entry {
-                AgentThreadEntry::Tool {
-                    protocol_id,
-                    status:
-                        AgentToolStatusModel::Pending
-                        | AgentToolStatusModel::Running
-                        | AgentToolStatusModel::NeedsApproval,
-                    subagent: true,
-                    ..
-                } => Some(protocol_id.as_str()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    fn notification_summaries(thread: &AgentThread) -> Vec<&str> {
-        thread
-            .entries
-            .iter()
-            .filter_map(|entry| match entry {
-                AgentThreadEntry::Notification { summary, .. } => Some(summary.as_str()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    #[test]
-    fn captured_subagent_turn_settles_its_task_tools_before_the_turn_ends() {
-        let thread = replay_captured_subagent_turn();
-
-        assert!(
-            thread.live_task_tools.is_empty(),
-            "every task reported terminal, so none is still held: {:?}",
-            thread.live_task_tools
-        );
-        for tool_use_id in [NOOP1_TOOL, NOOP2_TOOL, NOOP3_TOOL] {
-            assert_eq!(
-                thread.task_tool_status(tool_use_id),
-                Some(AgentToolStatusModel::Completed),
-                "{tool_use_id} is still spinning after its notification arrived"
-            );
-        }
-        assert_eq!(
-            spinning_subagent_tools(&thread),
-            Vec::<&str>::new(),
-            "the sticky strip renders a row for every unsettled subagent tool"
-        );
-        assert_eq!(
-            notification_summaries(&thread),
-            vec!["noop-1 done", "noop-2 done", "noop-3 done"],
-            "shell tasks notify too, and none of them is a card"
-        );
-    }
-
-    #[test]
-    fn captured_subagent_turn_leaves_no_spinner_once_the_turn_settles() {
-        let mut thread = replay_captured_subagent_turn();
-        thread.settle_inflight(AgentToolStatusModel::Completed);
-        thread.connection = AgentConnectionState::Ready;
-
-        assert!(thread.live_task_tools.is_empty());
-        for tool_use_id in [NOOP1_TOOL, NOOP2_TOOL, NOOP3_TOOL] {
-            assert_eq!(
-                thread.task_tool_status(tool_use_id),
-                Some(AgentToolStatusModel::Completed),
-                "{tool_use_id} outlived the turn boundary as a spinner"
-            );
-        }
-        assert_eq!(spinning_subagent_tools(&thread), Vec::<&str>::new());
-        assert_eq!(
-            notification_summaries(&thread),
-            vec!["noop-1 done", "noop-2 done", "noop-3 done"]
-        );
-    }
-
-    #[test]
-    fn reducer_keeps_orphaned_subagent_updates_in_the_flat_timeline() {
-        let mut thread =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        thread.apply_update(SessionUpdate::AgentMessageChunk(
-            ContentChunk::new(ContentBlock::Text(TextContent::new("orphan answer"))).meta(
-                claude_meta(&serde_json::json!({
-                    "claudeCode": {"parentToolUseId": "missing-task"}
-                })),
-            ),
-        ));
-
-        assert!(matches!(
-            thread.entries.as_slice(),
-            [AgentThreadEntry::Assistant { markdown, .. }] if markdown == "orphan answer"
-        ));
-    }
-
-    #[test]
-    fn reducer_flattens_deeper_subagent_updates_into_the_root_task() {
-        let mut thread =
-            AgentThread::new(AgentProvider::ClaudeCode, PathBuf::from("/workspace"), None);
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("root-task", "Root task").meta(claude_meta(&serde_json::json!({
-                "claudeCode": {"subagent": true}
-            }))),
-        ));
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("nested-task", "Nested task").meta(claude_meta(&serde_json::json!({
-                "claudeCode": {
-                    "subagent": true,
-                    "parentToolUseId": "root-task"
-                }
-            }))),
-        ));
-        thread.apply_update(SessionUpdate::AgentMessageChunk(
-            ContentChunk::new(ContentBlock::Text(TextContent::new("deep answer"))).meta(
-                claude_meta(&serde_json::json!({
-                    "claudeCode": {"parentToolUseId": "nested-task"}
-                })),
-            ),
-        ));
-
-        assert!(matches!(
-            &thread.entries[0],
-            AgentThreadEntry::Tool { children, .. }
-                if matches!(
-                    children.as_slice(),
-                    [
-                        AgentThreadEntry::Tool {
-                            children: nested_children,
-                            ..
-                        },
-                        AgentThreadEntry::Assistant { markdown, .. },
-                    ] if nested_children.is_empty() && markdown == "deep answer"
-                )
-        ));
-    }
-
-    #[test]
-    fn replay_dedupes_adjacent_sanitized_assistant_answers_only_at_finish() {
-        let mut thread = thread();
-        let answer = concat!(
-            "Committed as `fa0c328f4`.\n\n",
-            "::git-stage{cwd=\"/Users/demfabris/Documents/Development/Clairvo/backend\"}\n",
-            "::git-commit{cwd=\"/Users/demfabris/Documents/Development/Clairvo/backend\"}\n\n",
-        );
-        let raw = format!(
-            "{answer}<oai-mem-citation>\n\
-             <citation_entries>\n\
-             MEMORY.md:872-886|note=[used scoped commit guidance for a shared dirty tree]\n\
-             MEMORY.md:899-904|note=[used explicit and partial staging guidance]\n\
-             </citation_entries>\n\
-             <rollout_ids>\n\
-             019f7ff0-6773-7c13-9ef5-a46d634a02ff\n\
-             </rollout_ids>\n\
-             </oai-mem-citation>"
-        );
-        thread.apply_update(SessionUpdate::AgentMessageChunk(
-            ContentChunk::new(ContentBlock::Text(TextContent::new(answer)))
-                .message_id(MessageId::new("sanitized")),
-        ));
-        thread.apply_update(SessionUpdate::AgentMessageChunk(
-            ContentChunk::new(ContentBlock::Text(TextContent::new(raw)))
-                .message_id(MessageId::new("raw")),
-        ));
-
-        assert_eq!(thread.entries.len(), 2, "live reduction never dedupes");
-        thread.finish_replay();
-
-        assert_eq!(thread.entries.len(), 1);
-        assert_eq!(thread.entries.len(), thread.entry_revisions.len());
-        assert_eq!(thread.entry_indices.len(), 1);
-        assert!(matches!(
-            &thread.entries[0],
-            AgentThreadEntry::Assistant {
-                markdown,
-                memory_citations,
-                ..
-            } if markdown.starts_with("Committed as `fa0c328f4`.")
-                && !markdown.contains("::git-")
-                && memory_citations.len() == 2
-                && memory_citations[0].path == "MEMORY.md"
-        ));
-    }
-
-    #[test]
-    fn reducer_tracks_agent_commands_skills_and_generic_config_options() {
+    fn reducer_tracks_available_commands_and_generic_config_options() {
         let mut thread = thread();
         thread.apply_update(SessionUpdate::AvailableCommandsUpdate(
             AvailableCommandsUpdate::new(vec![
@@ -6625,7 +3603,7 @@ mod tests {
                         ),
                     ),
                 ),
-                AvailableCommand::new("$brainstorm", "Explore an idea"),
+                AvailableCommand::new("brainstorm", "Explore an idea"),
             ]),
         ));
         thread.apply_update(SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(
@@ -6656,13 +3634,15 @@ mod tests {
         assert!(matches!(
             thread.available_commands.as_ref(),
             [AgentCommand {
-                kind: AgentCommandKind::Command,
+                name,
                 input_hint: Some(hint),
                 ..
             }, AgentCommand {
-                kind: AgentCommandKind::Skill,
+                name: second_name,
                 ..
-            }] if hint == "optional instructions"
+            }] if name == "review"
+                && hint == "optional instructions"
+                && second_name == "brainstorm"
         ));
         assert!(matches!(
             thread.config_options.as_ref(),
@@ -6788,8 +3768,65 @@ mod tests {
     }
 
     #[test]
-    fn turn_boundaries_settle_tools_without_terminal_updates() {
+    fn vendor_metadata_is_inert_and_parented_updates_stay_flat() {
         let mut thread = thread();
+        let metadata = serde_json::json!({
+            "claudeCode": {
+                "subagent": true,
+                "parentToolUseId": "parent-tool"
+            },
+            "codex": {
+                "subagent": {
+                    "threadId": "thread-1",
+                    "activity": "started"
+                },
+                "collaboration": {
+                    "tool": "spawnAgent"
+                }
+            },
+            "contextCompaction": true,
+            "terminal_info": {
+                "terminal_id": "terminal-1"
+            }
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        thread.apply_update(SessionUpdate::ToolCall(
+            ToolCall::new("tool-1", "Task")
+                .status(ToolCallStatus::InProgress)
+                .raw_input(serde_json::json!({"prompt": "sleep"}))
+                .meta(metadata.clone()),
+        ));
+        thread.apply_update(SessionUpdate::ToolCallUpdate(
+            ToolCallUpdate::new("tool-1", ToolCallUpdateFields::new()).meta(metadata.clone()),
+        ));
+        thread.apply_update(SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("child output"))).meta(metadata),
+        ));
+
+        assert!(matches!(
+            thread.entries.as_slice(),
+            [
+                AgentThreadEntry::Tool {
+                    label,
+                    status: AgentToolStatusModel::Running,
+                    input: Some(ToolPayload::Json(input)),
+                    output,
+                    ..
+                },
+                AgentThreadEntry::Assistant { markdown, .. }
+            ] if label == "Task"
+                && input.contains("sleep")
+                && output.is_empty()
+                && markdown == "child output"
+        ));
+    }
+
+    #[test]
+    fn prompt_completion_ends_activity_without_fabricating_tool_completion() {
+        let mut thread = thread();
+        thread.connection = AgentConnectionState::Running;
         thread.apply_update(SessionUpdate::ToolCall(
             ToolCall::new("tool-running", "Run tests").status(ToolCallStatus::InProgress),
         ));
@@ -6797,11 +3834,9 @@ mod tests {
             "tool-pending",
             "Read file",
         )));
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("tool-failed", "Edit file").status(ToolCallStatus::Failed),
-        ));
 
-        thread.settle_inflight(AgentToolStatusModel::Completed);
+        thread.finish_turn();
+        thread.connection = AgentConnectionState::Ready;
 
         let statuses = thread
             .entries
@@ -6813,48 +3848,33 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             statuses,
-            [
-                AgentToolStatusModel::Completed,
-                AgentToolStatusModel::Completed,
-                AgentToolStatusModel::Failed,
-            ]
+            [AgentToolStatusModel::Running, AgentToolStatusModel::Pending,]
         );
+        assert_eq!(thread.connection, AgentConnectionState::Ready);
+    }
 
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("tool-error", "Fetch resource").status(ToolCallStatus::InProgress),
-        ));
-        thread.settle_inflight(AgentToolStatusModel::Failed);
-        assert!(matches!(
-            thread.entries.last(),
-            Some(AgentThreadEntry::Tool {
-                status: AgentToolStatusModel::Failed,
-                ..
-            })
-        ));
-
+    #[test]
+    fn late_standard_updates_change_data_without_reviving_pane_activity() {
+        let mut thread = thread();
         thread.connection = AgentConnectionState::Ready;
-        thread.apply_runtime_update(SessionUpdate::ToolCall(
-            ToolCall::new("tool-late-replay", "Read replayed file")
-                .status(ToolCallStatus::InProgress),
-        ));
-        assert!(matches!(
-            thread.entries.last(),
-            Some(AgentThreadEntry::Tool {
-                status: AgentToolStatusModel::Completed,
-                ..
-            })
-        ));
 
-        thread.connection = AgentConnectionState::Running;
         thread.apply_runtime_update(SessionUpdate::ToolCall(
-            ToolCall::new("tool-live", "Read live file").status(ToolCallStatus::InProgress),
+            ToolCall::new("tool-late", "Read replayed file").status(ToolCallStatus::InProgress),
         ));
+        thread.apply_runtime_update(SessionUpdate::AgentMessageChunk(ContentChunk::new(
+            ContentBlock::Text(TextContent::new("late output")),
+        )));
+
+        assert_eq!(thread.connection, AgentConnectionState::Ready);
         assert!(matches!(
-            thread.entries.last(),
-            Some(AgentThreadEntry::Tool {
-                status: AgentToolStatusModel::Running,
-                ..
-            })
+            thread.entries.as_slice(),
+            [
+                AgentThreadEntry::Tool {
+                    status: AgentToolStatusModel::Running,
+                    ..
+                },
+                AgentThreadEntry::Assistant { markdown, .. }
+            ] if markdown == "late output"
         ));
     }
 
@@ -6928,68 +3948,6 @@ mod tests {
                     output.as_slice(),
                     [ToolPayload::Json(output)] if output.contains("fallback")
                 )
-        ));
-    }
-
-    #[test]
-    fn terminal_frames_append_output_and_record_exit_status() {
-        let mut thread = thread();
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("terminal-tool", "cargo test")
-                .kind(ToolKind::Execute)
-                .status(ToolCallStatus::InProgress)
-                .raw_input(serde_json::json!({"command": "cargo test"}))
-                .content(vec![ToolCallContent::Terminal(Terminal::new(
-                    "terminal-tool",
-                ))])
-                .meta(claude_meta(&serde_json::json!({
-                    "terminal_info": {
-                        "terminal_id": "terminal-tool"
-                    }
-                }))),
-        ));
-        for data in ["first line\n", "second line"] {
-            thread.apply_update(SessionUpdate::ToolCallUpdate(
-                ToolCallUpdate::new("terminal-tool", ToolCallUpdateFields::new()).meta(
-                    claude_meta(&serde_json::json!({
-                        "terminal_output": {
-                            "terminal_id": "terminal-tool",
-                            "data": data
-                        }
-                    })),
-                ),
-            ));
-        }
-        thread.apply_update(SessionUpdate::ToolCallUpdate(
-            ToolCallUpdate::new(
-                "terminal-tool",
-                ToolCallUpdateFields::new()
-                    .status(ToolCallStatus::Completed)
-                    .content(vec![ToolCallContent::Terminal(Terminal::new(
-                        "terminal-tool",
-                    ))]),
-            )
-            .meta(claude_meta(&serde_json::json!({
-                "terminal_exit": {
-                    "terminal_id": "terminal-tool",
-                    "exit_code": 0,
-                    "signal": null
-                }
-            }))),
-        ));
-
-        assert!(matches!(
-            &thread.entries[0],
-            AgentThreadEntry::Tool {
-                status: AgentToolStatusModel::Completed,
-                output,
-                ..
-            } if matches!(
-                output.as_slice(),
-                [ToolPayload::Terminal(terminal)]
-                    if terminal
-                        == "$ cargo test\ncwd: /workspace\n\nfirst line\nsecond line\n[exit status: 0]"
-            )
         ));
     }
 
@@ -7341,36 +4299,6 @@ mod tests {
     }
 
     #[test]
-    fn placeholder_titles_never_become_terminal_commands() {
-        let frame = || {
-            TerminalFrame::from_meta(
-                Some(&claude_meta(&serde_json::json!({
-                    "terminal_info": { "terminal_id": "term-1" }
-                }))),
-                None,
-                None,
-            )
-        };
-        let terminal = |label: &str| {
-            let mut output = Vec::new();
-            assert!(apply_terminal_frame(&mut output, frame(), label));
-            match output.as_slice() {
-                [ToolPayload::Terminal(terminal)] => terminal.clone(),
-                other => panic!("expected a terminal payload, got {other:?}"),
-            }
-        };
-        assert_eq!(terminal("Terminal"), "[terminal term-1]\n\n");
-        assert_eq!(terminal("Read File"), "[terminal term-1]\n\n");
-        assert_eq!(terminal("`ls -la`"), "$ ls -la\n\n");
-        assert_eq!(terminal("cargo test"), "$ cargo test\n\n");
-        assert_eq!(command_from_title("`grep`"), None);
-        assert_eq!(
-            command_from_title("`printf '\\`'`"),
-            Some("printf '`'".to_owned())
-        );
-    }
-
-    #[test]
     fn oversized_tool_payloads_are_capped_on_char_boundaries() {
         let mut text = "é".repeat(16);
         truncate_payload(&mut text, TRUNCATION_MARKER.len() + 5);
@@ -7394,98 +4322,6 @@ mod tests {
         ));
     }
 
-    fn quiet_turn() -> AgentThread {
-        let mut thread = thread();
-        thread.connection = AgentConnectionState::Ready;
-        thread.begin_prompt("do the thing".to_owned(), Vec::new());
-        thread.apply_update(SessionUpdate::AgentMessageChunk(ContentChunk::new(
-            ContentBlock::Text(TextContent::new("working on it")),
-        )));
-        thread
-    }
-
-    #[test]
-    fn parking_settles_the_streaming_turn_without_an_error() {
-        let mut thread = quiet_turn();
-        let streaming = thread.entries.last().expect("streamed answer").id();
-        let revision = thread.entry_revisions.last().copied().expect("revision");
-        assert!(thread.active_stream.is_some());
-
-        thread.park_turn();
-
-        assert_eq!(thread.connection, AgentConnectionState::Ready);
-        assert!(thread.connection.accepts_prompt());
-        assert!(thread.error.is_none(), "a park is not a failure");
-        assert!(thread.active_stream.is_none());
-        assert!(!thread.suppress_user_echo);
-        assert!(matches!(
-            thread.entries.last(),
-            Some(AgentThreadEntry::Assistant { id, markdown, .. })
-                if *id == streaming && markdown == "working on it"
-        ));
-        assert!(thread.entry_revisions.last().copied() >= Some(revision));
-    }
-
-    #[test]
-    fn a_parked_tool_call_settles_completed_rather_than_failed() {
-        let mut thread = quiet_turn();
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("tool-1", "Run tests").status(ToolCallStatus::Completed),
-        ));
-        thread.apply_update(SessionUpdate::ToolCall(
-            ToolCall::new("tool-2", "Read file").status(ToolCallStatus::Pending),
-        ));
-
-        thread.park_turn();
-
-        assert!(
-            !thread.entries.iter().any(|entry| matches!(
-                entry,
-                AgentThreadEntry::Tool {
-                    status: AgentToolStatusModel::Pending
-                        | AgentToolStatusModel::Running
-                        | AgentToolStatusModel::NeedsApproval,
-                    ..
-                }
-            )),
-            "parking leaves nothing half-open in the transcript"
-        );
-        assert!(matches!(
-            thread.entries.last(),
-            Some(AgentThreadEntry::Tool {
-                status: AgentToolStatusModel::Completed,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn output_after_a_park_opens_a_new_segment() {
-        let mut thread = quiet_turn();
-        thread.park_turn();
-        let parked = thread.entries.len();
-
-        thread.apply_runtime_update(SessionUpdate::AgentMessageChunk(ContentChunk::new(
-            ContentBlock::Text(TextContent::new("actually, one more thing")),
-        )));
-
-        assert_eq!(
-            thread.entries.len(),
-            parked + 1,
-            "a late answer starts its own segment instead of reopening the parked one"
-        );
-        assert!(matches!(
-            thread.entries.last(),
-            Some(AgentThreadEntry::Assistant { markdown, .. })
-                if markdown == "actually, one more thing"
-        ));
-        assert!(matches!(
-            &thread.entries[parked - 1],
-            AgentThreadEntry::Assistant { markdown, .. } if markdown == "working on it"
-        ));
-    }
-
-    /// A controller wired to a mux client whose agent requests the test reads
     /// back, standing in for the daemon on the other end of the wire.
     fn proxy_controller(
         cx: &mut TestAppContext,
@@ -7606,6 +4442,15 @@ mod tests {
                         ),
                         item(
                             4,
+                            AgentStreamPayload::Update {
+                                update: json(&SessionUpdate::ToolCall(
+                                    ToolCall::new("tool-1", "Read file")
+                                        .status(ToolCallStatus::InProgress),
+                                )),
+                            },
+                        ),
+                        item(
+                            5,
                             AgentStreamPayload::PermissionRequested {
                                 request_id: 7,
                                 tool_call: json(&ToolCallUpdate::new(
@@ -7620,15 +4465,15 @@ mod tests {
                             },
                         ),
                         item(
-                            5,
+                            6,
                             AgentStreamPayload::PermissionResolved {
                                 request_id: 7,
                                 canceled: false,
                             },
                         ),
-                        item(6, turn_finished(StopReason::EndTurn)),
+                        item(7, turn_finished(StopReason::EndTurn)),
                         item(
-                            7,
+                            8,
                             AgentStreamPayload::PromptsReclaimed {
                                 prompts: vec![zz_daemon::AgentPrompt {
                                     owner: zz_protocol::ClientInstanceId::default(),
@@ -7654,13 +4499,20 @@ mod tests {
                     entries.first(),
                     Some(AgentThreadEntry::Assistant { markdown, .. }) if markdown == "hello"
                 ));
+                assert!(matches!(
+                    entries.get(1),
+                    Some(AgentThreadEntry::Tool {
+                        status: AgentToolStatusModel::Pending,
+                        ..
+                    })
+                ));
                 assert_eq!(
                     controller.take_pending_composer(pane).as_deref(),
                     Some("retry that"),
                     "a reclaimed prompt is visible in the draft again"
                 );
                 assert_eq!(
-                    controller.viewports[&pane].last_applied, 7,
+                    controller.viewports[&pane].last_applied, 8,
                     "the cursor follows the highest applied seq"
                 );
             });
@@ -8354,7 +5206,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn fatal_state_settles_subagent_spinners(cx: &mut TestAppContext) {
+    fn fatal_state_fails_inflight_tools(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(22);
         cx.update(|cx| {
@@ -8364,16 +5216,8 @@ mod tests {
                 thread.apply_update(SessionUpdate::ToolCall(
                     ToolCall::new("task-tool", "Research")
                         .kind(ToolKind::Think)
-                        .status(ToolCallStatus::InProgress)
-                        .meta(claude_meta(&serde_json::json!({
-                            "claudeCode": {"subagent": true}
-                        }))),
+                        .status(ToolCallStatus::InProgress),
                 ));
-                thread.apply_task_event(SdkTaskEvent::Started {
-                    task_id: "task-1".to_owned(),
-                    tool_use_id: "task-tool".to_owned(),
-                    is_agent: true,
-                });
                 controller.apply_pane_state(
                     pane,
                     &AgentPaneWire {
@@ -8385,7 +5229,6 @@ mod tests {
                     cx,
                 );
                 let thread = controller.panes.get(&pane).expect("pane");
-                assert!(thread.live_task_tools.is_empty());
                 assert!(matches!(
                     thread.entries.first(),
                     Some(AgentThreadEntry::Tool {

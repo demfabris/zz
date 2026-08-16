@@ -18,12 +18,12 @@ use zz_protocol::{AgentDescriptor, AgentProvider, CommandInvocation, PaneId};
 #[cfg(all(test, not(target_os = "macos")))]
 use zz_ui::agent::DisclosureKind;
 use zz_ui::agent::{
-    AGENT_CHROME_CONTROL_HEIGHT, AGENT_CONTENT_MAX_WIDTH, AGENT_STICKY_ROW_HEIGHT, AgentEntry,
-    AgentMarkdown, AgentPatch, AgentStickyRow, AgentTimeline, AgentTimelineStore, AgentToolEntry,
-    AgentToolKind, AgentToolPayload, AgentToolStatus, AgentToolText, COMPOSER_ATTACHMENT,
-    FoldedTimelineRows, MarkdownSlot, TimelineRow, TimelineStick, agent_attachment_thumbnail,
-    agent_jump_to_bottom_button, agent_pane_header, agent_patch, agent_patch_block,
-    agent_sticky_strip, append_timeline_row, fold_timeline_rows, timeline_group_kind,
+    AGENT_CHROME_CONTROL_HEIGHT, AGENT_CONTENT_MAX_WIDTH, AgentEntry, AgentMarkdown, AgentPatch,
+    AgentTimeline, AgentTimelineStore, AgentToolEntry, AgentToolKind, AgentToolPayload,
+    AgentToolStatus, AgentToolText, COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot,
+    TimelineRow, TimelineStick, agent_attachment_thumbnail, agent_jump_to_bottom_button,
+    agent_pane_header, agent_patch, agent_patch_block, append_timeline_row, fold_timeline_rows,
+    timeline_group_kind,
 };
 use zz_ui::command::palette_shortcut_hint;
 use zz_ui::{
@@ -42,11 +42,10 @@ use zz_ui::{
 use crate::{
     agent::attachment as agent_attachment,
     agent::controller::{
-        AgentCommand, AgentCommandKind, AgentConfigCategory, AgentConfigOption,
-        AgentConnectionState, AgentController, AgentPaneState, AgentPermissionKind,
-        AgentPermissionRequest, AgentSessionCapabilities, AgentSessionHistoryState,
-        AgentSessionSummary, AgentThreadEntry, AgentToolKindModel, AgentToolStatusModel,
-        ToolPayload,
+        AgentCommand, AgentConfigCategory, AgentConfigOption, AgentConnectionState,
+        AgentController, AgentPaneState, AgentPermissionKind, AgentPermissionRequest,
+        AgentSessionCapabilities, AgentSessionHistoryState, AgentSessionSummary, AgentThreadEntry,
+        AgentToolKindModel, AgentToolStatusModel, ToolPayload,
     },
     config::pane_content_radii,
     file_picker::{FilePickerEvent, FilePickerMode, FilePickerView, directory_picker_root},
@@ -103,7 +102,6 @@ const fn directory_picker_enabled(
 struct CommandCompletion {
     command: AgentCommand,
     replacement: Range<usize>,
-    sigil: char,
 }
 
 enum TimelineStoreUpdate {
@@ -131,30 +129,14 @@ struct TimelineModel {
     entry_to_row: Vec<usize>,
     markdown: HashMap<u64, AgentMarkdown>,
     tool_payloads: HashMap<(u64, usize), AgentToolPayload>,
-    nested_entries: HashMap<u64, AgentEntry>,
-    nested_revisions: HashMap<u64, u64>,
-    sticky_revision: u64,
 }
 
 impl TimelineModel {
-    fn new(
-        entries: &[AgentThreadEntry],
-        revisions: &[u64],
-        child_revisions: &HashMap<u64, u64>,
-    ) -> Self {
+    fn new(entries: &[AgentThreadEntry], revisions: &[u64]) -> Self {
         debug_assert_eq!(entries.len(), revisions.len());
         let mut markdown = HashMap::new();
         let mut tool_payloads = HashMap::new();
-        let mut nested_entries = HashMap::new();
-        let mut nested_revisions = HashMap::new();
-        let ui_entries = ui_entries_with_markdown(
-            entries,
-            &mut markdown,
-            &mut tool_payloads,
-            child_revisions,
-            &mut nested_entries,
-            &mut nested_revisions,
-        );
+        let ui_entries = ui_entries_with_markdown(entries, &mut markdown, &mut tool_payloads);
         let FoldedTimelineRows { rows, entry_to_row } = fold_timeline_rows(&ui_entries);
         Self {
             rows,
@@ -163,40 +145,26 @@ impl TimelineModel {
             entry_to_row,
             markdown,
             tool_payloads,
-            nested_entries,
-            nested_revisions,
-            sticky_revision: 1,
         }
     }
 
     fn clear(&mut self) {
-        self.sticky_revision = self.sticky_revision.wrapping_add(1);
         self.rows = Arc::new(Vec::new());
         self.entry_ids.clear();
         self.entry_revisions.clear();
         self.entry_to_row.clear();
         self.markdown.clear();
         self.tool_payloads.clear();
-        self.nested_entries.clear();
-        self.nested_revisions.clear();
     }
 
-    fn rebuild(
-        &mut self,
-        entries: &[AgentThreadEntry],
-        revisions: &[u64],
-        child_revisions: &HashMap<u64, u64>,
-    ) {
-        let sticky_revision = self.sticky_revision.wrapping_add(1);
-        *self = Self::new(entries, revisions, child_revisions);
-        self.sticky_revision = sticky_revision;
+    fn rebuild(&mut self, entries: &[AgentThreadEntry], revisions: &[u64]) {
+        *self = Self::new(entries, revisions);
     }
 
     fn synchronize(
         &mut self,
         entries: &[AgentThreadEntry],
         revisions: &[u64],
-        child_revisions: &HashMap<u64, u64>,
         changed_entries: Option<&[usize]>,
     ) -> TimelineModelUpdate {
         debug_assert_eq!(entries.len(), revisions.len());
@@ -217,7 +185,7 @@ impl TimelineModel {
                     .all(|(id, entry)| *id == entry.id())
             };
         if !append_only {
-            self.rebuild(entries, revisions, child_revisions);
+            self.rebuild(entries, revisions);
             return TimelineModelUpdate::Rebuild;
         }
 
@@ -243,50 +211,33 @@ impl TimelineModel {
         }
 
         let mut replacements = Vec::with_capacity(changed_existing.len());
-        let mut sticky_changed = false;
         for &entry_index in &changed_existing {
             let id = self.entry_ids[entry_index];
             let Some(&row_index) = self.entry_to_row.get(entry_index) else {
-                self.rebuild(entries, revisions, child_revisions);
+                self.rebuild(entries, revisions);
                 return TimelineModelUpdate::Rebuild;
             };
             let next = ui_entry_with_markdown(
                 &entries[entry_index],
                 &mut self.markdown,
                 &mut self.tool_payloads,
-                child_revisions,
-                &mut self.nested_entries,
-                &mut self.nested_revisions,
             );
             let Some(previous) = self.rows.get(row_index).and_then(|row| row.entry(id)) else {
-                self.rebuild(entries, revisions, child_revisions);
+                self.rebuild(entries, revisions);
                 return TimelineModelUpdate::Rebuild;
             };
             if !replacement_preserves_folding(previous, &next) {
-                self.rebuild(entries, revisions, child_revisions);
+                self.rebuild(entries, revisions);
                 return TimelineModelUpdate::Rebuild;
             }
-            sticky_changed |= sticky_entry_rows(previous) != sticky_entry_rows(&next);
             replacements.push((entry_index, row_index, id, next));
         }
 
         let appended = entries
             .iter()
             .skip(old_entry_count)
-            .map(|entry| {
-                ui_entry_with_markdown(
-                    entry,
-                    &mut self.markdown,
-                    &mut self.tool_payloads,
-                    child_revisions,
-                    &mut self.nested_entries,
-                    &mut self.nested_revisions,
-                )
-            })
+            .map(|entry| ui_entry_with_markdown(entry, &mut self.markdown, &mut self.tool_payloads))
             .collect::<Vec<_>>();
-        sticky_changed |= appended.iter().any(|entry| {
-            matches!(entry, AgentEntry::User { .. }) || !sticky_entry_rows(entry).is_empty()
-        });
         let old_row_count = self.rows.len();
         let mut store_entries = Vec::with_capacity(replacements.len());
         let mut remeasure_rows = replacements
@@ -311,9 +262,6 @@ impl TimelineModel {
             .extend(entries[old_entry_count..].iter().map(AgentThreadEntry::id));
         self.entry_revisions
             .extend_from_slice(&revisions[old_entry_count..]);
-        if sticky_changed {
-            self.sticky_revision = self.sticky_revision.wrapping_add(1);
-        }
 
         remeasure_rows.sort_unstable();
         remeasure_rows.dedup();
@@ -499,8 +447,6 @@ pub(crate) struct AgentView {
     stick: TimelineStick,
     completion_scroll: UniformListScrollHandle,
     submission_error: Option<Arc<str>>,
-    sticky_rows: Arc<[AgentStickyRow]>,
-    sticky_timeline_revision: u64,
     permission_wizard: PermissionWizard,
     attachments: Vec<Arc<Image>>,
     completions: Arc<[CommandCompletion]>,
@@ -588,13 +534,11 @@ impl AgentView {
             let pane_state = controller
                 .pane_state(pane)
                 .unwrap_or_else(disconnected_pane_state);
-            let empty_child_revisions = HashMap::new();
-            let (entries, revisions, child_revisions, next_revision) = controller
-                .pane_entries(pane)
-                .unwrap_or((&[], &[], &empty_child_revisions, 0));
+            let (entries, revisions, next_revision) =
+                controller.pane_entries(pane).unwrap_or((&[], &[], 0));
             (
                 pane_state,
-                TimelineModel::new(entries, revisions, child_revisions),
+                TimelineModel::new(entries, revisions),
                 next_revision,
                 controller.conversation_epoch(pane),
                 controller.turn_generation(pane),
@@ -634,8 +578,6 @@ impl AgentView {
             stick,
             completion_scroll: UniformListScrollHandle::new(),
             submission_error: None,
-            sticky_rows: Arc::from([]),
-            sticky_timeline_revision: 0,
             permission_wizard: PermissionWizard::default(),
             attachments: Vec::new(),
             completions: Arc::from([]),
@@ -710,9 +652,8 @@ impl AgentView {
         self.last_input.clone_from(&value);
         self.last_cursor = cursor;
         self.completion_dismissed = false;
-        let provider = self.pane_state.provider;
         let commands = self.pane_state.available_commands.clone();
-        self.recompute_completions(provider, &commands);
+        self.recompute_completions(&commands);
         cx.notify();
     }
 
@@ -824,14 +765,11 @@ impl AgentView {
             );
         }
         if commands_changed {
-            let provider = self.pane_state.provider;
             let commands = self.pane_state.available_commands.clone();
-            self.recompute_completions(provider, &commands);
+            self.recompute_completions(&commands);
         }
 
-        let Some((entries, revisions, child_revisions, next_revision)) =
-            controller.pane_entries(self.pane)
-        else {
+        let Some((entries, revisions, next_revision)) = controller.pane_entries(self.pane) else {
             if !self.timeline.rows.is_empty() {
                 self.timeline.clear();
                 self.timeline_next_revision = 0;
@@ -845,12 +783,10 @@ impl AgentView {
             );
         };
         if conversation_changed {
-            self.timeline.rebuild(entries, revisions, child_revisions);
+            self.timeline.rebuild(entries, revisions);
             self.timeline_next_revision = next_revision;
             self.timeline_scroll.reset(self.timeline.rows.len());
             self.stick.engage_now(&self.timeline_scroll, reduce_motion);
-            self.sticky_rows = sticky_agent_rows(&self.timeline.rows).into();
-            self.sticky_timeline_revision = self.timeline.sticky_revision;
             return (true, TimelineStoreUpdate::Clear);
         }
         if self.timeline.entry_ids.len() == entries.len()
@@ -864,32 +800,19 @@ impl AgentView {
         let Some(changed_entries) =
             controller.pane_entry_changes(self.pane, self.timeline_next_revision)
         else {
-            self.timeline.rebuild(entries, revisions, child_revisions);
+            self.timeline.rebuild(entries, revisions);
             self.timeline_next_revision = next_revision;
             self.timeline_scroll.reset(self.timeline.rows.len());
             self.stick.engage_now(&self.timeline_scroll, reduce_motion);
             return (true, TimelineStoreUpdate::Clear);
         };
         self.timeline_next_revision = next_revision;
-        let (timeline_changed, store_update) = self.synchronize_timeline(
-            entries,
-            revisions,
-            child_revisions,
-            &changed_entries,
-            reduce_motion,
-        );
+        let (timeline_changed, store_update) =
+            self.synchronize_timeline(entries, revisions, &changed_entries, reduce_motion);
         (
             timeline_changed || state_changed || changes_invalidated,
             store_update,
         )
-    }
-
-    fn cached_sticky_rows(&mut self) -> Arc<[AgentStickyRow]> {
-        if self.sticky_timeline_revision != self.timeline.sticky_revision {
-            self.sticky_rows = sticky_agent_rows(&self.timeline.rows).into();
-            self.sticky_timeline_revision = self.timeline.sticky_revision;
-        }
-        Arc::clone(&self.sticky_rows)
     }
 
     fn recompute_history_results(&mut self, query: &str) {
@@ -934,13 +857,12 @@ impl AgentView {
         &mut self,
         entries: &[AgentThreadEntry],
         revisions: &[u64],
-        child_revisions: &HashMap<u64, u64>,
         changed_entries: &[usize],
         reduce_motion: bool,
     ) -> (bool, TimelineStoreUpdate) {
         match self
             .timeline
-            .synchronize(entries, revisions, child_revisions, Some(changed_entries))
+            .synchronize(entries, revisions, Some(changed_entries))
         {
             TimelineModelUpdate::None => (false, TimelineStoreUpdate::None),
             TimelineModelUpdate::Rebuild => {
@@ -978,12 +900,8 @@ impl AgentView {
         }
     }
 
-    fn recompute_completions(&mut self, provider: AgentProvider, commands: &[AgentCommand]) {
-        let Some(query) = completion_query(
-            &self.last_input,
-            self.last_cursor,
-            completion_sigil(provider),
-        ) else {
+    fn recompute_completions(&mut self, commands: &[AgentCommand]) {
+        let Some(query) = completion_query(&self.last_input, self.last_cursor) else {
             self.completions = Arc::from([]);
             self.completion_selected = None;
             return;
@@ -1353,7 +1271,7 @@ impl AgentView {
         self.completion_dismissed = true;
         self.input.update(cx, |input, cx| {
             input.set_selected_range(completion.replacement, cx);
-            input.replace(format!("{}{name} ", completion.sigil), window, cx);
+            input.replace(format!("/{name} "), window, cx);
         });
         self.completions = Arc::from([]);
         self.completion_selected = None;
@@ -2912,7 +2830,6 @@ impl AgentView {
                     .filter_map(|index| {
                         let completion = completions.get(index)?.clone();
                         let command = completion.command.clone();
-                        let sigil = completion.sigil;
                         let name = bare_command_name(&command.name);
                         let description = meaningful_command_description(&command.description)
                             .map(ToOwned::to_owned);
@@ -2925,7 +2842,6 @@ impl AgentView {
                                 .w_full()
                                 .h(px(COMPLETION_ROW_HEIGHT))
                                 .items_center()
-                                .justify_between()
                                 .gap_3()
                                 .rounded(cx.theme().radius)
                                 .px_3()
@@ -2964,7 +2880,7 @@ impl AgentView {
                                                 .whitespace_nowrap()
                                                 .text_size(zz_ui::rems_from_px(12.0))
                                                 .font_weight(gpui::FontWeight::MEDIUM)
-                                                .child(format!("{sigil}{name}")),
+                                                .child(format!("/{name}")),
                                         )
                                         .when_some(description, |this, description| {
                                             this.child(
@@ -2978,20 +2894,6 @@ impl AgentView {
                                                     .text_color(cx.theme().foreground.muted())
                                                     .child(description),
                                             )
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .rounded(cx.theme().radius)
-                                        .bg(cx.theme().background.raised(2))
-                                        .px_2()
-                                        .py(px(2.0))
-                                        .text_size(zz_ui::rems_from_px(8.0))
-                                        .text_color(cx.theme().foreground.muted())
-                                        .child(match command.kind {
-                                            AgentCommandKind::Skill => "SKILL",
-                                            AgentCommandKind::Command => "COMMAND",
                                         }),
                                 ),
                         )
@@ -3021,7 +2923,6 @@ impl AgentView {
     fn render_composer(
         &self,
         state: &AgentPaneState,
-        sticky_rows: &[AgentStickyRow],
         view: &Entity<Self>,
         cx: &mut gpui::App,
     ) -> impl IntoElement {
@@ -3109,10 +3010,8 @@ impl AgentView {
             ));
         }
         let usage = state.usage.map(|(used, size)| format!("{used} / {size}"));
-        let command_hint =
-            active_command_hint(&self.last_input, state.provider, &state.available_commands);
+        let command_hint = active_command_hint(&self.last_input, &state.available_commands);
         let completions = self.render_completions(view, cx);
-        let sticky_strip = agent_sticky_strip(sticky_rows, view.entity_id(), cx);
 
         v_flex()
             .absolute()
@@ -3136,7 +3035,6 @@ impl AgentView {
                     .max_w(px(COMPOSER_MAX_WIDTH))
                     .mx_auto()
                     .gap_2()
-                    .when_some(sticky_strip, |this, sticky_strip| this.child(sticky_strip))
                     .when_some(
                         self.render_permission_wizard(state, view, cx),
                         |this, wizard| this.child(wizard),
@@ -3289,9 +3187,7 @@ impl Render for AgentView {
             .sync(&self.pane_state.pending_permissions);
         let state = self.pane_state.clone();
         let rows = self.timeline.rows.clone();
-        let sticky_rows = self.cached_sticky_rows();
-        let timeline_clearance =
-            TIMELINE_COMPOSER_CLEARANCE + sticky_strip_clearance(sticky_rows.len());
+        let timeline_clearance = TIMELINE_COMPOSER_CLEARANCE;
         self.stick.set_bottom_padding(timeline_clearance);
         self.drive_stick(window, cx);
         let view = cx.entity();
@@ -3363,7 +3259,7 @@ impl Render for AgentView {
                         })
                     }),
             )
-            .child(self.render_composer(&state, &sticky_rows, &view, cx))
+            .child(self.render_composer(&state, &view, cx))
             .when(self.history_open, |this| {
                 this.child(self.render_history_overlay(&state, &view, cx))
             })
@@ -3375,27 +3271,6 @@ impl Render for AgentView {
             });
         round_div_radii(root, pane_content_radii(cx, self.window_corners))
     }
-}
-
-fn sticky_agent_rows(rows: &[TimelineRow]) -> Vec<AgentStickyRow> {
-    let mut sticky = Vec::new();
-    for row in rows {
-        match row {
-            TimelineRow::Single(entry) => append_sticky_agent_entry(&mut sticky, entry),
-            TimelineRow::Group { entries, .. } => {
-                for entry in entries.iter() {
-                    append_sticky_agent_entry(&mut sticky, entry);
-                }
-            }
-        }
-    }
-    sticky
-}
-
-fn sticky_entry_rows(entry: &AgentEntry) -> Vec<AgentStickyRow> {
-    let mut sticky = Vec::new();
-    append_sticky_agent_entry(&mut sticky, entry);
-    sticky
 }
 
 fn rendered_error(error: &str) -> String {
@@ -3417,40 +3292,6 @@ fn rendered_error(error: &str) -> String {
         rendered.push('…');
     }
     rendered
-}
-
-/// Only a live subagent earns a strip row: settled work already reads off the
-/// transcript, so mirroring it above the composer would only restate it.
-fn append_sticky_agent_entry(sticky: &mut Vec<AgentStickyRow>, entry: &AgentEntry) {
-    if let AgentEntry::Tool(tool) = entry {
-        if tool.subagent
-            && matches!(
-                tool.status,
-                AgentToolStatus::Pending
-                    | AgentToolStatus::Running
-                    | AgentToolStatus::NeedsApproval
-            )
-        {
-            sticky.push(AgentStickyRow::Subagent {
-                id: tool.id,
-                status: tool.status,
-                label: tool.label.clone(),
-            });
-        }
-        for child in tool.children.iter() {
-            append_sticky_agent_entry(sticky, child);
-        }
-    }
-}
-
-fn sticky_strip_clearance(row_count: usize) -> f32 {
-    if row_count == 0 {
-        0.0
-    } else {
-        let row_count = u16::try_from(row_count).unwrap_or(u16::MAX);
-        let row_gaps = f32::from(row_count.saturating_sub(1)) * 4.0;
-        f32::from(row_count) * AGENT_STICKY_ROW_HEIGHT + row_gaps + 16.0
-    }
 }
 
 fn disconnected_pane_state() -> AgentPaneState {
@@ -3479,48 +3320,22 @@ fn disconnected_pane_state() -> AgentPaneState {
 
 #[cfg(test)]
 fn ui_entries(entries: &[AgentThreadEntry]) -> Arc<[AgentEntry]> {
-    ui_entries_with_markdown(
-        entries,
-        &mut HashMap::new(),
-        &mut HashMap::new(),
-        &HashMap::new(),
-        &mut HashMap::new(),
-        &mut HashMap::new(),
-    )
+    ui_entries_with_markdown(entries, &mut HashMap::new(), &mut HashMap::new())
 }
 
 #[cfg(test)]
 fn ui_entry(entry: &AgentThreadEntry) -> AgentEntry {
-    ui_entry_with_markdown(
-        entry,
-        &mut HashMap::new(),
-        &mut HashMap::new(),
-        &HashMap::new(),
-        &mut HashMap::new(),
-        &mut HashMap::new(),
-    )
+    ui_entry_with_markdown(entry, &mut HashMap::new(), &mut HashMap::new())
 }
 
 fn ui_entries_with_markdown(
     entries: &[AgentThreadEntry],
     markdown: &mut HashMap<u64, AgentMarkdown>,
     tool_payloads: &mut HashMap<(u64, usize), AgentToolPayload>,
-    child_revisions: &HashMap<u64, u64>,
-    nested_entries: &mut HashMap<u64, AgentEntry>,
-    nested_revisions: &mut HashMap<u64, u64>,
 ) -> Arc<[AgentEntry]> {
     entries
         .iter()
-        .map(|entry| {
-            ui_entry_with_markdown(
-                entry,
-                markdown,
-                tool_payloads,
-                child_revisions,
-                nested_entries,
-                nested_revisions,
-            )
-        })
+        .map(|entry| ui_entry_with_markdown(entry, markdown, tool_payloads))
         .collect::<Vec<_>>()
         .into()
 }
@@ -3553,9 +3368,6 @@ fn ui_entry_with_markdown(
     entry: &AgentThreadEntry,
     markdown_sources: &mut HashMap<u64, AgentMarkdown>,
     tool_payloads: &mut HashMap<(u64, usize), AgentToolPayload>,
-    child_revisions: &HashMap<u64, u64>,
-    nested_entries: &mut HashMap<u64, AgentEntry>,
-    nested_revisions: &mut HashMap<u64, u64>,
 ) -> AgentEntry {
     match entry {
         AgentThreadEntry::User {
@@ -3591,8 +3403,6 @@ fn ui_entry_with_markdown(
             input,
             output,
             default_expanded,
-            subagent,
-            children,
             ..
         } => {
             tool_payloads.retain(|(entry_id, slot), _| {
@@ -3637,79 +3447,13 @@ fn ui_entry_with_markdown(
                     .collect::<Vec<_>>()
                     .into(),
                 default_expanded: *default_expanded,
-                subagent: *subagent,
-                children: children
-                    .iter()
-                    .map(|entry| {
-                        ui_nested_entry(
-                            entry,
-                            markdown_sources,
-                            tool_payloads,
-                            child_revisions,
-                            nested_entries,
-                            nested_revisions,
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .into(),
             })
         }
         AgentThreadEntry::Plan { id, markdown } => AgentEntry::Plan {
             id: *id,
             markdown: replaced_markdown(markdown_sources, *id, markdown),
         },
-        AgentThreadEntry::Notification {
-            id,
-            task_id,
-            status,
-            summary,
-            result_markdown,
-            ..
-        } => AgentEntry::Notification {
-            id: *id,
-            task_id: SharedString::from(task_id.clone()),
-            status: SharedString::from(status.clone()),
-            summary: SharedString::from(summary.clone()),
-            result_markdown: replaced_markdown(markdown_sources, *id, result_markdown),
-        },
     }
-}
-
-fn ui_nested_entry(
-    entry: &AgentThreadEntry,
-    markdown_sources: &mut HashMap<u64, AgentMarkdown>,
-    tool_payloads: &mut HashMap<(u64, usize), AgentToolPayload>,
-    child_revisions: &HashMap<u64, u64>,
-    nested_entries: &mut HashMap<u64, AgentEntry>,
-    nested_revisions: &mut HashMap<u64, u64>,
-) -> AgentEntry {
-    let id = entry.id();
-    let Some(revision) = child_revisions.get(&id).copied() else {
-        return ui_entry_with_markdown(
-            entry,
-            markdown_sources,
-            tool_payloads,
-            child_revisions,
-            nested_entries,
-            nested_revisions,
-        );
-    };
-    if nested_revisions.get(&id) == Some(&revision)
-        && let Some(retained) = nested_entries.get(&id)
-    {
-        return retained.clone();
-    }
-    let next = ui_entry_with_markdown(
-        entry,
-        markdown_sources,
-        tool_payloads,
-        child_revisions,
-        nested_entries,
-        nested_revisions,
-    );
-    nested_revisions.insert(id, revision);
-    nested_entries.insert(id, next.clone());
-    next
 }
 
 fn synchronize_entry_store(
@@ -3721,12 +3465,7 @@ fn synchronize_entry_store(
         AgentEntry::User { id, markdown, .. }
         | AgentEntry::Assistant { id, markdown }
         | AgentEntry::Reasoning { id, markdown, .. }
-        | AgentEntry::Plan { id, markdown }
-        | AgentEntry::Notification {
-            id,
-            result_markdown: markdown,
-            ..
-        } => {
+        | AgentEntry::Plan { id, markdown } => {
             store.update(cx, |store, cx| {
                 store.synchronize_markdown(*id, MarkdownSlot::Body, markdown.clone(), cx);
             });
@@ -3741,9 +3480,6 @@ fn synchronize_entry_store(
                     cx,
                 );
             });
-            for child in tool.children.iter() {
-                synchronize_entry_store(store, child, cx);
-            }
         }
     }
 }
@@ -3973,14 +3709,6 @@ fn history_result_index_for_session(
 struct CompletionQuery {
     needle: String,
     replacement: Range<usize>,
-    sigil: char,
-}
-
-const fn completion_sigil(provider: AgentProvider) -> char {
-    match provider {
-        AgentProvider::Codex => '$',
-        AgentProvider::ClaudeCode => '/',
-    }
 }
 
 const fn provider_icon(provider: AgentProvider) -> IconName {
@@ -3990,13 +3718,13 @@ const fn provider_icon(provider: AgentProvider) -> IconName {
     }
 }
 
-fn completion_query(value: &str, cursor: usize, sigil: char) -> Option<CompletionQuery> {
+fn completion_query(value: &str, cursor: usize) -> Option<CompletionQuery> {
     if cursor > value.len() || !value.is_char_boundary(cursor) {
         return None;
     }
     let before_cursor = &value[..cursor];
     let line_start = before_cursor.rfind('\n').map_or(0, |index| index + 1);
-    let sigil_index = before_cursor[line_start..].rfind(sigil)? + line_start;
+    let sigil_index = before_cursor[line_start..].rfind('/')? + line_start;
     if sigil_index > line_start
         && !value[..sigil_index]
             .chars()
@@ -4005,19 +3733,18 @@ fn completion_query(value: &str, cursor: usize, sigil: char) -> Option<Completio
     {
         return None;
     }
-    let tail = &value[sigil_index + sigil.len_utf8()..cursor];
+    let tail = &value[sigil_index + 1..cursor];
     if tail.chars().any(char::is_whitespace) {
         return None;
     }
     Some(CompletionQuery {
         needle: tail.to_owned(),
         replacement: sigil_index..cursor,
-        sigil,
     })
 }
 
 fn bare_command_name(name: &str) -> &str {
-    name.trim_start_matches(['/', '$'])
+    name.trim_start_matches('/')
 }
 
 fn completion_score(candidate: &str, needle: &str) -> Option<u8> {
@@ -4052,22 +3779,20 @@ fn ranked_completions(
             completion_score(&searchable, &needle).map(|score| {
                 (
                     score,
-                    matches!(command.kind, AgentCommandKind::Command),
-                    command.name.to_ascii_lowercase(),
+                    searchable,
                     CommandCompletion {
                         command: command.clone(),
                         replacement: query.replacement.clone(),
-                        sigil: query.sigil,
                     },
                 )
             })
         })
         .collect::<Vec<_>>();
-    ranked.sort_by(|left, right| (left.1, left.0, &left.2).cmp(&(right.1, right.0, &right.2)));
+    ranked.sort_by(|left, right| (left.0, &left.1).cmp(&(right.0, &right.1)));
     ranked
         .into_iter()
         .take(MAX_COMPLETION_RESULTS)
-        .map(|(_, _, _, completion)| completion)
+        .map(|(_, _, completion)| completion)
         .collect()
 }
 
@@ -4080,14 +3805,8 @@ fn meaningful_command_description(description: &str) -> Option<&str> {
     .then_some(description)
 }
 
-fn active_command_hint(
-    value: &str,
-    provider: AgentProvider,
-    commands: &[AgentCommand],
-) -> Option<String> {
-    let command = value
-        .trim_start()
-        .strip_prefix(completion_sigil(provider))?;
+fn active_command_hint(value: &str, commands: &[AgentCommand]) -> Option<String> {
+    let command = value.trim_start().strip_prefix('/')?;
     let (name, arguments) = command
         .split_once(char::is_whitespace)
         .map_or((command, ""), |(name, arguments)| (name, arguments));
@@ -4120,7 +3839,6 @@ mod completion_tests {
             name: name.to_owned(),
             description: format!("Run {name}"),
             input_hint: None,
-            kind: AgentCommandKind::Command,
         }
     }
 
@@ -4363,48 +4081,30 @@ mod completion_tests {
     }
 
     #[test]
-    fn completion_uses_the_provider_specific_sigil() {
+    fn available_commands_use_standard_slash_semantics() {
+        assert_eq!(bare_command_name("/review"), "review");
+        assert_eq!(bare_command_name("$brainstorm"), "$brainstorm");
         assert_eq!(
-            completion_query("$rev", 4, completion_sigil(AgentProvider::Codex)),
+            completion_query("/rev", 4),
             Some(CompletionQuery {
                 needle: "rev".to_owned(),
                 replacement: 0..4,
-                sigil: '$',
             })
         );
         assert_eq!(
-            completion_query(
-                "please /rev",
-                11,
-                completion_sigil(AgentProvider::ClaudeCode),
-            ),
+            completion_query("please /rev", 11),
             Some(CompletionQuery {
                 needle: "rev".to_owned(),
                 replacement: 7..11,
-                sigil: '/',
             })
         );
-        assert!(completion_query("/rev", 4, completion_sigil(AgentProvider::Codex)).is_none());
-        assert!(
-            completion_query(
-                "https://zed.dev",
-                15,
-                completion_sigil(AgentProvider::ClaudeCode)
-            )
-            .is_none()
-        );
-        assert!(
-            completion_query(
-                "/review branch",
-                14,
-                completion_sigil(AgentProvider::ClaudeCode),
-            )
-            .is_none()
-        );
+        assert!(completion_query("$rev", 4).is_none());
+        assert!(completion_query("https://zed.dev", 15).is_none());
+        assert!(completion_query("/review branch", 14).is_none());
     }
 
     #[test]
-    fn completion_matching_supports_skill_names_without_the_dollar_prefix() {
+    fn completion_matching_supports_bare_command_names() {
         assert_eq!(completion_score("brainstorm", "brain"), Some(1));
         assert_eq!(completion_score("gh-address-comments", "gac"), Some(3));
         assert_eq!(completion_score("review", "xyz"), None);
@@ -4415,7 +4115,7 @@ mod completion_tests {
         let commands = (0..16)
             .map(|index| command(&format!("command-{index:02}")))
             .collect::<Vec<_>>();
-        let query = completion_query("$", 1, '$').expect("command completion query");
+        let query = completion_query("/", 1).expect("command completion query");
 
         let completions = ranked_completions(&commands, &query);
 
@@ -4423,24 +4123,17 @@ mod completion_tests {
     }
 
     #[test]
-    fn command_hints_follow_the_provider_sigil() {
+    fn command_hints_follow_standard_slash_semantics() {
         let command = AgentCommand {
             input_hint: Some("optional context".to_owned()),
             ..command("review")
         };
 
         assert_eq!(
-            active_command_hint(
-                "$review ",
-                AgentProvider::Codex,
-                std::slice::from_ref(&command)
-            ),
+            active_command_hint("/review ", std::slice::from_ref(&command)),
             Some("Argument · optional context".to_owned())
         );
-        assert_eq!(
-            active_command_hint("/review ", AgentProvider::Codex, &[command]),
-            None
-        );
+        assert_eq!(active_command_hint("$review ", &[command]), None);
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -4476,7 +4169,6 @@ mod completion_tests {
                 AgentThreadEntry::Assistant {
                     id: 2,
                     markdown: "old response".to_owned(),
-                    memory_citations: Vec::new(),
                 },
             ];
 
@@ -4489,7 +4181,7 @@ mod completion_tests {
                 history_input,
                 visible: false,
                 pane_state: disconnected_pane_state(),
-                timeline: TimelineModel::new(&timeline_entries, &[1, 2], &HashMap::new()),
+                timeline: TimelineModel::new(&timeline_entries, &[1, 2]),
                 timeline_store,
                 timeline_next_revision: 2,
                 conversation_epoch: 0,
@@ -4497,8 +4189,6 @@ mod completion_tests {
                 timeline_scroll,
                 completion_scroll: UniformListScrollHandle::new(),
                 submission_error: None,
-                sticky_rows: Arc::from([]),
-                sticky_timeline_revision: 0,
                 permission_wizard: PermissionWizard::default(),
                 attachments: Vec::new(),
                 completions: Arc::from([]),
@@ -4535,7 +4225,7 @@ mod completion_tests {
         let (changed, cleared) = cx.update(|_, cx| {
             view.update(cx, |view, cx| {
                 let (changed, store_update) =
-                    view.synchronize_timeline(&replacement, &[3], &HashMap::new(), &[], false);
+                    view.synchronize_timeline(&replacement, &[3], &[], false);
                 let cleared = view.update_timeline_store(store_update, cx);
                 (changed, cleared)
             })
@@ -4566,7 +4256,7 @@ mod completion_tests {
             let input = cx.new(|cx| {
                 InputState::new(window, cx)
                     .auto_grow(2, 8)
-                    .default_value("$")
+                    .default_value("/")
             });
             let mux = cx.new(|cx| {
                 MuxClient::new(
@@ -4595,26 +4285,22 @@ mod completion_tests {
                 timeline_scroll,
                 completion_scroll: UniformListScrollHandle::new(),
                 submission_error: None,
-                sticky_rows: Arc::from([]),
-                sticky_timeline_revision: 0,
                 permission_wizard: PermissionWizard::default(),
                 attachments: Vec::new(),
                 completions: vec![
                     CommandCompletion {
                         command: command("first"),
                         replacement: 0..1,
-                        sigil: '$',
                     },
                     CommandCompletion {
                         command: command("second"),
                         replacement: 0..1,
-                        sigil: '$',
                     },
                 ]
                 .into(),
                 completion_selected: Some(0),
                 completion_dismissed: false,
-                last_input: "$".to_owned(),
+                last_input: "/".to_owned(),
                 last_cursor: 1,
                 history_open: false,
                 history_all_projects: false,
@@ -4658,7 +4344,7 @@ mod completion_tests {
         cx.simulate_keystrokes("tab");
         assert_eq!(
             cx.update(|_, cx| view.read(cx).input.read(cx).value().to_string()),
-            "$first "
+            "/first "
         );
         assert!(cx.update(|_, cx| view.read(cx).completions.is_empty()));
     }
@@ -4746,8 +4432,6 @@ mod tests {
             input: None,
             output: Vec::new(),
             default_expanded: false,
-            subagent: false,
-            children: Vec::new(),
         }
     }
 
@@ -4757,17 +4441,6 @@ mod tests {
             label: "Reasoning".to_owned(),
             markdown: markdown.to_owned(),
             default_expanded: false,
-        }
-    }
-
-    fn thread_notification(id: u64, summary: &str) -> AgentThreadEntry {
-        AgentThreadEntry::Notification {
-            id,
-            task_id: format!("task-{id}"),
-            tool_use_id: format!("toolu_{id}"),
-            status: "completed".to_owned(),
-            summary: summary.to_owned(),
-            result_markdown: "details".to_owned(),
         }
     }
 
@@ -4865,64 +4538,6 @@ mod tests {
     }
 
     #[test]
-    fn notifications_never_reach_the_sticky_strip() {
-        let entries = [
-            thread_notification(1, "first completed"),
-            AgentThreadEntry::Assistant {
-                id: 2,
-                markdown: "answer".to_owned(),
-                memory_citations: Vec::new(),
-            },
-            thread_notification(3, "second completed"),
-        ];
-        let timeline = TimelineModel::new(&entries, &[1, 1, 1], &HashMap::new());
-        assert!(
-            sticky_agent_rows(&timeline.rows).is_empty(),
-            "settled work reads off the transcript, not the strip"
-        );
-        assert!(sticky_strip_clearance(0).abs() < f32::EPSILON);
-        assert!(sticky_strip_clearance(2) > sticky_strip_clearance(1));
-    }
-
-    #[test]
-    fn sticky_subagent_rows_follow_the_root_tool_lifecycle() {
-        let mut task = thread_tool(1, "Research", AgentToolStatusModel::Running);
-        let AgentThreadEntry::Tool { subagent, .. } = &mut task else {
-            unreachable!();
-        };
-        *subagent = true;
-        let running = TimelineModel::new(&[task.clone()], &[1], &HashMap::new());
-        assert!(matches!(
-            sticky_agent_rows(&running.rows).as_slice(),
-            [AgentStickyRow::Subagent {
-                id: 1,
-                status: AgentToolStatus::Running,
-                ..
-            }]
-        ));
-
-        let AgentThreadEntry::Tool { status, .. } = &mut task else {
-            unreachable!();
-        };
-        *status = AgentToolStatusModel::Completed;
-        let completed = TimelineModel::new(&[task], &[2], &HashMap::new());
-        assert!(sticky_agent_rows(&completed.rows).is_empty());
-    }
-
-    #[test]
-    fn a_dangling_generic_tool_leaves_the_sticky_strip_quiet() {
-        let stuck = TimelineModel::new(
-            &[thread_tool(1, "Ran command", AgentToolStatusModel::Running)],
-            &[1],
-            &HashMap::new(),
-        );
-        assert!(
-            sticky_agent_rows(&stuck.rows).is_empty(),
-            "only a subagent earns a strip row, so an unsettled generic tool cannot pin one"
-        );
-    }
-
-    #[test]
     fn reasoning_runs_fold_into_one_row_without_absorbing_other_kinds() {
         let mut entries = vec![
             thread_reasoning(1, "first"),
@@ -4930,7 +4545,7 @@ mod tests {
             thread_tool(3, "Editing files", AgentToolStatusModel::Completed),
         ];
         let mut revisions = vec![1, 1, 1];
-        let mut timeline = TimelineModel::new(&entries, &revisions, &HashMap::new());
+        let mut timeline = TimelineModel::new(&entries, &revisions);
         assert_eq!(timeline.entry_to_row, [0, 0, 1]);
         assert!(matches!(
             &timeline.rows[0],
@@ -4942,7 +4557,7 @@ mod tests {
         entries.push(thread_reasoning(5, "fourth"));
         revisions.extend([1, 1]);
         let TimelineModelUpdate::Incremental { splice_start, .. } =
-            timeline.synchronize(&entries, &revisions, &HashMap::new(), None)
+            timeline.synchronize(&entries, &revisions, None)
         else {
             panic!("appending reasoning after a tool should splice a row");
         };
@@ -4955,7 +4570,7 @@ mod tests {
             remeasure_rows,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions, &HashMap::new(), None)
+        } = timeline.synchronize(&entries, &revisions, None)
         else {
             panic!("a member revision should update its owning group row");
         };
@@ -4971,7 +4586,7 @@ mod tests {
             thread_tool(3, "Editing files", AgentToolStatusModel::Completed),
         ];
         let mut revisions = vec![1, 1, 1];
-        let mut timeline = TimelineModel::new(&entries, &revisions, &HashMap::new());
+        let mut timeline = TimelineModel::new(&entries, &revisions);
         assert_eq!(timeline.rows.len(), 1);
         assert_eq!(timeline.entry_to_row, [0, 0, 0]);
 
@@ -4986,7 +4601,7 @@ mod tests {
             remeasure_rows,
             splice_start,
             added_rows,
-        } = timeline.synchronize(&entries, &revisions, &HashMap::new(), None)
+        } = timeline.synchronize(&entries, &revisions, None)
         else {
             panic!("tool append should update the trailing group");
         };
@@ -5012,7 +4627,7 @@ mod tests {
             splice_start,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions, &HashMap::new(), None)
+        } = timeline.synchronize(&entries, &revisions, None)
         else {
             panic!("different-label tool append should update the trailing group");
         };
@@ -5029,7 +4644,7 @@ mod tests {
             remeasure_rows,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions, &HashMap::new(), None)
+        } = timeline.synchronize(&entries, &revisions, None)
         else {
             panic!("member revision should update its owning row");
         };
@@ -5052,7 +4667,7 @@ mod tests {
             remeasure_rows,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions, &HashMap::new(), None)
+        } = timeline.synchronize(&entries, &revisions, None)
         else {
             panic!("tool label changes should preserve contiguous grouping");
         };
@@ -5082,8 +4697,6 @@ mod tests {
                 ToolPayload::Terminal("$ cargo check\nok\n[exit status: 0]".to_owned()),
             ],
             default_expanded: false,
-            subagent: false,
-            children: Vec::new(),
         });
         let AgentEntry::Tool(AgentToolEntry {
             location,
@@ -5128,23 +4741,11 @@ mod tests {
                 ToolPayload::Text("three".to_owned()),
             ],
             default_expanded: false,
-            subagent: false,
-            children: Vec::new(),
         };
         let mut markdown = HashMap::new();
         let mut tool_payloads = HashMap::new();
-        let child_revisions = HashMap::new();
-        let mut nested_entries = HashMap::new();
-        let mut nested_revisions = HashMap::new();
 
-        ui_entry_with_markdown(
-            &entry,
-            &mut markdown,
-            &mut tool_payloads,
-            &child_revisions,
-            &mut nested_entries,
-            &mut nested_revisions,
-        );
+        ui_entry_with_markdown(&entry, &mut markdown, &mut tool_payloads);
         assert_eq!(tool_payloads.len(), 4);
 
         let AgentThreadEntry::Tool { input, output, .. } = &mut entry else {
@@ -5152,21 +4753,14 @@ mod tests {
         };
         *input = None;
         output.truncate(1);
-        ui_entry_with_markdown(
-            &entry,
-            &mut markdown,
-            &mut tool_payloads,
-            &child_revisions,
-            &mut nested_entries,
-            &mut nested_revisions,
-        );
+        ui_entry_with_markdown(&entry, &mut markdown, &mut tool_payloads);
 
         assert_eq!(tool_payloads.len(), 1);
         assert!(tool_payloads.contains_key(&(7, 1)));
     }
 
     #[test]
-    fn live_entry_adapter_covers_each_core_shape() {
+    fn flat_entry_adapter_covers_exactly_five_acp_shapes() {
         let entries = ui_entries(&[
             AgentThreadEntry::User {
                 id: 1,
@@ -5176,7 +4770,6 @@ mod tests {
             AgentThreadEntry::Assistant {
                 id: 2,
                 markdown: "assistant".to_owned(),
-                memory_citations: Vec::new(),
             },
             AgentThreadEntry::Reasoning {
                 id: 3,
@@ -5194,30 +4787,19 @@ mod tests {
                 input: None,
                 output: Vec::new(),
                 default_expanded: false,
-                subagent: false,
-                children: Vec::new(),
             },
             AgentThreadEntry::Plan {
                 id: 5,
                 markdown: "- [ ] plan".to_owned(),
             },
-            AgentThreadEntry::Notification {
-                id: 6,
-                task_id: "task".to_owned(),
-                tool_use_id: "toolu_6".to_owned(),
-                status: "completed".to_owned(),
-                summary: "background task finished".to_owned(),
-                result_markdown: "done".to_owned(),
-            },
         ]);
 
-        assert_eq!(entries.len(), 6);
+        assert_eq!(entries.len(), 5);
         assert!(matches!(entries[0], AgentEntry::User { .. }));
         assert!(matches!(entries[1], AgentEntry::Assistant { .. }));
         assert!(matches!(entries[2], AgentEntry::Reasoning { .. }));
         assert!(matches!(entries[3], AgentEntry::Tool(_)));
         assert!(matches!(entries[4], AgentEntry::Plan { .. }));
-        assert!(matches!(entries[5], AgentEntry::Notification { .. }));
     }
 
     #[test]

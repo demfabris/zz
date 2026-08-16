@@ -3,11 +3,11 @@
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, Context, ParentElement as _, SharedString, Styled as _, div, prelude::*, px,
+    AnyElement, App, Context, ParentElement as _, Styled as _, div, prelude::*, px,
 };
 use zz_ui::agent::{
-    AgentEntry, AgentMarkdown, AgentTimeline, AgentToolEntry, AgentToolKind, AgentToolPayload,
-    AgentToolStatus, agent_pane_header,
+    AgentEntry, AgentTimeline, AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus,
+    agent_pane_header,
 };
 use zz_ui::{ActiveTheme as _, Icon, IconName, Sizable as _};
 
@@ -67,13 +67,13 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
         )
         .child(
             gallery(
-                "Subagents & task notifications",
-                "A tool call that spawned its own agent expands into a nested timeline of that agent's entries, ruled off against the parent thread. Background tasks report back as notification rows, which read as a status and a line until their result is disclosed.",
+                "Adapter tools",
+                "Agent orchestration uses the same flat tool rows as every other ACP operation. The adapter owns any child or background lifecycle.",
                 cx,
             )
             .child(specimens().w_full().child(specimen_block(
-                "nested thread · running · completed · failed",
-                timeline(showcase, ThreadFixture::Delegated, cx),
+                "pending · running · completed · failed",
+                timeline(showcase, ThreadFixture::AdapterTools, cx),
                 cx,
             ))),
         )
@@ -118,7 +118,7 @@ pub(crate) enum ThreadFixture {
     Conversation,
     Tools,
     Payloads,
-    Delegated,
+    AdapterTools,
 }
 
 impl ThreadFixture {
@@ -126,7 +126,7 @@ impl ThreadFixture {
         Self::Conversation,
         Self::Tools,
         Self::Payloads,
-        Self::Delegated,
+        Self::AdapterTools,
     ];
 
     pub(crate) fn entries(self) -> Vec<AgentEntry> {
@@ -134,7 +134,7 @@ impl ThreadFixture {
             Self::Conversation => conversation_entries(),
             Self::Tools => tool_entries(),
             Self::Payloads => payload_entries(),
-            Self::Delegated => delegated_entries(),
+            Self::AdapterTools => adapter_tool_entries(),
         }
     }
 }
@@ -182,167 +182,125 @@ fn conversation_entries() -> Vec<AgentEntry> {
 fn tool_entries() -> Vec<AgentEntry> {
     vec![
         AgentEntry::Tool(AgentToolEntry {
-                id: 200,
-                kind: AgentToolKind::Execute,
-                status: AgentToolStatus::Running,
-                label: "cargo check -p zz".into(),
-                location: None,
-                input: None,
-                output: Arc::from([]),
-                default_expanded: false,
-                subagent: false,
-                children: Arc::from([]),
+            id: 200,
+            kind: AgentToolKind::Execute,
+            status: AgentToolStatus::Running,
+            label: "cargo check -p zz".into(),
+            location: None,
+            input: None,
+            output: Arc::from([]),
+            default_expanded: false,
         }),
         AgentEntry::Tool(AgentToolEntry {
-                id: 201,
-                kind: AgentToolKind::Edit,
-                status: AgentToolStatus::NeedsApproval,
-                label: "Write crates/zz/src/browser_controller.rs".into(),
-                location: Some("crates/zz/src/browser_controller.rs".into()),
-                input: None,
-                output: Arc::from([]),
-                default_expanded: false,
-                subagent: false,
-                children: Arc::from([]),
+            id: 201,
+            kind: AgentToolKind::Edit,
+            status: AgentToolStatus::NeedsApproval,
+            label: "Write crates/zz/src/browser_controller.rs".into(),
+            location: Some("crates/zz/src/browser_controller.rs".into()),
+            input: None,
+            output: Arc::from([]),
+            default_expanded: false,
         }),
         AgentEntry::Tool(AgentToolEntry {
-                id: 202,
-                kind: AgentToolKind::Fetch,
-                status: AgentToolStatus::Failed,
-                label: "GET https://gpui.rs/docs".into(),
-                location: None,
-                input: None,
-                output: Arc::from([AgentToolPayload::Text(
-                    "error: connection refused (os error 61)".into(),
-                )]),
-                default_expanded: false,
-                subagent: false,
-                children: Arc::from([]),
+            id: 202,
+            kind: AgentToolKind::Fetch,
+            status: AgentToolStatus::Failed,
+            label: "GET https://gpui.rs/docs".into(),
+            location: None,
+            input: None,
+            output: Arc::from([AgentToolPayload::Text(
+                "error: connection refused (os error 61)".into(),
+            )]),
+            default_expanded: false,
         }),
         AgentEntry::Tool(AgentToolEntry {
-                id: 203,
-                kind: AgentToolKind::Read,
-                status: AgentToolStatus::Completed,
-                label: "Read crates/zz-ui/src/pane.rs".into(),
-                location: Some("crates/zz-ui/src/pane.rs".into()),
-                input: None,
-                output: Arc::from([AgentToolPayload::Text("357 lines".into())]),
-                default_expanded: false,
-                subagent: false,
-                children: Arc::from([]),
+            id: 203,
+            kind: AgentToolKind::Read,
+            status: AgentToolStatus::Completed,
+            label: "Read crates/zz-ui/src/pane.rs".into(),
+            location: Some("crates/zz-ui/src/pane.rs".into()),
+            input: None,
+            output: Arc::from([AgentToolPayload::Text("357 lines".into())]),
+            default_expanded: false,
         }),
         AgentEntry::Tool(AgentToolEntry {
-                id: 204,
-                kind: AgentToolKind::Read,
-                status: AgentToolStatus::Completed,
-                label: "Read crates/zz-ui/src/browser.rs".into(),
-                location: Some("crates/zz-ui/src/browser.rs".into()),
-                input: None,
-                output: Arc::from([AgentToolPayload::Text("742 lines".into())]),
-                default_expanded: false,
-                subagent: false,
-                children: Arc::from([]),
+            id: 204,
+            kind: AgentToolKind::Read,
+            status: AgentToolStatus::Completed,
+            label: "Read crates/zz-ui/src/browser.rs".into(),
+            location: Some("crates/zz-ui/src/browser.rs".into()),
+            input: None,
+            output: Arc::from([AgentToolPayload::Text("742 lines".into())]),
+            default_expanded: false,
         }),
         AgentEntry::Tool(AgentToolEntry {
-                id: 205,
-                kind: AgentToolKind::Search,
-                status: AgentToolStatus::Completed,
-                label: "Grep begin_frame".into(),
-                location: None,
-                input: None,
-                output: Arc::from([AgentToolPayload::Text("11 matches in 4 files".into())]),
-                default_expanded: false,
-                subagent: false,
-                children: Arc::from([]),
+            id: 205,
+            kind: AgentToolKind::Search,
+            status: AgentToolStatus::Completed,
+            label: "Grep begin_frame".into(),
+            location: None,
+            input: None,
+            output: Arc::from([AgentToolPayload::Text("11 matches in 4 files".into())]),
+            default_expanded: false,
         }),
         AgentEntry::Tool(AgentToolEntry {
-                id: 206,
-                kind: AgentToolKind::Execute,
-                status: AgentToolStatus::Completed,
-                label: "sed -n '1,120p' crates/zz-ui/src/agent.rs\nsed -n '1,80p' crates/zz/src/agent_view.rs"
-                    .into(),
-                location: None,
-                input: None,
-                output: Arc::from([AgentToolPayload::Text("200 lines".into())]),
-                default_expanded: false,
-                subagent: false,
-                children: Arc::from([]),
+            id: 206,
+            kind: AgentToolKind::Execute,
+            status: AgentToolStatus::Completed,
+            label: "sed -n '1,120p' crates/zz-ui/src/agent.rs\nsed -n '1,80p' crates/zz/src/agent_view.rs"
+                .into(),
+            location: None,
+            input: None,
+            output: Arc::from([AgentToolPayload::Text("200 lines".into())]),
+            default_expanded: false,
         }),
     ]
 }
 
-fn delegated_entries() -> Vec<AgentEntry> {
+fn adapter_tool_entries() -> Vec<AgentEntry> {
     vec![
         AgentEntry::Tool(AgentToolEntry {
             id: 400,
             kind: AgentToolKind::Other,
-            status: AgentToolStatus::Completed,
-            label: "Task: audit the pane overlays".into(),
+            status: AgentToolStatus::Pending,
+            label: "Spawn research agent".into(),
             location: None,
-            input: Some(AgentToolPayload::Text(
-                "List every overlay that can occupy a pane corner and say which entity owns it."
-                    .into(),
-            )),
+            input: Some(AgentToolPayload::Text("Audit the pane overlays".into())),
+            output: Arc::from([]),
+            default_expanded: false,
+        }),
+        AgentEntry::Tool(AgentToolEntry {
+            id: 401,
+            kind: AgentToolKind::Other,
+            status: AgentToolStatus::Running,
+            label: "Wait for research agents".into(),
+            location: None,
+            input: None,
+            output: Arc::from([]),
+            default_expanded: false,
+        }),
+        AgentEntry::Tool(AgentToolEntry {
+            id: 402,
+            kind: AgentToolKind::Other,
+            status: AgentToolStatus::Completed,
+            label: "Collect research result".into(),
+            location: None,
+            input: None,
             output: Arc::from([AgentToolPayload::Text(
                 "4 overlays, 2 owners: PaneView and TerminalView".into(),
             )]),
-            default_expanded: true,
-            subagent: true,
-            children: Arc::from([
-                AgentEntry::Reasoning {
-                    id: 401,
-                    label: "Thinking".into(),
-                    markdown: "Corner overlays are stacked by `pane_overlay_stack`, so the owners \
-                               are whoever pushes into it."
-                        .into(),
-                    default_expanded: false,
-                },
-                AgentEntry::Tool(AgentToolEntry {
-                    id: 402,
-                    kind: AgentToolKind::Search,
-                    status: AgentToolStatus::Completed,
-                    label: "Grep pane_overlay_stack".into(),
-                    location: None,
-                    input: None,
-                    output: Arc::from([AgentToolPayload::Text("6 matches in 3 files".into())]),
-                    default_expanded: false,
-                    subagent: false,
-                    children: Arc::from([]),
-                }),
-                AgentEntry::Assistant {
-                    id: 403,
-                    markdown: "Top-right holds the **sync**, **zoom**, and **mode** tags; \
-                               bottom-right holds **search**, **status**, and **link**."
-                        .into(),
-                },
-            ]),
+            default_expanded: false,
         }),
-        AgentEntry::Notification {
-            id: 410,
-            task_id: "task-7".into(),
-            status: "running".into(),
-            summary: "Re-measuring the browser pane at 120hz".into(),
-            result_markdown: AgentMarkdown::default(),
-        },
-        AgentEntry::Notification {
-            id: 411,
-            task_id: "task-6".into(),
-            status: "completed".into(),
-            summary: "Frame log collected".into(),
-            result_markdown: "Captured 4,812 frames over 40s.\n\n\
-                              - p50 **8.1ms**\n\
-                              - p99 **31.4ms**, all inside the begin-frame pump"
-                .into(),
-        },
-        AgentEntry::Notification {
-            id: 412,
-            task_id: "task-5".into(),
-            status: "failed".into(),
-            summary: SharedString::default(),
-            result_markdown: "`cargo bench -p zz-terminal` exited 101: the bench harness needs a \
-                              tty."
-                .into(),
-        },
+        AgentEntry::Tool(AgentToolEntry {
+            id: 403,
+            kind: AgentToolKind::Other,
+            status: AgentToolStatus::Failed,
+            label: "Close research agent".into(),
+            location: None,
+            input: None,
+            output: Arc::from([AgentToolPayload::Text("agent process exited 1".into())]),
+            default_expanded: false,
+        }),
     ]
 }
 
@@ -370,8 +328,6 @@ fn payload_entries() -> Vec<AgentEntry> {
                         .into(),
                 }]),
                 default_expanded: true,
-                subagent: false,
-                children: Arc::from([]),
         }),
         AgentEntry::Tool(AgentToolEntry {
                 id: 301,
@@ -389,8 +345,6 @@ fn payload_entries() -> Vec<AgentEntry> {
                         .into(),
                 )]),
                 default_expanded: false,
-                subagent: false,
-                children: Arc::from([]),
         }),
         AgentEntry::Tool(AgentToolEntry {
                 id: 302,
@@ -404,8 +358,6 @@ fn payload_entries() -> Vec<AgentEntry> {
                         .into(),
                 )]),
                 default_expanded: false,
-                subagent: false,
-                children: Arc::from([]),
         }),
     ]
 }

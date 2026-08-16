@@ -62,7 +62,10 @@ const BINDINGS: [BindingHint; 5] = [
             label: "Split right",
         },
         matches: |command| {
-            command.name == "split-picker" && command.args.iter().any(|arg| arg == "-h")
+            matches!(
+                command.name.as_str(),
+                "split-picker" | "split-window" | "splitw"
+            ) && command.args.iter().any(|arg| arg == "-h")
         },
     },
     BindingHint {
@@ -72,7 +75,10 @@ const BINDINGS: [BindingHint; 5] = [
             label: "Split down",
         },
         matches: |command| {
-            command.name == "split-picker" && command.args.iter().all(|arg| arg != "-h")
+            matches!(
+                command.name.as_str(),
+                "split-picker" | "split-window" | "splitw"
+            ) && command.args.iter().all(|arg| arg != "-h")
         },
     },
     BindingHint {

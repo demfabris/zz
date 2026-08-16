@@ -30,7 +30,7 @@ purpose. Builds on the [tmux compatibility philosophy](/tmux/tmux-compat.md).
 
 tmux's syntax stays frozen at tmux's meaning. Every tmux line a user pastes must mean
 what tmux meant, or error — never a third thing. zz-only power arrives as new verbs
-(`split-browser`, `new-pane`, `fleet`), new pane kinds, and new selector dimensions —
+(`split-browser`, `split-picker`, `fleet`), new pane kinds, and new selector dimensions —
 never by overloading tmux grammar. Two decisions this doctrine already made:
 
 - Pane-kind flags on `split-window` are impossible (`-t`/`-b`/`-e` are taken by

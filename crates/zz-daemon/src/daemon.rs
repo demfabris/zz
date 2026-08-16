@@ -13092,6 +13092,44 @@ bind - split-window -v -c "#{pane_current_path}"
                 }
             ));
         }
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane: terminal,
+                    input: test_key(
+                        KeyCode::Character('a'),
+                        Modifiers::new(false, true, false, false),
+                        None,
+                    ),
+                    text_follows: false,
+                },
+            )
+            .expect("configured prefix again");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane: terminal,
+                    input: test_key(KeyCode::Character('-'), Modifiers::default(), Some("-")),
+                    text_follows: true,
+                },
+            )
+            .expect("configured vertical split binding");
+        let vertical = context.pane.expect("vertical terminal id");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.terminals.contains_key(&vertical));
+            assert!(matches!(
+                inner.engine.state.pane(vertical).map(|pane| &pane.kind),
+                Some(PaneKind::Terminal)
+            ));
+        }
     }
 
     #[test]

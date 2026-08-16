@@ -53,7 +53,7 @@ before the grind because tmux's own default bindings hit them (phase 1), the dif
 harness before the geometry rework it steers (phase 2 before 3), and `base-index` first in the
 grind because index arithmetic touches everything (phase 4).
 
-## Phase 0 — the floor (~1 week)
+## Phase 0 — the floor (shipped 2026-08-16)
 
 Catalog-driven unknown-flag rejection: every command rejects flags absent from its
 `CommandSpec`, deleting the hand-rolled allowlists — 36 distinct sites in `command.rs` today
@@ -63,9 +63,10 @@ small. After this, every remaining gap is loud — the precondition for claiming
 at all. Note: this makes currently-swallowed flags *louder* (by design); the fixes land in
 phases 1 and 4.
 
-## Phase 1 — superset rework + stock-binding blockers (~2 weeks)
+## Phase 1 — superset rework + stock-binding blockers (rework shipped 2026-08-16; blockers pending)
 
-Move every GUI-motivated divergence off tmux names:
+Move every GUI-motivated divergence off tmux names (shipped: picker renamed `split-picker`,
+key-bound `split-window` gives terminals, `select-window` bounds at zero positionals):
 
 - Stop routing key-bound `split-window` to the picker; zz's *default* bindings bind a zz verb,
   imported tmux bindings get pure tmux behavior. Also closes the TUI's bare-split-opens-picker

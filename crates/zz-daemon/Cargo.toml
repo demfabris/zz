@@ -39,6 +39,7 @@ base64 = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 futures-lite = { workspace = true, optional = true }
 getrandom.workspace = true
+glob = "0.3"
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 smol = { workspace = true, optional = true }

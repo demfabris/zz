@@ -2,10 +2,10 @@ use std::{collections::BTreeMap, path::PathBuf, str::FromStr as _};
 
 use zz_protocol::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind, CommandInvocation,
-    DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
-    DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES,
-    MAX_GUI_TEXT_BYTES, MuxOptionKey, PaneId, PaneKindSnapshot, ServerError, SessionId,
-    TerminalUiCommand, WindowId, normalize_browser_profile_name,
+    CommandSpec, DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND,
+    DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken,
+    MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, PaneId, PaneKindSnapshot,
+    ServerError, SessionId, TerminalUiCommand, WindowId, normalize_browser_profile_name,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, DEFAULT_HISTORY_LIMIT,
@@ -76,6 +76,10 @@ pub enum MuxEffect {
     SendKeys {
         pane: PaneId,
         keys: Vec<KeyToken>,
+    },
+    CopyModeRepeat {
+        pane: PaneId,
+        count: usize,
     },
     TerminalView {
         pane: PaneId,
@@ -2011,6 +2015,12 @@ impl MuxEngine {
         let pane = self
             .state
             .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        if options.value("-N").is_some() && positional.is_empty() && !options.has("-X") {
+            return Ok(Execution::effect(MuxEffect::CopyModeRepeat {
+                pane,
+                count: repeat,
+            }));
+        }
         if options.has("-X") {
             let command = positional.first().ok_or_else(|| {
                 ServerError::InvalidCommand("send-keys -X needs a copy-mode command".to_owned())
@@ -2079,9 +2089,22 @@ impl MuxEngine {
         let pane = self
             .state
             .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        if options.has("-q") {
+            return Ok(Execution::effect(MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
+            }));
+        }
+        if options.has("-M") {
+            return Ok(Execution::default());
+        }
         let mut effects = vec![MuxEffect::TerminalView {
             pane,
-            action: TerminalViewAction::EnterCopyMode,
+            action: if options.has("-e") {
+                TerminalViewAction::EnterCopyModeScrollExit
+            } else {
+                TerminalViewAction::EnterCopyMode
+            },
         }];
         if options.has("-u") {
             effects.push(MuxEffect::TerminalView {
@@ -2092,7 +2115,11 @@ impl MuxEngine {
         if options.has("-d") {
             effects.push(MuxEffect::TerminalView {
                 pane,
-                action: TerminalViewAction::CopyMode(CopyModeAction::PageDown),
+                action: TerminalViewAction::CopyMode(if options.has("-e") {
+                    CopyModeAction::PageDownScrollExit
+                } else {
+                    CopyModeAction::PageDown
+                }),
             });
         }
         Ok(Execution {
@@ -3226,6 +3253,15 @@ fn parse_command_options(
     args: &[String],
 ) -> Result<(Options, Vec<String>), ServerError> {
     let spec = command_spec(command).expect("executable command has catalog metadata");
+    let (options, positional) = parse_options_for_spec(args, spec)?;
+    validate_options(command, spec, &options)?;
+    Ok((options, positional))
+}
+
+fn parse_options_for_spec(
+    args: &[String],
+    spec: &zz_protocol::CommandSpec,
+) -> Result<(Options, Vec<String>), ServerError> {
     let value_options = spec
         .options
         .iter()
@@ -3236,7 +3272,14 @@ fn parse_command_options(
         .iter()
         .filter_map(|option| option.attached_value.then_some(option.name))
         .collect::<Vec<_>>();
-    let (options, positional) = parse_options(args, &value_options, &attached_options)?;
+    parse_options(args, &value_options, &attached_options)
+}
+
+fn validate_options(
+    command: &str,
+    spec: &zz_protocol::CommandSpec,
+    options: &Options,
+) -> Result<(), ServerError> {
     for name in options
         .flags
         .iter()
@@ -3252,7 +3295,7 @@ fn parse_command_options(
             return Err(ServerError::UnsupportedCommand(format!("{command} {name}")));
         }
     }
-    Ok((options, positional))
+    Ok(())
 }
 
 fn parse_options(
@@ -3843,34 +3886,60 @@ fn copy_selection_action(
 }
 
 fn bound_commands(tail: &[String]) -> Result<Vec<CommandInvocation>, ServerError> {
-    if let [argument] = tail
+    let commands = if let [argument] = tail
         && let Some(body) = crate::parser::command_block_body(argument)
     {
-        let commands: Vec<CommandInvocation> = crate::parse_config("<bind-key>", body)
+        let parsed = crate::parse_config("<bind-key>", body);
+        if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
+            return Err(ServerError::InvalidCommand(diagnostic.message));
+        }
+        let commands = parsed
             .commands
             .into_iter()
             .map(|command| CommandInvocation::new(command.name, command.args))
-            .collect();
+            .collect::<Vec<_>>();
         if commands.is_empty() {
             return Err(ServerError::InvalidCommand(
                 "bind-key command block is empty".to_owned(),
             ));
         }
-        return Ok(commands);
+        commands
+    } else {
+        tail.split(|argument| argument == ";")
+            .map(|segment| {
+                let Some((command, command_args)) = segment.split_first() else {
+                    return Err(ServerError::InvalidCommand(
+                        "bind-key command chain contains an empty command".to_owned(),
+                    ));
+                };
+                Ok(CommandInvocation::new(
+                    command,
+                    command_args.iter().cloned(),
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    for command in &commands {
+        validate_bound_command(command)?;
     }
-    tail.split(|argument| argument == ";")
-        .map(|segment| {
-            let Some((command, command_args)) = segment.split_first() else {
-                return Err(ServerError::InvalidCommand(
-                    "bind-key command chain contains an empty command".to_owned(),
-                ));
-            };
-            Ok(CommandInvocation::new(
-                command,
-                command_args.iter().cloned(),
-            ))
-        })
-        .collect()
+    Ok(commands)
+}
+
+fn validate_bound_command(command: &CommandInvocation) -> Result<(), ServerError> {
+    let name = canonical_command(&command.name);
+    if let Some(spec) = command_spec(name) {
+        let (options, _) = parse_options_for_spec(&command.args, spec)?;
+        return validate_options(name, spec, &options);
+    }
+    if CommandSpec::DAEMON_COMMAND_NAMES.contains(&name) {
+        return Ok(());
+    }
+    if CommandSpec::UNIMPLEMENTED_TMUX_COMMANDS.contains(&name) {
+        return Err(ServerError::UnsupportedCommand(format!("bind-key {name}")));
+    }
+    Err(ServerError::InvalidCommand(format!(
+        "unknown command: {name}"
+    )))
 }
 
 fn format_command(command: &CommandInvocation) -> String {

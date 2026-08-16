@@ -63,10 +63,12 @@ small. After this, every remaining gap is loud — the precondition for claiming
 at all. Note: this makes currently-swallowed flags *louder* (by design); the fixes land in
 phases 1 and 4.
 
-## Phase 1 — superset rework + stock-binding blockers (rework shipped 2026-08-16; blockers pending)
+## Phase 1 — superset rework + stock-binding blockers (shipped 2026-08-16)
 
 Move every GUI-motivated divergence off tmux names (shipped: picker renamed `split-picker`,
-key-bound `split-window` gives terminals, `select-window` bounds at zero positionals):
+key-bound `split-window` gives terminals, `select-window` bounds at zero positionals; the
+stock-binding blockers below shipped the same day — `source-file` `-F`/`-n` moved to the
+phase-4 grind, `-` stdin is a loud refusal):
 
 - Stop routing key-bound `split-window` to the picker; zz's *default* bindings bind a zz verb,
   imported tmux bindings get pure tmux behavior. Also closes the TUI's bare-split-opens-picker

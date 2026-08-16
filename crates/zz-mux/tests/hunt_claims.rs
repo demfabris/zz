@@ -1,5 +1,6 @@
 use zz_mux::{COMMAND_SPECS, DetachScope, ExecutionContext, MuxEffect, MuxEngine, parse_config};
 use zz_protocol::{Axis, CommandInvocation, KeyToken, LayoutNode, ServerError};
+use zz_terminal::{CopyModeAction, TerminalViewAction};
 
 fn command(name: &str, args: &[&str]) -> CommandInvocation {
     CommandInvocation::new(name, args.iter().copied())
@@ -97,7 +98,14 @@ fn catalog_covers_the_options_the_handlers_read() {
             .is_some()
     );
     assert!(spec("send-keys").option("-H").is_some());
-    assert!(spec("copy-mode").option("-d").is_some());
+    for flag in ["-d", "-e", "-M", "-q"] {
+        assert!(
+            spec("copy-mode")
+                .option(flag)
+                .is_some_and(|option| !option.unsupported),
+            "copy-mode catalog is missing supported {flag}"
+        );
+    }
     assert!(spec("detach-client").option("-a").is_some());
     assert!(spec("detach-client").option("-s").unwrap().value.is_some());
     for flag in ["-n", "-p", "-T"] {
@@ -164,6 +172,30 @@ fn kill_window_dash_a_keeps_only_the_target() {
 }
 
 #[test]
+fn removing_the_active_window_clears_the_replacement_bell() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let replacement_pane = context.pane.unwrap();
+    engine
+        .execute(&mut context, &command("new-window", &["-n", "active"]))
+        .unwrap();
+    assert!(engine.state.set_pane_bell(replacement_pane, true));
+
+    engine
+        .execute(&mut context, &command("kill-window", &[]))
+        .unwrap();
+    let replacement_window = context.window.unwrap();
+    assert_eq!(
+        engine.state.windows[&replacement_window].active_pane,
+        replacement_pane
+    );
+    assert!(!engine.state.windows[&replacement_window].panes[&replacement_pane].bell);
+}
+
+#[test]
 fn kill_pane_dash_a_keeps_only_the_target() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
@@ -217,6 +249,101 @@ fn bind_clustered_nr_flags_bind_a_repeatable_root_table_key() {
     assert_eq!(binding.commands.len(), 1);
     assert_eq!(binding.commands[0].name, "split-window");
     assert_eq!(binding.commands[0].args, ["-h"]);
+}
+
+#[test]
+fn bind_key_validates_payloads_before_storing_them() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    let original_x = engine.keys.get("prefix", "x").cloned();
+
+    let error = engine
+        .execute(&mut context, &command("bind-key", &["x", "not-a-command"]))
+        .unwrap_err();
+    assert!(matches!(error, ServerError::InvalidCommand(message)
+        if message == "unknown command: not-a-command"));
+    assert_eq!(engine.keys.get("prefix", "x"), original_x.as_ref());
+
+    let error = engine
+        .execute(
+            &mut context,
+            &command("bind-key", &["x", "split-window", "-Q"]),
+        )
+        .unwrap_err();
+    assert!(matches!(error, ServerError::InvalidCommand(message)
+        if message == "split-window does not support -Q"));
+    assert_eq!(engine.keys.get("prefix", "x"), original_x.as_ref());
+
+    let original_r = engine.keys.get("prefix", "r").cloned();
+    let error = engine
+        .execute(&mut context, &command("bind-key", &["r", "run-shell", "x"]))
+        .unwrap_err();
+    assert!(matches!(error, ServerError::UnsupportedCommand(message)
+        if message == "bind-key run-shell"));
+    assert_eq!(engine.keys.get("prefix", "r"), original_r.as_ref());
+
+    engine
+        .execute(
+            &mut context,
+            &command("bind-key", &["-n", "Any", "focus-sidebar"]),
+        )
+        .unwrap();
+    assert!(engine.keys.get("root", "Any").is_some());
+    engine
+        .execute(
+            &mut context,
+            &command(
+                "bind-key",
+                &[
+                    "-T",
+                    "copy-mode-vi",
+                    "v",
+                    "send-keys",
+                    "-X",
+                    "begin-selection",
+                ],
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        engine
+            .keys
+            .get("copy-mode-vi", "v")
+            .expect("copy-mode binding")
+            .commands,
+        [CommandInvocation::new(
+            "send-keys",
+            ["-X", "begin-selection"]
+        )]
+    );
+}
+
+#[test]
+fn bind_key_surfaces_block_diagnostics_and_preserves_empty_errors() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+
+    let error = engine
+        .execute(
+            &mut context,
+            &command("bind-key", &["x", "{ send-keys 'unterminated }"]),
+        )
+        .unwrap_err();
+    assert!(matches!(error, ServerError::InvalidCommand(message)
+        if message == "unterminated quote"));
+    let empty_block = engine
+        .execute(&mut context, &command("bind-key", &["x", "{}"]))
+        .unwrap_err();
+    assert!(matches!(empty_block, ServerError::InvalidCommand(message)
+        if message == "bind-key command block is empty"));
+    let empty_chain = engine
+        .execute(
+            &mut context,
+            &command("bind-key", &["x", "new-window", ";"]),
+        )
+        .unwrap_err();
+    assert!(matches!(empty_chain, ServerError::InvalidCommand(message)
+        if message == "bind-key command chain contains an empty command"));
 }
 
 #[test]
@@ -773,6 +900,23 @@ fn send_keys_dash_n_repeats_the_keys_instead_of_typing_the_count() {
 }
 
 #[test]
+fn send_keys_dash_n_without_keys_arms_the_copy_mode_repeat() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let pane = context.pane.unwrap();
+    let armed = engine
+        .execute(&mut context, &command("send-keys", &["-N", "5"]))
+        .unwrap();
+    assert_eq!(
+        armed.effects,
+        [MuxEffect::CopyModeRepeat { pane, count: 5 }]
+    );
+}
+
+#[test]
 fn send_keys_dash_n_repeats_copy_mode_movement_but_never_a_copy() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
@@ -842,23 +986,83 @@ fn send_keys_reports_the_flags_it_cannot_honor() {
 }
 
 #[test]
-fn copy_mode_pages_down_with_dash_d_and_reports_dash_e() {
+fn copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
+    let pane = context.pane.unwrap();
     let paged = engine
         .execute(&mut context, &command("copy-mode", &["-d"]))
         .unwrap();
-    assert_eq!(paged.effects.len(), 2);
-    let error = engine
+    assert_eq!(
+        paged.effects,
+        [
+            MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::EnterCopyMode,
+            },
+            MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::CopyMode(CopyModeAction::PageDown),
+            },
+        ]
+    );
+    let scroll_exit = engine
         .execute(&mut context, &command("copy-mode", &["-e"]))
-        .unwrap_err();
-    assert!(
-        matches!(&error, ServerError::UnsupportedCommand(message)
-            if message == "copy-mode -e"),
-        "{error:?}"
+        .unwrap();
+    assert_eq!(
+        scroll_exit.effects,
+        [MuxEffect::TerminalView {
+            pane,
+            action: TerminalViewAction::EnterCopyModeScrollExit,
+        }]
+    );
+    let immediate_scroll_exit = engine
+        .execute(&mut context, &command("copy-mode", &["-ed"]))
+        .unwrap();
+    assert_eq!(
+        immediate_scroll_exit.effects,
+        [
+            MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::EnterCopyModeScrollExit,
+            },
+            MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::CopyMode(CopyModeAction::PageDownScrollExit),
+            },
+        ]
+    );
+
+    let quit = engine
+        .execute(&mut context, &command("copy-mode", &["-q"]))
+        .unwrap();
+    let quit_with_dead_flag = engine
+        .execute(&mut context, &command("copy-mode", &["-qu"]))
+        .unwrap();
+    let cancel = [MuxEffect::TerminalView {
+        pane,
+        action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
+    }];
+    assert_eq!(quit.effects, cancel);
+    assert_eq!(quit_with_dead_flag.effects, cancel);
+
+    let mouse = engine
+        .execute(&mut context, &command("copy-mode", &["-M"]))
+        .unwrap();
+    assert!(mouse.effects.is_empty());
+    assert!(mouse.output.is_empty());
+    let quit_mouse = engine
+        .execute(&mut context, &command("copy-mode", &["-qM"]))
+        .unwrap();
+    assert_eq!(
+        quit_mouse.effects,
+        [MuxEffect::TerminalView {
+            pane,
+            action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
+        }]
     );
 }
 
@@ -972,7 +1176,11 @@ fn next_and_previous_window_target_a_session_and_follow_alerts() {
     engine
         .execute(&mut context, &command("new-window", &["-n", "third"]))
         .unwrap();
-    let belled = context.pane.unwrap();
+    let first_belled = context.pane.unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-h"]))
+        .unwrap();
+    let second_belled = context.pane.unwrap();
     engine
         .execute(&mut context, &command("new-session", &["-s", "other"]))
         .unwrap();
@@ -1001,11 +1209,42 @@ fn next_and_previous_window_target_a_session_and_follow_alerts() {
             if message == "no next window"),
         "{error:?}"
     );
-    assert!(engine.state.set_pane_bell(belled, true));
+    assert!(engine.state.set_pane_bell(first_belled, true));
+    assert!(engine.state.set_pane_bell(second_belled, true));
+    engine
+        .execute(
+            &mut context,
+            &command("select-window", &["-t", "work:third"]),
+        )
+        .unwrap();
+    assert!(
+        [first_belled, second_belled]
+            .into_iter()
+            .all(|pane| !engine.state.windows[&context.window.unwrap()].panes[&pane].bell)
+    );
+
+    engine
+        .execute(
+            &mut context,
+            &command("select-window", &["-t", "work:first"]),
+        )
+        .unwrap();
+    assert!(engine.state.set_pane_bell(first_belled, true));
+    assert!(engine.state.set_pane_bell(second_belled, true));
     engine
         .execute(&mut context, &command("next-window", &["-a"]))
         .unwrap();
     assert_eq!(active_window_name(&engine, "work"), "third");
+    assert!(
+        [first_belled, second_belled]
+            .into_iter()
+            .all(|pane| !engine.state.windows[&context.window.unwrap()].panes[&pane].bell)
+    );
+    let error = engine
+        .execute(&mut context, &command("next-window", &["-a"]))
+        .unwrap_err();
+    assert!(matches!(&error, ServerError::InvalidCommand(message)
+        if message == "no next window"));
 }
 
 #[test]
@@ -1108,6 +1347,16 @@ fn source_file_keeps_every_path_in_order() {
         [MuxEffect::SourceFile {
             path: "maybe".to_owned(),
             quiet: true,
+        }]
+    );
+    let stdin = engine
+        .execute(&mut context, &command("source-file", &["-"]))
+        .unwrap();
+    assert_eq!(
+        stdin.effects,
+        [MuxEffect::SourceFile {
+            path: "-".to_owned(),
+            quiet: false,
         }]
     );
     let error = engine

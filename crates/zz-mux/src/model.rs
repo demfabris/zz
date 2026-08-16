@@ -194,14 +194,17 @@ impl Session {
         self.last_window
     }
 
-    fn activate_window(&mut self, window: WindowId) {
-        if self.active_window != window {
+    fn activate_window(&mut self, window: WindowId) -> bool {
+        if self.active_window == window {
+            false
+        } else {
             self.last_window = Some(self.active_window);
             self.active_window = window;
+            true
         }
     }
 
-    fn forget_window(&mut self, window: WindowId) {
+    fn forget_window(&mut self, window: WindowId) -> Option<WindowId> {
         self.windows.retain(|candidate| *candidate != window);
         if self.last_window == Some(window) {
             self.last_window = None;
@@ -212,6 +215,9 @@ impl Session {
                 .take()
                 .filter(|candidate| self.windows.contains(candidate))
                 .unwrap_or(self.windows[0]);
+            Some(self.active_window)
+        } else {
+            None
         }
     }
 }
@@ -364,13 +370,13 @@ impl MuxState {
             input_options: InputOptions::default(),
         };
         self.windows.insert(window_id, window);
-        let session_state = self
-            .sessions
+        self.sessions
             .get_mut(&session)
-            .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?;
-        session_state.windows.push(window_id);
+            .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?
+            .windows
+            .push(window_id);
         if activate {
-            session_state.activate_window(window_id);
+            self.activate_window(session, window_id);
         }
         self.sort_session_windows(session);
         self.bump_generation();
@@ -598,13 +604,18 @@ impl MuxState {
             .remove(&window)
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
         let removed_panes = removed.pane_order.clone();
-        let session = self
-            .sessions
-            .get_mut(&removed.session)
-            .expect("window session exists");
-        session.forget_window(window);
-        if session.windows.is_empty() {
+        let (activated, session_empty) = {
+            let session = self
+                .sessions
+                .get_mut(&removed.session)
+                .expect("window session exists");
+            let activated = session.forget_window(window);
+            (activated, session.windows.is_empty())
+        };
+        if session_empty {
             self.sessions.remove(&removed.session);
+        } else if let Some(window) = activated {
+            self.clear_window_bells(window);
         }
         self.bump_generation();
         Ok(removed_panes)
@@ -632,14 +643,33 @@ impl MuxState {
     ) -> Result<(), ServerError> {
         let session_state = self
             .sessions
-            .get_mut(&session)
+            .get(&session)
             .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?;
         if !session_state.windows.contains(&window) {
             return Err(ServerError::MissingTarget(window.to_string()));
         }
-        session_state.activate_window(window);
+        self.activate_window(session, window);
         self.bump_generation();
         Ok(())
+    }
+
+    fn activate_window(&mut self, session: SessionId, window: WindowId) -> bool {
+        let changed = self
+            .sessions
+            .get_mut(&session)
+            .expect("session exists")
+            .activate_window(window);
+        if changed {
+            self.clear_window_bells(window);
+        }
+        changed
+    }
+
+    fn clear_window_bells(&mut self, window: WindowId) {
+        let panes = self.windows[&window].pane_order.clone();
+        for pane in panes {
+            self.set_pane_bell(pane, false);
+        }
     }
 
     pub fn select_pane(&mut self, pane: PaneId) -> Result<(), ServerError> {
@@ -657,9 +687,7 @@ impl MuxState {
         let session_id = self.windows[&window_id].session;
         let window = self.windows.get_mut(&window_id).expect("window exists");
         let pane_changed = activate_window_pane(window, pane, preserve_zoom);
-        let session = self.sessions.get_mut(&session_id).expect("session exists");
-        let window_changed = session.active_window != window_id;
-        session.activate_window(window_id);
+        let window_changed = self.activate_window(session_id, window_id);
         if pane_changed || window_changed {
             self.bump_generation();
         }
@@ -1851,13 +1879,13 @@ impl MuxState {
                 input_options: InputOptions::default(),
             },
         );
-        let destination = self
-            .sessions
+        self.sessions
             .get_mut(&destination_session)
-            .expect("destination session exists");
-        destination.windows.push(window_id);
+            .expect("destination session exists")
+            .windows
+            .push(window_id);
         if !detached {
-            destination.activate_window(window_id);
+            self.activate_window(destination_session, window_id);
         }
         self.sort_session_windows(destination_session);
         self.bump_generation();
@@ -1970,19 +1998,20 @@ impl MuxState {
         }
         normalize_window_history(target_state);
 
-        if source_will_close {
+        let activated = if source_will_close {
             self.sessions
                 .get_mut(&source_session)
                 .expect("source session exists")
-                .forget_window(source_window);
+                .forget_window(source_window)
         } else {
             self.windows.insert(source_window, source_state);
+            None
+        };
+        if let Some(window) = activated {
+            self.clear_window_bells(window);
         }
         if !detached {
-            self.sessions
-                .get_mut(&target_session)
-                .expect("target session exists")
-                .activate_window(target_window);
+            self.activate_window(target_session, target_window);
         }
         self.bump_generation();
         Ok(())

@@ -543,6 +543,14 @@ impl KeyEngine {
         self.table.as_deref()
     }
 
+    pub fn set_repeat_count(&mut self, count: usize) {
+        self.repeat_count = if count == 0 {
+            None
+        } else {
+            Some(u16::try_from(count.min(9_999)).expect("clamped repeat count fits in u16"))
+        };
+    }
+
     fn take_pending_jump_target(&mut self, key: &str) -> Option<KeyDecision> {
         let mut commands = self.pending.take()?;
         if key == "Escape" {

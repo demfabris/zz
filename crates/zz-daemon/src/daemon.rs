@@ -1253,6 +1253,47 @@ fn close_outbound(state: &mut OutboundState) {
     state.queued_bytes = 0;
 }
 
+#[derive(Clone, Copy)]
+enum DaemonCommandDispatch {
+    CapturePane,
+    AgentSend,
+    SendLastOutput,
+    CaptureBrowser,
+    DebugMarker,
+    Tools,
+    Buffer,
+}
+
+const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
+    ("capture-pane", DaemonCommandDispatch::CapturePane),
+    ("capturep", DaemonCommandDispatch::CapturePane),
+    ("agent-send", DaemonCommandDispatch::AgentSend),
+    ("send-last-output", DaemonCommandDispatch::SendLastOutput),
+    ("capture-browser", DaemonCommandDispatch::CaptureBrowser),
+    ("debug-marker", DaemonCommandDispatch::DebugMarker),
+    ("tools", DaemonCommandDispatch::Tools),
+    ("set-buffer", DaemonCommandDispatch::Buffer),
+    ("setb", DaemonCommandDispatch::Buffer),
+    ("show-buffer", DaemonCommandDispatch::Buffer),
+    ("showb", DaemonCommandDispatch::Buffer),
+    ("list-buffers", DaemonCommandDispatch::Buffer),
+    ("lsb", DaemonCommandDispatch::Buffer),
+    ("load-buffer", DaemonCommandDispatch::Buffer),
+    ("loadb", DaemonCommandDispatch::Buffer),
+    ("save-buffer", DaemonCommandDispatch::Buffer),
+    ("saveb", DaemonCommandDispatch::Buffer),
+    ("delete-buffer", DaemonCommandDispatch::Buffer),
+    ("deleteb", DaemonCommandDispatch::Buffer),
+    ("paste-buffer", DaemonCommandDispatch::Buffer),
+    ("pasteb", DaemonCommandDispatch::Buffer),
+];
+
+fn daemon_command_dispatch(name: &str) -> Option<DaemonCommandDispatch> {
+    DAEMON_COMMAND_DISPATCHES
+        .iter()
+        .find_map(|(candidate, dispatch)| (*candidate == name).then_some(*dispatch))
+}
+
 struct Shared {
     inner: Mutex<ServerState>,
     /// Built on the first agent pane rather than at startup: a daemon that
@@ -2044,20 +2085,29 @@ impl Shared {
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
     ) -> Result<Execution, DaemonError> {
-        let preempted = match command.name.as_str() {
-            "capture-pane" | "capturep" => Some(self.capture_pane(context, &command.args)),
-            "agent-send" => Some(self.agent_send(context, &command.args)),
-            "send-last-output" => Some(self.send_last_output(context, &command.args)),
-            "capture-browser" => Some(self.capture_browser(context, &command.args)),
-            "debug-marker" => Some(Ok(debug_marker(client, context, &command.args))),
-            "tools" => Some(Ok(workspace_tools_catalog())),
-            "set-buffer" | "setb" | "show-buffer" | "showb" | "list-buffers" | "lsb"
-            | "load-buffer" | "loadb" | "save-buffer" | "saveb" | "delete-buffer" | "deleteb"
-            | "paste-buffer" | "pasteb" => {
-                Some(self.buffer_command(context, &command.name, &command.args))
-            }
-            _ => None,
-        };
+        let preempted = zz_mux::CommandSpec::DAEMON_COMMAND_NAMES
+            .contains(&command.name.as_str())
+            .then(|| {
+                match daemon_command_dispatch(&command.name)
+                    .expect("daemon command catalog and dispatch must agree")
+                {
+                    DaemonCommandDispatch::CapturePane => self.capture_pane(context, &command.args),
+                    DaemonCommandDispatch::AgentSend => self.agent_send(context, &command.args),
+                    DaemonCommandDispatch::SendLastOutput => {
+                        self.send_last_output(context, &command.args)
+                    }
+                    DaemonCommandDispatch::CaptureBrowser => {
+                        self.capture_browser(context, &command.args)
+                    }
+                    DaemonCommandDispatch::DebugMarker => {
+                        Ok(debug_marker(client, context, &command.args))
+                    }
+                    DaemonCommandDispatch::Tools => Ok(workspace_tools_catalog()),
+                    DaemonCommandDispatch::Buffer => {
+                        self.buffer_command(context, &command.name, &command.args)
+                    }
+                }
+            });
         if let Some(result) = preempted {
             if result.is_ok() {
                 self.inner.lock().engine.repair_context(context);
@@ -2104,6 +2154,15 @@ impl Shared {
                 .iter()
                 .map(|(window, state)| (*window, state.active_pane))
                 .collect::<BTreeMap<_, _>>();
+            let belled_panes_before = inner
+                .engine
+                .state
+                .windows
+                .values()
+                .flat_map(|window| window.panes.values())
+                .filter(|pane| pane.bell)
+                .map(|pane| pane.id)
+                .collect::<BTreeSet<_>>();
             let mut focused_windows_before = BTreeMap::new();
             for (session, clients) in &inner.attached {
                 let Some(state) = inner.engine.state.sessions.get(session) else {
@@ -2131,6 +2190,11 @@ impl Shared {
                 .collect::<Vec<_>>();
             for pane in selected_panes {
                 if inner.engine.state.set_pane_bell(pane, false) {
+                    snapshot_changed = true;
+                }
+            }
+            for pane in belled_panes_before {
+                if inner.engine.state.pane(pane).is_none_or(|pane| !pane.bell) {
                     snapshot_changed = true;
                     if let Some(terminal) = inner.terminals.get(&pane) {
                         cleared_bells.push(Arc::clone(terminal));
@@ -2363,6 +2427,19 @@ impl Shared {
                             });
                         }
                     }
+                    MuxEffect::CopyModeRepeat { pane, count } => {
+                        if inner
+                            .copy_sessions
+                            .get(&client)
+                            .is_some_and(|session| session.pane == *pane)
+                        {
+                            inner
+                                .key_engines
+                                .entry(client)
+                                .or_default()
+                                .set_repeat_count(*count);
+                        }
+                    }
                     MuxEffect::TerminalView { pane, action } => {
                         let command_output = inner
                             .command_outputs
@@ -2398,7 +2475,7 @@ impl Shared {
                                 view: TerminalViewId(target.0),
                                 action: action.clone(),
                             });
-                            if matches!(action, zz_terminal::TerminalViewAction::EnterCopyMode) {
+                            if terminal_view_action_enters_copy_mode(action) {
                                 enter_copy_session(&mut inner, target, *pane)?;
                             } else if terminal_view_action_exits_copy_mode(action) {
                                 exit_copy_session(&mut inner, target);
@@ -2804,42 +2881,79 @@ impl Shared {
         } else if status_formats_changed {
             self.refresh_status(false);
         }
+        let mut source_file_error = None;
         for (path, quiet) in source_files {
-            let path = expand_path(&path);
-            if !quiet && !path.exists() {
+            if path == "-" {
                 self.publish_to_client(
                     client,
                     EventPayload::ClientMessage {
                         pane: context.pane,
                         kind: ClientMessageKind::Warning,
-                        text: format!("no such file: {}", path.display()),
+                        text: "source-file from standard input is not supported".to_owned(),
                     },
                 );
                 continue;
             }
-            if is_default_mux_config(&path) {
-                reload_config = true;
-            } else {
-                let mut report = ConfigLoadReport::default();
-                self.load_config_file_with_report(&path, context, 0, &mut report)?;
-                self.apply_stored_mux_config_overrides("source-file-replay");
-                if let Some(summary) = report.summary() {
+            let path = expand_path(&path);
+            let matches = source_glob_matches(&path);
+            for error in &matches.errors {
+                self.publish_to_client(
+                    client,
+                    EventPayload::ClientMessage {
+                        pane: context.pane,
+                        kind: ClientMessageKind::Warning,
+                        text: format!("source-file glob error for {}: {error}", path.display()),
+                    },
+                );
+            }
+            if matches.paths.is_empty() && matches.errors.is_empty() {
+                if !quiet {
                     self.publish_to_client(
                         client,
                         EventPayload::ClientMessage {
                             pane: context.pane,
                             kind: ClientMessageKind::Warning,
-                            text: summary,
+                            text: format!("no such file: {}", path.display()),
                         },
                     );
                 }
+                continue;
+            }
+            for path in matches.paths {
+                if is_default_mux_config(&path) {
+                    reload_config = true;
+                } else {
+                    let mut report = ConfigLoadReport::default();
+                    if let Err(error) =
+                        self.load_config_file_with_report(&path, context, 0, &mut report)
+                    {
+                        if source_file_error.is_none() {
+                            source_file_error = Some(error);
+                        }
+                        continue;
+                    }
+                    self.apply_stored_mux_config_overrides("source-file-replay");
+                    if let Some(summary) = report.summary() {
+                        self.publish_to_client(
+                            client,
+                            EventPayload::ClientMessage {
+                                pane: context.pane,
+                                kind: ClientMessageKind::Warning,
+                                text: summary,
+                            },
+                        );
+                    }
+                }
             }
         }
-        if reload_config {
-            self.reload_user_config(client, context)?;
+        if reload_config
+            && let Err(error) = self.reload_user_config(client, context)
+            && source_file_error.is_none()
+        {
+            source_file_error = Some(error);
         }
         self.publish_key_tables_if_changed();
-        Ok(execution)
+        source_file_error.map_or(Ok(execution), Err)
     }
 
     fn publish_key_tables_if_changed(&self) {
@@ -7027,6 +7141,7 @@ impl Shared {
                 diagnostic.column,
                 diagnostic.message
             );
+            report.note_invalid(&diagnostic.message);
         }
         for command in parsed.commands {
             if command.name == "reload-config" {
@@ -7037,17 +7152,71 @@ impl Shared {
                 continue;
             }
             if matches!(command.name.as_str(), "source" | "source-file") {
-                let sources = command
-                    .args
-                    .iter()
-                    .filter(|argument| !argument.starts_with('-'))
-                    .collect::<Vec<_>>();
-                if sources.is_empty() {
+                let source_effects = {
+                    let mut inner = self.inner.lock();
+                    inner.engine.execute(context, &command)
+                };
+                let source_effects = match source_effects {
+                    Ok(execution) => execution
+                        .effects
+                        .into_iter()
+                        .filter_map(|effect| match effect {
+                            MuxEffect::SourceFile { path, quiet } => Some((path, quiet)),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                    Err(ServerError::UnsupportedCommand(command)) => {
+                        log::warn!(
+                            "{}: ignoring unsupported tmux command: {command}",
+                            path.display()
+                        );
+                        report.note_skip(&command);
+                        continue;
+                    }
+                    Err(ServerError::InvalidCommand(message)) => {
+                        log::warn!(
+                            "{}: ignoring invalid tmux command: {message}",
+                            path.display()
+                        );
+                        report.note_invalid(&message);
+                        continue;
+                    }
+                    Err(error) => {
+                        log::warn!("{}: ignoring tmux command error: {error}", path.display());
+                        continue;
+                    }
+                };
+                if source_effects.is_empty() {
                     log::warn!("{}: ignoring source-file without a path", path.display());
                 }
-                for source in sources {
-                    let source = expand_relative(path, source);
-                    self.load_config_file_with_report(&source, context, depth + 1, report)?;
+                let mut source_error = None;
+                for (source, quiet) in source_effects {
+                    if source == "-" {
+                        log::warn!("source-file from standard input is not supported");
+                        continue;
+                    }
+                    let source = expand_relative(path, &source);
+                    let matches = source_glob_matches(&source);
+                    for error in &matches.errors {
+                        log::warn!("source-file glob error for {}: {error}", source.display());
+                    }
+                    if matches.paths.is_empty() && matches.errors.is_empty() {
+                        if !quiet {
+                            log::warn!("no such file: {}", source.display());
+                        }
+                        continue;
+                    }
+                    for source in matches.paths {
+                        if let Err(error) =
+                            self.load_config_file_with_report(&source, context, depth + 1, report)
+                            && source_error.is_none()
+                        {
+                            source_error = Some(error);
+                        }
+                    }
+                }
+                if let Some(error) = source_error {
+                    return Err(error);
                 }
                 continue;
             }
@@ -7065,6 +7234,13 @@ impl Shared {
                         path.display()
                     );
                     report.note_skip(&command);
+                }
+                Err(DaemonError::Server(ServerError::InvalidCommand(message))) => {
+                    log::warn!(
+                        "{}: ignoring invalid tmux command: {message}",
+                        path.display()
+                    );
+                    report.note_invalid(&message);
                 }
                 Err(DaemonError::Server(error)) => {
                     log::warn!("{}: ignoring tmux command error: {error}", path.display());
@@ -7675,26 +7851,56 @@ fn session_agent_panes(inner: &ServerState, session: SessionId) -> Vec<PaneId> {
 
 #[derive(Default)]
 struct ConfigLoadReport {
-    count: usize,
+    skipped_count: usize,
     skipped: Vec<String>,
+    invalid_count: usize,
+    invalid: Vec<String>,
 }
 
 impl ConfigLoadReport {
     const SUMMARY_NAMES: usize = 6;
 
     fn note_skip(&mut self, name: &str) {
-        self.count += 1;
+        self.skipped_count += 1;
         if !self.skipped.iter().any(|existing| existing == name) {
             self.skipped.push(name.to_owned());
         }
     }
 
+    fn note_invalid(&mut self, message: &str) {
+        self.invalid_count += 1;
+        if !self.invalid.iter().any(|existing| existing == message) {
+            self.invalid.push(message.to_owned());
+        }
+    }
+
     fn summary(&self) -> Option<String> {
-        if self.count == 0 {
+        if self.skipped_count == 0 && self.invalid_count == 0 {
             return None;
         }
+        let mut parts = Vec::new();
+        if self.skipped_count != 0 {
+            parts.push(format!(
+                "skipped {} unsupported tmux command{}: {}",
+                self.skipped_count,
+                if self.skipped_count == 1 { "" } else { "s" },
+                Self::summary_names(&self.skipped),
+            ));
+        }
+        if self.invalid_count != 0 {
+            parts.push(format!(
+                "{} invalid line{}: {}",
+                self.invalid_count,
+                if self.invalid_count == 1 { "" } else { "s" },
+                Self::summary_names(&self.invalid),
+            ));
+        }
+        Some(parts.join("; "))
+    }
+
+    fn summary_names(entries: &[String]) -> String {
         let mut names =
-            self.skipped
+            entries
                 .iter()
                 .take(Self::SUMMARY_NAMES)
                 .fold(String::new(), |mut names, name| {
@@ -7704,14 +7910,10 @@ impl ConfigLoadReport {
                     names.push_str(name);
                     names
                 });
-        if self.skipped.len() > Self::SUMMARY_NAMES {
+        if entries.len() > Self::SUMMARY_NAMES {
             names.push_str(", …");
         }
-        Some(format!(
-            "skipped {} unsupported tmux command{}: {names}",
-            self.count,
-            if self.count == 1 { "" } else { "s" },
-        ))
+        names
     }
 }
 
@@ -9159,12 +9361,20 @@ fn sync_copy_session_for_view_action(
     pane: PaneId,
     action: &zz_terminal::TerminalViewAction,
 ) -> Result<(), ServerError> {
-    if matches!(action, zz_terminal::TerminalViewAction::EnterCopyMode) {
+    if terminal_view_action_enters_copy_mode(action) {
         enter_copy_session(inner, client, pane)?;
     } else if terminal_view_action_exits_copy_mode(action) {
         exit_copy_session(inner, client);
     }
     Ok(())
+}
+
+fn terminal_view_action_enters_copy_mode(action: &zz_terminal::TerminalViewAction) -> bool {
+    matches!(
+        action,
+        zz_terminal::TerminalViewAction::EnterCopyMode
+            | zz_terminal::TerminalViewAction::EnterCopyModeScrollExit
+    )
 }
 
 fn terminal_view_action_exits_copy_mode(action: &zz_terminal::TerminalViewAction) -> bool {
@@ -9737,6 +9947,7 @@ fn terminal_view_action_is_input(action: &zz_terminal::TerminalViewAction) -> bo
         | Action::ClearSelection
         | Action::ClearHistory
         | Action::EnterCopyMode
+        | Action::EnterCopyModeScrollExit
         | Action::CopyMode(_)
         | Action::CopySelection { .. }
         | Action::SearchBegin(_)
@@ -10825,6 +11036,32 @@ fn expand_path(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+#[derive(Default)]
+struct SourceGlobMatches {
+    paths: Vec<PathBuf>,
+    errors: Vec<String>,
+}
+
+fn source_glob_matches(path: &Path) -> SourceGlobMatches {
+    match glob::glob(path.to_string_lossy().as_ref()) {
+        Ok(paths) => {
+            let mut matches = SourceGlobMatches::default();
+            for path in paths {
+                match path {
+                    Ok(path) => matches.paths.push(path),
+                    Err(error) => matches.errors.push(error.to_string()),
+                }
+            }
+            matches.paths.sort();
+            matches
+        }
+        Err(error) => SourceGlobMatches {
+            paths: Vec::new(),
+            errors: vec![error.to_string()],
+        },
+    }
+}
+
 fn expand_relative(source: &Path, nested: &str) -> PathBuf {
     let nested = expand_path(nested);
     if nested.is_absolute() {
@@ -11418,6 +11655,250 @@ mod tests {
     }
 
     #[test]
+    fn source_file_globs_nested_sources_and_refuses_standard_input() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let top = directory.path().join("top");
+        let nested = directory.path().join("nested");
+        fs::create_dir_all(&top).expect("top-level source directory");
+        fs::create_dir_all(&nested).expect("nested source directory");
+        fs::write(
+            top.join("10-first.conf"),
+            "set -g prefix C-a\nbind-key F2 new-window\n",
+        )
+        .expect("first top-level source");
+        fs::write(
+            top.join("20-second.conf"),
+            "set -g prefix C-z\nbind-key F3 kill-pane\n",
+        )
+        .expect("second top-level source");
+        fs::write(nested.join("10-first.conf"), "bind-key F4 new-window\n")
+            .expect("first nested source");
+        fs::write(nested.join("20-second.conf"), "bind-key F5 kill-pane\n")
+            .expect("second nested source");
+        let entry = directory.path().join("entry.conf");
+        fs::write(&entry, "source-file 'nested/*.conf'\n").expect("nested source entry");
+
+        let shared = Arc::new(Shared::new(50));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "source-glob"]),
+            )
+            .expect("source-file session");
+        take_reliable_messages(&mailbox);
+
+        let top_pattern = top.join("*.conf").display().to_string();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("source-file", [&top_pattern]),
+            )
+            .expect("top-level source glob");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("source-file", [entry.display().to_string()]),
+            )
+            .expect("nested source glob");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.keys.prefix(), "C-z");
+            for key in ["F2", "F3", "F4", "F5"] {
+                assert!(inner.engine.keys.get("prefix", key).is_some(), "{key}");
+            }
+        }
+
+        let unsupported_directory = directory.path().join("unsupported");
+        fs::create_dir_all(&unsupported_directory).expect("unsupported source directory");
+        fs::write(
+            unsupported_directory.join("ignored.conf"),
+            "bind-key F8 new-window\n",
+        )
+        .expect("unsupported nested source");
+        let unsupported_entry = directory.path().join("unsupported-entry.conf");
+        fs::write(
+            &unsupported_entry,
+            "source-file -v 'unsupported/*.conf'\nbind-key F7 new-window\n",
+        )
+        .expect("unsupported source entry");
+        let mut report = ConfigLoadReport::default();
+        shared
+            .load_config_file_with_report(&unsupported_entry, &mut context, 0, &mut report)
+            .expect("unsupported nested source is skipped");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.engine.keys.get("prefix", "F7").is_some());
+            assert!(inner.engine.keys.get("prefix", "F8").is_none());
+        }
+        assert!(
+            report
+                .summary()
+                .is_some_and(|summary| summary.contains("source-file -v"))
+        );
+
+        take_reliable_messages(&mailbox);
+        let missing = directory
+            .path()
+            .join("missing-*.conf")
+            .display()
+            .to_string();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("source-file", ["-q", &missing]),
+            )
+            .expect("quiet no-match source glob");
+        assert!(!take_reliable_messages(&mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage { .. },
+                    ..
+                })
+            )
+        }));
+
+        let malformed = directory.path().join("[").display().to_string();
+        let after_error = directory.path().join("after-error.conf");
+        fs::write(&after_error, "bind-key F6 new-window\n").expect("post-error source");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "source-file",
+                    ["-q", &malformed, &after_error.display().to_string()],
+                ),
+            )
+            .expect("glob error continues to later sources");
+        assert!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .keys
+                .get("prefix", "F6")
+                .is_some()
+        );
+        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage {
+                        kind: ClientMessageKind::Warning,
+                        text,
+                        ..
+                    },
+                    ..
+                }) if text.contains("source-file glob error")
+            )
+        }));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("source-file", [&missing]),
+            )
+            .expect("loud no-match source glob");
+        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage {
+                        kind: ClientMessageKind::Warning,
+                        text,
+                        ..
+                    },
+                    ..
+                }) if text.contains("no such file") && text.contains("missing-*.conf")
+            )
+        }));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("source-file", ["-q", "-"]),
+            )
+            .expect("standard-input refusal");
+        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage {
+                        kind: ClientMessageKind::Warning,
+                        text,
+                        ..
+                    },
+                    ..
+                }) if text.contains("source-file from standard input is not supported")
+            )
+        }));
+    }
+
+    #[test]
+    fn config_report_counts_invalid_and_unsupported_bound_commands() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let mux_config = directory.path().join("mux.conf");
+        fs::write(
+            &mux_config,
+            "bind F2 new-window\nbind x not-a-command\nbind r run-shell x\nbind F3 kill-pane\n",
+        )
+        .expect("mux config fixture");
+        let defaults = KeyTables::default();
+        let default_x = defaults.get("prefix", "x").cloned();
+        let default_r = defaults.get("prefix", "r").cloned();
+
+        let shared = Arc::new(Shared::new(52));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .reload_user_config_with_mux_file(client, &mut context, Some(&mux_config))
+            .expect("reload mixed config");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.engine.keys.get("prefix", "F2").is_some());
+            assert!(inner.engine.keys.get("prefix", "F3").is_some());
+            assert_eq!(inner.engine.keys.get("prefix", "x"), default_x.as_ref());
+            assert_eq!(inner.engine.keys.get("prefix", "r"), default_r.as_ref());
+        }
+        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage {
+                        kind: ClientMessageKind::Warning,
+                        text,
+                        ..
+                    },
+                    ..
+                }) if text.contains("skipped 1 unsupported tmux command")
+                    && text.contains("bind-key run-shell")
+                    && text.contains("1 invalid line")
+                    && text.contains("unknown command: not-a-command")
+            )
+        }));
+    }
+
+    #[test]
     fn invalid_mux_override_is_diagnostic_and_later_entries_still_apply() {
         let shared = Arc::new(Shared::new(46));
         let report = shared.apply_mux_config_overrides(
@@ -11958,7 +12439,7 @@ mod tests {
 
     #[test]
     fn tools_catalog_matches_dispatchable_verbs() {
-        const DAEMON_VERBS: [&str; 6] = [
+        const TOOL_VERBS: [&str; 6] = [
             "capture-pane",
             "agent-send",
             "send-last-output",
@@ -11976,16 +12457,34 @@ mod tests {
                 }
             }
         }
-        for verb in DAEMON_VERBS {
+        for verb in TOOL_VERBS {
             assert!(documented.contains(verb), "catalog is missing `zz {verb}`");
         }
         for verb in &documented {
             assert!(
-                DAEMON_VERBS.contains(verb) || zz_mux::command_spec(verb).is_some(),
+                TOOL_VERBS.contains(verb) || zz_mux::command_spec(verb).is_some(),
                 "catalog documents `zz {verb}`, which no command implements"
             );
         }
         assert!(catalog.contains(crate::transport::SOCKET_ENVIRONMENT_VARIABLE));
+    }
+
+    #[test]
+    fn daemon_command_catalog_matches_preemption_dispatch() {
+        let names = zz_mux::CommandSpec::DAEMON_COMMAND_NAMES
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let dispatches = DAEMON_COMMAND_DISPATCHES
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(zz_mux::CommandSpec::DAEMON_COMMAND_NAMES.len(), names.len());
+        assert_eq!(DAEMON_COMMAND_DISPATCHES.len(), dispatches.len());
+        assert_eq!(names, dispatches);
+        for name in ["new-session", "capture-pane-extra"] {
+            assert!(daemon_command_dispatch(name).is_none());
+        }
     }
 
     #[test]
@@ -14533,6 +15032,142 @@ bind - split-window -v -c "#{pane_current_path}"
             Modifiers::default(),
             false,
         )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_mode_scroll_exit_reconciles_the_client_copy_session() {
+        for (name, copy_args, exits) in [
+            ("copy-scroll-exit", &["-e"][..], true),
+            ("copy-scroll-stays", &[][..], false),
+        ] {
+            let (shared, client, mut context, pane, terminal, _mailbox) = copy_mode_fixture(
+                name,
+                "i=0; while [ $i -lt 12 ]; do printf 'line-%02d\\n' \"$i\"; i=$((i+1)); done",
+            );
+            let view = TerminalViewId(client.0);
+            let target = pane.to_string();
+            let args = copy_args
+                .iter()
+                .copied()
+                .chain(["-t", target.as_str()])
+                .collect::<Vec<_>>();
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("copy-mode", args),
+                )
+                .expect("enter copy mode");
+            wait_for_view_mode(&terminal, view, "copy mode did not freeze", |mode| {
+                matches!(mode, TerminalMode::Copy { .. })
+            });
+            wait_for_observed_copy_session(&shared, client);
+            let generation = terminal
+                .latest_viewport_for(view)
+                .expect("copy viewport")
+                .view_generation;
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("send-keys", ["-t", &target, "-X", "page-down"]),
+                )
+                .expect("page down");
+            if exits {
+                wait_for_view_mode(
+                    &terminal,
+                    view,
+                    "scroll-exit did not leave copy mode",
+                    |mode| mode == TerminalMode::Live,
+                );
+                wait_for_root_key_table(
+                    &shared,
+                    client,
+                    "scroll-exit left the client on a copy table",
+                );
+            } else {
+                wait_for_viewport(
+                    &terminal,
+                    view,
+                    "plain copy mode did not publish page-down",
+                    |viewport| {
+                        viewport.view_generation > generation
+                            && matches!(viewport.mode, TerminalMode::Copy { .. })
+                    },
+                );
+                let inner = shared.inner.lock();
+                assert!(inner.copy_sessions.contains_key(&client));
+                assert_eq!(
+                    inner
+                        .key_engines
+                        .get(&client)
+                        .and_then(KeyEngine::active_table),
+                    Some("copy-mode")
+                );
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn send_keys_count_prefix_moves_once_with_the_armed_count() {
+        let (shared, client, mut context, pane, terminal, _mailbox) = copy_mode_fixture(
+            "copy-repeat-count",
+            "i=0; while [ $i -lt 12 ]; do printf 'line-%02d\\n' \"$i\"; i=$((i+1)); done",
+        );
+        let view = TerminalViewId(client.0);
+        let target = pane.to_string();
+        for command in [
+            CommandInvocation::new("set-window-option", ["mode-keys", "vi"]),
+            CommandInvocation::new("copy-mode", ["-t", &target]),
+        ] {
+            shared
+                .execute(client, ClientKind::Interactive, &mut context, &command)
+                .expect("configure copy mode");
+        }
+        wait_for_view_mode(&terminal, view, "copy mode did not freeze", |mode| {
+            matches!(mode, TerminalMode::Copy { .. })
+        });
+        wait_for_observed_copy_session(&shared, client);
+        let start = match terminal
+            .latest_viewport_for(view)
+            .expect("copy viewport")
+            .mode
+        {
+            TerminalMode::Copy { position, .. } => position,
+            other => panic!("expected copy mode, got {other:?}"),
+        };
+        assert!(start > 3);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("send-keys", ["-t", &target, "-N", "3"]),
+            )
+            .expect("arm copy-mode count");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: test_key(KeyCode::Character('k'), Modifiers::default(), Some("k")),
+                    text_follows: false,
+                },
+            )
+            .expect("counted movement key");
+        wait_for_view_mode(&terminal, view, "counted movement did not land", |mode| {
+            matches!(
+                mode,
+                TerminalMode::Copy { position, .. } if position == start - 3
+            )
+        });
     }
 
     #[cfg(unix)]
@@ -19583,6 +20218,33 @@ bind - split-window -v -c "#{pane_current_path}"
             .collect()
     }
 
+    #[cfg(unix)]
+    fn ring_terminal_and_wait_for_bell(
+        shared: &Arc<Shared>,
+        mailbox: &OutboundMailbox,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+    ) {
+        terminal.send_text("printf '\\007'\n");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut saw_edge = false;
+        loop {
+            saw_edge |= bell_events(&take_reliable_messages(mailbox)).contains(&pane);
+            let state_belled = shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(pane)
+                .is_some_and(|pane| pane.bell);
+            if saw_edge && state_belled {
+                return;
+            }
+            assert!(Instant::now() < deadline, "bell did not publish");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn a_bell_publishes_one_edge_and_a_flag_that_input_clears() {
         let shared = Arc::new(Shared::new(1));
@@ -19675,6 +20337,127 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("select the belled pane");
         assert!(!pane_bell(&take_reliable_messages(&mailbox), second));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn activating_a_belled_window_releases_the_terminal_bell_latch() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "bell-window"]),
+            )
+            .expect("new session");
+        let session = context.session.expect("session");
+        let first_window = context.window.expect("first window");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-window", ["-d", "-n", "alert"]),
+            )
+            .expect("background window");
+        let (alert_window, alert_pane, terminal) = {
+            let inner = shared.inner.lock();
+            let alert_window = inner.engine.state.sessions[&session]
+                .windows
+                .iter()
+                .copied()
+                .find(|window| *window != first_window)
+                .expect("alert window");
+            let alert_pane = inner.engine.state.windows[&alert_window].active_pane;
+            (
+                alert_window,
+                alert_pane,
+                Arc::clone(&inner.terminals[&alert_pane]),
+            )
+        };
+        assert_eq!(
+            shared.inner.lock().engine.state.sessions[&session].active_window,
+            first_window
+        );
+        take_reliable_messages(&mailbox);
+
+        ring_terminal_and_wait_for_bell(&shared, &mailbox, alert_pane, &terminal);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("next-window", ["-a"]),
+            )
+            .expect("activate alerted window");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.engine.state.sessions[&session].active_window,
+                alert_window
+            );
+            assert!(
+                !inner
+                    .engine
+                    .state
+                    .pane(alert_pane)
+                    .expect("alert pane")
+                    .bell
+            );
+        }
+        take_reliable_messages(&mailbox);
+
+        ring_terminal_and_wait_for_bell(&shared, &mailbox, alert_pane, &terminal);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_session_dash_c_releases_the_terminal_bell_latch() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "bell-clear"]),
+            )
+            .expect("new session");
+        let session = context.session.expect("session");
+        let pane = context.pane.expect("pane");
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        take_reliable_messages(&mailbox);
+        ring_terminal_and_wait_for_bell(&shared, &mailbox, pane, &terminal);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("kill-session", ["-C", "-t", &session.to_string()]),
+            )
+            .expect("clear session alerts");
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(pane)
+                .expect("pane")
+                .bell
+        );
+        take_reliable_messages(&mailbox);
+        ring_terminal_and_wait_for_bell(&shared, &mailbox, pane, &terminal);
     }
 
     #[test]

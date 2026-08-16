@@ -86,13 +86,11 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 
 | Where | Divergence | Loud or silent? |
 | --- | --- | --- |
-| `copy-mode` | `-e -q -M -H -S -s` rejected; tmux's **own default bindings** use `-e`/`-q`/`-M`, so pasted stock configs hard-error. | loud |
-| `source-file` | No globbing (`conf.d/*.conf` matches nothing), no `-` stdin, no `-F`/`-n`. | glob is **silent** under `-q` |
-| `next/previous-window -a` | Bells never clear on window activation, so a second `-a` re-picks the same window where tmux errors. | **silent** |
+| `copy-mode` | `-k -H -S -s` rejected (`-e`/`-q`/`-M` — the stock-binding trio — are implemented). | loud |
+| `source-file` | No `-` stdin (refused loudly), no `-F`/`-n`/`-v`. Globbing works. | loud |
 | Alerts | Bell-only: `monitor-activity`/`monitor-silence` don't exist. Matches tmux defaults, ignores those configs. | **silent** |
 | `resize-pane` (nested) | The ratio tree rescales sibling panes; tmux moves exactly one boundary and preserves other panes' cells. | **silent** drift |
 | Pane sizes | Splits and percentages clamp to 10–90%; tmux allows down to `PANE_MINIMUM` (1 cell). | loud on `%`, silent clamp |
-| `send-keys -N` (no keys) | Doesn't arm tmux's copy-mode count prefix, so tmux's stock vi digit bindings no-op. | **silent** |
 | `send-keys -X` | `select-line`/`copy-end-of-line` ignore counts; flags written after the verb (`-X copy-selection -C`) parse as positionals; no "not in a mode" error. | **silent** |
 | `send-keys -H` | Bytes `80`–`ff` refused; tmux writes the raw byte (`KeyToken::Literal` carries UTF-8). | loud |
 | `split-window -f` | New pane numbered adjacent to the target; tmux numbers a full-size pane first/last. | **silent** |
@@ -102,7 +100,6 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | `set -o` | Errors where tmux's `-o`+`-u` combination silently ignores `-o`; `-q` doesn't silence invalid option names. | loud |
 | Brace blocks | Empty `{}` and a trailing `\;` error; tmux accepts both. | loud |
 | Unguarded commands | Closed by the [drop-in plan](/designs/tmux-drop-in.md)'s phase 0: every engine command rejects options centrally from its catalog `CommandSpec` — flags tmux has at the pin but zz lacks error as unsupported (and count in config-import skip reports); flags tmux doesn't have error as invalid. Residual: the daemon-side `capture-pane`/buffer family still hand-rolls parsing. | loud |
-| `bind-key` payloads | Bound commands are stored without validation; an unsupported command inside a binding fails only at keypress and never counts as a skipped config line. | **silent** |
 | Error strings | Several differ (zz `index in use: 2` vs tmux `create window failed: index 2 in use`). | cosmetic |
 
 # Options: 12 of 180

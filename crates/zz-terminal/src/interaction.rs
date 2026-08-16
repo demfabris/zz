@@ -353,6 +353,7 @@ pub enum CopyModeAction {
     },
     CopyEndOfLine(Box<CopyModeCopy>),
     GotoLine(u32),
+    PageDownScrollExit,
 }
 
 impl CopyModeAction {
@@ -411,6 +412,7 @@ pub enum TerminalViewAction {
     Paste(String),
     /// Move the live viewport top to an absolute scrollbar offset.
     ScrollToOffset(u32),
+    EnterCopyModeScrollExit,
 }
 
 #[cfg(test)]

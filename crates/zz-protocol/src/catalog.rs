@@ -113,6 +113,10 @@ pub struct CommandSpec {
 }
 
 impl CommandSpec {
+    pub const DAEMON_COMMAND_NAMES: &'static [&'static str] = crate::catalog::DAEMON_COMMAND_NAMES;
+    pub const UNIMPLEMENTED_TMUX_COMMANDS: &'static [&'static str] =
+        crate::catalog::UNIMPLEMENTED_TMUX_COMMANDS;
+
     #[must_use]
     pub fn positional_kind(&self, index: usize) -> Option<CommandValueKind> {
         self.positionals.get(index).copied().or(self.variadic)
@@ -127,6 +131,102 @@ impl CommandSpec {
 use CommandValueKind::{
     Boolean, FreeForm, KeyTable, Layout, Pane, PaneKind, Session, SetOption, Window,
 };
+
+pub static DAEMON_COMMAND_NAMES: &[&str] = &[
+    "capture-pane",
+    "capturep",
+    "agent-send",
+    "send-last-output",
+    "capture-browser",
+    "debug-marker",
+    "tools",
+    "set-buffer",
+    "setb",
+    "show-buffer",
+    "showb",
+    "list-buffers",
+    "lsb",
+    "load-buffer",
+    "loadb",
+    "save-buffer",
+    "saveb",
+    "delete-buffer",
+    "deleteb",
+    "paste-buffer",
+    "pasteb",
+];
+
+pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
+    "run-shell",
+    "run",
+    "if-shell",
+    "if",
+    "set-hook",
+    "show-hooks",
+    "wait-for",
+    "wait",
+    "pipe-pane",
+    "pipep",
+    "lock-client",
+    "lockc",
+    "lock-server",
+    "lock",
+    "lock-session",
+    "locks",
+    "server-access",
+    "start-server",
+    "start",
+    "display-popup",
+    "popup",
+    "display-menu",
+    "menu",
+    "confirm-before",
+    "confirm",
+    "customize-mode",
+    "choose-client",
+    "clock-mode",
+    "refresh-client",
+    "refresh",
+    "suspend-client",
+    "suspendc",
+    "switch-client",
+    "switchc",
+    "show-options",
+    "show",
+    "show-window-options",
+    "showw",
+    "move-window",
+    "movew",
+    "swap-window",
+    "swapw",
+    "set-environment",
+    "setenv",
+    "show-environment",
+    "showenv",
+    "respawn-pane",
+    "respawnp",
+    "respawn-window",
+    "respawnw",
+    "find-window",
+    "findw",
+    "list-clients",
+    "lsc",
+    "list-commands",
+    "lscm",
+    "link-window",
+    "linkw",
+    "unlink-window",
+    "unlinkw",
+    "resize-window",
+    "resizew",
+    "show-messages",
+    "showmsgs",
+    "clear-prompt-history",
+    "clearphist",
+    "show-prompt-history",
+    "showphist",
+    "switch-mode",
+];
 
 /// Every tmux-compatible command currently executable by the mux engine.
 pub static COMMAND_SPECS: &[CommandSpec] = &[
@@ -753,11 +853,11 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-d", "scroll one page down"),
             CommandOptionSpec::flag("-u", "scroll one page up"),
-            CommandOptionSpec::unsupported_flag("-e"),
+            CommandOptionSpec::flag("-e", "exit copy mode at the bottom of history"),
             CommandOptionSpec::unsupported_flag("-k"),
             CommandOptionSpec::unsupported_flag("-H"),
-            CommandOptionSpec::unsupported_flag("-M"),
-            CommandOptionSpec::unsupported_flag("-q"),
+            CommandOptionSpec::flag("-M", "use the command mouse event"),
+            CommandOptionSpec::flag("-q", "cancel copy mode"),
             CommandOptionSpec::unsupported_flag("-S"),
             CommandOptionSpec::unsupported_value("-s"),
         ],
@@ -1052,6 +1152,30 @@ mod tests {
     fn unknown_commands_remain_available_for_structured_errors() {
         assert_eq!(canonical_command("future-command"), "future-command");
         assert!(command_spec("future-command").is_none());
+    }
+
+    #[test]
+    fn external_command_name_lists_are_unique_and_disjoint() {
+        let mut names = BTreeSet::new();
+        for name in DAEMON_COMMAND_NAMES {
+            assert!(names.insert(*name), "duplicate daemon command {name}");
+        }
+        assert_eq!(names.len(), DAEMON_COMMAND_NAMES.len());
+        for name in UNIMPLEMENTED_TMUX_COMMANDS {
+            assert!(
+                names.insert(*name),
+                "duplicate or overlapping unimplemented command {name}"
+            );
+            assert!(command_spec(name).is_none());
+        }
+        assert_eq!(
+            CommandSpec::DAEMON_COMMAND_NAMES,
+            crate::catalog::DAEMON_COMMAND_NAMES
+        );
+        assert_eq!(
+            CommandSpec::UNIMPLEMENTED_TMUX_COMMANDS,
+            crate::catalog::UNIMPLEMENTED_TMUX_COMMANDS
+        );
     }
 
     #[test]

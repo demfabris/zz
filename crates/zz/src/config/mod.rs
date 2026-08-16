@@ -1623,7 +1623,7 @@ fn parse_geometry_value(value: &str, (min, max): (f32, f32)) -> Result<f32, Stri
 }
 
 fn parse_boolean(value: &str) -> Result<bool, String> {
-    match value {
+    match value.to_ascii_lowercase().as_str() {
         "on" | "yes" | "1" | "true" => Ok(true),
         "off" | "no" | "0" | "false" => Ok(false),
         _ => Err("expected a boolean (`true`/`on`/`yes`/`1` or `false`/`off`/`no`/`0`)".to_owned()),

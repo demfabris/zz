@@ -514,36 +514,41 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("new-session", args)?;
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-A" | "-d" | "-D"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "new-session {flag}"
+            )));
+        }
         if options.value("-t").is_some() {
             return Err(ServerError::UnsupportedCommand(
                 "new-session -t (session groups)".to_owned(),
             ));
         }
+        reject_unsupported_values("new-session", &options, &["-e", "-F", "-f", "-x", "-y"])?;
         let command = shell_command_positional(&positional);
         let detached = options.has("-d");
-        if options.has("-A")
-            && let Some(name) = options.value("-s")
-            && let Some(session) = session_named(&self.state, name)
-        {
-            let window = session_active_window(&self.state, session)?;
-            let pane = window_active_pane(&self.state, window)?;
-            *context = ExecutionContext {
-                session: Some(session),
-                window: Some(window),
-                pane: Some(pane),
+        if options.has("-A") {
+            let existing = match options.value("-s") {
+                Some(name) => session_named(&self.state, name),
+                None => self.state.resolve_session(None, context.session).ok(),
             };
-            let effects = if detached {
-                Vec::new()
-            } else {
-                vec![MuxEffect::Attach {
+            if let Some(session) = existing {
+                let window = session_active_window(&self.state, session)?;
+                let pane = window_active_pane(&self.state, window)?;
+                *context = ExecutionContext {
+                    session: Some(session),
+                    window: Some(window),
+                    pane: Some(pane),
+                };
+                return Ok(Execution::effect(MuxEffect::Attach {
                     session,
-                    detach_others: false,
-                }]
-            };
-            return Ok(Execution {
-                output: String::new(),
-                effects,
-            });
+                    detach_others: options.has("-D"),
+                }));
+            }
         }
         let inherit_cwd_from = spawn_cwd_source(
             "new-session",
@@ -651,10 +656,35 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-session", args)?;
-        let target = options
-            .value("-t")
-            .or_else(|| positional.first().map(String::as_str));
-        let session = self.state.resolve_session(target, context.session)?;
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-a" | "-C"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "kill-session {flag}"
+            )));
+        }
+        reject_positionals("kill-session", &positional)?;
+        let session = self
+            .state
+            .resolve_session(options.value("-t"), context.session)?;
+        if options.has("-C") {
+            let panes = self
+                .state
+                .sessions
+                .get(&session)
+                .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?
+                .windows
+                .iter()
+                .filter_map(|window| self.state.windows.get(window))
+                .flat_map(|window| window.pane_order().to_vec())
+                .collect::<Vec<_>>();
+            for pane in panes {
+                self.state.set_pane_bell(pane, false);
+            }
+            return Ok(Execution::default());
+        }
         let targets = if options.has("-a") {
             self.state
                 .sessions
@@ -683,11 +713,11 @@ impl MuxEngine {
                 "attach-session {flag}"
             )));
         }
-        let target = options
-            .value("-t")
-            .or_else(|| positional.first().map(String::as_str));
+        reject_positionals("attach-session", &positional)?;
         let detach_others = options.has("-d");
-        let session = self.state.resolve_session(target, context.session)?;
+        let session = self
+            .state
+            .resolve_session(options.value("-t"), context.session)?;
         let window = session_active_window(&self.state, session)?;
         let pane = window_active_pane(&self.state, window)?;
         *context = ExecutionContext {
@@ -743,6 +773,14 @@ impl MuxEngine {
         kind: PaneKind,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("new-window", args)?;
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-a" | "-d" | "-k" | "-S"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!("new-window {flag}")));
+        }
+        reject_unsupported_values("new-window", &options, &["-e", "-F"])?;
         let command = shell_command_positional(&positional);
         self.new_window_with_options(context, &options, kind, command)
     }
@@ -1044,19 +1082,23 @@ impl MuxEngine {
             let index = (current_index + steps * direction).rem_euclid(len);
             state.windows[usize::try_from(index).expect("nonnegative index")]
         };
+        let no_window = || {
+            ServerError::InvalidCommand(format!(
+                "no {} window",
+                if direction > 0 { "next" } else { "previous" }
+            ))
+        };
         let window = if alerted_only {
             (1..=len)
                 .map(step_to)
                 .find(|window| self.window_alerted(*window))
-                .ok_or_else(|| {
-                    ServerError::MissingTarget(format!(
-                        "{} window with an alert",
-                        if direction > 0 { "next" } else { "previous" }
-                    ))
-                })?
+                .ok_or_else(no_window)?
         } else {
             step_to(1)
         };
+        if window == current {
+            return Err(no_window());
+        }
         self.state.select_window(session, window)?;
         context.session = Some(session);
         context.window = Some(window);
@@ -1077,12 +1119,15 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-window", args)?;
-        let target = options
-            .value("-t")
-            .or_else(|| positional.first().map(String::as_str));
+        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-a") {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "kill-window {flag}"
+            )));
+        }
+        reject_positionals("kill-window", &positional)?;
         let window = self
             .state
-            .resolve_window(target, context.session, context.window)?;
+            .resolve_window(options.value("-t"), context.session, context.window)?;
         let targets = if options.has("-a") {
             let session = self
                 .state
@@ -1116,6 +1161,16 @@ impl MuxEngine {
         kind: Option<PaneKind>,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("split-window", args)?;
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-b" | "-d" | "-f" | "-h" | "-v"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "split-window {flag}"
+            )));
+        }
+        reject_unsupported_values("split-window", &options, &["-e"])?;
         let command = shell_command_positional(&positional);
         self.split_window_with_options(
             context,
@@ -1883,6 +1938,15 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("resize-pane", args)?;
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-D" | "-L" | "-R" | "-U" | "-Z"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "resize-pane {flag}"
+            )));
+        }
         let pane = self
             .state
             .resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -1905,7 +1969,6 @@ impl MuxEngine {
                 "resize-pane accepts at most one adjustment".to_owned(),
             ));
         }
-        let mut resized = false;
         for (option, axis) in [("-x", Axis::Horizontal), ("-y", Axis::Vertical)] {
             let Some(value) = options.value(option) else {
                 continue;
@@ -1922,32 +1985,29 @@ impl MuxEngine {
                         .ok_or_else(|| geometry_unavailable(&format!("resize-pane {option}")))?
             };
             self.state.resize_pane_to(pane, axis, fraction)?;
-            resized = true;
         }
-        if resized {
-            return Ok(Execution::default());
-        }
-        let cells = positional
+        let shared = positional
             .first()
-            .map(|value| {
-                value.parse::<f32>().map_err(|_| {
-                    ServerError::InvalidCommand(format!("invalid resize adjustment: {value}"))
-                })
-            })
-            .transpose()?
-            .unwrap_or(1.0);
-        let axis = if options.has("-U") || options.has("-D") {
-            Axis::Vertical
-        } else {
-            Axis::Horizontal
-        };
-        let sign = if options.has("-L") || options.has("-U") {
-            -1.0
-        } else {
-            1.0
-        };
-        let extent = self.window_cell_extent(pane, axis);
-        self.state.resize_pane(pane, axis, sign * cells, extent)?;
+            .map(|value| parse_resize_adjustment(value))
+            .transpose()?;
+        for (option, axis, sign) in [
+            ("-L", Axis::Horizontal, -1.0),
+            ("-R", Axis::Horizontal, 1.0),
+            ("-U", Axis::Vertical, -1.0),
+            ("-D", Axis::Vertical, 1.0),
+        ] {
+            let attached = options
+                .value(option)
+                .map(parse_resize_adjustment)
+                .transpose()?;
+            if attached.is_none() && !options.has(option) {
+                continue;
+            }
+            let cells = attached.or(shared).unwrap_or(1);
+            let extent = self.window_cell_extent(pane, axis);
+            self.state
+                .resize_pane(pane, axis, sign * cells as f32, extent)?;
+        }
         Ok(Execution::default())
     }
 
@@ -2071,12 +2131,13 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-pane", args)?;
-        let target = options
-            .value("-t")
-            .or_else(|| positional.first().map(String::as_str));
+        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-a") {
+            return Err(ServerError::UnsupportedCommand(format!("kill-pane {flag}")));
+        }
+        reject_positionals("kill-pane", &positional)?;
         let pane = self
             .state
-            .resolve_pane(target, context.window, context.pane)?;
+            .resolve_pane(options.value("-t"), context.window, context.pane)?;
         let targets = if options.has("-a") {
             let window = self
                 .state
@@ -2148,7 +2209,7 @@ impl MuxEngine {
                 .map(|value| hex_key_token(value))
                 .collect::<Result<Vec<_>, _>>()?
         } else if options.has("-l") {
-            vec![KeyToken::Literal(positional.join(" "))]
+            vec![KeyToken::Literal(positional.concat())]
         } else {
             positional.iter().map(|value| key_token(value)).collect()
         };
@@ -2187,11 +2248,6 @@ impl MuxEngine {
             return Err(ServerError::UnsupportedCommand(format!("copy-mode {flag}")));
         }
         reject_positionals("copy-mode", &positional)?;
-        if options.has("-d") && options.has("-u") {
-            return Err(ServerError::InvalidCommand(
-                "copy-mode cannot combine -d and -u".to_owned(),
-            ));
-        }
         let pane = self
             .state
             .resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -2199,17 +2255,16 @@ impl MuxEngine {
             pane,
             action: TerminalViewAction::EnterCopyMode,
         }];
-        let scroll = if options.has("-u") {
-            Some(CopyModeAction::PageUp)
-        } else if options.has("-d") {
-            Some(CopyModeAction::PageDown)
-        } else {
-            None
-        };
-        if let Some(action) = scroll {
+        if options.has("-u") {
             effects.push(MuxEffect::TerminalView {
                 pane,
-                action: TerminalViewAction::CopyMode(action),
+                action: TerminalViewAction::CopyMode(CopyModeAction::PageUp),
+            });
+        }
+        if options.has("-d") {
+            effects.push(MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::CopyMode(CopyModeAction::PageDown),
             });
         }
         Ok(Execution {
@@ -2542,7 +2597,19 @@ impl MuxEngine {
         if let Some(flag) = options.flags.first() {
             return Err(ServerError::UnsupportedCommand(format!("list-keys {flag}")));
         }
-        reject_positionals("list-keys", &positional)?;
+        if let Some(argument) = positional.first() {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "list-keys {argument} (key filter)"
+            )));
+        }
+        if let Some(table) = options.value("-T")
+            && !matches!(table, "root" | "prefix" | "copy-mode" | "copy-mode-vi")
+            && self.keys.table_names().all(|name| name != table)
+        {
+            return Err(ServerError::InvalidCommand(format!(
+                "table {table} doesn't exist"
+            )));
+        }
         let output = self
             .keys
             .list(options.value("-T"))
@@ -3242,15 +3309,32 @@ impl MuxEngine {
 }
 
 fn parse_flag_value(value: Option<&str>, current: bool) -> Result<bool, ServerError> {
-    match value {
-        None => Ok(!current),
-        // `true`/`false` is the zz/config spelling, forwarded verbatim as a value.
-        Some("on" | "yes" | "1" | "true") => Ok(true),
-        Some("off" | "no" | "0" | "false") => Ok(false),
-        Some(value) => Err(ServerError::InvalidCommand(format!(
-            "invalid flag value: {value}"
-        ))),
+    // tmux: `1` is exact, `on`/`yes` (and their negatives) compare with
+    // strcasecmp, and a missing or empty value toggles. `true`/`false` is the
+    // zz/config spelling, forwarded verbatim as a value.
+    let Some(value) = value else {
+        return Ok(!current);
+    };
+    if value.is_empty() {
+        return Ok(!current);
     }
+    if value == "1"
+        || ["on", "yes", "true"]
+            .iter()
+            .any(|spelling| value.eq_ignore_ascii_case(spelling))
+    {
+        return Ok(true);
+    }
+    if value == "0"
+        || ["off", "no", "false"]
+            .iter()
+            .any(|spelling| value.eq_ignore_ascii_case(spelling))
+    {
+        return Ok(false);
+    }
+    Err(ServerError::InvalidCommand(format!(
+        "invalid flag value: {value}"
+    )))
 }
 
 fn parse_mode_keys(value: Option<&str>, current: ModeKeys) -> Result<ModeKeys, ServerError> {
@@ -3394,12 +3478,18 @@ fn parse_command_options(
         .iter()
         .filter_map(|option| option.value.map(|_| option.name))
         .collect::<Vec<_>>();
-    parse_options(args, &value_options)
+    let attached_options = spec
+        .options
+        .iter()
+        .filter_map(|option| option.attached_value.then_some(option.name))
+        .collect::<Vec<_>>();
+    parse_options(args, &value_options, &attached_options)
 }
 
 fn parse_options(
     args: &[String],
     value_options: &[&str],
+    attached_options: &[&str],
 ) -> Result<(Options, Vec<String>), ServerError> {
     let mut options = Options::default();
     let mut index = 0;
@@ -3414,6 +3504,15 @@ fn parse_options(
         let mut cluster = argument[1..].chars();
         while let Some(character) = cluster.next() {
             let name = format!("-{character}");
+            if attached_options.contains(&name.as_str()) {
+                let attached = cluster.as_str();
+                if attached.is_empty() {
+                    options.flags.push(name);
+                } else {
+                    options.values.push((name, attached.to_owned()));
+                }
+                break;
+            }
             if !value_options.contains(&name.as_str()) {
                 options.flags.push(name);
                 continue;
@@ -3463,6 +3562,27 @@ fn reject_positionals(command: &str, positional: &[String]) -> Result<(), Server
     }
 }
 
+fn reject_unsupported_values(
+    command: &str,
+    options: &Options,
+    unsupported: &[&str],
+) -> Result<(), ServerError> {
+    for option in unsupported {
+        if options.value(option).is_some() {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "{command} {option}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn parse_resize_adjustment(value: &str) -> Result<i32, ServerError> {
+    value.parse::<i32>().map_err(|_| {
+        ServerError::InvalidCommand(format!("invalid resize adjustment: {value}"))
+    })
+}
+
 fn exactly_one_argument<'a>(
     command: &str,
     positional: &'a [String],
@@ -3494,8 +3614,11 @@ struct WindowDestination {
 }
 
 /// tmux's target-window-with-index resolution, the form `new-window -t` and
-/// `break-pane -t` use: the index need not exist yet, and a bare name is a
-/// session before it is a window index.
+/// `break-pane -t` use: the index need not exist yet, and a bare numeric
+/// target is a window index in the current session before anything else —
+/// even when a session shares that name (cmd-find.c tries the window part
+/// first and only falls back to a session lookup when every window
+/// interpretation fails).
 fn window_destination(
     state: &MuxState,
     target: Option<&str>,
@@ -3539,18 +3662,13 @@ fn window_destination(
             index: Some(index),
         });
     }
-    match state.resolve_session(Some(target), context.session) {
-        Ok(session) => session_destination(session),
-        Err(ServerError::MissingTarget(_)) => Ok(WindowDestination {
+    if let Ok(index) = target.parse::<u32>() {
+        return Ok(WindowDestination {
             session: state.resolve_session(None, context.session)?,
-            index: Some(
-                target
-                    .parse::<u32>()
-                    .map_err(|_| ServerError::MissingTarget(target.to_owned()))?,
-            ),
-        }),
-        Err(error) => Err(error),
+            index: Some(index),
+        });
     }
+    session_destination(state.resolve_session(Some(target), context.session)?)
 }
 
 fn session_named(state: &MuxState, name: &str) -> Option<SessionId> {
@@ -3688,14 +3806,29 @@ fn key_token(value: &str) -> KeyToken {
     }
 }
 
+/// tmux's `send-keys -H` is strtol(16) clamped to one byte, written raw to the
+/// pane. `KeyToken::Literal` carries UTF-8 text, so only the ASCII range maps
+/// to the same bytes tmux writes; high bytes are refused rather than silently
+/// re-encoded.
 fn hex_key_token(value: &str) -> Result<KeyToken, ServerError> {
-    u32::from_str_radix(value, 16)
-        .ok()
-        .and_then(char::from_u32)
-        .map(|character| KeyToken::Literal(character.to_string()))
-        .ok_or_else(|| {
-            ServerError::InvalidCommand(format!("send-keys -H needs a character code: {value}"))
-        })
+    let digits = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    let code = u32::from_str_radix(digits, 16).map_err(|_| {
+        ServerError::InvalidCommand(format!("send-keys -H needs a character code: {value}"))
+    })?;
+    match code {
+        0x00..=0x7f => Ok(KeyToken::Literal(
+            char::from_u32(code).expect("ascii range").to_string(),
+        )),
+        0x80..=0xff => Err(ServerError::UnsupportedCommand(format!(
+            "send-keys -H {value} (raw bytes above 7f)"
+        ))),
+        _ => Err(ServerError::InvalidCommand(format!(
+            "send-keys -H needs a character code: {value}"
+        ))),
+    }
 }
 
 fn repeat_count(command: &str, options: &Options) -> Result<usize, ServerError> {
@@ -3712,12 +3845,34 @@ fn repeat_count(command: &str, options: &Options) -> Result<usize, ServerError> 
 
 /// tmux hands the repeat count to the copy-mode command, which uses it only when
 /// it is a movement; repeating a copy or a cancel would mean something else.
+/// The copy-mode commands that honor tmux's `-N` repeat prefix: exactly the
+/// window-copy handlers that read `wme->prefix` and loop. Everything else runs
+/// once no matter the count (a repeated `rectangle-toggle` or copy would be a
+/// different command, not a repeated one).
 fn repeats_in_copy_mode(action: &CopyModeAction) -> bool {
-    !matches!(
+    matches!(
         action,
-        CopyModeAction::CopySelection(_)
-            | CopyModeAction::CopyEndOfLine(_)
-            | CopyModeAction::Cancel
+        CopyModeAction::Left
+            | CopyModeAction::Right
+            | CopyModeAction::Up
+            | CopyModeAction::Down
+            | CopyModeAction::PageUp
+            | CopyModeAction::PageDown
+            | CopyModeAction::HalfPageUp
+            | CopyModeAction::HalfPageDown
+            | CopyModeAction::ScrollUp
+            | CopyModeAction::ScrollDown
+            | CopyModeAction::NextWord
+            | CopyModeAction::PreviousWord
+            | CopyModeAction::NextWordEnd
+            | CopyModeAction::NextSpace
+            | CopyModeAction::PreviousSpace
+            | CopyModeAction::NextSpaceEnd
+            | CopyModeAction::NextParagraph
+            | CopyModeAction::PreviousParagraph
+            | CopyModeAction::Jump(_)
+            | CopyModeAction::RepeatJump { .. }
+            | CopyModeAction::SearchAgain { .. }
     )
 }
 
@@ -4127,13 +4282,40 @@ mod tests {
         assert_eq!(context.pane, Some(pane));
         assert_eq!(engine.state.sessions.len(), 2);
 
-        let quiet = engine
+        let ignores_detach = engine
             .execute(
                 &mut context,
                 &command("new-session", &["-A", "-d", "-s", "work"]),
             )
             .expect("attach or create");
-        assert!(quiet.effects.is_empty());
+        assert_eq!(
+            ignores_detach.effects,
+            [MuxEffect::Attach {
+                session,
+                detach_others: false,
+            }]
+        );
+
+        let detaches_others = engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-A", "-D", "-s", "work"]),
+            )
+            .expect("attach or create");
+        assert_eq!(
+            detaches_others.effects,
+            [MuxEffect::Attach {
+                session,
+                detach_others: true,
+            }]
+        );
+
+        let bare = engine
+            .execute(&mut context, &command("new-session", &["-A"]))
+            .expect("attach to the current session");
+        assert_eq!(bare.effects.len(), 1);
+        assert!(matches!(bare.effects[0], MuxEffect::Attach { .. }));
+        assert_eq!(engine.state.sessions.len(), 2);
 
         engine
             .execute(
@@ -5680,7 +5862,7 @@ mod tests {
     fn option_parsing_follows_getopt_word_semantics() {
         let parse = |args: &[&str], value_options: &[&str]| {
             let args = args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
-            parse_options(&args, value_options).expect("parsed options")
+            parse_options(&args, value_options, &[]).expect("parsed options")
         };
 
         let (options, positional) = parse(&["-As", "main", "htop"], &["-s", "-c", "-n"]);
@@ -5716,9 +5898,20 @@ mod tests {
         assert_eq!(positional, ["-", "-t", "1"]);
 
         assert!(matches!(
-            parse_options(&["-t".to_owned()], &["-t"]),
+            parse_options(&["-t".to_owned()], &["-t"], &[]),
             Err(ServerError::InvalidCommand(message)) if message == "-t requires an argument"
         ));
+
+        let (options, positional) = parse_options(
+            &["-R10".to_owned(), "-U5".to_owned(), "-R".to_owned()],
+            &[],
+            &["-R", "-U"],
+        )
+        .expect("parsed options");
+        assert_eq!(options.value("-R"), Some("10"));
+        assert_eq!(options.value("-U"), Some("5"));
+        assert!(options.has("-R"));
+        assert!(positional.is_empty());
     }
 
     #[test]

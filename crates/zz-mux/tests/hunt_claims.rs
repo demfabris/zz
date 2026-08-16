@@ -276,7 +276,7 @@ fn brace_command_lists_bind_as_a_single_command_sequence() {
 }
 
 #[test]
-fn new_window_dash_t_prefers_a_session_name_then_a_window_index() {
+fn new_window_dash_t_prefers_a_window_index_then_a_session_name() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
@@ -291,21 +291,23 @@ fn new_window_dash_t_prefers_a_session_name_then_a_window_index() {
     engine
         .execute(&mut context, &command("new-window", &["-t", "1"]))
         .unwrap();
-    assert_eq!(window_count(&engine, "work"), 1);
-    assert_eq!(window_count(&engine, "1"), 2);
+    assert_eq!(window_indexes(&engine, "work"), [0, 1]);
+    assert_eq!(window_count(&engine, "1"), 1);
 
     engine
-        .execute(&mut context, &command("attach-session", &["-t", "work"]))
+        .execute(&mut context, &command("new-window", &["-t", "3"]))
         .unwrap();
-    engine
-        .execute(&mut context, &command("new-window", &["-t", "2"]))
-        .unwrap();
-    assert_eq!(window_indexes(&engine, "work"), [0, 2]);
+    assert_eq!(window_indexes(&engine, "work"), [0, 1, 3]);
 
     let error = engine
-        .execute(&mut context, &command("new-window", &["-t", "2"]))
+        .execute(&mut context, &command("new-window", &["-t", "3"]))
         .unwrap_err();
-    assert!(matches!(error, ServerError::InvalidCommand(message) if message == "index in use: 2"));
+    assert!(matches!(error, ServerError::InvalidCommand(message) if message == "index in use: 3"));
+
+    engine
+        .execute(&mut context, &command("new-window", &["-t", "work"]))
+        .unwrap();
+    assert_eq!(window_indexes(&engine, "work"), [0, 1, 2, 3]);
 
     let error = engine
         .execute(&mut context, &command("new-window", &["-t", "work:nope"]))
@@ -486,7 +488,7 @@ fn new_session_dash_t_is_rejected_instead_of_leaking_into_the_pane_command() {
 }
 
 #[test]
-fn kill_session_positional_name_is_the_target() {
+fn kill_commands_refuse_positional_targets_like_tmux() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
@@ -495,13 +497,48 @@ fn kill_session_positional_name_is_the_target() {
     engine
         .execute(&mut context, &command("new-session", &["-s", "other"]))
         .unwrap();
+    for name in ["kill-session", "kill-window", "kill-pane", "attach-session"] {
+        let error = engine
+            .execute(&mut context, &command(name, &["other"]))
+            .unwrap_err();
+        assert!(
+            matches!(error, ServerError::InvalidCommand(ref message)
+                if message.contains("positional")),
+            "{name} accepted a positional target"
+        );
+    }
+    assert_eq!(session_names(&engine), ["keep", "other"]);
+
     engine
-        .execute(&mut context, &command("attach-session", &["-t", "keep"]))
-        .unwrap();
-    engine
-        .execute(&mut context, &command("kill-session", &["other"]))
+        .execute(&mut context, &command("kill-session", &["-t", "other"]))
         .unwrap();
     assert_eq!(session_names(&engine), ["keep"]);
+}
+
+#[test]
+fn kill_session_dash_c_clears_alerts_and_kills_nothing() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let pane = context.pane.unwrap();
+    assert!(engine.state.set_pane_bell(pane, true));
+
+    engine
+        .execute(&mut context, &command("kill-session", &["-C", "-t", "work"]))
+        .unwrap();
+    assert_eq!(session_names(&engine), ["work"]);
+    assert!(!engine.state.windows.values().any(|window| window
+        .panes
+        .values()
+        .any(|pane| pane.bell)));
+
+    let error = engine
+        .execute(&mut context, &command("kill-session", &["-f", "-t", "work"]))
+        .unwrap_err();
+    assert!(matches!(error, ServerError::UnsupportedCommand(ref message)
+        if message == "kill-session -f"));
 }
 
 #[test]
@@ -909,8 +946,8 @@ fn next_and_previous_window_target_a_session_and_follow_alerts() {
         .execute(&mut context, &command("next-window", &["-a"]))
         .unwrap_err();
     assert!(
-        matches!(&error, ServerError::MissingTarget(message)
-            if message == "next window with an alert"),
+        matches!(&error, ServerError::InvalidCommand(message)
+            if message == "no next window"),
         "{error:?}"
     );
     assert!(engine.state.set_pane_bell(belled, true));
@@ -966,8 +1003,16 @@ fn list_keys_rejects_the_selectors_it_does_not_implement() {
         .execute(&mut context, &command("list-keys", &["c"]))
         .unwrap_err();
     assert!(
+        matches!(&error, ServerError::UnsupportedCommand(message)
+            if message == "list-keys c (key filter)"),
+        "{error:?}"
+    );
+    let error = engine
+        .execute(&mut context, &command("list-keys", &["-T", "bogus"]))
+        .unwrap_err();
+    assert!(
         matches!(&error, ServerError::InvalidCommand(message)
-            if message == "list-keys does not take positional arguments: c"),
+            if message == "table bogus doesn't exist"),
         "{error:?}"
     );
     let listed = engine
@@ -1081,4 +1126,190 @@ fn set_dash_o_keeps_an_already_set_option() {
         )
         .unwrap();
     assert_eq!(engine.keys.prefix(), "C-a");
+}
+
+#[test]
+fn resize_pane_takes_attached_adjustments_and_rejects_unknown_flags() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-h"]))
+        .unwrap();
+
+    let before = split_ratio(&engine);
+    engine
+        .execute(&mut context, &command("resize-pane", &["-L20"]))
+        .unwrap();
+    assert!(split_ratio(&engine) < before);
+
+    let held = split_ratio(&engine);
+    engine.execute(&mut context, &command("resize-pane", &[])).unwrap();
+    assert_eq!(split_ratio(&engine), held);
+    engine
+        .execute(&mut context, &command("resize-pane", &["7"]))
+        .unwrap();
+    assert_eq!(split_ratio(&engine), held);
+
+    let error = engine
+        .execute(&mut context, &command("resize-pane", &["-M"]))
+        .unwrap_err();
+    assert!(matches!(&error, ServerError::UnsupportedCommand(message)
+        if message == "resize-pane -M"));
+    let error = engine
+        .execute(&mut context, &command("resize-pane", &["-R", "10.5"]))
+        .unwrap_err();
+    assert!(matches!(&error, ServerError::InvalidCommand(message)
+        if message == "invalid resize adjustment: 10.5"));
+}
+
+#[test]
+fn send_keys_dash_h_is_bytewise_ascii_like_tmux() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let pane = context.pane.unwrap();
+
+    let sent = engine
+        .execute(&mut context, &command("send-keys", &["-H", "0x41", "a"]))
+        .unwrap();
+    assert_eq!(
+        sent.effects,
+        [MuxEffect::SendKeys {
+            pane,
+            keys: vec![
+                KeyToken::Literal("A".to_owned()),
+                KeyToken::Literal("\n".to_owned()),
+            ],
+        }]
+    );
+
+    let error = engine
+        .execute(&mut context, &command("send-keys", &["-H", "e9"]))
+        .unwrap_err();
+    assert!(matches!(&error, ServerError::UnsupportedCommand(message)
+        if message == "send-keys -H e9 (raw bytes above 7f)"));
+    let error = engine
+        .execute(&mut context, &command("send-keys", &["-H", "1F600"]))
+        .unwrap_err();
+    assert!(matches!(&error, ServerError::InvalidCommand(message)
+        if message == "send-keys -H needs a character code: 1F600"));
+}
+
+#[test]
+fn send_keys_dash_l_concatenates_arguments_without_separators() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let pane = context.pane.unwrap();
+    let sent = engine
+        .execute(&mut context, &command("send-keys", &["-l", "foo", "bar"]))
+        .unwrap();
+    assert_eq!(
+        sent.effects,
+        [MuxEffect::SendKeys {
+            pane,
+            keys: vec![KeyToken::Literal("foobar".to_owned())],
+        }]
+    );
+}
+
+#[test]
+fn copy_mode_combines_dash_u_and_dash_d_like_tmux() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let entered = engine
+        .execute(&mut context, &command("copy-mode", &["-du"]))
+        .unwrap();
+    assert_eq!(entered.effects.len(), 3);
+}
+
+#[test]
+fn window_steps_error_instead_of_landing_in_place() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    for name in ["next-window", "previous-window"] {
+        let error = engine.execute(&mut context, &command(name, &[])).unwrap_err();
+        let direction = if name == "next-window" { "next" } else { "previous" };
+        assert!(
+            matches!(&error, ServerError::InvalidCommand(message)
+                if message == &format!("no {direction} window")),
+            "{error:?}"
+        );
+    }
+    let error = engine
+        .execute(&mut context, &command("select-window", &["-n"]))
+        .unwrap_err();
+    assert!(matches!(&error, ServerError::InvalidCommand(message)
+        if message == "no next window"));
+}
+
+#[test]
+fn creation_commands_refuse_the_valued_options_they_cannot_honor() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    for (name, args) in [
+        ("new-session", &["-x", "80"]),
+        ("new-session", &["-e", "FOO=bar"]),
+        ("new-window", &["-e", "FOO=bar"]),
+        ("new-window", &["-F", "#{window_id}"]),
+        ("split-window", &["-e", "FOO=bar"]),
+    ] {
+        let error = engine
+            .execute(&mut context, &command(name, args))
+            .unwrap_err();
+        assert!(
+            matches!(&error, ServerError::UnsupportedCommand(message)
+                if message.starts_with(name)),
+            "{name} {args:?} produced {error:?}"
+        );
+    }
+    let error = engine
+        .execute(&mut context, &command("split-window", &["-Z"]))
+        .unwrap_err();
+    assert!(matches!(&error, ServerError::UnsupportedCommand(message)
+        if message == "split-window -Z"));
+    assert_eq!(window_count(&engine, "work"), 1);
+}
+
+#[test]
+fn set_option_accepts_tmux_boolean_case_and_empty_toggle() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    engine
+        .execute(
+            &mut context,
+            &command("set-option", &["synchronize-panes", "ON"]),
+        )
+        .unwrap();
+    engine
+        .execute(
+            &mut context,
+            &command("set-option", &["synchronize-panes", "Off"]),
+        )
+        .unwrap();
+    engine
+        .execute(
+            &mut context,
+            &command("set-option", &["synchronize-panes", ""]),
+        )
+        .unwrap();
 }

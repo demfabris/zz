@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: tmux divergence matrix
-description: "Every known divergence from tmux at the pinned reference commit: the 38 missing commands and why, behavioral gaps on the implemented surface, the 12-of-~165 options coverage, and the protocol-level differences — the drop-in-replacement gap, enumerated."
+description: "Every known divergence from tmux at the pinned reference commit: the 38 missing commands and why, behavioral gaps on the implemented surface, the 12-of-180 options coverage, and the protocol-level differences — the drop-in-replacement gap, enumerated."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-16T00:00:00Z
@@ -15,12 +15,12 @@ independent passes compared each implemented behavior against the fetched tmux C
 complements the [compatibility philosophy](/tmux/tmux-compat.md) (the contract) and the
 [superset roadmap](/designs/tmux-superset-roadmap.md) (the plan) by enumerating the actual deltas.
 
-**State anchor:** the "implemented surface" section assumes
-[PR #4](https://github.com/demfabris/zz/pull/4) (`fix/tmux-compat-hunt-v2`), which corrects the
-hunt-claim regressions — two of them implemented backwards (`new-window -t` bare-target order,
-positional targets on the kill commands) plus the `kill-session -C`, `new-session -A`,
-`resize-pane` attached-adjustment, `send-keys -H`/`-l`, `copy-mode -du`, window-step-error, and
-boolean-case fixes. Until that PR merges, main additionally carries those bugs.
+**State anchor:** the "implemented surface" section reflects
+[PR #4](https://github.com/demfabris/zz/pull/4) (`fix/tmux-compat-hunt-v2`, merged 2026-08-16
+as `53b523e`), which corrected the hunt-claim regressions — two of them implemented backwards
+(`new-window -t` bare-target order, positional targets on the kill commands) plus the
+`kill-session -C`, `new-session -A`, `resize-pane` attached-adjustment, `send-keys -H`/`-l`,
+`copy-mode -du`, window-step-error, and boolean-case fixes.
 
 The one-line read: everything marked **silent** below is a bug by zz's own doctrine (tmux syntax
 must mean what tmux means, or error loudly); everything loud is a choice; the "genuine gaps"
@@ -102,15 +102,19 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | `select-window` | Accepts a positional target tmux bounds at zero arguments. | zz-lax |
 | `set -o` | Errors where tmux's `-o`+`-u` combination silently ignores `-o`; `-q` doesn't silence invalid option names. | loud |
 | Brace blocks | Empty `{}` and a trailing `\;` error; tmux accepts both. | loud |
-| Unguarded commands | Unknown flags are still swallowed wherever no hand-rolled allowlist exists; the systemic catalog-driven rejection is a PR #4 follow-up. | **silent** |
+| Unguarded commands | Unknown flags are still swallowed wherever no hand-rolled allowlist exists (36 allowlist sites in `command.rs` today); the systemic catalog-driven rejection is the [drop-in plan](/designs/tmux-drop-in.md)'s phase 0. | **silent** |
+| `bind-key` payloads | Bound commands are stored without validation; an unsupported command inside a binding fails only at keypress and never counts as a skipped config line. | **silent** |
 | Error strings | Several differ (zz `index in use: 2` vs tmux `create window failed: index 2 in use`). | cosmetic |
 | `new-pane` | The pinned tmux ships its own `new-pane`/`newp` (floating panes); zz's picker verb sits on the name with different semantics — the one remaining silent third-meaning, pending a product decision. | **silent** |
 
-# Options: 12 of ~165
+# Options: 12 of 180
 
-Implemented: `prefix`, `mode-keys`, `history-limit`, `synchronize-panes`, `word-separators`,
-`buffer-limit`, `set-clipboard`, `copy-command`, `status`, `status-interval`, `status-left`,
-`status-right`. Everything else is reported-and-skipped by the [conf parser](/tmux/conf-parser.md).
+tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin.
+Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-panes`,
+`word-separators`, `buffer-limit`, `set-clipboard`, `copy-command`, `status`,
+`status-interval`, `status-left`, `status-right`. (`set-option` also accepts six zz-native
+names — the agent/editor/history-trickle keys — which don't count toward tmux coverage.)
+Everything else is reported-and-skipped by the [conf parser](/tmux/conf-parser.md).
 The ones real dotfiles set most, roughly by frequency: `base-index`, `pane-base-index`,
 `renumber-windows`, `escape-time`, `mouse`, `default-terminal`, `terminal-overrides`,
 `set-titles`, `automatic-rename`, `aggressive-resize`, `remain-on-exit`, `monitor-activity`,

@@ -55,10 +55,13 @@ shell code. Concretely:
   cell-accurate `resize-pane`, and `%if` blocks skipped-with-diagnostic instead of executed; the
   scriptability layer (`-F` formats, `display-message`, compound targets) is tracked in the
   [tmux superset roadmap](/designs/tmux-superset-roadmap.md).
-- **Explicitly out of scope:** binary/control-mode/socket compatibility with a real tmux server,
-  serialized tmux layout strings, the rest of the status-line options (`status-style`,
-  `status-justify`, `status-position`, `status-format`), plugins, hooks, `#[…]` styling, floating
-  panes, and cell-size placement. These are rejected with diagnostics, not partially applied. The one
+- **Out of scope as shipped** (this list describes current behavior; the 2026-08-16
+  [drop-in plan](/designs/tmux-drop-in.md) schedules most of it — control mode, layout strings,
+  hooks, exec commands, styles, cell-size placement — with the permanent exclusions named
+  there): binary/socket compatibility with a real tmux server, control mode, serialized tmux
+  layout strings, the rest of the status-line options (`status-style`, `status-justify`,
+  `status-position`, `status-format`), plugins, hooks, `#[…]` styling, floating panes, and
+  cell-size placement. These are rejected with diagnostics, not partially applied. The one
   exception is `#[…]`, which is dropped from a status format rather than failing it.
 
 zz reimplements the *behavior*; the daemon sources the zz-owned `~/.config/zz/mux.conf` on startup

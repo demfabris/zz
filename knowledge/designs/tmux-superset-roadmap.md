@@ -94,7 +94,9 @@ harness, layout strings ride the cell-authoritative layout rework, and `-L`/the 
 join the grind. What survives as never:
 
 - Linked windows and session groups — one window belongs to one session; `new-session -t`
-  stays a loud rejection (drop-in plan, decision 3).
+  stays a loud rejection (drop-in plan, decision 3). Named consequences: `break-pane` on a
+  single-pane window keeps refusing (tmux relinks the window — linked-window machinery), and
+  tmux-resurrect's grouped-session restores error loudly.
 - Speaking tmux's private client-server socket protocol — the alias model (`alias tmux=zz`)
   makes real-tmux-binary interop a non-goal (drop-in plan, decision 4).
 - Fleet broadcast (`--all`) — composition over features: a shell loop over
@@ -115,7 +117,12 @@ join the grind. What survives as never:
   refuses `daemon`/`proxy`/`fleet`/`attach` and conflicts with `--socket`.
 - 2026-08-16: the drop-in pivot — goal upgraded from honest-subset-plus-superset
   to `alias tmux=zz`. The never-list shrank to the three items above; everything
-  else moved into the [tmux drop-in plan](/designs/tmux-drop-in.md)'s six phases.
+  else moved into the [tmux drop-in plan](/designs/tmux-drop-in.md). Revised the
+  same day after an adversarial review (claims verified against the tree): the
+  differential harness moved off control mode onto `list-* -F`, control mode
+  became a stdio front-end phase (how iTerm2 actually consumes `-CC`), consent
+  narrowed to the import flow (own config is trusted — `#()` already executes
+  ungated), and the TTY attach contract became a gated phase 8.
 
 # Related
 

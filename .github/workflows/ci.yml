@@ -8,6 +8,18 @@ permissions:
   contents: read
 
 jobs:
+  ios:
+    name: iPhone
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Install iPhone build tools
+        run: |
+          rustup target add aarch64-apple-ios-sim
+          brew install xcodegen
+      - name: Test native iPhone client
+        run: scripts/ios-sim.sh --test
+
   check:
     name: ${{ matrix.os }}
     strategy:

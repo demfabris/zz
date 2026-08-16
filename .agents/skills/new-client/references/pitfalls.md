@@ -124,10 +124,12 @@ external client crate resolves identically to the workspace and builds against
 the warm cache in seconds. (Both independent eval builds of an external client
 hit this wall; the gpui/proc-macro-error2 patches are UI-only and not needed.)
 
-## 12. The daemon is never session-less
+## 12. A fresh daemon starts with session 0, but a live daemon can become session-less
 
 `Shared::initialize` auto-creates session "0" at boot when nothing restores,
-and `attach("")` resolves to that default session. Two consequences:
+and `attach("")` resolves to that default session. Killing the last session
+after a client attaches can still produce an authoritative zero-session
+snapshot. Three consequences:
 
 - A test that wants exactly one session with a controlled name should
   **rename the boot session** (`rename-session`) rather than create a second
@@ -135,6 +137,8 @@ and `attach("")` resolves to that default session. Two consequences:
   unattached and frameless (see pitfall 2).
 - "Attach to the default session" in a user-facing client means session "0"
   on a fresh daemon, not the most recently created session.
+- Clients must render and recover from a zero-session snapshot instead of
+  assuming the boot invariant remains true for the daemon's lifetime.
 
 ## 13. Don't bump `PROTOCOL_VERSION` casually
 

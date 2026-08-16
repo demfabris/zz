@@ -7,14 +7,11 @@ mod command;
 mod config;
 mod diagnostics;
 mod editor;
-pub mod engine;
 #[cfg(any(feature = "agent-pane", feature = "editor-pane"))]
 mod file_picker;
 /// A CLI verb, so it belongs to the platforms that have a command line.
 #[cfg(not(target_os = "ios"))]
 mod fleet;
-#[cfg(target_os = "ios")]
-mod ios_input;
 mod keymap;
 #[cfg(target_os = "macos")]
 mod macos_app;

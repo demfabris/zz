@@ -1,65 +1,74 @@
 ---
 type: Rust Crate
 title: zz-client-ffi crate
-description: The Unix C ABI proof surface over zz-client, with a pollable wake fd, typed events, daemon commands, and caller-owned terminal viewport snapshots.
+description: Unix C ABI over zz-client for native shells, with pollable events, mux snapshots, raw terminal input, and caller-owned styled terminal viewports.
 resource: crates/zz-client-ffi/include/zz-client.h
-tags: [client, ffi, c-abi, unix, crate]
-timestamp: 2026-08-14T00:00:00Z
+tags: [client, ffi, c-abi, unix, ios, crate]
+timestamp: 2026-08-15T00:00:00Z
 ---
 
 # Overview
 
-`zz-client-ffi` exports a Unix-only C ABI over `ClientCore` and `InteractiveClient`. It builds as a
-Rust library, static library, and dynamic library. The contract is hand-maintained in
-`include/zz-client.h`; the smoke harness compiles a C program against that header and links the
-result to catch symbol and layout drift.
+`zz-client-ffi` exports a Unix C ABI over `ClientCore` and `InteractiveClient`. It builds as a Rust
+library, static library, and dynamic library. The native iPhone app links the static library and
+imports the hand-maintained `include/zz-client.h` contract through a Swift bridging header.
 
-One `zz_client` owns the daemon connection, a blocking reader thread, the reduced core, an event
-queue, and one end of a nonblocking Unix socket pair. Toolkit main loops poll
-`zz_client_event_fd()`, drain `zz_client_next_event()`, then read the new state. `zz_client_free()`
-shuts down the transport to unblock `recv()`, joins the reader, and closes the wake fd before it
-returns. A long-lived process can free and reconnect without leaving an interactive client attached
-to the daemon.
+One `zz_client` owns the daemon connection, blocking reader thread, reduced core, event queue, and
+one end of a nonblocking Unix socket pair. Native main loops poll `zz_client_event_fd()`, drain
+`zz_client_next_event()`, then acquire the immutable state they need. `zz_client_free()` shuts down
+the transport, joins the reader, and closes the wake descriptor.
 
 # Current ABI
 
 The header exposes:
 
-- connect/free, event fd, and typed event drain;
-- session attach, literal text, tmux-style command execution, and terminal resize;
-- terminal-pane enumeration for the attached session;
-- acquire/release viewport snapshots, dimensions, raw `zz_cell` storage, and decoded row text.
+- connect/free, the wake descriptor, typed events, appearance changes, disconnects, pane IDs, and
+  viewport damage rows;
+- attach, literal text, raw key press/repeat/release, tmux-style command execution, terminal resize,
+  terminal focus, and line scrolling;
+- caller-owned mux snapshots with generation, session identity/name/attachment, active window, and
+  ordered active-window pane metadata;
+- caller-owned terminal viewports with dimensions, generation counters, default colors, raw cells,
+  style records, grapheme offsets/bytes, and cursor state;
+- decoded UTF-8 row text for simple consumers that do not need graphical fidelity.
 
-`zz_viewport_row_text()` resolves scalar and interned grapheme glyphs, emits one visible glyph for a
+Mux snapshots own an `Arc<MuxSnapshot>`. Pane order comes from the active window's layout tree, so a
+client can present a stable visual order without rebuilding target resolution. Viewport snapshots
+share the core's immutable planes and remain valid until explicit release.
+
+`zz_viewport_row_text()` resolves scalar and interned-grapheme glyphs, emits one visible glyph for a
 wide cell, preserves blank cells as spaces, and truncates only between complete UTF-8 sequences.
-Viewport snapshots share the core's immutable planes and remain stable until release.
+Graphical clients should consume the cell/style/grapheme planes directly.
 
 # Scope boundary
 
-This is the narrow proof surface shipped for the first C consumer. It does not expose raw key
-forwarding, style and grapheme tables, viewport generation counters, the command catalog, live key
-tables, or chrome action events. A full GTK, Qt, or Swift renderer needs those additions before the
-ABI can serve as its complete graphical contract. The broader target remains in the
-[client-core decision record](/designs/client-core-and-contract.md).
+The ABI is renderer-neutral and sufficient for the native iPhone terminal slice. It still does not
+export the command catalog, live chrome key tables/actions, layout rectangles, history chunk access,
+Kitty image extraction, managed SSH connection setup, or richer Agent/Browser/Editor viewport data.
+Those remain shared-core work rather than Swift responsibilities.
 
 # Testing
 
-`tests/smoke.c` connects to a real in-process daemon, attaches, reads terminal rows, types through
-the ABI, frees the connection, and reconnects in the same C process. Rust unit tests cover interned
-graphemes, wide-cell spacers, and UTF-8-safe truncation.
+`tests/smoke.c` connects to a real in-process daemon, attaches, validates mux/session/pane metadata,
+creates and attaches another session, creates a second pane, reads styled terminal planes, sends raw
+Enter, kills that attached session, observes the detached snapshot, explicitly reattaches the
+surviving session, recovers its terminal content, then frees and reconnects in the same C process.
+Rust tests cover interned graphemes, wide-cell spacers, UTF-8-safe truncation, and the real-daemon
+link boundary. The iPhone build cross-compiles the crate for
+`aarch64-apple-ios-sim` on every Xcode build.
 
 # Key files
 
 | File | Role |
 | --- | --- |
 | `crates/zz-client-ffi/include/zz-client.h` | Hand-maintained public C contract. |
-| `crates/zz-client-ffi/src/ffi.rs` | Handle lifecycle, reader thread, wake fd, core reduction, exports, and row decoding. |
-| `crates/zz-client-ffi/tests/smoke.c` | From-scratch C proof client, including reconnect after free. |
-| `crates/zz-client-ffi/tests/smoke.rs` | Real-daemon harness that compiles, links, and runs the C client. |
+| `crates/zz-client-ffi/src/ffi.rs` | Lifecycle, transport reader, wake fd, reduction, snapshots, and exports. |
+| `crates/zz-client-ffi/tests/smoke.c` | From-scratch C consumer with live daemon assertions. |
+| `crates/zz-client-ffi/tests/smoke.rs` | Harness that compiles, links, and runs the C client. |
+| `clients/ios/Support/ZZ-Bridging-Header.h` | Swift import point for the ABI. |
 
 # Related
 
 - [zz-client](/crates/zz-client.md) supplies the reduced state and event model.
-- [zz-daemon](/crates/zz-daemon.md) supplies `InteractiveClient` and transport shutdown.
-- [Packed terminal lanes](/protocol/terminal-lanes.md) describe the viewport representation behind
-  the snapshots.
+- [Native iPhone client](/designs/ios-client.md) is the first graphical consumer.
+- [Packed terminal lanes](/protocol/terminal-lanes.md) describe the viewport representation.

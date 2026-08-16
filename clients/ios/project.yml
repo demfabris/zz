@@ -1,0 +1,62 @@
+name: ZZMobile
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "26.0"
+settings:
+  base:
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "6.0"
+targets:
+  ZZMobile:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.zz.ios
+        PRODUCT_NAME: ZZ
+        TARGETED_DEVICE_FAMILY: "1"
+        ARCHS: arm64
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: Y4JYPG9TS8
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: zz
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: zz connects to your computer on the local network.
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        SWIFT_OBJC_BRIDGING_HEADER: Support/ZZ-Bridging-Header.h
+        HEADER_SEARCH_PATHS: $(inherited) $(SRCROOT)/../../crates/zz-client-ffi/include
+        LIBRARY_SEARCH_PATHS: $(inherited) $(BUILT_PRODUCTS_DIR)
+        OTHER_LDFLAGS: $(inherited) -lzz_client_ffi -framework CoreFoundation -framework Security -framework SystemConfiguration -lresolv
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+    preBuildScripts:
+      - name: Build Rust client core
+        script: |
+          set -euo pipefail
+          "$SRCROOT/../../scripts/build-ios-client-core.sh"
+        outputFiles:
+          - $(BUILT_PRODUCTS_DIR)/libzz_client_ffi.a
+        basedOnDependencyAnalysis: false
+    scheme:
+      testTargets:
+        - ZZMobileTests
+  ZZMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - Tests/Unit
+    dependencies:
+      - target: ZZMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.zz.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/ZZ.app/ZZ
+        BUNDLE_LOADER: $(TEST_HOST)
+        HEADER_SEARCH_PATHS: $(inherited) $(SRCROOT)/../../crates/zz-client-ffi/include

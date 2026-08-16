@@ -54,8 +54,6 @@ static TEST_PROFILE: std::sync::LazyLock<AppProfile> =
 pub enum LocalHostPolicy {
     /// Desktop: always present, backed by the auto-started daemon.
     Always,
-    /// iOS: present only when `$ZZ_SOCKET` is set.
-    IfEnvSocket,
 }
 
 impl LocalHostPolicy {
@@ -63,7 +61,6 @@ impl LocalHostPolicy {
     pub fn synthesize_local(self) -> bool {
         match self {
             Self::Always => true,
-            Self::IfEnvSocket => std::env::var_os("ZZ_SOCKET").is_some(),
         }
     }
 }

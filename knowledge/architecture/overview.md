@@ -1,7 +1,7 @@
 ---
 type: Architecture
 title: zz system overview
-description: zz is a cross-platform GPUI workspace that multiplexes native terminal, Chromium browser, and Agent panes over a persistent daemon that several of the user's devices attach to at once.
+description: zz multiplexes terminal, Chromium browser, and Agent panes over a persistent daemon shared by native desktop, iPhone, and terminal clients.
 resource: crates/zz/src/lib.rs
 tags: [architecture, overview, gpui, multiplexer, daemon]
 timestamp: 2026-08-14T00:00:00Z
@@ -9,8 +9,8 @@ timestamp: 2026-08-14T00:00:00Z
 
 # Overview
 
-`zz` is a small cross-platform GPUI workspace that multiplexes three pane surfaces under a
-tmux-style model:
+`zz` is a multiplexer with a GPUI desktop client, a native Swift iPhone client, and a raw-terminal
+client over one persistent daemon. Its model contains three pane surfaces:
 
 - a **live local terminal** powered by `libghostty-vt` and a daemon-owned PTY worker
   (see [zz-terminal](/crates/zz-terminal.md));
@@ -65,18 +65,21 @@ stream.
 | [zz-client](/crates/zz-client.md) | sans-IO protocol reduction and client-local chrome key tables shared by client shells |
 | [zz-client-ffi](/crates/zz-client-ffi.md) | Unix C ABI proof surface over the shared client core |
 | [zz](/crates/zz.md) | long-lived GPUI mux client; reconciles layouts; hosts terminal and CEF runtimes and the Agent pane's viewport |
+| [native iPhone client](/designs/ios-client.md) | SwiftUI/UIKit shell over `zz-client-ffi`; session rail, pane cards, and fullscreen terminal |
 | [zz-chrome-import](/crates/zz-chrome-import.md) | Chrome profile discovery, cookie decryption, read-only history extraction |
 | [zz-xtask](/crates/zz-xtask.md) | builds and validates platform CEF bundles |
 
-Workspace members without a dedicated page here: `zz-ui` (widget fork), `zz-tui` (`zz attach`), and
-`zz-ios` / `zz-gpui-ios` (iPad client). See [crates](/crates/index.md).
+Workspace members without a dedicated page here: `zz-ui` (widget fork) and `zz-tui` (`zz attach`).
+The native iPhone app lives outside the Cargo workspace under `clients/ios`. See
+[crates](/crates/index.md).
 
 # Platform status
 
 Linux/Wayland remains the most extensively runtime-validated host. On macOS, the release CEF bundle
 and daemon PTY detach/reattach lifecycle are runtime-validated; a full interactive GUI PTY/browser
 smoke remains outstanding. Windows maps the protocol to a local named pipe and has CI bundle coverage,
-but its full host smoke remains outstanding.
+but its full host smoke remains outstanding. The native iPhone app is runtime-validated on an iOS 26
+simulator against a live local daemon; physical-device and remote-host attach remain open.
 
 # External pins
 

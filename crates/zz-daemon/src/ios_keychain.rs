@@ -196,15 +196,6 @@ fn identity_value(identity: &str) -> Vec<(CFString, CFType)> {
 
 #[cfg(test)]
 mod tests {
-    //! Needs a booted simulator and the app's entitlements linked into the test binary:
-    //!
-    //! ```sh
-    //! RUSTFLAGS="-Clink-arg=-Wl,-sectcreate,__TEXT,__entitlements,$PWD/crates/zz-ios/ios/sim.entitlements" \
-    //!   CARGO_TARGET_AARCH64_APPLE_IOS_SIM_RUNNER="xcrun simctl spawn booted" \
-    //!   cargo test -p zz-daemon --no-default-features \
-    //!   --target aarch64-apple-ios-sim ios_keychain
-    //! ```
-
     use super::*;
 
     fn stored() -> Option<String> {

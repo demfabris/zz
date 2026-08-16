@@ -31,14 +31,19 @@ install platform *args:
 
 # ctrl-c detaches the console and the app keeps running; `ZZ_SOCKET`
 # overrides the daemon socket the app dials.
-# Build the iPad client, boot a simulator if needed, launch attached to this machine's daemon, tail the console.
 ios:
     @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios requires macOS" >&2; exit 2; fi
     @scripts/ios-sim.sh
 
-# First run: Developer Mode on the iPad + trust the certificate; details print at the end.
-# Build, sign, and install the iPad client on a paired physical iPad (default device name: "ipad").
-ios-device device="ipad":
+ios-build:
+    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-build requires macOS" >&2; exit 2; fi
+    @scripts/ios-sim.sh --build-only
+
+ios-test:
+    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-test requires macOS" >&2; exit 2; fi
+    @scripts/ios-sim.sh --test
+
+ios-device device="iphone":
     @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-device requires macOS" >&2; exit 2; fi
     @scripts/ios-device.sh {{ device }}
 

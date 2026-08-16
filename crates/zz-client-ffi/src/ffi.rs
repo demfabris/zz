@@ -1,3 +1,5 @@
+#![allow(clippy::missing_safety_doc)]
+
 use std::{
     collections::VecDeque,
     ffi::{CStr, c_char, c_int},
@@ -7,10 +9,18 @@ use std::{
     thread,
 };
 
-use zz_client::{ClientCore, CoreEvent, Outbound};
+use zz_client::{ClientCore, CoreEvent, Outbound, ViewportDamage};
 use zz_daemon::InteractiveClient;
-use zz_protocol::{CommandInvocation, InputMessage, PaneId, PaneKindSnapshot, ProtocolMessage};
-use zz_terminal::{CellWidth, Glyph, TerminalViewport};
+use zz_protocol::{
+    CommandInvocation, InputMessage, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot,
+    ProtocolMessage, SessionId, SessionSnapshot, WindowSnapshot,
+};
+use zz_terminal::{
+    CellWidth, CursorStyle, Glyph, KeyAction, KeyCode, KeyInput, Modifiers, PackedStyle,
+    TerminalViewAction, TerminalViewport,
+};
+
+const EVENT_DAMAGE_ALL: u32 = 1;
 
 /// Event kinds mirrored in `include/zz-client.h`; values are ABI.
 #[repr(u32)]
@@ -25,6 +35,8 @@ pub enum ZzEventKind {
     Detached = 6,
     ServerStopping = 7,
     Other = 8,
+    AppearanceChanged = 9,
+    Disconnected = 10,
 }
 
 /// One drained event; `pane` is zero when the kind carries no pane.
@@ -32,7 +44,54 @@ pub enum ZzEventKind {
 #[derive(Clone, Copy, Debug)]
 pub struct ZzEvent {
     pub kind: ZzEventKind,
+    pub flags: u32,
     pub pane: u64,
+    pub row_start: u16,
+    pub row_end: u16,
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ZzPaneKind {
+    #[default]
+    Picker = 0,
+    Terminal = 1,
+    Browser = 2,
+    Agent = 3,
+    Editor = 4,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct ZzBytes {
+    pub ptr: *const u8,
+    pub len: usize,
+}
+
+impl ZzBytes {
+    const EMPTY: Self = Self {
+        ptr: std::ptr::null(),
+        len: 0,
+    };
+
+    fn new(value: &str) -> Self {
+        Self {
+            ptr: value.as_ptr(),
+            len: value.len(),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ZzCursor {
+    pub color: u32,
+    pub column: u16,
+    pub row: u16,
+    pub style: u8,
+    pub visible: u8,
+    pub blinking: u8,
+    pub wide_tail: u8,
 }
 
 /// An attached client: connection, reader thread, reduced core, event queue,
@@ -45,6 +104,11 @@ pub struct ZzClient {
     reader: Option<thread::JoinHandle<()>>,
 }
 
+pub struct ZzMuxSnapshot {
+    snapshot: Arc<MuxSnapshot>,
+    attached: Option<SessionId>,
+}
+
 /// A caller-owned viewport snapshot; cheap to acquire (shared immutable
 /// planes), stable until released.
 pub struct ZzViewport(TerminalViewport);
@@ -53,19 +117,108 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+fn session_at(snapshot: &ZzMuxSnapshot, index: usize) -> Option<&SessionSnapshot> {
+    snapshot.snapshot.sessions.get(index)
+}
+
+fn active_window_at(snapshot: &ZzMuxSnapshot, session: usize) -> Option<&WindowSnapshot> {
+    let session = session_at(snapshot, session)?;
+    let window = snapshot.snapshot.focused_window_for(session);
+    session
+        .windows
+        .iter()
+        .find(|candidate| candidate.id == window)
+}
+
+fn pane_at(
+    snapshot: &ZzMuxSnapshot,
+    session: usize,
+    pane: usize,
+) -> Option<(&WindowSnapshot, &PaneSnapshot)> {
+    let window = active_window_at(snapshot, session)?;
+    let mut panes = Vec::with_capacity(window.panes.len());
+    window.layout.panes(&mut panes);
+    let pane = panes.get(pane)?;
+    Some((window, window.panes.get(pane)?))
+}
+
+fn pane_kind(kind: &PaneKindSnapshot) -> ZzPaneKind {
+    match kind {
+        PaneKindSnapshot::Picker => ZzPaneKind::Picker,
+        PaneKindSnapshot::Terminal => ZzPaneKind::Terminal,
+        PaneKindSnapshot::Browser(_) => ZzPaneKind::Browser,
+        PaneKindSnapshot::Agent(_) => ZzPaneKind::Agent,
+        PaneKindSnapshot::Editor(_) => ZzPaneKind::Editor,
+    }
+}
+
+fn key_code(code: u32, codepoint: u32, function: u8) -> Option<KeyCode> {
+    Some(match code {
+        0 => KeyCode::Character(char::from_u32(codepoint)?),
+        1 => KeyCode::Backspace,
+        2 => KeyCode::Enter,
+        3 => KeyCode::Tab,
+        4 => KeyCode::Escape,
+        5 => KeyCode::Delete,
+        6 => KeyCode::Insert,
+        7 => KeyCode::Home,
+        8 => KeyCode::End,
+        9 => KeyCode::PageUp,
+        10 => KeyCode::PageDown,
+        11 => KeyCode::ArrowUp,
+        12 => KeyCode::ArrowDown,
+        13 => KeyCode::ArrowLeft,
+        14 => KeyCode::ArrowRight,
+        15 => KeyCode::Function(function),
+        16 => KeyCode::Unidentified,
+        _ => return None,
+    })
+}
+
+fn key_action(action: u32) -> Option<KeyAction> {
+    match action {
+        0 => Some(KeyAction::Press),
+        1 => Some(KeyAction::Repeat),
+        2 => Some(KeyAction::Release),
+        _ => None,
+    }
+}
+
 fn queue_event(events: &Mutex<VecDeque<ZzEvent>>, event: &CoreEvent) {
-    let (kind, pane) = match event {
-        CoreEvent::HelloReceived => (ZzEventKind::Hello, 0),
-        CoreEvent::Attached { .. } => (ZzEventKind::Attached, 0),
-        CoreEvent::SnapshotChanged => (ZzEventKind::SnapshotChanged, 0),
-        CoreEvent::ViewportChanged { pane, .. } => (ZzEventKind::ViewportChanged, pane.0),
-        CoreEvent::PaneRemoved { pane } => (ZzEventKind::PaneRemoved, pane.0),
-        CoreEvent::StatusChanged => (ZzEventKind::StatusChanged, 0),
-        CoreEvent::Detached { .. } => (ZzEventKind::Detached, 0),
-        CoreEvent::ServerStopping => (ZzEventKind::ServerStopping, 0),
-        _ => (ZzEventKind::Other, 0),
+    let (kind, flags, pane, row_start, row_end) = match event {
+        CoreEvent::HelloReceived => (ZzEventKind::Hello, 0, 0, 0, 0),
+        CoreEvent::Attached { .. } => (ZzEventKind::Attached, 0, 0, 0, 0),
+        CoreEvent::SnapshotChanged => (ZzEventKind::SnapshotChanged, 0, 0, 0, 0),
+        CoreEvent::ViewportChanged { pane, damage } => match damage {
+            ViewportDamage::All => (
+                ZzEventKind::ViewportChanged,
+                EVENT_DAMAGE_ALL,
+                pane.0,
+                0,
+                u16::MAX,
+            ),
+            ViewportDamage::Rows(rows) => (
+                ZzEventKind::ViewportChanged,
+                0,
+                pane.0,
+                rows.iter().copied().min().unwrap_or(0),
+                rows.iter().copied().max().unwrap_or(0),
+            ),
+        },
+        CoreEvent::PaneRemoved { pane } => (ZzEventKind::PaneRemoved, 0, pane.0, 0, 0),
+        CoreEvent::StatusChanged => (ZzEventKind::StatusChanged, 0, 0, 0, 0),
+        CoreEvent::AppearanceChanged => (ZzEventKind::AppearanceChanged, 0, 0, 0, 0),
+        CoreEvent::Detached { .. } => (ZzEventKind::Detached, 0, 0, 0, 0),
+        CoreEvent::ServerStopping => (ZzEventKind::ServerStopping, 0, 0, 0, 0),
+        _ => (ZzEventKind::Other, 0, 0, 0, 0),
     };
-    lock(events).push_back(ZzEvent { kind, pane });
+    lock(events).push_back(ZzEvent {
+        kind,
+        flags,
+        pane,
+        row_start,
+        row_end,
+    });
 }
 
 fn spawn_reader(
@@ -100,6 +253,14 @@ fn spawn_reader(
                     let _ = rustix::io::write(&wake_write, &[1]);
                 }
             }
+            lock(&events).push_back(ZzEvent {
+                kind: ZzEventKind::Disconnected,
+                flags: 0,
+                pane: 0,
+                row_start: 0,
+                row_end: 0,
+            });
+            let _ = rustix::io::write(&wake_write, &[1]);
         })
 }
 
@@ -224,6 +385,52 @@ pub unsafe extern "C" fn zz_client_send_text(
         .is_ok()
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_send_key(
+    client: *mut ZzClient,
+    pane: u64,
+    code: u32,
+    codepoint: u32,
+    function: u8,
+    action: u32,
+    modifiers: u8,
+    text: *const c_char,
+    text_follows: bool,
+) -> bool {
+    let Some(client) = (unsafe { client.as_mut() }) else {
+        return false;
+    };
+    let (Some(key), Some(action), Some(modifiers)) = (
+        key_code(code, codepoint, function),
+        key_action(action),
+        Modifiers::from_bits(modifiers),
+    ) else {
+        return false;
+    };
+    let text = if text.is_null() {
+        None
+    } else {
+        let Ok(text) = unsafe { CStr::from_ptr(text) }.to_str() else {
+            return false;
+        };
+        Some(text.to_owned().into_boxed_str())
+    };
+    client
+        .client
+        .send_input(InputMessage::Key {
+            pane: PaneId(pane),
+            input: KeyInput {
+                action,
+                key,
+                modifiers,
+                text,
+                unshifted_codepoint: None,
+            },
+            text_follows,
+        })
+        .is_ok()
+}
+
 /// Execute a tmux-style command (`name` plus arguments) on the daemon.
 ///
 /// # Safety
@@ -291,6 +498,177 @@ pub unsafe extern "C" fn zz_client_resize_terminal(
             cell_height_px,
         })
         .is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_scroll_lines(
+    client: *mut ZzClient,
+    pane: u64,
+    lines: i32,
+) -> bool {
+    let Some(client) = (unsafe { client.as_mut() }) else {
+        return false;
+    };
+    client
+        .client
+        .send_input(InputMessage::TerminalView {
+            pane: PaneId(pane),
+            action: TerminalViewAction::ScrollLines(lines),
+        })
+        .is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_focus_terminal(
+    client: *mut ZzClient,
+    pane: u64,
+    focused: bool,
+) -> bool {
+    let Some(client) = (unsafe { client.as_mut() }) else {
+        return false;
+    };
+    client
+        .client
+        .send_input(InputMessage::TerminalView {
+            pane: PaneId(pane),
+            action: TerminalViewAction::Focus(focused),
+        })
+        .is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_snapshot_acquire(client: *const ZzClient) -> *mut ZzMuxSnapshot {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return std::ptr::null_mut();
+    };
+    let core = lock(&client.core);
+    Box::into_raw(Box::new(ZzMuxSnapshot {
+        snapshot: Arc::clone(core.snapshot()),
+        attached: core.attached_session(),
+    }))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_release(snapshot: *mut ZzMuxSnapshot) {
+    if !snapshot.is_null() {
+        drop(unsafe { Box::from_raw(snapshot) });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_generation(snapshot: *const ZzMuxSnapshot) -> u64 {
+    unsafe { snapshot.as_ref() }.map_or(0, |snapshot| snapshot.snapshot.generation)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_count(snapshot: *const ZzMuxSnapshot) -> usize {
+    unsafe { snapshot.as_ref() }.map_or(0, |snapshot| snapshot.snapshot.sessions.len())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_id(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+) -> u64 {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| session_at(snapshot, session))
+        .map_or(0, |session| session.id.0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_name(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+) -> ZzBytes {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| session_at(snapshot, session))
+        .map_or(ZzBytes::EMPTY, |session| ZzBytes::new(&session.name))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_is_attached(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+) -> bool {
+    let Some(snapshot) = (unsafe { snapshot.as_ref() }) else {
+        return false;
+    };
+    session_at(snapshot, session).is_some_and(|session| snapshot.attached == Some(session.id))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_active_window(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+) -> u64 {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| active_window_at(snapshot, session))
+        .map_or(0, |window| window.id.0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_pane_count(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+) -> usize {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| active_window_at(snapshot, session))
+        .map_or(0, |window| window.panes.len())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_pane_id(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    pane: usize,
+) -> u64 {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| pane_at(snapshot, session, pane))
+        .map_or(0, |(_, pane)| pane.id.0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_pane_title(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    pane: usize,
+) -> ZzBytes {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| pane_at(snapshot, session, pane))
+        .map_or(ZzBytes::EMPTY, |(_, pane)| ZzBytes::new(&pane.title))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_pane_kind(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    pane: usize,
+) -> ZzPaneKind {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| pane_at(snapshot, session, pane))
+        .map_or(ZzPaneKind::Picker, |(_, pane)| pane_kind(&pane.kind))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_pane_is_active(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    pane: usize,
+) -> bool {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| pane_at(snapshot, session, pane))
+        .is_some_and(|(window, pane)| window.active_pane == pane.id)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_pane_has_bell(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    pane: usize,
+) -> bool {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| pane_at(snapshot, session, pane))
+        .is_some_and(|(_, pane)| pane.bell)
 }
 
 /// Write up to `capacity` terminal pane ids from the attached session into
@@ -404,6 +782,31 @@ pub unsafe extern "C" fn zz_viewport_rows(viewport: *const ZzViewport) -> u16 {
     unsafe { viewport.as_ref() }.map_or(0, |viewport| viewport.0.rows)
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_viewport_generation(viewport: *const ZzViewport) -> u64 {
+    unsafe { viewport.as_ref() }.map_or(0, |viewport| viewport.0.generation)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_viewport_view_generation(viewport: *const ZzViewport) -> u64 {
+    unsafe { viewport.as_ref() }.map_or(0, |viewport| viewport.0.view_generation)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_viewport_dictionary_generation(viewport: *const ZzViewport) -> u32 {
+    unsafe { viewport.as_ref() }.map_or(0, |viewport| viewport.0.dictionary_generation)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_viewport_foreground(viewport: *const ZzViewport) -> u32 {
+    unsafe { viewport.as_ref() }.map_or(0, |viewport| viewport.0.foreground.packed())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_viewport_background(viewport: *const ZzViewport) -> u32 {
+    unsafe { viewport.as_ref() }.map_or(0, |viewport| viewport.0.background.packed())
+}
+
 /// The row-major cell plane (`rows * columns` entries of `zz_cell`). Valid
 /// until the snapshot is released.
 ///
@@ -415,6 +818,73 @@ pub unsafe extern "C" fn zz_viewport_cells(
     viewport: *const ZzViewport,
 ) -> *const zz_terminal::PackedCell {
     unsafe { viewport.as_ref() }.map_or(std::ptr::null(), |viewport| viewport.0.cells.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_viewport_styles(viewport: *const ZzViewport) -> *const PackedStyle {
+    unsafe { viewport.as_ref() }.map_or(std::ptr::null(), |viewport| {
+        viewport.0.dictionary.styles.as_ptr()
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_viewport_style_count(viewport: *const ZzViewport) -> usize {
+    unsafe { viewport.as_ref() }.map_or(0, |viewport| viewport.0.dictionary.styles.len())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_viewport_grapheme_offsets(viewport: *const ZzViewport) -> *const u32 {
+    unsafe { viewport.as_ref() }.map_or(std::ptr::null(), |viewport| {
+        viewport.0.dictionary.grapheme_offsets.as_ptr()
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_viewport_grapheme_offset_count(viewport: *const ZzViewport) -> usize {
+    unsafe { viewport.as_ref() }.map_or(0, |viewport| viewport.0.dictionary.grapheme_offsets.len())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_viewport_grapheme_bytes(viewport: *const ZzViewport) -> *const u8 {
+    unsafe { viewport.as_ref() }.map_or(std::ptr::null(), |viewport| {
+        viewport.0.dictionary.grapheme_bytes.as_ptr()
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_viewport_grapheme_byte_count(viewport: *const ZzViewport) -> usize {
+    unsafe { viewport.as_ref() }.map_or(0, |viewport| viewport.0.dictionary.grapheme_bytes.len())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_viewport_cursor(
+    viewport: *const ZzViewport,
+    out: *mut ZzCursor,
+) -> bool {
+    let (Some(viewport), false) = (unsafe { viewport.as_ref() }, out.is_null()) else {
+        return false;
+    };
+    let Some(cursor) = viewport.0.cursor else {
+        return false;
+    };
+    let style = match cursor.style() {
+        CursorStyle::Bar => 0,
+        CursorStyle::Block => 1,
+        CursorStyle::Underline => 2,
+        CursorStyle::BlockHollow => 3,
+    };
+    unsafe {
+        out.write(ZzCursor {
+            color: cursor.color().packed(),
+            column: cursor.column(),
+            row: cursor.row(),
+            style,
+            visible: u8::from(cursor.visible()),
+            blinking: u8::from(cursor.blinking()),
+            wide_tail: u8::from(cursor.at_wide_tail()),
+        });
+    }
+    true
 }
 
 /// Decode one viewport row as UTF-8 text into `buf` (NUL-terminated when

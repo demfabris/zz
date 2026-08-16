@@ -69,9 +69,6 @@ pub(crate) enum AgentRequest {
     Replay {
         from_seq: u64,
     },
-    TurnDiff {
-        request_id: u64,
-    },
     AcknowledgePromptRestore {
         reclaim_id: u64,
     },
@@ -84,16 +81,12 @@ pub(crate) struct AgentEvents {
     pub(crate) items: Vec<(PaneId, Vec<zz_daemon::AgentStreamItem>)>,
     pub(crate) states: Vec<(PaneId, zz_protocol::AgentPaneWire)>,
     pub(crate) sessions: Vec<(PaneId, u64, String)>,
-    pub(crate) turn_diffs: Vec<(PaneId, u64, String)>,
 }
 
 #[cfg(feature = "agent-pane")]
 impl AgentEvents {
     fn is_empty(&self) -> bool {
-        self.items.is_empty()
-            && self.states.is_empty()
-            && self.sessions.is_empty()
-            && self.turn_diffs.is_empty()
+        self.items.is_empty() && self.states.is_empty() && self.sessions.is_empty()
     }
 }
 
@@ -3022,15 +3015,6 @@ impl MuxClient {
                 self.agent_events.sessions.push((pane, request_id, result));
             }
         }
-        for (pane, request_id, result) in pending.turn_diffs {
-            if panes.contains(&pane) {
-                ready.turn_diffs.push((pane, request_id, result));
-            } else {
-                self.agent_events
-                    .turn_diffs
-                    .push((pane, request_id, result));
-            }
-        }
         ready
     }
 
@@ -3069,7 +3053,6 @@ impl MuxClient {
             AgentRequest::Authenticate { method_id } => client.agent_authenticate(pane, method_id),
             AgentRequest::SessionOp { op } => client.agent_session_op(pane, op),
             AgentRequest::Replay { from_seq } => client.agent_replay(pane, from_seq),
-            AgentRequest::TurnDiff { request_id } => client.agent_turn_diff(pane, request_id),
             AgentRequest::AcknowledgePromptRestore { reclaim_id } => {
                 client.agent_acknowledge_prompt_restore(pane, reclaim_id)
             }
@@ -3549,18 +3532,6 @@ impl MuxClient {
             } => {
                 #[cfg(feature = "agent-pane")]
                 self.agent_events.sessions.push((pane, request_id, result));
-                #[cfg(not(feature = "agent-pane"))]
-                let _ = (pane, request_id, result);
-            }
-            CoreEvent::AgentTurnDiffResult {
-                pane,
-                request_id,
-                result,
-            } => {
-                #[cfg(feature = "agent-pane")]
-                self.agent_events
-                    .turn_diffs
-                    .push((pane, request_id, result));
                 #[cfg(not(feature = "agent-pane"))]
                 let _ = (pane, request_id, result);
             }

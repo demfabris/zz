@@ -497,10 +497,6 @@ impl InteractiveClient {
         self.send(&ProtocolMessage::AgentReplay { pane, from_seq })
     }
 
-    pub fn agent_turn_diff(&self, pane: PaneId, request_id: u64) -> Result<(), DaemonError> {
-        self.send(&ProtocolMessage::AgentTurnDiff { pane, request_id })
-    }
-
     pub fn agent_acknowledge_prompt_restore(
         &self,
         pane: PaneId,

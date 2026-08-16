@@ -18,8 +18,8 @@ use crate::{
     mend::{PENDING_LINK_URL, mend},
     scroll::ScrollableElement as _,
     text::{
-        MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, TextView,
-        TextViewState, TextViewStyle, markdown_ast,
+        CodeBlock, MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin,
+        TextView, TextViewState, TextViewStyle, markdown_ast,
     },
     v_flex,
 };
@@ -1427,21 +1427,24 @@ fn render_group(
         store.expanded(id, DisclosureKind::Group, false)
     });
     let toggle = store.clone();
-    let (icon, label, status) = match group {
-        TimelineGroupKind::Tool => (
-            tool_icon(
-                members
-                    .first()
-                    .and_then(tool_entry_kind)
-                    .unwrap_or(AgentToolKind::Other),
-            ),
-            tool_group_label(members),
-            Some(tool_status(aggregate_tool_status(members), cx)),
-        ),
+    let (icon, label, color) = match group {
+        TimelineGroupKind::Tool => {
+            let status = aggregate_tool_status(members);
+            (
+                tool_icon(
+                    members
+                        .first()
+                        .and_then(tool_entry_kind)
+                        .unwrap_or(AgentToolKind::Other),
+                ),
+                tool_group_label(members),
+                tool_status_color(status, cx),
+            )
+        }
         TimelineGroupKind::Reasoning => (
             IconName::Cpu,
             SharedString::from(format!("Reasoning · {} steps", members.len())),
-            None,
+            cx.theme().foreground.muted(),
         ),
     };
 
@@ -1455,7 +1458,6 @@ fn render_group(
                 .h(px(28.0))
                 .flex_none()
                 .items_center()
-                .justify_between()
                 .gap_2()
                 .py(px(3.0))
                 .rounded(cx.theme().radius)
@@ -1467,12 +1469,7 @@ fn render_group(
                         .flex_1()
                         .overflow_hidden()
                         .gap_2()
-                        .child(
-                            Icon::new(icon)
-                                .small()
-                                .flex_none()
-                                .text_color(cx.theme().foreground.muted()),
-                        )
+                        .child(Icon::new(icon).small().flex_none().text_color(color))
                         .child(
                             div()
                                 .min_w_0()
@@ -1482,18 +1479,17 @@ fn render_group(
                                 .text_size(crate::rems_from_px(13.0))
                                 .text_color(cx.theme().foreground.muted())
                                 .child(label),
+                        )
+                        .child(
+                            Icon::new(if expanded {
+                                IconName::ChevronUp
+                            } else {
+                                IconName::ChevronDown
+                            })
+                            .xsmall()
+                            .flex_none()
+                            .text_color(color),
                         ),
-                )
-                .child(
-                    h_flex().flex_none().gap_1().children(status).child(
-                        Icon::new(if expanded {
-                            IconName::ChevronUp
-                        } else {
-                            IconName::ChevronDown
-                        })
-                        .xsmall()
-                        .text_color(cx.theme().foreground.muted()),
-                    ),
                 )
                 .on_click(move |_, _, cx| {
                     toggle.update(cx, |store, cx| {
@@ -1662,12 +1658,35 @@ fn render_entry(
                     }),
             )
             .into_any_element(),
-        AgentEntry::Assistant { id, markdown } => div()
-            .id(("agent-assistant-entry", id))
-            .w_full()
-            .text_size(crate::rems_from_px(13.0))
-            .child(assistant_markdown_view(store, id, markdown, cx))
-            .into_any_element(),
+        AgentEntry::Assistant { id, markdown } => {
+            let copy = markdown.clone();
+            v_flex()
+                .id(("agent-assistant-entry", id))
+                .w_full()
+                .gap_1()
+                .text_size(crate::rems_from_px(13.0))
+                .child(assistant_markdown_view(store, id, markdown, cx))
+                .child(
+                    h_flex().w_full().h(px(28.0)).items_center().child(
+                        div()
+                            .debug_selector(|| "agent-assistant-copy".to_owned())
+                            .child(
+                                Button::new(("agent-copy-assistant", id))
+                                    .ghost()
+                                    .xsmall()
+                                    .compact()
+                                    .icon(IconName::Copy)
+                                    .tooltip("Copy message")
+                                    .on_click(move |_, _, cx| {
+                                        cx.write_to_clipboard(ClipboardItem::new_string(
+                                            copy.full_text(),
+                                        ));
+                                    }),
+                            ),
+                    ),
+                )
+                .into_any_element()
+        }
         AgentEntry::Reasoning {
             id,
             label,
@@ -1797,6 +1816,7 @@ fn render_tool_entry(
         })
     });
     let toggle = store.clone();
+    let status_color = tool_status_color(status, cx);
 
     v_flex()
         .id(("agent-tool-entry", id))
@@ -1808,7 +1828,6 @@ fn render_tool_entry(
                 .h(px(28.0))
                 .flex_none()
                 .items_center()
-                .justify_between()
                 .gap_2()
                 .py(px(3.0))
                 .rounded(cx.theme().radius)
@@ -1824,34 +1843,33 @@ fn render_tool_entry(
                             Icon::new(tool_icon(kind))
                                 .small()
                                 .flex_none()
-                                .text_color(cx.theme().foreground.muted()),
+                                .text_color(status_color),
                         )
                         .child(
                             div()
+                                .debug_selector(|| "agent-tool-label".to_owned())
                                 .min_w_0()
-                                .flex_1()
                                 .overflow_hidden()
                                 .text_ellipsis()
                                 .whitespace_nowrap()
                                 .text_size(crate::rems_from_px(13.0))
                                 .text_color(cx.theme().foreground.muted())
                                 .child(single_line(label)),
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .flex_none()
-                        .gap_1()
-                        .child(tool_status(status, cx))
+                        )
                         .when(expandable, |this| {
                             this.child(
-                                Icon::new(if expanded {
-                                    IconName::ChevronUp
-                                } else {
-                                    IconName::ChevronDown
-                                })
-                                .xsmall()
-                                .text_color(cx.theme().foreground.muted()),
+                                div()
+                                    .debug_selector(|| "agent-tool-chevron".to_owned())
+                                    .flex_none()
+                                    .child(
+                                        Icon::new(if expanded {
+                                            IconName::ChevronUp
+                                        } else {
+                                            IconName::ChevronDown
+                                        })
+                                        .xsmall()
+                                        .text_color(status_color),
+                                    ),
                             )
                         }),
                 )
@@ -2032,92 +2050,6 @@ fn bounded_tool_suffix(text: &str) -> (&str, bool) {
         start += 1;
     }
     (&text[start..], true)
-}
-
-/// Classify the lines of a unified patch into the timeline's diff rows. git has
-/// already decided which lines changed, so nothing is re-diffed here.
-fn materialize_patch(patch: &str) -> Vec<ToolContentRow> {
-    let mut rows = Vec::new();
-    let mut total_lines = 0;
-    for line in patch.trim_end_matches('\n').split('\n') {
-        let line = line.strip_suffix('\r').unwrap_or(line);
-        total_lines += 1;
-        if total_lines > TOOL_CONTENT_MAX_LINES {
-            continue;
-        }
-        rows.push(match line.as_bytes().first() {
-            // "\ No newline at end of file" and the hunk headers are notes
-            // about the patch rather than lines of either side.
-            Some(b'@' | b'\\') => ToolContentRow::Footer(line.to_owned().into()),
-            Some(b'+') => ToolContentRow::Diff {
-                kind: DiffLineKind::Added,
-                text: line[1..].to_owned().into(),
-            },
-            Some(b'-') => ToolContentRow::Diff {
-                kind: DiffLineKind::Removed,
-                text: line[1..].to_owned().into(),
-            },
-            _ => ToolContentRow::Diff {
-                kind: DiffLineKind::Equal,
-                text: line.strip_prefix(' ').unwrap_or(line).to_owned().into(),
-            },
-        });
-    }
-    append_line_truncation_footer(&mut rows, total_lines, false);
-    rows
-}
-
-#[derive(Clone)]
-pub struct AgentPatch {
-    rows: Arc<[ToolContentRow]>,
-}
-
-pub fn agent_patch(patch: &str) -> AgentPatch {
-    AgentPatch {
-        rows: materialize_patch(patch).into(),
-    }
-}
-
-/// A unified patch drawn as the monospace, gutter-marked block the timeline
-/// uses for tool diffs. `key` namespaces the element ids.
-pub fn agent_patch_block(
-    key: u64,
-    patch: &AgentPatch,
-    scroll: &UniformListScrollHandle,
-    cx: &App,
-) -> impl IntoElement {
-    let rows = Arc::clone(&patch.rows);
-    let scrollbar_handle = scroll.0.borrow().base_handle.clone();
-    let lines = uniform_list(
-        ("agent-patch-lines", key),
-        rows.len(),
-        move |range, _, cx| {
-            range
-                .filter_map(|index| {
-                    rows.get(index)
-                        .cloned()
-                        .map(|row| render_tool_content_row(key, index, row, cx))
-                })
-                .collect::<Vec<_>>()
-        },
-    )
-    .w_full()
-    .max_h(px(TOOL_CONTENT_MAX_HEIGHT))
-    .overflow_hidden()
-    .with_sizing_behavior(ListSizingBehavior::Infer)
-    .track_scroll(scroll);
-
-    div()
-        .id(("agent-patch-block", key))
-        .relative()
-        .w_full()
-        .min_h_0()
-        .max_h(px(TOOL_CONTENT_MAX_HEIGHT))
-        .overflow_hidden()
-        .border_t_1()
-        .border_color(cx.theme().border)
-        .child(lines)
-        .vertical_scrollbar(&scrollbar_handle)
 }
 
 fn append_line_truncation_footer(
@@ -2376,28 +2308,14 @@ fn tool_icon(kind: AgentToolKind) -> IconName {
     }
 }
 
-const fn tool_status_icon(status: AgentToolStatus) -> IconName {
+fn tool_status_color(status: AgentToolStatus, cx: &App) -> Hsla {
     match status {
-        AgentToolStatus::Pending | AgentToolStatus::Running => IconName::Ellipsis,
-        AgentToolStatus::NeedsApproval => IconName::TriangleAlert,
-        AgentToolStatus::Completed => IconName::Check,
-        AgentToolStatus::Failed | AgentToolStatus::Canceled => IconName::Close,
-    }
-}
-
-fn tool_status(status: AgentToolStatus, cx: &App) -> AnyElement {
-    let color = match status {
         AgentToolStatus::Running => cx.theme().foreground,
         AgentToolStatus::NeedsApproval => cx.theme().warning,
-        AgentToolStatus::Pending | AgentToolStatus::Completed | AgentToolStatus::Canceled => {
-            cx.theme().foreground.muted()
-        }
+        AgentToolStatus::Completed => cx.theme().success,
+        AgentToolStatus::Pending | AgentToolStatus::Canceled => cx.theme().foreground.muted(),
         AgentToolStatus::Failed => cx.theme().danger,
-    };
-    Icon::new(tool_status_icon(status))
-        .xsmall()
-        .text_color(color)
-        .into_any_element()
+    }
 }
 
 fn markdown_view(
@@ -2445,7 +2363,7 @@ fn markdown_view_with_extensions(
         state,
         extensions,
         style,
-        full_source: Some(full_source),
+        full_source: (!assistant).then_some(full_source),
         truncated,
     }
 }
@@ -2504,6 +2422,7 @@ impl gpui::RenderOnce for AgentMarkdownView {
             .max_w_full()
             .min_w_0()
             .selectable(true)
+            .code_block_actions(agent_code_block_chrome)
             .markdown_extensions(self.extensions)
             .when(self.truncated, |text| {
                 text.scrollable(true).h(px(MARKDOWN_PREVIEW_HEIGHT))
@@ -2529,6 +2448,50 @@ impl gpui::RenderOnce for AgentMarkdownView {
             },
         )
     }
+}
+
+fn agent_code_block_chrome(
+    code_block: &CodeBlock,
+    _window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let language = code_block_language(code_block.lang());
+    let code = code_block.code();
+    let source_offset = code_block.span.map_or(0, |span| span.start);
+
+    h_flex()
+        .w_full()
+        .h(px(28.0))
+        .items_center()
+        .justify_between()
+        .pl_1()
+        .child(
+            div()
+                .debug_selector(|| "agent-code-language".to_owned())
+                .text_size(crate::rems_from_px(10.0))
+                .text_color(cx.theme().foreground.muted())
+                .child(language),
+        )
+        .child(
+            div().debug_selector(|| "agent-code-copy".to_owned()).child(
+                Button::new(("agent-copy-code", source_offset))
+                    .ghost()
+                    .xsmall()
+                    .compact()
+                    .icon(IconName::Copy)
+                    .tooltip("Copy code")
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(code.to_string()));
+                    }),
+            ),
+        )
+        .into_any_element()
+}
+
+fn code_block_language(language: Option<SharedString>) -> SharedString {
+    language
+        .filter(|language| !language.trim().is_empty())
+        .unwrap_or_else(|| SharedString::from("text"))
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -3941,27 +3904,113 @@ mod tests {
         );
     }
 
-    #[test]
-    fn transcript_tool_statuses_use_static_icons() {
+    #[gpui::test]
+    fn transcript_tool_statuses_use_semantic_text_colors(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        cx.update(|cx| {
+            assert_eq!(
+                tool_status_color(AgentToolStatus::Running, cx),
+                cx.theme().foreground
+            );
+            assert_eq!(
+                tool_status_color(AgentToolStatus::NeedsApproval, cx),
+                cx.theme().warning
+            );
+            assert_eq!(
+                tool_status_color(AgentToolStatus::Failed, cx),
+                cx.theme().danger
+            );
+            assert_eq!(
+                tool_status_color(AgentToolStatus::Completed, cx),
+                cx.theme().success
+            );
+            for status in [AgentToolStatus::Pending, AgentToolStatus::Canceled] {
+                assert_eq!(tool_status_color(status, cx), cx.theme().foreground.muted());
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn assistant_and_code_block_copy_buttons_keep_raw_markdown(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        const RAW: &str = "Result\n\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```";
+        const CODE: &str = "fn main() {\n    println!(\"hi\");\n}";
+        let entry = AgentEntry::Assistant {
+            id: 17,
+            markdown: RAW.into(),
+        };
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| UserEntryTest {
+                store: cx.new(|_| AgentTimelineStore::default()),
+                entry,
+                pane_width: px(520.0),
+            });
+            crate::Root::new(view, window, cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        let language = cx
+            .debug_bounds("agent-code-language")
+            .expect("the code language should be painted");
+        let code_copy = cx
+            .debug_bounds("agent-code-copy")
+            .expect("the code copy button should be painted");
+        assert!(language.right() < code_copy.left());
+        cx.simulate_click(code_copy.center(), gpui::Modifiers::none());
         assert_eq!(
-            [
-                AgentToolStatus::Pending,
-                AgentToolStatus::Running,
-                AgentToolStatus::NeedsApproval,
-                AgentToolStatus::Completed,
-                AgentToolStatus::Failed,
-                AgentToolStatus::Canceled,
-            ]
-            .map(tool_status_icon),
-            [
-                IconName::Ellipsis,
-                IconName::Ellipsis,
-                IconName::TriangleAlert,
-                IconName::Check,
-                IconName::Close,
-                IconName::Close,
-            ]
+            cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())),
+            Some(CODE.to_owned())
         );
+
+        let message_copy = cx
+            .debug_bounds("agent-assistant-copy")
+            .expect("the message copy button should be painted");
+        cx.simulate_click(message_copy.center(), gpui::Modifiers::none());
+        assert_eq!(
+            cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())),
+            Some(RAW.to_owned())
+        );
+    }
+
+    #[gpui::test]
+    fn tool_disclosure_sits_beside_the_label(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        const PANE_WIDTH: Pixels = px(520.0);
+        let mut tool = test_tool_entry(
+            18,
+            "Ran command",
+            AgentToolKind::Execute,
+            AgentToolStatus::Completed,
+        );
+        tool.input = Some(AgentToolPayload::Text("cargo test".into()));
+        let entry = AgentEntry::Tool(tool);
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| UserEntryTest {
+                store: cx.new(|_| AgentTimelineStore::default()),
+                entry,
+                pane_width: PANE_WIDTH,
+            });
+            crate::Root::new(view, window, cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        let label = cx
+            .debug_bounds("agent-tool-label")
+            .expect("the tool label should be painted");
+        let chevron = cx
+            .debug_bounds("agent-tool-chevron")
+            .expect("the tool disclosure should be painted");
+        assert!(chevron.left() >= label.right());
+        assert!(chevron.left() - label.right() <= px(8.0));
+        assert!(PANE_WIDTH - chevron.right() > px(200.0));
     }
 
     #[gpui::test]
@@ -4228,6 +4277,13 @@ mod tests {
         assert!(!is_markdown_language("rust"));
     }
 
+    #[test]
+    fn code_block_header_uses_the_fence_language_or_text() {
+        assert_eq!(code_block_language(Some("rust".into())), "rust");
+        assert_eq!(code_block_language(Some("".into())), "text");
+        assert_eq!(code_block_language(None), "text");
+    }
+
     #[gpui::test]
     fn timeline_store_retains_row_state_while_the_row_is_absent(cx: &mut TestAppContext) {
         cx.update(crate::init);
@@ -4473,36 +4529,6 @@ mod tests {
             state.read_with(cx, |state, _| state.source()),
             "a **partly bold"
         );
-    }
-
-    #[test]
-    fn a_patch_keeps_the_side_git_assigned_each_line() {
-        let rows = materialize_patch("@@ -1,2 +1,2 @@\n one\n-two\n+three\n\\ No newline\n");
-
-        assert!(matches!(rows[0], ToolContentRow::Footer(_)));
-        assert!(matches!(
-            &rows[1],
-            ToolContentRow::Diff {
-                kind: DiffLineKind::Equal,
-                text
-            } if text == "one"
-        ));
-        assert!(matches!(
-            &rows[2],
-            ToolContentRow::Diff {
-                kind: DiffLineKind::Removed,
-                text
-            } if text == "two"
-        ));
-        assert!(matches!(
-            &rows[3],
-            ToolContentRow::Diff {
-                kind: DiffLineKind::Added,
-                text
-            } if text == "three"
-        ));
-        assert!(matches!(rows[4], ToolContentRow::Footer(_)));
-        assert_eq!(rows.len(), 5);
     }
 
     #[gpui::test]

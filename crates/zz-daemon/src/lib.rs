@@ -39,13 +39,9 @@ mod transport;
 pub mod user_data;
 
 #[cfg(feature = "agent")]
-pub use agent::{
-    stream::{
-        AgentAuthMethod, AgentImage as AgentStreamImage, AgentPrompt, AgentPromptOutcome,
-        AgentSessionCapabilities, AgentSessionSummary, AgentStreamItem, AgentStreamPayload,
-        AgentTurnDiffOutcome,
-    },
-    turn_snapshot::{TurnDiff, TurnFile, TurnFileStatus},
+pub use agent::stream::{
+    AgentAuthMethod, AgentImage as AgentStreamImage, AgentPrompt, AgentPromptOutcome,
+    AgentSessionCapabilities, AgentSessionSummary, AgentStreamItem, AgentStreamPayload,
 };
 /// Only unix and Windows spawn ssh, so only they carry the askpass helper.
 #[cfg(any(unix, windows))]

@@ -154,11 +154,6 @@ pub enum CoreEvent {
         request_id: u64,
         result: String,
     },
-    AgentTurnDiffResult {
-        pane: PaneId,
-        request_id: u64,
-        result: String,
-    },
     /// An inbound message the core does not reduce (pasted-image previews,
     /// echoing of client-to-daemon variants); the shell keeps its own handling.
     Message(Box<ProtocolMessage>),
@@ -613,17 +608,6 @@ impl ClientCore {
                     result,
                 });
             }
-            EventPayload::AgentTurnDiffResult {
-                pane,
-                request_id,
-                result,
-            } => {
-                self.events.push_back(CoreEvent::AgentTurnDiffResult {
-                    pane,
-                    request_id,
-                    result,
-                });
-            }
         }
     }
 
@@ -836,11 +820,6 @@ mod tests {
             request_id: 9,
             result: "[]".to_owned(),
         }));
-        core.handle_message(event(EventPayload::AgentTurnDiffResult {
-            pane,
-            request_id: 10,
-            result: "{\"diff\":\"\"}".to_owned(),
-        }));
 
         assert_eq!(
             drain(&mut core),
@@ -855,11 +834,6 @@ mod tests {
                     pane,
                     request_id: 9,
                     result: "[]".to_owned(),
-                },
-                CoreEvent::AgentTurnDiffResult {
-                    pane,
-                    request_id: 10,
-                    result: "{\"diff\":\"\"}".to_owned(),
                 },
             ]
         );

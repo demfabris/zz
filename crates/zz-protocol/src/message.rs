@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 56;
+pub const PROTOCOL_VERSION: u16 = 57;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
@@ -1048,6 +1048,15 @@ pub struct AgentPermissionWire {
     pub payload: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentGitSummary {
+    #[serde(deserialize_with = "deserialize_optional_agent_option_text")]
+    pub branch: Option<String>,
+    pub changed_files: u32,
+    pub additions: u32,
+    pub deletions: u32,
+}
+
 /// One agent pane's live state, small enough to publish to every client
 /// attached to the session. Postcard cannot carry the ACP SDK's JSON-shaped
 /// types, so auth methods, config options, and modes cross as JSON blobs.
@@ -1068,6 +1077,7 @@ pub struct AgentPaneWire {
     #[serde(deserialize_with = "deserialize_agent_state_blob")]
     pub modes: String,
     pub pending_permission: Option<AgentPermissionWire>,
+    pub git: Option<AgentGitSummary>,
 }
 
 impl AgentPaneWire {
@@ -1111,6 +1121,14 @@ impl AgentPaneWire {
             .is_some_and(|permission| permission.payload.len() > MAX_AGENT_PERMISSION_BYTES)
         {
             return Err("agent permission payload exceeds the wire byte limit");
+        }
+        if self
+            .git
+            .as_ref()
+            .and_then(|git| git.branch.as_ref())
+            .is_some_and(|branch| branch.len() > MAX_AGENT_OPTION_BYTES)
+        {
+            return Err("agent Git branch exceeds the wire byte limit");
         }
         Ok(())
     }
@@ -1529,12 +1547,6 @@ pub enum EventPayload {
         #[serde(deserialize_with = "deserialize_agent_result")]
         result: String,
     },
-    AgentTurnDiffResult {
-        pane: PaneId,
-        request_id: u64,
-        #[serde(deserialize_with = "deserialize_agent_result")]
-        result: String,
-    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1662,10 +1674,6 @@ pub enum ProtocolMessage {
     AgentReplay {
         pane: PaneId,
         from_seq: u64,
-    },
-    AgentTurnDiff {
-        pane: PaneId,
-        request_id: u64,
     },
     AgentAcknowledgePromptRestore {
         pane: PaneId,
@@ -1799,9 +1807,9 @@ mod tests {
                 },
             },
             super::ProtocolMessage::AgentReplay { pane, from_seq: 0 },
-            super::ProtocolMessage::AgentTurnDiff {
+            super::ProtocolMessage::AgentAcknowledgePromptRestore {
                 pane,
-                request_id: 0,
+                reclaim_id: 0,
             },
         ]
         .into_iter()
@@ -1832,11 +1840,6 @@ mod tests {
             },
             super::EventPayload::AgentLagged { pane, next_seq: 0 },
             super::EventPayload::AgentSessions {
-                pane,
-                request_id: 0,
-                result: String::new(),
-            },
-            super::EventPayload::AgentTurnDiffResult {
                 pane,
                 request_id: 0,
                 result: String::new(),

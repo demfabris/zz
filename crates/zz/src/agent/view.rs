@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeSet, HashMap},
+    f32::consts::PI,
     ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
@@ -9,21 +10,20 @@ use std::{
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, Timelike as _};
 use gpui::{
     Anchor, AnyElement, Context, ElementId, Entity, EntityId, FocusHandle, Focusable, Hsla, Image,
-    IntoElement, KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, Render,
-    ScrollStrategy, SharedString, Subscription, Task, Transformation, UniformListScrollHandle,
-    Window, div, ease_in_out, percentage, prelude::*, px, relative, uniform_list,
+    IntoElement, KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, PathBuilder,
+    Render, Role, ScrollStrategy, SharedString, Subscription, Transformation,
+    UniformListScrollHandle, Window, canvas, div, ease_in_out, percentage, point, prelude::*, px,
+    relative, uniform_list,
 };
-use zz_daemon::{TurnDiff, TurnFile, TurnFileStatus};
-use zz_protocol::{AgentDescriptor, AgentProvider, CommandInvocation, PaneId};
+use zz_protocol::{AgentDescriptor, AgentGitSummary, AgentProvider, CommandInvocation, PaneId};
 #[cfg(all(test, not(target_os = "macos")))]
 use zz_ui::agent::DisclosureKind;
 use zz_ui::agent::{
-    AGENT_CHROME_CONTROL_HEIGHT, AGENT_CONTENT_MAX_WIDTH, AgentEntry, AgentMarkdown, AgentPatch,
-    AgentTimeline, AgentTimelineStore, AgentToolEntry, AgentToolKind, AgentToolPayload,
-    AgentToolStatus, AgentToolText, COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot,
-    TimelineRow, TimelineStick, agent_attachment_thumbnail, agent_jump_to_bottom_button,
-    agent_pane_header, agent_patch, agent_patch_block, append_timeline_row, fold_timeline_rows,
-    timeline_group_kind,
+    AGENT_CHROME_CONTROL_HEIGHT, AGENT_CONTENT_MAX_WIDTH, AgentEntry, AgentMarkdown, AgentTimeline,
+    AgentTimelineStore, AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus,
+    AgentToolText, COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot, TimelineRow,
+    TimelineStick, agent_attachment_thumbnail, agent_jump_to_bottom_button, agent_pane_header,
+    append_timeline_row, fold_timeline_rows, timeline_group_kind,
 };
 use zz_ui::command::palette_shortcut_hint;
 use zz_ui::{
@@ -36,6 +36,7 @@ use zz_ui::{
     pulse::pulse_phase,
     scroll::Scrollbar,
     tag::Tag,
+    tooltip::Tooltip,
     v_flex,
 };
 
@@ -58,12 +59,15 @@ const COMPLETION_ROW_HEIGHT: f32 = 52.0;
 const MAX_VISIBLE_COMPLETION_ROWS: u8 = 6;
 const MAX_COMPLETION_RESULTS: usize = 64;
 const HISTORY_ROW_HEIGHT: f32 = 52.0;
-const CHANGES_ROW_HEIGHT: f32 = 40.0;
 const COMPOSER_MIN_HEIGHT: f32 = 86.0;
+const COMPOSER_FOOTER_HEIGHT: f32 = 28.0;
 const COMPOSER_MAX_WIDTH: f32 = AGENT_CONTENT_MAX_WIDTH + 2.0;
 const COMPOSER_OCCLUSION_HEIGHT: f32 = COMPOSER_MIN_HEIGHT / 2.0;
 const TIMELINE_COMPOSER_CLEARANCE: f32 = (COMPOSER_MIN_HEIGHT + 12.0) * 1.5;
+const TIMELINE_COMPOSER_FOOTER_CLEARANCE: f32 = COMPOSER_FOOTER_HEIGHT + 8.0;
 const CHROME_BUTTON_HEIGHT: f32 = AGENT_CHROME_CONTROL_HEIGHT;
+const CONTEXT_USAGE_RING_SIZE: f32 = 16.0;
+const CONTEXT_USAGE_STROKE_WIDTH: f32 = 2.0;
 const SPINNER_PERIOD: Duration = Duration::from_millis(800);
 const MAX_RENDERED_ERROR_BYTES: usize = 1024;
 
@@ -297,6 +301,190 @@ const fn composer_action(active_turn: bool, has_content: bool) -> ComposerAction
     }
 }
 
+#[allow(clippy::cast_precision_loss)]
+fn context_usage_fraction(used: u64, size: u64) -> f64 {
+    if size == 0 {
+        0.0
+    } else {
+        (used.min(size) as f64 / size as f64).clamp(0.0, 1.0)
+    }
+}
+
+fn context_usage_tooltip(used: u64, size: u64) -> String {
+    if size == 0 {
+        "Context window usage unavailable".to_owned()
+    } else {
+        format!(
+            "{used} of {size} context tokens used ({:.0}%)",
+            context_usage_fraction(used, size) * 100.0
+        )
+    }
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn context_usage_meter(pane: PaneId, used: u64, size: u64, cx: &gpui::App) -> AnyElement {
+    let progress = context_usage_fraction(used, size) as f32;
+    let tooltip = context_usage_tooltip(used, size);
+    let track_color = cx.theme().foreground.muted().opacity(0.22);
+    let progress_color = cx.theme().foreground.muted();
+    let ring = canvas(
+        |_, _, _| (),
+        move |bounds, (), window, _| {
+            let stroke = px(CONTEXT_USAGE_STROKE_WIDTH);
+            let radius = px((CONTEXT_USAGE_RING_SIZE - CONTEXT_USAGE_STROKE_WIDTH) / 2.0);
+            let center_x = bounds.origin.x + bounds.size.width / 2.0;
+            let center_y = bounds.origin.y + bounds.size.height / 2.0;
+
+            let mut track = PathBuilder::stroke(stroke);
+            track.move_to(point(center_x + radius, center_y));
+            track.arc_to(
+                point(radius, radius),
+                px(0.0),
+                false,
+                true,
+                point(center_x - radius, center_y),
+            );
+            track.arc_to(
+                point(radius, radius),
+                px(0.0),
+                false,
+                true,
+                point(center_x + radius, center_y),
+            );
+            track.close();
+            if let Ok(path) = track.build() {
+                window.paint_path(path, track_color);
+            }
+
+            if progress <= 0.0 {
+                return;
+            }
+            let mut fill = PathBuilder::stroke(stroke);
+            if progress >= 0.999 {
+                fill.move_to(point(center_x + radius, center_y));
+                fill.arc_to(
+                    point(radius, radius),
+                    px(0.0),
+                    false,
+                    true,
+                    point(center_x - radius, center_y),
+                );
+                fill.arc_to(
+                    point(radius, radius),
+                    px(0.0),
+                    false,
+                    true,
+                    point(center_x + radius, center_y),
+                );
+                fill.close();
+            } else {
+                fill.move_to(point(center_x, center_y - radius));
+                let angle = -PI / 2.0 + progress * 2.0 * PI;
+                fill.arc_to(
+                    point(radius, radius),
+                    px(0.0),
+                    progress > 0.5,
+                    true,
+                    point(
+                        center_x + radius * angle.cos(),
+                        center_y + radius * angle.sin(),
+                    ),
+                );
+            }
+            if let Ok(path) = fill.build() {
+                window.paint_path(path, progress_color);
+            }
+        },
+    )
+    .size(px(CONTEXT_USAGE_RING_SIZE));
+    let aria_value = format!("{:.0}%", f64::from(progress) * 100.0);
+    let hover_tooltip = tooltip.clone();
+
+    div()
+        .id(("agent-context-usage", pane.0))
+        .role(Role::ProgressIndicator)
+        .aria_label(tooltip)
+        .aria_value(aria_value)
+        .flex()
+        .flex_none()
+        .size(px(28.0))
+        .items_center()
+        .justify_center()
+        .tooltip(move |window, cx| Tooltip::new(hover_tooltip.clone()).build(window, cx))
+        .child(ring)
+        .into_any_element()
+}
+
+fn git_file_count_label(count: u32) -> String {
+    if count == 1 {
+        "1 file".to_owned()
+    } else {
+        format!("{count} files")
+    }
+}
+
+fn git_summary_footer(pane: PaneId, git: &AgentGitSummary, cx: &gpui::App) -> AnyElement {
+    let branch = git.branch.clone().map(SharedString::from);
+    let files = git_file_count_label(git.changed_files);
+    let tooltip = match git.branch.as_deref() {
+        Some(branch) => format!(
+            "{branch}: {files}, +{} additions, -{} deletions",
+            git.additions, git.deletions
+        ),
+        None => format!(
+            "Detached HEAD: {files}, +{} additions, -{} deletions",
+            git.additions, git.deletions
+        ),
+    };
+    let hover_tooltip = tooltip.clone();
+
+    h_flex()
+        .id(("agent-git-summary", pane.0))
+        .min_w_0()
+        .h(px(COMPOSER_FOOTER_HEIGHT))
+        .items_center()
+        .gap_2()
+        .text_size(zz_ui::rems_from_px(11.0))
+        .tooltip(move |window, cx| Tooltip::new(hover_tooltip.clone()).build(window, cx))
+        .child(
+            Icon::new(IconName::GitBranch)
+                .xsmall()
+                .flex_none()
+                .text_color(cx.theme().foreground.muted()),
+        )
+        .when_some(branch, |this, branch| {
+            this.child(
+                div()
+                    .min_w_0()
+                    .max_w(px(220.0))
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .whitespace_nowrap()
+                    .text_color(cx.theme().foreground.muted())
+                    .child(branch),
+            )
+        })
+        .child(
+            div()
+                .flex_none()
+                .text_color(cx.theme().foreground.muted())
+                .child(files),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_color(cx.theme().success)
+                .child(format!("+{}", git.additions)),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_color(cx.theme().danger)
+                .child(format!("-{}", git.deletions)),
+        )
+        .into_any_element()
+}
+
 /// What a wizard interaction asks the controller to do.
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum PermissionStep {
@@ -461,16 +649,6 @@ pub(crate) struct AgentView {
     history_scroll: UniformListScrollHandle,
     history_delete_confirmation: Option<Arc<str>>,
     last_history_query: String,
-    changes_open: bool,
-    changes: Option<Arc<TurnDiff>>,
-    changes_error: Option<Arc<str>>,
-    changes_expanded: Option<SharedString>,
-    changes_hunks: Option<(usize, Option<AgentPatch>)>,
-    changes_scroll: UniformListScrollHandle,
-    changes_patch_scroll: UniformListScrollHandle,
-    changes_turn_generation: u64,
-    /// The in-flight capture. Dropping it cancels the diff.
-    changes_task: Option<Task<()>>,
     directory_picker: Option<Entity<FilePickerView>>,
     window_corners: WindowCorners,
     _subscriptions: Vec<Subscription>,
@@ -523,13 +701,7 @@ impl AgentView {
         controller.update(cx, |controller, cx| {
             controller.ensure_pane(pane, descriptor, cx);
         });
-        let (
-            pane_state,
-            timeline,
-            timeline_next_revision,
-            conversation_epoch,
-            changes_turn_generation,
-        ) = {
+        let (pane_state, timeline, timeline_next_revision, conversation_epoch) = {
             let controller = controller.read(cx);
             let pane_state = controller
                 .pane_state(pane)
@@ -541,7 +713,6 @@ impl AgentView {
                 TimelineModel::new(entries, revisions),
                 next_revision,
                 controller.conversation_epoch(pane),
-                controller.turn_generation(pane),
             )
         };
         let timeline_scroll = ListState::new(0, ListAlignment::Top, px(1_200.0));
@@ -592,15 +763,6 @@ impl AgentView {
             history_scroll: UniformListScrollHandle::new(),
             history_delete_confirmation: None,
             last_history_query: String::new(),
-            changes_open: false,
-            changes: None,
-            changes_error: None,
-            changes_expanded: None,
-            changes_hunks: None,
-            changes_scroll: UniformListScrollHandle::new(),
-            changes_patch_scroll: UniformListScrollHandle::new(),
-            changes_turn_generation,
-            changes_task: None,
             directory_picker: None,
             window_corners: WindowCorners::NONE,
             _subscriptions: vec![
@@ -737,23 +899,6 @@ impl AgentView {
         let commands_changed = provider_changed
             || self.pane_state.available_commands.as_ref()
                 != next_state.available_commands.as_ref();
-        let next_turn_generation = controller.turn_generation(self.pane);
-        let changes_invalidated = (self.changes_turn_generation != next_turn_generation
-            || !controller.has_turn_base(self.pane))
-            && (self.changes_open
-                || self.changes.is_some()
-                || self.changes_error.is_some()
-                || self.changes_expanded.is_some()
-                || self.changes_task.is_some());
-        if changes_invalidated {
-            self.changes_open = false;
-            self.changes = None;
-            self.changes_error = None;
-            self.changes_expanded = None;
-            self.changes_hunks = None;
-            self.changes_task = None;
-        }
-        self.changes_turn_generation = next_turn_generation;
         if state_changed {
             self.pane_state = next_state;
         }
@@ -777,10 +922,7 @@ impl AgentView {
                 self.stick.engage_now(&self.timeline_scroll, reduce_motion);
                 return (true, TimelineStoreUpdate::Clear);
             }
-            return (
-                state_changed || changes_invalidated,
-                TimelineStoreUpdate::Clear,
-            );
+            return (state_changed, TimelineStoreUpdate::Clear);
         };
         if conversation_changed {
             self.timeline.rebuild(entries, revisions);
@@ -792,10 +934,7 @@ impl AgentView {
         if self.timeline.entry_ids.len() == entries.len()
             && self.timeline_next_revision == next_revision
         {
-            return (
-                state_changed || changes_invalidated,
-                TimelineStoreUpdate::None,
-            );
+            return (state_changed, TimelineStoreUpdate::None);
         }
         let Some(changed_entries) =
             controller.pane_entry_changes(self.pane, self.timeline_next_revision)
@@ -809,10 +948,7 @@ impl AgentView {
         self.timeline_next_revision = next_revision;
         let (timeline_changed, store_update) =
             self.synchronize_timeline(entries, revisions, &changed_entries, reduce_motion);
-        (
-            timeline_changed || state_changed || changes_invalidated,
-            store_update,
-        )
+        (timeline_changed || state_changed, store_update)
     }
 
     fn recompute_history_results(&mut self, query: &str) {
@@ -1176,93 +1312,6 @@ impl AgentView {
         cx.notify();
     }
 
-    fn open_changes(&mut self, cx: &mut Context<Self>) {
-        self.changes_open = true;
-        self.completions = Arc::from([]);
-        self.completion_selected = None;
-        self.refresh_changes(cx);
-    }
-
-    fn close_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.changes_open = false;
-        self.changes_task = None;
-        self.focus(cx).focus(window, cx);
-        cx.notify();
-    }
-
-    /// Diff the worktree against the base this turn started from. The capture
-    /// runs on the background executor; only the result comes back here.
-    fn refresh_changes(&mut self, cx: &mut Context<Self>) {
-        let pane = self.pane;
-        self.changes = None;
-        self.changes_expanded = None;
-        self.changes_hunks = None;
-        let Some(capture) = self
-            .controller
-            .update(cx, |controller, cx| controller.capture_turn_diff(pane, cx))
-        else {
-            self.changes_task = None;
-            self.changes_error = Some(Arc::from("this turn has no snapshot to diff against"));
-            cx.notify();
-            return;
-        };
-        self.changes_error = None;
-        self.changes_task = Some(cx.spawn(async move |view, cx| {
-            let captured = capture.await;
-            view.update(cx, |view, cx| view.apply_turn_diff(captured, cx))
-                .ok();
-        }));
-        cx.notify();
-    }
-
-    fn apply_turn_diff(&mut self, captured: Result<TurnDiff, String>, cx: &mut Context<Self>) {
-        // This runs inside the capture task, so the handle is dropped from the
-        // future it owns: the cancel lands after this poll, on a task that has
-        // already produced everything it was going to.
-        self.changes_task = None;
-        match captured {
-            Ok(diff) => {
-                if !diff.files.iter().any(|file| {
-                    self.changes_expanded
-                        .as_ref()
-                        .is_some_and(|path| path == file.path.as_str())
-                }) {
-                    self.changes_expanded = None;
-                    self.changes_hunks = None;
-                }
-                self.changes = Some(Arc::new(diff));
-                self.changes_error = None;
-            }
-            Err(error) => {
-                self.changes = None;
-                self.changes_expanded = None;
-                self.changes_hunks = None;
-                self.changes_error = Some(Arc::from(error.as_str()));
-            }
-        }
-        cx.notify();
-    }
-
-    fn toggle_changed_file(&mut self, path: &SharedString, cx: &mut Context<Self>) {
-        if self.changes_expanded.as_ref() == Some(path) {
-            self.changes_expanded = None;
-            self.changes_hunks = None;
-        } else {
-            self.changes_expanded = Some(path.clone());
-            self.changes_hunks = self.changes.as_ref().and_then(|diff| {
-                let index = diff
-                    .files
-                    .iter()
-                    .position(|file| file.path.as_str() == path.as_ref())?;
-                Some((
-                    index,
-                    file_hunks(&diff.patch, &diff.files[index]).map(agent_patch),
-                ))
-            });
-        }
-        cx.notify();
-    }
-
     fn accept_completion(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(completion) = self.completions.get(index).cloned() else {
             return;
@@ -1321,11 +1370,6 @@ impl AgentView {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.changes_open && event.keystroke.key.as_str() == "escape" {
-            self.close_changes(window, cx);
-            cx.stop_propagation();
-            return;
-        }
         if self.history_open && event.keystroke.key.as_str() == "escape" {
             if self.history_delete_confirmation.take().is_some() {
                 cx.notify();
@@ -1337,7 +1381,6 @@ impl AgentView {
         }
         if self.completions.is_empty()
             && !self.history_open
-            && !self.changes_open
             && self.handle_permission_key(event, window, cx)
         {
             cx.stop_propagation();
@@ -1815,8 +1858,7 @@ impl AgentView {
     ) -> impl IntoElement {
         let enabled = state.session_capabilities.list && state.connection.accepts_prompt();
         agent_chrome_button(("agent-session-history", self.pane.0))
-            .icon(IconName::GalleryVerticalEnd)
-            .label("History")
+            .icon(IconName::History)
             .tooltip(if enabled {
                 "Browse sessions stored by this agent"
             } else if state.session_capabilities.list {
@@ -1829,330 +1871,6 @@ impl AgentView {
                 view.update(cx, |view, cx| view.open_history(window, cx));
                 cx.stop_propagation();
             })
-    }
-
-    /// The way into the turn diff, shown only once the turn has a base to diff
-    /// against — a pane outside a git worktree never grows the affordance.
-    fn render_changes_button(
-        &self,
-        view: Entity<Self>,
-        cx: &gpui::App,
-    ) -> Option<impl IntoElement> {
-        self.controller
-            .read(cx)
-            .has_turn_base(self.pane)
-            .then_some(())?;
-        Some(
-            agent_chrome_button(("agent-turn-changes", self.pane.0))
-                .icon(IconName::Layers)
-                .label("Changes")
-                .tooltip("What this turn changed in the worktree")
-                .on_click(move |_, _, cx| {
-                    view.update(cx, AgentView::open_changes);
-                    cx.stop_propagation();
-                }),
-        )
-    }
-
-    fn render_changes_overlay(&self, view: &Entity<Self>, cx: &mut gpui::App) -> impl IntoElement {
-        let pane = self.pane;
-        let diff = self.changes.clone();
-        let loading = self.changes_task.is_some();
-        let rows_diff = diff.clone();
-        let rows_view = view.clone();
-        let rows_expanded = self.changes_expanded.clone();
-        let rows = uniform_list(
-            ("agent-changes-rows", pane.0),
-            rows_diff.as_ref().map_or(0, |diff| diff.files.len()),
-            move |range, _, cx| {
-                let Some(diff) = rows_diff.clone() else {
-                    return Vec::new();
-                };
-                range
-                    .filter_map(|index| {
-                        let file = diff.files.get(index)?;
-                        let path = SharedString::from(file.path.clone());
-                        let is_expanded = rows_expanded.as_ref() == Some(&path);
-                        let click_view = rows_view.clone();
-                        let click_path = path.clone();
-                        Some(
-                            h_flex()
-                                .id(format!("agent-changes-row-{}-{index}", pane.0))
-                                .w_full()
-                                .h(px(CHANGES_ROW_HEIGHT))
-                                .items_center()
-                                .gap_2()
-                                .rounded(cx.theme().radius)
-                                .px_2p5()
-                                .cursor_pointer()
-                                .when(is_expanded, |this| this.bg(cx.theme().background.hover()))
-                                .when(!is_expanded, |this| {
-                                    this.hover(|this| this.bg(cx.theme().background.hover()))
-                                })
-                                .on_click(move |_, _, cx| {
-                                    click_view.update(cx, |view, cx| {
-                                        view.toggle_changed_file(&click_path, cx);
-                                    });
-                                    cx.stop_propagation();
-                                })
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .w(px(16.0))
-                                        .font_family(cx.theme().mono_font_family.clone())
-                                        .text_size(zz_ui::rems_from_px(11.0))
-                                        .text_color(changed_file_color(file.status, cx))
-                                        .child(changed_file_glyph(file.status)),
-                                )
-                                .child(
-                                    v_flex()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .child(
-                                            div()
-                                                .w_full()
-                                                .min_w_0()
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .text_size(zz_ui::rems_from_px(12.0))
-                                                .child(path.clone()),
-                                        )
-                                        .when_some(file.old_path.clone(), |this, old_path| {
-                                            this.child(
-                                                div()
-                                                    .w_full()
-                                                    .min_w_0()
-                                                    .overflow_hidden()
-                                                    .text_ellipsis()
-                                                    .whitespace_nowrap()
-                                                    .text_size(zz_ui::rems_from_px(9.0))
-                                                    .text_color(cx.theme().foreground.muted())
-                                                    .child(format!("was {old_path}")),
-                                            )
-                                        }),
-                                )
-                                .child(
-                                    h_flex()
-                                        .flex_none()
-                                        .gap_2()
-                                        .text_size(zz_ui::rems_from_px(10.0))
-                                        .when(file.binary, |this| {
-                                            this.child(
-                                                div()
-                                                    .text_color(cx.theme().foreground.muted())
-                                                    .child("binary"),
-                                            )
-                                        })
-                                        .when(!file.binary, |this| {
-                                            this.child(
-                                                div()
-                                                    .text_color(cx.theme().success)
-                                                    .child(format!("+{}", file.additions)),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_color(cx.theme().danger)
-                                                    .child(format!("−{}", file.deletions)),
-                                            )
-                                        }),
-                                ),
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            },
-        )
-        .flex_1()
-        .track_scroll(&self.changes_scroll);
-
-        let summary = diff.as_ref().map_or_else(
-            || "Diffing this turn…".to_owned(),
-            |diff| {
-                format!(
-                    "{} · +{} −{}",
-                    file_count_label(diff.files.len()),
-                    diff.additions,
-                    diff.deletions
-                )
-            },
-        );
-        let truncated = diff.as_ref().is_some_and(|diff| diff.truncated);
-        let empty = diff.as_ref().is_some_and(|diff| diff.files.is_empty());
-        let hunks = self
-            .changes_hunks
-            .as_ref()
-            .map(|(index, hunks)| (*index, hunks.as_ref()));
-        let refresh_view = view.clone();
-        let close_view = view.clone();
-        let backdrop_view = view.clone();
-
-        div()
-            .id(("agent-changes-overlay", pane.0))
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .p_4()
-            .bg(cx.theme().scrim)
-            .occlude()
-            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                backdrop_view.update(cx, |view, cx| view.close_changes(window, cx));
-                cx.stop_propagation();
-            })
-            .child(
-                v_flex()
-                    .id(("agent-changes-modal", pane.0))
-                    .relative()
-                    .w(relative(0.92))
-                    .max_w(px(660.0))
-                    .h(relative(0.82))
-                    .min_h(px(240.0))
-                    .max_h(px(720.0))
-                    .overflow_hidden()
-                    .rounded(cx.theme().radius)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().background.raised(1))
-                    .shadow_lg()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .flex_none()
-                            .items_center()
-                            .gap(px(CHROME_GAP))
-                            .border_b_1()
-                            .border_color(cx.theme().border)
-                            .p(px(CHROME_GAP))
-                            .child(
-                                h_flex()
-                                    .min_w_0()
-                                    .flex_1()
-                                    .items_center()
-                                    .gap_2()
-                                    .text_size(zz_ui::rems_from_px(12.0))
-                                    .when(loading, |this| {
-                                        this.child(agent_spinner(
-                                            Size::XSmall,
-                                            cx.theme().foreground.muted(),
-                                            view.entity_id(),
-                                            cx,
-                                        ))
-                                    })
-                                    .child(
-                                        div()
-                                            .min_w_0()
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .child(summary),
-                                    )
-                                    .when(truncated, |this| {
-                                        this.child(
-                                            div()
-                                                .flex_none()
-                                                .rounded(px(999.0))
-                                                .bg(cx.theme().warning.fill())
-                                                .px_1()
-                                                .text_size(zz_ui::rems_from_px(8.0))
-                                                .text_color(cx.theme().warning)
-                                                .child("PARTIAL"),
-                                        )
-                                    }),
-                            )
-                            .child(
-                                agent_chrome_button(("agent-changes-refresh", pane.0))
-                                    .icon(IconName::Redo2)
-                                    .label("Refresh")
-                                    .disabled(loading)
-                                    .on_click(move |_, _, cx| {
-                                        refresh_view.update(cx, |view, cx| {
-                                            view.refresh_changes(cx);
-                                        });
-                                        cx.stop_propagation();
-                                    }),
-                            )
-                            .child(
-                                agent_chrome_button(("agent-changes-close", pane.0))
-                                    .icon(IconName::Close)
-                                    .tooltip("Close")
-                                    .on_click(move |_, window, cx| {
-                                        close_view.update(cx, |view, cx| {
-                                            view.close_changes(window, cx);
-                                        });
-                                        cx.stop_propagation();
-                                    }),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .relative()
-                            .flex()
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_hidden()
-                            .p(px(CHROME_GAP))
-                            .child(rows)
-                            .when(empty || diff.is_none(), |this| {
-                                this.child(
-                                    div()
-                                        .absolute()
-                                        .inset_0()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .text_size(zz_ui::rems_from_px(11.0))
-                                        .text_color(cx.theme().foreground.muted())
-                                        .child(if empty {
-                                            "Nothing changed this turn."
-                                        } else {
-                                            "Diffing this turn…"
-                                        }),
-                                )
-                            }),
-                    )
-                    .when_some(hunks, |this, (index, hunks)| {
-                        this.child(match hunks {
-                            Some(hunks) => div()
-                                .w_full()
-                                .flex_none()
-                                .child(agent_patch_block(
-                                    index as u64,
-                                    hunks,
-                                    &self.changes_patch_scroll,
-                                    cx,
-                                ))
-                                .into_any_element(),
-                            None => div()
-                                .w_full()
-                                .flex_none()
-                                .border_t_1()
-                                .border_color(cx.theme().border)
-                                .px_2p5()
-                                .py_2()
-                                .text_size(zz_ui::rems_from_px(10.0))
-                                .text_color(cx.theme().foreground.muted())
-                                .child("This file carries no textual hunk.")
-                                .into_any_element(),
-                        })
-                    })
-                    .when_some(self.changes_error.clone(), |this, error| {
-                        this.child(
-                            div()
-                                .w_full()
-                                .flex_none()
-                                .border_t_1()
-                                .border_color(cx.theme().danger.outline())
-                                .bg(cx.theme().danger.fill())
-                                .px_2p5()
-                                .py_2()
-                                .text_size(zz_ui::rems_from_px(10.0))
-                                .text_color(cx.theme().danger)
-                                .child(rendered_error(&error)),
-                        )
-                    }),
-            )
     }
 
     /// The jump-to-bottom pill, floated over the timeline just above the
@@ -3009,7 +2727,14 @@ impl AgentView {
                 settings_enabled,
             ));
         }
-        let usage = state.usage.map(|(used, size)| format!("{used} / {size}"));
+        let usage = state
+            .usage
+            .map(|(used, size)| context_usage_meter(self.pane, used, size, cx));
+        let git = state
+            .git
+            .as_ref()
+            .map(|git| git_summary_footer(self.pane, git, cx));
+        let has_footer = git.is_some() || usage.is_some();
         let command_hint = active_command_hint(&self.last_input, &state.available_commands);
         let completions = self.render_completions(view, cx);
 
@@ -3090,22 +2815,21 @@ impl AgentView {
                                             .gap(px(CHROME_GAP))
                                             .children(settings),
                                     )
-                                    .child(
-                                        h_flex()
-                                            .flex_none()
-                                            .gap(px(CHROME_GAP))
-                                            .when_some(usage, |this, usage| {
-                                                this.child(
-                                                    div()
-                                                        .text_size(zz_ui::rems_from_px(9.0))
-                                                        .text_color(cx.theme().foreground.muted())
-                                                        .child(usage),
-                                                )
-                                            })
-                                            .child(action),
-                                    ),
+                                    .child(h_flex().flex_none().gap(px(CHROME_GAP)).child(action)),
                             ),
-                    ),
+                    )
+                    .when(has_footer, |this| {
+                        this.child(
+                            h_flex()
+                                .w_full()
+                                .h(px(COMPOSER_FOOTER_HEIGHT))
+                                .items_center()
+                                .justify_between()
+                                .px_1()
+                                .child(h_flex().min_w_0().flex_1().children(git))
+                                .child(h_flex().flex_none().children(usage)),
+                        )
+                    }),
             )
     }
 }
@@ -3187,17 +2911,22 @@ impl Render for AgentView {
             .sync(&self.pane_state.pending_permissions);
         let state = self.pane_state.clone();
         let rows = self.timeline.rows.clone();
-        let timeline_clearance = TIMELINE_COMPOSER_CLEARANCE;
+        let timeline_clearance = TIMELINE_COMPOSER_CLEARANCE
+            + if state.git.is_some() || state.usage.is_some() {
+                TIMELINE_COMPOSER_FOOTER_CLEARANCE
+            } else {
+                0.0
+            };
         self.stick.set_bottom_padding(timeline_clearance);
         self.drive_stick(window, cx);
         let view = cx.entity();
         let local_host = self.mux.read(cx).attached_host() == HostId::LOCAL;
-        let header_controls = h_flex()
-            .min_w_0()
+        let header_controls = self.render_agent_picker(&state, view.clone());
+        let header_actions = h_flex()
+            .flex_none()
             .gap(px(CHROME_GAP))
-            .child(self.render_agent_picker(&state, view.clone()))
             .child(self.render_history_button(&state, view.clone()))
-            .children(self.render_changes_button(view.clone(), cx));
+            .child(self.render_directory_picker(&state, view.clone(), local_host));
         let input_focus = self.focus(cx);
         let root = div()
             .id(("agent-pane", self.pane.0))
@@ -3214,11 +2943,7 @@ impl Render for AgentView {
             .capture_action(cx.listener(Self::move_completion_down))
             .capture_action(cx.listener(Self::complete))
             .on_key_down(cx.listener(Self::on_key_down))
-            .child(agent_pane_header(
-                header_controls,
-                self.render_directory_picker(&state, view.clone(), local_host),
-                cx,
-            ))
+            .child(agent_pane_header(header_controls, header_actions, cx))
             .child(
                 div()
                     .id(("agent-thread-scroll", self.pane.0))
@@ -3262,9 +2987,6 @@ impl Render for AgentView {
             .child(self.render_composer(&state, &view, cx))
             .when(self.history_open, |this| {
                 this.child(self.render_history_overlay(&state, &view, cx))
-            })
-            .when(self.changes_open, |this| {
-                this.child(self.render_changes_overlay(&view, cx))
             })
             .when_some(self.directory_picker.clone(), |this, picker| {
                 this.child(picker)
@@ -3313,6 +3035,7 @@ fn disconnected_pane_state() -> AgentPaneState {
         config_options: Arc::from([]),
         available_commands: Arc::from([]),
         usage: None,
+        git: None,
         pending_composer: None,
         queued_prompts: 0,
     }
@@ -3533,94 +3256,6 @@ fn retained_tool_payload(
     };
     retained.insert(key, next.clone());
     next
-}
-
-const fn changed_file_glyph(status: TurnFileStatus) -> &'static str {
-    match status {
-        TurnFileStatus::Added => "A",
-        TurnFileStatus::Modified => "M",
-        TurnFileStatus::Deleted => "D",
-        TurnFileStatus::Renamed => "R",
-        TurnFileStatus::Copied => "C",
-        TurnFileStatus::Unmerged => "U",
-    }
-}
-
-fn changed_file_color(status: TurnFileStatus, cx: &gpui::App) -> gpui::Hsla {
-    match status {
-        TurnFileStatus::Added | TurnFileStatus::Copied => cx.theme().success,
-        TurnFileStatus::Deleted => cx.theme().danger,
-        TurnFileStatus::Unmerged => cx.theme().warning,
-        TurnFileStatus::Modified | TurnFileStatus::Renamed => cx.theme().foreground.muted(),
-    }
-}
-
-fn file_count_label(files: usize) -> String {
-    if files == 1 {
-        "1 file".to_owned()
-    } else {
-        format!("{files} files")
-    }
-}
-
-/// The hunks git wrote for one file, sliced out of the turn patch. `None` when
-/// the file has no textual hunk at all — a binary blob, or a pure rename.
-fn file_hunks<'a>(patch: &'a str, file: &TurnFile) -> Option<&'a str> {
-    let mut starts = Vec::new();
-    let mut offset = 0;
-    for line in patch.split_inclusive('\n') {
-        if line.starts_with("diff --git ") {
-            starts.push(offset);
-        }
-        offset += line.len();
-    }
-    starts.iter().enumerate().find_map(|(index, start)| {
-        let end = starts.get(index + 1).copied().unwrap_or(patch.len());
-        let section = &patch[*start..end];
-        section_covers(section, file).then(|| section_hunks(section))?
-    })
-}
-
-/// Match a patch section to a summarized file through its `---`/`+++` header
-/// rather than the `diff --git` line, whose two paths cannot be split apart
-/// unambiguously when a path holds a space.
-fn section_covers(section: &str, file: &TurnFile) -> bool {
-    let old = file.old_path.as_deref().unwrap_or(file.path.as_str());
-    section
-        .lines()
-        .take_while(|line| !line.starts_with("@@"))
-        .any(|line| {
-            line.strip_prefix("+++ ")
-                .and_then(strip_diff_prefix)
-                .is_some_and(|path| path == file.path)
-                || line
-                    .strip_prefix("--- ")
-                    .and_then(strip_diff_prefix)
-                    .is_some_and(|path| path == old)
-        })
-}
-
-fn strip_diff_prefix(path: &str) -> Option<&str> {
-    let path = path.trim_end();
-    if path == "/dev/null" {
-        return None;
-    }
-    Some(
-        path.strip_prefix("a/")
-            .or_else(|| path.strip_prefix("b/"))
-            .unwrap_or(path),
-    )
-}
-
-fn section_hunks(section: &str) -> Option<&str> {
-    let mut offset = 0;
-    for line in section.split_inclusive('\n') {
-        if line.starts_with("@@") {
-            return Some(&section[offset..]);
-        }
-        offset += line.len();
-    }
-    None
 }
 
 fn agent_chrome_button(id: impl Into<ElementId>) -> Button {
@@ -4203,15 +3838,6 @@ mod completion_tests {
                 history_scroll: UniformListScrollHandle::new(),
                 history_delete_confirmation: None,
                 last_history_query: String::new(),
-                changes_open: false,
-                changes: None,
-                changes_error: None,
-                changes_expanded: None,
-                changes_hunks: None,
-                changes_scroll: UniformListScrollHandle::new(),
-                changes_patch_scroll: UniformListScrollHandle::new(),
-                changes_turn_generation: 0,
-                changes_task: None,
                 directory_picker: None,
                 window_corners: WindowCorners::NONE,
                 _subscriptions: Vec::new(),
@@ -4309,15 +3935,6 @@ mod completion_tests {
                 history_scroll: UniformListScrollHandle::new(),
                 history_delete_confirmation: None,
                 last_history_query: String::new(),
-                changes_open: false,
-                changes: None,
-                changes_error: None,
-                changes_expanded: None,
-                changes_hunks: None,
-                changes_scroll: UniformListScrollHandle::new(),
-                changes_patch_scroll: UniformListScrollHandle::new(),
-                changes_turn_generation: 0,
-                changes_task: None,
                 directory_picker: None,
                 window_corners: WindowCorners::NONE,
                 _subscriptions: Vec::new(),
@@ -4363,6 +3980,32 @@ mod completion_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn context_usage_is_bounded_and_handles_an_unknown_window() {
+        assert_eq!(context_usage_fraction(0, 0), 0.0);
+        assert_eq!(context_usage_fraction(25, 100), 0.25);
+        assert_eq!(context_usage_fraction(125, 100), 1.0);
+    }
+
+    #[test]
+    fn context_usage_tooltip_keeps_the_exact_counts() {
+        assert_eq!(
+            context_usage_tooltip(32_000, 128_000),
+            "32000 of 128000 context tokens used (25%)"
+        );
+        assert_eq!(
+            context_usage_tooltip(4, 0),
+            "Context window usage unavailable"
+        );
+    }
+
+    #[test]
+    fn git_footer_pluralizes_the_file_count() {
+        assert_eq!(git_file_count_label(0), "0 files");
+        assert_eq!(git_file_count_label(1), "1 file");
+        assert_eq!(git_file_count_label(12), "12 files");
+    }
 
     #[test]
     fn busy_chrome_follows_the_connection_and_not_a_tool_row() {
@@ -4442,99 +4085,6 @@ mod tests {
             markdown: markdown.to_owned(),
             default_expanded: false,
         }
-    }
-
-    const TURN_PATCH: &str = concat!(
-        "diff --git a/src/one.rs b/src/one.rs\n",
-        "index 1111111..2222222 100644\n",
-        "--- a/src/one.rs\n",
-        "+++ b/src/one.rs\n",
-        "@@ -1,2 +1,2 @@\n",
-        " keep\n",
-        "-old\n",
-        "+new\n",
-        "diff --git a/old name.txt b/new name.txt\n",
-        "similarity index 88%\n",
-        "rename from old name.txt\n",
-        "rename to new name.txt\n",
-        "--- a/old name.txt\n",
-        "+++ b/new name.txt\n",
-        "@@ -1 +1 @@\n",
-        "-a\n",
-        "+b\n",
-        "diff --git a/blob.bin b/blob.bin\n",
-        "new file mode 100644\n",
-        "index 0000000..3333333\n",
-        "Binary files /dev/null and b/blob.bin differ\n",
-        "diff --git a/gone.txt b/gone.txt\n",
-        "deleted file mode 100644\n",
-        "index 4444444..0000000\n",
-        "--- a/gone.txt\n",
-        "+++ /dev/null\n",
-        "@@ -1 +0,0 @@\n",
-        "-bye\n",
-    );
-
-    fn turn_file(path: &str, old_path: Option<&str>, status: TurnFileStatus) -> TurnFile {
-        TurnFile {
-            path: path.to_owned(),
-            old_path: old_path.map(ToOwned::to_owned),
-            status,
-            additions: 0,
-            deletions: 0,
-            binary: false,
-        }
-    }
-
-    #[test]
-    fn a_files_hunks_are_sliced_out_of_the_turn_patch() {
-        let modified = file_hunks(
-            TURN_PATCH,
-            &turn_file("src/one.rs", None, TurnFileStatus::Modified),
-        )
-        .expect("the edited file has hunks");
-        assert!(modified.starts_with("@@ -1,2 +1,2 @@\n"), "{modified}");
-        assert!(modified.ends_with("+new\n"), "{modified}");
-
-        let renamed = file_hunks(
-            TURN_PATCH,
-            &turn_file(
-                "new name.txt",
-                Some("old name.txt"),
-                TurnFileStatus::Renamed,
-            ),
-        )
-        .expect("a renamed file with an edit has hunks");
-        assert_eq!(renamed, "@@ -1 +1 @@\n-a\n+b\n");
-
-        let deleted = file_hunks(
-            TURN_PATCH,
-            &turn_file("gone.txt", None, TurnFileStatus::Deleted),
-        )
-        .expect("a deleted file has hunks");
-        assert_eq!(deleted, "@@ -1 +0,0 @@\n-bye\n");
-    }
-
-    #[test]
-    fn a_binary_or_unknown_file_slices_to_no_hunk() {
-        assert_eq!(
-            file_hunks(
-                TURN_PATCH,
-                &turn_file("blob.bin", None, TurnFileStatus::Added)
-            ),
-            None
-        );
-        assert_eq!(
-            file_hunks(
-                TURN_PATCH,
-                &turn_file("never-here.rs", None, TurnFileStatus::Modified)
-            ),
-            None
-        );
-        assert_eq!(
-            file_hunks("", &turn_file("src/one.rs", None, TurnFileStatus::Modified)),
-            None
-        );
     }
 
     #[test]

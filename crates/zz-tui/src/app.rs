@@ -1189,7 +1189,6 @@ fn handle_core_event(
         | CoreEvent::AgentStateChanged { .. }
         | CoreEvent::AgentLagged { .. }
         | CoreEvent::AgentSessions { .. }
-        | CoreEvent::AgentTurnDiffResult { .. }
         | CoreEvent::Message(_) => Ok(ProtocolOutcome::None),
     }
 }

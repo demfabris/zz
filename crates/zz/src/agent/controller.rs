@@ -15,19 +15,17 @@ use agent_client_protocol::schema::{
         ToolCallUpdateFields, ToolKind,
     },
 };
-use async_channel::Sender;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use gpui::{App, Context, Entity, EventEmitter, Image, ImageFormat, Task};
 use zz_daemon::{
     AgentAuthMethod as StreamAuthMethod, AgentPromptOutcome, AgentStreamItem, AgentStreamPayload,
-    AgentTurnDiffOutcome, TurnDiff,
 };
 use zz_protocol::{
-    AgentConnectionPhase, AgentDescriptor, AgentPaneWire, AgentProvider, AgentSessionOpKind,
-    MAX_AGENT_AUTH_METHODS, MAX_AGENT_AVAILABLE_COMMANDS, MAX_AGENT_CONFIG_CHOICES,
-    MAX_AGENT_CONFIG_OPTIONS, MAX_AGENT_MODES, MAX_AGENT_PERMISSION_OPTIONS,
-    MAX_AGENT_QUEUED_PROMPTS, MAX_AGENT_SESSION_DIRECTORIES, MAX_AGENT_TOOL_CONTENT_ITEMS,
-    MAX_GUI_TEXT_BYTES, PaneId,
+    AgentConnectionPhase, AgentDescriptor, AgentGitSummary, AgentPaneWire, AgentProvider,
+    AgentSessionOpKind, MAX_AGENT_AUTH_METHODS, MAX_AGENT_AVAILABLE_COMMANDS,
+    MAX_AGENT_CONFIG_CHOICES, MAX_AGENT_CONFIG_OPTIONS, MAX_AGENT_MODES,
+    MAX_AGENT_PERMISSION_OPTIONS, MAX_AGENT_QUEUED_PROMPTS, MAX_AGENT_SESSION_DIRECTORIES,
+    MAX_AGENT_TOOL_CONTENT_ITEMS, MAX_GUI_TEXT_BYTES, PaneId,
 };
 
 use crate::{
@@ -58,7 +56,6 @@ const TRUNCATION_MARKER: &str = "… [truncated]";
 /// tell agent panes apart in the tree without wrapping the pane header.
 const MAX_TITLE_WORDS: usize = 7;
 const MAX_TITLE_CHARS: usize = 48;
-const TURN_DIFF_TIMEOUT: Duration = Duration::from_secs(30);
 const LIFECYCLE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const ENTRY_CHANGE_LOG_CAPACITY: usize = 4_096;
 
@@ -308,6 +305,7 @@ pub(crate) struct AgentPaneState {
     pub(crate) config_options: Arc<[AgentConfigOption]>,
     pub(crate) available_commands: Arc<[AgentCommand]>,
     pub(crate) usage: Option<(u64, u64)>,
+    pub(crate) git: Option<AgentGitSummary>,
     /// Text `agent-send` routed here, waiting for the pane's view to fold it
     /// into the composer draft.
     pub(crate) pending_composer: Option<Arc<str>>,
@@ -356,6 +354,7 @@ struct AgentThread {
     config_options: Arc<[AgentConfigOption]>,
     available_commands: Arc<[AgentCommand]>,
     usage: Option<(u64, u64)>,
+    git: Option<AgentGitSummary>,
     cwd: PathBuf,
     session_id: Option<Arc<str>>,
     session_capabilities: AgentSessionCapabilities,
@@ -403,6 +402,7 @@ impl AgentThread {
             config_options: Arc::from([]),
             available_commands: Arc::from([]),
             usage: None,
+            git: None,
             cwd,
             session_id: session_id.map(Arc::from),
             session_capabilities: AgentSessionCapabilities::default(),
@@ -442,6 +442,7 @@ impl AgentThread {
             config_options: self.config_options.clone(),
             available_commands: self.available_commands.clone(),
             usage: self.usage,
+            git: self.git.clone(),
             pending_composer: None,
             queued_prompts: 0,
         }
@@ -467,6 +468,7 @@ impl AgentThread {
         self.config_options = Arc::from([]);
         self.available_commands = Arc::from([]);
         self.usage = None;
+        self.git = None;
         self.session_history.loading = false;
         self.settings_busy = false;
         self.preference_reconcile_skips.clear();
@@ -1108,10 +1110,6 @@ enum RuntimeEvent {
         pane: PaneId,
         result: Result<StopReason, String>,
     },
-    TurnStarted {
-        pane: PaneId,
-        turn_id: u64,
-    },
     Authenticated,
     AuthenticationFailed {
         message: String,
@@ -1175,9 +1173,6 @@ struct PaneViewport {
     last_applied: u64,
     pending_setting: Option<AgentSettingRequest>,
     queued_prompts: usize,
-    turn_dispatched: bool,
-    turn_generation: u64,
-    last_turn_id: Option<u64>,
     conversation_epoch: u64,
     last_reclaim_id: u64,
     lifecycle_pending: Option<LifecycleRequest>,
@@ -1201,8 +1196,6 @@ pub struct AgentController {
     pending_composer: BTreeMap<PaneId, String>,
     pending_images: BTreeMap<PaneId, Vec<Arc<Image>>>,
     retained_panes: BTreeSet<PaneId>,
-    turn_diffs: BTreeMap<u64, (PaneId, u64, Sender<Result<TurnDiff, String>>)>,
-    next_turn_diff_request: u64,
     shutting_down: bool,
 }
 
@@ -1226,8 +1219,6 @@ impl AgentController {
             pending_composer: BTreeMap::new(),
             pending_images: BTreeMap::new(),
             retained_panes: BTreeSet::new(),
-            turn_diffs: BTreeMap::new(),
-            next_turn_diff_request: 0,
             shutting_down: false,
         }
     }
@@ -1258,99 +1249,10 @@ impl AgentController {
             .map_or(0, |viewport| viewport.queued_prompts)
     }
 
-    pub(crate) fn has_turn_base(&self, pane: PaneId) -> bool {
-        self.viewports
-            .get(&pane)
-            .is_some_and(|viewport| viewport.turn_dispatched)
-    }
-
-    pub(crate) fn turn_generation(&self, pane: PaneId) -> u64 {
-        self.viewports
-            .get(&pane)
-            .map_or(0, |viewport| viewport.turn_generation)
-    }
-
     pub(crate) fn conversation_epoch(&self, pane: PaneId) -> u64 {
         self.viewports
             .get(&pane)
             .map_or(0, |viewport| viewport.conversation_epoch)
-    }
-
-    pub(crate) fn capture_turn_diff(
-        &mut self,
-        pane: PaneId,
-        cx: &App,
-    ) -> Option<Task<Result<TurnDiff, String>>> {
-        if !self.has_turn_base(pane) {
-            return None;
-        }
-        self.turn_diffs
-            .retain(|_, (_, _, sender)| !sender.is_closed());
-        self.next_turn_diff_request = self.next_turn_diff_request.saturating_add(1);
-        let request_id = self.next_turn_diff_request;
-        if !self.send(pane, AgentRequest::TurnDiff { request_id }, cx) {
-            return Some(Task::ready(Err("agent daemon is not connected".to_owned())));
-        }
-        let (sender, receiver) = async_channel::bounded(1);
-        let generation = self.turn_generation(pane);
-        self.turn_diffs
-            .insert(request_id, (pane, generation, sender));
-        let timer = cx.background_executor().timer(TURN_DIFF_TIMEOUT);
-        Some(cx.background_executor().spawn(async move {
-            futures_lite::future::race(
-                async {
-                    receiver
-                        .recv()
-                        .await
-                        .unwrap_or_else(|_| Err("the turn diff was abandoned".to_owned()))
-                },
-                async {
-                    timer.await;
-                    Err("the turn diff timed out".to_owned())
-                },
-            )
-            .await
-        }))
-    }
-
-    fn resolve_turn_diff(
-        &mut self,
-        pane: PaneId,
-        request_id: u64,
-        outcome: Result<TurnDiff, String>,
-    ) -> Option<u64> {
-        if self
-            .turn_diffs
-            .get(&request_id)
-            .is_some_and(|(request_pane, _, _)| *request_pane == pane)
-            && let Some((_, generation, sender)) = self.turn_diffs.remove(&request_id)
-        {
-            let _ = sender.try_send(outcome);
-            return Some(generation);
-        }
-        None
-    }
-
-    fn abandon_turn(&mut self, pane: PaneId) -> bool {
-        let mut changed = false;
-        if let Some(viewport) = self.viewports.get_mut(&pane) {
-            changed |= viewport.turn_dispatched;
-            viewport.turn_dispatched = false;
-        }
-        let requests = self
-            .turn_diffs
-            .iter()
-            .filter_map(|(request, (request_pane, _, _))| {
-                (*request_pane == pane).then_some(*request)
-            })
-            .collect::<Vec<_>>();
-        for request in requests {
-            if let Some((_, _, sender)) = self.turn_diffs.remove(&request) {
-                changed = true;
-                let _ = sender.try_send(Err("the agent session changed".to_owned()));
-            }
-        }
-        changed
     }
 
     pub(crate) fn pane_status(&self, pane: PaneId) -> Option<AgentPaneStatus> {
@@ -1430,9 +1332,6 @@ impl AgentController {
             .panes
             .get(&pane)
             .is_some_and(|thread| thread.provider != descriptor.provider);
-        if provider_changed {
-            self.abandon_turn(pane);
-        }
         let descriptor_changed = provider_changed;
         let thread = self.panes.entry(pane).or_insert_with(|| {
             AgentThread::new(descriptor.provider, cwd.clone(), session_id.clone())
@@ -1445,7 +1344,6 @@ impl AgentController {
         let mut pending_provider_state = None;
         if provider_changed {
             viewport.conversation_epoch = viewport.conversation_epoch.saturating_add(1);
-            viewport.last_turn_id = None;
             viewport.lifecycle_pending = None;
             viewport.session_change_pending = false;
             pending_provider_state = viewport.pending_provider_state.take();
@@ -1465,7 +1363,6 @@ impl AgentController {
             .copied()
             .collect::<Vec<_>>();
         for pane in removed {
-            self.abandon_turn(pane);
             self.panes.remove(&pane);
         }
         self.viewports.retain(|pane, _| retained.contains(pane));
@@ -1795,7 +1692,6 @@ impl AgentController {
             cx.notify();
             return Ok(());
         }
-        self.abandon_turn(pane);
         let title = derive_pane_title(&text);
         if let Some(thread) = self.panes.get_mut(&pane) {
             thread.begin_prompt(text, images);
@@ -2054,7 +1950,6 @@ impl AgentController {
         let thread = self.panes.get_mut(&pane).expect("pane checked above");
         thread.session_history.loading = false;
         thread.settings_busy = false;
-        self.abandon_turn(pane);
         let viewport = self.viewport_mut(pane);
         viewport.pending_setting = None;
         viewport.session_change_pending = false;
@@ -2159,8 +2054,6 @@ impl AgentController {
         let Some(before) = self.pane_state(pane) else {
             return;
         };
-        let turn_changed =
-            matches!(state.phase, AgentConnectionPhase::Failed { .. }) && self.abandon_turn(pane);
         let viewport = self.viewport_mut(pane);
         viewport.queued_prompts = state.queued_prompts as usize;
         if matches!(
@@ -2213,6 +2106,7 @@ impl AgentController {
             }
         }
         thread.title = state.title.as_deref().map(Arc::from);
+        thread.git.clone_from(&state.git);
         if state.auth_methods.is_empty() {
             thread.auth_methods = Arc::from([]);
         } else if let Some(methods) =
@@ -2248,7 +2142,7 @@ impl AgentController {
         } else if let Some(modes) = decode_state_blob::<SessionModeState>(&state.modes) {
             thread.set_session_configuration(Some(modes), None);
         }
-        if turn_changed || self.pane_state(pane).as_ref() != Some(&before) {
+        if self.pane_state(pane).as_ref() != Some(&before) {
             cx.notify();
         }
     }
@@ -2269,38 +2163,6 @@ impl AgentController {
         };
         if self.handle_runtime_event(pane, event, cx) {
             cx.notify();
-        }
-    }
-
-    /// Reduce the answer to one `AgentTurnDiff` request.
-    pub(crate) fn apply_turn_diff_result(
-        &mut self,
-        pane: PaneId,
-        result: &str,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(payload) = decode_state_blob::<AgentStreamPayload>(result) else {
-            return;
-        };
-        if let AgentStreamPayload::TurnDiff {
-            request_id,
-            outcome,
-            ..
-        } = payload
-        {
-            let (outcome, unavailable) = match outcome {
-                AgentTurnDiffOutcome::Captured { diff } => (Ok(diff), false),
-                AgentTurnDiffOutcome::Unavailable { message } => (Err(message), true),
-                AgentTurnDiffOutcome::Failed { message } => (Err(message), false),
-            };
-            let generation = self.resolve_turn_diff(pane, request_id, outcome);
-            if unavailable
-                && generation == Some(self.turn_generation(pane))
-                && let Some(viewport) = self.viewports.get_mut(&pane)
-                && std::mem::take(&mut viewport.turn_dispatched)
-            {
-                cx.notify();
-            }
         }
     }
 
@@ -2436,9 +2298,7 @@ impl AgentController {
                     AgentPromptOutcome::Failed { message } => Err(message),
                 },
             },
-            AgentStreamPayload::TurnStarted { turn_id } => {
-                RuntimeEvent::TurnStarted { pane, turn_id }
-            }
+            AgentStreamPayload::TurnStarted { .. } => return None,
             AgentStreamPayload::Authenticated => RuntimeEvent::Authenticated,
             AgentStreamPayload::AuthenticationFailed { message } => {
                 RuntimeEvent::AuthenticationFailed { message }
@@ -2542,22 +2402,6 @@ impl AgentController {
                     images,
                 }
             }
-            AgentStreamPayload::TurnDiff {
-                request_id,
-                outcome,
-                ..
-            } => {
-                self.resolve_turn_diff(
-                    pane,
-                    request_id,
-                    match outcome {
-                        AgentTurnDiffOutcome::Captured { diff } => Ok(diff),
-                        AgentTurnDiffOutcome::Unavailable { message }
-                        | AgentTurnDiffOutcome::Failed { message } => Err(message),
-                    },
-                );
-                return None;
-            }
         })
     }
 
@@ -2620,10 +2464,8 @@ impl AgentController {
                 }
             }
             RuntimeEvent::SessionReset { pane, restoring } => {
-                self.abandon_turn(pane);
                 let viewport = self.viewport_mut(pane);
                 viewport.conversation_epoch = viewport.conversation_epoch.saturating_add(1);
-                viewport.last_turn_id = None;
                 if let Some(thread) = self.panes.get_mut(&pane) {
                     thread.reset_for_open(restoring);
                     changed_pane = Some(pane);
@@ -2698,7 +2540,6 @@ impl AgentController {
                 config_options,
                 replay,
             } => {
-                self.abandon_turn(pane);
                 self.viewport_mut(pane).session_change_pending = false;
                 if self
                     .panes
@@ -2708,7 +2549,6 @@ impl AgentController {
                     let viewport = self.viewport_mut(pane);
                     viewport.conversation_epoch = viewport.conversation_epoch.saturating_add(1);
                 }
-                self.viewport_mut(pane).last_turn_id = None;
                 if let Some(thread) = self.panes.get_mut(&pane) {
                     let previous_title = thread.title.clone();
                     if !thread.session_reset {
@@ -2804,7 +2644,6 @@ impl AgentController {
                 }
             }
             RuntimeEvent::PromptFinished { pane, result } => {
-                let mut failed = false;
                 if let Some(thread) = self.panes.get_mut(&pane) {
                     match result {
                         Ok(StopReason::Cancelled) => {
@@ -2821,29 +2660,12 @@ impl AgentController {
                             thread.connection = AgentConnectionState::Failed;
                             thread.error = Some(Arc::from(error));
                             thread.fail_inflight();
-                            failed = true;
                         }
                     }
                     changed_pane = Some(pane);
                     if thread.connection.accepts_prompt() {
                         reconcile_pane = Some(pane);
                     }
-                }
-                if failed {
-                    self.abandon_turn(pane);
-                }
-            }
-            RuntimeEvent::TurnStarted { pane, turn_id } => {
-                let viewport = self.viewport_mut(pane);
-                let started = viewport.last_turn_id != Some(turn_id);
-                if started {
-                    viewport.last_turn_id = Some(turn_id);
-                    viewport.turn_generation = viewport.turn_generation.saturating_add(1);
-                }
-                let had_base = viewport.turn_dispatched;
-                viewport.turn_dispatched = true;
-                if started || !had_base {
-                    changed_pane = Some(pane);
                 }
             }
             RuntimeEvent::Authenticated => {
@@ -2959,7 +2781,6 @@ impl AgentController {
                 }
             }
             RuntimeEvent::PaneFailed { pane, message } => {
-                self.abandon_turn(pane);
                 self.viewport_mut(pane).session_change_pending = false;
                 if let Some(thread) = self.panes.get_mut(&pane) {
                     thread.connection = AgentConnectionState::Failed;
@@ -4866,6 +4687,12 @@ mod tests {
                         })
                         .to_string(),
                     }),
+                    git: Some(AgentGitSummary {
+                        branch: Some("main".to_owned()),
+                        changed_files: 3,
+                        additions: 21,
+                        deletions: 8,
+                    }),
                 };
 
                 controller.apply_pane_state(pane, &state, cx);
@@ -4876,6 +4703,7 @@ mod tests {
                 assert_eq!(pane_state.session_id.as_deref(), Some("s-9"));
                 assert_eq!(pane_state.auth_methods.len(), 1);
                 assert_eq!(pane_state.config_options.len(), 1);
+                assert_eq!(pane_state.git, state.git);
                 assert_eq!(
                     pane_state
                         .pending_permissions
@@ -4897,6 +4725,7 @@ mod tests {
                         config_options: String::new(),
                         modes: String::new(),
                         pending_permission: None,
+                        git: None,
                     },
                     cx,
                 );
@@ -4906,6 +4735,7 @@ mod tests {
                 assert!(pane_state.auth_methods.is_empty());
                 assert!(pane_state.config_options.is_empty());
                 assert!(pane_state.pending_permissions.is_empty());
+                assert_eq!(pane_state.git, None);
             });
         });
     }
@@ -4972,12 +4802,6 @@ mod tests {
                 thread.connection = AgentConnectionState::Failed;
                 thread.error = Some(Arc::from("could not spawn adapter"));
                 thread.session_history.loading = true;
-                controller
-                    .viewports
-                    .get_mut(&pane)
-                    .expect("viewport")
-                    .turn_dispatched = true;
-
                 controller.retry(pane, cx);
                 controller.retry(pane, cx);
 
@@ -4986,7 +4810,6 @@ mod tests {
                 assert_eq!(state.error.as_deref(), Some("could not spawn adapter"));
                 assert!(!state.session_history.loading);
                 assert!(state.lifecycle_pending);
-                assert!(!controller.has_turn_base(pane));
             });
         });
         assert_eq!(&*events.lock(), &[pane]);
@@ -5152,60 +4975,6 @@ mod tests {
     }
 
     #[gpui::test]
-    fn a_rejected_session_change_keeps_the_previous_turn_diff(cx: &mut TestAppContext) {
-        let (controller, _sink) = proxy_controller(cx);
-        let pane = PaneId(24);
-        cx.update(|cx| {
-            controller.update(cx, |controller, cx| {
-                ready_pane(controller, pane);
-                let thread = controller.panes.get_mut(&pane).expect("pane");
-                thread.session_id = Some(Arc::from("current"));
-                thread.session_capabilities.load = true;
-                controller
-                    .viewports
-                    .get_mut(&pane)
-                    .expect("viewport")
-                    .turn_dispatched = true;
-
-                controller
-                    .switch_session(
-                        pane,
-                        AgentSessionSummary {
-                            session_id: "rejected".to_owned(),
-                            cwd: PathBuf::from("/workspace"),
-                            additional_directories: Vec::new(),
-                            title: None,
-                            updated_at: None,
-                        },
-                        cx,
-                    )
-                    .expect("session request");
-                assert!(controller.has_turn_base(pane));
-
-                controller.handle_runtime_event(
-                    pane,
-                    RuntimeEvent::SessionSwitchFailed {
-                        pane,
-                        message: "could not restore".to_owned(),
-                    },
-                    cx,
-                );
-                assert!(controller.has_turn_base(pane));
-
-                controller.handle_runtime_event(
-                    pane,
-                    RuntimeEvent::SessionReset {
-                        pane,
-                        restoring: false,
-                    },
-                    cx,
-                );
-                assert!(!controller.has_turn_base(pane));
-            });
-        });
-    }
-
-    #[gpui::test]
     fn fatal_state_fails_inflight_tools(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(22);
@@ -5238,83 +5007,6 @@ mod tests {
                 ));
             });
         });
-    }
-
-    #[gpui::test]
-    fn unavailable_turn_diff_clears_only_its_live_turn_base(cx: &mut TestAppContext) {
-        let (controller, _sink) = proxy_controller(cx);
-        let pane = PaneId(23);
-        let (sender, receiver) = async_channel::bounded(1);
-        let result = serde_json::to_string(&AgentStreamPayload::TurnDiff {
-            client: zz_protocol::ClientId(1),
-            request_id: 9,
-            outcome: AgentTurnDiffOutcome::Unavailable {
-                message: "this pane has no turn to diff".to_owned(),
-            },
-        })
-        .expect("turn diff encodes");
-        cx.update(|cx| {
-            controller.update(cx, |controller, cx| {
-                ready_pane(controller, pane);
-                controller
-                    .viewports
-                    .get_mut(&pane)
-                    .expect("viewport")
-                    .turn_dispatched = true;
-                let generation = controller.turn_generation(pane);
-                controller.turn_diffs.insert(9, (pane, generation, sender));
-                controller.apply_turn_diff_result(pane, &result, cx);
-                assert!(!controller.has_turn_base(pane));
-                controller
-                    .viewports
-                    .get_mut(&pane)
-                    .expect("viewport")
-                    .turn_dispatched = true;
-                controller.apply_turn_diff_result(pane, &result, cx);
-                assert!(controller.has_turn_base(pane));
-            });
-        });
-        assert!(matches!(
-            receiver.try_recv(),
-            Ok(Err(message)) if message == "this pane has no turn to diff"
-        ));
-    }
-
-    #[gpui::test]
-    fn turn_diff_replies_are_correlated_by_pane_and_abandoned_on_failure(cx: &mut TestAppContext) {
-        let (controller, _sink) = proxy_controller(cx);
-        let pane = PaneId(18);
-        let other = PaneId(19);
-        let (sender, receiver) = async_channel::bounded(1);
-        cx.update(|cx| {
-            controller.update(cx, |controller, cx| {
-                ready_pane(controller, pane);
-                controller
-                    .viewports
-                    .get_mut(&pane)
-                    .expect("viewport")
-                    .turn_dispatched = true;
-                let generation = controller.turn_generation(pane);
-                controller.turn_diffs.insert(7, (pane, generation, sender));
-                controller.resolve_turn_diff(other, 7, Err("wrong pane".to_owned()));
-                assert!(controller.turn_diffs.contains_key(&7));
-
-                controller.handle_runtime_event(
-                    pane,
-                    RuntimeEvent::PaneFailed {
-                        pane,
-                        message: "adapter exited".to_owned(),
-                    },
-                    cx,
-                );
-                assert!(!controller.turn_diffs.contains_key(&7));
-                assert!(!controller.has_turn_base(pane));
-            });
-        });
-        assert!(matches!(
-            receiver.try_recv(),
-            Ok(Err(message)) if message == "the agent session changed"
-        ));
     }
 
     #[gpui::test]

@@ -3,10 +3,10 @@ use std::time::{Duration, Instant};
 use std::{
     collections::{BTreeMap, VecDeque},
     future::Future,
-    path::PathBuf,
+    path::{Path, PathBuf},
     pin::Pin,
     sync::{Arc, atomic::AtomicU64},
-    thread::JoinHandle,
+    thread::{self, JoinHandle},
 };
 
 use async_channel::{Receiver, Sender};
@@ -15,18 +15,19 @@ use serde_json::Value;
 #[cfg(test)]
 use zz_protocol::ClientInstanceId;
 use zz_protocol::{
-    AgentProvider, ClientId, MAX_AGENT_PROMPT_BYTES, MAX_AGENT_QUEUED_PROMPTS, PaneId,
+    AgentGitSummary, AgentProvider, ClientId, MAX_AGENT_PROMPT_BYTES, MAX_AGENT_QUEUED_PROMPTS,
+    PaneId,
 };
 
 use crate::agent::{
     environment::{AgentWorkspaceEnvironment, warm_adapter_cache},
+    git_summary,
     journal::AgentJournal,
     runtime::{AgentSpawnConfig, RuntimeCommand, RuntimeControl, run_agent_runtime},
     stream::{
         AgentAuthMethod, AgentPrompt, AgentPromptOutcome, AgentSessionCapabilities,
-        AgentSessionSummary, AgentStreamItem, AgentStreamPayload, AgentTurnDiffOutcome,
+        AgentSessionSummary, AgentStreamItem, AgentStreamPayload,
     },
-    turn_snapshot::{self, TurnTree},
 };
 
 const PANE_INBOX_CAPACITY: usize = 64;
@@ -75,10 +76,6 @@ pub(crate) enum HostCommand {
     DeleteSession {
         client: ClientId,
         session_id: String,
-    },
-    TurnDiff {
-        client: ClientId,
-        request_id: u64,
     },
 }
 
@@ -134,6 +131,7 @@ pub(crate) struct AgentPaneState {
     pub(crate) pending_permissions: Vec<AgentPendingPermission>,
     pub(crate) error: Option<String>,
     pub(crate) last_seq: u64,
+    pub(crate) git: Option<AgentGitSummary>,
 }
 
 impl AgentPaneState {
@@ -150,6 +148,7 @@ impl AgentPaneState {
             pending_permissions: Vec::new(),
             error: None,
             last_seq: 0,
+            git: None,
         }
     }
 
@@ -167,6 +166,12 @@ impl AgentPaneState {
 enum PaneInput {
     Command(HostCommand),
     Event(AgentStreamPayload),
+    GitSummary {
+        generation: u64,
+        refresh: u64,
+        cwd: PathBuf,
+        summary: Option<AgentGitSummary>,
+    },
     Finished(Result<(), String>),
 }
 
@@ -382,7 +387,9 @@ impl AgentHost {
             .try_send(PaneInput::Command(command))
             .map_err(|error| match error.into_inner() {
                 PaneInput::Command(command) => command,
-                PaneInput::Event(_) | PaneInput::Finished(_) => unreachable!(),
+                PaneInput::Event(_) | PaneInput::GitSummary { .. } | PaneInput::Finished(_) => {
+                    unreachable!()
+                }
             })
     }
 
@@ -465,6 +472,7 @@ async fn run_pane(
         closer.close();
     };
 
+    let pump_inbox = inbox_tx.clone();
     let forward = async move {
         while let Ok(payload) = event_rx.recv().await {
             if inbox_tx.send(PaneInput::Event(payload)).await.is_err() {
@@ -482,12 +490,13 @@ async fn run_pane(
         spec,
         state,
         sink,
+        inbox: pump_inbox,
         commands: command_tx,
         controls: runtime_control_tx,
         close: close_tx,
         seq: 0,
         queue: VecDeque::new(),
-        turn_base: None,
+        git_refresh: 0,
         next_turn_id: 0,
         active_turn: None,
         dispatched_prompt: None,
@@ -509,12 +518,13 @@ struct PanePump {
     spec: AgentPaneSpec,
     state: Arc<Mutex<AgentPaneState>>,
     sink: Arc<AgentStreamSink>,
+    inbox: Sender<PaneInput>,
     commands: Sender<RuntimeCommand>,
     controls: Sender<RuntimeControl>,
     close: Sender<()>,
     seq: u64,
     queue: VecDeque<AgentPrompt>,
-    turn_base: Option<TurnTree>,
+    git_refresh: u64,
     next_turn_id: u64,
     active_turn: Option<u64>,
     dispatched_prompt: Option<(u64, AgentPrompt)>,
@@ -571,6 +581,12 @@ impl PanePump {
             match input {
                 PaneInput::Event(payload) => self.observe(payload),
                 PaneInput::Command(command) => self.command(command),
+                PaneInput::GitSummary {
+                    generation,
+                    refresh,
+                    cwd,
+                    summary,
+                } => self.apply_git_summary(generation, refresh, &cwd, summary),
                 PaneInput::Finished(result) => {
                     self.finish(&result);
                     self.reclaim_accepted_inputs(&prompts, &inbox);
@@ -677,7 +693,6 @@ impl PanePump {
                     });
                 }
             }
-            HostCommand::TurnDiff { client, request_id } => self.turn_diff(client, request_id),
         }
     }
 
@@ -730,10 +745,18 @@ impl PanePump {
             &payload,
             AgentStreamPayload::SessionReset { .. } | AgentStreamPayload::SessionSwitched { .. }
         ) {
-            self.turn_base = None;
             self.active_turn = None;
             self.reclaim_dispatched_prompt();
         }
+        if matches!(&payload, AgentStreamPayload::SessionReset { .. }) {
+            self.git_refresh = self.git_refresh.saturating_add(1);
+        }
+        let refresh_git = matches!(
+            &payload,
+            AgentStreamPayload::SessionReady { .. }
+                | AgentStreamPayload::SessionSwitched { .. }
+                | AgentStreamPayload::PromptFinished { .. }
+        );
         {
             let mut state = self.state.lock();
             match &payload {
@@ -755,6 +778,7 @@ impl PanePump {
                         AgentConnectionPhase::Starting
                     };
                     state.error = None;
+                    state.git = None;
                     settle_turn(&mut state);
                 }
                 AgentStreamPayload::SessionReady { session_id, .. } => {
@@ -837,11 +861,13 @@ impl PanePump {
                 | AgentStreamPayload::SessionDeleted { .. }
                 | AgentStreamPayload::SessionDeleteFailed { .. }
                 | AgentStreamPayload::PromptsReclaimed { .. }
-                | AgentStreamPayload::PromptsRestored { .. }
-                | AgentStreamPayload::TurnDiff { .. } => {}
+                | AgentStreamPayload::PromptsRestored { .. } => {}
             }
         }
         self.emit(payload);
+        if refresh_git {
+            self.start_git_refresh();
+        }
         match follow {
             FollowUp::None => {}
             FollowUp::DrainQueue => self.dispatch_next(),
@@ -889,20 +915,6 @@ impl PanePump {
         self.next_turn_id = self.next_turn_id.saturating_add(1).max(1);
         let turn_id = self.next_turn_id;
         self.active_turn = Some(turn_id);
-        let cwd = self.state.lock().cwd.clone();
-        // Blocking git is fine here: the pane's own thread is the only thing
-        // it stalls, and a pane outside a worktree simply keeps no base.
-        self.turn_base = match turn_snapshot::snapshot_tree(&cwd) {
-            Ok(base) => Some(base),
-            Err(error) => {
-                log::debug!(
-                    target: "zz::agent",
-                    "no turn snapshot for pane {}: {error}",
-                    self.pane
-                );
-                None
-            }
-        };
         {
             let mut state = self.state.lock();
             state.phase = AgentConnectionPhase::Running;
@@ -919,7 +931,6 @@ impl PanePump {
             }
             Err(error) => {
                 self.active_turn = None;
-                self.turn_base = None;
                 {
                     let mut state = self.state.lock();
                     state.phase = AgentConnectionPhase::Ready;
@@ -974,22 +985,55 @@ impl PanePump {
         self.reclaim_queue();
     }
 
-    fn turn_diff(&mut self, client: ClientId, request_id: u64) {
+    fn start_git_refresh(&mut self) {
+        self.git_refresh = self.git_refresh.saturating_add(1);
+        let generation = self.generation;
+        let refresh = self.git_refresh;
         let cwd = self.state.lock().cwd.clone();
-        let outcome = match self.turn_base.as_ref() {
-            Some(base) => match turn_snapshot::capture_turn_diff(&cwd, base) {
-                Ok(diff) => AgentTurnDiffOutcome::Captured { diff },
-                Err(message) => AgentTurnDiffOutcome::Failed { message },
-            },
-            None => AgentTurnDiffOutcome::Unavailable {
-                message: "this pane has no turn to diff".to_owned(),
-            },
+        let capture_cwd = cwd.clone();
+        let inbox = self.inbox.clone();
+        let pane = self.pane;
+        if let Err(error) = thread::Builder::new()
+            .name(format!("zz-agent-git-{}-{refresh}", pane.0))
+            .spawn(move || {
+                let summary = match git_summary::capture_git_summary(&capture_cwd) {
+                    Ok(summary) => Some(summary),
+                    Err(error) => {
+                        log::debug!(target: "zz::agent", "no Git summary for pane {pane}: {error}");
+                        None
+                    }
+                };
+                let _ = inbox.send_blocking(PaneInput::GitSummary {
+                    generation,
+                    refresh,
+                    cwd,
+                    summary,
+                });
+            })
+        {
+            log::warn!(target: "zz::agent", "could not start Git summary capture for pane {pane}: {error}");
+        }
+    }
+
+    fn apply_git_summary(
+        &mut self,
+        generation: u64,
+        refresh: u64,
+        cwd: &Path,
+        summary: Option<AgentGitSummary>,
+    ) {
+        if generation != self.generation || refresh != self.git_refresh {
+            return;
+        }
+        let state = {
+            let mut state = self.state.lock();
+            if state.cwd != cwd || state.git == summary {
+                return;
+            }
+            state.git = summary;
+            state.clone()
         };
-        self.emit(AgentStreamPayload::TurnDiff {
-            client,
-            request_id,
-            outcome,
-        });
+        (self.sink)(self.pane, self.generation, state, None);
     }
 
     fn close(&mut self) {
@@ -1118,8 +1162,49 @@ mod tests {
         journal::AgentJournal,
         stream::{AgentImage, AgentStreamPayload},
     };
+    use std::{fs, process::Command};
 
     const DEADLINE: Duration = Duration::from_secs(10);
+
+    fn git_available() -> bool {
+        Command::new("git")
+            .arg("--version")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    fn git(root: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .expect("git should run");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn seeded_git_repo() -> Option<(tempfile::TempDir, PathBuf)> {
+        if !git_available() {
+            return None;
+        }
+        let scratch = tempfile::tempdir().expect("temporary directory");
+        let root = scratch.path().canonicalize().expect("resolved path");
+        git(&root, &["init", "--quiet", "--initial-branch=main"]);
+        git(&root, &["config", "user.email", "git-summary@zz.test"]);
+        git(&root, &["config", "user.name", "zz git summary"]);
+        git(&root, &["config", "commit.gpgsign", "false"]);
+        fs::write(root.join("tracked.txt"), "one\ntwo\n").expect("seed file");
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "--quiet", "-m", "seed"]);
+        Some((scratch, root))
+    }
 
     #[derive(Clone, Default)]
     struct Recorder {
@@ -1623,9 +1708,8 @@ mod tests {
             assert!(
                 host.command(
                     pane,
-                    HostCommand::TurnDiff {
-                        client: ClientId(1),
-                        request_id: request_id as u64,
+                    HostCommand::SetMode {
+                        mode_id: request_id.to_string(),
                     }
                 )
                 .is_ok()
@@ -1634,9 +1718,8 @@ mod tests {
         assert!(
             host.command(
                 pane,
-                HostCommand::TurnDiff {
-                    client: ClientId(1),
-                    request_id: PANE_INBOX_CAPACITY as u64,
+                HostCommand::SetMode {
+                    mode_id: PANE_INBOX_CAPACITY.to_string(),
                 }
             )
             .is_err()
@@ -1790,7 +1873,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pane_outside_a_worktree_reports_that_it_has_no_turn_to_diff() {
+    fn pane_outside_git_has_no_summary_on_session_ready() {
         let scratch = tempfile::tempdir().expect("temporary directory");
         let fixture = Fixture::build(
             Behavior::Chunk,
@@ -1801,26 +1884,179 @@ mod tests {
             Some(scratch.path().to_path_buf()),
         );
         fixture.wait_for_session();
-        fixture.prompt("go");
+
+        assert_eq!(fixture.state().git, None);
+        fixture.close();
+    }
+
+    #[test]
+    fn git_summary_refreshes_on_session_ready_and_prompt_finished() {
+        let Some((_scratch, root)) = seeded_git_repo() else {
+            return;
+        };
+        let fixture = Fixture::build(
+            Behavior::AskPermission,
+            false,
+            true,
+            None,
+            None,
+            Some(root.clone()),
+        );
+        fixture.wait_for_session();
+        let deadline = Instant::now() + DEADLINE;
+        while fixture.state().git.is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(
+            fixture.state().git,
+            Some(AgentGitSummary {
+                branch: Some("main".to_owned()),
+                changed_files: 0,
+                additions: 0,
+                deletions: 0,
+            })
+        );
+        let states = fixture.recorder.states.lock();
+        let ready = states
+            .iter()
+            .position(|(state, has_item)| {
+                *has_item && state.phase == AgentConnectionPhase::Ready && state.git.is_none()
+            })
+            .expect("session readiness was published before Git capture");
+        let summarized = states
+            .iter()
+            .position(|(state, has_item)| {
+                !*has_item
+                    && state
+                        .git
+                        .as_ref()
+                        .is_some_and(|git| git.branch.as_deref() == Some("main"))
+            })
+            .expect("Git summary was published as a state-only update");
+        assert!(ready < summarized);
+        drop(states);
+
+        fs::write(root.join("tracked.txt"), "one\nchanged\n").expect("tracked edit");
+        fs::write(root.join("fresh.txt"), "new\nfile\n").expect("untracked file");
+        let state_marker = fixture.recorder.states.lock().len();
+        fixture.prompt("inspect the changes");
+        let payloads = fixture.recorder.wait("the permission request", |payload| {
+            matches!(payload, AgentStreamPayload::PermissionRequested { .. })
+        });
+        let request_id = payloads
+            .iter()
+            .find_map(|payload| match payload {
+                AgentStreamPayload::PermissionRequested { request_id, .. } => Some(*request_id),
+                _ => None,
+            })
+            .expect("permission request");
+        fixture.command(HostCommand::RespondPermission {
+            request_id,
+            option_id: Some("allow".to_owned()),
+        });
         fixture.recorder.wait("the turn to finish", |payload| {
             matches!(payload, AgentStreamPayload::PromptFinished { .. })
         });
+        let deadline = Instant::now() + DEADLINE;
+        while fixture
+            .state()
+            .git
+            .as_ref()
+            .is_none_or(|git| git.changed_files != 2)
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(2));
+        }
 
-        fixture.command(HostCommand::TurnDiff {
-            client: ClientId(4),
-            request_id: 3,
-        });
-        let payloads = fixture.recorder.wait("the turn diff", |payload| {
-            matches!(payload, AgentStreamPayload::TurnDiff { .. })
-        });
-        assert!(payloads.iter().any(|payload| matches!(
-            payload,
-            AgentStreamPayload::TurnDiff {
-                client: ClientId(4),
-                request_id: 3,
-                outcome: AgentTurnDiffOutcome::Unavailable { .. }
-            }
-        )));
+        assert_eq!(
+            fixture.state().git,
+            Some(AgentGitSummary {
+                branch: Some("main".to_owned()),
+                changed_files: 2,
+                additions: 3,
+                deletions: 1,
+            })
+        );
+        let states = fixture.recorder.states.lock();
+        let settled = states[state_marker..]
+            .iter()
+            .position(|(state, has_item)| {
+                *has_item
+                    && state.phase == AgentConnectionPhase::Ready
+                    && state.git.as_ref().is_some_and(|git| git.changed_files == 0)
+            })
+            .expect("turn settlement was published with the previous summary");
+        let refreshed = states[state_marker..]
+            .iter()
+            .position(|(state, has_item)| {
+                !*has_item && state.git.as_ref().is_some_and(|git| git.changed_files == 2)
+            })
+            .expect("Git refresh was published as a state-only update");
+        assert!(settled < refreshed);
+        drop(states);
+        fixture.close();
+    }
+
+    #[test]
+    fn stale_git_summary_results_are_dropped_by_generation_token_and_cwd() {
+        let Some((_scratch, root)) = seeded_git_repo() else {
+            return;
+        };
+        let fixture = Fixture::build(Behavior::Hang, false, true, None, None, Some(root.clone()));
+        fixture.wait_for_session();
+        let deadline = Instant::now() + DEADLINE;
+        while fixture.state().git.is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let marker = fixture.recorder.states.lock().len();
+        let inbox = fixture
+            .host
+            .registry
+            .panes
+            .lock()
+            .get(&fixture.pane)
+            .expect("pane")
+            .inbox
+            .clone();
+        for (generation, refresh, cwd, branch) in [
+            (0, 2, root.clone(), "wrong-generation"),
+            (1, 1, root.clone(), "wrong-token"),
+            (1, 2, root.join("elsewhere"), "wrong-cwd"),
+            (1, 2, root.clone(), "accepted"),
+        ] {
+            inbox
+                .send_blocking(PaneInput::GitSummary {
+                    generation,
+                    refresh,
+                    cwd,
+                    summary: Some(AgentGitSummary {
+                        branch: Some(branch.to_owned()),
+                        changed_files: 0,
+                        additions: 0,
+                        deletions: 0,
+                    }),
+                })
+                .expect("Git result reaches pane");
+        }
+        let deadline = Instant::now() + DEADLINE;
+        while fixture
+            .state()
+            .git
+            .as_ref()
+            .and_then(|git| git.branch.as_deref())
+            != Some("accepted")
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+
+        let states = fixture.recorder.states.lock();
+        let branches = states[marker..]
+            .iter()
+            .filter_map(|(state, _)| state.git.as_ref()?.branch.as_deref())
+            .collect::<Vec<_>>();
+        assert_eq!(branches, ["accepted"]);
+        drop(states);
         fixture.close();
     }
 

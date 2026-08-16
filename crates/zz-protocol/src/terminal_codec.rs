@@ -540,9 +540,7 @@ fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolErr
             .map_err(|error| ProtocolError::InvalidAgentPayload(error.to_owned()))?;
     }
     if let ProtocolMessage::Event(Event {
-        payload:
-            EventPayload::AgentSessions { result, .. }
-            | EventPayload::AgentTurnDiffResult { result, .. },
+        payload: EventPayload::AgentSessions { result, .. },
         ..
     }) = message
         && result.len() > MAX_AGENT_RESULT_BYTES
@@ -3204,6 +3202,12 @@ mod tests {
                 request_id: 4,
                 payload: r#"{"tool":"edit"}"#.to_owned(),
             }),
+            git: Some(crate::AgentGitSummary {
+                branch: Some("main".to_owned()),
+                changed_files: 3,
+                additions: 21,
+                deletions: 8,
+            }),
         }
     }
 
@@ -3282,9 +3286,9 @@ mod tests {
                 },
             },
             ProtocolMessage::AgentReplay { pane, from_seq: 41 },
-            ProtocolMessage::AgentTurnDiff {
+            ProtocolMessage::AgentAcknowledgePromptRestore {
                 pane,
-                request_id: 3,
+                reclaim_id: 3,
             },
         ] {
             assert_control_round_trip(&message);
@@ -3321,11 +3325,6 @@ mod tests {
                 pane,
                 request_id: 5,
                 result: r#"{"sessions":[]}"#.to_owned(),
-            },
-            EventPayload::AgentTurnDiffResult {
-                pane,
-                request_id: 6,
-                result: r#"{"files":[]}"#.to_owned(),
             },
         ] {
             assert_control_round_trip(&ProtocolMessage::Event(Event {
@@ -3605,19 +3604,16 @@ mod tests {
             Err(ProtocolError::InvalidAgentPayload(_))
         ));
 
-        let turn_diff = |length: usize| {
-            ProtocolMessage::Event(Event {
-                sequence: 10,
-                payload: EventPayload::AgentTurnDiffResult {
-                    pane: PaneId(4),
-                    request_id: 1,
-                    result: "r".repeat(length),
-                },
-            })
+        let with_branch = |length: usize| crate::AgentPaneWire {
+            git: Some(crate::AgentGitSummary {
+                branch: Some("b".repeat(length)),
+                ..crate::AgentGitSummary::default()
+            }),
+            ..agent_state_fixture()
         };
-        assert!(encode_protocol_message(&turn_diff(MAX_AGENT_RESULT_BYTES)).is_ok());
+        assert!(encode_protocol_message(&state(with_branch(MAX_AGENT_OPTION_BYTES))).is_ok());
         assert!(matches!(
-            encode_protocol_message(&turn_diff(MAX_AGENT_RESULT_BYTES + 1)),
+            encode_protocol_message(&state(with_branch(MAX_AGENT_OPTION_BYTES + 1))),
             Err(ProtocolError::InvalidAgentPayload(_))
         ));
     }

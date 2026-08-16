@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v55)
+title: zz wire protocol (v57)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 56`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 57`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (56) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (57) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -103,7 +103,6 @@ fields in declaration order.
 | `AgentAuthenticate { pane, method_id }` | one method | Run one advertised authentication method |
 | `AgentSessionOp { pane, op }` | `List { cwd, cursor, replace }` / `New { cwd }` / `Switch { session_id, cwd, additional_directories }` / `Delete { session_id }` | Session management against the pane's adapter; `List` answers with `EventPayload::AgentSessions` |
 | `AgentReplay { pane, from_seq: u64 }` | journal cursor | Replay the pane's journal from `from_seq`, then tail it. Sent on attach, after `AgentLagged`, and when a pane enters the visible set |
-| `AgentTurnDiff { pane, request_id }` | one request | Ask for the diff of the pane's current turn against its dispatch-time snapshot; answered by `EventPayload::AgentTurnDiffResult` |
 | `AgentAcknowledgePromptRestore { pane, reclaim_id }` | one restored draft | Retire one daemon-cached recovered prompt after its owning client has put it back in the composer, preventing a later replay from restoring it again |
 
 The agent identifiers (`option_id`, `value`, `mode_id`, `method_id`) are bounded to
@@ -162,7 +161,7 @@ offset: u32, columns: u16, rows: Vec<Vec<PackedCell>>, dictionary: TerminalDicti
 (each chunk ≤ `MAX_KITTY_IMAGE_CHUNK_BYTES`, 1 MiB), and
 `KittyImagesRemoved { pane, image_ids }`.
 
-The agent lane added at v53 carries five more: `AgentUpdates { pane, first_seq: u64, items: Vec<Vec<u8>> }`
+The agent lane added at v53 carries four more: `AgentUpdates { pane, first_seq: u64, items: Vec<Vec<u8>> }`
 carries one coalesced batch of JSON agent stream items numbered by the pane's fanout lane
 (`first_seq` names the first item, the rest follow one by one; a batch is nonempty and totals at most
 `MAX_AGENT_UPDATES_BYTES`, 9 MiB, so a longer window splits across frames).
@@ -170,14 +169,15 @@ carries one coalesced batch of JSON agent stream items numbered by the pane's fa
 attached to the session: `phase` (`Starting | Ready | Running | AwaitingPermission | Failed
 { message }`), `queued_prompts: u32`, `session_id`, `title`, the adapter's auth methods, config
 options, and modes as one JSON `String` blob each (≤ `MAX_AGENT_STATE_BLOB_BYTES`, 256 KiB, because
-postcard cannot carry the ACP SDK's JSON-shaped types), and
+postcard cannot carry the ACP SDK's JSON-shaped types),
 `pending_permission: Option<AgentPermissionWire { request_id, payload }>` whose payload is bounded to
-`MAX_AGENT_PERMISSION_BYTES` (64 KiB). `AgentLagged { pane, next_seq }` says the client's agent lane
+`MAX_AGENT_PERMISSION_BYTES` (64 KiB), and
+`git: Option<AgentGitSummary { branch, changed_files, additions, deletions }>`; a branch is bounded
+to `MAX_AGENT_OPTION_BYTES` (4 KiB). `AgentLagged { pane, next_seq }` says the client's agent lane
 overflowed and was cleared, which the client answers with `AgentReplay` rather than dying.
-`AgentSessions { pane, request_id, result }` and `AgentTurnDiffResult { pane, request_id, result }`
-are the JSON replies to `AgentSessionOp::List` and `AgentTurnDiff`, each ≤ `MAX_AGENT_RESULT_BYTES`
-(1 MiB) and sent only to the client that made the request. A session listing uses request ID zero;
-the daemon carries its requester out of band.
+`AgentSessions { pane, request_id, result }` is the JSON reply to `AgentSessionOp::List`, bounded by
+`MAX_AGENT_RESULT_BYTES` (1 MiB) and sent only to the client that made the request. A session
+listing uses request ID zero; the daemon carries its requester out of band.
 
 The three payloads `TerminalViewport`, `TerminalPatch`, and `CommandOutput { viewport: Some(..) }` are
 diverted to the [Terminal lane](/protocol/terminal-lanes.md) by `encode_protocol_message`; all other
@@ -324,7 +324,7 @@ unbounded `#()` script off the wire.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 56`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 57`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
 - **Any change that affects an already shipped encoding** (new enum variants, reordered fields,

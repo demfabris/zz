@@ -24,9 +24,9 @@ JSON blob with a byte cap, which the client deserializes into the shape its redu
 
 | Layer | Representation | Responsibility |
 | --- | --- | --- |
-| protocol | `PaneKindSnapshot::Agent(AgentDescriptor)` | Versioned pane identity plus `provider`, `cwd`, and opaque ACP `session_id`; introduced across v22–v32. The live wire version is `PROTOCOL_VERSION` (56) |
+| protocol | `PaneKindSnapshot::Agent(AgentDescriptor)` | Versioned pane identity plus `provider`, `cwd`, and opaque ACP `session_id`; introduced across v22–v32. The live wire version is `PROTOCOL_VERSION` (57) |
 | mux | `PaneKind::Agent(AgentDescriptor)` | Stable layout leaf, targeting, titles, and validated restore-metadata updates |
-| server | one ACP adapter child per pane, on its own thread | Spawns and owns the child (`zz-daemon/src/agent/host.rs`), auto-approves permissions, queues mid-turn prompts, snapshots turn bases, journals standard session updates, adopts the session ID the adapter returns, and coalesces the stream onto a per-pane outbound lane (`fanout.rs`) |
+| server | one ACP adapter child per pane, on its own thread | Spawns and owns the child (`zz-daemon/src/agent/host.rs`), auto-approves permissions, queues mid-turn prompts, captures bounded worktree summaries, journals standard session updates, adopts the session ID the adapter returns, and coalesces the stream onto a per-pane outbound lane (`fanout.rs`) |
 | app | shared `Entity<AgentController>` | Reduces the daemon's stream into a flat transcript, tracks the per-pane replay cursor, restores selector preferences, normalizes pasted attachments, and turns user gestures into `AgentRequest` sends |
 | view/UI | `AgentView`, `AgentTimeline`, `AgentEntry` | History picker, composer, cancellation, approval/auth actions, Markdown, reasoning, plans, tools, and Mermaid |
 
@@ -164,7 +164,7 @@ does not replace running children by itself.
 
 # How the conversation reaches a client
 
-Ten `ProtocolMessage` variants go up and five `EventPayload` variants come down; the byte bounds and
+Ten `ProtocolMessage` variants go up and four `EventPayload` variants come down; the byte bounds and
 exact shapes are in [the wire protocol](/protocol/wire-protocol.md). What matters here is the
 delivery model.
 
@@ -172,11 +172,11 @@ Up: `AgentPrompt` (text plus encoded images, 6 MiB total), `AgentCancel`, `Agent
 `AgentRespondPermission`, `AgentSetConfigOption`, `AgentSetMode`, `AgentAuthenticate`,
 `AgentSessionOp` (`List { cwd, cursor, replace }`, `New { cwd }`,
 `Switch { session_id, cwd, additional_directories }`, or `Delete { session_id }`),
-`AgentReplay { from_seq }`, and `AgentTurnDiff`.
+`AgentReplay { from_seq }`, and `AgentAcknowledgePromptRestore`.
 
 Down: `AgentUpdates { pane, first_seq, items }` is one coalesced batch of JSON stream items;
 `AgentState { pane, state: AgentPaneWire }` is the small typed pane state; `AgentLagged` says a lane
-overflowed; `AgentSessions` and `AgentTurnDiffResult` are the JSON replies.
+overflowed; `AgentSessions` is the JSON session-list reply.
 
 - **Coalescing.** The fanout gathers items into 25 ms windows on one shared flush thread that parks
   whenever no pane has anything gathered, so a healthy client sees a few frames per second rather
@@ -448,6 +448,10 @@ switches. Markdown keeps the active light/dark syntax theme and process-stable e
 Assistant-authored fenced `markdown`/`md` blocks are promoted to nested rich Markdown; this bounded
 nested plugin is the sole remaining window-keyed Markdown state because it has no timeline-store
 access. Other code fences remain literal.
+Every literal fence reserves a compact top strip: the language from the fence, or `text` when none
+was supplied, sits at the left and a copy icon at the right writes the complete raw code. Every
+assistant response ends with a second copy icon that writes the complete raw Markdown rather than
+the repaired or rendered display text.
 
 A second plugin recognizes fenced `mermaid` blocks and renders resvg-safe SVG off the UI thread with
 `merman`. The renderer maps virtual UI font names to a conservative `system-ui, sans-serif`
@@ -461,8 +465,10 @@ offset so distinct blocks do not alias, while identical diagrams can share a ras
 configuration is built only on a cache miss.
 
 User prompts use a neutral input surface. Tool
-disclosures are compact, fixed single-line borderless rows with one action icon, an ellipsized
-label, a status-only indicator, and a chevron when details are available. Single-line enforcement
+disclosures are compact, fixed single-line borderless rows with one kind icon, an ellipsized label,
+and a chevron immediately after the label when details are available. There is no trailing status
+glyph or ellipsis; static semantic color on the kind icon, label, and chevron keeps failed and
+approval states distinct without inventing another control. Single-line enforcement
 lives in code, since style cannot do it: `whitespace_nowrap` and `text_ellipsis` only govern
 wrapping, while gpui shapes text by splitting on `\n` first and truncates by cumulative character
 width without noticing the breaks, so a label with an embedded newline lays out two full-height
@@ -470,11 +476,10 @@ lines in a 28px row and the row's own overflow mask cuts both in half.
 Agents send such labels routinely (one Bash call with two
 commands arrives as one title with a newline between them), so every label bound for a fixed-height
 row goes through `single_line`, which joins the pieces with ` · `. Clickable rows retain a
-pointer cursor without painting a hover background. Tool and folded-group statuses use static
-glyphs. Pending and running rows never animate, so an adapter can leave a status unresolved without
-leaving a spinner behind. Completed uses a checkmark; failed and canceled use an X. Pane-level busy
+pointer cursor without painting a hover background. Pending and running rows never animate, so an
+adapter can leave a status unresolved without leaving a spinner behind. Pane-level busy
 chrome derives from the connection phase alone (`pane_is_busy`, `view.rs`), never from tool rows.
-Pane activity, startup, the Changes overlay, and permissions share the leased pulse clock. No
+Pane activity, startup, and permissions share the leased pulse clock. No
 mounted agent spinner starts a display-rate `gpui::Animation`. A run of two or more
 adjacent tools, regardless of label or action, renders one collapsed group header with the first
 member's icon and a first-seen, count-aware action summary such as **Ran command, Edit files, Read
@@ -546,6 +551,10 @@ completed entry always renders exactly what it holds.
 The native composer is a centered, bordered input card that auto-grows from two to eight lines.
 Enter sends when the session is ready; Shift+Enter inserts a newline. The controller returns to ready
 on ACP completion and marks in-flight tools cancelled when the stop reason is `cancelled`.
+The Send, Queue, and Stop states share one icon-only circular button. A separate compact footer under
+the card carries the current Git branch and `N files +A -D` summary on the left, and a 16 px context
+usage ring on the right. The ring fills clockwise, exposes exact token counts and percentage in its
+tooltip and accessibility value, and clamps malformed over-capacity values to a full circle.
 
 One button carries three actions, chosen by `composer_action(active_turn, has_content)`
 (`view.rs:236`): **Send** while the pane is idle, **Queue** when a turn is running and the composer
@@ -580,7 +589,7 @@ Pending permissions render as a wizard, one request per page in arrival order (`
 and Escape cancels the page; the footer reads `1-9 picks · enter confirms · esc cancels`, and the
 `n/m` counter appears only when more than one request is pending. Options past the ninth render
 without a digit chip and are click-only. Digits are left to the composer while the user is
-mid-sentence and focused, and the whole key path sits behind the Changes overlay, the History picker,
+mid-sentence and focused, and the whole key path sits behind the History picker,
 and the completion menu, so a wizard never steals a key one of those owns. Because auto-approve
 answers kinded requests before they reach `pending_permissions`, the wizard is what a user sees with
 `agent-auto-approve = false`, or when an agent advertises no allow option at all.
@@ -645,7 +654,8 @@ the old process from entering the new stream while preserving the pane's monoton
 The one retiring-generation payload still accepted is `PromptsReclaimed`, because it is the only
 copy of queued text and images that must return to the composer.
 
-The header's other end holds the working-directory picker: the pane's cwd by its last component,
+The header's other end holds an icon-only History action followed by the working-directory picker:
+the pane's cwd by its last component,
 its full path in the tooltip, and a native folder chooser behind a click on the local host. It is
 disabled on remote hosts because a native chooser sees the desktop filesystem, not the daemon's.
 An ACP session is bound to
@@ -734,30 +744,22 @@ returns keeps the pane Working until the user stops or retries it.
 Standard session updates may arrive after the prompt response because ACP v1 has no notification
 flush barrier. The reducer applies those updates to transcript data without reopening the turn.
 
-## What this turn changed
+## Workspace footer
 
-The header offers a **Changes** action once the pane has recorded a turn base, opening a modal
-summary of what the agent did to the worktree. The base is a bare git *tree object*, not a commit or
-a stash: `snapshot_tree` (`zz-daemon/src/agent/turn_snapshot.rs:78`) points `GIT_INDEX_FILE` at a
-throwaway index in a temp directory, runs `git add -A` against it, and keeps the `write-tree` SHA.
-The real `.git/index` is never touched, and staging untracked files is deliberate . a file that was
-already untracked when the turn started then diffs correctly instead of reading as brand new. The
-snapshot is taken at every prompt dispatch, on the pane's own daemon thread (blocking git there
-stalls nothing else), and a pane outside a worktree simply keeps no base and shows no button; the
-failure is logged, never surfaced. Running it daemon-side is also the correct machine: for a daemon
-reached over ssh, the worktree is the daemon's, not the client's.
+The composer footer shows a bounded current-worktree summary, not a claim about what one turn
+changed. `git_summary.rs` points `GIT_INDEX_FILE` at a throwaway index, runs `git add -A`, writes a
+tree, and compares that tree with `HEAD` through name-status and numstat. This includes tracked and
+untracked files without touching the real `.git/index`; binary files contribute to the file count
+and zero line totals. An unborn repository compares against Git's empty tree. A detached checkout
+keeps the counts but has no branch label.
 
-Opening the overlay sends `AgentTurnDiff { pane, request_id }` and the answer comes back as
-`AgentTurnDiffResult`, JSON-encoded and capped at 1 MiB. Daemon-side it takes a fresh tree and runs
-three `git diff-tree` invocations between the two trees . name-status, numstat, and the unified patch
-. all with rename detection. `capture_git`
-(`:258`) streams stdout and kills the child the moment it would exceed its ceiling (3 MiB for the
-patch, 2 MiB for the summaries), so an enormous diff costs bounded memory rather than the pane. Any
-of the three overflowing sets `TurnDiff::truncated`, which the overlay shows as a **PARTIAL** pill
-beside the `N files · +A −D` summary; the patch text itself is cut back to the last whole line and
-marked `[diff truncated]`. Rows carry status glyph, path, `was <old path>` for a rename, and line
-counts or a `binary` marker; one file expands at a time into its hunks. A working directory that
-moved since the snapshot is refused outright rather than diffed against the wrong root.
+The daemon starts this capture after `SessionReady`, `SessionSwitched`, and `PromptFinished`. It
+publishes the session or turn boundary first, starts a named background worker, and dispatches any
+queued prompt without waiting for Git. A runtime generation, refresh token, and cwd check discard a
+late result after a replacement, newer capture, or workspace switch. Each Git process has a five
+second timeout and a 2 MiB output ceiling. Outside a worktree, or on any capture failure,
+`AgentPaneWire.git` is `None` and the Git portion of the footer stays absent. Running the capture in
+the daemon is what makes a remote pane summarize the remote worktree rather than the desktop's.
 
 # Attention outside the pane
 
@@ -848,15 +850,17 @@ prompts, credentials, approval decisions, or a copy of provider session files.
 - Reducer tests cover the five flat transcript shapes, inert vendor metadata, prompt completion
   without fabricated tool completion, late updates without activity revival, message coalescing,
   replay deduplication, entry revisions, stable tool IDs, plan replacement, permissions, generic
-  options, slash commands, and session-ID bounds. UI tests pin static tool status glyphs, Markdown,
-  Mermaid, and completion-key routing.
+  options, slash commands, and session-ID bounds. UI tests pin static tool semantics, nearby
+  chevrons, raw Markdown and code copying, code-fence labels, the context ring, and completion-key
+  routing.
 - The ACP peer tests moved to the daemon with the runtime. `zz-daemon/src/agent/fixture.rs` is an
   in-process ACP agent both the host's own tests and the daemon's end-to-end wiring tests open panes
   against, in place of spawning a child. Host tests cover the whole arc . spawn through prompt to a
   finished turn, an auto-approved tool never reaching a client, a surfaced permission waiting for an
   answer, a mid-turn prompt queueing and dispatching after the prompt response, unqueueing handing
   prompts back with their images, a session the agent cannot load being replayed out of the journal,
-  a pane outside a worktree reporting no turn to diff, and pane closure cancelling what it owed.
+  Git summaries refreshing after session readiness and prompt completion without blocking either,
+  a pane outside a worktree reporting no summary, and pane closure cancelling what it owed.
 - Fanout tests pin the lane's contract: a window of items leaving as one frame numbered from the
   first, a replay inside the ring serving only what the client missed, a replay older than the ring
   restoring Ready/reset/journal/SessionReady in order, request replies leaving the stream without
@@ -897,12 +901,10 @@ prompts, credentials, approval decisions, or a copy of provider session files.
   past the size cap, and retention pruning; a host test replays a session the agent cannot load out
   of the journal. A separate paths test pins that the journal lives under the daemon's own data
   directory rather than the GUI's.
-- Turn-snapshot tests (also daemon-side now) cover snapshot stability, the real index staying
-  untouched, an untracked file from *before* the turn not being reported, rename detection, binary
-  flagging, a directory outside a worktree and a retargeted working directory being refused, and
-  patch truncation leaving the file summaries intact.
-- Protocol tests pin that the ten agent messages and five agent payloads were appended to the wire
-  tails they claim (`agent_runtime_variants_hold_the_wire_tails_they_were_appended_to`) and that the
+- Git-summary tests cover clean, dirty, detached, unborn, and non-worktree states, the real index
+  staying untouched, tracked and untracked file totals, timeout cleanup, and saturating counters.
+- Protocol tests pin that the ten agent messages and four agent payloads occupy the wire tails
+  they claim (`agent_runtime_variants_hold_the_wire_tails_they_were_appended_to`) and that the
   three agent mux options carry their defaults. The v54 session-op tests cover list filters and
   cursors, new-session cwd, full switch roots, path byte limits, and the 256-directory ceiling.
 - `crates/zz-daemon/tests/agent_soak.rs` drives the fixture adapter through the daemon into a
@@ -919,7 +921,7 @@ prompts, credentials, approval decisions, or a copy of provider session files.
 
 - [System overview](/architecture/overview.md)
 - [Daemon-owned agent runtime](/designs/agent-daemon-runtime.md) . the decision record for the move
-- [Wire protocol](/protocol/wire-protocol.md) . the ten agent messages, five agent payloads, and their bounds
+- [Wire protocol](/protocol/wire-protocol.md) . the ten agent messages, four agent payloads, and their bounds
 - [Session persistence](/concepts/session-persistence.md) . what survives detach, and what a daemon restart takes
 - [Mux snapshots](/protocol/snapshots.md)
 - [Application configuration](/configuration/app-config.md)

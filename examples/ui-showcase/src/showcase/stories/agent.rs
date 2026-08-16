@@ -2,9 +2,7 @@
 
 use std::sync::Arc;
 
-use gpui::{
-    AnyElement, App, Context, ParentElement as _, Styled as _, div, prelude::*, px,
-};
+use gpui::{AnyElement, App, Context, ParentElement as _, Styled as _, div, prelude::*, px};
 use zz_ui::agent::{
     AgentEntry, AgentTimeline, AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus,
     agent_pane_header,
@@ -20,7 +18,7 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
         .child(
             gallery(
                 "Pane header",
-                "The 40px header strip: two app-supplied slots pinned to the ends, nothing in between. The strip decides only its height, its inset, and the rule beneath it.",
+                "The 40px header strip keeps the provider on the left, with icon-only History and the working directory grouped on the right.",
                 cx,
             )
             .child(specimens().w_full().child(specimen_block(
@@ -32,7 +30,7 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
         .child(
             gallery(
                 "Thread entries",
-                "A turn as the timeline lays it out: the user prompt, the assistant's markdown reply, a collapsed reasoning disclosure, and the plan. Click a disclosure to expand it.",
+                "A turn as the timeline lays it out: the user prompt, an assistant reply with code and raw-Markdown copy actions, a collapsed reasoning disclosure, and the plan.",
                 cx,
             )
             .child(specimens().w_full().child(specimen_block(
@@ -44,7 +42,7 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
         .child(
             gallery(
                 "Tool calls",
-                "One row per tool call, with the kind glyph and a status the row derives its treatment from. Consecutive tool calls fold into a single group row that reports the aggregate status.",
+                "One row per tool call, with semantic color and a disclosure chevron directly beside its label. Consecutive tool calls fold into one group row.",
                 cx,
             )
             .child(specimens().w_full().child(specimen_block(
@@ -91,7 +89,12 @@ fn header(title: &'static str, directory: &'static str, cx: &App) -> impl IntoEl
     };
     agent_pane_header(
         slot(IconName::Openai, title),
-        slot(IconName::FolderOpen, directory),
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(Icon::new(IconName::History).xsmall())
+            .child(slot(IconName::FolderOpen, directory)),
         cx,
     )
 }

@@ -19,8 +19,8 @@ pub use key::{
     input_typed_text,
 };
 pub use message::{
-    AgentCommand, AgentConnectionPhase, AgentImage, AgentPaneWire, AgentPermissionWire,
-    AgentSessionOpKind, BrowserCommand, ChooseBufferAction, ChooseBufferItem,
+    AgentCommand, AgentConnectionPhase, AgentGitSummary, AgentImage, AgentPaneWire,
+    AgentPermissionWire, AgentSessionOpKind, BrowserCommand, ChooseBufferAction, ChooseBufferItem,
     ChooseBufferSearchState, ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind,
     ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget, ClientHello,
     ClientKind, ClientMessageKind, CommandInvocation, CommandPromptAction, CommandPromptKind,

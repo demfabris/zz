@@ -26,23 +26,24 @@ runs on the daemon's machine, which is the correct machine).
 
 # Ownership shift
 
-| Concern | Before (v52) | Current (v56) |
+| Concern | Before (v52) | Current (v57) |
 | --- | --- | --- |
 | Adapter child, stdio, ACP session | GUI (`AgentController` runtime tasks) | daemon `agent::host`, one thread per pane |
 | Auto-approve, queued prompts, stderr tail, session ops | GUI runtime half | daemon `agent::host` |
 | Journal | GUI `<data>/zz/agent-journal` | daemon `<data>/zz/daemon/agent-journal` |
-| Turn snapshots (git write-tree at dispatch) | GUI background executor | daemon (correct for remote daemons) |
+| Worktree status | GUI-owned per-turn snapshot and diff overlay | daemon-owned bounded current summary, published through pane state |
 | Transcript reducer (`AgentThread`), view, composer, wizard, badges, mend, spring | GUI | GUI, unchanged |
 | Adapter command strings, auto-approve flag | GUI config keys (`agent-*`) | mux options (flow via `mux.conf` + `SetConfigOverrides`, like `experimental-agent-pane`) |
 | `agent-send --submit` | daemon → GUI round-trip (`request_from_gui`) | daemon dispatches directly into the host; `ComposerAppend` keeps the GUI round-trip |
 | Adopting the ACP session ID, naming a pane after its first prompt | GUI, via `set-agent-session` / `select-pane -T` round trips | daemon (`adopt_agent_session`, `title_agent_pane`); the GUI keeps its own titling for the pane it drives |
 
-# Wire surface (v56)
+# Wire surface (v57)
 
 v53 moved the runtime into the daemon. v54 completed its session and restart controls. v55 gives
 each client process a stable identity and acknowledges restored prompts so reconnects remain
 owner-specific and do not resurrect consumed drafts. v56 removes the provider task-event, parked,
-and abandoned-turn stream vocabulary. Postcard
+and abandoned-turn stream vocabulary. v57 removes the turn-diff request/reply and adds a bounded
+`AgentGitSummary` to `AgentPaneWire`. Postcard
 cannot carry the ACP SDK's JSON-shaped types
 (`serde_json::Map` metas, `RawValue` params), so every stream item crosses as an opaque JSON
 blob with a byte cap, and the client deserializes into the same `RuntimeEvent`-shaped enum the
@@ -64,24 +65,23 @@ Client → daemon (`ProtocolMessage`, appended, never reordered):
   `Switch` carries session ID/cwd/additional directories, and `Delete` carries the session ID.
 - `AgentReplay { pane, from_seq: u64 }` — request journal replay (attach, lag recovery, pane
   focus).
-- `AgentTurnDiff { pane, request_id: u64 }`
+- `AgentAcknowledgePromptRestore { pane, reclaim_id: u64 }` — retire one daemon-cached draft after
+  its owning client restores it.
 
 Daemon → client (`EventPayload`, appended):
 - `AgentUpdates { pane, first_seq: u64, items: Vec<Vec<u8>> }` — JSON `AgentStreamItem`s,
   batch ≤ 1 MiB (split into multiple frames when larger), per-pane monotonic `seq`.
 - `AgentState { pane, state: AgentPaneWire }` — small typed struct: connection phase, queued
-  count, active session id, title, auth methods, pending permission
-  `(request_id, payload ≤ 64 KiB)`, and the adapter's config options and modes as one JSON blob
-  each (≤ 256 KiB). Published on change to every client attached to the pane's session (feeds
-  badges without the heavy stream). A payload that fails `AgentPaneWire::validate` is trimmed
-  down to the fields that fit rather than dropped.
+  count, active session id, title, auth methods, pending permission `(request_id, payload ≤ 64
+  KiB)`, current Git summary (branch ≤ 4 KiB plus `u32` totals), and the adapter's config options
+  and modes as one JSON blob each (≤ 256 KiB). Published on change to every client attached to
+  the pane's session (feeds badges without the heavy stream). A payload that fails
+  `AgentPaneWire::validate` is trimmed down to the fields that fit rather than dropped.
 - `AgentLagged { pane, next_seq }` — the client's agent lane overflowed and was cleared; the
   client answers with `AgentReplay`.
-- `AgentSessions { pane, request_id, result }` and
-  `AgentTurnDiffResult { pane, request_id, result }` — JSON replies to `AgentSessionOp::List`
-  and `AgentTurnDiff` (the `HistoryRequest → HistoryChunk` precedent), each ≤ 1 MiB. Both return
-  only to the requesting connection. A turn diff carries the requester's `request_id`; a session
-  listing has none on the ACP side, so it rides `request_id` 0 while the daemon carries `ClientId`
+- `AgentSessions { pane, request_id, result }` — the JSON reply to `AgentSessionOp::List`, at most
+  1 MiB and returned only to the requesting connection. A session listing has no request ID on the
+  ACP side, so it rides `request_id` 0 while the daemon carries `ClientId`
   out of band. An oversized listing becomes a bounded failure reply.
 
 Every new payload gets an explicit bound in `validate_control_message`, and
@@ -169,8 +169,10 @@ depend on `zz-daemon` with `default-features = false` and never inherit
 - Permissions: the live SDK responder parks in the host with NO timeout (a human decides).
   The pending request rides `AgentState`, so late-attaching clients see it; resolution is
   first-answer-wins; pane close or adapter death resolves it cancelled.
-- Turn snapshots run at dispatch on the pane thread (blocking git is fine there);
-  `AgentTurnDiff` captures against the stored base.
+- A named background worker captures the current branch, changed-file count, additions, and
+  deletions after session readiness, a session switch, and prompt completion. The host publishes
+  the lifecycle boundary and drains queued prompts first; generation, refresh, and cwd guards reject
+  stale results before a state-only publication.
 - The journal moved file-for-file (`agent-journal/<session>.jsonl`, 32 MiB cap, 30-day prune,
   torn-tail tolerance) under `<data>/zz/daemon/`, with the `user_data.rs`
   permission-hardening helpers now living in `zz-daemon::user_data` and re-exported for the
@@ -203,7 +205,7 @@ depend on `zz-daemon` with `default-features = false` and never inherit
   asks for a replay when a pane goes live; `prompt`/`cancel`/wizard answers/settings become
   protocol sends through `AgentRequest`; incoming `AgentStreamItem`s land in
   `apply_stream_items` and feed the existing reducer, so the view, wizard, badges, mend, and
-  spring are untouched. The client-side journal, stdio runtime, turn snapshots, and PATH repair
+  spring are untouched. The client-side journal, stdio runtime, legacy turn snapshots, and PATH repair
   are deleted, along with the `set-agent-session` round trip the daemon now does itself.
 - v54 carries the client's full session intent to the daemon. History scope and cursors reach
   `session/list`; a new workspace reaches `session/new`; a restore preserves cwd and additional

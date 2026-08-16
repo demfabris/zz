@@ -7329,9 +7329,6 @@ impl Shared {
             ProtocolMessage::AgentAuthenticate { method_id, .. } => {
                 HostCommand::Authenticate { method_id }
             }
-            ProtocolMessage::AgentTurnDiff { request_id, .. } => {
-                HostCommand::TurnDiff { client, request_id }
-            }
             ProtocolMessage::AgentSessionOp { op, .. } => match op {
                 AgentSessionOpKind::List {
                     cwd,
@@ -7570,27 +7567,11 @@ impl AgentPublisher for Shared {
     }
 
     fn send_agent_reply(&self, pane: PaneId, reply: AgentRequestReply) {
-        let (client, payload) = match reply {
-            AgentRequestReply::Sessions { client, result } => (
-                client,
-                EventPayload::AgentSessions {
-                    pane,
-                    request_id: 0,
-                    result,
-                },
-            ),
-            AgentRequestReply::TurnDiff {
-                client,
-                request_id,
-                result,
-            } => (
-                client,
-                EventPayload::AgentTurnDiffResult {
-                    pane,
-                    request_id,
-                    result,
-                },
-            ),
+        let AgentRequestReply::Sessions { client, result } = reply;
+        let payload = EventPayload::AgentSessions {
+            pane,
+            request_id: 0,
+            result,
         };
         let subscriber = self.inner.lock().subscribers.get(&client).cloned();
         if let Some(subscriber) = subscriber {
@@ -7664,7 +7645,6 @@ fn agent_message_pane(message: &ProtocolMessage) -> Result<PaneId, ServerError> 
         | ProtocolMessage::AgentAuthenticate { pane, .. }
         | ProtocolMessage::AgentSessionOp { pane, .. }
         | ProtocolMessage::AgentReplay { pane, .. }
-        | ProtocolMessage::AgentTurnDiff { pane, .. }
         | ProtocolMessage::AgentAcknowledgePromptRestore { pane, .. } => Ok(*pane),
         _ => Err(ServerError::InvalidCommand(
             "not an agent message".to_owned(),
@@ -10687,7 +10667,6 @@ fn handle_connection<S: TransportStream>(
             | ProtocolMessage::AgentAuthenticate { .. }
             | ProtocolMessage::AgentSessionOp { .. }
             | ProtocolMessage::AgentReplay { .. }
-            | ProtocolMessage::AgentTurnDiff { .. }
             | ProtocolMessage::AgentAcknowledgePromptRestore { .. }) => {
                 if let Err(error) = handle_agent_message(shared, client, message) {
                     let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(

@@ -12,8 +12,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use zz_protocol::{AgentPaneWire, ClientId, ClientInstanceId};
 
-use crate::agent::turn_snapshot::TurnDiff;
-
 /// One stamped item of a pane's stream. `seq` counts from 1 per pane and never
 /// repeats, so a reattaching client replays from the last one it applied.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -124,25 +122,12 @@ pub enum AgentStreamPayload {
         reclaim_id: u64,
         prompts: Vec<AgentPrompt>,
     },
-    TurnDiff {
-        client: ClientId,
-        request_id: u64,
-        outcome: AgentTurnDiffOutcome,
-    },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", tag = "outcome")]
 pub enum AgentPromptOutcome {
     Finished { stop_reason: Value },
-    Failed { message: String },
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase", tag = "outcome")]
-pub enum AgentTurnDiffOutcome {
-    Captured { diff: TurnDiff },
-    Unavailable { message: String },
     Failed { message: String },
 }
 
@@ -364,13 +349,6 @@ mod tests {
                         data: vec![0, 1, 2, 3, 255],
                     }],
                 }],
-            },
-            AgentStreamPayload::TurnDiff {
-                client: ClientId(3),
-                request_id: 3,
-                outcome: AgentTurnDiffOutcome::Failed {
-                    message: "not a worktree".to_owned(),
-                },
             },
         ];
 

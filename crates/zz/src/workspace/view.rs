@@ -1532,9 +1532,6 @@ impl AppView {
             for (pane, _, result) in events.sessions {
                 controller.apply_sessions_result(pane, &result, cx);
             }
-            for (pane, _, result) in events.turn_diffs {
-                controller.apply_turn_diff_result(pane, &result, cx);
-            }
         });
     }
 

@@ -709,6 +709,7 @@ impl CodeBlock {
         cx: &mut App,
     ) -> AnyElement {
         let style = &node_cx.style;
+        let actions = node_cx.code_block_actions.clone();
 
         div()
             .w_full()
@@ -719,7 +720,13 @@ impl CodeBlock {
                     .id(("codeblock", options.ix))
                     .w_full()
                     .min_w_0()
-                    .p_3()
+                    .px_3()
+                    .pb_3()
+                    .pt(if actions.is_some() {
+                        px(44.0)
+                    } else {
+                        px(12.0)
+                    })
                     .rounded(cx.theme().radius)
                     .bg(cx.theme().background.raised(2))
                     .font_family(cx.theme().mono_font_family.clone())
@@ -732,13 +739,17 @@ impl CodeBlock {
                         vec![],
                         self.styles(&cx.theme().highlight_theme),
                     ))
-                    .when_some(node_cx.code_block_actions.clone(), |this, actions| {
+                    .when_some(actions, |this, actions| {
                         this.child(
                             div()
                                 .id("actions")
                                 .absolute()
                                 .top_2()
+                                .left_2()
                                 .right_2()
+                                .flex()
+                                .items_center()
+                                .justify_end()
                                 .bg(cx.theme().background.raised(2))
                                 .rounded(cx.theme().radius)
                                 .child(actions(&self, window, cx)),

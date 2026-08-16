@@ -56,15 +56,7 @@ const MAX_TITLE_CHARS: usize = 48;
 const DEFAULT_AGENT_PANE_TITLE: &str = "agent";
 
 pub(crate) enum AgentRequestReply {
-    Sessions {
-        client: ClientId,
-        result: String,
-    },
-    TurnDiff {
-        client: ClientId,
-        request_id: u64,
-        result: String,
-    },
+    Sessions { client: ClientId, result: String },
 }
 
 /// What the daemon does with everything an agent pane produces. The fanout
@@ -410,6 +402,7 @@ struct StateFingerprint {
     session_id: Option<String>,
     error: Option<String>,
     auth_methods: usize,
+    git: Option<zz_protocol::AgentGitSummary>,
     blobs: u64,
 }
 
@@ -528,27 +521,6 @@ impl AgentFanout {
                     return false;
                 };
                 publisher.send_agent_reply(pane, AgentRequestReply::Sessions { client, result });
-                return true;
-            }
-            HostCommand::TurnDiff { client, request_id } => {
-                let payload = AgentStreamPayload::TurnDiff {
-                    client,
-                    request_id,
-                    outcome: crate::agent::stream::AgentTurnDiffOutcome::Failed {
-                        message: "agent command queue is busy".to_owned(),
-                    },
-                };
-                let Some(result) = encode_reply(&payload) else {
-                    return false;
-                };
-                publisher.send_agent_reply(
-                    pane,
-                    AgentRequestReply::TurnDiff {
-                        client,
-                        request_id,
-                        result,
-                    },
-                );
                 return true;
             }
             HostCommand::NewSession { .. } | HostCommand::SwitchSession { .. } => {
@@ -716,24 +688,6 @@ impl AgentFanout {
                         result,
                     });
                 }
-                AgentStreamPayload::TurnDiff {
-                    client, request_id, ..
-                } => {
-                    let result = encode_reply(&item.payload).or_else(|| {
-                        encode_reply(&AgentStreamPayload::TurnDiff {
-                            client: *client,
-                            request_id: *request_id,
-                            outcome: crate::agent::stream::AgentTurnDiffOutcome::Failed {
-                                message: "agent returned too many worktree changes".to_owned(),
-                            },
-                        })
-                    });
-                    reply = result.map(|result| AgentRequestReply::TurnDiff {
-                        client: *client,
-                        request_id: *request_id,
-                        result,
-                    });
-                }
                 _ => {}
             }
             if reply.is_none() {
@@ -809,6 +763,9 @@ impl AgentFanout {
                 first_seq,
                 items.into_iter().map(|(_, encoded)| encoded).collect(),
             );
+            for (first_seq, items) in lane.take_batch() {
+                publisher.publish_agent_updates(pane, first_seq, items, None);
+            }
             publisher.send_agent_replay(client, pane, frames);
             return;
         }
@@ -913,8 +870,10 @@ impl AgentFanout {
     }
 
     fn shutdown(&self) {
+        let lanes = self.lanes.lock();
         self.stopped.store(true, Ordering::Release);
         self.wake.notify_all();
+        drop(lanes);
         if let Some(flusher) = self.flusher.lock().take() {
             let _ = flusher.join();
         }
@@ -1048,6 +1007,7 @@ impl PaneLane {
             session_id: state.session_id.clone(),
             error: state.error.clone(),
             auth_methods: state.auth_methods.len(),
+            git: state.git.clone(),
             blobs: self.blobs,
         };
         if self.fingerprint.as_ref() == Some(&fingerprint) {
@@ -1063,6 +1023,7 @@ impl PaneLane {
             next.config_options.clear();
             next.auth_methods.clear();
             next.pending_permission = None;
+            next.git = None;
             next.validate().ok()?;
         }
         self.state = Some(next.clone());
@@ -1108,7 +1069,6 @@ fn run_flusher(fanout: &Weak<AgentFanout>) {
             }
             continue;
         }
-        drop(lanes);
         let Some(publisher) = fanout.publisher.upgrade() else {
             return;
         };
@@ -1201,6 +1161,7 @@ fn wire(state: &AgentPaneState, title: Option<&str>) -> AgentPaneWire {
                 .to_string(),
             }
         }),
+        git: state.git.clone(),
     }
 }
 
@@ -1226,12 +1187,14 @@ pub(crate) fn is_default_agent_title(title: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc::{self, Receiver, Sender};
+
     use serde_json::json;
 
     use super::*;
     use crate::agent::{
         fixture::{Behavior, fixture_runner},
-        stream::{AgentImage, AgentSessionCapabilities, AgentSessionSummary, AgentTurnDiffOutcome},
+        stream::{AgentImage, AgentSessionCapabilities, AgentSessionSummary},
     };
 
     const DEADLINE: Duration = Duration::from_secs(5);
@@ -1244,6 +1207,7 @@ mod tests {
         replies: Mutex<Vec<(ClientId, PaneId, u64, String)>>,
         sessions: Mutex<Vec<(PaneId, String)>>,
         titles: Mutex<Vec<(PaneId, String)>>,
+        update_gate: Mutex<Option<(Sender<()>, Receiver<()>)>>,
     }
 
     impl Recorder {
@@ -1306,6 +1270,10 @@ mod tests {
             items: Vec<Vec<u8>>,
             also: Option<ClientId>,
         ) {
+            if let Some((entered, release)) = self.update_gate.lock().take() {
+                let _ = entered.send(());
+                let _ = release.recv();
+            }
             self.broadcast.lock().push((pane, first_seq, items, also));
         }
 
@@ -1340,14 +1308,8 @@ mod tests {
         }
 
         fn send_agent_reply(&self, pane: PaneId, reply: AgentRequestReply) {
-            let (client, request_id, result) = match reply {
-                AgentRequestReply::Sessions { client, result } => (client, 0, result),
-                AgentRequestReply::TurnDiff {
-                    client,
-                    request_id,
-                    result,
-                } => (client, request_id, result),
-            };
+            let AgentRequestReply::Sessions { client, result } = reply;
+            let request_id = 0;
             self.replies.lock().push((client, pane, request_id, result));
         }
 
@@ -1457,6 +1419,52 @@ mod tests {
         let broadcast = fixture.recorder.broadcast.lock();
         assert_eq!(broadcast.len(), 1, "one window, one frame: {broadcast:?}");
         assert_eq!(broadcast[0].1, 1);
+    }
+
+    #[test]
+    fn a_flush_settles_and_drains_before_replay_admission() {
+        let fixture = Fixture::open(None, Some("s-1"));
+        let (entered_send, entered_recv) = mpsc::channel();
+        let (release_send, release_recv) = mpsc::channel();
+        *fixture.recorder.update_gate.lock() = Some((entered_send, release_recv));
+
+        fixture.chunk("a");
+        entered_recv
+            .recv_timeout(DEADLINE)
+            .expect("flusher should enter publication");
+        assert!(fixture.fanout.lanes.try_lock().is_none());
+
+        release_send.send(()).expect("release flusher");
+        let deadline = Instant::now() + DEADLINE;
+        let settled = loop {
+            if fixture.fanout.lanes.try_lock().is_some() {
+                break true;
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+            std::thread::yield_now();
+        };
+        assert!(settled, "flusher should release the lane");
+        fixture.chunk("b");
+        assert!(
+            fixture
+                .fanout
+                .lanes
+                .lock()
+                .get(&fixture.pane)
+                .is_some_and(|lane| !lane.batch.is_empty())
+        );
+        fixture.fanout.replay(ClientId(8), fixture.pane, 0);
+        assert!(
+            fixture
+                .fanout
+                .lanes
+                .lock()
+                .get(&fixture.pane)
+                .is_some_and(|lane| lane.batch.is_empty())
+        );
+        assert_eq!(fixture.recorder.direct.lock().len(), 1);
     }
 
     #[test]
@@ -2087,7 +2095,7 @@ mod tests {
     }
 
     #[test]
-    fn request_replies_leave_the_stream_without_spending_a_sequence() {
+    fn session_replies_leave_the_stream_without_spending_a_sequence() {
         let fixture = Fixture::open(None, Some("s-1"));
         fixture.accept(AgentStreamPayload::SessionsListed {
             client: ClientId(8),
@@ -2102,13 +2110,6 @@ mod tests {
             cwd_filter: None,
             replace: true,
         });
-        fixture.accept(AgentStreamPayload::TurnDiff {
-            client: ClientId(9),
-            request_id: 7,
-            outcome: AgentTurnDiffOutcome::Failed {
-                message: "no turn".to_owned(),
-            },
-        });
         fixture.accept(AgentStreamPayload::SessionDeleted {
             client: ClientId(10),
             session_id: "s-3".to_owned(),
@@ -2122,14 +2123,11 @@ mod tests {
             "a reply is not part of the transcript the client replays"
         );
         let replies = fixture.recorder.replies.lock();
-        assert_eq!(replies.len(), 3);
+        assert_eq!(replies.len(), 2);
         assert_eq!(replies[0].0, ClientId(8));
         assert_eq!(replies[0].2, 0);
-        assert_eq!(replies[1].0, ClientId(9));
-        assert_eq!(replies[1].2, 7);
-        assert!(replies[1].3.contains("no turn"));
-        assert_eq!(replies[2].0, ClientId(10));
-        assert!(replies[2].3.contains("s-3"));
+        assert_eq!(replies[1].0, ClientId(10));
+        assert!(replies[1].3.contains("s-3"));
     }
 
     #[test]
@@ -2158,34 +2156,6 @@ mod tests {
             serde_json::from_str::<AgentStreamPayload>(&replies[0].3),
             Ok(AgentStreamPayload::SessionListFailed { client, message })
                 if client == ClientId(8) && message.contains("too much session history")
-        ));
-    }
-
-    #[test]
-    fn an_oversized_turn_diff_returns_a_targeted_failure() {
-        let fixture = Fixture::open(None, Some("s-1"));
-        fixture.accept(AgentStreamPayload::TurnDiff {
-            client: ClientId(8),
-            request_id: 9,
-            outcome: AgentTurnDiffOutcome::Captured {
-                diff: crate::agent::turn_snapshot::TurnDiff {
-                    patch: "x".repeat(MAX_AGENT_RESULT_BYTES),
-                    ..crate::agent::turn_snapshot::TurnDiff::default()
-                },
-            },
-        });
-
-        let replies = fixture.recorder.replies.lock();
-        assert_eq!(replies.len(), 1);
-        assert_eq!(replies[0].0, ClientId(8));
-        assert_eq!(replies[0].2, 9);
-        assert!(matches!(
-            serde_json::from_str::<AgentStreamPayload>(&replies[0].3),
-            Ok(AgentStreamPayload::TurnDiff {
-                client,
-                request_id: 9,
-                outcome: AgentTurnDiffOutcome::Failed { message },
-            }) if client == ClientId(8) && message.contains("too many worktree changes")
         ));
     }
 
@@ -2252,8 +2222,16 @@ mod tests {
         let mut running = state(AgentConnectionPhase::Running);
         running.queued_prompts = 1;
         fixture.fanout.accept(fixture.pane, 1, &running, None);
+        running.git = Some(zz_protocol::AgentGitSummary {
+            branch: Some("main".to_owned()),
+            changed_files: 2,
+            additions: 8,
+            deletions: 3,
+        });
+        fixture.fanout.accept(fixture.pane, 1, &running, None);
         let states = fixture.recorder.states.lock();
-        assert_eq!(states.len(), 2);
+        assert_eq!(states.len(), 3);
         assert_eq!(states[1].1.queued_prompts, 1);
+        assert_eq!(states[2].1.git, running.git);
     }
 }

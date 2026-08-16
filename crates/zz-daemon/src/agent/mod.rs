@@ -10,9 +10,9 @@ pub(crate) mod environment;
 pub(crate) mod fanout;
 #[cfg(test)]
 pub(crate) mod fixture;
+pub(crate) mod git_summary;
 pub(crate) mod host;
 pub(crate) mod journal;
 pub(crate) mod paths;
 pub(crate) mod runtime;
 pub(crate) mod stream;
-pub(crate) mod turn_snapshot;

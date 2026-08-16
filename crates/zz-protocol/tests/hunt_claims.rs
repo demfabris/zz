@@ -1,7 +1,7 @@
 use zz_protocol::{
-    BrowserDescriptor, ClientHello, ClientKind, Event, EventPayload, GuiResponse, InputMessage,
-    MuxOptionKey, MuxSnapshot, PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PaneSnapshot,
-    PasteUploadPurpose, ProtocolMessage, encode_protocol_message,
+    BrowserDescriptor, ClientHello, ClientInstanceId, ClientKind, Event, EventPayload, GuiResponse,
+    InputMessage, MuxOptionKey, MuxSnapshot, PROTOCOL_VERSION, PaneId, PaneKindSnapshot,
+    PaneSnapshot, PasteUploadPurpose, ProtocolMessage, encode_protocol_message,
 };
 use zz_terminal::TerminalColorScheme;
 
@@ -10,20 +10,21 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_fifty_one() {
-    assert_eq!(PROTOCOL_VERSION, 51);
+fn protocol_version_on_this_commit_is_fifty_five() {
+    assert_eq!(PROTOCOL_VERSION, 55);
 }
 
 #[test]
-fn mux_option_key_has_eleven_daemon_owned_keys() {
-    assert_eq!(MuxOptionKey::ALL.len(), 11);
+fn mux_option_key_has_fourteen_daemon_owned_keys() {
+    assert_eq!(MuxOptionKey::ALL.len(), 14);
     assert!(MuxOptionKey::ALL.contains(&MuxOptionKey::HistoryTrickle));
 }
 
 #[test]
-fn dark_interactive_hello_is_sixteen_bytes_with_varint_version() {
+fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
     let frame = encode_protocol_message(&ProtocolMessage::ClientHello(ClientHello {
         protocol_version: PROTOCOL_VERSION,
+        client_instance_id: ClientInstanceId(0),
         kind: ClientKind::Interactive,
         device_name: None,
         capabilities: Vec::new(),
@@ -34,8 +35,8 @@ fn dark_interactive_hello_is_sixteen_bytes_with_varint_version() {
     assert_eq!(
         frame,
         [
-            0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00, 0x00, 0x33, 0x00, 0x00, 0x00, 0x01,
-            0x01, 0x00,
+            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x37, 0x00, 0x00, 0x37, 0x00, 0x00, 0x00, 0x00,
+            0x01, 0x01, 0x00,
         ]
     );
 }

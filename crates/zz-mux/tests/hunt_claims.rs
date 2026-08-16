@@ -50,7 +50,7 @@ fn split_ratio(engine: &MuxEngine) -> f32 {
 
 #[test]
 fn catalog_covers_the_options_the_handlers_read() {
-    assert_eq!(COMMAND_SPECS.len(), 58);
+    assert_eq!(COMMAND_SPECS.len(), 59);
     for name in ["kill-session", "kill-window", "kill-pane"] {
         let spec = COMMAND_SPECS
             .iter()

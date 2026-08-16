@@ -3931,7 +3931,7 @@ fn validate_bound_command(command: &CommandInvocation) -> Result<(), ServerError
         let (options, _) = parse_options_for_spec(&command.args, spec)?;
         return validate_options(name, spec, &options);
     }
-    if CommandSpec::DAEMON_COMMAND_NAMES.contains(&name) {
+    if name == "copy-mode-repeat" || CommandSpec::DAEMON_COMMAND_NAMES.contains(&name) {
         return Ok(());
     }
     if CommandSpec::UNIMPLEMENTED_TMUX_COMMANDS.contains(&name) {

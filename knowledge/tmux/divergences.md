@@ -91,6 +91,7 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | Alerts | Bell-only: `monitor-activity`/`monitor-silence` don't exist. Matches tmux defaults, ignores those configs. | **silent** |
 | `resize-pane` (nested) | The ratio tree rescales sibling panes; tmux moves exactly one boundary and preserves other panes' cells. | **silent** drift |
 | Pane sizes | Splits and percentages clamp to 10–90%; tmux allows down to `PANE_MINIMUM` (1 cell). | loud on `%`, silent clamp |
+| `send-keys -N` (no keys) | Arms the **invoking client's** count prefix; tmux stores it on the pane mode, so another client's (or a Command client's) `-N` is a silent no-op in zz. | **silent** edge |
 | `send-keys -X` | `select-line`/`copy-end-of-line` ignore counts; flags written after the verb (`-X copy-selection -C`) parse as positionals; no "not in a mode" error. | **silent** |
 | `send-keys -H` | Bytes `80`–`ff` refused; tmux writes the raw byte (`KeyToken::Literal` carries UTF-8). | loud |
 | `split-window -f` | New pane numbered adjacent to the target; tmux numbers a full-size pane first/last. | **silent** |
@@ -100,6 +101,7 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | `set -o` | Errors where tmux's `-o`+`-u` combination silently ignores `-o`; `-q` doesn't silence invalid option names. | loud |
 | Brace blocks | Empty `{}` and a trailing `\;` error; tmux accepts both. | loud |
 | Unguarded commands | Closed by the [drop-in plan](/designs/tmux-drop-in.md)'s phase 0: every engine command rejects options centrally from its catalog `CommandSpec` — flags tmux has at the pin but zz lacks error as unsupported (and count in config-import skip reports); flags tmux doesn't have error as invalid. Residual: the daemon-side `capture-pane`/buffer family still hand-rolls parsing. | loud |
+| `bind-key` payloads | Bind-time validation covers names and flags only; positional arity and target errors still surface at keypress, and daemon-side verbs (`capture-pane`, the buffer family) bind with no validation at all. tmux validates the full argument template at bind time. | **silent** edge |
 | Error strings | Several differ (zz `index in use: 2` vs tmux `create window failed: index 2 in use`). | cosmetic |
 
 # Options: 12 of 180

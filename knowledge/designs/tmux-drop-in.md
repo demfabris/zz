@@ -78,14 +78,19 @@ phase-4 grind, `-` stdin is a loud refusal):
   `attach-session` half landed in PR #4).
 
 Then the divergences tmux's **own default bindings** hit — a drop-in whose mouse wheel errors
-is not a drop-in:
+is not a drop-in (all shipped 2026-08-16):
 
-- `copy-mode -e`/`-M`/`-q` (stock `WheelUpPane`/`MouseDrag1Pane`/menu bindings use all three).
-- `send-keys -N` with no keys (arms the copy-mode count; stock vi digit bindings).
-- Bell-clear on window activation (today `next-window -a` re-picks the same window forever).
-- `source-file` globbing, `-` stdin, `-F`/`-n` (`conf.d/*.conf` currently matches nothing).
-- `bind-key` payload validation at bind time — today an unsupported command inside a binding
-  is stored silently and only fails at keypress, invisible to the import report.
+- `copy-mode -e`/`-M`/`-q` landed (stock `WheelUpPane`/`MouseDrag1Pane`/menu bindings use all
+  three); `-k`/`-H`/`-S`/`-s` stay loud.
+- `send-keys -N` with no keys arms the client's copy-mode count prefix (stock vi digit
+  bindings work; the prefix is client-scoped where tmux's is pane-mode-scoped — see the
+  divergence matrix).
+- Window activation clears its panes' bells, so `next-window -a` steps instead of re-picking
+  the same window, and the terminal bell latch is released on the same transition.
+- `source-file` globs every path (`conf.d/*.conf` works); `-` stdin is a loud refusal;
+  `-F`/`-n`/`-v` are deferred to the phase-4 grind (options table row below).
+- `bind-key` payloads validate at bind time (names + flags; arity and targets still surface
+  at keypress), and invalid config lines now reach the import report.
 
 ## Phase 2 — the differential harness (~1 week)
 
@@ -129,6 +134,7 @@ faithful serialized layout strings (`select-layout` compat, resurrect-style save
 | Styles (`#[…]`, `*-style`) | meaningful on the TUI surface; GUI maps to theme | 2 weeks |
 | The gap commands | the 16 buildable ones (18 in the matrix minus `link-`/`unlink-window`, decision 3), plus `start-server` as a no-op (TPM's bootstrap runs `tmux start-server\; show-environment`; config sourcing already skips it, the CLI errors today) and basic `refresh-client` | 3 weeks |
 | Target grammar | session `-t` fnmatch (`work*`), `=name` exact-match, empty `-t` = current; empty `{}` and trailing `\;` acceptance | 1 week |
+| `source-file -F`/`-n`/`-v` | format-expanded paths, parse-only, verbose printing — deferred from phase 1 | days |
 
 `switch-client` is **not** mechanical: a pane script's `switch-client` must retarget some
 *other* Interactive client's attachment, and the only pane→client seam today is

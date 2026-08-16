@@ -1,7 +1,7 @@
 ---
 type: Design Plan
 title: Terminal bell . Ghostty-parity notifications
-description: Shipped plan to stop swallowing BEL - register libghostty's on_bell in the daemon, carry a per-pane bell flag in mux state and the snapshot plus an appended EventPayload edge event, badge the pane's sidebar icon, render a `!` window flag, request window attention and play the macOS system beep on the ring edge, clear on pane input or selection; no OS notification popup, no config in v1.
+description: Shipped plan to stop swallowing BEL - register libghostty's on_bell in the daemon, carry a per-pane bell flag in mux state and the snapshot plus an appended EventPayload edge event, badge the pane's sidebar icon, render a `!` window flag, request window attention and play the macOS system beep on the ring edge, clear on pane input, selection, or window activation; no OS notification popup, no config in v1.
 status: Complete
 tags:
 - terminal

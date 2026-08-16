@@ -2476,9 +2476,19 @@ impl Shared {
                                 action: action.clone(),
                             });
                             if terminal_view_action_enters_copy_mode(action) {
-                                enter_copy_session(&mut inner, target, *pane)?;
+                                enter_copy_session(
+                                    &mut inner,
+                                    target,
+                                    *pane,
+                                    terminal_view_action_arms_scroll_exit(action),
+                                )?;
                             } else if terminal_view_action_exits_copy_mode(action) {
                                 exit_copy_session(&mut inner, target);
+                            } else if terminal_view_action_arms_scroll_exit(action)
+                                && let Some(session) = inner.copy_sessions.get_mut(&target)
+                                && session.pane == *pane
+                            {
+                                session.scroll_exit = true;
                             }
                         }
                     }
@@ -7193,6 +7203,7 @@ impl Shared {
                 for (source, quiet) in source_effects {
                     if source == "-" {
                         log::warn!("source-file from standard input is not supported");
+                        report.note_invalid("source-file from standard input is not supported");
                         continue;
                     }
                     let source = expand_relative(path, &source);
@@ -7974,6 +7985,7 @@ struct PasteUpload {
 struct CopySession {
     pane: PaneId,
     observed: bool,
+    scroll_exit: bool,
 }
 
 struct DiagnosticSample {
@@ -9329,6 +9341,7 @@ fn enter_copy_session(
     inner: &mut ServerState,
     client: ClientId,
     pane: PaneId,
+    scroll_exit: bool,
 ) -> Result<(), ServerError> {
     let table = inner.engine.copy_mode_table_for_pane(pane)?.to_owned();
     inner
@@ -9341,9 +9354,20 @@ fn enter_copy_session(
         CopySession {
             pane,
             observed: false,
+            scroll_exit,
         },
     );
     Ok(())
+}
+
+fn terminal_view_action_arms_scroll_exit(action: &zz_terminal::TerminalViewAction) -> bool {
+    matches!(
+        action,
+        zz_terminal::TerminalViewAction::EnterCopyModeScrollExit
+            | zz_terminal::TerminalViewAction::CopyMode(
+                zz_terminal::CopyModeAction::PageDownScrollExit
+            )
+    )
 }
 
 fn exit_copy_session(inner: &mut ServerState, client: ClientId) {
@@ -9362,9 +9386,19 @@ fn sync_copy_session_for_view_action(
     action: &zz_terminal::TerminalViewAction,
 ) -> Result<(), ServerError> {
     if terminal_view_action_enters_copy_mode(action) {
-        enter_copy_session(inner, client, pane)?;
+        enter_copy_session(
+            inner,
+            client,
+            pane,
+            terminal_view_action_arms_scroll_exit(action),
+        )?;
     } else if terminal_view_action_exits_copy_mode(action) {
         exit_copy_session(inner, client);
+    } else if terminal_view_action_arms_scroll_exit(action)
+        && let Some(session) = inner.copy_sessions.get_mut(&client)
+        && session.pane == pane
+    {
+        session.scroll_exit = true;
     }
     Ok(())
 }
@@ -9441,7 +9475,9 @@ fn reconcile_copy_session(
             None
         }
         (TerminalMode::Copy { .. }, _) => inner.terminals.get(&pane).cloned(),
-        (TerminalMode::Live, Some(session)) if session.pane == pane && session.observed => {
+        (TerminalMode::Live, Some(session))
+            if session.pane == pane && (session.observed || session.scroll_exit) =>
+        {
             exit_copy_session(inner, client);
             None
         }
@@ -15035,6 +15071,33 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[cfg(unix)]
+    #[test]
+    fn copy_mode_ed_instant_exit_frees_the_key_table_without_observation() {
+        let (shared, client, mut context, pane, terminal, _mailbox) =
+            copy_mode_fixture("copy-instant-exit", "printf 'one\\ntwo\\n'");
+        let view = TerminalViewId(client.0);
+        let target = pane.to_string();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("copy-mode", ["-e", "-d", "-t", target.as_str()]),
+            )
+            .expect("instant scroll-exit entry");
+        wait_for_view_mode(
+            &terminal,
+            view,
+            "copy mode did not exit instantly",
+            |mode| mode == TerminalMode::Live,
+        );
+        wait_for_root_key_table(
+            &shared,
+            client,
+            "instant scroll-exit stranded the key table",
+        );
+    }
+
     #[test]
     fn copy_mode_scroll_exit_reconciles_the_client_copy_session() {
         for (name, copy_args, exits) in [

@@ -274,6 +274,23 @@ fn bind_key_validates_payloads_before_storing_them() {
         if message == "split-window does not support -Q"));
     assert_eq!(engine.keys.get("prefix", "x"), original_x.as_ref());
 
+    let error = engine
+        .execute(&mut context, &command("bind-key", &["y", "new-pane", "-h"]))
+        .unwrap_err();
+    assert!(matches!(error, ServerError::UnsupportedCommand(message)
+        if message == "bind-key new-pane"));
+
+    engine
+        .execute(
+            &mut context,
+            &command(
+                "bind-key",
+                &["-T", "copy-mode-vi", "5", "copy-mode-repeat", "5"],
+            ),
+        )
+        .unwrap();
+    assert!(engine.keys.get("copy-mode-vi", "5").is_some());
+
     let original_r = engine.keys.get("prefix", "r").cloned();
     let error = engine
         .execute(&mut context, &command("bind-key", &["r", "run-shell", "x"]))

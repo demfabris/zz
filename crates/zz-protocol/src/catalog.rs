@@ -157,6 +157,8 @@ pub static DAEMON_COMMAND_NAMES: &[&str] = &[
 ];
 
 pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
+    "new-pane",
+    "newp",
     "run-shell",
     "run",
     "if-shell",
@@ -414,7 +416,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "previous-window",
-        aliases: &["previous"],
+        aliases: &["prev"],
         description: "Select the previous window",
         options: &[
             CommandOptionSpec::value("-t", Session, "target session"),
@@ -856,7 +858,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-e", "exit copy mode at the bottom of history"),
             CommandOptionSpec::unsupported_flag("-k"),
             CommandOptionSpec::unsupported_flag("-H"),
-            CommandOptionSpec::flag("-M", "use the command mouse event"),
+            CommandOptionSpec::flag("-M", "mouse-drag entry; no-op without a mouse event"),
             CommandOptionSpec::flag("-q", "cancel copy mode"),
             CommandOptionSpec::unsupported_flag("-S"),
             CommandOptionSpec::unsupported_value("-s"),

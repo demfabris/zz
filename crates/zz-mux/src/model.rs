@@ -2887,7 +2887,11 @@ pub(crate) fn window_cell_extent(
             Axis::Horizontal => columns,
             Axis::Vertical => rows,
         });
-        let fraction = pane_axis_fraction(&window.layout, *candidate, axis)?;
+        let fraction = if window.zoomed_pane == Some(*candidate) {
+            1.0
+        } else {
+            pane_axis_fraction(&window.layout, *candidate, axis)?
+        };
         (cells >= 1.0 && fraction > 0.0).then(|| cells / fraction)
     })
 }

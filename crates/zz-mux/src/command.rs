@@ -4565,22 +4565,149 @@ mod tests {
     }
 
     #[test]
-    fn pane_format_variables_are_empty_in_session_scope() {
+    fn session_and_window_rows_backfill_the_active_pane_like_tmux() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
             .execute(&mut context, &command("new-session", &["-s", "work"]))
             .unwrap();
+        let first_window = context.window.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let second_pane = context.pane.unwrap();
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "second"]))
+            .unwrap();
+        let second_window = context.window.unwrap();
+        let third_pane = context.pane.unwrap();
+        engine.set_pane_geometry(third_pane, 80, 24);
 
-        assert!(
+        assert_eq!(
             engine
                 .execute(
                     &mut context,
-                    &command("list-sessions", &["-F", "#{pane_width}#{pane_active}"],),
+                    &command(
+                        "list-sessions",
+                        &[
+                            "-F",
+                            "#{window_index}:#{pane_id}:#{pane_width}:#{pane_active}:#{window_active}",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            format!("1:{third_pane}:80:1:1")
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-windows",
+                        &["-F", "#{window_id}:#{pane_id}:#{pane_active}"],
+                    ),
+                )
+                .unwrap()
+                .output,
+            format!("{first_window}:{second_pane}:1\n{second_window}:{third_pane}:1")
+        );
+    }
+
+    #[test]
+    fn window_extent_survives_a_zoomed_measurement() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let first = context.pane.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        engine.set_pane_geometry(first, 80, 24);
+        let extent = |engine: &mut MuxEngine, context: &mut ExecutionContext| {
+            engine
+                .execute(
+                    context,
+                    &command("list-windows", &["-F", "#{window_width}x#{window_height}"]),
                 )
                 .unwrap()
                 .output
-                .is_empty()
+        };
+
+        assert_eq!(extent(&mut engine, &mut context), "160x24");
+        engine
+            .execute(
+                &mut context,
+                &command("resize-pane", &["-Z", "-t", &first.to_string()]),
+            )
+            .unwrap();
+        engine.set_pane_geometry(first, 160, 24);
+        assert_eq!(extent(&mut engine, &mut context), "160x24");
+        engine
+            .execute(
+                &mut context,
+                &command("resize-pane", &["-Z", "-t", &first.to_string()]),
+            )
+            .unwrap();
+        engine.set_pane_geometry(first, 80, 24);
+        assert_eq!(extent(&mut engine, &mut context), "160x24");
+    }
+
+    #[test]
+    fn window_activity_conditionals_and_display_message_read_the_new_variables() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let first_window = context.window.unwrap();
+        let first_pane = context.pane.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let second_pane = context.pane.unwrap();
+        engine.set_pane_geometry(first_pane, 40, 24);
+        engine.set_pane_geometry(second_pane, 40, 24);
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "second"]))
+            .unwrap();
+        let second_window = context.window.unwrap();
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-windows",
+                        &[
+                            "-F",
+                            "#{window_id}#{?window_active,*,}#{?!window_active,-,}",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            format!("{first_window}-\n{second_window}*")
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &[
+                            "-p",
+                            "-t",
+                            &second_pane.to_string(),
+                            "#{pane_width}x#{pane_height}|#{pane_active}|#{window_active}"
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "40x24|1|0"
         );
     }
 

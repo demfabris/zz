@@ -231,6 +231,10 @@ impl StatusContext {
         })
     }
 
+    /// `None` is the status-line view, whose focused window is always current;
+    /// the daemon also fills `Some(true)` there since tmux's status line
+    /// resolves against the current window. Command/list rows set the real
+    /// per-row value.
     fn window_flags(&self) -> String {
         // tmux's flag order: current, bell, zoomed.
         let mut flags = String::new();
@@ -282,11 +286,19 @@ impl FormatContext {
                 self.session
                     .filter(|session| state.sessions.contains_key(session))
             });
+        let window = window.or_else(|| {
+            session
+                .and_then(|session| state.sessions.get(&session))
+                .map(|session| session.active_window)
+                .filter(|window| state.windows.contains_key(window))
+        });
+        let pane = pane.or_else(|| {
+            window
+                .and_then(|window| state.windows.get(&window))
+                .map(|window| window.active_pane)
+        });
 
-        let mut context = StatusContext {
-            window_active: Some(false),
-            ..StatusContext::default()
-        };
+        let mut context = StatusContext::default();
         if let Some(session) = session.and_then(|session| state.sessions.get(&session)) {
             context.session_id = session.id.to_string();
             context.session_name.clone_from(&session.name);
@@ -791,6 +803,30 @@ mod tests {
         assert_eq!(flags(true, true), "*!Z");
         assert_eq!(
             expand_status(
+                "#F",
+                &StatusContext {
+                    window_active: None,
+                    window_bell: true,
+                    ..context()
+                },
+                &mut Stub,
+            ),
+            "*!"
+        );
+        assert_eq!(
+            expand_status(
+                "#F",
+                &StatusContext {
+                    window_active: Some(false),
+                    window_bell: true,
+                    ..context()
+                },
+                &mut Stub,
+            ),
+            "!"
+        );
+        assert_eq!(
+            expand_status(
                 "#{?window_bell_flag,rang,quiet}",
                 &StatusContext {
                     window_bell: true,
@@ -857,7 +893,7 @@ mod tests {
                 },
                 &pane_cells,
             ),
-            format!("{session}:work 2[]||")
+            format!("{session}:work 2[*]|1|1")
         );
         assert_eq!(
             expand_format(

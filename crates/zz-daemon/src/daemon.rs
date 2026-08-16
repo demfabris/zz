@@ -17948,7 +17948,7 @@ bind - split-window -v -c "#{pane_current_path}"
             assert_eq!(second_status.window_width, Some(120));
             assert_eq!(second_status.window_height, Some(40));
             assert_eq!(second_status.pane_active, Some(true));
-            assert_eq!(second_status.window_active, Some(false));
+            assert_eq!(second_status.window_active, Some(true));
         }
 
         let first_messages = take_reliable_messages(&first_mailbox);

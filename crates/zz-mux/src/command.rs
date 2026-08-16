@@ -2934,6 +2934,14 @@ impl MuxEngine {
                 )));
             }
         }
+        let scope_flags = usize::from(options.has("-g"))
+            + usize::from(options.has("-w"))
+            + usize::from(options.has("-p"));
+        if scope_flags > 1 {
+            return Err(ServerError::InvalidCommand(
+                "synchronize-panes has conflicting scopes".to_owned(),
+            ));
+        }
         if (options.has("-u") || options.has("-U")) && value.is_some() {
             return Err(ServerError::InvalidCommand(
                 "unsetting synchronize-panes does not accept a value".to_owned(),
@@ -6146,6 +6154,7 @@ mod tests {
 
         for invalid in [
             command("set-option", &["-p", "mode-keys", "vi"]),
+            command("set-window-option", &["-w", "mode-keys", "vi"]),
             command("set-option", &["mode-keys", "unknown"]),
             command("set-option", &["-u", "mode-keys", "vi"]),
         ] {
@@ -6173,7 +6182,7 @@ mod tests {
         let changed = engine
             .execute(
                 &mut context,
-                &command("set-window-option", &["synchronize-panes", "on"]),
+                &command("set-option", &["-w", "synchronize-panes", "on"]),
             )
             .unwrap();
         assert!(changed.effects.contains(&MuxEffect::SnapshotChanged));
@@ -6185,11 +6194,36 @@ mod tests {
         engine
             .execute(
                 &mut context,
-                &command("set-window-option", &["synchronize-panes"]),
+                &command(
+                    "set-option",
+                    &["-p", "-t", &second.to_string(), "synchronize-panes", "off"],
+                ),
             )
             .unwrap();
         assert_eq!(engine.synchronized_input_targets(first).unwrap(), [first]);
         assert_eq!(engine.synchronized_input_targets(second).unwrap(), [second]);
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-p", "-u", "-t", &second.to_string(), "synchronize-panes"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.synchronized_input_targets(second).unwrap(),
+            [first, second]
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-w", "synchronize-panes"]),
+            )
+            .unwrap();
+        assert_eq!(engine.synchronized_input_targets(first).unwrap(), [first]);
 
         engine
             .execute(
@@ -6200,7 +6234,16 @@ mod tests {
         engine
             .execute(
                 &mut context,
-                &command("set-window-option", &["-u", "synchronize-panes"]),
+                &command(
+                    "set-option",
+                    &["-p", "-t", &second.to_string(), "synchronize-panes", "off"],
+                ),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-U", "synchronize-panes"]),
             )
             .unwrap();
         assert_eq!(

@@ -4,7 +4,7 @@ title: Updating the pinned tmux behavioral reference
 description: How to bump zz's pinned tmux upstream commit and re-verify the Rust tmux-compat reimplementation against it.
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, upgrade, playbook, behavioral-reference]
-timestamp: 2026-07-14T00:00:00Z
+timestamp: 2026-08-16T00:00:00-03:00
 ---
 
 # Overview
@@ -58,9 +58,19 @@ implementation. That is a research-and-port task, unlike the mechanical version 
 5. **Update `UPSTREAM.md`.** Bump the pinned commit hash and its GitHub link, and adjust the
    "most relevant upstream files" list if step 2 changed it. Keep the note that only the
    deliberately supported subset is implemented and unsupported config is reported and skipped.
-6. **Refresh the retained license.** The upstream tmux license kept beside `UPSTREAM.md` for
+6. **Move the differential harness to the new pin.** The pin hash lives in three more places
+   that must change together:
+   - `compat/fetch-tmux.sh` . `TMUX_COMMIT`, and `TMUX_VERSION` if the reported `-V` string moved
+   - `.github/workflows/ci.yml` . the `tmux-<short-hash>-${{ runner.os }}` cache key, so CI
+     rebuilds the reference instead of restoring the old binary
+   - [the compat harness playbook](/playbooks/compat-harness.md) . the commit hash in its overview
+
+   Then run `compat/run.sh` end to end. A behavior change in the new pin shows up as scenario
+   divergences; either port the change (step 3) or record it in
+   [the divergence matrix](/tmux/divergences.md) and `compat/scenarios/known/` before landing.
+7. **Refresh the retained license.** The upstream tmux license kept beside `UPSTREAM.md` for
    provenance should match the newly pinned commit's license terms (rarely changes, but check).
-7. **Commit the commit-hash bump, any list-of-files changes, the ported Rust changes, and their
+8. **Commit the commit-hash bump, any list-of-files changes, the ported Rust changes, and their
    tests together.** A stale pin note with mismatched behavior is worse than no note.
 
 # Key files
@@ -70,9 +80,12 @@ implementation. That is a research-and-port task, unlike the mechanical version 
 | `third_party/tmux-reference/UPSTREAM.md` | The pinned commit and list of relevant upstream files |
 | `crates/zz-mux/src/**` | The Rust reimplementation being verified against upstream behavior |
 | `crates/zz-protocol/src/catalog.rs` | The supported command surface to manually re-check, mirrored in [tmux command set](/tmux/commands.md) |
+| `compat/fetch-tmux.sh` | Builds the pinned reference binary; carries `TMUX_COMMIT`/`TMUX_VERSION` |
+| `.github/workflows/ci.yml` | Caches the reference build under a key containing the pin hash |
 
 # Related
 
 - [tmux upstream reference](/references/tmux-upstream.md) . the pin this playbook updates
 - [tmux compat concept](/tmux/tmux-compat.md) . the Rust reimplementation being kept in sync
+- [compat harness playbook](/playbooks/compat-harness.md) . the differential corpus that re-verifies a bumped pin
 - [`mux` crate](/crates/zz-mux.md) . where ported behavior changes land

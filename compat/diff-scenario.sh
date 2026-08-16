@@ -94,6 +94,7 @@ cleanup() {
   if [ -x "$TMUX_BIN" ]; then
     tmux_command kill-server >/dev/null 2>&1
   fi
+  rm -f -- "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/$TMUX_SOCKET_NAME"
   rm -f -- "$ZZ_SOCKET"
   if [ -n "$ZZ_PID" ]; then
     kill "$ZZ_PID" >/dev/null 2>&1
@@ -348,6 +349,12 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   command_text="${command_text#"${command_text%%[![:space:]]*}"}"
   command_text="${command_text%"${command_text##*[![:space:]]}"}"
   [ -n "$command_text" ] || die "empty command after side prefix: $line"
+
+  case "$command_text" in
+  *'$'* | *'`'* | *';'* | *'&'* | *'|'* | *'<'* | *'>'*)
+    die "unsupported shell metacharacter in scenario command: $command_text"
+    ;;
+  esac
 
   command_args=()
   if ! eval "command_args=($command_text)"; then

@@ -78,6 +78,7 @@ jobs:
 
       - name: Run tmux compatibility harness
         if: runner.os == 'Linux'
+        timeout-minutes: 15
         run: compat/run.sh
 
       - name: Build and validate CEF bundle

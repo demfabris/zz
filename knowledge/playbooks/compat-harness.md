@@ -56,8 +56,11 @@ Open `compat/results/<scenario>.log` for the command status and per-step unified
 - `GEO` compares window and pane cell dimensions. The runner reports these differences by
   default and fails them under `--strict-geometry`.
 
+The log also captures each step's stdout and stderr for debugging, but the comparison covers
+only the exit class and the TOPO/GEO snapshots; command output itself is never diffed.
+
 The runner starts zz on a short `/tmp/zzc-<pid>.sock` path and starts tmux with
-`-L zzc-<pid> -f /dev/null`. Its exit trap stops both servers and removes the socket.
+`-L zzc-<pid> -f /dev/null`. Its exit trap stops both servers and removes both socket files.
 
 # Adding a scenario
 
@@ -66,12 +69,24 @@ command on each line; the runner skips blank lines and lines beginning with `#`.
 and flags that both command catalogs support, and target panes by index rather than by raw
 `%N` IDs.
 
-The runner handles simple shell quoting when it turns each line into an argument array. Prefix
-a command with `zz-only:` or `tmux-only:` only when a scenario needs side-specific setup.
-The shared corpus should use the same command on both sides.
+The runner handles simple shell quoting when it turns each line into an argument array, and
+rejects any line containing a shell metacharacter (`$`, backtick, `;`, `&`, `|`, `<`, `>`)
+before parsing it. Prefix a command with `zz-only:` or `tmux-only:` only when a scenario needs
+side-specific setup. The shared corpus should use the same command on both sides. A
+side-prefixed line skips the exit-class comparison for that step, but the query trio still
+runs afterward — both servers must converge to the same topology by the end of the step.
 
 After each line, the harness runs the query trio. Scenario files should contain state changes,
 not their own `list-*` assertions.
+
+Traps that produce false divergences:
+
+- Every `new-window` needs `-n <name>`. Default window names are process-derived in tmux —
+  and refreshed by the `automatic-rename` timer roughly 500ms later — but index-derived in zz.
+  The runner's prologue renames window 0 to `main` on both sides for the same reason.
+- Never kill the last remaining session. tmux's server exits (`exit-empty`), while the zz CLI
+  respawns a fresh daemon with a new session `0`, so every later step diverges. The prologue
+  already creates session `w` before removing the auto-created session.
 
 ## Known divergences
 

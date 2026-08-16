@@ -92,7 +92,7 @@ is not a drop-in (all shipped 2026-08-16):
 - `bind-key` payloads validate at bind time (names + flags; arity and targets still surface
   at keypress), and invalid config lines now reach the import report.
 
-## Phase 2 — the differential harness (~1 week)
+## Phase 2 — the differential harness (shipped 2026-08-16)
 
 **Not control mode.** The harness is: one command script fed to zz and to the pinned tmux,
 diff `list-sessions`/`list-windows`/`list-panes` output with *explicit `-F` formats* on both
@@ -104,6 +104,13 @@ the measured cell geometry the daemon already feeds the engine (`pane_cells` via
 to convergence, rather than being validated by it. Control mode itself moves to phase 6; a
 control client is a worse differential tool (it streams `%output` for every pane and adds a
 transport layer to debug).
+
+Shipped as `compat/` (see [the compat harness playbook](/playbooks/compat-harness.md)): the
+2a format vocabulary landed first (geometry, activity flags, tmux-style scope backfill), then
+the per-step runner with strict TOPO/exit-class diffing, report-only GEO, a
+`scenarios/known/` set for accepted divergences, and a Linux CI leg with the pin cached. The
+seven-scenario corpus runs TOPO-clean against the pin; every GEO hunk is phase-3 steering
+data.
 
 ## Phase 3 — cell-authoritative layout (~2–3 weeks)
 

@@ -1,0 +1,256 @@
+single
+  layout: b25d,80x24,0,0,0
+  panes:  0:80x24 
+  steps:
+
+split-h-default
+  layout: 8205,80x24,0,0{40x24,0,0,0,39x24,41,0,1}
+  panes:  0:40x24 1:39x24 
+  steps:
+    split-window -h -t w:0
+
+split-v-default
+  layout: c195,80x24,0,0[80x12,0,0,0,80x11,0,13,1]
+  panes:  0:80x12 1:80x11 
+  steps:
+    split-window -v -t w:0
+
+split-h-then-v-right
+  layout: d67e,80x24,0,0{40x24,0,0,0,39x24,41,0[39x12,41,0,1,39x11,41,13,2]}
+  panes:  0:40x24 1:39x12 2:39x11 
+  steps:
+    split-window -h -t w:0
+    split-window -v -t w:0.1
+
+split-h-l30
+  layout: 8ee5,80x24,0,0{49x24,0,0,0,30x24,50,0,1}
+  panes:  0:49x24 1:30x24 
+  steps:
+    split-window -h -l 30 -t w:0
+
+split-h-p25
+  layout: 93d5,80x24,0,0{59x24,0,0,0,20x24,60,0,1}
+  panes:  0:59x24 1:20x24 
+  steps:
+    split-window -h -p 25 -t w:0
+
+split-h-before
+  layout: 0209,80x24,0,0{40x24,0,0,1,39x24,41,0,0}
+  panes:  0:40x24 1:39x24 
+  steps:
+    split-window -h -b -t w:0
+
+split-v-l5
+  layout: 3ca0,80x24,0,0[80x18,0,0,0,80x5,0,19,1]
+  panes:  0:80x18 1:80x5 
+  steps:
+    split-window -v -l 5 -t w:0
+
+three-h-nested
+  layout: fa80,80x24,0,0{40x24,0,0,0,19x24,41,0,1,19x24,61,0,2}
+  panes:  0:40x24 1:19x24 2:19x24 
+  steps:
+    split-window -h -t w:0.0
+    split-window -h -t w:0.1
+
+three-h-siblings-even
+  layout: 22a4,80x24,0,0{20x24,0,0,0,19x24,21,0,2,39x24,41,0,1}
+  panes:  0:20x24 1:19x24 2:39x24 
+  steps:
+    split-window -h -t w:0.0
+    split-window -h -t w:0.0
+
+kill-middle-of-three
+  layout: 0206,80x24,0,0{40x24,0,0,0,39x24,41,0,2}
+  panes:  0:40x24 1:39x24 
+  steps:
+    split-window -h -t w:0.0
+    split-window -h -t w:0.1
+    kill-pane -t w:0.1
+
+kill-gives-after-neighbor
+  layout: bca8,80x24,0,0[80x18,0,0,1,80x5,0,19,2]
+  panes:  0:80x18 1:80x5 
+  steps:
+    split-window -v -t w:0.0
+    split-window -v -t w:0.1
+    kill-pane -t w:0.0
+
+resize-r10
+  layout: 86f5,80x24,0,0{50x24,0,0,0,29x24,51,0,1}
+  panes:  0:50x24 1:29x24 
+  steps:
+    split-window -h -t w:0
+    resize-pane -t w:0.0 -R 10
+
+resize-x30
+  layout: 7d15,80x24,0,0{30x24,0,0,0,49x24,31,0,1}
+  panes:  0:30x24 1:49x24 
+  steps:
+    split-window -h -t w:0
+    resize-pane -t w:0.0 -x 30
+
+resize-x30-from-right
+  layout: 8ee5,80x24,0,0{49x24,0,0,0,30x24,50,0,1}
+  panes:  0:49x24 1:30x24 
+  steps:
+    split-window -h -t w:0
+    resize-pane -t w:0.1 -x 30
+
+resize-d3-nested
+  layout: 3d7a,80x24,0,0{40x24,0,0,0,39x24,41,0[39x15,41,0,1,39x8,41,16,2]}
+  panes:  0:40x24 1:39x15 2:39x8 
+  steps:
+    split-window -h -t w:0
+    split-window -v -t w:0.1
+    resize-pane -t w:0.1 -D 3
+
+resize-u2-percent-mix
+  layout: 3ca0,80x24,0,0[80x18,0,0,0,80x5,0,19,1]
+  panes:  0:80x18 1:80x5 
+  steps:
+    split-window -v -t w:0
+    resize-pane -t w:0.0 -y 75%
+
+split-f-full-width
+  layout: eb1f,80x24,0,0[80x12,0,0{40x12,0,0,0,39x12,41,0,1},80x11,0,13,2]
+  panes:  0:40x12 1:39x12 2:80x11 
+  steps:
+    split-window -h -t w:0
+    split-window -v -f -t w:0.0
+
+split-f-before-full
+  layout: 987d,80x24,0,0{40x24,0,0,2,39x24,41,0[39x12,41,0,0,39x11,41,13,1]}
+  panes:  0:40x24 1:39x12 2:39x11 
+  steps:
+    split-window -v -t w:0
+    split-window -h -f -b -t w:0.1
+
+even-horizontal-3
+  layout: 9bb2,80x24,0,0{26x24,0,0,0,26x24,27,0,1,26x24,54,0,2}
+  panes:  0:26x24 1:26x24 2:26x24 
+  steps:
+    split-window -h -t w:0.0
+    split-window -h -t w:0.1
+    select-layout -t w even-horizontal
+
+even-vertical-4
+  layout: c022,80x24,0,0[80x6,0,0,0,80x5,0,7,1,80x5,0,13,2,80x5,0,19,3]
+  panes:  0:80x6 1:80x5 2:80x5 3:80x5 
+  steps:
+    split-window -v -t w:0.0
+    split-window -v -t w:0.1
+    split-window -v -t w:0.2
+    select-layout -t w even-vertical
+
+main-horizontal-3
+  layout: d9a3,80x24,0,0[80x22,0,0,0,80x1,0,23{40x1,0,23,1,39x1,41,23,2}]
+  panes:  0:80x22 1:40x1 2:39x1 
+  steps:
+    split-window -h -t w:0.0
+    split-window -h -t w:0.1
+    select-layout -t w main-horizontal
+
+main-vertical-3
+  layout: c464,80x24,0,0{78x24,0,0,0,1x24,79,0[1x12,79,0,1,1x11,79,13,2]}
+  panes:  0:78x24 1:1x12 2:1x11 
+  steps:
+    split-window -h -t w:0.0
+    split-window -h -t w:0.1
+    select-layout -t w main-vertical
+
+main-horizontal-mirrored-3
+  layout: 28c9,80x24,0,0[80x1,0,0{40x1,0,0,1,39x1,41,0,2},80x22,0,2,0]
+  panes:  0:80x22 1:40x1 2:39x1 
+  steps:
+    split-window -h -t w:0.0
+    split-window -h -t w:0.1
+    select-layout -t w main-horizontal-mirrored
+
+main-vertical-mirrored-3
+  layout: 3749,80x24,0,0{1x24,0,0[1x12,0,0,1,1x11,0,13,2],78x24,2,0,0}
+  panes:  0:78x24 1:1x12 2:1x11 
+  steps:
+    split-window -h -t w:0.0
+    split-window -h -t w:0.1
+    select-layout -t w main-vertical-mirrored
+
+tiled-5
+  layout: 8b94,80x24,0,0[80x7,0,0{39x7,0,0,0,40x7,40,0,3},80x7,0,8{39x7,0,8,1,40x7,40,8,4},80x8,0,16,2]
+  panes:  0:39x7 1:40x7 2:39x7 3:40x7 4:80x8 
+  steps:
+    split-window -h -t w:0.0
+    split-window -h -t w:0.1
+    split-window -v -t w:0.0
+    split-window -v -t w:0.2
+    select-layout -t w tiled
+
+tiled-3
+  layout: a7cf,80x24,0,0[80x11,0,0{39x11,0,0,0,40x11,40,0,1},80x12,0,12,2]
+  panes:  0:39x11 1:40x11 2:80x12 
+  steps:
+    split-window -h -t w:0.0
+    split-window -h -t w:0.1
+    select-layout -t w tiled
+
+spread-after-uneven
+  layout: 9bb2,80x24,0,0{26x24,0,0,0,26x24,27,0,1,26x24,54,0,2}
+  panes:  0:26x24 1:26x24 2:26x24 
+  steps:
+    split-window -h -t w:0.0
+    split-window -h -t w:0.1
+    resize-pane -t w:0.0 -x 60
+    select-layout -t w -E
+
+break-pane
+  layout: b25d,80x24,0,0,0
+b25e,80x24,0,0,1
+  panes:  0:80x24 
+  steps:
+    split-window -h -t w:0
+    break-pane -s w:0.1 -t w:
+
+join-pane-v
+  layout: c195,80x24,0,0[80x12,0,0,0,80x11,0,13,1]
+  panes:  0:80x12 1:80x11 
+  steps:
+    split-window -h -t w:0
+    break-pane -s w:0.1 -t w:
+    join-pane -v -s w:1.0 -t w:0.0
+
+resize-window-grow
+  layout: 6bc2,100x30,0,0{47x30,0,0,0,26x30,48,0,1,25x30,75,0,2}
+  panes:  0:47x30 1:26x30 2:25x30 
+  steps:
+    split-window -h -t w:0.0
+    split-window -h -t w:0.1
+    resize-window -t w -x 100 -y 30
+
+resize-window-shrink
+  layout: e585,50x20,0,0{30x20,0,0,0,9x20,31,0,1,9x20,41,0,2}
+  panes:  0:30x20 1:9x20 2:9x20 
+  steps:
+    split-window -h -t w:0.0
+    split-window -h -t w:0.1
+    resize-window -t w -x 50 -y 20
+
+resize-pane-overclamp
+  layout: ea02,80x24,0,0{1x24,0,0,0,78x24,2,0,1}
+  panes:  0:1x24 1:78x24 
+  steps:
+    split-window -h -t w:0
+    resize-pane -t w:0.0 -L 100
+
+resize-pane-grow-overclamp
+  layout: 0bdf,80x24,0,0{78x24,0,0,0,1x24,79,0,1}
+  panes:  0:78x24 1:1x24 
+  steps:
+    split-window -h -t w:0
+    resize-pane -t w:0.0 -R 100
+
+split-v-l1-minimum
+  layout: d89e,80x24,0,0[80x22,0,0,0,80x1,0,23,1]
+  panes:  0:80x22 1:80x1 
+  steps:
+    split-window -v -l 1 -t w:0
+

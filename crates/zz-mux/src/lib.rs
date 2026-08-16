@@ -1,6 +1,7 @@
 //! Pure state, commands, layouts, key tables, and tmux-compatible parsing.
 
 mod command;
+mod layout;
 mod model;
 mod parser;
 mod status;

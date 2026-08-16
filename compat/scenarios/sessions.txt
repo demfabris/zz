@@ -1,0 +1,4 @@
+# A second session is renamed and removed while session w survives.
+new-session -d -s x
+rename-session -t x y
+kill-session -t y

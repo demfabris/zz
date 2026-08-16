@@ -37,7 +37,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes cmake curl desktop-file-utils dpkg-dev ninja-build libfontconfig-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+          sudo apt-get install --yes autoconf automake bison cmake curl desktop-file-utils dpkg-dev libevent-dev libfontconfig-dev libncurses-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev ninja-build pkg-config
 
       - uses: mlugg/setup-zig@v2.2.1
         with:
@@ -48,6 +48,13 @@ jobs:
         with:
           path: ${{ github.workspace }}/.cef-cache
           key: cef-151.3.14-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Cache pinned tmux build
+        if: runner.os == 'Linux'
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/compat/.cache
+          key: tmux-d77c9dc6-${{ runner.os }}
 
       - name: Check formatting
         if: runner.os == 'Linux'
@@ -68,6 +75,10 @@ jobs:
 
       - name: Test workspace
         run: cargo test --workspace --all-features
+
+      - name: Run tmux compatibility harness
+        if: runner.os == 'Linux'
+        run: compat/run.sh
 
       - name: Build and validate CEF bundle
         run: cargo xtask bundle-cef --release --output target/cef-bundle

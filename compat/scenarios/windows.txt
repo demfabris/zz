@@ -1,0 +1,10 @@
+# Window creation, navigation, naming, deletion, and index-gap allocation.
+new-window -d -t w -n one
+new-window -d -t w -n two
+rename-window -t w:2 middle
+select-window -t w:1
+next-window -t w
+previous-window -t w
+last-window -t w
+kill-window -t w:1
+new-window -d -t w -n three

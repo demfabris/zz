@@ -1,0 +1,5 @@
+# Alternating splits three levels deep, followed by middle-pane removal.
+split-window -h -t w:0.0
+split-window -v -t w:0.1
+split-window -h -t w:0.2
+kill-pane -t w:0.1

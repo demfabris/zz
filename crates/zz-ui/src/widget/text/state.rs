@@ -6,7 +6,7 @@ use async_channel::{Receiver, Sender, unbounded};
 use std::{
     future::Future,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex},
     task::{Context as TaskContext, Poll},
 };
 
@@ -27,6 +27,7 @@ use super::{
     node::{self, NodeContext},
     style::TextViewStyle,
     text_view::CodeBlockActionsFn,
+    veil::{RowVeil, StreamingVeil},
 };
 
 const MAX_COALESCED_UPDATES_PER_PARSE: usize = 64;
@@ -43,6 +44,7 @@ pub struct TextViewState {
     pub(super) text_view_style: TextViewStyle,
     pub(super) code_block_actions: Option<std::sync::Arc<CodeBlockActionsFn>>,
     pub(super) markdown_extensions: Arc<MarkdownExtensions>,
+    pub(super) streaming: bool,
 
     pub(super) is_selecting: bool,
     multi_click_selection: Option<TextViewMultiClickSelection>,
@@ -56,6 +58,9 @@ pub struct TextViewState {
     deferred_full_parse: bool,
     parsed_error: Option<SharedString>,
     tx: Sender<UpdateOptions>,
+    streaming_veil: Arc<Mutex<RowVeil>>,
+    seed_streaming_veil: bool,
+    streaming_veil_baseline: usize,
     _parse_task: Task<()>,
     _receive_task: Task<()>,
 }
@@ -117,6 +122,7 @@ impl TextViewState {
             text_view_style: TextViewStyle::default(),
             code_block_actions: None,
             markdown_extensions: Arc::default(),
+            streaming: false,
             is_selecting: false,
             auto_scroll: AutoScroll::default(),
             parsed_content: Default::default(),
@@ -125,6 +131,9 @@ impl TextViewState {
             revision: 0,
             deferred_full_parse: !parse_initial,
             tx,
+            streaming_veil: Arc::new(Mutex::new(RowVeil::default())),
+            seed_streaming_veil: false,
+            streaming_veil_baseline: 0,
             _parse_task,
             _receive_task,
         };
@@ -184,6 +193,19 @@ impl TextViewState {
         }
         self.text.push_str(new_text);
         self.increment_update(new_text, true, false, cx);
+    }
+
+    pub(crate) fn set_streaming(&mut self, streaming: bool, cx: &mut Context<Self>) {
+        if self.streaming == streaming {
+            return;
+        }
+        self.streaming = streaming;
+        self.seed_streaming_veil = streaming;
+        self.streaming_veil_baseline = if streaming { self.text.len() } else { 0 };
+        if let Ok(mut veil) = self.streaming_veil.lock() {
+            *veil = RowVeil::default();
+        }
+        cx.notify();
     }
 
     pub(crate) fn set_markdown_extensions(
@@ -395,6 +417,18 @@ impl Render for TextViewState {
         node_cx.code_block_actions = self.code_block_actions.clone();
         node_cx.markdown_extensions = self.markdown_extensions.clone();
         node_cx.style = self.text_view_style.clone();
+        if self.streaming {
+            let seed = self.seed_streaming_veil || cx.reduce_motion();
+            node_cx.streaming_veil = Some(StreamingVeil::new(
+                self.streaming_veil.clone(),
+                self.entity_id,
+                seed,
+                self.streaming_veil_baseline,
+            ));
+            if !document.blocks.is_empty() {
+                self.seed_streaming_veil = false;
+            }
+        }
 
         v_flex()
             .size_full()

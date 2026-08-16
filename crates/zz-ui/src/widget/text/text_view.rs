@@ -30,6 +30,7 @@ pub struct TextView {
     style: StyleRefinement,
     selectable: bool,
     scrollable: bool,
+    streaming: bool,
     code_block_actions: Option<Arc<CodeBlockActionsFn>>,
     markdown_extensions: Arc<MarkdownExtensions>,
 }
@@ -50,6 +51,7 @@ impl TextView {
             style: StyleRefinement::default(),
             selectable: false,
             scrollable: false,
+            streaming: false,
             code_block_actions: None,
             markdown_extensions: Arc::default(),
         }
@@ -65,6 +67,7 @@ impl TextView {
             state: None,
             selectable: false,
             scrollable: false,
+            streaming: false,
             code_block_actions: None,
             markdown_extensions: Arc::default(),
         }
@@ -86,6 +89,11 @@ impl TextView {
     /// its content.
     pub fn scrollable(mut self, scrollable: bool) -> Self {
         self.scrollable = scrollable;
+        self
+    }
+
+    pub fn streaming(mut self, streaming: bool) -> Self {
+        self.streaming = streaming;
         self
     }
 
@@ -159,6 +167,7 @@ impl Element for TextView {
             state.set_markdown_extensions(self.markdown_extensions.clone(), cx);
             state.selectable = self.selectable;
             state.scrollable = self.scrollable;
+            state.set_streaming(self.streaming, cx);
             state.text_view_style = self.text_view_style.clone();
 
             if let Some(text) = self.text.clone() {

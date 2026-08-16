@@ -19,6 +19,7 @@ mod state;
 mod style;
 mod text_view;
 mod utils;
+mod veil;
 mod window_selection;
 
 use gpui::{App, KeyBinding, actions};

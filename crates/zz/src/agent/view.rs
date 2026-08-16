@@ -61,15 +61,26 @@ const MAX_COMPLETION_RESULTS: usize = 64;
 const HISTORY_ROW_HEIGHT: f32 = 52.0;
 const COMPOSER_MIN_HEIGHT: f32 = 86.0;
 const COMPOSER_FOOTER_HEIGHT: f32 = 28.0;
+const COMPOSER_OUTER_PADDING: f32 = 12.0;
+const COMPOSER_SECTION_GAP: f32 = 8.0;
+const COMPOSER_ACTION_SIZE: f32 = 32.0;
 const COMPOSER_MAX_WIDTH: f32 = AGENT_CONTENT_MAX_WIDTH + 2.0;
-const COMPOSER_OCCLUSION_HEIGHT: f32 = COMPOSER_MIN_HEIGHT / 2.0;
-const TIMELINE_COMPOSER_CLEARANCE: f32 = (COMPOSER_MIN_HEIGHT + 12.0) * 1.5;
-const TIMELINE_COMPOSER_FOOTER_CLEARANCE: f32 = COMPOSER_FOOTER_HEIGHT + 8.0;
 const CHROME_BUTTON_HEIGHT: f32 = AGENT_CHROME_CONTROL_HEIGHT;
 const CONTEXT_USAGE_RING_SIZE: f32 = 16.0;
 const CONTEXT_USAGE_STROKE_WIDTH: f32 = 2.0;
 const SPINNER_PERIOD: Duration = Duration::from_millis(800);
 const MAX_RENDERED_ERROR_BYTES: usize = 1024;
+
+const fn composer_total_height() -> f32 {
+    COMPOSER_MIN_HEIGHT
+        + 2.0 * COMPOSER_OUTER_PADDING
+        + COMPOSER_SECTION_GAP
+        + COMPOSER_FOOTER_HEIGHT
+}
+
+const fn composer_tail_clearance() -> f32 {
+    composer_total_height() - COMPOSER_OUTER_PADDING
+}
 
 fn agent_spinner(size: Size, color: Hsla, view: EntityId, cx: &mut gpui::App) -> AnyElement {
     let phase = ease_in_out(pulse_phase(SPINNER_PERIOD, view, cx));
@@ -1857,7 +1868,7 @@ impl AgentView {
         view: Entity<Self>,
     ) -> impl IntoElement {
         let enabled = state.session_capabilities.list && state.connection.accepts_prompt();
-        agent_chrome_button(("agent-session-history", self.pane.0))
+        agent_chrome_icon_button(("agent-session-history", self.pane.0))
             .icon(IconName::History)
             .tooltip(if enabled {
                 "Browse sessions stored by this agent"
@@ -2642,12 +2653,14 @@ impl AgentView {
         &self,
         state: &AgentPaneState,
         view: &Entity<Self>,
+        local_host: bool,
         cx: &mut gpui::App,
     ) -> impl IntoElement {
         let can_submit = state.connection.accepts_prompt();
         let button = Button::new(format!("agent-action-{}", self.pane.0))
             .small()
-            .rounded(px(999.0));
+            .size(px(COMPOSER_ACTION_SIZE))
+            .rounded_full();
         let action = match composer_action(
             state.connection.has_active_turn(),
             self.composer_has_content(),
@@ -2734,7 +2747,7 @@ impl AgentView {
             .git
             .as_ref()
             .map(|git| git_summary_footer(self.pane, git, cx));
-        let has_footer = git.is_some() || usage.is_some();
+        let directory = self.render_directory_picker(state, view.clone(), local_host);
         let command_hint = active_command_hint(&self.last_input, &state.available_commands);
         let completions = self.render_completions(view, cx);
 
@@ -2744,22 +2757,13 @@ impl AgentView {
             .right(px(0.0))
             .bottom(px(0.0))
             .w_full()
-            .p_3()
-            .child(
-                div()
-                    .absolute()
-                    .left(px(0.0))
-                    .right(px(0.0))
-                    .bottom(px(0.0))
-                    .h(px(COMPOSER_OCCLUSION_HEIGHT))
-                    .bg(cx.theme().background),
-            )
+            .p(px(COMPOSER_OUTER_PADDING))
             .child(
                 v_flex()
                     .w_full()
                     .max_w(px(COMPOSER_MAX_WIDTH))
                     .mx_auto()
-                    .gap_2()
+                    .gap(px(COMPOSER_SECTION_GAP))
                     .when_some(
                         self.render_permission_wizard(state, view, cx),
                         |this, wizard| this.child(wizard),
@@ -2818,18 +2822,22 @@ impl AgentView {
                                     .child(h_flex().flex_none().gap(px(CHROME_GAP)).child(action)),
                             ),
                     )
-                    .when(has_footer, |this| {
-                        this.child(
-                            h_flex()
-                                .w_full()
-                                .h(px(COMPOSER_FOOTER_HEIGHT))
-                                .items_center()
-                                .justify_between()
-                                .px_1()
-                                .child(h_flex().min_w_0().flex_1().children(git))
-                                .child(h_flex().flex_none().children(usage)),
-                        )
-                    }),
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .h(px(COMPOSER_FOOTER_HEIGHT))
+                            .items_center()
+                            .justify_between()
+                            .px_1()
+                            .child(h_flex().min_w_0().flex_1().children(git))
+                            .child(
+                                h_flex()
+                                    .flex_none()
+                                    .gap(px(CHROME_GAP))
+                                    .children(usage)
+                                    .child(directory),
+                            ),
+                    ),
             )
     }
 }
@@ -2911,12 +2919,7 @@ impl Render for AgentView {
             .sync(&self.pane_state.pending_permissions);
         let state = self.pane_state.clone();
         let rows = self.timeline.rows.clone();
-        let timeline_clearance = TIMELINE_COMPOSER_CLEARANCE
-            + if state.git.is_some() || state.usage.is_some() {
-                TIMELINE_COMPOSER_FOOTER_CLEARANCE
-            } else {
-                0.0
-            };
+        let timeline_clearance = composer_tail_clearance();
         self.stick.set_bottom_padding(timeline_clearance);
         self.drive_stick(window, cx);
         let view = cx.entity();
@@ -2925,8 +2928,7 @@ impl Render for AgentView {
         let header_actions = h_flex()
             .flex_none()
             .gap(px(CHROME_GAP))
-            .child(self.render_history_button(&state, view.clone()))
-            .child(self.render_directory_picker(&state, view.clone(), local_host));
+            .child(self.render_history_button(&state, view.clone()));
         let input_focus = self.focus(cx);
         let root = div()
             .id(("agent-pane", self.pane.0))
@@ -2968,6 +2970,7 @@ impl Render for AgentView {
                                 self.timeline_scroll.clone(),
                                 self.timeline_store.clone(),
                             )
+                            .active_turn(state.connection.has_active_turn())
                             .bottom_padding(timeline_clearance),
                         )
                         .child(
@@ -2976,7 +2979,7 @@ impl Render for AgentView {
                                 .top_0()
                                 .left_0()
                                 .right_0()
-                                .bottom(px(COMPOSER_OCCLUSION_HEIGHT))
+                                .bottom(px(timeline_clearance))
                                 .child(Scrollbar::vertical(&self.timeline_scroll)),
                         )
                         .when(self.stick.shows_jump_button(), |this| {
@@ -2984,7 +2987,7 @@ impl Render for AgentView {
                         })
                     }),
             )
-            .child(self.render_composer(&state, &view, cx))
+            .child(self.render_composer(&state, &view, local_host, cx))
             .when(self.history_open, |this| {
                 this.child(self.render_history_overlay(&state, &view, cx))
             })
@@ -3264,6 +3267,14 @@ fn agent_chrome_button(id: impl Into<ElementId>) -> Button {
         .xsmall()
         .h(px(CHROME_BUTTON_HEIGHT))
         .px_2p5()
+}
+
+fn agent_chrome_icon_button(id: impl Into<ElementId>) -> Button {
+    Button::new(id)
+        .ghost()
+        .xsmall()
+        .size(px(CHROME_BUTTON_HEIGHT))
+        .p_0()
 }
 
 fn session_directory_label(cwd: &Path) -> String {
@@ -3980,6 +3991,16 @@ mod completion_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn composer_geometry_tracks_the_rendered_stack() {
+        assert_eq!(composer_total_height(), 146.0);
+        assert_eq!(composer_tail_clearance(), 134.0);
+        assert_eq!(
+            composer_total_height() - composer_tail_clearance(),
+            COMPOSER_OUTER_PADDING
+        );
+    }
 
     #[test]
     fn context_usage_is_bounded_and_handles_an_unknown_window() {

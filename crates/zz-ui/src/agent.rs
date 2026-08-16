@@ -1345,6 +1345,7 @@ pub struct AgentTimeline {
     rows: Arc<Vec<TimelineRow>>,
     list_state: ListState,
     store: Entity<AgentTimelineStore>,
+    active_turn: bool,
     bottom_padding: f32,
 }
 
@@ -1359,8 +1360,15 @@ impl AgentTimeline {
             rows,
             list_state,
             store,
+            active_turn: false,
             bottom_padding: 4.0,
         }
+    }
+
+    #[must_use]
+    pub fn active_turn(mut self, active_turn: bool) -> Self {
+        self.active_turn = active_turn;
+        self
     }
 
     #[must_use]
@@ -1375,6 +1383,11 @@ impl gpui::RenderOnce for AgentTimeline {
         let rows = self.rows;
         let timeline_scroll = self.list_state.clone();
         let store = self.store;
+        let copyable_assistant = if self.active_turn {
+            None
+        } else {
+            final_assistant_entry_id(&rows)
+        };
         let bottom_padding = self.bottom_padding;
 
         list(self.list_state, move |index, _window, cx| {
@@ -1390,7 +1403,13 @@ impl gpui::RenderOnce for AgentTimeline {
                         .w_full()
                         .max_w(px(AGENT_CONTENT_MAX_WIDTH))
                         .mx_auto()
-                        .child(render_timeline_row(&timeline_scroll, &store, row, cx)),
+                        .child(render_timeline_row(
+                            &timeline_scroll,
+                            &store,
+                            row,
+                            copyable_assistant,
+                            cx,
+                        )),
                 )
                 .into_any_element()
         })
@@ -1401,17 +1420,37 @@ impl gpui::RenderOnce for AgentTimeline {
     }
 }
 
+fn final_assistant_entry_id(rows: &[TimelineRow]) -> Option<u64> {
+    rows.iter().rev().find_map(|row| match row {
+        TimelineRow::Single(AgentEntry::Assistant { id, .. }) => Some(*id),
+        TimelineRow::Group { entries, .. } => entries.iter().rev().find_map(|entry| match entry {
+            AgentEntry::Assistant { id, .. } => Some(*id),
+            _ => None,
+        }),
+        TimelineRow::Single(_) => None,
+    })
+}
+
 fn render_timeline_row(
     timeline_scroll: &ListState,
     store: &Entity<AgentTimelineStore>,
     row: TimelineRow,
+    copyable_assistant: Option<u64>,
     cx: &mut App,
 ) -> AnyElement {
     match row {
-        TimelineRow::Single(entry) => render_entry(timeline_scroll, store, entry, cx),
-        TimelineRow::Group { kind, id, entries } => {
-            render_group(timeline_scroll, store, kind, id, &entries, cx)
+        TimelineRow::Single(entry) => {
+            render_entry(timeline_scroll, store, entry, copyable_assistant, cx)
         }
+        TimelineRow::Group { kind, id, entries } => render_group(
+            timeline_scroll,
+            store,
+            kind,
+            id,
+            &entries,
+            copyable_assistant,
+            cx,
+        ),
     }
 }
 
@@ -1421,32 +1460,29 @@ fn render_group(
     group: TimelineGroupKind,
     id: u64,
     members: &[AgentEntry],
+    copyable_assistant: Option<u64>,
     cx: &mut App,
 ) -> AnyElement {
     let expanded = store.update(cx, |store, _| {
         store.expanded(id, DisclosureKind::Group, false)
     });
     let toggle = store.clone();
-    let (icon, label, color) = match group {
-        TimelineGroupKind::Tool => {
-            let status = aggregate_tool_status(members);
-            (
-                tool_icon(
-                    members
-                        .first()
-                        .and_then(tool_entry_kind)
-                        .unwrap_or(AgentToolKind::Other),
-                ),
-                tool_group_label(members),
-                tool_status_color(status, cx),
-            )
-        }
+    let (icon, label) = match group {
+        TimelineGroupKind::Tool => (
+            tool_icon(
+                members
+                    .first()
+                    .and_then(tool_entry_kind)
+                    .unwrap_or(AgentToolKind::Other),
+            ),
+            tool_group_label(members),
+        ),
         TimelineGroupKind::Reasoning => (
             IconName::Cpu,
             SharedString::from(format!("Reasoning · {} steps", members.len())),
-            cx.theme().foreground.muted(),
         ),
     };
+    let icon_color = timeline_affordance_color(cx);
 
     v_flex()
         .id(("agent-timeline-group", id))
@@ -1469,7 +1505,7 @@ fn render_group(
                         .flex_1()
                         .overflow_hidden()
                         .gap_2()
-                        .child(Icon::new(icon).small().flex_none().text_color(color))
+                        .child(Icon::new(icon).small().flex_none().text_color(icon_color))
                         .child(
                             div()
                                 .min_w_0()
@@ -1481,14 +1517,10 @@ fn render_group(
                                 .child(label),
                         )
                         .child(
-                            Icon::new(if expanded {
-                                IconName::ChevronUp
-                            } else {
-                                IconName::ChevronDown
-                            })
-                            .xsmall()
-                            .flex_none()
-                            .text_color(color),
+                            Icon::new(disclosure_icon(expanded))
+                                .xsmall()
+                                .flex_none()
+                                .text_color(icon_color),
                         ),
                 )
                 .on_click(move |_, _, cx| {
@@ -1498,14 +1530,11 @@ fn render_group(
                 }),
         )
         .when(expanded, |this| {
-            this.child(
-                v_flex().w_full().children(
-                    members
-                        .iter()
-                        .cloned()
-                        .map(|entry| render_entry(timeline_scroll, store, entry, cx)),
-                ),
-            )
+            this.child(v_flex().w_full().children(
+                members.iter().cloned().map(|entry| {
+                    render_entry(timeline_scroll, store, entry, copyable_assistant, cx)
+                }),
+            ))
         })
         .into_any_element()
 }
@@ -1592,28 +1621,11 @@ fn single_line(text: SharedString) -> SharedString {
         .into()
 }
 
-fn aggregate_tool_status(tools: &[AgentEntry]) -> AgentToolStatus {
-    tools
-        .iter()
-        .filter_map(|entry| match entry {
-            AgentEntry::Tool(tool) => Some(tool.status),
-            _ => None,
-        })
-        .max_by_key(|status| match status {
-            AgentToolStatus::Completed => 0,
-            AgentToolStatus::Pending => 1,
-            AgentToolStatus::Running => 2,
-            AgentToolStatus::NeedsApproval => 3,
-            AgentToolStatus::Canceled => 4,
-            AgentToolStatus::Failed => 5,
-        })
-        .unwrap_or(AgentToolStatus::Completed)
-}
-
 fn render_entry(
     timeline_scroll: &ListState,
     store: &Entity<AgentTimelineStore>,
     entry: AgentEntry,
+    copyable_assistant: Option<u64>,
     cx: &mut App,
 ) -> AnyElement {
     match entry {
@@ -1666,25 +1678,27 @@ fn render_entry(
                 .gap_1()
                 .text_size(crate::rems_from_px(13.0))
                 .child(assistant_markdown_view(store, id, markdown, cx))
-                .child(
-                    h_flex().w_full().h(px(28.0)).items_center().child(
-                        div()
-                            .debug_selector(|| "agent-assistant-copy".to_owned())
-                            .child(
-                                Button::new(("agent-copy-assistant", id))
-                                    .ghost()
-                                    .xsmall()
-                                    .compact()
-                                    .icon(IconName::Copy)
-                                    .tooltip("Copy message")
-                                    .on_click(move |_, _, cx| {
-                                        cx.write_to_clipboard(ClipboardItem::new_string(
-                                            copy.full_text(),
-                                        ));
-                                    }),
-                            ),
-                    ),
-                )
+                .when(copyable_assistant == Some(id), |this| {
+                    this.child(
+                        h_flex().w_full().h(px(28.0)).items_center().child(
+                            div()
+                                .debug_selector(|| "agent-assistant-copy".to_owned())
+                                .child(
+                                    Button::new(("agent-copy-assistant", id))
+                                        .ghost()
+                                        .xsmall()
+                                        .compact()
+                                        .icon(IconName::Copy)
+                                        .tooltip("Copy message")
+                                        .on_click(move |_, _, cx| {
+                                            cx.write_to_clipboard(ClipboardItem::new_string(
+                                                copy.full_text(),
+                                            ));
+                                        }),
+                                ),
+                        ),
+                    )
+                })
                 .into_any_element()
         }
         AgentEntry::Reasoning {
@@ -1723,13 +1737,9 @@ fn render_entry(
                                 .child(single_line(label)),
                         )
                         .child(
-                            Icon::new(if expanded {
-                                IconName::ChevronUp
-                            } else {
-                                IconName::ChevronDown
-                            })
-                            .xsmall()
-                            .text_color(cx.theme().foreground.muted()),
+                            Icon::new(disclosure_icon(expanded))
+                                .xsmall()
+                                .text_color(cx.theme().foreground.muted()),
                         )
                         .on_click(move |_, _, cx| {
                             toggle.update(cx, |store, cx| {
@@ -1789,6 +1799,14 @@ fn render_entry(
     }
 }
 
+const fn disclosure_icon(expanded: bool) -> IconName {
+    if expanded {
+        IconName::ChevronUp
+    } else {
+        IconName::ChevronRight
+    }
+}
+
 fn render_tool_entry(
     timeline_scroll: &ListState,
     store: &Entity<AgentTimelineStore>,
@@ -1798,7 +1816,7 @@ fn render_tool_entry(
     let AgentToolEntry {
         id,
         kind,
-        status,
+        status: _,
         label,
         location,
         input,
@@ -1816,7 +1834,7 @@ fn render_tool_entry(
         })
     });
     let toggle = store.clone();
-    let status_color = tool_status_color(status, cx);
+    let icon_color = timeline_affordance_color(cx);
 
     v_flex()
         .id(("agent-tool-entry", id))
@@ -1843,7 +1861,7 @@ fn render_tool_entry(
                             Icon::new(tool_icon(kind))
                                 .small()
                                 .flex_none()
-                                .text_color(status_color),
+                                .text_color(icon_color),
                         )
                         .child(
                             div()
@@ -1862,13 +1880,9 @@ fn render_tool_entry(
                                     .debug_selector(|| "agent-tool-chevron".to_owned())
                                     .flex_none()
                                     .child(
-                                        Icon::new(if expanded {
-                                            IconName::ChevronUp
-                                        } else {
-                                            IconName::ChevronDown
-                                        })
-                                        .xsmall()
-                                        .text_color(status_color),
+                                        Icon::new(disclosure_icon(expanded))
+                                            .xsmall()
+                                            .text_color(icon_color),
                                     ),
                             )
                         }),
@@ -2308,14 +2322,8 @@ fn tool_icon(kind: AgentToolKind) -> IconName {
     }
 }
 
-fn tool_status_color(status: AgentToolStatus, cx: &App) -> Hsla {
-    match status {
-        AgentToolStatus::Running => cx.theme().foreground,
-        AgentToolStatus::NeedsApproval => cx.theme().warning,
-        AgentToolStatus::Completed => cx.theme().success,
-        AgentToolStatus::Pending | AgentToolStatus::Canceled => cx.theme().foreground.muted(),
-        AgentToolStatus::Failed => cx.theme().danger,
-    }
+fn timeline_affordance_color(cx: &App) -> Hsla {
+    cx.theme().foreground.muted()
 }
 
 fn markdown_view(
@@ -2353,16 +2361,18 @@ fn markdown_view_with_extensions(
         ..TextViewStyle::default()
     };
 
-    let (state, extensions) = store.update(cx, |store, cx| {
+    let (state, extensions, streaming) = store.update(cx, |store, cx| {
         (
             store.markdown(id, slot, markdown, cx),
             store.markdown_extensions_for(assistant),
+            store.streaming == Some(id),
         )
     });
     AgentMarkdownView {
         state,
         extensions,
         style,
+        streaming,
         full_source: (!assistant).then_some(full_source),
         truncated,
     }
@@ -2411,6 +2421,7 @@ struct AgentMarkdownView {
     state: Entity<TextViewState>,
     extensions: MarkdownExtensions,
     style: TextViewStyle,
+    streaming: bool,
     full_source: Option<AgentMarkdown>,
     truncated: bool,
 }
@@ -2422,6 +2433,7 @@ impl gpui::RenderOnce for AgentMarkdownView {
             .max_w_full()
             .min_w_0()
             .selectable(true)
+            .streaming(self.streaming)
             .code_block_actions(agent_code_block_chrome)
             .markdown_extensions(self.extensions)
             .when(self.truncated, |text| {
@@ -2827,6 +2839,7 @@ impl MarkdownPlugin for RichMarkdownPlugin {
             state,
             extensions: standard_markdown_extensions(),
             style,
+            streaming: false,
             full_source: None,
             truncated: false,
         })
@@ -3655,18 +3668,19 @@ mod tests {
         store: Entity<AgentTimelineStore>,
         entry: AgentEntry,
         pane_width: Pixels,
+        active_turn: bool,
     }
 
     impl Render for UserEntryTest {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div()
-                .w(self.pane_width)
-                .h(px(600.0))
-                .child(AgentTimeline::new(
+            div().w(self.pane_width).h(px(600.0)).child(
+                AgentTimeline::new(
                     Arc::new(vec![TimelineRow::Single(self.entry.clone())]),
                     ListState::new(1, gpui::ListAlignment::Top, px(600.0)),
                     self.store.clone(),
-                ))
+                )
+                .active_turn(self.active_turn),
+            )
         }
     }
 
@@ -3865,69 +3879,48 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_tool_status_uses_worst_status_precedence() {
-        let statuses = |statuses: &[AgentToolStatus]| {
-            (0_u64..)
-                .zip(statuses)
-                .map(|(id, status)| test_tool(id, "group", *status))
-                .collect::<Vec<_>>()
-        };
-
-        assert_eq!(
-            aggregate_tool_status(&statuses(&[
-                AgentToolStatus::Completed,
-                AgentToolStatus::Failed,
-                AgentToolStatus::Running,
-            ])),
-            AgentToolStatus::Failed
-        );
-        assert_eq!(
-            aggregate_tool_status(&statuses(&[
-                AgentToolStatus::Completed,
-                AgentToolStatus::Running,
-            ])),
-            AgentToolStatus::Running
-        );
-        assert_eq!(
-            aggregate_tool_status(&statuses(&[
-                AgentToolStatus::Completed,
-                AgentToolStatus::Completed,
-            ])),
-            AgentToolStatus::Completed
-        );
-        assert_eq!(
-            aggregate_tool_status(&statuses(&[
-                AgentToolStatus::NeedsApproval,
-                AgentToolStatus::Canceled,
-            ])),
-            AgentToolStatus::Canceled
-        );
+    fn transcript_disclosures_point_right_when_closed_and_up_when_open() {
+        assert_eq!(disclosure_icon(false), IconName::ChevronRight);
+        assert_eq!(disclosure_icon(true), IconName::ChevronUp);
     }
 
     #[gpui::test]
-    fn transcript_tool_statuses_use_semantic_text_colors(cx: &mut TestAppContext) {
+    fn transcript_affordances_use_the_muted_foreground(cx: &mut TestAppContext) {
         cx.update(crate::init);
         cx.update(|cx| {
-            assert_eq!(
-                tool_status_color(AgentToolStatus::Running, cx),
-                cx.theme().foreground
-            );
-            assert_eq!(
-                tool_status_color(AgentToolStatus::NeedsApproval, cx),
-                cx.theme().warning
-            );
-            assert_eq!(
-                tool_status_color(AgentToolStatus::Failed, cx),
-                cx.theme().danger
-            );
-            assert_eq!(
-                tool_status_color(AgentToolStatus::Completed, cx),
-                cx.theme().success
-            );
-            for status in [AgentToolStatus::Pending, AgentToolStatus::Canceled] {
-                assert_eq!(tool_status_color(status, cx), cx.theme().foreground.muted());
-            }
+            assert_eq!(timeline_affordance_color(cx), cx.theme().foreground.muted());
         });
+    }
+
+    #[test]
+    fn final_assistant_copy_target_is_the_latest_assistant() {
+        let rows = vec![
+            TimelineRow::Single(AgentEntry::Assistant {
+                id: 20,
+                markdown: "first".into(),
+            }),
+            TimelineRow::Single(test_tool(21, "Read file", AgentToolStatus::Completed)),
+            TimelineRow::Single(AgentEntry::Assistant {
+                id: 22,
+                markdown: "second".into(),
+            }),
+            TimelineRow::Single(AgentEntry::Reasoning {
+                id: 23,
+                label: "Finished".into(),
+                markdown: "done".into(),
+                default_expanded: false,
+            }),
+        ];
+
+        assert_eq!(final_assistant_entry_id(&rows), Some(22));
+        assert_eq!(
+            final_assistant_entry_id(&[TimelineRow::Single(test_tool(
+                24,
+                "Read file",
+                AgentToolStatus::Completed,
+            ))]),
+            None
+        );
     }
 
     #[gpui::test]
@@ -3944,6 +3937,7 @@ mod tests {
                 store: cx.new(|_| AgentTimelineStore::default()),
                 entry,
                 pane_width: px(520.0),
+                active_turn: false,
             });
             crate::Root::new(view, window, cx)
         });
@@ -3977,6 +3971,31 @@ mod tests {
     }
 
     #[gpui::test]
+    fn assistant_copy_is_hidden_while_the_turn_is_active(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let entry = AgentEntry::Assistant {
+            id: 25,
+            markdown: "Still streaming".into(),
+        };
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| UserEntryTest {
+                store: cx.new(|_| AgentTimelineStore::default()),
+                entry,
+                pane_width: px(520.0),
+                active_turn: true,
+            });
+            crate::Root::new(view, window, cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        assert!(cx.debug_bounds("agent-assistant-copy").is_none());
+    }
+
+    #[gpui::test]
     fn tool_disclosure_sits_beside_the_label(cx: &mut TestAppContext) {
         cx.update(crate::init);
         const PANE_WIDTH: Pixels = px(520.0);
@@ -3993,6 +4012,7 @@ mod tests {
                 store: cx.new(|_| AgentTimelineStore::default()),
                 entry,
                 pane_width: PANE_WIDTH,
+                active_turn: false,
             });
             crate::Root::new(view, window, cx)
         });
@@ -4029,6 +4049,7 @@ mod tests {
                 store: cx.new(|_| AgentTimelineStore::default()),
                 entry,
                 pane_width: PANE_WIDTH,
+                active_turn: false,
             });
             crate::Root::new(view, window, cx)
         });

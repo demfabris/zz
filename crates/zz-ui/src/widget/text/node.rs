@@ -32,6 +32,7 @@ use super::{
     scroll_area::horizontal_scroll_area,
     text_view::CodeBlockActionsFn,
     utils::list_item_prefix,
+    veil::{StreamingVeil, VeilKey},
 };
 use crate::Colorize as _;
 
@@ -733,12 +734,18 @@ impl CodeBlock {
                     .text_size(cx.theme().mono_font_size)
                     .relative()
                     .refine_style(&style.code_block)
-                    .child(Inline::new(
-                        "code",
-                        self.state.clone(),
-                        vec![],
-                        self.styles(&cx.theme().highlight_theme),
-                    ))
+                    .child(
+                        Inline::new(
+                            "code",
+                            self.state.clone(),
+                            vec![],
+                            self.styles(&cx.theme().highlight_theme),
+                        )
+                        .streaming_veil(
+                            node_cx.streaming_veil.clone(),
+                            VeilKey::new(self.span.map_or(options.ix, |span| span.start), 0),
+                        ),
+                    )
                     .when_some(actions, |this, actions| {
                         this.child(
                             div()
@@ -767,6 +774,7 @@ pub(crate) struct NodeContext {
     pub(crate) style: TextViewStyle,
     pub(crate) code_block_actions: Option<Arc<CodeBlockActionsFn>>,
     pub(crate) markdown_extensions: Arc<MarkdownExtensions>,
+    pub(crate) streaming_veil: Option<StreamingVeil>,
 }
 
 impl NodeContext {
@@ -811,12 +819,17 @@ impl Paragraph {
                     if let Ok(mut state) = inline_node.state.lock() {
                         state.set_text(text.clone().into());
                     }
+                    let element = child_nodes.len();
                     child_nodes.push(
                         Inline::new(
                             ix,
                             inline_node.state.clone(),
                             links.clone(),
                             highlights.clone(),
+                        )
+                        .streaming_veil(
+                            node_cx.streaming_veil.clone(),
+                            VeilKey::new(span.unwrap_or_default().start, element),
                         )
                         .into_any_element(),
                     );
@@ -906,8 +919,15 @@ impl Paragraph {
             if let Ok(mut state) = self.state.lock() {
                 state.set_text(text.into());
             }
-            child_nodes
-                .push(Inline::new(ix, self.state.clone(), links, highlights).into_any_element());
+            let element = child_nodes.len();
+            child_nodes.push(
+                Inline::new(ix, self.state.clone(), links, highlights)
+                    .streaming_veil(
+                        node_cx.streaming_veil.clone(),
+                        VeilKey::new(span.unwrap_or_default().start, element),
+                    )
+                    .into_any_element(),
+            );
         }
 
         div()

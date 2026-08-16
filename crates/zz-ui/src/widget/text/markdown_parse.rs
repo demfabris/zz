@@ -351,7 +351,11 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
             None,
             new_span(val.position, cx),
         )),
-        Node::Html(val) => BlockNode::Paragraph(Paragraph::new(val.value)),
+        Node::Html(val) => {
+            let mut paragraph = Paragraph::new(val.value);
+            paragraph.span = new_span(val.position, cx);
+            BlockNode::Paragraph(paragraph)
+        }
         Node::MdxFlowExpression(val) => BlockNode::CodeBlock(CodeBlock::new(
             val.value.into(),
             Some("mdx".into()),
@@ -475,6 +479,19 @@ mod tests {
                 .any(|(_, mark)| mark.bold && mark.italic),
             "nested emphasis should produce a bold and italic mark"
         );
+    }
+
+    #[test]
+    fn raw_html_blocks_keep_distinct_source_spans() {
+        let mut cx = NodeContext::default();
+        let document = parse("<div>one</div>\n\n<div>two</div>", &mut cx).unwrap();
+        let spans = document
+            .blocks
+            .iter()
+            .map(|block| block.span().expect("html span").start)
+            .collect::<Vec<_>>();
+
+        assert_eq!(spans, vec![0, 16]);
     }
 
     #[derive(Debug, Clone, PartialEq)]

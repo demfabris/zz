@@ -22,6 +22,7 @@ use super::{
     node::LinkMark,
     selection::{Selection, word_range_at},
     state::TextViewMultiClickKind,
+    veil::{StreamingVeil, VeilKey},
     window_selection,
 };
 use crate::Colorize as _;
@@ -32,6 +33,7 @@ pub(super) struct Inline {
     links: Rc<Vec<(Range<usize>, LinkMark)>>,
     highlights: Vec<(Range<usize>, HighlightStyle)>,
     styled_text: StyledText,
+    streaming_veil: Option<(StreamingVeil, VeilKey)>,
 
     state: Arc<Mutex<InlineState>>,
 }
@@ -73,8 +75,18 @@ impl Inline {
             highlights,
             text: text.clone(),
             styled_text: StyledText::new(text),
+            streaming_veil: None,
             state,
         }
+    }
+
+    pub(super) fn streaming_veil(
+        mut self,
+        streaming_veil: Option<StreamingVeil>,
+        key: VeilKey,
+    ) -> Self {
+        self.streaming_veil = streaming_veil.map(|veil| (veil, key));
+        self
     }
 
     fn link_for_position(
@@ -342,6 +354,9 @@ impl Element for Inline {
         }
         if ix < self.text.len() {
             runs.push(text_style.to_run(self.text.len() - ix));
+        }
+        if let Some((veil, key)) = &self.streaming_veil {
+            runs = veil.runs(*key, self.text.as_ref(), runs, cx);
         }
 
         self.styled_text = StyledText::new(self.text.clone()).with_runs(runs);

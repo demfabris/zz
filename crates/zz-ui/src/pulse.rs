@@ -53,9 +53,18 @@ pub fn pulse_phase(period: Duration, view: EntityId, cx: &mut App) -> f32 {
         return 0.0;
     }
 
+    let phase = phase_at(cx.default_global::<PulseClock>().epoch.elapsed(), period);
+    pulse_lease(view, cx);
+    phase
+}
+
+pub(crate) fn pulse_lease(view: EntityId, cx: &mut App) {
+    if cx.reduce_motion() {
+        return;
+    }
+
     let clock = cx.default_global::<PulseClock>();
     clock.leases.insert(view, Instant::now() + LEASE);
-    let phase = phase_at(clock.epoch.elapsed(), period);
     let start = !clock.running;
     clock.running = true;
 
@@ -70,8 +79,6 @@ pub fn pulse_phase(period: Duration, view: EntityId, cx: &mut App) -> f32 {
         })
         .detach();
     }
-
-    phase
 }
 
 /// Position within `period`, in `0.0..1.0`. Exact modular arithmetic, so the

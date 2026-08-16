@@ -428,13 +428,12 @@ Markdown state.
 The transcript is a variable-height GPUI `ListState`, so only visible rows plus 1200 px of overdraw
 are measured and rendered. Every row uses a centered 680 px content column with responsive side
 padding; the composer extends one pixel beyond that column on each side. The composer floats over the
-bottom of the full-height transcript without a section divider; internal timeline tail clearance
-lets content travel beneath it during scrolling while allowing the final row to clear the default
-composer when scrolled fully to the end, with 50% extra runway beyond that default footprint. Its
-rounded card uses an opaque popover surface, while a pane-background occlusion strip spans the lower
-half of the default composer footprint. Transcript rows therefore disappear as they cross behind the
-composer and cannot reappear through its bottom gutter. Controller updates for other panes or
-unchanged pane metadata do not invalidate this view.
+bottom of the full-height transcript without a section divider or a full-width underlay. Its card is
+the only opaque surface, so content remains visible while scrolling beneath the floating composer.
+The footer remains present because it holds the working-directory picker.
+`composer_tail_clearance` aligns the settled transcript tail with the card's top edge rather than the
+composer's outer padding, and the scrollbar uses the same cutoff. Controller updates for other panes
+or unchanged pane metadata do not invalidate this view.
 
 The pane-owned timeline store keys body Markdown and materialized tool content separately by entry
 ID and slot, disclosure state by `(entry ID, disclosure kind)`, and expanded-tool uniform-list scroll
@@ -450,8 +449,9 @@ nested plugin is the sole remaining window-keyed Markdown state because it has n
 access. Other code fences remain literal.
 Every literal fence reserves a compact top strip: the language from the fence, or `text` when none
 was supplied, sits at the left and a copy icon at the right writes the complete raw code. Every
-assistant response ends with a second copy icon that writes the complete raw Markdown rather than
-the repaired or rendered display text.
+settled transcript exposes one response-level copy icon only after the active turn ends, attached to
+the final assistant response; it writes the complete raw Markdown rather than the repaired or
+rendered display text.
 
 A second plugin recognizes fenced `mermaid` blocks and renders resvg-safe SVG off the UI thread with
 `merman`. The renderer maps virtual UI font names to a conservative `system-ui, sans-serif`
@@ -467,8 +467,8 @@ configuration is built only on a cache miss.
 User prompts use a neutral input surface. Tool
 disclosures are compact, fixed single-line borderless rows with one kind icon, an ellipsized label,
 and a chevron immediately after the label when details are available. There is no trailing status
-glyph or ellipsis; static semantic color on the kind icon, label, and chevron keeps failed and
-approval states distinct without inventing another control. Single-line enforcement
+glyph or ellipsis. Kind icons and chevrons use the same muted foreground regardless of ACP status;
+the closed chevron points right and the open chevron points up. Single-line enforcement
 lives in code, since style cannot do it: `whitespace_nowrap` and `text_ellipsis` only govern
 wrapping, while gpui shapes text by splitting on `\n` first and truncates by cumulative character
 width without noticing the breaks, so a label with an embedded newline lays out two full-height
@@ -483,9 +483,8 @@ Pane activity, startup, and permissions share the leased pulse clock. No
 mounted agent spinner starts a display-rate `gpui::Animation`. A run of two or more
 adjacent tools, regardless of label or action, renders one collapsed group header with the first
 member's icon and a first-seen, count-aware action summary such as **Ran command, Edit files, Read
-file**. Aggregate status uses worst-first precedence: Failed, Canceled, NeedsApproval, Running,
-Pending, then Completed. A run of thoughts collapses the same way, under a **Reasoning · N steps**
-header with no status column, since a thought has no outcome to report.
+file**. A run of thoughts collapses the same way, under a **Reasoning · N steps** header with no
+status column, since a thought has no outcome to report.
 Opening a group reveals the original compact member rows, and each member independently controls its
 content as a second disclosure level. Payload previews stay out of collapsed rows and remain
 available only inside the expanded detail view.
@@ -527,12 +526,12 @@ jump pill appears; clicking it re-engages the spring. The spring chases a lead p
 target, scaled by an EMA of how fast the target is growing, and teleports whatever remains beyond
 2.5 viewports, so a long replay lands rather than scrolling through the whole history.
 
-Spinners share one clock. A mounted repeating `gpui::Animation` pins the entire window to display
+Spinners and streamed-text fades share one clock. A mounted repeating `gpui::Animation` pins the entire window to display
 refresh rate, because any notify repaints the whole window; `pulse.rs` instead runs a single ~30 fps
-tick and notifies only its leaseholders. A lease is taken by reading `pulse_phase` and lapses 300 ms
-later . there is no release call . and the loop parks itself once the lease set empties. Pane-level
-activity and approval controls lease it; transcript tool rows do not. Reduced motion returns phase
-`0.0` and schedules nothing.
+tick and notifies only its leaseholders. A lease is taken through `pulse_phase` or `pulse_lease` and
+lapses 300 ms later . there is no release call . and the loop parks itself once the lease set
+empties. Pane-level activity, approval controls, and an active text veil lease it; transcript tool
+rows do not. Reduced motion returns phase `0.0` and schedules nothing.
 
 While an entry is still streaming, its *display* copy is repaired by `zz-ui/src/mend.rs`. Markdown
 arriving a token at a time is briefly ill-formed . a half-written `**bold`, an inline span with one
@@ -546,15 +545,27 @@ keeps the raw `source` beside the rendered `TextViewState`, exactly one entry is
 and `settle_markdown` snaps the display copy back to the raw text when the entry stops streaming . a
 completed entry always renders exactly what it holds.
 
+Streaming does not type characters or hold a second text queue. `widget/text/veil.rs` places each
+parsed suffix into `TextView` immediately, tracks the changed rendered byte range by source-span and
+text-segment identity, and fades only that range's `TextRun` colors. Arrival-gap EMA sets each fade
+to three times the observed cadence, clamped to 120–400 ms with overlapping chunks accelerated; the
+shared leased clock advances it at about 30 fps and parks after the last range settles. Reparsed
+Markdown preserves the common rendered prefix, the initial visible content of a reattached stream
+is seeded at full opacity, settling clears all veil state, and reduced motion continually seeds the
+current full-opacity baseline. The mixed text-and-image inline-flow path stays unanimated because
+its wrap fragments do not have stable identities across reflow.
+
 # Composer, permissions, and failure states
 
 The native composer is a centered, bordered input card that auto-grows from two to eight lines.
 Enter sends when the session is ready; Shift+Enter inserts a newline. The controller returns to ready
 on ACP completion and marks in-flight tools cancelled when the stop reason is `cancelled`.
-The Send, Queue, and Stop states share one icon-only circular button. A separate compact footer under
-the card carries the current Git branch and `N files +A -D` summary on the left, and a 16 px context
-usage ring on the right. The ring fills clockwise, exposes exact token counts and percentage in its
-tooltip and accessibility value, and clamps malformed over-capacity values to a full circle.
+The Send, Queue, and Stop states share one 32 px icon-only button declared with `rounded_full()`,
+so it stays a true circle instead of inheriting the widget radius or squircle smoothing. A separate
+compact footer under the card carries the current Git branch and `N files +A -D` summary on the
+left; its right side holds the 16 px context-usage ring and working-directory picker. The ring fills
+clockwise, exposes exact token counts and percentage in its tooltip and accessibility value, and
+clamps malformed over-capacity values to a full circle.
 
 One button carries three actions, chosen by `composer_action(active_turn, has_content)`
 (`view.rs:236`): **Send** while the pane is idle, **Queue** when a turn is running and the composer
@@ -654,10 +665,11 @@ the old process from entering the new stream while preserving the pane's monoton
 The one retiring-generation payload still accepted is `PromptsReclaimed`, because it is the only
 copy of queued text and images that must return to the composer.
 
-The header's other end holds an icon-only History action followed by the working-directory picker:
-the pane's cwd by its last component,
-its full path in the tooltip, and a native folder chooser behind a click on the local host. It is
-disabled on remote hosts because a native chooser sees the desktop filesystem, not the daemon's.
+The header's other end holds one square icon-only History control. The
+working-directory picker lives at the right end of the composer footer: the pane's cwd by its last
+component, its full path in the tooltip, and a native folder chooser behind a click on the local
+host. It is disabled on remote hosts because a native chooser sees the desktop filesystem, not the
+daemon's.
 An ACP session is bound to
 the directory it was created in, so choosing another one is `session/new` there rather than an
 in-place move (the same boundary the History picker's **New** crosses), gated the same way on an

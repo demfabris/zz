@@ -11,8 +11,8 @@ use std::{
 };
 
 use chrono::Local;
-use zz_mux::{StatusContext, StatusFormats, StatusHooks, expand_status};
-use zz_protocol::{ClientId, MuxSnapshot, SessionId, StatusLine, WindowId};
+use zz_mux::{MuxEngine, StatusContext, StatusFormats, StatusHooks, expand_status};
+use zz_protocol::{Axis, ClientId, MuxSnapshot, SessionId, StatusLine, WindowId};
 
 use crate::shell_process;
 
@@ -69,6 +69,7 @@ impl StatusRenderer {
 
 pub(crate) fn status_context(
     snapshot: &MuxSnapshot,
+    engine: &MuxEngine,
     attached: Option<SessionId>,
     focused_window: Option<WindowId>,
 ) -> StatusContext {
@@ -101,6 +102,9 @@ pub(crate) fn status_context(
     context.window_index = window.index;
     context.window_name.clone_from(&window.name);
     context.window_panes = window.panes.len();
+    context.window_width = engine.window_extent(window.id, Axis::Horizontal);
+    context.window_height = engine.window_extent(window.id, Axis::Vertical);
+    context.window_active = Some(session.active_window == window.id);
     context.window_zoomed = window.zoomed_pane.is_some();
     context.window_bell = window.panes.values().any(|pane| pane.bell);
 
@@ -114,6 +118,11 @@ pub(crate) fn status_context(
     if let Some(pane) = window.panes.get(&window.active_pane) {
         context.pane_id = pane.id.to_string();
         context.pane_title.clone_from(&pane.title);
+        if let Some((columns, rows)) = engine.pane_geometry(pane.id) {
+            context.pane_width = Some(columns);
+            context.pane_height = Some(rows);
+        }
+        context.pane_active = Some(window.active_pane == pane.id);
         context.pane_synchronized = pane.synchronized_input;
     }
     context

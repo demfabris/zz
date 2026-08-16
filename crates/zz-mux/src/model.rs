@@ -2874,6 +2874,24 @@ pub(crate) fn pane_axis_fraction(node: &LayoutNode, target: PaneId, axis: Axis) 
     }
 }
 
+pub(crate) fn window_cell_extent(
+    state: &MuxState,
+    pane_cells: &BTreeMap<PaneId, (u16, u16)>,
+    window: WindowId,
+    axis: Axis,
+) -> Option<f32> {
+    let window = state.windows.get(&window)?;
+    window.pane_order().iter().find_map(|candidate| {
+        let (columns, rows) = *pane_cells.get(candidate)?;
+        let cells = f32::from(match axis {
+            Axis::Horizontal => columns,
+            Axis::Vertical => rows,
+        });
+        let fraction = pane_axis_fraction(&window.layout, *candidate, axis)?;
+        (cells >= 1.0 && fraction > 0.0).then(|| cells / fraction)
+    })
+}
+
 fn resize_boundary(
     node: &LayoutNode,
     target: PaneId,

@@ -604,6 +604,7 @@ impl MuxEngine {
                             window: None,
                             pane: None,
                         },
+                        &self.pane_cells,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -856,6 +857,7 @@ impl MuxEngine {
                             window: Some(window.id),
                             pane: None,
                         },
+                        &self.pane_cells,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -1781,6 +1783,7 @@ impl MuxEngine {
                             window: Some(window_id),
                             pane: Some(pane.id),
                         },
+                        &self.pane_cells,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -1885,18 +1888,20 @@ impl MuxEngine {
         self.pane_cells.insert(pane, (columns, rows));
     }
 
+    #[must_use]
+    pub fn pane_geometry(&self, pane: PaneId) -> Option<(u16, u16)> {
+        self.pane_cells.get(&pane).copied()
+    }
+
+    #[must_use]
+    pub fn window_extent(&self, window: WindowId, axis: Axis) -> Option<u16> {
+        crate::model::window_cell_extent(&self.state, &self.pane_cells, window, axis)
+            .map(|extent| extent.round() as u16)
+    }
+
     fn window_cell_extent(&self, pane: PaneId, axis: Axis) -> Option<f32> {
         let window = self.state.window_for_pane(pane)?;
-        let window = self.state.windows.get(&window)?;
-        window.pane_order().iter().find_map(|candidate| {
-            let (columns, rows) = *self.pane_cells.get(candidate)?;
-            let cells = f32::from(match axis {
-                Axis::Horizontal => columns,
-                Axis::Vertical => rows,
-            });
-            let fraction = crate::model::pane_axis_fraction(&window.layout, *candidate, axis)?;
-            (cells >= 1.0 && fraction > 0.0).then(|| cells / fraction)
-        })
+        crate::model::window_cell_extent(&self.state, &self.pane_cells, window, axis)
     }
 
     fn select_layout(
@@ -2332,7 +2337,7 @@ impl MuxEngine {
         } else {
             positional.join(" ")
         };
-        let text = expand_format(&format, &self.state, format_context);
+        let text = expand_format(&format, &self.state, format_context, &self.pane_cells);
         if options.has("-p") {
             Ok(Execution::output(text))
         } else {
@@ -4425,6 +4430,157 @@ mod tests {
             engine
                 .execute(&mut context, &command("list-sessions", &["-x"]))
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn format_geometry_uses_measured_panes_and_derived_window_extents() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let first = context.pane.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let second = context.pane.unwrap();
+        engine.set_pane_geometry(first, 40, 24);
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-panes",
+                        &["-F", "#{pane_id}:#{pane_width}x#{pane_height}"],
+                    ),
+                )
+                .unwrap()
+                .output,
+            format!("{first}:40x24\n{second}:x")
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("list-windows", &["-F", "#{window_width}x#{window_height}"],),
+                )
+                .unwrap()
+                .output,
+            "80x24"
+        );
+    }
+
+    #[test]
+    fn format_geometry_is_empty_until_a_pane_is_measured() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-panes",
+                        &[
+                            "-F",
+                            "#{pane_width}:#{pane_height}:#{window_width}:#{window_height}",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            ":::"
+        );
+    }
+
+    #[test]
+    fn format_activity_tracks_each_rows_window_and_pane() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let first_window = context.window.unwrap();
+        let first_pane = context.pane.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let second_pane = context.pane.unwrap();
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "second"]))
+            .unwrap();
+        let second_window = context.window.unwrap();
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-panes",
+                        &[
+                            "-t",
+                            &first_window.to_string(),
+                            "-F",
+                            "#{pane_id}:#{pane_active}",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            format!("{first_pane}:0\n{second_pane}:1")
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-panes",
+                        &[
+                            "-t",
+                            &first_window.to_string(),
+                            "-F",
+                            "#{pane_id}#{?pane_active,(active),}",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            format!("{first_pane}\n{second_pane}(active)")
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("list-windows", &["-F", "#{window_id}:#{window_active}"],),
+                )
+                .unwrap()
+                .output,
+            format!("{first_window}:0\n{second_window}:1")
+        );
+    }
+
+    #[test]
+    fn pane_format_variables_are_empty_in_session_scope() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+
+        assert!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("list-sessions", &["-F", "#{pane_width}#{pane_active}"],),
+                )
+                .unwrap()
+                .output
+                .is_empty()
         );
     }
 

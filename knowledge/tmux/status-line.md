@@ -80,8 +80,9 @@ variable expands to nothing, which is tmux's own rule.
 
 Variables resolve against the client's current view (its attached session, that session's active
 window, that window's active pane): `session_name`, `session_windows`, `window_index`, `window_name`,
-`window_panes`, `window_flags`, `window_zoomed_flag`, `pane_index`, `pane_id`, `pane_title`,
-`pane_synchronized`, `host`, `host_short`.
+`window_panes`, `window_width`, `window_height`, `window_active`, `window_flags`,
+`window_zoomed_flag`, `pane_index`, `pane_id`, `pane_title`, `pane_width`, `pane_height`,
+`pane_active`, `pane_synchronized`, `host`, `host_short`.
 
 Two decisions:
 

@@ -1728,6 +1728,7 @@ impl Shared {
                         formats: formats.clone(),
                         context: status_context(
                             &snapshot,
+                            &inner.engine,
                             attached,
                             client_focused_window_for_attachment(&inner, client),
                         ),
@@ -1945,6 +1946,7 @@ impl Shared {
             formats: inner.engine.status_formats().clone(),
             context: status_context(
                 &inner.engine.state.snapshot(),
+                &inner.engine,
                 attached,
                 client_focused_window_for_attachment(&inner, client),
             ),
@@ -17889,7 +17891,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("first client focuses logs");
 
         {
-            let inner = shared.inner.lock();
+            let mut inner = shared.inner.lock();
             let state = &inner.engine.state.sessions[&session];
             assert_eq!(state.active_window, second_window);
             assert_eq!(
@@ -17917,20 +17919,36 @@ bind - split-window -v -c "#{pane_current_path}"
                 .expect("first client now views the logs terminal")
                 .1;
             assert_eq!((second_resize.columns, second_resize.rows), (160, 50));
+            inner.engine.set_pane_geometry(first_pane, 120, 40);
+            inner.engine.set_pane_geometry(second_pane, 160, 50);
 
             let snapshot = inner.engine.state.snapshot();
             let first_status = status_context(
                 &snapshot,
+                &inner.engine,
                 Some(session),
                 client_focused_window_for_attachment(&inner, first_client),
             );
             let second_status = status_context(
                 &snapshot,
+                &inner.engine,
                 Some(session),
                 client_focused_window_for_attachment(&inner, second_client),
             );
             assert_eq!(first_status.window_name, "logs");
             assert_eq!(second_status.window_name, "agent");
+            assert_eq!(first_status.pane_width, Some(160));
+            assert_eq!(first_status.pane_height, Some(50));
+            assert_eq!(first_status.window_width, Some(160));
+            assert_eq!(first_status.window_height, Some(50));
+            assert_eq!(first_status.pane_active, Some(true));
+            assert_eq!(first_status.window_active, Some(true));
+            assert_eq!(second_status.pane_width, Some(120));
+            assert_eq!(second_status.pane_height, Some(40));
+            assert_eq!(second_status.window_width, Some(120));
+            assert_eq!(second_status.window_height, Some(40));
+            assert_eq!(second_status.pane_active, Some(true));
+            assert_eq!(second_status.window_active, Some(false));
         }
 
         let first_messages = take_reliable_messages(&first_mailbox);

@@ -480,6 +480,7 @@ impl MuxEngine {
             "set-window-option" => self.set_option(context, &command.args, true)?,
             "source-file" => Self::source_file(&command.args)?,
             "reload-config" => {
+                let _ = parse_command_options("reload-config", &command.args)?;
                 if command.args.is_empty() {
                     Execution::effect(MuxEffect::ReloadConfig)
                 } else {
@@ -488,7 +489,10 @@ impl MuxEngine {
                     ));
                 }
             }
-            "kill-server" => Execution::effect(MuxEffect::KillServer),
+            "kill-server" => {
+                let _ = parse_command_options("kill-server", &command.args)?;
+                Execution::effect(MuxEffect::KillServer)
+            }
             _ => return Err(ServerError::UnsupportedCommand(command.name.clone())),
         };
 
@@ -514,21 +518,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("new-session", args)?;
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-A" | "-d" | "-D"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "new-session {flag}"
-            )));
-        }
-        if options.value("-t").is_some() {
-            return Err(ServerError::UnsupportedCommand(
-                "new-session -t (session groups)".to_owned(),
-            ));
-        }
-        reject_unsupported_values("new-session", &options, &["-e", "-F", "-f", "-x", "-y"])?;
         let command = shell_command_positional(&positional);
         let detached = options.has("-d");
         if options.has("-A") {
@@ -596,7 +585,6 @@ impl MuxEngine {
 
     fn list_sessions(&self, args: &[String]) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-sessions", args)?;
-        reject_flags("list-sessions", &options)?;
         reject_positionals("list-sessions", &positional)?;
         if let Some(format) = options.value("-F") {
             let output = self
@@ -641,7 +629,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("rename-session", args)?;
-        reject_flags("rename-session", &options)?;
         let name = exactly_one_argument("rename-session", &positional)?;
         let session = self
             .state
@@ -656,15 +643,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-session", args)?;
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-a" | "-C"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "kill-session {flag}"
-            )));
-        }
         reject_positionals("kill-session", &positional)?;
         let session = self
             .state
@@ -708,11 +686,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("attach-session", args)?;
-        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-d") {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "attach-session {flag}"
-            )));
-        }
         reject_positionals("attach-session", &positional)?;
         let detach_others = options.has("-d");
         let session = self
@@ -737,11 +710,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("detach-client", args)?;
-        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-a") {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "detach-client {flag}"
-            )));
-        }
         reject_positionals("detach-client", &positional)?;
         let scope = match options.value("-s") {
             Some(target) => {
@@ -759,7 +727,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("has-session", args)?;
-        reject_flags("has-session", &options)?;
         reject_positionals("has-session", &positional)?;
         self.state
             .resolve_session(options.value("-t"), context.session)?;
@@ -773,14 +740,6 @@ impl MuxEngine {
         kind: PaneKind,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("new-window", args)?;
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-a" | "-d" | "-k" | "-S"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!("new-window {flag}")));
-        }
-        reject_unsupported_values("new-window", &options, &["-e", "-F"])?;
         let command = shell_command_positional(&positional);
         self.new_window_with_options(context, &options, kind, command)
     }
@@ -870,7 +829,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-windows", args)?;
-        reject_flags("list-windows", &options)?;
         reject_positionals("list-windows", &positional)?;
         let session_id = self
             .state
@@ -930,7 +888,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("rename-window", args)?;
-        reject_flags("rename-window", &options)?;
         let name = exactly_one_argument("rename-window", &positional)?;
         let window =
             self.state
@@ -945,15 +902,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("select-window", args)?;
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-l" | "-n" | "-p" | "-T"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "select-window {flag}"
-            )));
-        }
         let target = options
             .value("-t")
             .or_else(|| positional.first().map(String::as_str));
@@ -1040,9 +988,6 @@ impl MuxEngine {
             "previous-window"
         };
         let (options, positional) = parse_command_options(command, args)?;
-        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-a") {
-            return Err(ServerError::UnsupportedCommand(format!("{command} {flag}")));
-        }
         reject_positionals(command, &positional)?;
         let session = self
             .state
@@ -1119,15 +1064,10 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-window", args)?;
-        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-a") {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "kill-window {flag}"
-            )));
-        }
         reject_positionals("kill-window", &positional)?;
-        let window = self
-            .state
-            .resolve_window(options.value("-t"), context.session, context.window)?;
+        let window =
+            self.state
+                .resolve_window(options.value("-t"), context.session, context.window)?;
         let targets = if options.has("-a") {
             let session = self
                 .state
@@ -1161,16 +1101,6 @@ impl MuxEngine {
         kind: Option<PaneKind>,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("split-window", args)?;
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-b" | "-d" | "-f" | "-h" | "-v"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "split-window {flag}"
-            )));
-        }
-        reject_unsupported_values("split-window", &options, &["-e"])?;
         let command = shell_command_positional(&positional);
         self.split_window_with_options(
             context,
@@ -1309,24 +1239,6 @@ impl MuxEngine {
                 "break-pane does not accept positional arguments".to_owned(),
             ));
         }
-        if let Some((option, _)) = options
-            .values
-            .iter()
-            .find(|(option, _)| !matches!(option.as_str(), "-n" | "-s" | "-t"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "break-pane {option}"
-            )));
-        }
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-d"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "break-pane {flag}"
-            )));
-        }
         let source = self
             .state
             .resolve_pane(options.value("-s"), context.window, context.pane)?;
@@ -1387,22 +1299,6 @@ impl MuxEngine {
             return Err(ServerError::InvalidCommand(format!(
                 "{command} does not accept positional arguments"
             )));
-        }
-        if let Some((option, _)) = options
-            .values
-            .iter()
-            .find(|(option, _)| !matches!(option.as_str(), "-p" | "-s" | "-t"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "{command} {option}"
-            )));
-        }
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-b" | "-d" | "-f" | "-h" | "-v"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!("{command} {flag}")));
         }
         let source = self
             .state
@@ -1713,15 +1609,6 @@ impl MuxEngine {
                 "select-pane accepts at most one target".to_owned(),
             ));
         }
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-D" | "-L" | "-R" | "-U" | "-Z" | "-l"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "select-pane {flag}"
-            )));
-        }
         let target = options
             .value("-t")
             .or_else(|| positional.first().map(String::as_str));
@@ -1786,12 +1673,7 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("last-pane", args)?;
-        if !positional.is_empty()
-            || options
-                .flags
-                .iter()
-                .any(|flag| !matches!(flag.as_str(), "-Z"))
-        {
+        if !positional.is_empty() {
             return Err(ServerError::InvalidCommand(
                 "last-pane supports only -t and -Z".to_owned(),
             ));
@@ -1811,12 +1693,7 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("swap-pane", args)?;
-        if !positional.is_empty()
-            || options
-                .flags
-                .iter()
-                .any(|flag| !matches!(flag.as_str(), "-d" | "-D" | "-U" | "-Z"))
-        {
+        if !positional.is_empty() {
             return Err(ServerError::InvalidCommand(
                 "swap-pane supports -d, -D, -U, -Z, -s, and -t".to_owned(),
             ));
@@ -1878,7 +1755,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-panes", args)?;
-        reject_flags("list-panes", &options)?;
         reject_positionals("list-panes", &positional)?;
         let window_id =
             self.state
@@ -1938,15 +1814,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("resize-pane", args)?;
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-D" | "-L" | "-R" | "-U" | "-Z"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "resize-pane {flag}"
-            )));
-        }
         let pane = self
             .state
             .resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -2036,18 +1903,6 @@ impl MuxEngine {
         command: &str,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options(command, args)?;
-        let allowed_flags: &[&str] = if command == "select-layout" {
-            &["-E", "-n", "-o", "-p"]
-        } else {
-            &[]
-        };
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !allowed_flags.contains(&flag.as_str()))
-        {
-            return Err(ServerError::UnsupportedCommand(format!("{command} {flag}")));
-        }
         if positional.len() > usize::from(command == "select-layout") {
             return Err(ServerError::InvalidCommand(format!(
                 "{command} accepts {} layout names",
@@ -2105,15 +1960,6 @@ impl MuxEngine {
                 "rotate-window does not accept positional arguments".to_owned(),
             ));
         }
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-D" | "-U" | "-Z"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "rotate-window {flag}"
-            )));
-        }
         let window =
             self.state
                 .resolve_window(options.value("-t"), context.session, context.window)?;
@@ -2131,9 +1977,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-pane", args)?;
-        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-a") {
-            return Err(ServerError::UnsupportedCommand(format!("kill-pane {flag}")));
-        }
         reject_positionals("kill-pane", &positional)?;
         let pane = self
             .state
@@ -2165,13 +2008,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("send-keys", args)?;
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-C" | "-H" | "-P" | "-X" | "-l" | "-o"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!("send-keys {flag}")));
-        }
         let repeat = repeat_count("send-keys", &options)?;
         let pane = self
             .state
@@ -2240,13 +2076,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("copy-mode", args)?;
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-d" | "-u"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!("copy-mode {flag}")));
-        }
         reject_positionals("copy-mode", &positional)?;
         let pane = self
             .state
@@ -2300,18 +2129,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("command-prompt", args)?;
-        for flag in &options.flags {
-            if flag != "-b" {
-                return Err(ServerError::UnsupportedCommand(format!(
-                    "command-prompt {flag}"
-                )));
-            }
-        }
-        if options.value("-t").is_some() || options.value("-T").is_some() {
-            return Err(ServerError::UnsupportedCommand(
-                "command-prompt target or prompt type".to_owned(),
-            ));
-        }
         if positional.len() > 1 {
             return Err(ServerError::InvalidCommand(
                 "command-prompt accepts at most one template".to_owned(),
@@ -2408,15 +2225,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("choose-tree", args)?;
-        let unsupported = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-s" | "-w" | "-Z"));
-        if let Some(flag) = unsupported {
-            return Err(ServerError::InvalidCommand(format!(
-                "choose-tree does not support {flag}"
-            )));
-        }
         if options.has("-s") && options.has("-w") {
             return Err(ServerError::InvalidCommand(
                 "choose-tree accepts only one of -s or -w".to_owned(),
@@ -2462,11 +2270,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("choose-buffer", args)?;
-        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-Z") {
-            return Err(ServerError::InvalidCommand(format!(
-                "choose-buffer does not support {flag}"
-            )));
-        }
         if !positional.is_empty() {
             return Err(ServerError::InvalidCommand(
                 "choose-buffer command templates are not supported yet".to_owned(),
@@ -2484,11 +2287,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("display-message", args)?;
-        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-p") {
-            return Err(ServerError::InvalidCommand(format!(
-                "display-message does not support {flag}"
-            )));
-        }
         let pane = match options.value("-t") {
             Some(target) => Some(self.state.resolve_pane(
                 Some(target),
@@ -2527,16 +2325,6 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("display-panes", args)?;
-        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-b") {
-            return Err(ServerError::InvalidCommand(format!(
-                "display-panes does not support {flag}"
-            )));
-        }
-        if options.value("-t").is_some() {
-            return Err(ServerError::InvalidCommand(
-                "display-panes target clients are not supported yet".to_owned(),
-            ));
-        }
         if !positional.is_empty() {
             return Err(ServerError::InvalidCommand(
                 "display-panes command templates are not supported yet".to_owned(),
@@ -2594,9 +2382,6 @@ impl MuxEngine {
 
     fn list_keys(&self, args: &[String]) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-keys", args)?;
-        if let Some(flag) = options.flags.first() {
-            return Err(ServerError::UnsupportedCommand(format!("list-keys {flag}")));
-        }
         if let Some(argument) = positional.first() {
             return Err(ServerError::UnsupportedCommand(format!(
                 "list-keys {argument} (key filter)"
@@ -3268,11 +3053,6 @@ impl MuxEngine {
 
     fn source_file(args: &[String]) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("source-file", args)?;
-        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-q") {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "source-file {flag}"
-            )));
-        }
         if positional.is_empty() {
             return Err(ServerError::InvalidCommand(
                 "source-file needs a path".to_owned(),
@@ -3483,7 +3263,23 @@ fn parse_command_options(
         .iter()
         .filter_map(|option| option.attached_value.then_some(option.name))
         .collect::<Vec<_>>();
-    parse_options(args, &value_options, &attached_options)
+    let (options, positional) = parse_options(args, &value_options, &attached_options)?;
+    for name in options
+        .flags
+        .iter()
+        .map(String::as_str)
+        .chain(options.values.iter().map(|(name, _)| name.as_str()))
+    {
+        let Some(option) = spec.option(name) else {
+            return Err(ServerError::InvalidCommand(format!(
+                "{command} does not support {name}"
+            )));
+        };
+        if option.unsupported {
+            return Err(ServerError::UnsupportedCommand(format!("{command} {name}")));
+        }
+    }
+    Ok((options, positional))
 }
 
 fn parse_options(
@@ -3542,16 +3338,6 @@ fn required_arg<'a>(
         .ok_or_else(|| ServerError::InvalidCommand(format!("{option} requires an argument")))
 }
 
-fn reject_flags(command: &str, options: &Options) -> Result<(), ServerError> {
-    if let Some(flag) = options.flags.first() {
-        Err(ServerError::InvalidCommand(format!(
-            "{command} does not support {flag}"
-        )))
-    } else {
-        Ok(())
-    }
-}
-
 fn reject_positionals(command: &str, positional: &[String]) -> Result<(), ServerError> {
     if let Some(argument) = positional.first() {
         Err(ServerError::InvalidCommand(format!(
@@ -3562,25 +3348,10 @@ fn reject_positionals(command: &str, positional: &[String]) -> Result<(), Server
     }
 }
 
-fn reject_unsupported_values(
-    command: &str,
-    options: &Options,
-    unsupported: &[&str],
-) -> Result<(), ServerError> {
-    for option in unsupported {
-        if options.value(option).is_some() {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "{command} {option}"
-            )));
-        }
-    }
-    Ok(())
-}
-
 fn parse_resize_adjustment(value: &str) -> Result<i32, ServerError> {
-    value.parse::<i32>().map_err(|_| {
-        ServerError::InvalidCommand(format!("invalid resize adjustment: {value}"))
-    })
+    value
+        .parse::<i32>()
+        .map_err(|_| ServerError::InvalidCommand(format!("invalid resize adjustment: {value}")))
 }
 
 fn exactly_one_argument<'a>(
@@ -6564,7 +6335,8 @@ mod tests {
                 &mut context,
                 &command("command-prompt", &["-F", "unsupported"]),
             ),
-            Err(ServerError::UnsupportedCommand(_))
+            Err(ServerError::InvalidCommand(message))
+                if message == "command-prompt does not support -F"
         ));
     }
 
@@ -6670,7 +6442,6 @@ mod tests {
 
         for args in [
             vec!["-N"],
-            vec!["-t", "$1"],
             vec!["select-pane", "-t", "%%%"],
             vec!["-d", "forever"],
         ] {
@@ -6679,6 +6450,14 @@ mod tests {
                 Err(ServerError::InvalidCommand(_))
             ));
         }
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("display-panes", &["-t", "$1"]),
+            ),
+            Err(ServerError::UnsupportedCommand(message))
+                if message == "display-panes -t"
+        ));
     }
 
     #[test]
@@ -7083,7 +6862,8 @@ mod tests {
         ));
         assert!(matches!(
             engine.execute(&mut context, &command("break-pane", &["-W"])),
-            Err(ServerError::UnsupportedCommand(_))
+            Err(ServerError::InvalidCommand(message))
+                if message == "break-pane does not support -W"
         ));
     }
 
@@ -7183,7 +6963,8 @@ mod tests {
         ));
         assert!(matches!(
             engine.execute(&mut context, &command("next-layout", &["-n"])),
-            Err(ServerError::UnsupportedCommand(_))
+            Err(ServerError::InvalidCommand(message))
+                if message == "next-layout does not support -n"
         ));
     }
 
@@ -7257,11 +7038,13 @@ mod tests {
 
         assert!(matches!(
             engine.execute(&mut context, &command("rotate-window", &["-d"])),
-            Err(ServerError::UnsupportedCommand(_))
+            Err(ServerError::InvalidCommand(message))
+                if message == "rotate-window does not support -d"
         ));
         assert!(matches!(
             engine.execute(&mut context, &command("select-pane", &["-m"])),
-            Err(ServerError::UnsupportedCommand(_))
+            Err(ServerError::InvalidCommand(message))
+                if message == "select-pane does not support -m"
         ));
     }
 }

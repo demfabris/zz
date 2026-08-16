@@ -27,6 +27,8 @@ pub struct CommandOptionSpec {
     /// it is attached (`-R10`); a bare `-R` stays a flag and never consumes the
     /// next argument.
     pub attached_value: bool,
+    /// Whether the option is catalogued only so its value can be rejected.
+    pub unsupported: bool,
 }
 
 impl CommandOptionSpec {
@@ -37,6 +39,7 @@ impl CommandOptionSpec {
             description,
             completable: true,
             attached_value: false,
+            unsupported: false,
         }
     }
 
@@ -47,6 +50,7 @@ impl CommandOptionSpec {
             description,
             completable: true,
             attached_value: true,
+            unsupported: false,
         }
     }
 
@@ -57,6 +61,7 @@ impl CommandOptionSpec {
             description,
             completable: true,
             attached_value: false,
+            unsupported: false,
         }
     }
 
@@ -67,6 +72,7 @@ impl CommandOptionSpec {
             description: "unsupported tmux option",
             completable: false,
             attached_value: false,
+            unsupported: true,
         }
     }
 }
@@ -333,6 +339,9 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-p", FreeForm, "browser profile"),
+            CommandOptionSpec::flag("-b", "new pane goes left or above"),
+            CommandOptionSpec::flag("-d", "keep focus on the current pane"),
+            CommandOptionSpec::flag("-f", "span the full window"),
             CommandOptionSpec::flag("-h", "horizontal split"),
             CommandOptionSpec::flag("-v", "vertical split"),
         ],
@@ -732,7 +741,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "clear-history",
         aliases: &["clearhist"],
         description: "Clear terminal history",
-        options: &[CommandOptionSpec::value("-t", Pane, "target pane")],
+        options: &[
+            CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::flag("-H", "also clear hyperlinks"),
+        ],
         positionals: &[],
         variadic: None,
     },
@@ -755,6 +767,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "Remove a key binding",
         options: &[
             CommandOptionSpec::value("-T", KeyTable, "key table"),
+            CommandOptionSpec::flag("-a", "remove all key bindings"),
             CommandOptionSpec::flag("-n", "root table"),
         ],
         positionals: &[FreeForm],
@@ -795,8 +808,11 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-a", "append"),
             CommandOptionSpec::flag("-g", "global scope"),
             CommandOptionSpec::flag("-o", "set only if unset"),
+            CommandOptionSpec::flag("-p", "pane scope"),
             CommandOptionSpec::flag("-q", "quiet"),
             CommandOptionSpec::flag("-u", "unset"),
+            CommandOptionSpec::flag("-U", "unset pane overrides"),
+            CommandOptionSpec::flag("-w", "window scope"),
         ],
         positionals: &[SetOption, Boolean],
         variadic: None,

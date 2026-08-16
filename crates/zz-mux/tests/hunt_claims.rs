@@ -482,7 +482,7 @@ fn new_session_dash_t_is_rejected_instead_of_leaking_into_the_pane_command() {
         .execute(&mut context, &command("new-session", &["-t", "name"]))
         .unwrap_err();
     assert!(
-        matches!(error, ServerError::UnsupportedCommand(message) if message == "new-session -t (session groups)")
+        matches!(error, ServerError::UnsupportedCommand(message) if message == "new-session -t")
     );
     assert!(session_names(&engine).is_empty());
 }
@@ -526,19 +526,28 @@ fn kill_session_dash_c_clears_alerts_and_kills_nothing() {
     assert!(engine.state.set_pane_bell(pane, true));
 
     engine
-        .execute(&mut context, &command("kill-session", &["-C", "-t", "work"]))
+        .execute(
+            &mut context,
+            &command("kill-session", &["-C", "-t", "work"]),
+        )
         .unwrap();
     assert_eq!(session_names(&engine), ["work"]);
-    assert!(!engine.state.windows.values().any(|window| window
-        .panes
-        .values()
-        .any(|pane| pane.bell)));
+    assert!(
+        !engine
+            .state
+            .windows
+            .values()
+            .any(|window| window.panes.values().any(|pane| pane.bell))
+    );
 
     let error = engine
-        .execute(&mut context, &command("kill-session", &["-f", "-t", "work"]))
+        .execute(
+            &mut context,
+            &command("kill-session", &["-f", "-t", "work"]),
+        )
         .unwrap_err();
-    assert!(matches!(error, ServerError::UnsupportedCommand(ref message)
-        if message == "kill-session -f"));
+    assert!(matches!(error, ServerError::InvalidCommand(ref message)
+        if message == "kill-session does not support -f"));
 }
 
 #[test]
@@ -785,8 +794,8 @@ fn send_keys_reports_the_flags_it_cannot_honor() {
             .execute(&mut context, &command("send-keys", &[flag, "x"]))
             .unwrap_err();
         assert!(
-            matches!(&error, ServerError::UnsupportedCommand(message)
-                if message == &format!("send-keys {flag}")),
+            matches!(&error, ServerError::InvalidCommand(message)
+                if message == &format!("send-keys does not support {flag}")),
             "{error:?}"
         );
     }
@@ -807,7 +816,8 @@ fn copy_mode_pages_down_with_dash_d_and_reports_dash_e() {
         .execute(&mut context, &command("copy-mode", &["-e"]))
         .unwrap_err();
     assert!(
-        matches!(&error, ServerError::UnsupportedCommand(message) if message == "copy-mode -e"),
+        matches!(&error, ServerError::InvalidCommand(message)
+            if message == "copy-mode does not support -e"),
         "{error:?}"
     );
 }
@@ -848,7 +858,8 @@ fn detach_client_dash_a_leaves_the_caller_attached() {
         .execute(&mut context, &command("detach-client", &["-t", "0"]))
         .unwrap_err();
     assert!(
-        matches!(&error, ServerError::UnsupportedCommand(message) if message == "detach-client -t"),
+        matches!(&error, ServerError::InvalidCommand(message)
+            if message == "detach-client does not support -t"),
         "{error:?}"
     );
 }
@@ -972,8 +983,8 @@ fn attach_session_reports_the_client_flags_it_cannot_honor() {
             )
             .unwrap_err();
         assert!(
-            matches!(&error, ServerError::UnsupportedCommand(message)
-                if message == &format!("attach-session {flag}")),
+            matches!(&error, ServerError::InvalidCommand(message)
+                if message == &format!("attach-session does not support {flag}")),
             "{error:?}"
         );
     }
@@ -994,8 +1005,8 @@ fn list_keys_rejects_the_selectors_it_does_not_implement() {
             .execute(&mut context, &command("list-keys", &[flag]))
             .unwrap_err();
         assert!(
-            matches!(&error, ServerError::UnsupportedCommand(message)
-                if message == &format!("list-keys {flag}")),
+            matches!(&error, ServerError::InvalidCommand(message)
+                if message == &format!("list-keys does not support {flag}")),
             "{error:?}"
         );
     }
@@ -1055,7 +1066,8 @@ fn source_file_keeps_every_path_in_order() {
         .execute(&mut context, &command("source-file", &["-v", "loud"]))
         .unwrap_err();
     assert!(
-        matches!(&error, ServerError::UnsupportedCommand(message) if message == "source-file -v"),
+        matches!(&error, ServerError::InvalidCommand(message)
+            if message == "source-file does not support -v"),
         "{error:?}"
     );
 }
@@ -1146,7 +1158,9 @@ fn resize_pane_takes_attached_adjustments_and_rejects_unknown_flags() {
     assert!(split_ratio(&engine) < before);
 
     let held = split_ratio(&engine);
-    engine.execute(&mut context, &command("resize-pane", &[])).unwrap();
+    engine
+        .execute(&mut context, &command("resize-pane", &[]))
+        .unwrap();
     assert_eq!(split_ratio(&engine), held);
     engine
         .execute(&mut context, &command("resize-pane", &["7"]))
@@ -1156,8 +1170,8 @@ fn resize_pane_takes_attached_adjustments_and_rejects_unknown_flags() {
     let error = engine
         .execute(&mut context, &command("resize-pane", &["-M"]))
         .unwrap_err();
-    assert!(matches!(&error, ServerError::UnsupportedCommand(message)
-        if message == "resize-pane -M"));
+    assert!(matches!(&error, ServerError::InvalidCommand(message)
+        if message == "resize-pane does not support -M"));
     let error = engine
         .execute(&mut context, &command("resize-pane", &["-R", "10.5"]))
         .unwrap_err();
@@ -1241,8 +1255,14 @@ fn window_steps_error_instead_of_landing_in_place() {
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
     for name in ["next-window", "previous-window"] {
-        let error = engine.execute(&mut context, &command(name, &[])).unwrap_err();
-        let direction = if name == "next-window" { "next" } else { "previous" };
+        let error = engine
+            .execute(&mut context, &command(name, &[]))
+            .unwrap_err();
+        let direction = if name == "next-window" {
+            "next"
+        } else {
+            "previous"
+        };
         assert!(
             matches!(&error, ServerError::InvalidCommand(message)
                 if message == &format!("no {direction} window")),
@@ -1282,8 +1302,8 @@ fn creation_commands_refuse_the_valued_options_they_cannot_honor() {
     let error = engine
         .execute(&mut context, &command("split-window", &["-Z"]))
         .unwrap_err();
-    assert!(matches!(&error, ServerError::UnsupportedCommand(message)
-        if message == "split-window -Z"));
+    assert!(matches!(&error, ServerError::InvalidCommand(message)
+        if message == "split-window does not support -Z"));
     assert_eq!(window_count(&engine, "work"), 1);
 }
 

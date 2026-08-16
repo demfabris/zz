@@ -6,8 +6,9 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     sync::{Arc, OnceLock},
-    time::{Duration, Instant},
 };
+
+use instant::{Duration, Instant};
 
 use crate::{
     ActiveTheme as _, CHROME_GAP, Colorize as _, Icon, IconName, Sizable as _, WindowExt as _,

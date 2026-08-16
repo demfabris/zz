@@ -5,9 +5,9 @@ use super::{HighlightTheme, LanguageRegistry};
 use anyhow::{Context, Result, anyhow};
 use gpui::{HighlightStyle, SharedString};
 
+use instant::{Duration, Instant};
 use ropey::{ChunkCursor, Rope};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 use std::{
     collections::{BTreeSet, HashMap},
     ops::{ControlFlow, Range},

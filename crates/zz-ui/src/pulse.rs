@@ -11,12 +11,10 @@
 //! One epoch backs every lease, so indicators that mount at different times
 //! stay phase-locked instead of each running its own animation timeline.
 
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use std::collections::HashMap;
 
 use gpui::{App, EntityId, Global};
+use instant::{Duration, Instant};
 
 /// Tick interval of the shared clock, ~30fps.
 const TICK: Duration = Duration::from_millis(33);

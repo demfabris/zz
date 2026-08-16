@@ -39,6 +39,10 @@ ios-build:
     @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-build requires macOS" >&2; exit 2; fi
     @scripts/ios-sim.sh --build-only
 
+ios-test:
+    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-test requires macOS" >&2; exit 2; fi
+    @scripts/ios-sim.sh --test
+
 ios-device device="iphone":
     @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-device requires macOS" >&2; exit 2; fi
     @scripts/ios-device.sh {{ device }}

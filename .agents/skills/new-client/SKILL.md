@@ -30,24 +30,25 @@ territory. The knowledge bundle is the map; source is ground truth.
 ## Pick your integration route
 
 1. **C or any non-Rust toolkit (GTK, Qt, Swift, …)** — link `zz-client-ffi`
-   (staticlib/cdylib) against `include/zz-client.h`. The current ABI is a
-   text-terminal proof surface, and `crates/zz-client-ffi/tests/smoke.c` is its
-   working reference: connect, attach, list panes, resize, read rows, type,
-   free, and reconnect. Main-loop
+   (staticlib/cdylib) against `include/zz-client.h`. The ABI exposes typed mux
+   snapshots, caller-owned styled terminal viewports, raw key/text input,
+   focus, scrolling, resize, damage, appearance, and disconnect events;
+   `crates/zz-client-ffi/tests/smoke.c` is its working reference. Main-loop
    integration is fd-based by design: poll `zz_client_event_fd`, then drain
    `zz_client_next_event` until false — plugs into GSource, QSocketNotifier,
-   or DispatchSource with no cross-thread callbacks. A full graphical skin
-   still needs ABI exports for raw keys, styles/graphemes, generation counters,
-   catalog/key-table access, and chrome action events; do not recreate those
-   contracts in toolkit code.
+   or DispatchSource with no cross-thread callbacks. Catalog/key-table access,
+   chrome action events, history, Kitty images, and non-terminal viewport
+   models remain outside the ABI; do not recreate those contracts in toolkit
+   code.
 2. **Rust surface** — depend on `zz-client` + `zz-daemon` (client half) +
    `zz-protocol` and drive `ClientCore` yourself. `crates/zz-tui` is the
    exemplar: reader thread reduces into `Arc<Mutex<ClientCore>>`, the main
    loop reads cached copies. Its dependency list is also the fence — if your
    client needs a dep the TUI doesn't have, question it.
-3. **gpui-based client on a new platform** — don't write a client at all;
-   recompile `crates/zz` through the `zz::engine` facade with an `AppProfile`,
-   the way `crates/zz-ios` does.
+3. **gpui-based client on a new platform** — reuse the desktop `crates/zz`
+   engine only when the platform can support the full desktop surface. The old
+   GPUI iOS crates were deleted; native Apple clients belong on
+   `zz-client-ffi`, as demonstrated by `clients/ios`.
 
 ## The shell contract for ClientCore
 

@@ -160,23 +160,18 @@ is not chrome and not part of the contract.
 
 ## Pillar 6 - zz-client-ffi target and shipped proof
 
-The shipped proof is a thin `#[no_mangle]` shim with a hand-maintained header. It covers connection,
-event wake/drain, attach, text, command execution, resize, pane IDs, basic cells, and decoded row
-text. The C smoke test compiles and links that contract, creates a session and pane through it, then
-frees and reconnects in one process.
-The fuller target below has not shipped:
+The shipped `#[no_mangle]` shim and hand-maintained header now cover connection, pollable event
+wake/drain, attach, typed mux snapshots, caller-owned styled terminal viewports, raw key and text
+input, command execution, resize, focus, scrolling, damage, appearance, and disconnect events. The
+viewport is the render contract: a flat cell plane plus style table, grapheme arena, cursor, colors,
+and generation counters remain alive until the caller releases the handle. The reader stays inside
+the core and toolkits integrate its wake fd with GSource, `QSocketNotifier`, or DispatchSource; Rust
+threads never call toolkit code.
 
-- **Render contract**: the packed viewport *is* the FFI render type — flat cell
-  buffer + style table + grapheme arena + generation counters, handed out as
-  `const zz_viewport_t*` snapshots. Do not invent a second representation.
-- **Main-loop integration**: the core owns its reader thread and exposes an
-  eventfd/pipe fd plus `drain_events()` — plugs into GSource, `QSocketNotifier`,
-  and DispatchSource without cross-thread callback footguns. No callbacks from
-  Rust threads into toolkit land.
-- **Exports**: `zz_commands()` (static catalog), `zz_key_tables()` (live,
-  refreshed on `KeyTablesChanged`), `zz_send_key()` (raw forwarding),
-  `zz_viewport()` / `zz_send_text()` / resize / command execution, and an event
-  queue yielding `ZZ_EVENT_ACTION { action }` for resolved chrome actions.
+The C smoke compiles and links the contract, creates sessions and panes, renders styled content,
+types through the raw-key path, kills the attached session, reattaches a survivor and recovers its
+viewport, then frees and reconnects in one process. Catalog and live key-table access, resolved
+chrome action events, history, Kitty images, and non-terminal viewport models remain outside the ABI.
 
 # What stays out of the core
 

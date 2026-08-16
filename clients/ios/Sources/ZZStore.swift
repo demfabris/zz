@@ -9,14 +9,15 @@ final class ZZStore: ObservableObject {
     @Published private(set) var terminalFontSizeSteps: [UInt64: Int] = [:]
     @Published var selectedSessionID: UInt64?
     @Published var selectedPaneID: UInt64?
-    @Published private(set) var keyboardRevision: UInt64 = 0
+    @Published private(set) var terminalInput = TerminalInputState()
+    @Published private(set) var sceneIsActive = true
     @Published private(set) var terminalModifiers: UInt8 = 0
     @Published private(set) var actionError: String?
     @Published private(set) var isCreatingSession = false
 
     private var client: OpaquePointer?
     private var eventSource: DispatchSourceRead?
-    private var terminalLayouts: [UInt64: TerminalLayout] = [:]
+    private var terminalGeometries: [UInt64: TerminalGeometryState] = [:]
     private var pendingSessionIDs: Set<UInt64>?
     private var attachedSessionID: UInt64?
     private var pendingAttachmentSessionID: UInt64?
@@ -25,13 +26,6 @@ final class ZZStore: ObservableObject {
 
     private static let controlModifier: UInt8 = 1 << 1
     private static let altModifier: UInt8 = 1 << 2
-
-    private struct TerminalLayout: Equatable {
-        let columns: UInt16
-        let rows: UInt16
-        let cellWidth: UInt32
-        let cellHeight: UInt32
-    }
 
     var selectedSession: ZZSession? {
         guard let selectedSessionID else {
@@ -89,11 +83,36 @@ final class ZZStore: ObservableObject {
     }
 
     func retry() {
-        stop()
+        disconnect(preservingTerminalState: true)
         start()
     }
 
     func stop() {
+        disconnect(preservingTerminalState: false)
+    }
+
+    func setSceneActive(_ active: Bool) {
+        guard sceneIsActive != active else {
+            if active {
+                start()
+            }
+            return
+        }
+        sceneIsActive = active
+        terminalModifiers = 0
+        if active {
+            start()
+            if let pane = terminalInput.owner.pane {
+                focus(pane: pane, focused: true)
+                terminalInput.acquire(pane)
+            }
+        } else if let pane = terminalInput.owner.pane {
+            focus(pane: pane, focused: false)
+            restoreStableGeometryAfterTransientInput(for: pane)
+        }
+    }
+
+    private func disconnect(preservingTerminalState: Bool) {
         sessionCreationTimeout?.cancel()
         sessionCreationTimeout = nil
         pendingSessionIDs = nil
@@ -109,10 +128,15 @@ final class ZZStore: ObservableObject {
         client = nil
         sessions = []
         frames = [:]
-        terminalFontSizeSteps = [:]
-        terminalLayouts = [:]
+        if preservingTerminalState {
+            invalidateSentGeometries()
+        } else {
+            terminalFontSizeSteps = [:]
+            terminalGeometries = [:]
+        }
         selectedSessionID = nil
         selectedPaneID = nil
+        terminalInput = TerminalInputState()
         terminalModifiers = 0
         connectionState = .idle
     }
@@ -125,9 +149,7 @@ final class ZZStore: ObservableObject {
             selectedSessionID = session.id
             return
         }
-        if let pane = selectedPane, pane.kind == .terminal {
-            focus(pane: pane.id, focused: false)
-        }
+        releaseTerminalInput()
         let previous = selectedSessionID
         let previousPendingAttachment = pendingAttachmentSessionID
         selectedSessionID = session.id
@@ -155,14 +177,12 @@ final class ZZStore: ObservableObject {
     }
 
     func openPane(_ pane: ZZPane) {
-        if let current = selectedPane, current.id != pane.id, current.kind == .terminal {
-            focus(pane: current.id, focused: false)
-        }
         terminalModifiers = 0
         selectedPaneID = pane.id
         if pane.kind == .terminal {
-            focus(pane: pane.id, focused: true)
-            requestKeyboard()
+            acquireTerminalInput(pane.id)
+        } else {
+            releaseTerminalInput()
         }
     }
 
@@ -179,15 +199,16 @@ final class ZZStore: ObservableObject {
     }
 
     func showOverview() {
-        if let pane = selectedPane, pane.kind == .terminal {
-            focus(pane: pane.id, focused: false)
-        }
+        releaseTerminalInput()
         selectedPaneID = nil
         terminalModifiers = 0
     }
 
-    func requestKeyboard() {
-        keyboardRevision &+= 1
+    func requestKeyboard(for pane: UInt64) {
+        guard selectedPaneID == pane, selectedPane?.kind == .terminal else {
+            return
+        }
+        acquireTerminalInput(pane)
     }
 
     func frame(for pane: UInt64) -> TerminalFrame? {
@@ -251,28 +272,16 @@ final class ZZStore: ObservableObject {
         )
     }
 
-    func resize(pane: UInt64, columns: Int, rows: Int, cell: CGSize) {
-        guard let client, columns > 0, rows > 0 else {
+    func resize(pane: UInt64, layout: TerminalLayout, stable: Bool) {
+        var geometry = terminalGeometries[pane] ?? TerminalGeometryState()
+        let shouldSend = geometry.observe(layout, stable: stable)
+        terminalGeometries[pane] = geometry
+        guard shouldSend, let client else {
             return
         }
-        let layout = TerminalLayout(
-            columns: UInt16(clamping: columns),
-            rows: UInt16(clamping: rows),
-            cellWidth: UInt32(clamping: Int(cell.width.rounded(.up))),
-            cellHeight: UInt32(clamping: Int(cell.height.rounded(.up)))
-        )
-        guard terminalLayouts[pane] != layout else {
-            return
-        }
-        if zz_client_resize_terminal(
-            client,
-            pane,
-            layout.columns,
-            layout.rows,
-            layout.cellWidth,
-            layout.cellHeight
-        ) {
-            terminalLayouts[pane] = layout
+        if send(layout, to: pane, client: client) {
+            geometry.markSent(layout)
+            terminalGeometries[pane] = geometry
         }
     }
 
@@ -349,7 +358,10 @@ final class ZZStore: ObservableObject {
         if selectedPaneID == pane {
             selectedPaneID = nil
         }
-        terminalLayouts.removeValue(forKey: pane)
+        if terminalInput.owner.owns(pane) {
+            releaseTerminalInput()
+        }
+        terminalGeometries.removeValue(forKey: pane)
         terminalFontSizeSteps.removeValue(forKey: pane)
         if !execute("kill-pane", args: ["-t", "%\(pane)"]) {
             actionError = "zz couldn’t close that pane."
@@ -368,6 +380,9 @@ final class ZZStore: ObservableObject {
     }
 
     private func requestAttachment(to session: ZZSession, client: OpaquePointer) -> Bool {
+        for pane in session.panes where pane.kind == .terminal {
+            terminalGeometries[pane.id]?.invalidateSent()
+        }
         pendingAttachmentSessionID = session.id
         guard session.name.withCString({ zz_client_attach(client, $0) }) else {
             pendingAttachmentSessionID = nil
@@ -419,10 +434,14 @@ final class ZZStore: ObservableObject {
                 refreshFrame(pane: event.pane, damage: damage)
             case ZZ_EVENT_PANE_REMOVED:
                 frames.removeValue(forKey: event.pane)
-                terminalLayouts.removeValue(forKey: event.pane)
+                terminalGeometries.removeValue(forKey: event.pane)
                 terminalFontSizeSteps.removeValue(forKey: event.pane)
+                if terminalInput.owner.owns(event.pane) {
+                    terminalInput.release()
+                }
                 refreshMux = true
             case ZZ_EVENT_DETACHED:
+                invalidateSentGeometries()
                 refreshMux = true
             case ZZ_EVENT_SERVER_STOPPING, ZZ_EVENT_DISCONNECTED:
                 connectionState = .disconnected
@@ -502,6 +521,9 @@ final class ZZStore: ObservableObject {
         if let selectedPaneID,
            !nextSessions.lazy.flatMap(\.panes).contains(where: { $0.id == selectedPaneID }) {
             self.selectedPaneID = nil
+            if terminalInput.owner.owns(selectedPaneID) {
+                terminalInput.release()
+            }
         }
 
         let attachedPanes = Set(
@@ -517,10 +539,11 @@ final class ZZStore: ObservableObject {
                 .filter { $0.kind == .terminal }
                 .map(\.id)
         )
-        terminalLayouts = terminalLayouts.filter { knownTerminalPanes.contains($0.key) }
+        terminalGeometries = terminalGeometries.filter { knownTerminalPanes.contains($0.key) }
         terminalFontSizeSteps = terminalFontSizeSteps.filter { knownTerminalPanes.contains($0.key) }
         frames = frames.filter { attachedPanes.contains($0.key) }
         for pane in attachedPanes {
+            restoreStableGeometry(for: pane, client: client)
             refreshFrame(pane: pane, damage: .full)
         }
         if attached == nil,
@@ -539,6 +562,63 @@ final class ZZStore: ObservableObject {
             return
         }
         frames[pane] = frame
+    }
+
+    private func acquireTerminalInput(_ pane: UInt64) {
+        if let previous = terminalInput.owner.pane, previous != pane {
+            focus(pane: previous, focused: false)
+            restoreStableGeometryAfterTransientInput(for: previous)
+        }
+        terminalInput.acquire(pane)
+        if sceneIsActive {
+            focus(pane: pane, focused: true)
+        }
+    }
+
+    private func releaseTerminalInput() {
+        guard let pane = terminalInput.owner.pane else {
+            return
+        }
+        focus(pane: pane, focused: false)
+        restoreStableGeometryAfterTransientInput(for: pane)
+        terminalInput.release()
+    }
+
+    private func send(_ layout: TerminalLayout, to pane: UInt64, client: OpaquePointer) -> Bool {
+        zz_client_resize_terminal(
+            client,
+            pane,
+            layout.columns,
+            layout.rows,
+            layout.cellWidth,
+            layout.cellHeight
+        )
+    }
+
+    private func restoreStableGeometry(for pane: UInt64, client: OpaquePointer) {
+        guard var geometry = terminalGeometries[pane],
+              let layout = geometry.reconnectLayout,
+              send(layout, to: pane, client: client) else {
+            return
+        }
+        geometry.markSent(layout)
+        terminalGeometries[pane] = geometry
+    }
+
+    private func restoreStableGeometryAfterTransientInput(for pane: UInt64) {
+        guard let client, var geometry = terminalGeometries[pane],
+              let layout = geometry.stableLayoutToRestore,
+              send(layout, to: pane, client: client) else {
+            return
+        }
+        geometry.markSent(layout)
+        terminalGeometries[pane] = geometry
+    }
+
+    private func invalidateSentGeometries() {
+        for pane in terminalGeometries.keys {
+            terminalGeometries[pane]?.invalidateSent()
+        }
     }
 
     private func string(_ bytes: zz_bytes) -> String {

@@ -44,7 +44,7 @@ Run `just` recipes from the repo root; `just --list` shows everything.
 | `just watch <platform>` | Rebuild and relaunch on source change |
 | `just build <platform>` | Release bundle into `dist/zz` (wraps `cargo xtask bundle-cef`) |
 | `just install mac` | Build and swap `/Applications/zz.app`; the daemon survives the swap |
-| `just ios` / `just ios-build` / `just ios-device [name]` | Native iPhone client on simulator / build only / physical device |
+| `just ios` / `just ios-build` / `just ios-test` / `just ios-device [name]` | Native iPhone client on simulator / build only / simulator tests / physical device |
 | `just forks` / `just fork-rebase <name>` | Carried-patch fork status / rebase |
 | `just site` | Docs site dev server with live reload |
 | `just showcase` / `showcase-setup` / `showcase-build[-release]` | wasm UI showcase dev loop / toolchain / assets |

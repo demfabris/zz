@@ -2,7 +2,7 @@
 type: Design Plan
 title: Native iPhone client
 description: Native SwiftUI and UIKit iPhone client over zz-client-ffi, with a Safari-style session rail, pane-card overview, fullscreen terminal, and local-daemon simulator workflow.
-status: First native slice implemented 2026-08-15; simulator and local daemon are live, while remote transport and a separate iPad client remain future work
+status: Native phone slice, terminal lifecycle hardening, simulator tests, and local-daemon workflow implemented 2026-08-15; remote transport and a separate iPad client remain future work
 tags:
 - ios
 - iphone
@@ -56,6 +56,12 @@ The center control has a second mode instead of installing a UIKit keyboard acce
 button replaces the pane selector with a horizontally scrollable row containing Escape, Tab, sticky
 Control and Alt, four arrows, and Prefix while the two circular controls stay in place. Hardware keys
 use the same raw-key FFI path. Text input remains Unicode and IME aware through `UIKeyInput`.
+
+The store owns one explicit input target: no pane or one terminal pane. A focus request advances an
+activation token, and UIKit reconciles first-responder state on the next main-actor turn only while
+the matching surface is mounted and the scene is active. Overview navigation, pane switching, and
+scene deactivation release the old responder and daemon focus through the same state transition.
+Backgrounding gates focus without destroying the FFI client, reduced core, or retained viewports.
 
 A two-finger pinch changes the current pane's terminal font in one-point steps from 9 through 23
 points. Each crossed step emits selection haptics and reports the resulting cell geometry to the
@@ -119,11 +125,19 @@ SwiftUI card button and entering or leaving the overview does not reflow the PTY
 views enable their tap, pan, pinch, and keyboard input and derive resize reports from their actual
 safe-area-adjusted bounds. The store deduplicates identical layouts per pane.
 
-The terminal's decoded background color paints through every system inset while glyphs stay below
-the top safe area. The surface ignores only the bottom container inset, not the keyboard region, so a
-docked software keyboard reduces the renderer bounds and PTY rows instead of covering them. Hiding
-the keyboard restores the larger grid; a floating keyboard remains an overlay. Floating controls
-remain inside the live safe area.
+The terminal's decoded background color paints through every system inset while glyphs respect both
+the top and bottom safe areas. A docked software keyboard reduces the renderer's native bounds and
+PTY rows instead of covering them; no keyboard height is calculated or applied by hand. Hiding the
+keyboard restores the larger grid, a floating keyboard remains an overlay, and the three-piece pane
+bar continues to float over the safe-area-contained terminal.
+
+Keyboard notifications classify layouts rather than driving layout. The store sends every live grid
+to the daemon but remembers only keyboard-hidden geometry as the reconnect baseline. After a retry or
+detach, it reapplies that stable grid once attachment lands; a still-visible docked keyboard can then
+report its smaller transient grid without replacing the baseline. Keyboard visibility is shared
+across terminal surfaces so a pane handoff while the keyboard stays open cannot bless a short grid as
+stable. Leaving interactive input also restores the stable grid, so overview previews and inactive
+sessions never inherit the docked keyboard's height.
 
 # Build and run
 
@@ -133,6 +147,7 @@ for the selected Apple SDK and links it into Swift through `ZZ-Bridging-Header.h
 
 ```sh
 just ios-build
+just ios-test
 just ios
 just ios-device <device-name>
 ```
@@ -140,18 +155,22 @@ just ios-device <device-name>
 `just ios` builds, boots an available iPhone simulator, installs `dev.zz.ios`, injects `ZZ_SOCKET`,
 and launches it. The first milestone is the simulator attached to a daemon on the same Mac. The
 device recipe proves signing, installation, and launch; a device-reachable remote transport is not
-yet implemented.
+yet implemented. `just ios-test` runs the hosted Swift policy suite on an available iPhone simulator;
+CI uses the same path.
 
 # Boundaries and next work
 
 - Add phone-to-host transport and host selection before treating physical-device attach as usable.
 - Design the iPad client as its own target instead of adding size-class branches here.
 - Decide native representations for Browser, Agent, Editor, and picker panes.
-- Add automated Swift model and renderer tests beyond the native build lane.
+- Add one daemon-backed UI automation smoke for software-keyboard frame behavior once the fixture can
+  launch deterministically in Xcode's test host.
 
 The C ABI smoke test creates and attaches a session, creates a second terminal pane, renders styled
 content, types through the raw-key path, kills the attached session, reattaches a survivor and
 recovers its viewport, then frees and reconnects against a real daemon.
+The Swift suite covers live and keyboard-sized grid calculation, stable reconnect selection,
+deduplicated layout updates, exclusive input ownership, and quantized zoom steps.
 
 # Key files
 
@@ -159,9 +178,11 @@ recovers its viewport, then frees and reconnects against a real daemon.
 | --- | --- |
 | `clients/ios/project.yml` | Native iPhone target, bundle settings, and Rust pre-build phase. |
 | `clients/ios/Sources/ContentView.swift` | Session rail, pane grid, placeholders, and fullscreen shell. |
+| `clients/ios/Sources/Models.swift` | Input ownership and live/stable terminal geometry policies. |
 | `clients/ios/Sources/ZZStore.swift` | FFI connection, event drain, snapshots, actions, and published models. |
 | `clients/ios/Sources/TerminalSurface.swift` | UIKit terminal drawing and keyboard input. |
 | `clients/ios/Sources/TerminalFrame.swift` | Caller-owned viewport planes exposed to the renderer. |
+| `clients/ios/Tests/Unit/TerminalInteractionTests.swift` | Simulator policy regressions. |
 | `crates/zz-client-ffi/include/zz-client.h` | Stable C boundary consumed by Swift. |
 | `scripts/ios-sim.sh` | Simulator build, install, socket injection, and launch. |
 

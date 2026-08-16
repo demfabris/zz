@@ -17,8 +17,8 @@ jobs:
         run: |
           rustup target add aarch64-apple-ios-sim
           brew install xcodegen
-      - name: Build native iPhone client
-        run: scripts/ios-sim.sh --build-only
+      - name: Test native iPhone client
+        run: scripts/ios-sim.sh --test
 
   check:
     name: ${{ matrix.os }}

@@ -23,9 +23,6 @@ struct ContentView: View {
             }
         }
         .background(Color.zzCanvas.ignoresSafeArea())
-        .onAppear {
-            store.start()
-        }
         .alert(
             "Action failed",
             isPresented: Binding(
@@ -392,7 +389,6 @@ private struct FullscreenPane: View {
                 }
             }
             .matchedGeometryEffect(id: pane.id, in: namespace)
-            .ignoresSafeArea(.container, edges: .bottom)
 
             paneBar
                 .padding(.horizontal, 14)

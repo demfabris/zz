@@ -13,24 +13,40 @@ enum TerminalFontZoom {
     static func pointSize(for step: Int) -> CGFloat {
         defaultPointSize + CGFloat(clamped(step))
     }
+
+    static func targetStep(anchor: Int, scale: CGFloat) -> Int {
+        let scaledPointSize = pointSize(for: anchor) * max(scale, 0.01)
+        return clamped(Int((scaledPointSize - defaultPointSize).rounded()))
+    }
+
+    static func crossedSteps(from current: Int, to target: Int) -> [Int] {
+        guard current != target else {
+            return []
+        }
+        let direction = target > current ? 1 : -1
+        return Array(stride(from: current + direction, through: target, by: direction))
+    }
 }
 
 @MainActor
 final class TerminalGridView: UIView, UIKeyInput {
+    private static var softwareKeyboardVisible = false
+
     var pane: UInt64 = 0 {
         didSet {
             guard pane != oldValue else {
                 return
             }
-            lastResize = .zero
-            lastResizeCell = .zero
+            lastResize = nil
+            responderRevision &+= 1
         }
     }
     var onText: ((String) -> Void)?
     var onKey: ((UInt32, UInt32, UInt8, UInt8) -> Void)?
-    var onResize: ((Int, Int, CGSize) -> Void)?
+    var onResize: ((TerminalLayout, Bool) -> Void)?
     var onScroll: ((Int) -> Void)?
     var onFontSizeStep: ((Int) -> Void)?
+    var onFocus: (() -> Void)?
 
     private var viewport: TerminalFrame?
     private var interactive = false
@@ -42,8 +58,7 @@ final class TerminalGridView: UIView, UIKeyInput {
     private var boldItalicFont = UIFont.monospacedSystemFont(ofSize: 13, weight: .bold)
     private var measuredCell = CGSize(width: 8, height: 16)
     private var logicalCell = CGSize(width: 8, height: 16)
-    private var lastResize = CGSize.zero
-    private var lastResizeCell = CGSize.zero
+    private var lastResize: TerminalLayout?
     private var panRows = 0
     private var fontSizeStep = 0
     private var pinchAnchorStep = 0
@@ -52,6 +67,11 @@ final class TerminalGridView: UIView, UIKeyInput {
     private var blinkTimer: Timer?
     private var colors: [UInt32: UIColor] = [:]
     private let fontFeedback = UISelectionFeedbackGenerator()
+    private var inputRequested = false
+    private var sceneActive = true
+    private var inputActivation: UInt64 = 0
+    private var responderRevision: UInt64 = 0
+    private var viewportIsStable = true
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -65,14 +85,30 @@ final class TerminalGridView: UIView, UIKeyInput {
         addGestureRecognizer(pan)
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(zoom(_:)))
         addGestureRecognizer(pinch)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillShow(_:)),
+            name: UIResponder.keyboardWillShowNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardDidHide(_:)),
+            name: UIResponder.keyboardDidHideNotification,
+            object: nil
+        )
     }
 
     required init?(coder: NSCoder) {
         nil
     }
 
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     override var canBecomeFirstResponder: Bool {
-        interactive
+        interactive && inputRequested && sceneActive
     }
 
     var hasText: Bool {
@@ -92,21 +128,41 @@ final class TerminalGridView: UIView, UIKeyInput {
         )
     }
 
-    func configure(frame: TerminalFrame?, interactive: Bool, preview: Bool, fontSizeStep: Int) {
+    func configure(
+        frame: TerminalFrame?,
+        interactive: Bool,
+        preview: Bool,
+        fontSizeStep: Int,
+        inputRequested: Bool,
+        sceneActive: Bool,
+        inputActivation: UInt64
+    ) {
         let generationChanged = viewport?.generation != frame?.generation ||
             viewport?.viewGeneration != frame?.viewGeneration
+        let inputChanged = self.interactive != interactive ||
+            self.inputRequested != inputRequested ||
+            self.sceneActive != sceneActive ||
+            self.inputActivation != inputActivation
         viewport = frame
         self.interactive = interactive
         self.preview = preview
+        self.inputRequested = inputRequested
+        self.sceneActive = sceneActive
+        self.inputActivation = inputActivation
+        if !sceneActive {
+            Self.softwareKeyboardVisible = false
+            viewportIsStable = true
+        } else if Self.softwareKeyboardVisible {
+            viewportIsStable = false
+        }
         let nextFontSizeStep = TerminalFontZoom.clamped(fontSizeStep)
         if self.fontSizeStep != nextFontSizeStep {
             self.fontSizeStep = nextFontSizeStep
-            lastResize = .zero
-            lastResizeCell = .zero
+            lastResize = nil
         }
         isUserInteractionEnabled = interactive
-        if !interactive, isFirstResponder {
-            resignFirstResponder()
+        if inputChanged {
+            reconcileInput()
         }
         if let frame {
             backgroundColor = color(frame.background)
@@ -123,10 +179,9 @@ final class TerminalGridView: UIView, UIKeyInput {
         resizeIfNeeded()
     }
 
-    func focusKeyboard() {
-        if interactive, window != nil {
-            becomeFirstResponder()
-        }
+    func deactivateInput() {
+        inputRequested = false
+        reconcileInput()
     }
 
     override func didMoveToWindow() {
@@ -137,10 +192,8 @@ final class TerminalGridView: UIView, UIKeyInput {
         } else {
             updateBlinkTimer()
             resizeIfNeeded()
-            if interactive {
-                becomeFirstResponder()
-            }
         }
+        reconcileInput()
     }
 
     override func layoutSubviews() {
@@ -202,7 +255,7 @@ final class TerminalGridView: UIView, UIKeyInput {
     }
 
     @objc private func focusInput() {
-        focusKeyboard()
+        onFocus?()
     }
 
     @objc private func scroll(_ gesture: UIPanGestureRecognizer) {
@@ -234,16 +287,11 @@ final class TerminalGridView: UIView, UIKeyInput {
             pinchReportedStep = fontSizeStep
             fontFeedback.prepare()
         case .changed:
-            let scale = max(gesture.scale, 0.01)
-            let scaledPointSize = TerminalFontZoom.pointSize(for: pinchAnchorStep) * scale
-            let target = TerminalFontZoom.clamped(
-                Int((scaledPointSize - TerminalFontZoom.defaultPointSize).rounded())
-            )
-            while pinchReportedStep != target {
-                pinchReportedStep += target > pinchReportedStep ? 1 : -1
-                fontSizeStep = pinchReportedStep
-                lastResize = .zero
-                lastResizeCell = .zero
+            let target = TerminalFontZoom.targetStep(anchor: pinchAnchorStep, scale: gesture.scale)
+            for step in TerminalFontZoom.crossedSteps(from: pinchReportedStep, to: target) {
+                pinchReportedStep = step
+                fontSizeStep = step
+                lastResize = nil
                 updateMetrics()
                 resizeIfNeeded()
                 setNeedsDisplay()
@@ -294,19 +342,58 @@ final class TerminalGridView: UIView, UIKeyInput {
 
     private func resizeIfNeeded() {
         guard interactive, window != nil, viewport != nil,
-              bounds.width > 0, bounds.height > 0,
-              logicalCell.width > 0, logicalCell.height > 0 else {
+              let layout = TerminalLayout(bounds: bounds.size, cell: logicalCell) else {
             return
         }
-        let columns = max(1, Int(floor(bounds.width / logicalCell.width)))
-        let rows = max(1, Int(floor(bounds.height / logicalCell.height)))
-        let size = CGSize(width: columns, height: rows)
-        guard size != lastResize || logicalCell != lastResizeCell else {
+        guard layout != lastResize else {
             return
         }
-        lastResize = size
-        lastResizeCell = logicalCell
-        onResize?(columns, rows, logicalCell)
+        lastResize = layout
+        onResize?(layout, viewportIsStable)
+    }
+
+    private func reconcileInput() {
+        responderRevision &+= 1
+        let revision = responderRevision
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self, self.responderRevision == revision else {
+                return
+            }
+            let shouldOwnInput = self.interactive &&
+                self.inputRequested &&
+                self.sceneActive &&
+                self.window != nil
+            if shouldOwnInput {
+                if !self.isFirstResponder {
+                    self.becomeFirstResponder()
+                }
+            } else if self.isFirstResponder {
+                self.resignFirstResponder()
+            }
+        }
+    }
+
+    @objc private func keyboardWillShow(_ notification: Notification) {
+        guard keyboardIsLocal(notification) else {
+            return
+        }
+        Self.softwareKeyboardVisible = true
+        viewportIsStable = false
+    }
+
+    @objc private func keyboardDidHide(_ notification: Notification) {
+        guard keyboardIsLocal(notification) else {
+            return
+        }
+        Self.softwareKeyboardVisible = false
+        viewportIsStable = true
+        lastResize = nil
+        resizeIfNeeded()
+    }
+
+    private func keyboardIsLocal(_ notification: Notification) -> Bool {
+        notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? Bool ?? true
     }
 
     private func updateBlinkTimer() {
@@ -569,18 +656,10 @@ struct TerminalSurface: UIViewRepresentable {
 
     func updateUIView(_ view: TerminalGridView, context: Context) {
         configure(view)
-        if interactive, context.coordinator.keyboardRevision != store.keyboardRevision {
-            context.coordinator.keyboardRevision = store.keyboardRevision
-            view.focusKeyboard()
-        }
     }
 
-    static func dismantleUIView(_ view: TerminalGridView, coordinator: Coordinator) {
-        view.resignFirstResponder()
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(keyboardRevision: store.keyboardRevision)
+    static func dismantleUIView(_ view: TerminalGridView, coordinator: ()) {
+        view.deactivateInput()
     }
 
     private func configure(_ view: TerminalGridView) {
@@ -589,24 +668,20 @@ struct TerminalSurface: UIViewRepresentable {
         view.onKey = { code, scalar, modifiers, action in
             store.sendKey(code, to: pane, codepoint: scalar, action: UInt32(action), modifiers: modifiers)
         }
-        view.onResize = { columns, rows, cell in
-            store.resize(pane: pane, columns: columns, rows: rows, cell: cell)
+        view.onResize = { layout, stable in
+            store.resize(pane: pane, layout: layout, stable: stable)
         }
         view.onScroll = { lines in store.scroll(pane: pane, lines: lines) }
         view.onFontSizeStep = { step in store.setTerminalFontSizeStep(step, for: pane) }
+        view.onFocus = { store.requestKeyboard(for: pane) }
         view.configure(
             frame: frame,
             interactive: interactive,
             preview: preview,
-            fontSizeStep: store.terminalFontSizeStep(for: pane)
+            fontSizeStep: store.terminalFontSizeStep(for: pane),
+            inputRequested: interactive && store.terminalInput.owner.owns(pane),
+            sceneActive: store.sceneIsActive,
+            inputActivation: store.terminalInput.activation
         )
-    }
-
-    final class Coordinator {
-        var keyboardRevision: UInt64
-
-        init(keyboardRevision: UInt64) {
-            self.keyboardRevision = keyboardRevision
-        }
     }
 }

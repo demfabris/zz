@@ -43,4 +43,20 @@ targets:
           - $(BUILT_PRODUCTS_DIR)/libzz_client_ffi.a
         basedOnDependencyAnalysis: false
     scheme:
-      testTargets: []
+      testTargets:
+        - ZZMobileTests
+  ZZMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - Tests/Unit
+    dependencies:
+      - target: ZZMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.zz.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/ZZ.app/ZZ
+        BUNDLE_LOADER: $(TEST_HOST)
+        HEADER_SEARCH_PATHS: $(inherited) $(SRCROOT)/../../crates/zz-client-ffi/include

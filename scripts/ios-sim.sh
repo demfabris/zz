@@ -8,7 +8,7 @@ command -v xcodegen >/dev/null 2>&1 || die "xcodegen not found (brew install xco
 command -v xcrun >/dev/null 2>&1 || die "xcrun not found (install Xcode)"
 
 mode="${1:-run}"
-[[ "$mode" == "run" || "$mode" == "--build-only" ]] || die "usage: scripts/ios-sim.sh [--build-only]"
+[[ "$mode" == "run" || "$mode" == "--build-only" || "$mode" == "--test" ]] || die "usage: scripts/ios-sim.sh [--build-only|--test]"
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 spec="$repo_root/clients/ios/project.yml"
@@ -20,7 +20,34 @@ bundle_id="dev.zz.ios"
 workspace_version="$(sed -nE 's/^version = "([^"]+)"$/\1/p' "$repo_root/Cargo.toml" | head -1)"
 marketing_version="${workspace_version%%[-+]*}"
 
+simulator_udid() {
+    local udid
+    udid="$(xcrun simctl list devices booted | grep 'iPhone' | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -1 || true)"
+    if [[ -z "$udid" ]]; then
+        udid="$(xcrun simctl list devices available \
+            | grep 'iPhone' \
+            | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' \
+            | head -1)"
+    fi
+    [[ -n "$udid" ]] || die "no iPhone simulator is available"
+    echo "$udid"
+}
+
 xcodegen generate --spec "$spec" --project "$project_dir" >/dev/null
+if [[ "$mode" == "--test" ]]; then
+    udid="$(simulator_udid)"
+    xcodebuild \
+        -project "$project" \
+        -scheme ZZMobile \
+        -configuration Debug \
+        -destination "platform=iOS Simulator,id=$udid" \
+        -derivedDataPath "$derived" \
+        MARKETING_VERSION="$marketing_version" \
+        CODE_SIGNING_ALLOWED=NO \
+        test
+    exit 0
+fi
+
 xcodebuild \
     -project "$project" \
     -scheme ZZMobile \
@@ -34,15 +61,8 @@ xcodebuild \
 [[ -d "$app" ]] || die "build finished but $app is missing"
 [[ "$mode" == "run" ]] || exit 0
 
-udid="$(xcrun simctl list devices booted | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -1 || true)"
-if [[ -z "$udid" ]]; then
-    udid="$(xcrun simctl list devices available \
-        | grep 'iPhone' \
-        | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' \
-        | head -1)"
-    [[ -n "$udid" ]] || die "no iPhone simulator is available"
-    xcrun simctl boot "$udid"
-fi
+udid="$(simulator_udid)"
+xcrun simctl boot "$udid" 2>/dev/null || true
 open -a Simulator
 
 socket="${ZZ_SOCKET:-}"

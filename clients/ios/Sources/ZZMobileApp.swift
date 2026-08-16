@@ -10,12 +10,11 @@ struct ZZMobileApp: App {
             ContentView()
                 .environmentObject(store)
                 .preferredColorScheme(.dark)
+                .onAppear {
+                    store.setSceneActive(scenePhase == .active)
+                }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active {
-                        store.start()
-                    } else if phase == .background {
-                        store.stop()
-                    }
+                    store.setSceneActive(phase == .active)
                 }
         }
     }

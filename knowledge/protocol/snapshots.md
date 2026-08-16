@@ -61,7 +61,7 @@ with later OSC 0/2 output. Browser document-title changes arrive through tmux-co
 `select-pane -T`. Either title change advances `generation` and publishes a fresh snapshot without
 renaming the containing window.
 
-`Picker` is a durable, runtime-free pane state used by the native new-pane flow. It occupies a real
+`Picker` is a durable, runtime-free pane state used by the native split-picker flow. It occupies a real
 layout leaf and survives GUI detach/reattach, but the daemon owns no PTY and the GUI owns no CEF
 session for it. `select-pane-kind` with `terminal`, `browser`, `agent`, or `editor` materializes the
 same `PaneId` and advances the snapshot generation.

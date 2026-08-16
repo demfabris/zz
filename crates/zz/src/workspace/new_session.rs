@@ -62,7 +62,7 @@ const BINDINGS: [BindingHint; 5] = [
             label: "Split right",
         },
         matches: |command| {
-            command.name == "split-window" && command.args.iter().any(|arg| arg == "-h")
+            command.name == "split-picker" && command.args.iter().any(|arg| arg == "-h")
         },
     },
     BindingHint {
@@ -72,7 +72,7 @@ const BINDINGS: [BindingHint; 5] = [
             label: "Split down",
         },
         matches: |command| {
-            command.name == "split-window" && command.args.iter().all(|arg| arg != "-h")
+            command.name == "split-picker" && command.args.iter().all(|arg| arg != "-h")
         },
     },
     BindingHint {
@@ -404,7 +404,7 @@ mod tests {
             KeyBindingSnapshot {
                 key: "%".to_owned(),
                 commands: vec![CommandInvocation {
-                    name: "split-window".to_owned(),
+                    name: "split-picker".to_owned(),
                     args: vec!["-h".to_owned()],
                     source: None,
                 }],
@@ -414,7 +414,7 @@ mod tests {
             KeyBindingSnapshot {
                 key: "|".to_owned(),
                 commands: vec![CommandInvocation {
-                    name: "split-window".to_owned(),
+                    name: "split-picker".to_owned(),
                     args: vec!["-h".to_owned()],
                     source: None,
                 }],
@@ -458,7 +458,7 @@ mod tests {
         let bindings = [KeyBindingSnapshot {
             key: String::new(),
             commands: vec![CommandInvocation {
-                name: "split-window".to_owned(),
+                name: "split-picker".to_owned(),
                 args: vec!["-h".to_owned()],
                 source: None,
             }],

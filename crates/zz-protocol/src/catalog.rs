@@ -298,7 +298,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-p", "select the previous window"),
             CommandOptionSpec::flag("-T", "select the last window when already current"),
         ],
-        positionals: &[Window],
+        positionals: &[],
         variadic: None,
     },
     CommandSpec {
@@ -344,7 +344,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         variadic: None,
     },
     CommandSpec {
-        name: "new-pane",
+        name: "split-picker",
         aliases: &[],
         description: "Split a pane and choose what it becomes",
         options: &[
@@ -1073,7 +1073,7 @@ mod tests {
             "previous-window",
             "last-window",
             "kill-window",
-            "new-pane",
+            "split-picker",
             "split-window",
             "split-browser",
             "select-pane-kind",

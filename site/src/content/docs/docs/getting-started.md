@@ -196,8 +196,9 @@ mode.
 empty pane asking what you want in it. Press <kbd>t</kbd> for a terminal or
 <kbd>b</kbd> for a browser. <kbd>Escape</kbd> closes the pane again.
 
-This applies to key bindings only. `zz split-window` from a shell still gives
-you a plain terminal, which is what scripts expect.
+That is zz's default binding, which names the zz-native `split-picker` command.
+`split-window` itself — from a shell, a script, or your own `.tmux.conf`
+bindings — always gives you a plain terminal, exactly like tmux.
 
 A browser pane runs a real Chromium off-screen and draws onto the same GPU
 surface as your terminals. It takes the browser chords you already know:

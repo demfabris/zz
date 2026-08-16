@@ -439,7 +439,7 @@ impl MuxEngine {
             "previous-window" => self.step_window(context, &command.args, -1)?,
             "last-window" => self.last_window(context, &command.args)?,
             "kill-window" => self.kill_window(context, &command.args)?,
-            "new-pane" => self.new_pane(context, &command.args)?,
+            "split-picker" => self.split_picker(context, &command.args)?,
             "split-window" => self.split_window(context, &command.args, None)?,
             "split-browser" => self.split_browser(context, &command.args)?,
             "select-pane-kind" => self.select_pane_kind(context, &command.args)?,
@@ -902,9 +902,8 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("select-window", args)?;
-        let target = options
-            .value("-t")
-            .or_else(|| positional.first().map(String::as_str));
+        reject_positionals("select-window", &positional)?;
+        let target = options.value("-t");
         if options.has("-n") || options.has("-p") {
             let session = self.session_of_window_target(target, context)?;
             let direction = if options.has("-n") { 1 } else { -1 };
@@ -1111,22 +1110,22 @@ impl MuxEngine {
         )
     }
 
-    fn new_pane(
+    fn split_picker(
         &mut self,
         context: &mut ExecutionContext,
         args: &[String],
     ) -> Result<Execution, ServerError> {
-        let (options, positional) = parse_command_options("new-pane", args)?;
+        let (options, positional) = parse_command_options("split-picker", args)?;
         if !positional.is_empty() {
             return Err(ServerError::InvalidCommand(
-                "new-pane does not accept positional arguments".to_owned(),
+                "split-picker does not accept positional arguments".to_owned(),
             ));
         }
         let target = self
             .state
             .resolve_pane(options.value("-t"), context.window, context.pane)?;
         let inherit_cwd_from = spawn_cwd_source(
-            "new-pane",
+            "split-picker",
             &self.state,
             &options,
             Some(target),
@@ -4589,7 +4588,7 @@ mod tests {
         let source = context.pane.expect("source pane");
 
         let created = engine
-            .execute(&mut context, &command("new-pane", &["-h"]))
+            .execute(&mut context, &command("split-picker", &["-h"]))
             .expect("picker split");
         let picker = context.pane.expect("picker pane");
         assert_ne!(picker, source);
@@ -4637,7 +4636,7 @@ mod tests {
         ));
 
         engine
-            .execute(&mut context, &command("new-pane", &["-v"]))
+            .execute(&mut context, &command("split-picker", &["-v"]))
             .expect("second picker");
         let browser_picker = context.pane.expect("browser picker");
         engine
@@ -4656,7 +4655,7 @@ mod tests {
         ));
 
         engine
-            .execute(&mut context, &command("new-pane", &["-h"]))
+            .execute(&mut context, &command("split-picker", &["-h"]))
             .expect("third picker");
         let agent_picker = context.pane.expect("agent picker");
         engine
@@ -4709,7 +4708,7 @@ mod tests {
             .expect("session");
         let terminal = context.pane.expect("terminal pane");
         engine
-            .execute(&mut context, &command("new-pane", &["-h"]))
+            .execute(&mut context, &command("split-picker", &["-h"]))
             .expect("picker split");
         let agent = context.pane.expect("agent pane");
         engine
@@ -4821,7 +4820,7 @@ mod tests {
             .expect("session");
         let terminal = context.pane.expect("terminal pane");
         engine
-            .execute(&mut context, &command("new-pane", &["-h"]))
+            .execute(&mut context, &command("split-picker", &["-h"]))
             .expect("picker split");
         let editor = context.pane.expect("editor pane");
         let window = context.window.expect("window");
@@ -4906,7 +4905,7 @@ mod tests {
             .execute(&mut context, &command("new-session", &["-s", "gated"]))
             .expect("session");
         engine
-            .execute(&mut context, &command("new-pane", &["-h"]))
+            .execute(&mut context, &command("split-picker", &["-h"]))
             .expect("picker split");
         let picker = context.pane.expect("picker pane");
 

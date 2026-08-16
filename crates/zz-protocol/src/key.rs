@@ -49,8 +49,8 @@ impl Default for KeyTables {
         };
         for (key, command) in [
             ("c", "new-window"),
-            ("%", "split-window -h"),
-            ("\"", "split-window -v"),
+            ("%", "split-picker -h"),
+            ("\"", "split-picker -v"),
             ("!", "break-pane"),
             ("x", "kill-pane"),
             ("&", "kill-window"),
@@ -1100,11 +1100,11 @@ mod tests {
         );
         assert_eq!(
             tables.get("prefix", "%").unwrap().commands,
-            vec![CommandInvocation::new("split-window", ["-h"])]
+            vec![CommandInvocation::new("split-picker", ["-h"])]
         );
         assert_eq!(
             tables.get("prefix", "\"").unwrap().commands,
-            vec![CommandInvocation::new("split-window", ["-v"])]
+            vec![CommandInvocation::new("split-picker", ["-v"])]
         );
         assert_eq!(
             tables.get("prefix", "?").unwrap().commands,

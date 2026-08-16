@@ -19,7 +19,7 @@ use parking_lot::{Condvar, Mutex};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use zz_mux::{
     DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision, KeyEngine,
-    KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, canonical_command, parse_config,
+    KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, parse_config,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -4556,8 +4556,7 @@ impl Shared {
         let mut output = String::new();
         let mut output_truncated = false;
         for command in commands {
-            let command = key_bound_command(command);
-            let execution = match self.execute(client, kind, context, command.as_ref()) {
+            let execution = match self.execute(client, kind, context, command) {
                 Ok(execution) => execution,
                 Err(error) => {
                     log::warn!(
@@ -9023,15 +9022,6 @@ fn command_prompt_history_snapshot(history: &[String]) -> Vec<String> {
     snapshot
 }
 
-fn key_bound_command(command: &CommandInvocation) -> Cow<'_, CommandInvocation> {
-    if canonical_command(&command.name) != "split-window" {
-        return Cow::Borrowed(command);
-    }
-    let mut picker = command.clone();
-    "new-pane".clone_into(&mut picker.name);
-    Cow::Owned(picker)
-}
-
 fn command_prompt_state(inner: &ServerState, client: ClientId) -> Option<CommandPromptState> {
     inner
         .command_prompts
@@ -10451,7 +10441,7 @@ Run `zz list-panes -t @N` or `zz list-windows` to discover the rest.
   zz send-keys -t %N 'text' Enter
       Type into a terminal pane. -l sends text literally.
 
-  zz split-window | zz split-browser | zz new-pane [-h|-v] [-t %N]
+  zz split-window | zz split-browser | zz split-picker [-h|-v] [-t %N]
       Add a pane beside another one.
 
   zz debug-marker [NOTE]
@@ -11466,7 +11456,7 @@ mod tests {
                 ClientId(3),
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-pane", ["-v"]),
+                &CommandInvocation::new("split-picker", ["-v"]),
             )
             .expect("picker");
         let picker = context.pane.expect("picker");
@@ -12035,7 +12025,7 @@ mod tests {
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-pane", ["-v"]),
+                &CommandInvocation::new("split-picker", ["-v"]),
             )
             .expect("picker");
         let agent = context.pane.expect("picker");
@@ -12125,7 +12115,7 @@ mod tests {
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-pane", ["-v"]),
+                &CommandInvocation::new("split-picker", ["-v"]),
             )
             .expect("picker");
         let agent = context.pane.expect("picker");
@@ -12199,7 +12189,7 @@ mod tests {
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-pane", ["-v"]),
+                &CommandInvocation::new("split-picker", ["-v"]),
             )
             .expect("picker");
         let picker = context.pane.expect("picker");
@@ -13017,7 +13007,7 @@ mod tests {
     }
 
     #[test]
-    fn configured_split_bindings_defer_runtime_creation_until_a_kind_is_selected() {
+    fn configured_split_window_binding_creates_a_terminal_without_rewriting_the_command() {
         let shared = Arc::new(Shared::new(1));
         let client = ClientId(7);
         let mut context = ExecutionContext::default();
@@ -13085,14 +13075,14 @@ bind - split-window -v -c "#{pane_current_path}"
                 },
             )
             .expect("configured horizontal split binding");
-        let picker = context.pane.expect("picker id");
+        let terminal = context.pane.expect("terminal id");
         {
             let inner = shared.inner.lock();
             assert!(inner.terminals.contains_key(&source));
-            assert!(!inner.terminals.contains_key(&picker));
+            assert!(inner.terminals.contains_key(&terminal));
             assert!(matches!(
-                inner.engine.state.pane(picker).map(|pane| &pane.kind),
-                Some(PaneKind::Picker { .. })
+                inner.engine.state.pane(terminal).map(|pane| &pane.kind),
+                Some(PaneKind::Terminal)
             ));
             assert!(matches!(
                 inner.engine.state.windows[&window].layout,
@@ -13102,19 +13092,29 @@ bind - split-window -v -c "#{pane_current_path}"
                 }
             ));
         }
+    }
 
+    #[test]
+    fn default_percent_binding_creates_a_picker_via_split_picker() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
         shared
             .execute(
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new(
-                    "select-pane-kind",
-                    ["-t", &picker.to_string(), "terminal"],
-                ),
+                &CommandInvocation::new("new-session", ["-s", "picker"]),
             )
-            .expect("terminal selection");
-        assert!(shared.inner.lock().terminals.contains_key(&picker));
+            .expect("session");
+        let source = context.pane.expect("source terminal");
+        let window = context.window.expect("window");
+        {
+            let inner = shared.inner.lock();
+            let binding = inner.engine.keys.get("prefix", "%").unwrap();
+            assert_eq!(binding.commands[0].name, "split-picker");
+            assert_eq!(binding.commands[0].args, ["-h"]);
+        }
 
         shared
             .input(
@@ -13122,60 +13122,42 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientKind::Interactive,
                 &mut context,
                 InputMessage::Key {
-                    pane: picker,
+                    pane: source,
                     input: test_key(
-                        KeyCode::Character('a'),
+                        KeyCode::Character('b'),
                         Modifiers::new(false, true, false, false),
                         None,
                     ),
                     text_follows: false,
                 },
             )
-            .expect("configured prefix");
+            .expect("default prefix");
         shared
             .input(
                 client,
                 ClientKind::Interactive,
                 &mut context,
                 InputMessage::Key {
-                    pane: picker,
-                    input: test_key(KeyCode::Character('-'), Modifiers::default(), Some("-")),
+                    pane: source,
+                    input: test_key(KeyCode::Character('%'), Modifiers::default(), Some("%")),
                     text_follows: true,
                 },
             )
-            .expect("configured vertical split binding");
-        let browser = context.pane.expect("browser picker id");
-        {
-            let inner = shared.inner.lock();
-            assert!(!inner.terminals.contains_key(&browser));
-            let LayoutNode::Split { second, .. } = &inner.engine.state.windows[&window].layout
-            else {
-                panic!("horizontal split remains the layout root");
-            };
-            assert!(matches!(
-                second.as_ref(),
-                LayoutNode::Split {
-                    axis: zz_protocol::Axis::Vertical,
-                    ..
-                }
-            ));
-        }
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new(
-                    "select-pane-kind",
-                    ["-t", &browser.to_string(), "browser"],
-                ),
-            )
-            .expect("browser selection");
+            .expect("default horizontal split binding");
+        let picker = context.pane.expect("picker id");
         let inner = shared.inner.lock();
-        assert!(!inner.terminals.contains_key(&browser));
+        assert!(inner.terminals.contains_key(&source));
+        assert!(!inner.terminals.contains_key(&picker));
         assert!(matches!(
-            inner.engine.state.pane(browser).map(|pane| &pane.kind),
-            Some(PaneKind::Browser(_))
+            inner.engine.state.pane(picker).map(|pane| &pane.kind),
+            Some(PaneKind::Picker { .. })
+        ));
+        assert!(matches!(
+            inner.engine.state.windows[&window].layout,
+            LayoutNode::Split {
+                axis: zz_protocol::Axis::Horizontal,
+                ..
+            }
         ));
     }
 
@@ -13235,7 +13217,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientId(7),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-pane", ["-v"]),
+                &CommandInvocation::new("split-picker", ["-v"]),
             )
             .expect("agent picker");
         let agent = context.pane.expect("agent picker pane");
@@ -13274,7 +13256,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientId(7),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-pane", ["-v"]),
+                &CommandInvocation::new("split-picker", ["-v"]),
             )
             .expect("configured agent picker");
         let configured_agent = context.pane.expect("configured agent picker pane");
@@ -13312,7 +13294,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientId(7),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-pane", ["-v"]),
+                &CommandInvocation::new("split-picker", ["-v"]),
             )
             .expect("editor picker");
         let editor = context.pane.expect("editor picker pane");
@@ -18818,7 +18800,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-pane", ["-v"]),
+                &CommandInvocation::new("split-picker", ["-v"]),
             )
             .expect("agent picker");
         let agent = context.pane.expect("agent picker");
@@ -19082,7 +19064,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-pane", ["-h", "-t", &terminal.to_string()]),
+                &CommandInvocation::new("split-picker", ["-h", "-t", &terminal.to_string()]),
             )
             .expect("editor picker beside the terminal");
         let editor = context.pane.expect("editor picker");
@@ -20752,7 +20734,7 @@ bind - split-window -v -c "#{pane_current_path}"
             for command in [
                 CommandInvocation::new("new-session", ["-s", "agents"]),
                 CommandInvocation::new("set-option", ["-g", "experimental-agent-pane", "on"]),
-                CommandInvocation::new("new-pane", ["-v"]),
+                CommandInvocation::new("split-picker", ["-v"]),
             ] {
                 shared
                     .execute(client, ClientKind::Interactive, &mut context, &command)

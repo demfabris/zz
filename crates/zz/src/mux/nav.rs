@@ -779,9 +779,9 @@ pub fn kill_target_command(target: TreeTarget) -> CommandInvocation {
 }
 
 #[must_use]
-pub fn new_pane_command(pane: PaneId, axis: Axis) -> CommandInvocation {
+pub fn split_picker_command(pane: PaneId, axis: Axis) -> CommandInvocation {
     CommandInvocation::new(
-        "new-pane",
+        "split-picker",
         vec![
             match axis {
                 Axis::Horizontal => "-h",

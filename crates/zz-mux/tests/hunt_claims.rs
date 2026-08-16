@@ -377,14 +377,14 @@ fn split_window_dash_p_gives_the_new_pane_that_share() {
 }
 
 #[test]
-fn new_pane_dash_p_gives_the_new_pane_that_share() {
+fn split_picker_dash_p_gives_the_new_pane_that_share() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
     engine
-        .execute(&mut context, &command("new-pane", &["-h", "-p", "25"]))
+        .execute(&mut context, &command("split-picker", &["-h", "-p", "25"]))
         .unwrap();
     assert!((split_ratio(&engine) - 0.75).abs() < 1e-5);
 }
@@ -513,6 +513,46 @@ fn kill_commands_refuse_positional_targets_like_tmux() {
         .execute(&mut context, &command("kill-session", &["-t", "other"]))
         .unwrap();
     assert_eq!(session_names(&engine), ["keep"]);
+}
+
+#[test]
+fn select_window_refuses_positional_targets_like_tmux() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let selected = context.window;
+    let error = engine
+        .execute(&mut context, &command("select-window", &["0"]))
+        .unwrap_err();
+    assert!(
+        matches!(error, ServerError::InvalidCommand(message) if message.contains("positional"))
+    );
+    assert_eq!(context.window, selected);
+}
+
+#[test]
+fn split_picker_rejects_positional_arguments() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let pane_count = engine.state.windows.values().next().unwrap().panes.len();
+    let error = engine
+        .execute(
+            &mut context,
+            &command("split-picker", &["printf", "not-a-shell-command"]),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(error, ServerError::InvalidCommand(message) if message.contains("positional"))
+    );
+    assert_eq!(
+        engine.state.windows.values().next().unwrap().panes.len(),
+        pane_count
+    );
 }
 
 #[test]

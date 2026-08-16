@@ -6,8 +6,8 @@ use gpui::{
     AnyElement, App, Context, ParentElement as _, SharedString, Styled as _, div, prelude::*, px,
 };
 use zz_ui::agent::{
-    AgentEntry, AgentTimeline, AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus,
-    agent_pane_header,
+    AgentEntry, AgentMarkdown, AgentTimeline, AgentToolEntry, AgentToolKind, AgentToolPayload,
+    AgentToolStatus, agent_pane_header,
 };
 use zz_ui::{ActiveTheme as _, Icon, IconName, Sizable as _};
 
@@ -322,7 +322,7 @@ fn delegated_entries() -> Vec<AgentEntry> {
             task_id: "task-7".into(),
             status: "running".into(),
             summary: "Re-measuring the browser pane at 120hz".into(),
-            result_markdown: SharedString::default(),
+            result_markdown: AgentMarkdown::default(),
         },
         AgentEntry::Notification {
             id: 411,

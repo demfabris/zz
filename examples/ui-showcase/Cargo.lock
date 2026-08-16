@@ -5603,9 +5603,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.150"
+version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
+checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
  "indexmap",
  "itoa",
@@ -6568,9 +6568,9 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter"
-version = "0.26.9"
+version = "0.26.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dab76d0b724ba557954125188cf0633a1ca43199ced82d95c7b9c32cc3de1f3"
+checksum = "83c567a8e18ae93f20982c90370b16fd24023aeaf52f6052b96957ab253a0fec"
 dependencies = [
  "cc",
  "regex",
@@ -8128,7 +8128,7 @@ dependencies = [
 
 [[package]]
 name = "zz-ui"
-version = "0.2.0-beta.1"
+version = "0.2.0-beta.2"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -8137,6 +8137,7 @@ dependencies = [
  "log",
  "markdown",
  "merman",
+ "parking_lot",
  "ropey",
  "rust-embed",
  "serde",

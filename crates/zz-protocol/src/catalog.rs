@@ -23,6 +23,10 @@ pub struct CommandOptionSpec {
     pub description: &'static str,
     /// Whether the option is part of the implemented completion surface.
     pub completable: bool,
+    /// tmux's `X::` optional-argument form: the option takes a value only when
+    /// it is attached (`-R10`); a bare `-R` stays a flag and never consumes the
+    /// next argument.
+    pub attached_value: bool,
 }
 
 impl CommandOptionSpec {
@@ -32,6 +36,17 @@ impl CommandOptionSpec {
             value: None,
             description,
             completable: true,
+            attached_value: false,
+        }
+    }
+
+    const fn attached_flag(name: &'static str, description: &'static str) -> Self {
+        Self {
+            name,
+            value: None,
+            description,
+            completable: true,
+            attached_value: true,
         }
     }
 
@@ -41,6 +56,7 @@ impl CommandOptionSpec {
             value: Some(value),
             description,
             completable: true,
+            attached_value: false,
         }
     }
 
@@ -50,6 +66,7 @@ impl CommandOptionSpec {
             value: Some(CommandValueKind::FreeForm),
             description: "unsupported tmux option",
             completable: false,
+            attached_value: false,
         }
     }
 }
@@ -91,9 +108,17 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "Create a new session",
         options: &[
             CommandOptionSpec::flag("-d", "do not attach"),
+            CommandOptionSpec::flag("-A", "attach to the named session when it exists"),
+            CommandOptionSpec::flag("-D", "with -A, detach other clients"),
             CommandOptionSpec::value("-s", FreeForm, "session name"),
             CommandOptionSpec::value("-n", FreeForm, "initial window name"),
             CommandOptionSpec::value("-c", FreeForm, "start in the current pane path"),
+            CommandOptionSpec::unsupported_value("-t"),
+            CommandOptionSpec::unsupported_value("-e"),
+            CommandOptionSpec::unsupported_value("-F"),
+            CommandOptionSpec::unsupported_value("-f"),
+            CommandOptionSpec::unsupported_value("-x"),
+            CommandOptionSpec::unsupported_value("-y"),
         ],
         positionals: &[],
         variadic: Some(FreeForm),
@@ -118,7 +143,11 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "kill-session",
         aliases: &[],
         description: "Destroy a session",
-        options: &[CommandOptionSpec::value("-t", Session, "target session")],
+        options: &[
+            CommandOptionSpec::value("-t", Session, "target session"),
+            CommandOptionSpec::flag("-a", "kill every other session"),
+            CommandOptionSpec::flag("-C", "clear alerts in the session instead of killing"),
+        ],
         positionals: &[],
         variadic: None,
     },
@@ -130,7 +159,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-d", "detach other clients"),
             CommandOptionSpec::value("-t", Session, "target session"),
         ],
-        positionals: &[Session],
+        positionals: &[],
         variadic: None,
     },
     CommandSpec {
@@ -145,7 +174,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "detach-client",
         aliases: &["detach"],
         description: "Detach the current client",
-        options: &[],
+        options: &[
+            CommandOptionSpec::flag("-a", "detach every other client"),
+            CommandOptionSpec::value("-s", Session, "detach every client on the session"),
+        ],
         positionals: &[],
         variadic: None,
     },
@@ -154,9 +186,15 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         aliases: &["neww"],
         description: "Create a terminal window",
         options: &[
-            CommandOptionSpec::value("-t", Session, "target session"),
+            CommandOptionSpec::value("-t", Window, "destination session or window index"),
             CommandOptionSpec::value("-n", FreeForm, "window name"),
             CommandOptionSpec::value("-c", FreeForm, "start in the current pane path"),
+            CommandOptionSpec::flag("-d", "do not select the new window"),
+            CommandOptionSpec::flag("-a", "insert after the target window"),
+            CommandOptionSpec::flag("-k", "replace the window at the target index"),
+            CommandOptionSpec::flag("-S", "select an existing window with the same name"),
+            CommandOptionSpec::unsupported_value("-e"),
+            CommandOptionSpec::unsupported_value("-F"),
         ],
         positionals: &[],
         variadic: Some(FreeForm),
@@ -166,9 +204,13 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         aliases: &[],
         description: "Create a browser window",
         options: &[
-            CommandOptionSpec::value("-t", Session, "target session"),
+            CommandOptionSpec::value("-t", Window, "destination session or window index"),
             CommandOptionSpec::value("-n", FreeForm, "window name"),
             CommandOptionSpec::value("-p", FreeForm, "browser profile"),
+            CommandOptionSpec::flag("-d", "do not select the new window"),
+            CommandOptionSpec::flag("-a", "insert after the target window"),
+            CommandOptionSpec::flag("-k", "replace the window at the target index"),
+            CommandOptionSpec::flag("-S", "select an existing window with the same name"),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -199,6 +241,9 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         options: &[
             CommandOptionSpec::value("-t", Window, "target window"),
             CommandOptionSpec::flag("-l", "select the last window"),
+            CommandOptionSpec::flag("-n", "select the next window"),
+            CommandOptionSpec::flag("-p", "select the previous window"),
+            CommandOptionSpec::flag("-T", "select the last window when already current"),
         ],
         positionals: &[Window],
         variadic: None,
@@ -207,7 +252,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "next-window",
         aliases: &["next"],
         description: "Select the next window",
-        options: &[],
+        options: &[
+            CommandOptionSpec::value("-t", Session, "target session"),
+            CommandOptionSpec::flag("-a", "select the next window with an alert"),
+        ],
         positionals: &[],
         variadic: None,
     },
@@ -215,7 +263,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "previous-window",
         aliases: &["previous"],
         description: "Select the previous window",
-        options: &[],
+        options: &[
+            CommandOptionSpec::value("-t", Session, "target session"),
+            CommandOptionSpec::flag("-a", "select the previous window with an alert"),
+        ],
         positionals: &[],
         variadic: None,
     },
@@ -231,8 +282,11 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "kill-window",
         aliases: &["killw"],
         description: "Destroy a window",
-        options: &[CommandOptionSpec::value("-t", Window, "target window")],
-        positionals: &[Window],
+        options: &[
+            CommandOptionSpec::value("-t", Window, "target window"),
+            CommandOptionSpec::flag("-a", "kill every other window in the session"),
+        ],
+        positionals: &[],
         variadic: None,
     },
     CommandSpec {
@@ -241,8 +295,12 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "Split a pane and choose what it becomes",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::value("-l", FreeForm, "new pane size in cells or percent"),
             CommandOptionSpec::value("-p", FreeForm, "split percentage"),
             CommandOptionSpec::value("-c", FreeForm, "terminal working directory source"),
+            CommandOptionSpec::flag("-b", "new pane goes left or above"),
+            CommandOptionSpec::flag("-d", "keep focus on the current pane"),
+            CommandOptionSpec::flag("-f", "span the full window"),
             CommandOptionSpec::flag("-h", "horizontal split"),
             CommandOptionSpec::flag("-v", "vertical split"),
         ],
@@ -255,10 +313,15 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "Split a pane with a terminal",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::value("-l", FreeForm, "new pane size in cells or percent"),
             CommandOptionSpec::value("-p", FreeForm, "split percentage"),
             CommandOptionSpec::value("-c", FreeForm, "start in the current pane path"),
+            CommandOptionSpec::flag("-b", "new pane goes left or above"),
+            CommandOptionSpec::flag("-d", "keep focus on the current pane"),
+            CommandOptionSpec::flag("-f", "span the full window"),
             CommandOptionSpec::flag("-h", "horizontal split"),
             CommandOptionSpec::flag("-v", "vertical split"),
+            CommandOptionSpec::unsupported_value("-e"),
         ],
         positionals: &[],
         variadic: Some(FreeForm),
@@ -294,7 +357,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         options: &[
             CommandOptionSpec::value("-n", FreeForm, "new window name"),
             CommandOptionSpec::value("-s", Pane, "source pane"),
-            CommandOptionSpec::value("-t", Window, "destination window or session"),
+            CommandOptionSpec::value("-t", Window, "destination session or window index"),
             CommandOptionSpec::flag("-d", "do not select the new window"),
             CommandOptionSpec::unsupported_value("-F"),
             CommandOptionSpec::unsupported_value("-x"),
@@ -483,10 +546,12 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "Resize or zoom a pane",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
-            CommandOptionSpec::flag("-D", "resize downward"),
-            CommandOptionSpec::flag("-L", "resize left"),
-            CommandOptionSpec::flag("-R", "resize right"),
-            CommandOptionSpec::flag("-U", "resize upward"),
+            CommandOptionSpec::value("-x", FreeForm, "width in cells or percent"),
+            CommandOptionSpec::value("-y", FreeForm, "height in cells or percent"),
+            CommandOptionSpec::attached_flag("-D", "resize downward, optionally by attached cells"),
+            CommandOptionSpec::attached_flag("-L", "resize left, optionally by attached cells"),
+            CommandOptionSpec::attached_flag("-R", "resize right, optionally by attached cells"),
+            CommandOptionSpec::attached_flag("-U", "resize upward, optionally by attached cells"),
             CommandOptionSpec::flag("-Z", "toggle zoom"),
         ],
         positionals: &[FreeForm],
@@ -539,8 +604,11 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "kill-pane",
         aliases: &["killp"],
         description: "Destroy a pane",
-        options: &[CommandOptionSpec::value("-t", Pane, "target pane")],
-        positionals: &[Pane],
+        options: &[
+            CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::flag("-a", "kill every other pane in the window"),
+        ],
+        positionals: &[],
         variadic: None,
     },
     CommandSpec {
@@ -549,8 +617,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "Send keys or a copy-mode command",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::value("-N", FreeForm, "repeat count"),
             CommandOptionSpec::flag("-X", "copy-mode command"),
             CommandOptionSpec::flag("-C", "do not copy to the system clipboard"),
+            CommandOptionSpec::flag("-H", "keys are hexadecimal character codes"),
             CommandOptionSpec::flag("-P", "do not create a paste buffer"),
             CommandOptionSpec::flag("-l", "literal text"),
             CommandOptionSpec::flag("-o", "operate on command output"),
@@ -572,6 +642,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "Enter copy mode",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::flag("-d", "scroll one page down"),
             CommandOptionSpec::flag("-u", "scroll one page up"),
         ],
         positionals: &[],
@@ -595,7 +666,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         options: &[
             CommandOptionSpec::value("-I", FreeForm, "initial input"),
             CommandOptionSpec::value("-p", FreeForm, "prompt label"),
-            CommandOptionSpec::flag("-b", "prompt from bottom"),
+            CommandOptionSpec::flag("-b", "background prompt, always on in zz"),
             CommandOptionSpec::unsupported_value("-t"),
             CommandOptionSpec::unsupported_value("-T"),
         ],
@@ -610,7 +681,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-s", "focus the session sidebar"),
             CommandOptionSpec::flag("-w", "focus the session sidebar"),
-            CommandOptionSpec::flag("-Z", "preserve zoom"),
+            CommandOptionSpec::flag("-Z", "zoom the chooser, always full window in zz"),
         ],
         positionals: &[],
         variadic: None,
@@ -629,7 +700,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "Choose a paste buffer",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
-            CommandOptionSpec::flag("-Z", "preserve zoom"),
+            CommandOptionSpec::flag("-Z", "zoom the chooser, always full window in zz"),
         ],
         positionals: &[],
         variadic: None,
@@ -651,7 +722,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "Display pane numbers",
         options: &[
             CommandOptionSpec::value("-d", FreeForm, "duration in milliseconds"),
-            CommandOptionSpec::flag("-b", "block until selection"),
+            CommandOptionSpec::flag("-b", "do not block other commands, always on in zz"),
             CommandOptionSpec::unsupported_value("-t"),
         ],
         positionals: &[],
@@ -734,9 +805,12 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "source-file",
         aliases: &["source"],
         description: "Load a tmux configuration file",
-        options: &[],
+        options: &[CommandOptionSpec::flag(
+            "-q",
+            "do not report a missing file",
+        )],
         positionals: &[FreeForm],
-        variadic: None,
+        variadic: Some(FreeForm),
     },
     CommandSpec {
         name: "reload-config",

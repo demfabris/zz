@@ -34,13 +34,13 @@ The tree stores only proportions; concrete geometry is computed on demand and ne
 
 | Operation | Helper | Behavior |
 | --- | --- | --- |
-| Split a pane | `replace_leaf_with_split` | `split_pane` replaces the target leaf with a `0.5` split of `(target, new)`. |
+| Split a pane | `insert_existing_pane` | `split_pane_with` inserts the new leaf beside the target under a `SplitPlacement` (`ratio` = the new pane's share, `before`, `full_size`, `detached`); plain `split_pane` is that with the `0.5`-after-and-focus default. |
 | Remove a pane | `remove_leaf` | `kill_pane`/`break_pane`/`join_pane` collapse the split by moving the owned sibling into its parent, preserving descendant allocations. |
-| Reparent a pane | `insert_existing_pane` | `join-pane` inserts an existing leaf beside a target (`-b` before, `-f` full-size, `-p` ratio). |
+| Reparent a pane | `insert_existing_pane` | `join-pane` moves an existing leaf beside a target through the same placement (`-b` before, `-f` full-size, `-p` ratio). |
 | Swap two leaves | `swap_layout_panes` | `swap-pane` exchanges leaves, keeping split IDs/ratios. |
 | Rotate | `remap_layout_panes` | `rotate-window` walks surfaces through slots via a pane→pane remap. |
 | Exact resize | `set_split_ratio` | `resize-split` (divider drag commit) sets one `^split`'s ratio. |
-| Nearest resize | `adjust_nearest_ratio` | `resize-pane -L/-R/-U/-D` walks to the nearest ancestor split on the requested axis. |
+| Directional resize | `resize_boundary` | `resize-pane -L/-R/-U/-D` (`resize_pane`) and `-x`/`-y` (`resize_pane_to`) move **one** boundary: the deepest on-axis ancestor holding the pane in its `first` subtree (the divider touching the pane's right/bottom edge), falling back to the deepest ancestor holding it in `second` when the pane already ends at the window edge. A positive delta always moves that divider right/down, so `-R` grows a pane that has a neighbor to its right and shrinks one pinned to the window edge, which is what `layout_resize_pane` in tmux does with its last-cell/previous-cell rule. The tree stores proportions, so the space that move frees is shared proportionally within each side instead of being taken cell-for-cell from the adjacent pane as in tmux. |
 
 # Layout reconciliation (presets)
 

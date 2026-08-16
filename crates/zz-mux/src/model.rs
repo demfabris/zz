@@ -129,6 +129,29 @@ impl PaneKind {
     }
 }
 
+/// Where a split drops the pane it creates: `ratio` is the new pane's share of
+/// the box it lands in, `before` puts it left of or above the target,
+/// `full_size` spans the whole window instead of the target's box, and
+/// `detached` leaves focus where it was.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SplitPlacement {
+    pub ratio: f32,
+    pub before: bool,
+    pub full_size: bool,
+    pub detached: bool,
+}
+
+impl Default for SplitPlacement {
+    fn default() -> Self {
+        Self {
+            ratio: 0.5,
+            before: false,
+            full_size: false,
+            detached: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pane {
     pub id: PaneId,
@@ -304,7 +327,18 @@ impl MuxState {
         name: Option<String>,
         kind: PaneKind,
     ) -> Result<(WindowId, PaneId), ServerError> {
-        let index = self.next_window_index(session)?;
+        self.create_window_at(session, None, name, kind, true)
+    }
+
+    pub fn create_window_at(
+        &mut self,
+        session: SessionId,
+        index: Option<u32>,
+        name: Option<String>,
+        kind: PaneKind,
+        activate: bool,
+    ) -> Result<(WindowId, PaneId), ServerError> {
+        let index = self.claim_window_index(session, index)?;
         let window_id = self.allocate_window_id();
         let pane_id = self.allocate_pane_id();
         let pane = Pane {
@@ -335,9 +369,134 @@ impl MuxState {
             .get_mut(&session)
             .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?;
         session_state.windows.push(window_id);
-        session_state.activate_window(window_id);
+        if activate {
+            session_state.activate_window(window_id);
+        }
+        self.sort_session_windows(session);
         self.bump_generation();
         Ok((window_id, pane_id))
+    }
+
+    /// The index a new window takes in `session`: the requested one when it is
+    /// free, otherwise the lowest free index.
+    fn claim_window_index(
+        &self,
+        session: SessionId,
+        index: Option<u32>,
+    ) -> Result<u32, ServerError> {
+        let Some(index) = index else {
+            return self.next_window_index(session);
+        };
+        if self.window_at_index(session, index).is_some() {
+            return Err(ServerError::InvalidCommand(format!(
+                "index in use: {index}"
+            )));
+        }
+        if self.sessions.contains_key(&session) {
+            Ok(index)
+        } else {
+            Err(ServerError::MissingTarget(session.to_string()))
+        }
+    }
+
+    #[must_use]
+    pub fn window_at_index(&self, session: SessionId, index: u32) -> Option<WindowId> {
+        self.window_matching(session, |window| window.index == index)
+    }
+
+    #[must_use]
+    pub fn window_named(&self, session: SessionId, name: &str) -> Option<WindowId> {
+        self.window_matching(session, |window| window.name == name)
+    }
+
+    fn window_matching(
+        &self,
+        session: SessionId,
+        predicate: impl Fn(&Window) -> bool,
+    ) -> Option<WindowId> {
+        self.sessions
+            .get(&session)?
+            .windows
+            .iter()
+            .copied()
+            .find(|window| self.windows.get(window).is_some_and(&predicate))
+    }
+
+    /// Frees `index` by moving the contiguous run of windows starting there up
+    /// one slot, tmux's `winlink_shuffle_up`.
+    pub fn shift_windows_up(&mut self, session: SessionId, index: u32) -> Result<(), ServerError> {
+        let state = self
+            .sessions
+            .get(&session)
+            .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?;
+        let used = state
+            .windows
+            .iter()
+            .filter_map(|window| self.windows.get(window).map(|window| window.index))
+            .collect::<BTreeSet<_>>();
+        let mut free = index;
+        while used.contains(&free) {
+            free = free
+                .checked_add(1)
+                .ok_or_else(|| ServerError::InvalidCommand("no free window index".to_owned()))?;
+        }
+        let moved = state
+            .windows
+            .iter()
+            .copied()
+            .filter(|window| {
+                self.windows
+                    .get(window)
+                    .is_some_and(|window| (index..free).contains(&window.index))
+            })
+            .collect::<Vec<_>>();
+        if moved.is_empty() {
+            return Ok(());
+        }
+        for window in moved {
+            self.windows
+                .get_mut(&window)
+                .expect("shifted window exists")
+                .index += 1;
+        }
+        self.sort_session_windows(session);
+        self.bump_generation();
+        Ok(())
+    }
+
+    pub fn set_window_index(&mut self, window: WindowId, index: u32) -> Result<(), ServerError> {
+        let session = self
+            .windows
+            .get(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?
+            .session;
+        if self
+            .window_at_index(session, index)
+            .is_some_and(|occupant| occupant != window)
+        {
+            return Err(ServerError::InvalidCommand(format!(
+                "index in use: {index}"
+            )));
+        }
+        self.windows
+            .get_mut(&window)
+            .expect("window target was resolved")
+            .index = index;
+        self.sort_session_windows(session);
+        self.bump_generation();
+        Ok(())
+    }
+
+    fn sort_session_windows(&mut self, session: SessionId) {
+        let Some(state) = self.sessions.get(&session) else {
+            return;
+        };
+        let mut windows = state.windows.clone();
+        windows.sort_by_key(|window| self.windows.get(window).map(|window| window.index));
+        self.sessions
+            .get_mut(&session)
+            .expect("session was just read")
+            .windows = windows;
     }
 
     pub fn rename_window(
@@ -363,13 +522,39 @@ impl MuxState {
         axis: Axis,
         kind: PaneKind,
     ) -> Result<PaneId, ServerError> {
+        self.split_pane_with(target, axis, kind, SplitPlacement::default())
+    }
+
+    pub fn split_pane_with(
+        &mut self,
+        target: PaneId,
+        axis: Axis,
+        kind: PaneKind,
+        placement: SplitPlacement,
+    ) -> Result<PaneId, ServerError> {
+        if !placement.ratio.is_finite()
+            || !(MIN_SPLIT_RATIO..=MAX_SPLIT_RATIO).contains(&placement.ratio)
+        {
+            return Err(ServerError::InvalidCommand(format!(
+                "new pane ratio must be between {MIN_SPLIT_RATIO} and {MAX_SPLIT_RATIO}"
+            )));
+        }
         let window_id = self
             .window_for_pane(target)
             .ok_or_else(|| ServerError::MissingTarget(target.to_string()))?;
         let pane_id = self.allocate_pane_id();
         let split_id = self.allocate_split_id();
         let window = self.windows.get_mut(&window_id).expect("window exists");
-        if !replace_leaf_with_split(&mut window.layout, target, pane_id, split_id, axis) {
+        if !insert_existing_pane(
+            &mut window.layout,
+            target,
+            pane_id,
+            split_id,
+            axis,
+            placement.ratio,
+            placement.before,
+            placement.full_size,
+        ) {
             return Err(ServerError::MissingTarget(target.to_string()));
         }
         window.panes.insert(
@@ -382,8 +567,10 @@ impl MuxState {
                 input_options: InputOptions::default(),
             },
         );
-        insert_pane_order(&mut window.pane_order, pane_id, target, false);
-        activate_window_pane(window, pane_id, false);
+        insert_pane_order(&mut window.pane_order, pane_id, target, placement.before);
+        if !placement.detached {
+            activate_window_pane(window, pane_id, false);
+        }
         self.bump_generation();
         Ok(pane_id)
     }
@@ -497,9 +684,9 @@ impl MuxState {
         Ok(())
     }
 
-    /// Shift the nearest resizable split for `pane` by `cells` terminal cells.
-    /// `window_extent` is the window's cell count along `axis`; without one, a
-    /// unit falls back to 5% of the adjusted split.
+    /// Move `pane`'s resize boundary by `cells` terminal cells, positive toward
+    /// the right or bottom. `window_extent` is the window's cell count along
+    /// `axis`; without one, a unit falls back to 5% of the adjusted split.
     pub fn resize_pane(
         &mut self,
         pane: PaneId,
@@ -512,22 +699,66 @@ impl MuxState {
                 "pane resize adjustment must be finite".to_owned(),
             ));
         }
+        let (window_id, boundary) = self.resize_boundary_for(pane, axis)?;
+        let delta = match window_extent {
+            Some(extent) if extent >= 1.0 => cells / extent / boundary.container.max(f32::EPSILON),
+            _ => cells * 0.05,
+        };
+        self.apply_resize(window_id, boundary.split, boundary.ratio + delta);
+        Ok(())
+    }
+
+    /// Give `pane` `fraction` of the window along `axis`, the way
+    /// `resize-pane -x` and `-y` do. The tree keeps proportions, so callers
+    /// convert cells to a fraction with the geometry they were handed.
+    pub fn resize_pane_to(
+        &mut self,
+        pane: PaneId,
+        axis: Axis,
+        fraction: f32,
+    ) -> Result<(), ServerError> {
+        if !fraction.is_finite() || fraction <= 0.0 || fraction > 1.0 {
+            return Err(ServerError::InvalidCommand(
+                "pane size must be a positive share of the window".to_owned(),
+            ));
+        }
+        let (window_id, boundary) = self.resize_boundary_for(pane, axis)?;
+        let layout = &self.windows[&window_id].layout;
+        let current = pane_axis_fraction(layout, pane, axis)
+            .filter(|current| *current > 0.0)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let scale = fraction / current;
+        let ratio = if boundary.target_first {
+            boundary.ratio * scale
+        } else {
+            1.0 - (1.0 - boundary.ratio) * scale
+        };
+        self.apply_resize(window_id, boundary.split, ratio);
+        Ok(())
+    }
+
+    fn resize_boundary_for(
+        &self,
+        pane: PaneId,
+        axis: Axis,
+    ) -> Result<(WindowId, ResizeBoundary), ServerError> {
         let window_id = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let boundary = resize_boundary(&self.windows[&window_id].layout, pane, axis, 1.0)
+            .ok_or_else(|| {
+                ServerError::InvalidCommand(format!(
+                    "pane {pane} has no resizable split on the requested axis"
+                ))
+            })?;
+        Ok((window_id, boundary))
+    }
+
+    fn apply_resize(&mut self, window_id: WindowId, split: SplitId, ratio: f32) {
         let window = self.windows.get_mut(&window_id).expect("window exists");
-        let delta = match window_extent {
-            Some(extent) if extent >= 1.0 => ResizeDelta::WindowFraction(cells / extent),
-            _ => ResizeDelta::ContainerFraction(cells * 0.05),
-        };
-        if !adjust_nearest_ratio(&mut window.layout, pane, axis, delta, 1.0) {
-            return Err(ServerError::InvalidCommand(format!(
-                "pane {pane} has no resizable split on the requested axis"
-            )));
-        }
+        set_split_ratio(&mut window.layout, split, ratio).expect("located split still exists");
         window.zoomed_pane = None;
         self.bump_generation();
-        Ok(())
     }
 
     /// Sets one exact split ratio and returns whether the layout changed.
@@ -1132,13 +1363,34 @@ impl MuxState {
                 .then_some(id)
                 .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
         }
-        unique_match(
-            target,
-            self.sessions
-                .values()
-                .filter(|session| session.name == target)
-                .map(|session| session.id),
-        )
+        if let Some(session) = self
+            .sessions
+            .values()
+            .find(|session| session.name == target)
+            .map(|session| session.id)
+        {
+            return Ok(session);
+        }
+        let mut prefixed = self
+            .sessions
+            .values()
+            .filter(|session| session.name.starts_with(target))
+            .collect::<Vec<_>>();
+        match prefixed.as_slice() {
+            [] => Err(ServerError::MissingTarget(target.to_owned())),
+            [session] => Ok(session.id),
+            _ => {
+                prefixed.sort_unstable_by(|left, right| left.name.cmp(&right.name));
+                let names = prefixed
+                    .iter()
+                    .map(|session| session.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Err(ServerError::AmbiguousTarget(format!(
+                    "{target} matches {names}"
+                )))
+            }
+        }
     }
 
     pub fn resolve_window(
@@ -1551,6 +1803,7 @@ impl MuxState {
         &mut self,
         pane: PaneId,
         destination_session: SessionId,
+        destination_index: Option<u32>,
         name: Option<String>,
         detached: bool,
     ) -> Result<WindowId, ServerError> {
@@ -1565,7 +1818,7 @@ impl MuxState {
                 "cannot break the only pane in a window".to_owned(),
             ));
         }
-        let index = self.next_window_index(destination_session)?;
+        let index = self.claim_window_index(destination_session, destination_index)?;
         let window_id = self.allocate_window_id();
         let source = self
             .windows
@@ -1606,6 +1859,7 @@ impl MuxState {
         if !detached {
             destination.activate_window(window_id);
         }
+        self.sort_session_windows(destination_session);
         self.bump_generation();
         Ok(window_id)
     }
@@ -2137,32 +2391,6 @@ fn replace_split_ids(node: &mut LayoutNode, split_ids: &mut impl Iterator<Item =
     }
 }
 
-fn replace_leaf_with_split(
-    node: &mut LayoutNode,
-    target: PaneId,
-    new_pane: PaneId,
-    split: SplitId,
-    axis: Axis,
-) -> bool {
-    match node {
-        LayoutNode::Pane(pane) if *pane == target => {
-            *node = LayoutNode::Split {
-                id: split,
-                axis,
-                ratio: 0.5,
-                first: Box::new(LayoutNode::Pane(target)),
-                second: Box::new(LayoutNode::Pane(new_pane)),
-            };
-            true
-        }
-        LayoutNode::Pane(_) => false,
-        LayoutNode::Split { first, second, .. } => {
-            replace_leaf_with_split(first, target, new_pane, split, axis)
-                || replace_leaf_with_split(second, target, new_pane, split, axis)
-        }
-    }
-}
-
 /// The layout `swap-pane -s source -t target` produces, without touching state.
 /// A client renders a drop optimistically through this same transform.
 #[must_use]
@@ -2577,10 +2805,18 @@ fn valid_split_ratios(node: &LayoutNode) -> bool {
     }
 }
 
+/// The split a resize moves for one pane: tmux moves the boundary on the far
+/// side of the pane (right or bottom), and only falls back to the near boundary
+/// when the pane already ends at the window edge.
 #[derive(Clone, Copy)]
-enum ResizeDelta {
-    WindowFraction(f32),
-    ContainerFraction(f32),
+struct ResizeBoundary {
+    split: SplitId,
+    ratio: f32,
+    /// The window fraction the split's box covers along the resize axis.
+    container: f32,
+    /// The target sits in the split's first child, so the boundary is the one
+    /// on its far side and a positive delta grows it.
+    target_first: bool,
 }
 
 pub(crate) fn pane_axis_fraction(node: &LayoutNode, target: PaneId, axis: Axis) -> Option<f32> {
@@ -2609,50 +2845,52 @@ pub(crate) fn pane_axis_fraction(node: &LayoutNode, target: PaneId, axis: Axis) 
     }
 }
 
-fn adjust_nearest_ratio(
-    node: &mut LayoutNode,
+fn resize_boundary(
+    node: &LayoutNode,
     target: PaneId,
     axis: Axis,
-    delta: ResizeDelta,
-    fraction: f32,
-) -> bool {
+    container: f32,
+) -> Option<ResizeBoundary> {
     let LayoutNode::Split {
+        id,
         axis: split_axis,
         ratio,
         first,
         second,
-        ..
     } = node
     else {
-        return false;
+        return None;
     };
     let on_axis = *split_axis == axis;
-    let (child, child_fraction) = if first.contains(target) {
-        (first, if on_axis { fraction * *ratio } else { fraction })
+    let (child, target_first) = if first.contains(target) {
+        (first, true)
     } else if second.contains(target) {
-        (
-            second,
-            if on_axis {
-                fraction * (1.0 - *ratio)
-            } else {
-                fraction
-            },
-        )
+        (second, false)
     } else {
-        return false;
+        return None;
     };
-    if adjust_nearest_ratio(child, target, axis, delta, child_fraction.max(f32::EPSILON)) {
-        return true;
-    }
-    if !on_axis {
-        return false;
-    }
-    let delta = match delta {
-        ResizeDelta::WindowFraction(window) => window / fraction.max(f32::EPSILON),
-        ResizeDelta::ContainerFraction(container) => container,
+    let share = if target_first { *ratio } else { 1.0 - *ratio };
+    let child_container = if on_axis {
+        container * share
+    } else {
+        container
     };
-    *ratio = (*ratio + delta).clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO);
-    true
+    let deeper = resize_boundary(child, target, axis, child_container.max(f32::EPSILON));
+    let here = on_axis.then_some(ResizeBoundary {
+        split: *id,
+        ratio: *ratio,
+        container,
+        target_first,
+    });
+    match (deeper, here) {
+        (Some(deeper), Some(here)) => Some(if here.target_first && !deeper.target_first {
+            here
+        } else {
+            deeper
+        }),
+        (Some(deeper), None) => Some(deeper),
+        (None, here) => here,
+    }
 }
 
 fn set_split_ratio(node: &mut LayoutNode, target: SplitId, requested: f32) -> Option<bool> {
@@ -2969,6 +3207,38 @@ mod tests {
             window
         );
         assert_eq!(state.resolve_pane(Some("%0"), None, None).unwrap(), pane);
+    }
+
+    #[test]
+    fn session_names_resolve_by_exact_match_then_unique_prefix() {
+        let mut state = MuxState::default();
+        let (work, ..) = state.create_session("work").unwrap();
+        let (workshop, ..) = state.create_session("workshop").unwrap();
+        let (other, ..) = state.create_session("other").unwrap();
+
+        assert_eq!(
+            state.resolve_session(Some("work"), None).unwrap(),
+            work,
+            "an exact name wins over the longer session it prefixes"
+        );
+        assert_eq!(
+            state.resolve_session(Some("workshop"), None).unwrap(),
+            workshop
+        );
+        assert_eq!(
+            state.resolve_session(Some("works"), None).unwrap(),
+            workshop
+        );
+        assert_eq!(state.resolve_session(Some("o"), None).unwrap(), other);
+
+        let ambiguous = state.resolve_session(Some("wor"), None).unwrap_err();
+        assert!(
+            matches!(&ambiguous, ServerError::AmbiguousTarget(message)
+                if message == "wor matches work, workshop"),
+            "{ambiguous:?}"
+        );
+        let missing = state.resolve_session(Some("nope"), None).unwrap_err();
+        assert!(matches!(missing, ServerError::MissingTarget(target) if target == "nope"));
     }
 
     #[test]
@@ -3533,7 +3803,7 @@ mod tests {
         let next_split = SplitId(state.next_split_id);
 
         let broken_window = state
-            .break_pane(browser, session, Some("web".to_owned()), false)
+            .break_pane(browser, session, None, Some("web".to_owned()), false)
             .unwrap();
         assert_eq!(
             state.windows[&broken_window].layout,
@@ -3574,7 +3844,9 @@ mod tests {
         ));
         assert_eq!(state.windows[&original_window].active_pane, browser);
 
-        let second_break = state.break_pane(browser, session, None, true).unwrap();
+        let second_break = state
+            .break_pane(browser, session, None, None, true)
+            .unwrap();
         state
             .join_pane(browser, third, Axis::Vertical, 0.25, false, true, true)
             .unwrap();
@@ -3606,7 +3878,7 @@ mod tests {
             .split_pane(source_base, Axis::Horizontal, PaneKind::Terminal)
             .unwrap();
         let moving_window = state
-            .break_pane(moving, source_session, None, true)
+            .break_pane(moving, source_session, None, None, true)
             .unwrap();
         let (target_session, target_window, target) = state.create_session("target").unwrap();
 

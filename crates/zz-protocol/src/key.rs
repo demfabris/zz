@@ -470,6 +470,10 @@ impl KeyTables {
         })
     }
 
+    pub fn table_names(&self) -> impl Iterator<Item = &str> {
+        self.tables.keys().map(String::as_str)
+    }
+
     /// The binding a key press resolves to in `table`, preferring the
     /// character the press typed (`?` from shift+`/`) over the folded
     /// physical key name, with an `Any` fallback. This is the one lookup

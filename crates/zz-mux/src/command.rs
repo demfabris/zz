@@ -14,8 +14,8 @@ use zz_terminal::{
 };
 
 use crate::{
-    Binding, KeyTables, LayoutPreset, MuxState, PaneDirection, PaneKind, StatusFormats,
-    StatusOption, canonical_command, command_spec,
+    Binding, KeyTables, LayoutPreset, MuxState, PaneDirection, PaneKind, SplitPlacement,
+    StatusFormats, StatusOption, canonical_command, command_spec,
     status::{FormatContext, expand_format},
 };
 
@@ -128,11 +128,25 @@ pub enum MuxEffect {
         session: SessionId,
         detach_others: bool,
     },
-    Detach,
-    SourceFile(String),
+    Detach(DetachScope),
+    SourceFile {
+        path: String,
+        quiet: bool,
+    },
     ReloadConfig,
     KillServer,
     SnapshotChanged,
+}
+
+/// Which clients `detach-client` hangs up on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DetachScope {
+    /// The client that ran the command.
+    Client,
+    /// Every attached client except the caller.
+    Others,
+    /// Every client attached to one session, the caller included.
+    Session(SessionId),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -411,7 +425,7 @@ impl MuxEngine {
             "kill-session" => self.kill_session(context, &command.args)?,
             "attach-session" => self.attach_session(context, &command.args)?,
             "has-session" => self.has_session(context, &command.args)?,
-            "detach-client" => Execution::effect(MuxEffect::Detach),
+            "detach-client" => self.detach_client(context, &command.args)?,
             "new-window" => self.new_window(context, &command.args, PaneKind::Terminal)?,
             "new-browser" => {
                 let (options, positional) = parse_command_options("new-browser", &command.args)?;
@@ -421,8 +435,8 @@ impl MuxEngine {
             "list-windows" => self.list_windows(context, &command.args)?,
             "rename-window" => self.rename_window(context, &command.args)?,
             "select-window" => self.select_window(context, &command.args)?,
-            "next-window" => self.step_window(context, 1)?,
-            "previous-window" => self.step_window(context, -1)?,
+            "next-window" => self.step_window(context, &command.args, 1)?,
+            "previous-window" => self.step_window(context, &command.args, -1)?,
             "last-window" => self.last_window(context, &command.args)?,
             "kill-window" => self.kill_window(context, &command.args)?,
             "new-pane" => self.new_pane(context, &command.args)?,
@@ -500,8 +514,42 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("new-session", args)?;
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-A" | "-d" | "-D"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "new-session {flag}"
+            )));
+        }
+        if options.value("-t").is_some() {
+            return Err(ServerError::UnsupportedCommand(
+                "new-session -t (session groups)".to_owned(),
+            ));
+        }
+        reject_unsupported_values("new-session", &options, &["-e", "-F", "-f", "-x", "-y"])?;
         let command = shell_command_positional(&positional);
         let detached = options.has("-d");
+        if options.has("-A") {
+            let existing = match options.value("-s") {
+                Some(name) => session_named(&self.state, name),
+                None => self.state.resolve_session(None, context.session).ok(),
+            };
+            if let Some(session) = existing {
+                let window = session_active_window(&self.state, session)?;
+                let pane = window_active_pane(&self.state, window)?;
+                *context = ExecutionContext {
+                    session: Some(session),
+                    window: Some(window),
+                    pane: Some(pane),
+                };
+                return Ok(Execution::effect(MuxEffect::Attach {
+                    session,
+                    detach_others: options.has("-D"),
+                }));
+            }
+        }
         let inherit_cwd_from = spawn_cwd_source(
             "new-session",
             &self.state,
@@ -607,11 +655,50 @@ impl MuxEngine {
         context: &ExecutionContext,
         args: &[String],
     ) -> Result<Execution, ServerError> {
-        let (options, _) = parse_command_options("kill-session", args)?;
+        let (options, positional) = parse_command_options("kill-session", args)?;
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-a" | "-C"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "kill-session {flag}"
+            )));
+        }
+        reject_positionals("kill-session", &positional)?;
         let session = self
             .state
             .resolve_session(options.value("-t"), context.session)?;
-        let panes = self.state.kill_session(session)?;
+        if options.has("-C") {
+            let panes = self
+                .state
+                .sessions
+                .get(&session)
+                .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?
+                .windows
+                .iter()
+                .filter_map(|window| self.state.windows.get(window))
+                .flat_map(|window| window.pane_order().to_vec())
+                .collect::<Vec<_>>();
+            for pane in panes {
+                self.state.set_pane_bell(pane, false);
+            }
+            return Ok(Execution::default());
+        }
+        let targets = if options.has("-a") {
+            self.state
+                .sessions
+                .keys()
+                .copied()
+                .filter(|candidate| *candidate != session)
+                .collect()
+        } else {
+            vec![session]
+        };
+        let mut panes = Vec::new();
+        for target in targets {
+            panes.extend(self.state.kill_session(target)?);
+        }
         Ok(Execution::effect(MuxEffect::PanesRemoved(panes)))
     }
 
@@ -621,11 +708,16 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("attach-session", args)?;
-        let target = options
-            .value("-t")
-            .or_else(|| positional.first().map(String::as_str));
+        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-d") {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "attach-session {flag}"
+            )));
+        }
+        reject_positionals("attach-session", &positional)?;
         let detach_others = options.has("-d");
-        let session = self.state.resolve_session(target, context.session)?;
+        let session = self
+            .state
+            .resolve_session(options.value("-t"), context.session)?;
         let window = session_active_window(&self.state, session)?;
         let pane = window_active_pane(&self.state, window)?;
         *context = ExecutionContext {
@@ -637,6 +729,28 @@ impl MuxEngine {
             session,
             detach_others,
         }))
+    }
+
+    fn detach_client(
+        &self,
+        context: &ExecutionContext,
+        args: &[String],
+    ) -> Result<Execution, ServerError> {
+        let (options, positional) = parse_command_options("detach-client", args)?;
+        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-a") {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "detach-client {flag}"
+            )));
+        }
+        reject_positionals("detach-client", &positional)?;
+        let scope = match options.value("-s") {
+            Some(target) => {
+                DetachScope::Session(self.state.resolve_session(Some(target), context.session)?)
+            }
+            None if options.has("-a") => DetachScope::Others,
+            None => DetachScope::Client,
+        };
+        Ok(Execution::effect(MuxEffect::Detach(scope)))
     }
 
     fn has_session(
@@ -659,6 +773,14 @@ impl MuxEngine {
         kind: PaneKind,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("new-window", args)?;
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-a" | "-d" | "-k" | "-S"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!("new-window {flag}")));
+        }
+        reject_unsupported_values("new-window", &options, &["-e", "-F"])?;
         let command = shell_command_positional(&positional);
         self.new_window_with_options(context, &options, kind, command)
     }
@@ -670,26 +792,76 @@ impl MuxEngine {
         kind: PaneKind,
         command: Option<String>,
     ) -> Result<Execution, ServerError> {
-        let session = self
-            .state
-            .resolve_session(options.value("-t"), context.session)?;
+        let destination = window_destination(&self.state, options.value("-t"), context)?;
+        let session = destination.session;
+        let selects = !options.has("-d");
+        let name = options.value("-n");
+        if options.has("-S")
+            && let Some(existing) = name.and_then(|name| self.state.window_named(session, name))
+        {
+            if selects {
+                self.state.select_window(session, existing)?;
+                *context = ExecutionContext {
+                    session: Some(session),
+                    window: Some(existing),
+                    pane: Some(window_active_pane(&self.state, existing)?),
+                };
+            }
+            return Ok(Execution::default());
+        }
         let inherit_cwd_from =
             spawn_cwd_source("new-window", &self.state, options, context.pane, &kind)?;
-        let snapshot_kind = pane_kind_snapshot(&kind);
-        let (window, pane) =
-            self.state
-                .create_window(session, options.value("-n").map(str::to_owned), kind)?;
-        *context = ExecutionContext {
-            session: Some(session),
-            window: Some(window),
-            pane: Some(pane),
+        let index = if options.has("-a") {
+            let after = match destination.index {
+                Some(index) => index,
+                None => window_index(&self.state, session_active_window(&self.state, session)?)?,
+            };
+            let index = after
+                .checked_add(1)
+                .ok_or_else(|| ServerError::InvalidCommand("no free window index".to_owned()))?;
+            self.state.shift_windows_up(session, index)?;
+            Some(index)
+        } else {
+            destination.index
         };
-        Ok(Execution::effect(MuxEffect::PaneCreated {
+        let replaced = match index {
+            Some(index) if options.has("-k") => self.state.window_at_index(session, index),
+            _ => None,
+        };
+        let snapshot_kind = pane_kind_snapshot(&kind);
+        let mut effects = Vec::new();
+        let window_name = name
+            .map(str::to_owned)
+            .or_else(|| index.map(|index| index.to_string()));
+        let (window, pane) = self.state.create_window_at(
+            session,
+            index.filter(|_| replaced.is_none()),
+            window_name,
+            kind,
+            selects,
+        )?;
+        if let Some(replaced) = replaced {
+            effects.push(MuxEffect::PanesRemoved(self.state.kill_window(replaced)?));
+            self.state
+                .set_window_index(window, index.expect("replacing an occupied index"))?;
+        }
+        if selects {
+            *context = ExecutionContext {
+                session: Some(session),
+                window: Some(window),
+                pane: Some(pane),
+            };
+        }
+        effects.push(MuxEffect::PaneCreated {
             pane,
             kind: snapshot_kind,
             inherit_cwd_from,
             command,
-        }))
+        });
+        Ok(Execution {
+            output: String::new(),
+            effects,
+        })
     }
 
     fn list_windows(
@@ -773,23 +945,25 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("select-window", args)?;
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-l" | "-n" | "-p" | "-T"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "select-window {flag}"
+            )));
+        }
         let target = options
             .value("-t")
             .or_else(|| positional.first().map(String::as_str));
+        if options.has("-n") || options.has("-p") {
+            let session = self.session_of_window_target(target, context)?;
+            let direction = if options.has("-n") { 1 } else { -1 };
+            return self.step_window_in_session(context, session, direction, false);
+        }
         if options.has("-l") {
-            let session = match target {
-                Some(_) => {
-                    let window =
-                        self.state
-                            .resolve_window(target, context.session, context.window)?;
-                    self.state
-                        .windows
-                        .get(&window)
-                        .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?
-                        .session
-                }
-                None => self.state.resolve_session(None, context.session)?,
-            };
+            let session = self.session_of_window_target(target, context)?;
             return self.activate_last_window(context, session);
         }
         let window = self
@@ -801,11 +975,32 @@ impl MuxEngine {
             .get(&window)
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?
             .session;
+        if options.has("-T") && session_active_window(&self.state, session)? == window {
+            return self.activate_last_window(context, session);
+        }
         self.state.select_window(session, window)?;
         context.session = Some(session);
         context.window = Some(window);
         context.pane = Some(window_active_pane(&self.state, window)?);
         Ok(Execution::default())
+    }
+
+    fn session_of_window_target(
+        &self,
+        target: Option<&str>,
+        context: &ExecutionContext,
+    ) -> Result<SessionId, ServerError> {
+        let Some(target) = target else {
+            return self.state.resolve_session(None, context.session);
+        };
+        let window = self
+            .state
+            .resolve_window(Some(target), context.session, context.window)?;
+        self.state
+            .windows
+            .get(&window)
+            .map(|window| window.session)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))
     }
 
     fn last_window(
@@ -836,35 +1031,86 @@ impl MuxEngine {
     fn step_window(
         &mut self,
         context: &mut ExecutionContext,
+        args: &[String],
         direction: isize,
     ) -> Result<Execution, ServerError> {
-        let session = self.state.resolve_session(None, context.session)?;
+        let command = if direction > 0 {
+            "next-window"
+        } else {
+            "previous-window"
+        };
+        let (options, positional) = parse_command_options(command, args)?;
+        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-a") {
+            return Err(ServerError::UnsupportedCommand(format!("{command} {flag}")));
+        }
+        reject_positionals(command, &positional)?;
+        let session = self
+            .state
+            .resolve_session(options.value("-t"), context.session)?;
+        self.step_window_in_session(context, session, direction, options.has("-a"))
+    }
+
+    fn step_window_in_session(
+        &mut self,
+        context: &mut ExecutionContext,
+        session: SessionId,
+        direction: isize,
+        alerted_only: bool,
+    ) -> Result<Execution, ServerError> {
         let state = self
             .state
             .sessions
             .get(&session)
             .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?;
-        let current = context
-            .window
-            .filter(|window| state.windows.contains(window))
-            .unwrap_or(state.active_window);
-        let current_index = state
-            .windows
-            .iter()
-            .position(|window| *window == current)
-            .unwrap_or(0);
         let len = isize::try_from(state.windows.len()).expect("window count fits isize");
         if len == 0 {
             return Err(ServerError::MissingTarget(session.to_string()));
         }
-        let next =
-            (isize::try_from(current_index).expect("index fits isize") + direction).rem_euclid(len);
-        let window = state.windows[usize::try_from(next).expect("nonnegative index")];
+        let current = context
+            .window
+            .filter(|window| state.windows.contains(window))
+            .unwrap_or(state.active_window);
+        let current_index = isize::try_from(
+            state
+                .windows
+                .iter()
+                .position(|window| *window == current)
+                .unwrap_or(0),
+        )
+        .expect("index fits isize");
+        let step_to = |steps: isize| {
+            let index = (current_index + steps * direction).rem_euclid(len);
+            state.windows[usize::try_from(index).expect("nonnegative index")]
+        };
+        let no_window = || {
+            ServerError::InvalidCommand(format!(
+                "no {} window",
+                if direction > 0 { "next" } else { "previous" }
+            ))
+        };
+        let window = if alerted_only {
+            (1..=len)
+                .map(step_to)
+                .find(|window| self.window_alerted(*window))
+                .ok_or_else(no_window)?
+        } else {
+            step_to(1)
+        };
+        if window == current {
+            return Err(no_window());
+        }
         self.state.select_window(session, window)?;
         context.session = Some(session);
         context.window = Some(window);
         context.pane = Some(window_active_pane(&self.state, window)?);
         Ok(Execution::default())
+    }
+
+    fn window_alerted(&self, window: WindowId) -> bool {
+        self.state
+            .windows
+            .get(&window)
+            .is_some_and(|window| window.panes.values().any(|pane| pane.bell))
     }
 
     fn kill_window(
@@ -873,13 +1119,38 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-window", args)?;
-        let target = options
-            .value("-t")
-            .or_else(|| positional.first().map(String::as_str));
+        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-a") {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "kill-window {flag}"
+            )));
+        }
+        reject_positionals("kill-window", &positional)?;
         let window = self
             .state
-            .resolve_window(target, context.session, context.window)?;
-        let panes = self.state.kill_window(window)?;
+            .resolve_window(options.value("-t"), context.session, context.window)?;
+        let targets = if options.has("-a") {
+            let session = self
+                .state
+                .windows
+                .get(&window)
+                .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?
+                .session;
+            self.state
+                .sessions
+                .get(&session)
+                .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?
+                .windows
+                .iter()
+                .copied()
+                .filter(|candidate| *candidate != window)
+                .collect()
+        } else {
+            vec![window]
+        };
+        let mut panes = Vec::new();
+        for target in targets {
+            panes.extend(self.state.kill_window(target)?);
+        }
         Ok(Execution::effect(MuxEffect::PanesRemoved(panes)))
     }
 
@@ -890,27 +1161,24 @@ impl MuxEngine {
         kind: Option<PaneKind>,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("split-window", args)?;
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-b" | "-d" | "-f" | "-h" | "-v"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "split-window {flag}"
+            )));
+        }
+        reject_unsupported_values("split-window", &options, &["-e"])?;
         let command = shell_command_positional(&positional);
-        let target = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
-        let axis = if options.has("-h") {
-            Axis::Horizontal
-        } else {
-            Axis::Vertical
-        };
-        let kind = kind.unwrap_or(PaneKind::Terminal);
-        let inherit_cwd_from =
-            spawn_cwd_source("split-window", &self.state, &options, Some(target), &kind)?;
-        let snapshot_kind = pane_kind_snapshot(&kind);
-        let pane = self.state.split_pane(target, axis, kind)?;
-        *context = ExecutionContext::for_pane(&self.state, pane).expect("new pane has a context");
-        Ok(Execution::effect(MuxEffect::PaneCreated {
-            pane,
-            kind: snapshot_kind,
-            inherit_cwd_from,
+        self.split_window_with_options(
+            context,
+            &options,
+            kind.unwrap_or(PaneKind::Terminal),
             command,
-        }))
+            split_size(&options),
+        )
     }
 
     fn new_pane(
@@ -934,7 +1202,13 @@ impl MuxEngine {
             Some(target),
             &PaneKind::Terminal,
         )?;
-        self.split_window_with_options(context, &options, PaneKind::Picker { inherit_cwd_from })
+        self.split_window_with_options(
+            context,
+            &options,
+            PaneKind::Picker { inherit_cwd_from },
+            None,
+            split_size(&options),
+        )
     }
 
     fn split_browser(
@@ -944,7 +1218,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("split-browser", args)?;
         let browser = browser_from_args(&options, &positional)?;
-        self.split_window_with_options(context, &options, PaneKind::Browser(browser))
+        self.split_window_with_options(context, &options, PaneKind::Browser(browser), None, None)
     }
 
     fn select_pane_kind(
@@ -1061,23 +1335,20 @@ impl MuxEngine {
             .window_for_pane(source)
             .expect("resolved source pane has a window");
         let source_session = self.state.windows[&source_window].session;
-        let destination_session = match options.value("-t") {
-            Some(target) if target.starts_with('$') => {
-                self.state.resolve_session(Some(target), context.session)?
-            }
-            Some(target) => {
-                let window =
-                    self.state
-                        .resolve_window(Some(target), context.session, context.window)?;
-                self.state.windows[&window].session
-            }
-            None => source_session,
+        let destination = match options.value("-t") {
+            Some(target) => window_destination(&self.state, Some(target), context)?,
+            None => WindowDestination {
+                session: source_session,
+                index: None,
+            },
         };
+        let destination_session = destination.session;
         let detached = options.has("-d");
         let original_context = context.clone();
         let window = self.state.break_pane(
             source,
             destination_session,
+            destination.index,
             options.value("-n").map(str::to_owned),
             detached,
         )?;
@@ -1159,7 +1430,11 @@ impl MuxEngine {
             } else {
                 Axis::Vertical
             },
-            parse_join_pane_ratio(options.value("-p"))?,
+            options
+                .value("-p")
+                .map(parse_pane_percentage)
+                .transpose()?
+                .unwrap_or(0.5),
             options.has("-b"),
             options.has("-f"),
             detached,
@@ -1344,6 +1619,8 @@ impl MuxEngine {
         context: &mut ExecutionContext,
         options: &Options,
         kind: PaneKind,
+        command: Option<String>,
+        size: Option<SplitSize<'_>>,
     ) -> Result<Execution, ServerError> {
         let target = self
             .state
@@ -1353,17 +1630,76 @@ impl MuxEngine {
         } else {
             Axis::Vertical
         };
+        let placement = self.split_placement(options, size, target, axis)?;
         let snapshot_kind = pane_kind_snapshot(&kind);
         let inherit_cwd_from =
             spawn_cwd_source("split-window", &self.state, options, Some(target), &kind)?;
-        let pane = self.state.split_pane(target, axis, kind)?;
-        *context = ExecutionContext::for_pane(&self.state, pane).expect("new pane has a context");
+        let pane = self.state.split_pane_with(target, axis, kind, placement)?;
+        if !placement.detached {
+            *context =
+                ExecutionContext::for_pane(&self.state, pane).expect("new pane has a context");
+        }
         Ok(Execution::effect(MuxEffect::PaneCreated {
             pane,
             kind: snapshot_kind,
             inherit_cwd_from,
-            command: None,
+            command,
         }))
+    }
+
+    fn split_placement(
+        &self,
+        options: &Options,
+        size: Option<SplitSize<'_>>,
+        target: PaneId,
+        axis: Axis,
+    ) -> Result<SplitPlacement, ServerError> {
+        let full_size = options.has("-f");
+        let ratio = match size {
+            None => SplitPlacement::default().ratio,
+            Some(SplitSize::Percentage(value)) => parse_pane_percentage(value)?,
+            Some(SplitSize::Cells(value)) => {
+                if let Some(percentage) = value.strip_suffix('%') {
+                    parse_pane_percentage(percentage)?
+                } else {
+                    let cells = value.parse::<f32>().map_err(|_| {
+                        ServerError::InvalidCommand(format!("invalid pane size: {value}"))
+                    })?;
+                    cells / self.split_cell_extent(target, axis, full_size)?
+                }
+            }
+        };
+        Ok(SplitPlacement {
+            ratio,
+            before: options.has("-b"),
+            full_size,
+            detached: options.has("-d"),
+        })
+    }
+
+    /// Cells along `axis` in the box a new pane divides: the whole window under
+    /// `-f`, otherwise the pane being split.
+    fn split_cell_extent(
+        &self,
+        target: PaneId,
+        axis: Axis,
+        full_size: bool,
+    ) -> Result<f32, ServerError> {
+        let extent = self
+            .window_cell_extent(target, axis)
+            .ok_or_else(|| geometry_unavailable("a split size"))?;
+        if full_size {
+            return Ok(extent);
+        }
+        let window = self
+            .state
+            .window_for_pane(target)
+            .ok_or_else(|| ServerError::MissingTarget(target.to_string()))?;
+        let layout = &self.state.windows[&window].layout;
+        crate::model::pane_axis_fraction(layout, target, axis)
+            .filter(|fraction| *fraction > 0.0)
+            .map(|fraction| extent * fraction)
+            .ok_or_else(|| geometry_unavailable("a split size"))
     }
 
     fn select_pane(
@@ -1602,6 +1938,15 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("resize-pane", args)?;
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-D" | "-L" | "-R" | "-U" | "-Z"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "resize-pane {flag}"
+            )));
+        }
         let pane = self
             .state
             .resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -1619,22 +1964,50 @@ impl MuxEngine {
             }
             return Ok(Execution::default());
         }
-        let cells = positional
+        if positional.len() > 1 {
+            return Err(ServerError::InvalidCommand(
+                "resize-pane accepts at most one adjustment".to_owned(),
+            ));
+        }
+        for (option, axis) in [("-x", Axis::Horizontal), ("-y", Axis::Vertical)] {
+            let Some(value) = options.value(option) else {
+                continue;
+            };
+            let fraction = if let Some(percentage) = value.strip_suffix('%') {
+                parse_pane_percentage(percentage)?
+            } else {
+                let cells = value.parse::<f32>().map_err(|_| {
+                    ServerError::InvalidCommand(format!("invalid pane size: {value}"))
+                })?;
+                cells
+                    / self
+                        .window_cell_extent(pane, axis)
+                        .ok_or_else(|| geometry_unavailable(&format!("resize-pane {option}")))?
+            };
+            self.state.resize_pane_to(pane, axis, fraction)?;
+        }
+        let shared = positional
             .first()
-            .and_then(|value| value.parse::<f32>().ok())
-            .unwrap_or(1.0);
-        let axis = if options.has("-U") || options.has("-D") {
-            Axis::Vertical
-        } else {
-            Axis::Horizontal
-        };
-        let sign = if options.has("-L") || options.has("-U") {
-            -1.0
-        } else {
-            1.0
-        };
-        let extent = self.window_cell_extent(pane, axis);
-        self.state.resize_pane(pane, axis, sign * cells, extent)?;
+            .map(|value| parse_resize_adjustment(value))
+            .transpose()?;
+        for (option, axis, sign) in [
+            ("-L", Axis::Horizontal, -1.0),
+            ("-R", Axis::Horizontal, 1.0),
+            ("-U", Axis::Vertical, -1.0),
+            ("-D", Axis::Vertical, 1.0),
+        ] {
+            let attached = options
+                .value(option)
+                .map(parse_resize_adjustment)
+                .transpose()?;
+            if attached.is_none() && !options.has(option) {
+                continue;
+            }
+            let cells = attached.or(shared).unwrap_or(1);
+            let extent = self.window_cell_extent(pane, axis);
+            self.state
+                .resize_pane(pane, axis, sign * cells as f32, extent)?;
+        }
         Ok(Execution::default())
     }
 
@@ -1758,13 +2131,31 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-pane", args)?;
-        let target = options
-            .value("-t")
-            .or_else(|| positional.first().map(String::as_str));
+        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-a") {
+            return Err(ServerError::UnsupportedCommand(format!("kill-pane {flag}")));
+        }
+        reject_positionals("kill-pane", &positional)?;
         let pane = self
             .state
-            .resolve_pane(target, context.window, context.pane)?;
-        let panes = self.state.kill_pane(pane)?;
+            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let targets = if options.has("-a") {
+            let window = self
+                .state
+                .window_for_pane(pane)
+                .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+            self.state.windows[&window]
+                .pane_order()
+                .iter()
+                .copied()
+                .filter(|candidate| *candidate != pane)
+                .collect()
+        } else {
+            vec![pane]
+        };
+        let mut panes = Vec::new();
+        for target in targets {
+            panes.extend(self.state.kill_pane(target)?);
+        }
         Ok(Execution::effect(MuxEffect::PanesRemoved(panes)))
     }
 
@@ -1774,6 +2165,14 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("send-keys", args)?;
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-C" | "-H" | "-P" | "-X" | "-l" | "-o"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!("send-keys {flag}")));
+        }
+        let repeat = repeat_count("send-keys", &options)?;
         let pane = self
             .state
             .resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -1788,17 +2187,36 @@ impl MuxEngine {
                 self.set_clipboard,
                 &self.copy_command,
             )?;
-            return Ok(Execution::effect(MuxEffect::TerminalView {
-                pane,
-                action: TerminalViewAction::CopyMode(action),
-            }));
+            let repeat = if repeats_in_copy_mode(&action) {
+                repeat
+            } else {
+                1
+            };
+            return Ok(Execution {
+                output: String::new(),
+                effects: vec![
+                    MuxEffect::TerminalView {
+                        pane,
+                        action: TerminalViewAction::CopyMode(action),
+                    };
+                    repeat
+                ],
+            });
         }
-        let keys = if options.has("-l") {
-            vec![KeyToken::Literal(positional.join(" "))]
+        let keys = if options.has("-H") {
+            positional
+                .iter()
+                .map(|value| hex_key_token(value))
+                .collect::<Result<Vec<_>, _>>()?
+        } else if options.has("-l") {
+            vec![KeyToken::Literal(positional.concat())]
         } else {
             positional.iter().map(|value| key_token(value)).collect()
         };
-        Ok(Execution::effect(MuxEffect::SendKeys { pane, keys }))
+        Ok(Execution::effect(MuxEffect::SendKeys {
+            pane,
+            keys: std::iter::repeat_n(keys, repeat).flatten().collect(),
+        }))
     }
 
     fn send_prefix(
@@ -1821,7 +2239,15 @@ impl MuxEngine {
         context: &ExecutionContext,
         args: &[String],
     ) -> Result<Execution, ServerError> {
-        let (options, _) = parse_command_options("copy-mode", args)?;
+        let (options, positional) = parse_command_options("copy-mode", args)?;
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-d" | "-u"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!("copy-mode {flag}")));
+        }
+        reject_positionals("copy-mode", &positional)?;
         let pane = self
             .state
             .resolve_pane(options.value("-t"), context.window, context.pane)?;
@@ -1833,6 +2259,12 @@ impl MuxEngine {
             effects.push(MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::CopyMode(CopyModeAction::PageUp),
+            });
+        }
+        if options.has("-d") {
+            effects.push(MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::CopyMode(CopyModeAction::PageDown),
             });
         }
         Ok(Execution {
@@ -2130,47 +2562,15 @@ impl MuxEngine {
     }
 
     fn bind_key(&mut self, args: &[String]) -> Result<Execution, ServerError> {
-        let mut table = "prefix".to_owned();
-        let mut repeat = false;
-        let mut note = None;
-        let mut index = 0;
-        while let Some(argument) = args.get(index) {
-            match argument.as_str() {
-                "-n" => {
-                    "root".clone_into(&mut table);
-                    index += 1;
-                }
-                "-r" => {
-                    repeat = true;
-                    index += 1;
-                }
-                "-T" => {
-                    required_arg(args, index + 1, "-T")?.clone_into(&mut table);
-                    index += 2;
-                }
-                "-N" => {
-                    note = Some(required_arg(args, index + 1, "-N")?.to_owned());
-                    index += 2;
-                }
-                _ => break,
-            }
-        }
-        let key = required_arg(args, index, "key")?;
-        required_arg(args, index + 1, "command")?;
-        let mut commands = Vec::new();
-        for segment in args[index + 1..].split(|argument| argument == ";") {
-            let Some((command, command_args)) = segment.split_first() else {
-                return Err(ServerError::InvalidCommand(
-                    "bind-key command chain contains an empty command".to_owned(),
-                ));
-            };
-            commands.push(CommandInvocation::new(
-                command,
-                command_args.iter().cloned(),
-            ));
-        }
+        let (options, positional) = parse_command_options("bind-key", args)?;
+        let table = key_table(&options);
+        let repeat = options.has("-r");
+        let note = options.value("-N").map(str::to_owned);
+        let key = required_arg(&positional, 0, "key")?;
+        required_arg(&positional, 1, "command")?;
+        let commands = bound_commands(&positional[1..])?;
         self.keys.bind(
-            &table,
+            table,
             key,
             Binding {
                 commands,
@@ -2182,25 +2582,34 @@ impl MuxEngine {
     }
 
     fn unbind_key(&mut self, args: &[String]) -> Result<Execution, ServerError> {
-        let mut table = "prefix";
-        let mut index = 0;
-        if args.get(index).is_some_and(|arg| arg == "-n") {
-            table = "root";
-            index += 1;
-        } else if args.get(index).is_some_and(|arg| arg == "-T") {
-            table = required_arg(args, index + 1, "-T")?;
-            index += 2;
-        }
-        if args.get(index).is_some_and(|arg| arg == "-a") {
+        let (options, positional) = parse_command_options("unbind-key", args)?;
+        if options.has("-a") {
             return Err(ServerError::UnsupportedCommand("unbind-key -a".to_owned()));
         }
-        let key = required_arg(args, index, "key")?;
+        let table = key_table(&options);
+        let key = required_arg(&positional, 0, "key")?;
         self.keys.unbind(table, key);
         Ok(Execution::default())
     }
 
     fn list_keys(&self, args: &[String]) -> Result<Execution, ServerError> {
-        let (options, _) = parse_command_options("list-keys", args)?;
+        let (options, positional) = parse_command_options("list-keys", args)?;
+        if let Some(flag) = options.flags.first() {
+            return Err(ServerError::UnsupportedCommand(format!("list-keys {flag}")));
+        }
+        if let Some(argument) = positional.first() {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "list-keys {argument} (key filter)"
+            )));
+        }
+        if let Some(table) = options.value("-T")
+            && !matches!(table, "root" | "prefix" | "copy-mode" | "copy-mode-vi")
+            && self.keys.table_names().all(|name| name != table)
+        {
+            return Err(ServerError::InvalidCommand(format!(
+                "table {table} doesn't exist"
+            )));
+        }
         let output = self
             .keys
             .list(options.value("-T"))
@@ -2288,6 +2697,18 @@ impl MuxEngine {
         }
         if let Some(status) = StatusOption::from_name(option) {
             return self.set_status_option(status, positional.get(1).map(String::as_str), &options);
+        }
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-g" | "-o" | "-q"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "set-option {flag} {option}"
+            )));
+        }
+        if options.has("-o") {
+            return already_set_or_quiet(&options, option);
         }
         let value = positional.get(1).ok_or_else(|| {
             ServerError::InvalidCommand(format!("set-option {option} needs a value"))
@@ -2436,6 +2857,14 @@ impl MuxEngine {
             return Err(ServerError::UnsupportedCommand(format!(
                 "set-option {flag} history-trickle"
             )));
+        }
+        if options.has("-o") {
+            if options.has("-u") {
+                return Err(ServerError::InvalidCommand(
+                    "history-trickle cannot combine set-once and unset".to_owned(),
+                ));
+            }
+            return already_set_or_quiet(options, "history-trickle");
         }
         let limit = if options.has("-u") {
             if value.is_some() {
@@ -2838,11 +3267,25 @@ impl MuxEngine {
     }
 
     fn source_file(args: &[String]) -> Result<Execution, ServerError> {
-        let path = args
-            .iter()
-            .find(|argument| !argument.starts_with('-'))
-            .ok_or_else(|| ServerError::InvalidCommand("source-file needs a path".to_owned()))?;
-        Ok(Execution::effect(MuxEffect::SourceFile(path.clone())))
+        let (options, positional) = parse_command_options("source-file", args)?;
+        if let Some(flag) = options.flags.iter().find(|flag| flag.as_str() != "-q") {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "source-file {flag}"
+            )));
+        }
+        if positional.is_empty() {
+            return Err(ServerError::InvalidCommand(
+                "source-file needs a path".to_owned(),
+            ));
+        }
+        let quiet = options.has("-q");
+        Ok(Execution {
+            output: String::new(),
+            effects: positional
+                .into_iter()
+                .map(|path| MuxEffect::SourceFile { path, quiet })
+                .collect(),
+        })
     }
 
     /// Re-point a connection's context at live ids. Any command path that
@@ -2866,15 +3309,32 @@ impl MuxEngine {
 }
 
 fn parse_flag_value(value: Option<&str>, current: bool) -> Result<bool, ServerError> {
-    match value {
-        None => Ok(!current),
-        // `true`/`false` is the zz/config spelling, forwarded verbatim as a value.
-        Some("on" | "yes" | "1" | "true") => Ok(true),
-        Some("off" | "no" | "0" | "false") => Ok(false),
-        Some(value) => Err(ServerError::InvalidCommand(format!(
-            "invalid flag value: {value}"
-        ))),
+    // tmux: `1` is exact, `on`/`yes` (and their negatives) compare with
+    // strcasecmp, and a missing or empty value toggles. `true`/`false` is the
+    // zz/config spelling, forwarded verbatim as a value.
+    let Some(value) = value else {
+        return Ok(!current);
+    };
+    if value.is_empty() {
+        return Ok(!current);
     }
+    if value == "1"
+        || ["on", "yes", "true"]
+            .iter()
+            .any(|spelling| value.eq_ignore_ascii_case(spelling))
+    {
+        return Ok(true);
+    }
+    if value == "0"
+        || ["off", "no", "false"]
+            .iter()
+            .any(|spelling| value.eq_ignore_ascii_case(spelling))
+    {
+        return Ok(false);
+    }
+    Err(ServerError::InvalidCommand(format!(
+        "invalid flag value: {value}"
+    )))
 }
 
 fn parse_mode_keys(value: Option<&str>, current: ModeKeys) -> Result<ModeKeys, ServerError> {
@@ -2909,10 +3369,28 @@ fn validate_word_separators(value: &str) -> Result<(), ServerError> {
     Ok(())
 }
 
-fn parse_join_pane_ratio(value: Option<&str>) -> Result<f32, ServerError> {
-    let Some(value) = value else {
-        return Ok(0.5);
-    };
+/// How a split verb spells the size of the pane it creates: `-p` is always a
+/// percentage, `-l` is cells unless it carries a `%` suffix.
+#[derive(Clone, Copy)]
+enum SplitSize<'a> {
+    Percentage(&'a str),
+    Cells(&'a str),
+}
+
+fn split_size(options: &Options) -> Option<SplitSize<'_>> {
+    options.value("-l").map_or_else(
+        || options.value("-p").map(SplitSize::Percentage),
+        |size| Some(SplitSize::Cells(size)),
+    )
+}
+
+fn geometry_unavailable(what: &str) -> ServerError {
+    ServerError::InvalidCommand(format!(
+        "{what} in cells needs pane geometry, which arrives once a client draws the window; use a percentage instead"
+    ))
+}
+
+fn parse_pane_percentage(value: &str) -> Result<f32, ServerError> {
     let percentage = value
         .strip_suffix('%')
         .unwrap_or(value)
@@ -2984,6 +3462,12 @@ impl Options {
     }
 }
 
+fn key_table(options: &Options) -> &str {
+    options
+        .value("-T")
+        .unwrap_or(if options.has("-n") { "root" } else { "prefix" })
+}
+
 fn parse_command_options(
     command: &str,
     args: &[String],
@@ -2994,49 +3478,58 @@ fn parse_command_options(
         .iter()
         .filter_map(|option| option.value.map(|_| option.name))
         .collect::<Vec<_>>();
-    parse_options(args, &value_options)
+    let attached_options = spec
+        .options
+        .iter()
+        .filter_map(|option| option.attached_value.then_some(option.name))
+        .collect::<Vec<_>>();
+    parse_options(args, &value_options, &attached_options)
 }
 
 fn parse_options(
     args: &[String],
     value_options: &[&str],
+    attached_options: &[&str],
 ) -> Result<(Options, Vec<String>), ServerError> {
     let mut options = Options::default();
-    let mut positional = Vec::new();
     let mut index = 0;
     while let Some(argument) = args.get(index) {
-        if argument == "--" {
-            positional.extend(args[index + 1..].iter().cloned());
+        if !argument.starts_with('-') || argument == "-" {
             break;
         }
-        if let Some(option) = value_options.iter().find(|option| argument == **option) {
-            let value = required_arg(args, index + 1, option)?;
-            options
-                .values
-                .push(((*option).to_owned(), value.to_owned()));
-            index += 2;
-            continue;
-        }
-        if let Some(option) = value_options
-            .iter()
-            .find(|option| argument.starts_with(**option) && argument.len() > option.len())
-        {
-            options
-                .values
-                .push(((*option).to_owned(), argument[option.len()..].to_owned()));
-            index += 1;
-            continue;
-        }
-        if argument.starts_with('-') && argument != "-" {
-            for character in argument[1..].chars() {
-                options.flags.push(format!("-{character}"));
-            }
-        } else {
-            positional.push(argument.clone());
-        }
         index += 1;
+        if argument == "--" {
+            break;
+        }
+        let mut cluster = argument[1..].chars();
+        while let Some(character) = cluster.next() {
+            let name = format!("-{character}");
+            if attached_options.contains(&name.as_str()) {
+                let attached = cluster.as_str();
+                if attached.is_empty() {
+                    options.flags.push(name);
+                } else {
+                    options.values.push((name, attached.to_owned()));
+                }
+                break;
+            }
+            if !value_options.contains(&name.as_str()) {
+                options.flags.push(name);
+                continue;
+            }
+            let attached = cluster.as_str();
+            let value = if attached.is_empty() {
+                let value = required_arg(args, index, &name)?.to_owned();
+                index += 1;
+                value
+            } else {
+                attached.to_owned()
+            };
+            options.values.push((name, value));
+            break;
+        }
     }
-    Ok((options, positional))
+    Ok((options, args[index..].to_vec()))
 }
 
 fn required_arg<'a>(
@@ -3069,6 +3562,27 @@ fn reject_positionals(command: &str, positional: &[String]) -> Result<(), Server
     }
 }
 
+fn reject_unsupported_values(
+    command: &str,
+    options: &Options,
+    unsupported: &[&str],
+) -> Result<(), ServerError> {
+    for option in unsupported {
+        if options.value(option).is_some() {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "{command} {option}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn parse_resize_adjustment(value: &str) -> Result<i32, ServerError> {
+    value.parse::<i32>().map_err(|_| {
+        ServerError::InvalidCommand(format!("invalid resize adjustment: {value}"))
+    })
+}
+
 fn exactly_one_argument<'a>(
     command: &str,
     positional: &'a [String],
@@ -3090,6 +3604,87 @@ fn pane_kind_snapshot(kind: &PaneKind) -> PaneKindSnapshot {
         PaneKind::Agent(agent) => PaneKindSnapshot::Agent(agent.clone()),
         PaneKind::Editor(editor) => PaneKindSnapshot::Editor(editor.clone()),
     }
+}
+
+/// Where a freshly created window lands: an explicit index makes the command
+/// fail when that slot is taken, `None` takes the lowest free index.
+struct WindowDestination {
+    session: SessionId,
+    index: Option<u32>,
+}
+
+/// tmux's target-window-with-index resolution, the form `new-window -t` and
+/// `break-pane -t` use: the index need not exist yet, and a bare numeric
+/// target is a window index in the current session before anything else —
+/// even when a session shares that name (cmd-find.c tries the window part
+/// first and only falls back to a session lookup when every window
+/// interpretation fails).
+fn window_destination(
+    state: &MuxState,
+    target: Option<&str>,
+    context: &ExecutionContext,
+) -> Result<WindowDestination, ServerError> {
+    let session_destination = |session| {
+        Ok(WindowDestination {
+            session,
+            index: None,
+        })
+    };
+    let Some(target) = target else {
+        return session_destination(state.resolve_session(None, context.session)?);
+    };
+    if target.starts_with('$') {
+        return session_destination(state.resolve_session(Some(target), context.session)?);
+    }
+    if target.starts_with('@') {
+        let window = state.resolve_window(Some(target), context.session, context.window)?;
+        return session_destination(
+            state
+                .windows
+                .get(&window)
+                .ok_or_else(|| ServerError::MissingTarget(target.to_owned()))?
+                .session,
+        );
+    }
+    if let Some((session_target, window_target)) = target.split_once(':') {
+        let session = match session_target {
+            "" => state.resolve_session(None, context.session)?,
+            session => state.resolve_session(Some(session), context.session)?,
+        };
+        if window_target.is_empty() {
+            return session_destination(session);
+        }
+        let index = window_target
+            .parse::<u32>()
+            .map_err(|_| ServerError::MissingTarget(target.to_owned()))?;
+        return Ok(WindowDestination {
+            session,
+            index: Some(index),
+        });
+    }
+    if let Ok(index) = target.parse::<u32>() {
+        return Ok(WindowDestination {
+            session: state.resolve_session(None, context.session)?,
+            index: Some(index),
+        });
+    }
+    session_destination(state.resolve_session(Some(target), context.session)?)
+}
+
+fn session_named(state: &MuxState, name: &str) -> Option<SessionId> {
+    state
+        .sessions
+        .values()
+        .find(|session| session.name == name)
+        .map(|session| session.id)
+}
+
+fn window_index(state: &MuxState, window: WindowId) -> Result<u32, ServerError> {
+    state
+        .windows
+        .get(&window)
+        .map(|window| window.index)
+        .ok_or_else(|| ServerError::MissingTarget(window.to_string()))
 }
 
 fn session_active_window(state: &MuxState, session: SessionId) -> Result<WindowId, ServerError> {
@@ -3209,6 +3804,76 @@ fn key_token(value: &str) -> KeyToken {
     } else {
         KeyToken::Literal(value.to_owned())
     }
+}
+
+/// tmux's `send-keys -H` is strtol(16) clamped to one byte, written raw to the
+/// pane. `KeyToken::Literal` carries UTF-8 text, so only the ASCII range maps
+/// to the same bytes tmux writes; high bytes are refused rather than silently
+/// re-encoded.
+fn hex_key_token(value: &str) -> Result<KeyToken, ServerError> {
+    let digits = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    let code = u32::from_str_radix(digits, 16).map_err(|_| {
+        ServerError::InvalidCommand(format!("send-keys -H needs a character code: {value}"))
+    })?;
+    match code {
+        0x00..=0x7f => Ok(KeyToken::Literal(
+            char::from_u32(code).expect("ascii range").to_string(),
+        )),
+        0x80..=0xff => Err(ServerError::UnsupportedCommand(format!(
+            "send-keys -H {value} (raw bytes above 7f)"
+        ))),
+        _ => Err(ServerError::InvalidCommand(format!(
+            "send-keys -H needs a character code: {value}"
+        ))),
+    }
+}
+
+fn repeat_count(command: &str, options: &Options) -> Result<usize, ServerError> {
+    let Some(value) = options.value("-N") else {
+        return Ok(1);
+    };
+    match value.parse::<usize>() {
+        Ok(count) if count > 0 => Ok(count),
+        _ => Err(ServerError::InvalidCommand(format!(
+            "{command} -N needs a positive repeat count: {value}"
+        ))),
+    }
+}
+
+/// tmux hands the repeat count to the copy-mode command, which uses it only when
+/// it is a movement; repeating a copy or a cancel would mean something else.
+/// The copy-mode commands that honor tmux's `-N` repeat prefix: exactly the
+/// window-copy handlers that read `wme->prefix` and loop. Everything else runs
+/// once no matter the count (a repeated `rectangle-toggle` or copy would be a
+/// different command, not a repeated one).
+fn repeats_in_copy_mode(action: &CopyModeAction) -> bool {
+    matches!(
+        action,
+        CopyModeAction::Left
+            | CopyModeAction::Right
+            | CopyModeAction::Up
+            | CopyModeAction::Down
+            | CopyModeAction::PageUp
+            | CopyModeAction::PageDown
+            | CopyModeAction::HalfPageUp
+            | CopyModeAction::HalfPageDown
+            | CopyModeAction::ScrollUp
+            | CopyModeAction::ScrollDown
+            | CopyModeAction::NextWord
+            | CopyModeAction::PreviousWord
+            | CopyModeAction::NextWordEnd
+            | CopyModeAction::NextSpace
+            | CopyModeAction::PreviousSpace
+            | CopyModeAction::NextSpaceEnd
+            | CopyModeAction::NextParagraph
+            | CopyModeAction::PreviousParagraph
+            | CopyModeAction::Jump(_)
+            | CopyModeAction::RepeatJump { .. }
+            | CopyModeAction::SearchAgain { .. }
+    )
 }
 
 fn copy_mode_action(
@@ -3433,6 +4098,37 @@ fn copy_selection_action(
     }))
 }
 
+fn bound_commands(tail: &[String]) -> Result<Vec<CommandInvocation>, ServerError> {
+    if let [argument] = tail
+        && let Some(body) = crate::parser::command_block_body(argument)
+    {
+        let commands: Vec<CommandInvocation> = crate::parse_config("<bind-key>", body)
+            .commands
+            .into_iter()
+            .map(|command| CommandInvocation::new(command.name, command.args))
+            .collect();
+        if commands.is_empty() {
+            return Err(ServerError::InvalidCommand(
+                "bind-key command block is empty".to_owned(),
+            ));
+        }
+        return Ok(commands);
+    }
+    tail.split(|argument| argument == ";")
+        .map(|segment| {
+            let Some((command, command_args)) = segment.split_first() else {
+                return Err(ServerError::InvalidCommand(
+                    "bind-key command chain contains an empty command".to_owned(),
+                ));
+            };
+            Ok(CommandInvocation::new(
+                command,
+                command_args.iter().cloned(),
+            ))
+        })
+        .collect()
+}
+
 fn format_command(command: &CommandInvocation) -> String {
     std::iter::once(command.name.as_str())
         .chain(command.args.iter().map(String::as_str))
@@ -3453,6 +4149,17 @@ mod tests {
 
     fn command(name: &str, args: &[&str]) -> CommandInvocation {
         CommandInvocation::new(name, args.iter().copied())
+    }
+
+    fn window_layout(engine: &MuxEngine, session: SessionId) -> Vec<String> {
+        engine.state.sessions[&session]
+            .windows
+            .iter()
+            .map(|window| {
+                let window = &engine.state.windows[window];
+                format!("{}:{}", window.index, window.name)
+            })
+            .collect()
     }
 
     fn absolute_test_path(name: &str) -> PathBuf {
@@ -3543,6 +4250,259 @@ mod tests {
                 MuxEffect::SnapshotChanged,
             ] if *created == pane
         ));
+    }
+
+    #[test]
+    fn new_session_dash_a_attaches_to_the_named_session_instead_of_failing() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("first session");
+        let session = context.session.expect("session id");
+        let pane = context.pane.expect("pane id");
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "other"]),
+            )
+            .expect("second session");
+
+        let attached = engine
+            .execute(&mut context, &command("new-session", &["-A", "-s", "work"]))
+            .expect("attach or create");
+        assert_eq!(
+            attached.effects,
+            [MuxEffect::Attach {
+                session,
+                detach_others: false,
+            }]
+        );
+        assert_eq!(context.session, Some(session));
+        assert_eq!(context.pane, Some(pane));
+        assert_eq!(engine.state.sessions.len(), 2);
+
+        let ignores_detach = engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-A", "-d", "-s", "work"]),
+            )
+            .expect("attach or create");
+        assert_eq!(
+            ignores_detach.effects,
+            [MuxEffect::Attach {
+                session,
+                detach_others: false,
+            }]
+        );
+
+        let detaches_others = engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-A", "-D", "-s", "work"]),
+            )
+            .expect("attach or create");
+        assert_eq!(
+            detaches_others.effects,
+            [MuxEffect::Attach {
+                session,
+                detach_others: true,
+            }]
+        );
+
+        let bare = engine
+            .execute(&mut context, &command("new-session", &["-A"]))
+            .expect("attach to the current session");
+        assert_eq!(bare.effects.len(), 1);
+        assert!(matches!(bare.effects[0], MuxEffect::Attach { .. }));
+        assert_eq!(engine.state.sessions.len(), 2);
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-A", "-d", "-s", "fresh"]),
+            )
+            .expect("create");
+        assert!(
+            engine
+                .state
+                .sessions
+                .values()
+                .any(|session| session.name == "fresh")
+        );
+
+        assert!(matches!(
+            engine.execute(&mut context, &command("new-session", &["-s", "work"])),
+            Err(ServerError::InvalidCommand(_))
+        ));
+    }
+
+    #[test]
+    fn new_window_dash_d_creates_without_selecting() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+        let first = context.window.unwrap();
+
+        let created = engine
+            .execute(&mut context, &command("new-window", &["-d", "-n", "logs"]))
+            .expect("detached window");
+        assert_eq!(context.window, Some(first));
+        assert_eq!(engine.state.sessions[&session].active_window, first);
+        let pane = match created.effects.first() {
+            Some(MuxEffect::PaneCreated { pane, .. }) => *pane,
+            other => panic!("expected a created pane: {other:?}"),
+        };
+        let created_window = engine.state.window_for_pane(pane).expect("window");
+        assert_eq!(engine.state.windows[&created_window].name, "logs");
+        assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
+    fn new_window_dash_a_inserts_after_the_target_and_shifts_the_run_up() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+        for name in ["one", "two", "three"] {
+            engine
+                .execute(&mut context, &command("new-window", &["-n", name]))
+                .unwrap();
+        }
+        assert_eq!(
+            window_layout(&engine, session),
+            ["0:0", "1:one", "2:two", "3:three"]
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-a", "-t", "1", "-n", "inserted"]),
+            )
+            .expect("insert after window 1");
+        assert_eq!(
+            window_layout(&engine, session),
+            ["0:0", "1:one", "2:inserted", "3:two", "4:three"]
+        );
+        assert_eq!(
+            engine.state.windows[&engine.state.sessions[&session].active_window].name,
+            "inserted"
+        );
+        assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
+    fn new_window_dash_k_replaces_the_window_holding_the_index() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+        let doomed = context.window.unwrap();
+        let doomed_pane = context.pane.unwrap();
+
+        let replaced = engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-k", "-t", "0", "-n", "replacement"]),
+            )
+            .expect("replace the only window");
+        assert!(
+            replaced
+                .effects
+                .contains(&MuxEffect::PanesRemoved(vec![doomed_pane]))
+        );
+        assert!(!engine.state.windows.contains_key(&doomed));
+        assert_eq!(window_layout(&engine, session), ["0:replacement"]);
+        assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
+    fn new_window_dash_s_selects_an_existing_window_with_the_same_name() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "logs"]))
+            .unwrap();
+        let logs = context.window.unwrap();
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "editor"]))
+            .unwrap();
+
+        let selected = engine
+            .execute(&mut context, &command("new-window", &["-S", "-n", "logs"]))
+            .expect("select the existing window");
+        assert_eq!(selected.effects, [MuxEffect::SnapshotChanged]);
+        assert_eq!(context.window, Some(logs));
+        assert_eq!(engine.state.sessions[&session].windows.len(), 3);
+
+        engine
+            .execute(&mut context, &command("new-window", &["-S", "-n", "fresh"]))
+            .expect("create the missing window");
+        assert_eq!(engine.state.sessions[&session].windows.len(), 4);
+    }
+
+    #[test]
+    fn break_pane_dash_t_names_the_destination_index() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+        let home = context.window.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let broken = context.pane.unwrap();
+
+        engine
+            .execute(
+                &mut context,
+                &command("break-pane", &["-d", "-t", "work:5", "-n", "moved"]),
+            )
+            .expect("break to an explicit index");
+        assert_eq!(window_layout(&engine, session), ["0:0", "5:moved"]);
+        assert_eq!(context.window, Some(home));
+        assert_eq!(engine.state.sessions[&session].active_window, home);
+
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let second = context.pane.unwrap();
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("break-pane", &["-d", "-t", "work:5"]),
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "index in use: 5"
+        ));
+
+        engine
+            .execute(&mut context, &command("break-pane", &["-t", "7"]))
+            .expect("break to a bare index in the current session");
+        assert_eq!(engine.state.window_for_pane(second), context.window);
+        assert_eq!(
+            engine.state.windows[&context.window.unwrap()].index,
+            7,
+            "the broken pane lands at the requested index"
+        );
+        let first_break = engine
+            .state
+            .window_for_pane(broken)
+            .expect("the first broken pane kept its window");
+        assert_eq!(engine.state.windows[&first_break].index, 5);
+        assert!(engine.state.validate().is_ok());
     }
 
     #[test]
@@ -4896,6 +5856,115 @@ mod tests {
             engine.keys.get("root", "F2").unwrap().commands[0].name,
             "new-window"
         );
+    }
+
+    #[test]
+    fn option_parsing_follows_getopt_word_semantics() {
+        let parse = |args: &[&str], value_options: &[&str]| {
+            let args = args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
+            parse_options(&args, value_options, &[]).expect("parsed options")
+        };
+
+        let (options, positional) = parse(&["-As", "main", "htop"], &["-s", "-c", "-n"]);
+        assert!(options.has("-A"));
+        assert_eq!(options.value("-s"), Some("main"));
+        assert_eq!(positional, ["htop"]);
+
+        let (options, positional) = parse(&["-dc", "#{pane_path}"], &["-s", "-c", "-n"]);
+        assert!(options.has("-d"));
+        assert_eq!(options.value("-c"), Some("#{pane_path}"));
+        assert!(positional.is_empty());
+
+        let (options, positional) = parse(&["-n1", "date"], &["-n"]);
+        assert_eq!(options.value("-n"), Some("1"));
+        assert_eq!(positional, ["date"]);
+
+        let (options, positional) = parse(&["-c", "-foo", "-g"], &["-c"]);
+        assert_eq!(options.value("-c"), Some("-foo"));
+        assert!(options.has("-g"));
+        assert!(positional.is_empty());
+
+        let (options, positional) = parse(&["-g", "--", "-s", "value"], &["-s"]);
+        assert!(options.has("-g"));
+        assert_eq!(options.value("-s"), None);
+        assert_eq!(positional, ["-s", "value"]);
+
+        let (options, positional) = parse(&["ls", "-la", "Enter"], &["-t"]);
+        assert!(options.flags.is_empty());
+        assert_eq!(positional, ["ls", "-la", "Enter"]);
+
+        let (options, positional) = parse(&["-", "-t", "1"], &["-t"]);
+        assert!(options.flags.is_empty());
+        assert_eq!(positional, ["-", "-t", "1"]);
+
+        assert!(matches!(
+            parse_options(&["-t".to_owned()], &["-t"], &[]),
+            Err(ServerError::InvalidCommand(message)) if message == "-t requires an argument"
+        ));
+
+        let (options, positional) = parse_options(
+            &["-R10".to_owned(), "-U5".to_owned(), "-R".to_owned()],
+            &[],
+            &["-R", "-U"],
+        )
+        .expect("parsed options");
+        assert_eq!(options.value("-R"), Some("10"));
+        assert_eq!(options.value("-U"), Some("5"));
+        assert!(options.has("-R"));
+        assert!(positional.is_empty());
+    }
+
+    #[test]
+    fn commands_keep_dash_arguments_after_their_first_positional() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let created = engine
+            .execute(
+                &mut context,
+                &command("new-window", &["echo", "-n", "hello"]),
+            )
+            .unwrap();
+        assert!(matches!(
+            created.effects.first(),
+            Some(MuxEffect::PaneCreated {
+                command: Some(command),
+                ..
+            }) if command == "echo -n hello"
+        ));
+        let window = &engine.state.windows[&context.window.unwrap()];
+        assert_eq!(window.name, window.index.to_string());
+
+        let sent = engine
+            .execute(&mut context, &command("send-keys", &["ls", "-la", "Enter"]))
+            .unwrap();
+        assert!(matches!(
+            sent.effects.first(),
+            Some(MuxEffect::SendKeys { keys, .. })
+                if keys == &vec![
+                    KeyToken::Literal("ls".to_owned()),
+                    KeyToken::Literal("-la".to_owned()),
+                    KeyToken::Named("Enter".to_owned())
+                ]
+        ));
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "--", "prefix", "C-z"]),
+            )
+            .unwrap();
+        assert_eq!(engine.keys.prefix(), "C-z");
+
+        engine
+            .execute(
+                &mut context,
+                &command("set", &["-g", "status-left", "-foo"]),
+            )
+            .unwrap();
+        assert_eq!(engine.status.format(StatusOption::Left), Some("-foo"));
     }
 
     #[test]

@@ -47,7 +47,14 @@ use crate::transport::{LocalTransport, Transport as _, TransportStream as _};
 #[cfg(any(unix, windows, test))]
 // Runs under `sh -lc` so `zz` resolves through the login shell's PATH; the sentinel prefixes
 // let the parser skip whatever a login profile prints around the probe's own output.
-pub(crate) const REMOTE_SOCKET_PROBE: &str = "'if [ -n \"$XDG_RUNTIME_DIR\" ]; then printf \"zz-probe-socket=%s\\n\" \"$XDG_RUNTIME_DIR/zz/default.sock\"; else printf \"zz-probe-socket=%s\\n\" \"${TMPDIR:-/tmp}/zz-$USER/default.sock\"; fi; if command -v zz >/dev/null 2>&1; then printf \"zz-probe-protocol=%s\\n\" \"$(zz protocol-version 2>/dev/null || echo unknown)\"; else printf \"zz-probe-protocol=missing\\n\"; fi'";
+pub(crate) const REMOTE_SOCKET_PROBE: &str = "'if [ -n \"$XDG_RUNTIME_DIR\" ]; then zz_dir=\"$XDG_RUNTIME_DIR/zz\"; \
+     else zz_tmp=\"$TMPDIR\"; \
+     if [ -z \"$zz_tmp\" ]; then zz_tmp=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null); fi; \
+     case \"$zz_tmp\" in /*) ;; *) zz_tmp=/tmp ;; esac; \
+     zz_dir=\"${zz_tmp%/}/zz-$USER\"; fi; \
+     printf \"zz-probe-socket=%s\\n\" \"$zz_dir/default.sock\"; \
+     if command -v zz >/dev/null 2>&1; then printf \"zz-probe-protocol=%s\\n\" \"$(zz protocol-version 2>/dev/null || echo unknown)\"; \
+     else printf \"zz-probe-protocol=missing\\n\"; fi'";
 /// Exit codes the auto-start script picks for itself; ssh reports its own failures as 255.
 #[cfg(any(unix, windows, test))]
 pub(crate) const REMOTE_ZZ_MISSING_STATUS: i32 = 127;
@@ -1966,6 +1973,111 @@ mod tests {
             .get_args()
             .map(|argument| argument.to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[cfg(unix)]
+    fn probe_socket_path(environment: &[(&str, Option<&str>)]) -> String {
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg(format!("sh -c {REMOTE_SOCKET_PROBE}"));
+        for (key, value) in environment {
+            if let Some(value) = value {
+                command.env(key, value);
+            } else {
+                command.env_remove(key);
+            }
+        }
+        let output = command.output().expect("sh should run the probe");
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .find_map(|line| line.strip_prefix("zz-probe-socket="))
+            .map(str::to_owned)
+            .expect("the probe should print a socket line")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_socket_probe_prefers_xdg_runtime_dir_then_tmpdir() {
+        for (environment, expected) in [
+            (
+                [
+                    ("XDG_RUNTIME_DIR", Some("/run/user/1000")),
+                    ("TMPDIR", Some("/launchd/tmp")),
+                    ("USER", Some("ada")),
+                ],
+                "/run/user/1000/zz/default.sock",
+            ),
+            (
+                [
+                    ("XDG_RUNTIME_DIR", None),
+                    ("TMPDIR", Some("/launchd/tmp/")),
+                    ("USER", Some("ada")),
+                ],
+                "/launchd/tmp/zz-ada/default.sock",
+            ),
+            (
+                [
+                    ("XDG_RUNTIME_DIR", None),
+                    ("TMPDIR", Some("relative")),
+                    ("USER", Some("ada")),
+                ],
+                "/tmp/zz-ada/default.sock",
+            ),
+        ] {
+            assert_eq!(probe_socket_path(&environment), expected);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_socket_probe_resolves_the_launchd_temporary_directory() {
+        let expected_root = Command::new("getconf")
+            .arg("DARWIN_USER_TEMP_DIR")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+            .filter(|root| root.starts_with('/'))
+            .map_or_else(
+                || "/tmp".to_owned(),
+                |root| root.trim_end_matches('/').to_owned(),
+            );
+        assert!(
+            cfg!(not(target_os = "macos")) || expected_root != "/tmp",
+            "{expected_root}"
+        );
+        assert_eq!(
+            probe_socket_path(&[
+                ("XDG_RUNTIME_DIR", None),
+                ("TMPDIR", None),
+                ("USER", Some("ada")),
+            ]),
+            format!("{expected_root}/zz-ada/default.sock")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_socket_probe_falls_back_to_slash_tmp_when_getconf_rejects_the_variable() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let stub = directory.path().join("getconf");
+        fs::write(&stub, "#!/bin/sh\necho unsupported >&2\nexit 1\n").expect("getconf stub");
+        fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).expect("stub permissions");
+        let path = format!(
+            "{}:{}",
+            directory.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        assert_eq!(
+            probe_socket_path(&[
+                ("XDG_RUNTIME_DIR", None),
+                ("TMPDIR", None),
+                ("USER", Some("ada")),
+                ("PATH", Some(&path)),
+            ]),
+            "/tmp/zz-ada/default.sock"
+        );
     }
 
     fn command_envs(command: &Command) -> Vec<(String, Option<String>)> {

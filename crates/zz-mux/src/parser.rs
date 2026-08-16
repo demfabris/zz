@@ -22,6 +22,76 @@ enum Quote {
     Double,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct Block {
+    depth: u32,
+    quote: Quote,
+    escaped: bool,
+    in_comment: bool,
+    word_start: bool,
+    line: u32,
+    column: u32,
+}
+
+impl Block {
+    fn open(line: u32, column: u32) -> Self {
+        Self {
+            depth: 1,
+            quote: Quote::None,
+            escaped: false,
+            in_comment: false,
+            word_start: true,
+            line,
+            column,
+        }
+    }
+
+    fn feed(&mut self, character: char) -> bool {
+        if self.in_comment {
+            if character == '\n' {
+                self.in_comment = false;
+                self.word_start = true;
+            }
+            return false;
+        }
+        if self.escaped {
+            self.escaped = false;
+            self.word_start = false;
+            return false;
+        }
+        if character == '\\' && self.quote != Quote::Single {
+            self.escaped = true;
+            return false;
+        }
+        match self.quote {
+            Quote::Single if character == '\'' => self.quote = Quote::None,
+            Quote::Double if character == '"' => self.quote = Quote::None,
+            Quote::Single | Quote::Double => {}
+            Quote::None => match character {
+                '\'' => self.quote = Quote::Single,
+                '"' => self.quote = Quote::Double,
+                '#' if self.word_start => self.in_comment = true,
+                '{' => self.depth = self.depth.saturating_add(1),
+                '}' => {
+                    self.depth = self.depth.saturating_sub(1);
+                    if self.depth == 0 {
+                        return true;
+                    }
+                }
+                _ => {}
+            },
+        }
+        self.word_start = character.is_whitespace();
+        false
+    }
+}
+
+pub(crate) fn command_block_body(argument: &str) -> Option<&str> {
+    argument
+        .strip_prefix('{')
+        .and_then(|rest| rest.strip_suffix('}'))
+}
+
 pub fn parse_config(source: impl Into<String>, input: &str) -> ParsedConfig {
     let source = source.into();
     let mut parsed = ParsedConfig::default();
@@ -31,6 +101,7 @@ pub fn parse_config(source: impl Into<String>, input: &str) -> ParsedConfig {
     let mut quote = Quote::None;
     let mut escaped = false;
     let mut in_comment = false;
+    let mut block: Option<Block> = None;
     let mut line = 1_u32;
     let mut column = 0_u32;
     let mut command_line = 1_u32;
@@ -38,6 +109,18 @@ pub fn parse_config(source: impl Into<String>, input: &str) -> ParsedConfig {
 
     for character in input.chars() {
         column = column.saturating_add(1);
+        if let Some(state) = block.as_mut() {
+            word.push(character);
+            if character == '\n' {
+                line = line.saturating_add(1);
+                column = 0;
+            }
+            if state.feed(character) {
+                block = None;
+                finish_word(&mut word, &mut word_started, &mut words);
+            }
+            continue;
+        }
         if in_comment {
             if character == '\n' {
                 finish_command(
@@ -109,6 +192,15 @@ pub fn parse_config(source: impl Into<String>, input: &str) -> ParsedConfig {
                     quote = Quote::Double;
                 }
                 '#' if !word_started => in_comment = true,
+                '{' if !word_started => {
+                    if words.is_empty() {
+                        command_line = line;
+                        command_column = column;
+                    }
+                    word_started = true;
+                    word.push('{');
+                    block = Some(Block::open(line, column));
+                }
                 ';' | '\n' => {
                     finish_command(
                         &source,
@@ -140,7 +232,14 @@ pub fn parse_config(source: impl Into<String>, input: &str) -> ParsedConfig {
             },
         }
     }
-    if quote != Quote::None {
+    if let Some(state) = block {
+        parsed.diagnostics.push(ConfigDiagnostic {
+            source,
+            line: state.line,
+            column: state.column,
+            message: "unterminated command block".to_owned(),
+        });
+    } else if quote != Quote::None {
         parsed.diagnostics.push(ConfigDiagnostic {
             source,
             line: command_line,
@@ -346,6 +445,74 @@ mod tests {
         assert!(unterminated.commands.is_empty());
         assert_eq!(unterminated.diagnostics.len(), 1);
         assert_eq!(unterminated.diagnostics[0].message, "unterminated %if");
+    }
+
+    #[test]
+    fn groups_a_command_block_into_one_argument() {
+        let parsed = parse_config("test.conf", "bind c { new-window ; split-window }\n");
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.commands.len(), 1);
+        assert_eq!(parsed.commands[0].name, "bind");
+        assert_eq!(
+            parsed.commands[0].args,
+            ["c", "{ new-window ; split-window }"]
+        );
+    }
+
+    #[test]
+    fn command_blocks_nest_and_span_lines_and_comments() {
+        let parsed = parse_config(
+            "test.conf",
+            "bind x {\n\
+             \x20 if-shell true { new-window ; kill-pane }\n\
+             \x20 # a } comment\n\
+             \x20 split-window\n\
+             }\nbind y kill-pane\n",
+        );
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.commands.len(), 2);
+        assert_eq!(parsed.commands[0].args[0], "x");
+        assert_eq!(
+            parsed.commands[0].args[1],
+            "{\n  if-shell true { new-window ; kill-pane }\n  # a } comment\n  split-window\n}"
+        );
+        assert_eq!(parsed.commands[1].args, ["y", "kill-pane"]);
+    }
+
+    #[test]
+    fn braces_stay_literal_inside_quotes_and_words() {
+        let parsed = parse_config(
+            "test.conf",
+            "bind z send-keys \"{ literal ; text }\"\nbind w new-window -n a{b}c\n",
+        );
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.commands.len(), 2);
+        assert_eq!(
+            parsed.commands[0].args,
+            ["z", "send-keys", "{ literal ; text }"]
+        );
+        assert_eq!(parsed.commands[1].args, ["w", "new-window", "-n", "a{b}c"]);
+    }
+
+    #[test]
+    fn command_blocks_keep_quoted_separators_and_report_unterminated_blocks() {
+        let quoted = parse_config("test.conf", "bind w { send-keys 'a ; b' ; new-window }");
+        assert!(quoted.diagnostics.is_empty());
+        assert_eq!(
+            quoted.commands[0].args[1],
+            "{ send-keys 'a ; b' ; new-window }"
+        );
+
+        let unterminated = parse_config("test.conf", "set -g prefix C-a\nbind c { new-window\n");
+        assert_eq!(unterminated.commands.len(), 1);
+        assert_eq!(unterminated.commands[0].name, "set");
+        assert_eq!(unterminated.diagnostics.len(), 1);
+        assert_eq!(unterminated.diagnostics[0].line, 2);
+        assert_eq!(unterminated.diagnostics[0].column, 8);
+        assert_eq!(
+            unterminated.diagnostics[0].message,
+            "unterminated command block"
+        );
     }
 
     #[test]

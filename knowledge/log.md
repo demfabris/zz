@@ -1,6 +1,7 @@
 # Update Log
 
 ## 2026-08-16
+* **Creation**: Added the tmux divergence matrix — the verification sweep's exhaustive inventory of the 38 missing commands, the implemented-surface gaps (loud vs silent), the 12-of-~165 options coverage, and the protocol-level differences, anchored to PR #4.
 * **Update**: Simplified the Agent pane to the stable ACP v1 contract: flat standard session updates, static tool statuses, prompt-response turn boundaries, and universal slash commands. Removed vendor metadata interpretation, nested subagent and background-task UI, lifecycle synthesis, task journaling, quiescence parking, and sticky task controls; bumped the wire protocol to v56.
 
 ## 2026-08-15

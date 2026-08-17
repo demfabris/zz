@@ -13,7 +13,7 @@ Every zz window arranges its panes as an **n-ary tree measured in terminal cells
 Rust port of the pinned tmux's `layout.c` engine, living in `crates/zz-mux/src/layout.rs` and
 owned per-window inside [`MuxState`](/crates/zz-mux.md). Cells are the truth: a node carries
 `sx/sy/xoff/yoff` in cells, the root's extent IS the window size, and every split, resize,
-preset, and kill runs tmux's exact integer arithmetic — validated against 46 golden fixtures
+preset, and kill runs tmux's exact integer arithmetic — validated against 48 golden fixtures
 captured from the pinned tmux binary (`crates/zz-mux/tests/fixtures/layout-pin.txt`, regenerated
 by `compat/gen-layout-fixtures.sh`) and by the differential harness running `--strict-geometry`
 clean. Ratios exist only as a derived projection for clients.
@@ -44,9 +44,11 @@ The tmux algorithms, with their load-bearing quirks:
   targets convert to deltas.
 - **presets**: all seven (`even-*`, `main-*` ± mirrored, `tiled`) with the pin's defaults
   (main-pane-height 24, main-pane-width 80). Spread biases remainders to the first children;
-  tiled biases them to the last column/row. One deliberate divergence: with exactly two panes
+  tiled biases them to the last column/row. Two deliberate divergences: with exactly two panes
   the pin never sizes the lone "other" pane (an upstream bug that violates tmux's own
-  invariant) — zz sizes it. See [the divergence matrix](/tmux/divergences.md).
+  invariant) — zz sizes it; and `select-layout -E` on a parent mixing leaf and node children
+  (the pin spreads only leaves over the full extent, corrupting the sums) is refused rather
+  than reproduced. See [the divergence matrix](/tmux/divergences.md).
 - **layout strings**: `dump()` emits tmux's checksummed `layout-custom.c` format; parsing is
   future work.
 
@@ -84,7 +86,7 @@ always inserts after (reproducing the pin's pass-by-value `-b` quirk), and a sin
 | File | Role |
 | --- | --- |
 | `crates/zz-mux/src/layout.rs` | The cell kernel: algorithms, projection, dump, validation |
-| `crates/zz-mux/src/layout_pin_tests.rs` | Replays the 46 pin-captured fixtures through the kernel |
+| `crates/zz-mux/src/layout_pin_tests.rs` | Replays the 48 pin-captured fixtures through the kernel |
 | `crates/zz-mux/src/model.rs` | `MuxState` write paths wrapping the kernel; invariants |
 | `crates/zz-mux/src/command.rs` | Command surface: sizes, percentages, measurement feed |
 | `compat/gen-layout-fixtures.sh` | Regenerates the golden fixtures from the pinned binary |

@@ -42,6 +42,12 @@ them to fail the run:
 compat/run.sh --strict-geometry
 ```
 
+Strict mode is the CI contract: the Linux workflow leg runs `compat/run.sh
+--strict-geometry`, so every scenario outside `known/` must stay TOPO-clean and GEO-clean
+against the pin. Since the cell-authoritative layout landed, a headless zz window is born
+at tmux's 80x24 and every layout operation runs the pin's integer arithmetic, which is what
+makes exact-geometry diffing possible.
+
 # Reading results
 
 The runner writes `compat/results/summary.md`. Each row gives the number of executed steps,

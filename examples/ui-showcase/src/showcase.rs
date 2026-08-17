@@ -666,7 +666,7 @@ fn ui_scale_control(cx: &App) -> Div {
             Button::new("showcase-ui-smaller")
                 .ghost()
                 .small()
-                .icon(IconName::Dash)
+                .icon(IconName::Minus)
                 .tooltip("Smaller UI")
                 .disabled(font_size <= px(MIN_UI_FONT_SIZE))
                 .on_click(|_, _, cx| adjust_ui_font_size(-UI_FONT_SIZE_STEP, cx)),

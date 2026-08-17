@@ -309,7 +309,9 @@ slow shell is probed once rather than on every pane spawn.
 # Session history
 
 When an initialized adapter advertises `sessionCapabilities.list`, the pane header exposes a
-**History** picker. Every one of its verbs is an `AgentSessionOp` on the wire. `List` carries the cwd
+**History** picker. Starting a session is not one of the picker's controls: the header carries its
+own icon-only plus beside History, gated on the connection accepting a prompt rather than on the
+listing having loaded, so a new session never waits on a page of history. Every one of its verbs is an `AgentSessionOp` on the wire. `List` carries the cwd
 filter, opaque cursor, and replace/append intent; `New` carries the selected cwd; `Switch` carries
 the session ID, cwd, and additional directories; `Delete` carries the session ID. The daemon runs
 them against the pane's adapter. A
@@ -408,12 +410,13 @@ and `apply_stream_items` folds one batch into a single controller transaction an
 notification. Each thread maintains a stable ID-to-index map and a monotonic revision per entry.
 The reducer remains flat.
 `AgentView` folds top-level entries into presentation-only `TimelineRow` values and retains an
-entry-index-to-row-index map. Two entry kinds fold (`Tool` and `Reasoning`, the ones that repeat),
-and an uninterrupted run of either shares one row once it has at least two members. Any entry of a
-different kind ends the run, so a tool between two thoughts splits them and a group never mixes the
-two. A member revision therefore remeasures its owning group row rather than its flat entry index.
+entry-index-to-row-index map. Tools and reasoning share one fold: an uninterrupted run of either
+shares one row once it has at least two members. User, assistant, and plan entries still stand
+alone and end the run. A member revision therefore remeasures its owning group row rather than its
+flat entry index.
 Appending another member updates the trailing group without a `ListState` splice, regardless of its
-label; an append that starts a row splices exactly one row. Tool label changes preserve the fold,
+label or whether it is a tool or a thought; an append that starts a row splices exactly one row.
+Tool label changes preserve the fold,
 while a replacement that changes an entry's group kind, and other non-append mutations, take the
 full reset-and-refold path. Same-length streaming updates continue through `Arc::make_mut` instead
 of rebuilding the complete history.
@@ -458,8 +461,9 @@ A second plugin recognizes fenced `mermaid` blocks and renders resvg-safe SVG of
 measurement stack, feeds semantic colors through Mermaid's theme variables, and adds scoped SVG
 overrides for variants that otherwise emit fixed light-theme styles. Gantt and XY charts use the
 transcript's 640 px content width. Every diagram scales down to fit the transcript card rather than
-overflowing it, and an explicit preview action opens the complete raster in a large scale-to-fit
-dialog. The resulting raster is stored in a 16-image global cache keyed by source, scale, font,
+overflowing it. Two ghost icon-only actions sit in the card's top-right corner, painting no fill until hovered so
+they do not sit as two chips on the diagram: copy writes the original Mermaid source, and preview
+opens the complete raster in a large scale-to-fit dialog. The resulting raster is stored in a 16-image global cache keyed by source, scale, font,
 every semantic color used by the SVG theme, and appearance. Per-node state also includes the source
 offset so distinct blocks do not alias, while identical diagrams can share a raster; Mermaid theme
 configuration is built only on a cache miss.
@@ -468,23 +472,27 @@ User prompts use a neutral input surface. Tool
 disclosures are compact, fixed single-line borderless rows with one kind icon, an ellipsized label,
 and a chevron immediately after the label when details are available. There is no trailing status
 glyph or ellipsis. Kind icons and chevrons use the same muted foreground regardless of ACP status;
-the closed chevron points right and the open chevron points up. Single-line enforcement
+the closed chevron points right and the open chevron points up. Reasoning, tool, and group headers
+come from one `activity_row` builder, so their metrics cannot drift: a 28px row, UI font at 13px,
+a 16px line box, and centred glyphs dropped half a pixel because gpui centres text on its
+ascent/descent box while the ink a reader sees sits below that centre. Single-line enforcement
 lives in code, since style cannot do it: `whitespace_nowrap` and `text_ellipsis` only govern
 wrapping, while gpui shapes text by splitting on `\n` first and truncates by cumulative character
 width without noticing the breaks, so a label with an embedded newline lays out two full-height
 lines in a 28px row and the row's own overflow mask cuts both in half.
 Agents send such labels routinely (one Bash call with two
 commands arrives as one title with a newline between them), so every label bound for a fixed-height
-row goes through `single_line`, which joins the pieces with ` · `. Clickable rows retain a
-pointer cursor without painting a hover background. Pending and running rows never animate, so an
+row goes through `single_line`, which joins the pieces with ` · `. Clickable rows take a pointer
+cursor and brighten from muted to the theme foreground on hover; the hover style hangs on the
+stateful row rather than the label, since gpui only resolves a hover in time to reshape text when
+the element carries an id. Pending and running rows never animate, so an
 adapter can leave a status unresolved without leaving a spinner behind. Pane-level busy
 chrome derives from the connection phase alone (`pane_is_busy`, `view.rs`), never from tool rows.
 Pane activity, startup, and permissions share the leased pulse clock. No
 mounted agent spinner starts a display-rate `gpui::Animation`. A run of two or more
-adjacent tools, regardless of label or action, renders one collapsed group header with the first
-member's icon and a first-seen, count-aware action summary such as **Ran command, Edit files, Read
-file**. A run of thoughts collapses the same way, under a **Reasoning · N steps** header with no
-status column, since a thought has no outcome to report.
+adjacent tools and thoughts, regardless of label or action, renders one collapsed group header with
+the first member's icon and a first-seen, count-aware action summary such as **Ran command, Reasoning,
+Edit files**.
 Opening a group reveals the original compact member rows, and each member independently controls its
 content as a second disclosure level. Payload previews stay out of collapsed rows and remain
 available only inside the expanded detail view.
@@ -504,8 +512,18 @@ input pins the surrounding transcript to its live event-time offset while the in
 move, then chains back to the transcript at either edge; location-only and input-only tools remain
 expandable.
 Inline backtick spans use mixed font runs so surrounding prose stays in the UI family while code
-uses the primary terminal family resolved from Ghostty. Their fill uses the neutral muted surface
-instead of the accent color, while nested bold, italic, strikethrough, and link styling is retained.
+uses the primary terminal family resolved from Ghostty. This is not agent-pane chrome: the marks
+travel to `Inline` (`widget/text/inline.rs`), the one element every markdown run paints through, so
+transcripts, settings, and docs views all render inline code the same way. The paragraph stays one
+shaped run — split it into an element per span and the spans stop sharing a baseline, since
+flexbox aligns boxes and has no inline layout — so `Inline` swaps the mono family into the runs it
+already builds, then paints a rounded fill under the glyphs before painting them, reading span
+positions back out of its own `TextLayout`. Each fill hugs the font's ink box rather than the
+taller line box gpui's own run background fills, and a span that survives a wrap gets one fill per
+visual line. The fill uses the neutral muted surface instead of the accent color, while nested
+bold, italic, strikethrough, and link styling is retained. Paragraphs that mix an image with text
+take the inline-flow path, which re-slices runs per fragment and still paints the older square
+run background for code.
 
 ## Following the tail
 
@@ -560,8 +578,13 @@ its wrap fragments do not have stable identities across reflow.
 The native composer is a centered, bordered input card that auto-grows from two to eight lines.
 Enter sends when the session is ready; Shift+Enter inserts a newline. The controller returns to ready
 on ACP completion and marks in-flight tools cancelled when the stop reason is `cancelled`.
-The Send, Queue, and Stop states share one 32 px icon-only button declared with `rounded_full()`,
-so it stays a true circle instead of inheriting the widget radius or squircle smoothing. A separate
+Send is disabled on an empty draft, not just on a busy connection, so the primary control never
+invites a no-op. The Send, Queue, and Stop states share one 28 px icon-only button declared with
+`rounded_full()`,
+so it stays a true circle instead of inheriting the widget radius or squircle smoothing. The
+jump-to-latest control is its mirror: a 26 px `rounded_full()` disc carrying the arrow-down twin of
+Send's arrow-up, floated over the timeline at `composer_tail_clearance()` so it clears the composer
+card rather than sitting on it, and labelled by tooltip alone. A separate
 compact footer under the card carries the current Git branch and `N files +A -D` summary on the
 left; its right side holds the 16 px context-usage ring and working-directory picker. The ring fills
 clockwise, exposes exact token counts and percentage in its tooltip and accessibility value, and
@@ -656,8 +679,8 @@ finds, text before images, so an image copied from a browser (which also offers 
 pastes as that text. Screenshots and image-only boards are unaffected.
 
 The provider picker lives in the pane header. It offers Codex and Claude Code under their vendors'
-marks (the OpenAI and Claude glyphs, Simple Icons artwork beside the Lucide set that `zz-ui`
-otherwise ships, since Lucide draws no vendor logos), is disabled during an active turn, and starts
+marks (the OpenAI and Claude glyphs, Simple Icons artwork beside the Iconoir set that `zz-ui`
+otherwise ships, since Iconoir draws no vendor logos), is disabled during an active turn, and starts
 a fresh provider-bound thread on selection. The mux persists the choice via `set-agent-provider`,
 clears the old opaque session ID, and replaces the daemon-owned ACP child. Retry uses the same
 restart effect. Each replacement receives a new runtime generation, which prevents late output from
@@ -886,8 +909,8 @@ prompts, credentials, approval decisions, or a copy of provider session files.
   replace the host runtime and keep the fanout sequence monotonic.
 - Client-side, preference tests cover bounded private persistence, workspace/provider scoping, and
   model → effort → permission restore order including legacy mode fallback.
-- Timeline tests cover both folds: a tool run and a thought run collapse independently, a lone
-  member stays a plain row, an entry of the other kind ends a run, and a member revision remeasures
+- Timeline tests cover the activity fold: tools and reasoning collapse together, a lone
+  member stays a plain row, an assistant or plan entry ends a run, and a member revision remeasures
   its owning group row rather than splicing.
 - Mux/server tests cover descriptor round trips, session/cwd validation, stable picker
   materialization, live donor-cwd capture, and donor fallback to the last focused terminal when the

@@ -1005,9 +1005,9 @@ impl SettingsView {
                     .cloned()
                     .unwrap_or(HostState::Disconnected);
                 let (glyph, color) = match &state {
-                    HostState::Connected => (IconName::GlobeCheck, cx.theme().success),
+                    HostState::Connected => (IconName::Globe, cx.theme().success),
                     HostState::Unreachable { .. } | HostState::Incompatible { .. } => {
-                        (IconName::GlobeX, cx.theme().danger)
+                        (IconName::Globe, cx.theme().danger)
                     }
                     HostState::Connecting | HostState::Reconnecting { .. } => {
                         (IconName::Globe, cx.theme().warning)
@@ -1022,7 +1022,7 @@ impl SettingsView {
                         Button::new(format!("settings-remove-host-{name}"))
                             .small()
                             .ghost()
-                            .icon(IconName::Trash2)
+                            .icon(IconName::Delete)
                             .tooltip(format!("Remove host ({})", state.label()))
                             .on_click(move |_, _, cx| {
                                 let host_id = remove_mux.read(cx).fleet_hosts().find_map(

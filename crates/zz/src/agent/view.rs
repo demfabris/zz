@@ -63,9 +63,14 @@ const COMPOSER_MIN_HEIGHT: f32 = 86.0;
 const COMPOSER_FOOTER_HEIGHT: f32 = 28.0;
 const COMPOSER_OUTER_PADDING: f32 = 12.0;
 const COMPOSER_SECTION_GAP: f32 = 8.0;
-const COMPOSER_ACTION_SIZE: f32 = 32.0;
+const COMPOSER_INPUT_PADDING_TOP: f32 = 12.0;
+const COMPOSER_INPUT_PADDING_X: f32 = 14.0;
+const COMPOSER_ACTION_SIZE: f32 = 28.0;
 const COMPOSER_MAX_WIDTH: f32 = AGENT_CONTENT_MAX_WIDTH + 2.0;
 const CHROME_BUTTON_HEIGHT: f32 = AGENT_CHROME_CONTROL_HEIGHT;
+/// Labelled chrome pills sit a step under the square icon buttons: the
+/// label carries them, so the box does not have to.
+const CHROME_PILL_HEIGHT: f32 = 24.0;
 const CONTEXT_USAGE_RING_SIZE: f32 = 16.0;
 const CONTEXT_USAGE_STROKE_WIDTH: f32 = 2.0;
 const SPINNER_PERIOD: Duration = Duration::from_millis(800);
@@ -79,7 +84,7 @@ const fn composer_total_height() -> f32 {
 }
 
 const fn composer_tail_clearance() -> f32 {
-    composer_total_height() - COMPOSER_OUTER_PADDING
+    composer_total_height() + COMPOSER_OUTER_PADDING
 }
 
 fn agent_spinner(size: Size, color: Hsla, view: EntityId, cx: &mut gpui::App) -> AnyElement {
@@ -1863,6 +1868,26 @@ impl AgentView {
             .anchor(Anchor::TopLeft)
     }
 
+    fn render_new_session_button(
+        &self,
+        state: &AgentPaneState,
+        view: Entity<Self>,
+    ) -> impl IntoElement {
+        let enabled = state.connection.accepts_prompt();
+        agent_chrome_icon_button(("agent-session-new", self.pane.0))
+            .icon(IconName::ChatPlus)
+            .tooltip(if enabled {
+                "Start a new session"
+            } else {
+                "Wait for the current turn to finish"
+            })
+            .disabled(!enabled)
+            .on_click(move |_, window, cx| {
+                view.update(cx, |view, cx| view.start_new_session(window, cx));
+                cx.stop_propagation();
+            })
+    }
+
     fn render_history_button(
         &self,
         state: &AgentPaneState,
@@ -1894,7 +1919,7 @@ impl AgentView {
             .absolute()
             .left_0()
             .right_0()
-            .bottom(px(CHROME_GAP))
+            .bottom(px(composer_tail_clearance()))
             .flex()
             .justify_center()
             .child(
@@ -1920,7 +1945,7 @@ impl AgentView {
         );
         let cwd = state.cwd.display().to_string();
         agent_chrome_button(("agent-working-directory", self.pane.0))
-            .icon(IconName::FolderOpen)
+            .icon(IconName::Folder)
             .label(session_directory_label(&state.cwd))
             .tooltip(if !local_host {
                 format!("{cwd} · working directory is managed by the remote host")
@@ -2136,7 +2161,6 @@ impl AgentView {
 
         let refresh_view = view.clone();
         let scope_view = view.clone();
-        let new_view = view.clone();
         let backdrop_view = view.clone();
         let load_more_view = view.clone();
         let scope_label = if self.history_all_projects {
@@ -2349,20 +2373,7 @@ impl AgentView {
                                                 cx.stop_propagation();
                                             }),
                                     )
-                                    .child(div().flex_1())
-                                    .child(
-                                        agent_chrome_button(("agent-history-new", pane.0))
-                                            .icon(IconName::Plus)
-                                            .label("New")
-                                            .tooltip("Start a new session")
-                                            .disabled(loading)
-                                            .on_click(move |_, window, cx| {
-                                                new_view.update(cx, |view, cx| {
-                                                    view.start_new_session(window, cx);
-                                                });
-                                                cx.stop_propagation();
-                                            }),
-                                    ),
+                                    .child(div().flex_1()),
                             ),
                     )
                     .child(
@@ -2672,7 +2683,7 @@ impl AgentView {
                     .primary()
                     .icon(IconName::ArrowUp)
                     .tooltip("Send message")
-                    .disabled(!can_submit)
+                    .disabled(!can_submit || !self.composer_has_content())
                     .on_click(move |_, window, cx| {
                         submit_view.update(cx, |view, cx| view.submit(window, cx));
                     })
@@ -2758,74 +2769,109 @@ impl AgentView {
             .right(px(0.0))
             .bottom(px(0.0))
             .w_full()
-            .p(px(COMPOSER_OUTER_PADDING))
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .h(px(
+                        COMPOSER_FOOTER_HEIGHT
+                            + COMPOSER_OUTER_PADDING
+                            + COMPOSER_SECTION_GAP,
+                    ) + cx.theme().radius)
+                    .bg(crate::theme::app_pane_background(cx)),
+            )
             .child(
                 v_flex()
                     .w_full()
-                    .max_w(px(COMPOSER_MAX_WIDTH))
-                    .mx_auto()
-                    .gap(px(COMPOSER_SECTION_GAP))
-                    .when_some(
-                        self.render_permission_wizard(state, view, cx),
-                        |this, wizard| this.child(wizard),
-                    )
-                    .when_some(self.render_queue_chip(state, cx), |this, chip| {
-                        this.child(chip)
-                    })
-                    .when_some(self.render_error(state, cx), |this, error| {
-                        this.child(error)
-                    })
-                    .when_some(completions, |this, completions| this.child(completions))
+                    .px(px(COMPOSER_OUTER_PADDING))
+                    .pt(px(COMPOSER_OUTER_PADDING))
                     .child(
                         v_flex()
                             .w_full()
-                            .min_h(px(COMPOSER_MIN_HEIGHT))
-                            .rounded(cx.theme().radius)
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .bg(cx.theme().background.raised(1))
-                            .when(cx.theme().shadow, |this| this.shadow_xs())
-                            .children(self.render_attachments(view, cx))
-                            .child(
-                                Input::new(&self.input)
-                                    .w_full()
-                                    .min_w_0()
-                                    .text_size(zz_ui::rems_from_px(13.0))
-                                    .appearance(false)
-                                    .bordered(false)
-                                    .focus_bordered(false),
+                            .max_w(px(COMPOSER_MAX_WIDTH))
+                            .mx_auto()
+                            .gap(px(COMPOSER_SECTION_GAP))
+                            .when_some(
+                                self.render_permission_wizard(state, view, cx),
+                                |this, wizard| this.child(wizard),
                             )
-                            .when_some(command_hint, |this, hint| {
-                                this.child(
-                                    div()
-                                        .px_3()
-                                        .pb_1()
-                                        .text_size(zz_ui::rems_from_px(10.0))
-                                        .text_color(cx.theme().foreground.muted())
-                                        .child(hint),
-                                )
+                            .when_some(self.render_queue_chip(state, cx), |this, chip| {
+                                this.child(chip)
                             })
+                            .when_some(self.render_error(state, cx), |this, error| {
+                                this.child(error)
+                            })
+                            .when_some(completions, |this, completions| this.child(completions))
                             .child(
-                                h_flex()
+                                v_flex()
                                     .w_full()
-                                    .min_h(px(40.0))
-                                    .items_end()
-                                    .justify_between()
-                                    .gap(px(CHROME_GAP))
-                                    .p(px(CHROME_GAP))
+                                    .min_h(px(COMPOSER_MIN_HEIGHT))
+                                    .rounded(cx.theme().radius)
+                                    .border_1()
+                                    .border_color(cx.theme().border)
+                                    .bg(cx.theme().background.raised(1))
+                                    .when(cx.theme().shadow, |this| this.shadow_xs())
+                                    .children(self.render_attachments(view, cx))
+                                    .child(
+                                        Input::new(&self.input)
+                                            .w_full()
+                                            .min_w_0()
+                                            .pt(px(COMPOSER_INPUT_PADDING_TOP))
+                                            .px(px(COMPOSER_INPUT_PADDING_X))
+                                            .text_size(zz_ui::rems_from_px(13.0))
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .focus_bordered(false),
+                                    )
+                                    .when_some(command_hint, |this, hint| {
+                                        this.child(
+                                            div()
+                                                .px_3()
+                                                .pb_1()
+                                                .text_size(zz_ui::rems_from_px(10.0))
+                                                .text_color(cx.theme().foreground.muted())
+                                                .child(hint),
+                                        )
+                                    })
                                     .child(
                                         h_flex()
-                                            .min_w_0()
-                                            .flex_wrap()
+                                            .w_full()
+                                            .min_h(px(40.0))
+                                            .items_end()
+                                            .justify_between()
                                             .gap(px(CHROME_GAP))
-                                            .children(settings),
-                                    )
-                                    .child(h_flex().flex_none().gap(px(CHROME_GAP)).child(action)),
+                                            .p(px(CHROME_GAP))
+                                            .child(
+                                                h_flex()
+                                                    .min_w_0()
+                                                    .flex_wrap()
+                                                    .gap(px(CHROME_GAP))
+                                                    .children(settings),
+                                            )
+                                            .child(
+                                                h_flex()
+                                                    .flex_none()
+                                                    .gap(px(CHROME_GAP))
+                                                    .child(action),
+                                            ),
+                                    ),
                             ),
-                    )
+                    ),
+            )
+            .child(
+                v_flex()
+                    .w_full()
+                    .bg(crate::theme::app_pane_background(cx))
+                    .px(px(COMPOSER_OUTER_PADDING))
+                    .pt(px(COMPOSER_SECTION_GAP))
+                    .pb(px(COMPOSER_OUTER_PADDING))
                     .child(
                         h_flex()
                             .w_full()
+                            .max_w(px(COMPOSER_MAX_WIDTH))
+                            .mx_auto()
                             .h(px(COMPOSER_FOOTER_HEIGHT))
                             .items_center()
                             .justify_between()
@@ -2920,6 +2966,8 @@ impl Render for AgentView {
             .sync(&self.pane_state.pending_permissions);
         let state = self.pane_state.clone();
         let rows = self.timeline.rows.clone();
+        let has_timeline = !rows.is_empty();
+        let show_jump = has_timeline && self.stick.shows_jump_button();
         let timeline_clearance = composer_tail_clearance();
         self.stick.set_bottom_padding(timeline_clearance);
         self.drive_stick(window, cx);
@@ -2929,6 +2977,7 @@ impl Render for AgentView {
         let header_actions = h_flex()
             .flex_none()
             .gap(px(CHROME_GAP))
+            .child(self.render_new_session_button(&state, view.clone()))
             .child(self.render_history_button(&state, view.clone()));
         let input_focus = self.focus(cx);
         let root = div()
@@ -2953,7 +3002,7 @@ impl Render for AgentView {
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
-                    .when(rows.is_empty(), |this| {
+                    .when(!has_timeline, |this| {
                         this.child(
                             div().w_full().px_3().child(
                                 div()
@@ -2964,7 +3013,7 @@ impl Render for AgentView {
                             ),
                         )
                     })
-                    .when(!rows.is_empty(), |this| {
+                    .when(has_timeline, |this| {
                         this.child(
                             AgentTimeline::new(
                                 rows,
@@ -2983,12 +3032,12 @@ impl Render for AgentView {
                                 .bottom(px(timeline_clearance))
                                 .child(Scrollbar::vertical(&self.timeline_scroll)),
                         )
-                        .when(self.stick.shows_jump_button(), |this| {
-                            this.child(self.render_jump_to_end(&view, cx))
-                        })
                     }),
             )
             .child(self.render_composer(&state, &view, local_host, cx))
+            .when(show_jump, |this| {
+                this.child(self.render_jump_to_end(&view, cx))
+            })
             .when(self.history_open, |this| {
                 this.child(self.render_history_overlay(&state, &view, cx))
             })
@@ -3266,14 +3315,16 @@ fn agent_chrome_button(id: impl Into<ElementId>) -> Button {
     Button::new(id)
         .ghost()
         .xsmall()
-        .h(px(CHROME_BUTTON_HEIGHT))
-        .px_2p5()
+        .h(px(CHROME_PILL_HEIGHT))
+        .px_2()
 }
 
+/// A square icon-only chrome button. The size variant is left at its default
+/// so the glyph comes out at 16px: `size` pins the box, so the variant only
+/// picks the icon here.
 fn agent_chrome_icon_button(id: impl Into<ElementId>) -> Button {
     Button::new(id)
         .ghost()
-        .xsmall()
         .size(px(CHROME_BUTTON_HEIGHT))
         .p_0()
 }
@@ -3996,9 +4047,9 @@ mod tests {
     #[test]
     fn composer_geometry_tracks_the_rendered_stack() {
         assert_eq!(composer_total_height(), 146.0);
-        assert_eq!(composer_tail_clearance(), 134.0);
+        assert_eq!(composer_tail_clearance(), 158.0);
         assert_eq!(
-            composer_total_height() - composer_tail_clearance(),
+            composer_tail_clearance() - composer_total_height(),
             COMPOSER_OUTER_PADDING
         );
     }
@@ -4110,7 +4161,7 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_runs_fold_into_one_row_without_absorbing_other_kinds() {
+    fn reasoning_and_tools_fold_into_one_row() {
         let mut entries = vec![
             thread_reasoning(1, "first"),
             thread_reasoning(2, "second"),
@@ -4118,23 +4169,28 @@ mod tests {
         ];
         let mut revisions = vec![1, 1, 1];
         let mut timeline = TimelineModel::new(&entries, &revisions);
-        assert_eq!(timeline.entry_to_row, [0, 0, 1]);
+        assert_eq!(timeline.entry_to_row, [0, 0, 0]);
         assert!(matches!(
             &timeline.rows[0],
-            TimelineRow::Group { entries, .. } if entries.len() == 2
+            TimelineRow::Group { entries, .. } if entries.len() == 3
         ));
-        assert!(matches!(&timeline.rows[1], TimelineRow::Single(_)));
 
         entries.push(thread_reasoning(4, "third"));
         entries.push(thread_reasoning(5, "fourth"));
         revisions.extend([1, 1]);
-        let TimelineModelUpdate::Incremental { splice_start, .. } =
-            timeline.synchronize(&entries, &revisions, None)
+        let TimelineModelUpdate::Incremental {
+            remeasure_rows,
+            splice_start,
+            added_rows,
+            ..
+        } = timeline.synchronize(&entries, &revisions, None)
         else {
-            panic!("appending reasoning after a tool should splice a row");
+            panic!("appending reasoning after a tool should update the trailing group");
         };
-        assert_eq!(splice_start, 2);
-        assert_eq!(timeline.entry_to_row, [0, 0, 1, 2, 2]);
+        assert_eq!(remeasure_rows, [0]);
+        assert_eq!(splice_start, 1);
+        assert_eq!(added_rows, 0);
+        assert_eq!(timeline.entry_to_row, [0, 0, 0, 0, 0]);
 
         entries[3] = thread_reasoning(4, "third, continued");
         revisions[3] = 2;
@@ -4146,7 +4202,7 @@ mod tests {
         else {
             panic!("a member revision should update its owning group row");
         };
-        assert_eq!(remeasure_rows, [2]);
+        assert_eq!(remeasure_rows, [0]);
         assert_eq!(added_rows, 0);
     }
 

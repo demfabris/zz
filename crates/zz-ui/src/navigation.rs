@@ -1,5 +1,6 @@
 use crate::{
-    ActiveTheme as _, Colorize as _, Icon, IconName, Sizable as _, TITLE_BAR_HEIGHT, UiZoom,
+    ActiveTheme as _, Colorize as _, Icon, IconName, MACOS_TRAFFIC_LIGHT_INSET,
+    MACOS_TRAFFIC_LIGHT_SPAN, Sizable as _, TITLE_BAR_HEIGHT, UiZoom,
     button::{Button, ButtonVariants as _},
     rems_from_px,
     tooltip::Tooltip,
@@ -28,8 +29,10 @@ const WORKSPACE_STRIP_CHIP_HEIGHT: f32 = 24.0;
 const WORKSPACE_STRIP_CHIP_CONNECTOR_WIDTH: f32 = 8.0;
 const WORKSPACE_STRIP_WINDOW_PILL_WIDTH: f32 = 104.0;
 /// Leading inset the titlebar strip keeps clear on macOS for the traffic
-/// lights, which AppKit spans over x = 9..69, rounded up for margin.
-pub const WORKSPACE_STRIP_TRAFFIC_LIGHT_INSET: f32 = 80.0;
+/// lights: their own leading margin, the cluster, then that margin again, so
+/// the lights sit in equal gaps between the window edge and the first control.
+pub const WORKSPACE_STRIP_TRAFFIC_LIGHT_INSET: f32 =
+    2.0 * MACOS_TRAFFIC_LIGHT_INSET + MACOS_TRAFFIC_LIGHT_SPAN;
 
 /// Where a titlebar-height strip may start putting controls of its own: past
 /// the macOS traffic lights, or at the plain content inset elsewhere. Both
@@ -49,7 +52,7 @@ pub fn workspace_controls_leading_inset(cx: &App) -> Pixels {
 pub fn workspace_layout_button(id: impl Into<ElementId>) -> Button {
     Button::new(id)
         .ghost()
-        .xsmall()
+        .small()
         .compact()
         .icon(IconName::PanelsTopLeft)
         .tooltip("Workspace layout")
@@ -61,7 +64,7 @@ pub fn workspace_layout_button(id: impl Into<ElementId>) -> Button {
 pub fn sidebar_settings_button(id: impl Into<ElementId>) -> Button {
     Button::new(id)
         .ghost()
-        .xsmall()
+        .small()
         .compact()
         .icon(IconName::Settings)
         .tooltip("Settings")

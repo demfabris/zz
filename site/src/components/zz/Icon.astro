@@ -1,6 +1,6 @@
 ---
-// Inlines a Lucide file from src/icons at build time. The app embeds the same 62
-// files via rust_embed (zz-ui/src/widget/icon/assets.rs:9) and paints them with
+// Inlines an Iconoir file from src/icons at build time. The app embeds the same
+// set via rust_embed (zz-ui/src/widget/icon/assets.rs:9) and paints them with
 // currentColor, so an <img> would lose the colour inheritance — hence set:html.
 interface Props {
 	name: string;
@@ -21,8 +21,7 @@ const raw = files[`../../icons/${name}.svg`];
 if (!raw) throw new Error(`zz Icon: no src/icons/${name}.svg`);
 
 // Drop the authored 24x24 so the CSS size wins — but only off the root tag, or
-// the strip would also eat inner <rect> geometry (panels-top-left, zz-mark).
-// stroke-width survives either way: the character before it is '-', not whitespace.
+// the strip would also eat inner <rect> geometry (zz-mark).
 const open = raw.indexOf('<svg');
 const close = raw.indexOf('>', open);
 const root = raw.slice(open, close).replace(/\s(width|height)=(["'])[^"']*\2/g, '');

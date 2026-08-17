@@ -807,6 +807,7 @@ impl Paragraph {
         let mut text = String::new();
         let mut highlights: Vec<(Range<usize>, HighlightStyle)> = vec![];
         let mut links: Vec<(Range<usize>, LinkMark)> = vec![];
+        let mut code_ranges: Vec<Range<usize>> = vec![];
         let mut offset = 0;
 
         let mut ix = 0;
@@ -827,6 +828,7 @@ impl Paragraph {
                             links.clone(),
                             highlights.clone(),
                         )
+                        .code_ranges(code_ranges.clone())
                         .streaming_veil(
                             node_cx.streaming_veil.clone(),
                             VeilKey::new(span.unwrap_or_default().start, element),
@@ -858,6 +860,7 @@ impl Paragraph {
                 text.clear();
                 links.clear();
                 highlights.clear();
+                code_ranges.clear();
                 offset = 0;
             } else {
                 let mut node_highlights = vec![];
@@ -884,7 +887,7 @@ impl Paragraph {
                         });
                     }
                     if style.code {
-                        highlight.background_color = Some(cx.theme().background.raised(2));
+                        code_ranges.push(inner_range.clone());
                     }
                     if let Some(color) = style.highlight {
                         highlight.background_color = Some(color);
@@ -922,6 +925,7 @@ impl Paragraph {
             let element = child_nodes.len();
             child_nodes.push(
                 Inline::new(ix, self.state.clone(), links, highlights)
+                    .code_ranges(code_ranges)
                     .streaming_veil(
                         node_cx.streaming_veil.clone(),
                         VeilKey::new(span.unwrap_or_default().start, element),
@@ -1240,8 +1244,15 @@ impl BlockNode {
         ix: usize,
         options: NodeRenderOptions,
         checked: Option<bool>,
+        window: &Window,
         cx: &mut App,
     ) -> Div {
+        // First-line strut: the box is sized to the font, then dropped so its
+        // ink sits on the letters. `items_center` on the row would centre the
+        // checkbox on the whole wrapped block; the strut keeps it on line 1.
+        const CHECKBOX_OPTICAL_DROP: f32 = 0.5;
+        let line_height = window.line_height();
+        let font_size = window.text_style().font_size.to_pixels(window.rem_size());
         h_flex()
             .w_full()
             .flex_1()
@@ -1255,20 +1266,29 @@ impl BlockNode {
             .when_some(checked, |this, checked| {
                 this.child(
                     div()
-                        .flex()
-                        .mt(rems(0.4))
+                        .flex_none()
+                        .h(line_height)
                         .mr_1p5()
-                        .size(rems(0.875))
+                        .flex()
                         .items_center()
-                        .justify_center()
-                        .rounded(cx.theme().radius.half())
-                        .border_1()
-                        .border_color(cx.theme().foreground)
-                        .text_color(cx.theme().foreground.on())
-                        .when(checked, |this| {
-                            this.bg(cx.theme().foreground)
-                                .child(Icon::new(IconName::Check).size_2().text_xs())
-                        }),
+                        .child(
+                            div()
+                                .relative()
+                                .top(px(CHECKBOX_OPTICAL_DROP))
+                                .flex()
+                                .size(font_size)
+                                .items_center()
+                                .justify_center()
+                                .rounded(cx.theme().radius.half())
+                                .border_1()
+                                .border_color(cx.theme().foreground)
+                                .text_color(cx.theme().foreground.on())
+                                .when(checked, |this| {
+                                    this.bg(cx.theme().foreground).child(
+                                        Icon::new(IconName::Check).size(px(f32::from(font_size) * 0.65)),
+                                    )
+                                }),
+                        ),
                 )
             })
             .child(div().flex_1().min_w_0().overflow_hidden().child(content))
@@ -1330,7 +1350,7 @@ impl BlockNode {
                                 }
 
                                 items.push(Self::render_list_item_row(
-                                    text, ix, options, *checked, cx,
+                                    text, ix, options, *checked, window, cx,
                                 ));
                             }
                             BlockNode::List { .. } => {
@@ -1367,7 +1387,7 @@ impl BlockNode {
 
                                 if child_ix == 0 {
                                     items.push(Self::render_list_item_row(
-                                        block, ix, options, *checked, cx,
+                                        block, ix, options, *checked, window, cx,
                                     ));
                                 } else {
                                     items.push(

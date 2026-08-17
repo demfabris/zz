@@ -94,7 +94,7 @@ fn header(title: &'static str, directory: &'static str, cx: &App) -> impl IntoEl
             .items_center()
             .gap_2()
             .child(Icon::new(IconName::History).xsmall())
-            .child(slot(IconName::FolderOpen, directory)),
+            .child(slot(IconName::Folder, directory)),
         cx,
     )
 }

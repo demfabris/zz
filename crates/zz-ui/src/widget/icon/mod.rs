@@ -1,8 +1,12 @@
 //! Icons: the glyph set, and the element that draws one.
 //!
-//! The artwork in `assets/icons/` is [Lucide](https://lucide.dev), plus the
-//! `openai` and `claude` brand marks from
-//! [Simple Icons](https://simpleicons.org) (CC0-1.0).
+//! The artwork in `assets/icons/` is [Iconoir](https://iconoir.com) regular
+//! (MIT, `assets/icons/LICENSE-ICONOIR`), plus the `openai` and `claude` brand
+//! marks from [Simple Icons](https://simpleicons.org) (CC0-1.0) and the four
+//! hand-drawn `window-*` control glyphs. Iconoir draws only the left panel, so
+//! `panel-right` and `panel-bottom` are `sidebar-collapse` with a mirror and a
+//! rotation baked into the file — lossless, because that glyph's rect is a
+//! true square, so the stroke stays 1.5px on every edge.
 
 mod assets;
 
@@ -109,6 +113,7 @@ impl From<Icon> for AnyElement {
 /// Every icon shipped in `assets/icons/`, one variant per file.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, IntoElement)]
 pub enum IconName {
+    ArrowDown,
     ArrowLeft,
     ArrowRight,
     ArrowUp,
@@ -117,6 +122,7 @@ pub enum IconName {
     Bell,
     Bot,
     CaseSensitive,
+    ChatPlus,
     Check,
     ChevronDown,
     ChevronRight,
@@ -128,20 +134,15 @@ pub enum IconName {
     Close,
     Copy,
     Cpu,
-    Dash,
     Delete,
     Ellipsis,
     EllipsisVertical,
     ExternalLink,
     File,
     Folder,
-    FolderOpen,
-    Frame,
     GalleryVerticalEnd,
     GitBranch,
     Globe,
-    GlobeCheck,
-    GlobeX,
     HardDrive,
     History,
     Inbox,
@@ -165,7 +166,6 @@ pub enum IconName {
     SquareTerminal,
     Star,
     Sun,
-    Trash2,
     TriangleAlert,
     Undo2,
     User,
@@ -178,6 +178,7 @@ pub enum IconName {
 impl IconName {
     /// Every variant, in declaration order.
     pub const ALL: &[Self] = &[
+        Self::ArrowDown,
         Self::ArrowLeft,
         Self::ArrowRight,
         Self::ArrowUp,
@@ -186,6 +187,7 @@ impl IconName {
         Self::Bell,
         Self::Bot,
         Self::CaseSensitive,
+        Self::ChatPlus,
         Self::Check,
         Self::ChevronDown,
         Self::ChevronRight,
@@ -197,20 +199,15 @@ impl IconName {
         Self::Close,
         Self::Copy,
         Self::Cpu,
-        Self::Dash,
         Self::Delete,
         Self::Ellipsis,
         Self::EllipsisVertical,
         Self::ExternalLink,
         Self::File,
         Self::Folder,
-        Self::FolderOpen,
-        Self::Frame,
         Self::GalleryVerticalEnd,
         Self::GitBranch,
         Self::Globe,
-        Self::GlobeCheck,
-        Self::GlobeX,
         Self::HardDrive,
         Self::History,
         Self::Inbox,
@@ -234,7 +231,6 @@ impl IconName {
         Self::SquareTerminal,
         Self::Star,
         Self::Sun,
-        Self::Trash2,
         Self::TriangleAlert,
         Self::Undo2,
         Self::User,
@@ -249,6 +245,7 @@ impl IconName {
     #[must_use]
     pub const fn path(&self) -> &'static str {
         match self {
+            Self::ArrowDown => "icons/arrow-down.svg",
             Self::ArrowLeft => "icons/arrow-left.svg",
             Self::ArrowRight => "icons/arrow-right.svg",
             Self::ArrowUp => "icons/arrow-up.svg",
@@ -257,6 +254,7 @@ impl IconName {
             Self::Bell => "icons/bell.svg",
             Self::Bot => "icons/bot.svg",
             Self::CaseSensitive => "icons/case-sensitive.svg",
+            Self::ChatPlus => "icons/chat-plus.svg",
             Self::Check => "icons/check.svg",
             Self::ChevronDown => "icons/chevron-down.svg",
             Self::ChevronRight => "icons/chevron-right.svg",
@@ -268,20 +266,15 @@ impl IconName {
             Self::Close => "icons/close.svg",
             Self::Copy => "icons/copy.svg",
             Self::Cpu => "icons/cpu.svg",
-            Self::Dash => "icons/dash.svg",
             Self::Delete => "icons/delete.svg",
             Self::Ellipsis => "icons/ellipsis.svg",
             Self::EllipsisVertical => "icons/ellipsis-vertical.svg",
             Self::ExternalLink => "icons/external-link.svg",
             Self::File => "icons/file.svg",
             Self::Folder => "icons/folder.svg",
-            Self::FolderOpen => "icons/folder-open.svg",
-            Self::Frame => "icons/frame.svg",
             Self::GalleryVerticalEnd => "icons/gallery-vertical-end.svg",
             Self::GitBranch => "icons/git-branch.svg",
             Self::Globe => "icons/globe.svg",
-            Self::GlobeCheck => "icons/globe-check.svg",
-            Self::GlobeX => "icons/globe-x.svg",
             Self::HardDrive => "icons/hard-drive.svg",
             Self::History => "icons/history.svg",
             Self::Inbox => "icons/inbox.svg",
@@ -305,7 +298,6 @@ impl IconName {
             Self::SquareTerminal => "icons/square-terminal.svg",
             Self::Star => "icons/star.svg",
             Self::Sun => "icons/sun.svg",
-            Self::Trash2 => "icons/trash-2.svg",
             Self::TriangleAlert => "icons/triangle-alert.svg",
             Self::Undo2 => "icons/undo-2.svg",
             Self::User => "icons/user.svg",

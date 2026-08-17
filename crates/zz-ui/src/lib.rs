@@ -23,7 +23,10 @@ pub use widget::overlay::{ROOT_KEY_CONTEXT, Root, WindowExt};
 
 pub use widget::icon::{Icon, IconName};
 
-pub use widget::title_bar::{TITLE_BAR_HEIGHT, TitleBar, WindowControls, draws_window_controls};
+pub use widget::title_bar::{
+    MACOS_TRAFFIC_LIGHT_INSET, MACOS_TRAFFIC_LIGHT_SPAN, TITLE_BAR_HEIGHT, TitleBar,
+    WindowControls, draws_window_controls,
+};
 
 /// The SVG icon assets backing [`IconName`], embedded from `crates/zz-ui/assets`.
 /// Register with `with_assets`.

@@ -2,7 +2,6 @@ use std::{
     cell::Cell,
     collections::{HashMap, VecDeque},
     hash::{DefaultHasher, Hash, Hasher},
-    ops::Range,
     path::{Path, PathBuf},
     rc::Rc,
     sync::{Arc, OnceLock},
@@ -11,7 +10,7 @@ use std::{
 use instant::{Duration, Instant};
 
 use crate::{
-    ActiveTheme as _, CHROME_GAP, Colorize as _, Icon, IconName, Sizable as _, WindowExt as _,
+    ActiveTheme as _, CHROME_GAP, Colorize as _, Icon, IconName, Sizable as _,
     attachment::{open_attachment_preview, open_render_image_preview},
     button::{Button, ButtonVariants as _},
     control_shadow, h_flex,
@@ -25,10 +24,9 @@ use crate::{
 };
 use gpui::{
     AnyElement, App, ClipboardItem, Context, DispatchPhase, Div, ElementId, Entity, FollowMode,
-    FontStyle, FontWeight, Global, HighlightStyle, Hsla, Image, ImageSource, InteractiveText,
-    IntoElement, ListSizingBehavior, ListState, ObjectFit, Pixels, RenderImage, Rgba,
-    ScrollStrategy, ScrollWheelEvent, SharedString, Stateful, StyledText, Task,
-    UniformListScrollHandle, Window, canvas, div, img, list, prelude::*, px, relative,
+    FontWeight, Global, Hsla, Image, ImageSource, IntoElement, ListSizingBehavior, ListState,
+    ObjectFit, Pixels, RenderImage, Rgba, ScrollStrategy, ScrollWheelEvent, SharedString, Stateful,
+    Task, UniformListScrollHandle, Window, canvas, div, img, list, prelude::*, px, relative,
     uniform_list,
 };
 use parking_lot::RwLock;
@@ -36,7 +34,6 @@ use similar::{ChangeTag, TextDiff};
 
 const MERMAID_NODE_NAME: &str = "zz-mermaid";
 const RICH_MARKDOWN_NODE_NAME: &str = "zz-rich-markdown";
-const INLINE_CODE_PARAGRAPH_NODE_NAME: &str = "zz-inline-code-paragraph";
 const MERMAID_MAX_HEIGHT: f32 = 560.0;
 const MERMAID_MAX_SOURCE_BYTES: usize = 32 * 1024;
 const MERMAID_RENDER_DEBOUNCE: Duration = Duration::from_millis(250);
@@ -44,6 +41,19 @@ const TOOL_CONTENT_MAX_HEIGHT: f32 = 360.0;
 const TOOL_CONTENT_MAX_LINES: usize = 2_000;
 const TOOL_CONTENT_MAX_BYTES: usize = 64 * 1024;
 const TOOL_CONTENT_ROW_HEIGHT: f32 = 20.0;
+/// Side of the round jump-to-bottom disc floated over the timeline.
+const JUMP_TO_BOTTOM_SIZE: f32 = 26.0;
+const ACTIVITY_ROW_HEIGHT: f32 = 28.0;
+const ACTIVITY_ROW_FONT_SIZE: f32 = 13.0;
+/// Tall enough to clear the system font's ascent-plus-descent at
+/// [`ACTIVITY_ROW_FONT_SIZE`] (15.31px), so `overflow_hidden` never clips a
+/// descender.
+const ACTIVITY_ROW_LINE_HEIGHT: f32 = 16.0;
+const ACTIVITY_DISCLOSURE_SIZE: f32 = 12.0;
+/// gpui centres a glyph on its ascent/descent box, but the ink a reader sees
+/// sits below that centre — 0.33px for caps, 1.49px for x-height at 13px. Drop
+/// the icons by less than either so they never overshoot the letters.
+const ACTIVITY_ICON_OPTICAL_DROP: f32 = 0.5;
 const MERMAID_CACHE_CAPACITY: usize = 16;
 const MAX_STREAMING_MEND_BYTES: usize = 64 * 1024;
 const MARKDOWN_PREVIEW_MAX_BYTES: usize = 32 * 1024;
@@ -894,19 +904,17 @@ impl AgentEntry {
     }
 }
 
-/// The entry kinds that collapse into one row when they run consecutively.
+/// Consecutive tools and reasoning collapse into one activity row.
 /// Every other kind stands alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TimelineGroupKind {
     Tool,
-    Reasoning,
 }
 
 #[must_use]
 pub const fn timeline_group_kind(entry: &AgentEntry) -> Option<TimelineGroupKind> {
     match entry {
-        AgentEntry::Tool(_) => Some(TimelineGroupKind::Tool),
-        AgentEntry::Reasoning { .. } => Some(TimelineGroupKind::Reasoning),
+        AgentEntry::Tool(_) | AgentEntry::Reasoning { .. } => Some(TimelineGroupKind::Tool),
         _ => None,
     }
 }
@@ -1118,20 +1126,22 @@ impl StickSpring {
     }
 }
 
-/// The jump-to-bottom pill. Paint it as an overlay: it must not take part in
-/// the timeline's layout, or appearing would resize the scroll viewport and
-/// move the very content it is offering to reveal.
+/// The jump-to-bottom disc, an arrow-down mirror of the composer's send
+/// button. Paint it as an overlay: it must not take part in the timeline's
+/// layout, or appearing would resize the scroll viewport and move the very
+/// content it is offering to reveal.
 pub fn agent_jump_to_bottom_button(id: impl Into<ElementId>, cx: &App) -> Button {
-    let pill = Button::new(id)
+    let disc = Button::new(id)
         .secondary()
-        .xsmall()
-        .rounded(px(999.0))
-        .icon(IconName::ChevronDown)
-        .label("Jump to latest");
+        .small()
+        .size(px(JUMP_TO_BOTTOM_SIZE))
+        .rounded_full()
+        .icon(IconName::ArrowDown)
+        .tooltip("Jump to latest");
     if cx.theme().shadow {
-        pill.shadow(control_shadow(cx))
+        disc.shadow(control_shadow(cx))
     } else {
-        pill
+        disc
     }
 }
 
@@ -1442,10 +1452,9 @@ fn render_timeline_row(
         TimelineRow::Single(entry) => {
             render_entry(timeline_scroll, store, entry, copyable_assistant, cx)
         }
-        TimelineRow::Group { kind, id, entries } => render_group(
+        TimelineRow::Group { id, entries, .. } => render_group(
             timeline_scroll,
             store,
-            kind,
             id,
             &entries,
             copyable_assistant,
@@ -1457,7 +1466,6 @@ fn render_timeline_row(
 fn render_group(
     timeline_scroll: &ListState,
     store: &Entity<AgentTimelineStore>,
-    group: TimelineGroupKind,
     id: u64,
     members: &[AgentEntry],
     copyable_assistant: Option<u64>,
@@ -1467,67 +1475,29 @@ fn render_group(
         store.expanded(id, DisclosureKind::Group, false)
     });
     let toggle = store.clone();
-    let (icon, label) = match group {
-        TimelineGroupKind::Tool => (
-            tool_icon(
-                members
-                    .first()
-                    .and_then(tool_entry_kind)
-                    .unwrap_or(AgentToolKind::Other),
-            ),
-            tool_group_label(members),
-        ),
-        TimelineGroupKind::Reasoning => (
-            IconName::Cpu,
-            SharedString::from(format!("Reasoning · {} steps", members.len())),
-        ),
+    let icon = match members.first() {
+        Some(AgentEntry::Reasoning { .. }) => IconName::Cpu,
+        Some(AgentEntry::Tool(tool)) => tool_icon(tool.kind),
+        _ => tool_icon(AgentToolKind::Other),
     };
-    let icon_color = timeline_affordance_color(cx);
+    let label = tool_group_label(members);
 
     v_flex()
         .id(("agent-timeline-group", id))
         .w_full()
         .child(
-            h_flex()
-                .id(("agent-timeline-group-toggle", id))
-                .w_full()
-                .h(px(28.0))
-                .flex_none()
-                .items_center()
-                .gap_2()
-                .py(px(3.0))
-                .rounded(cx.theme().radius)
-                .overflow_hidden()
-                .cursor_pointer()
-                .child(
-                    h_flex()
-                        .min_w_0()
-                        .flex_1()
-                        .overflow_hidden()
-                        .gap_2()
-                        .child(Icon::new(icon).small().flex_none().text_color(icon_color))
-                        .child(
-                            div()
-                                .min_w_0()
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .whitespace_nowrap()
-                                .text_size(crate::rems_from_px(13.0))
-                                .text_color(cx.theme().foreground.muted())
-                                .child(label),
-                        )
-                        .child(
-                            Icon::new(disclosure_icon(expanded))
-                                .xsmall()
-                                .flex_none()
-                                .text_color(icon_color),
-                        ),
-                )
-                .on_click(move |_, _, cx| {
-                    toggle.update(cx, |store, cx| {
-                        store.toggle_expanded(id, DisclosureKind::Group, false, cx);
-                    });
-                }),
+            activity_row(
+                ("agent-timeline-group-toggle", id),
+                icon,
+                label,
+                Some(expanded),
+                cx,
+            )
+            .on_click(move |_, _, cx| {
+                toggle.update(cx, |store, cx| {
+                    store.toggle_expanded(id, DisclosureKind::Group, false, cx);
+                });
+            }),
         )
         .when(expanded, |this| {
             this.child(v_flex().w_full().children(
@@ -1539,24 +1509,24 @@ fn render_group(
         .into_any_element()
 }
 
-fn tool_entry_kind(entry: &AgentEntry) -> Option<AgentToolKind> {
+fn group_action(entry: &AgentEntry) -> Option<(&'static str, &'static str)> {
     match entry {
-        AgentEntry::Tool(tool) => Some(tool.kind),
-        _ => None,
-    }
-}
-
-fn tool_group_label(tools: &[AgentEntry]) -> SharedString {
-    let mut actions = Vec::new();
-    for kind in tools.iter().filter_map(tool_entry_kind) {
-        let (singular, plural) = match kind {
+        AgentEntry::Reasoning { .. } => Some(("Reasoning", "Reasoning")),
+        AgentEntry::Tool(tool) => Some(match tool.kind {
             AgentToolKind::Read | AgentToolKind::Search => ("Read file", "Read files"),
             AgentToolKind::Edit => ("Edit file", "Edit files"),
             AgentToolKind::Execute => ("Ran command", "Ran commands"),
             AgentToolKind::Fetch => ("Fetched resource", "Fetched resources"),
             AgentToolKind::Think => ("Thought", "Thought"),
             AgentToolKind::Other => ("Used tool", "Used tools"),
-        };
+        }),
+        _ => None,
+    }
+}
+
+fn tool_group_label(entries: &[AgentEntry]) -> SharedString {
+    let mut actions = Vec::new();
+    for (singular, plural) in entries.iter().filter_map(group_action) {
         if let Some((_, _, count)) = actions
             .iter_mut()
             .find(|(existing, _, _)| *existing == singular)
@@ -1619,6 +1589,58 @@ fn single_line(text: SharedString) -> SharedString {
         .collect::<Vec<_>>()
         .join(" · ")
         .into()
+}
+
+fn activity_row_glyph(icon: IconName, size: f32) -> Div {
+    div()
+        .flex_none()
+        .relative()
+        .top(px(ACTIVITY_ICON_OPTICAL_DROP))
+        .child(Icon::new(icon).size(px(size)))
+}
+
+/// The one row shape every folded activity wears: tool call, thought, or a
+/// whole run of them. One builder so the font, the metrics and the hover can
+/// never drift apart between the three callers.
+fn activity_row(
+    id: impl Into<ElementId>,
+    icon: IconName,
+    label: SharedString,
+    disclosure: Option<bool>,
+    cx: &App,
+) -> Stateful<Div> {
+    let foreground = cx.theme().foreground;
+    h_flex()
+        .id(id)
+        .w_full()
+        .h(px(ACTIVITY_ROW_HEIGHT))
+        .flex_none()
+        .gap_2()
+        .overflow_hidden()
+        .font_family(cx.theme().font_family.clone())
+        .text_size(crate::rems_from_px(ACTIVITY_ROW_FONT_SIZE))
+        .line_height(px(ACTIVITY_ROW_LINE_HEIGHT))
+        .text_color(timeline_affordance_color(cx))
+        .when(disclosure.is_some(), |this| {
+            this.cursor_pointer()
+                .hover(move |this| this.text_color(foreground))
+        })
+        .child(activity_row_glyph(icon, ACTIVITY_ROW_FONT_SIZE))
+        .child(
+            div()
+                .debug_selector(|| "agent-activity-label".to_owned())
+                .min_w_0()
+                .overflow_hidden()
+                .text_ellipsis()
+                .whitespace_nowrap()
+                .child(single_line(label)),
+        )
+        .when_some(disclosure, |this, expanded| {
+            this.child(
+                activity_row_glyph(disclosure_icon(expanded), ACTIVITY_DISCLOSURE_SIZE)
+                    .debug_selector(|| "agent-activity-chevron".to_owned()),
+            )
+        })
 }
 
 fn render_entry(
@@ -1716,41 +1738,23 @@ fn render_entry(
                 .w_full()
                 .gap_1()
                 .child(
-                    h_flex()
-                        .id(("agent-reasoning-toggle", id))
-                        .w_full()
-                        .items_center()
-                        .justify_between()
-                        .py_1()
-                        .cursor_pointer()
-                        .child(
-                            h_flex()
-                                .min_w_0()
-                                .gap_2()
-                                .text_size(crate::rems_from_px(12.0))
-                                .text_color(cx.theme().foreground.muted())
-                                .child(
-                                    Icon::new(IconName::Cpu)
-                                        .small()
-                                        .text_color(cx.theme().foreground.muted()),
-                                )
-                                .child(single_line(label)),
-                        )
-                        .child(
-                            Icon::new(disclosure_icon(expanded))
-                                .xsmall()
-                                .text_color(cx.theme().foreground.muted()),
-                        )
-                        .on_click(move |_, _, cx| {
-                            toggle.update(cx, |store, cx| {
-                                store.toggle_expanded(
-                                    id,
-                                    DisclosureKind::Reasoning,
-                                    default_expanded,
-                                    cx,
-                                );
-                            });
-                        }),
+                    activity_row(
+                        ("agent-reasoning-toggle", id),
+                        IconName::Cpu,
+                        label,
+                        Some(expanded),
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| {
+                        toggle.update(cx, |store, cx| {
+                            store.toggle_expanded(
+                                id,
+                                DisclosureKind::Reasoning,
+                                default_expanded,
+                                cx,
+                            );
+                        });
+                    }),
                 )
                 .when(expanded, |this| {
                     this.child(
@@ -1834,66 +1838,25 @@ fn render_tool_entry(
         })
     });
     let toggle = store.clone();
-    let icon_color = timeline_affordance_color(cx);
 
     v_flex()
         .id(("agent-tool-entry", id))
         .w_full()
         .child(
-            h_flex()
-                .id(("agent-tool-toggle", id))
-                .w_full()
-                .h(px(28.0))
-                .flex_none()
-                .items_center()
-                .gap_2()
-                .py(px(3.0))
-                .rounded(cx.theme().radius)
-                .overflow_hidden()
-                .when(expandable, gpui::Styled::cursor_pointer)
-                .child(
-                    h_flex()
-                        .min_w_0()
-                        .flex_1()
-                        .overflow_hidden()
-                        .gap_2()
-                        .child(
-                            Icon::new(tool_icon(kind))
-                                .small()
-                                .flex_none()
-                                .text_color(icon_color),
-                        )
-                        .child(
-                            div()
-                                .debug_selector(|| "agent-tool-label".to_owned())
-                                .min_w_0()
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .whitespace_nowrap()
-                                .text_size(crate::rems_from_px(13.0))
-                                .text_color(cx.theme().foreground.muted())
-                                .child(single_line(label)),
-                        )
-                        .when(expandable, |this| {
-                            this.child(
-                                div()
-                                    .debug_selector(|| "agent-tool-chevron".to_owned())
-                                    .flex_none()
-                                    .child(
-                                        Icon::new(disclosure_icon(expanded))
-                                            .xsmall()
-                                            .text_color(icon_color),
-                                    ),
-                            )
-                        }),
-                )
-                .when(expandable, |this| {
-                    this.on_click(move |_, _, cx| {
-                        toggle.update(cx, |store, cx| {
-                            store.toggle_expanded(id, DisclosureKind::Tool, default_expanded, cx);
-                        });
-                    })
-                }),
+            activity_row(
+                ("agent-tool-toggle", id),
+                tool_icon(kind),
+                label,
+                expandable.then_some(expanded),
+                cx,
+            )
+            .when(expandable, |this| {
+                this.on_click(move |_, _, cx| {
+                    toggle.update(cx, |store, cx| {
+                        store.toggle_expanded(id, DisclosureKind::Tool, default_expanded, cx);
+                    });
+                })
+            }),
         )
         .when_some(
             content.filter(|content| !content.rows.is_empty()),
@@ -2506,250 +2469,11 @@ fn code_block_language(language: Option<SharedString>) -> SharedString {
         .unwrap_or_else(|| SharedString::from("text"))
 }
 
-#[allow(clippy::struct_excessive_bools)]
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct InlineCodeTextStyle {
-    bold: bool,
-    italic: bool,
-    strikethrough: bool,
-    code: bool,
-    link: Option<SharedString>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct InlineCodeTextSpan {
-    range: Range<usize>,
-    style: InlineCodeTextStyle,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct InlineCodeParagraph {
-    text: String,
-    spans: Vec<InlineCodeTextSpan>,
-    source_offset: usize,
-}
-
-#[derive(Default)]
-struct InlineCodeParagraphBuilder {
-    text: String,
-    spans: Vec<InlineCodeTextSpan>,
-    has_code: bool,
-}
-
-impl InlineCodeParagraphBuilder {
-    fn push(&mut self, text: &str, style: InlineCodeTextStyle) {
-        if text.is_empty() {
-            return;
-        }
-
-        let start = self.text.len();
-        self.text.push_str(text);
-        let end = self.text.len();
-        if let Some(previous) = self.spans.last_mut()
-            && previous.range.end == start
-            && previous.style == style
-        {
-            previous.range.end = end;
-        } else {
-            self.spans.push(InlineCodeTextSpan {
-                range: start..end,
-                style,
-            });
-        }
-    }
-}
-
-fn inline_code_paragraph(
-    node: &markdown_ast::Node,
-    document_offset: usize,
-) -> Option<InlineCodeParagraph> {
-    let markdown_ast::Node::Paragraph(paragraph) = node else {
-        return None;
-    };
-    let mut builder = InlineCodeParagraphBuilder::default();
-    let style = InlineCodeTextStyle::default();
-    if !collect_inline_code_text(&paragraph.children, &style, &mut builder) || !builder.has_code {
-        return None;
-    }
-
-    Some(InlineCodeParagraph {
-        text: builder.text,
-        spans: builder.spans,
-        source_offset: document_offset
-            + paragraph
-                .position
-                .as_ref()
-                .map_or(0, |position| position.start.offset),
-    })
-}
-
-fn collect_inline_code_text(
-    nodes: &[markdown_ast::Node],
-    style: &InlineCodeTextStyle,
-    builder: &mut InlineCodeParagraphBuilder,
-) -> bool {
-    nodes
-        .iter()
-        .all(|node| collect_inline_code_node(node, style, builder))
-}
-
-fn collect_inline_code_node(
-    node: &markdown_ast::Node,
-    style: &InlineCodeTextStyle,
-    builder: &mut InlineCodeParagraphBuilder,
-) -> bool {
-    match node {
-        markdown_ast::Node::Text(text) => {
-            builder.push(&text.value, style.clone());
-            true
-        }
-        markdown_ast::Node::Break(_) => {
-            builder.push("\n", style.clone());
-            true
-        }
-        markdown_ast::Node::InlineCode(code) => {
-            let mut style = style.clone();
-            style.code = true;
-            builder.has_code = true;
-            builder.push(&code.value, style);
-            true
-        }
-        markdown_ast::Node::InlineMath(math) => {
-            let mut style = style.clone();
-            style.code = true;
-            builder.has_code = true;
-            builder.push(&math.value, style);
-            true
-        }
-        markdown_ast::Node::Strong(strong) => {
-            let mut style = style.clone();
-            style.bold = true;
-            collect_inline_code_text(&strong.children, &style, builder)
-        }
-        markdown_ast::Node::Emphasis(emphasis) => {
-            let mut style = style.clone();
-            style.italic = true;
-            collect_inline_code_text(&emphasis.children, &style, builder)
-        }
-        markdown_ast::Node::Delete(delete) => {
-            let mut style = style.clone();
-            style.strikethrough = true;
-            collect_inline_code_text(&delete.children, &style, builder)
-        }
-        markdown_ast::Node::Link(link) => {
-            let mut style = style.clone();
-            style.link = Some(link.url.clone().into());
-            collect_inline_code_text(&link.children, &style, builder)
-        }
-        markdown_ast::Node::MdxJsxTextElement(element) => {
-            collect_inline_code_text(&element.children, style, builder)
-        }
-        markdown_ast::Node::MdxTextExpression(expression) => {
-            builder.push(&expression.value, style.clone());
-            true
-        }
-        _ => false,
-    }
-}
-
-#[derive(Clone, Copy)]
-struct InlineCodeParagraphPlugin;
-
-impl MarkdownPlugin for InlineCodeParagraphPlugin {
-    fn is_block(&self) -> bool {
-        true
-    }
-
-    fn name(&self) -> &str {
-        INLINE_CODE_PARAGRAPH_NODE_NAME
-    }
-
-    fn parse(
-        &self,
-        node: &markdown_ast::Node,
-        cx: &MarkdownParseContext<'_>,
-    ) -> Option<MarkdownNode> {
-        let paragraph = inline_code_paragraph(node, cx.offset())?;
-        Some(
-            MarkdownNode::new(INLINE_CODE_PARAGRAPH_NODE_NAME, paragraph.clone())
-                .text(paragraph.text.clone())
-                .markdown(cx.node_source(node).unwrap_or(&paragraph.text)),
-        )
-    }
-
-    fn render(&self, node: &MarkdownNode, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let paragraph = node
-            .data::<InlineCodeParagraph>()
-            .expect("inline code paragraph data");
-        let mut highlights = Vec::with_capacity(paragraph.spans.len());
-        let mut font_overrides = Vec::new();
-        let mut link_ranges = Vec::new();
-        let mut link_urls = Vec::new();
-
-        for span in &paragraph.spans {
-            let mut highlight = HighlightStyle::default();
-            if span.style.bold {
-                highlight.font_weight = Some(FontWeight::BOLD);
-            }
-            if span.style.italic {
-                highlight.font_style = Some(FontStyle::Italic);
-            }
-            if span.style.strikethrough {
-                highlight.strikethrough = Some(gpui::StrikethroughStyle {
-                    thickness: px(1.0),
-                    ..Default::default()
-                });
-            }
-            if span.style.code {
-                highlight.background_color = Some(cx.theme().background.raised(2));
-                font_overrides.push((span.range.clone(), cx.theme().mono_font_family.clone()));
-            }
-            if let Some(url) = &span.style.link {
-                highlight.color = Some(cx.theme().foreground);
-                highlight.underline = Some(gpui::UnderlineStyle {
-                    thickness: px(1.0),
-                    ..Default::default()
-                });
-                link_ranges.push(span.range.clone());
-                link_urls.push(url.clone());
-            }
-            highlights.push((span.range.clone(), highlight));
-        }
-
-        let styled_text = StyledText::new(paragraph.text.clone())
-            .with_highlights(highlights)
-            .with_font_family_overrides(font_overrides);
-        let interactive_text = InteractiveText::new(
-            SharedString::from(format!(
-                "agent-inline-code-paragraph-{}",
-                paragraph.source_offset
-            )),
-            styled_text,
-        );
-        let interactive_text = if link_ranges.is_empty() {
-            interactive_text
-        } else {
-            interactive_text.on_click(link_ranges, move |index, window, cx| {
-                let Some(url) = link_urls.get(index) else {
-                    return;
-                };
-                window.end_text_selection(cx);
-                cx.stop_propagation();
-                cx.open_url(url.as_ref());
-            })
-        };
-
-        div().w_full().min_w_0().child(interactive_text)
-    }
-}
-
 fn standard_markdown_extensions() -> MarkdownExtensions {
     static EXTENSIONS: OnceLock<MarkdownExtensions> = OnceLock::new();
     EXTENSIONS
         .get_or_init(|| {
-            MarkdownExtensions::default()
-                .plugin(InlineCodeParagraphPlugin)
-                .plugin(MermaidPlugin)
+            MarkdownExtensions::default().plugin(MermaidPlugin)
         })
         .clone()
 }
@@ -2759,7 +2483,6 @@ fn assistant_markdown_extensions() -> MarkdownExtensions {
     EXTENSIONS
         .get_or_init(|| {
             MarkdownExtensions::default()
-                .plugin(InlineCodeParagraphPlugin)
                 .plugin(MermaidPlugin)
                 .plugin(RichMarkdownPlugin)
         })
@@ -2934,6 +2657,12 @@ impl MarkdownPlugin for MermaidPlugin {
             state.synchronize(source.clone(), render_key, cx);
         });
 
+        let preview_image = match &render_state.read(cx).result {
+            MermaidRenderResult::Ready(image) => Some(Arc::clone(image)),
+            _ => None,
+        };
+        let mermaid_source = source.source.clone();
+        let source_offset = source.source_offset;
         let content = match &render_state.read(cx).result {
             MermaidRenderResult::Pending => h_flex()
                 .w_full()
@@ -2952,7 +2681,6 @@ impl MarkdownPlugin for MermaidPlugin {
                 .into_any_element(),
             MermaidRenderResult::Ready(image) => div()
                 .id(("agent-mermaid", source.source_offset))
-                .relative()
                 .w_full()
                 .min_w_0()
                 .max_h(px(MERMAID_MAX_HEIGHT))
@@ -2963,23 +2691,6 @@ impl MarkdownPlugin for MermaidPlugin {
                             .max_w_full()
                             .max_h(px(MERMAID_MAX_HEIGHT))
                             .mx_auto(),
-                    ),
-                )
-                .child(
-                    div().absolute().top_2().right_2().child(
-                        Button::new(("agent-mermaid-preview", source.source_offset))
-                            .secondary()
-                            .xsmall()
-                            .compact()
-                            .icon(IconName::WindowMaximize)
-                            .label("Full diagram")
-                            .tooltip("Open full diagram")
-                            .on_click({
-                                let image = Arc::clone(image);
-                                move |_, window, cx| {
-                                    open_render_image_preview(Arc::clone(&image), window, cx);
-                                }
-                            }),
                     ),
                 )
                 .into_any_element(),
@@ -3003,6 +2714,7 @@ impl MarkdownPlugin for MermaidPlugin {
         };
 
         div()
+            .relative()
             .w_full()
             .p_3()
             .rounded(cx.theme().radius)
@@ -3011,6 +2723,38 @@ impl MarkdownPlugin for MermaidPlugin {
             .bg(cx.theme().background)
             .overflow_hidden()
             .child(content)
+            .child(
+                div().absolute().top_1().right_1().child(
+                    h_flex()
+                        .gap_1()
+                        .child(
+                            Button::new(("agent-mermaid-copy", source_offset))
+                                .ghost()
+                                .xsmall()
+                                .compact()
+                                .icon(IconName::Copy)
+                                .tooltip("Copy source")
+                                .on_click(move |_, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(
+                                        mermaid_source.clone(),
+                                    ));
+                                }),
+                        )
+                        .when_some(preview_image, |this, image| {
+                            this.child(
+                                Button::new(("agent-mermaid-preview", source_offset))
+                                    .ghost()
+                                    .xsmall()
+                                    .compact()
+                                    .icon(IconName::WindowMaximize)
+                                    .tooltip("Open full diagram")
+                                    .on_click(move |_, window, cx| {
+                                        open_render_image_preview(Arc::clone(&image), window, cx);
+                                    }),
+                            )
+                        }),
+                ),
+            )
     }
 }
 
@@ -3833,7 +3577,7 @@ mod tests {
     }
 
     #[test]
-    fn timeline_rows_fold_reasoning_separately_from_tools() {
+    fn timeline_rows_fold_reasoning_with_tools() {
         let reasoning = |id: u64| AgentEntry::Reasoning {
             id,
             label: "Reasoning".into(),
@@ -3852,30 +3596,23 @@ mod tests {
 
         let folded = fold_timeline_rows(&entries);
 
-        assert_eq!(folded.rows.len(), 4);
-        assert_eq!(folded.entry_to_row, [0, 1, 2, 2, 2, 3, 3]);
-        assert!(
-            matches!(
-                &folded.rows[0],
-                TimelineRow::Single(AgentEntry::Reasoning { .. })
-            ),
-            "a lone thought is not a group"
-        );
+        assert_eq!(folded.rows.len(), 1);
+        assert_eq!(folded.entry_to_row, [0, 0, 0, 0, 0, 0, 0]);
         assert!(matches!(
-            &folded.rows[2],
-            TimelineRow::Group {
-                kind: TimelineGroupKind::Reasoning,
-                id: 3,
-                entries
-            } if entries.len() == 3
-        ));
-        assert!(matches!(
-            &folded.rows[3],
+            &folded.rows[0],
             TimelineRow::Group {
                 kind: TimelineGroupKind::Tool,
-                ..
-            },
+                id: 1,
+                entries
+            } if entries.len() == 7
         ));
+        assert_eq!(
+            tool_group_label(match &folded.rows[0] {
+                TimelineRow::Group { entries, .. } => entries,
+                TimelineRow::Single(_) => unreachable!(),
+            }),
+            "Reasoning, Edit files"
+        );
     }
 
     #[test]
@@ -3996,6 +3733,29 @@ mod tests {
     }
 
     #[gpui::test]
+    fn inline_code_fills_paint_after_the_text_lays_out(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let entry = AgentEntry::Assistant {
+            id: 31,
+            markdown: "A tiny bot named `cronkitty` had a single mission: `sleep(5)`.".into(),
+        };
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| UserEntryTest {
+                store: cx.new(|_| AgentTimelineStore::default()),
+                entry,
+                pane_width: px(520.0),
+                active_turn: false,
+            });
+            crate::Root::new(view, window, cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+    }
+
+    #[gpui::test]
     fn tool_disclosure_sits_beside_the_label(cx: &mut TestAppContext) {
         cx.update(crate::init);
         const PANE_WIDTH: Pixels = px(520.0);
@@ -4023,10 +3783,10 @@ mod tests {
         });
 
         let label = cx
-            .debug_bounds("agent-tool-label")
+            .debug_bounds("agent-activity-label")
             .expect("the tool label should be painted");
         let chevron = cx
-            .debug_bounds("agent-tool-chevron")
+            .debug_bounds("agent-activity-chevron")
             .expect("the tool disclosure should be painted");
         assert!(chevron.left() >= label.right());
         assert!(chevron.left() - label.right() <= px(8.0));
@@ -4678,35 +4438,6 @@ mod tests {
             Some(ToolContentRow::Plain(line))
                 if line == &format!("line-{}", TOOL_CONTENT_MAX_LINES + 1)
         ));
-    }
-
-    #[test]
-    fn inline_code_paragraph_preserves_text_and_marks_code_range() {
-        let node = markdown_ast::Node::Paragraph(markdown_ast::Paragraph {
-            children: vec![
-                markdown_ast::Node::Text(markdown_ast::Text {
-                    value: "Run ".to_owned(),
-                    position: None,
-                }),
-                markdown_ast::Node::InlineCode(markdown_ast::InlineCode {
-                    value: "cargo test".to_owned(),
-                    position: None,
-                }),
-                markdown_ast::Node::Text(markdown_ast::Text {
-                    value: " now".to_owned(),
-                    position: None,
-                }),
-            ],
-            position: None,
-        });
-
-        let paragraph = inline_code_paragraph(&node, 41).expect("inline code paragraph");
-
-        assert_eq!(paragraph.text, "Run cargo test now");
-        assert_eq!(paragraph.source_offset, 41);
-        assert_eq!(paragraph.spans.len(), 3);
-        assert_eq!(paragraph.spans[1].range, 4..14);
-        assert!(paragraph.spans[1].style.code);
     }
 
     #[gpui::test]

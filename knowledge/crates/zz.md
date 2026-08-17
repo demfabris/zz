@@ -518,18 +518,17 @@ imports reload the page.
   Both selection signals are the same fill at two strengths, applied in that order: the **keyboard
   cursor** takes a washed `background.raised(2)`, the **mux-active** row the solid one with
   medium weight. A row that is both reads active. The
-  toggle collapses the sidebar to a parked rail rather than removing it, so the sidebar always owns
-  the window's left edge, and on macOS the traffic lights that sit on it. One
-  `WORKSPACE_SIDEBAR_COLLAPSED_WIDTH` = 68px (zz-ui `navigation.rs`) applies on every platform, and
-  clearing those lights is what sets it: `config::titlebar_options` scales them to 12pt starting 8px
-  in, so the cluster spans x ≈ 8..59 and 68px leaves it near-symmetric margins. Nothing else claims
-  that strip. The rail renders the attached
-  session's windows as tinted rounded groups holding their panes as square tabs (browser tab groups
-  stood on end): the active window's group carries the accent wash, the active pane keeps the tree's
-  accent fill, tooltips carry window and pane names, and clicking a tab selects that pane. It is
-  pointer-only and offers no resize edge. While collapsed the expand toggle
-  (`workspace_rail_toggle`) heads the rail's own column, since the strip above it is the window's
-  title bar and is too narrow for the control cluster. Below the tree,
+  toggle flips `ChromeMode` between the full-height sidebar and a titlebar-height strip, so one of
+  the two always owns the window's left edge and, on macOS, the traffic lights that sit on it. Both
+  chromes start their control cluster at `WORKSPACE_STRIP_TRAFFIC_LIGHT_INSET`, which clears those
+  lights and is derived rather than chosen: `2 * MACOS_TRAFFIC_LIGHT_INSET + MACOS_TRAFFIC_LIGHT_SPAN`
+  = 88px, so the gap between the cluster and the first control equals the gap between the window
+  edge and the cluster. Both numbers are measured, not guessed: on macOS 27 each window button is a
+  14x14 frame with origins 23 apart, so three of them span 60. The lights' y falls out of the same
+  arithmetic — `(TITLE_BAR_HEIGHT - 14) / 2` — because the platform layer centres them in a
+  container of `glyph + 2y`; move the strip height without moving y and the lights stop sharing its
+  centre line.
+  Nothing else claims that strip. Below the tree,
   `workspace_sidebar_status` renders the daemon-expanded [tmux status line](/tmux/status-line.md):
   `status-left` and `status-right` stacked as two ellipsized lines, empty halves dropped so `status
   off` costs no height, and the whole section hidden while collapsed. `MuxClient::status_revision`

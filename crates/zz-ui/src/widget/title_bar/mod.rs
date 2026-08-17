@@ -20,7 +20,22 @@ use crate::{
 
 /// Height of the title bar, and of every strip that has to line up with it
 /// (the sidebar headers in [`crate::navigation`] and [`crate::settings`]).
-pub const TITLE_BAR_HEIGHT: Pixels = px(34.);
+pub const TITLE_BAR_HEIGHT: Pixels = px(38.);
+
+/// Side of a native macOS window-button frame, and the width of all three
+/// plus their gaps. Measured on macOS 27: each frame is 14x14, origins sit 23
+/// apart, so the cluster spans 60 from the first left edge to the last right
+/// edge. The platform layer centres the buttons in a container of
+/// `glyph + 2 * traffic_light_position.y`, which is what ties them to
+/// [`TITLE_BAR_HEIGHT`]: keep the two in step or the lights stop sharing a
+/// centre line with the strip's own controls.
+pub const MACOS_TRAFFIC_LIGHT_GLYPH: f32 = 14.;
+pub const MACOS_TRAFFIC_LIGHT_SPAN: f32 = 60.;
+
+/// Leading margin the macOS traffic lights keep from the window edge. The
+/// strip's own controls keep the same margin from the cluster's far edge, so
+/// the gap on either side of the lights reads as one measurement.
+pub const MACOS_TRAFFIC_LIGHT_INSET: f32 = 14.;
 
 /// Whether the app draws the window's minimize / maximize / close buttons:
 /// Windows outside fullscreen, and Linux under [`Decorations::Client`]. macOS
@@ -35,7 +50,10 @@ pub fn draws_window_controls(window: &Window) -> bool {
 /// Left inset that clears the native macOS traffic lights, in window points.
 #[cfg(target_os = "macos")]
 fn title_bar_left_padding(cx: &App) -> Pixels {
-    UiZoom::unzoomed(px(80.), cx)
+    UiZoom::unzoomed(
+        px(2. * MACOS_TRAFFIC_LIGHT_INSET + MACOS_TRAFFIC_LIGHT_SPAN),
+        cx,
+    )
 }
 #[cfg(not(target_os = "macos"))]
 fn title_bar_left_padding(_cx: &App) -> Pixels {
@@ -71,7 +89,10 @@ impl TitleBar {
         TitlebarOptions {
             title: None,
             appears_transparent: true,
-            traffic_light_position: Some(point(px(9.0), px(9.0))),
+            traffic_light_position: Some(point(
+                px(MACOS_TRAFFIC_LIGHT_INSET),
+                (TITLE_BAR_HEIGHT - px(MACOS_TRAFFIC_LIGHT_GLYPH)) / 2.,
+            )),
             ..TitlebarOptions::default()
         }
     }

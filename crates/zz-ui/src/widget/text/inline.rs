@@ -27,11 +27,60 @@ use super::{
 };
 use crate::Colorize as _;
 
+/// Horizontal and vertical breathing room around an inline code fill. The fill
+/// is painted under the glyphs rather than reserved in layout, so the padding
+/// has to stay under the width of the space that separates code from prose.
+const CODE_FILL_PAD_X: f32 = 3.0;
+const CODE_FILL_PAD_Y: f32 = 1.0;
+/// `widget-corner-radius` is sized for panels and buttons and goes as high as
+/// 24px; on a fill barely taller than the glyphs anything near half the height
+/// rounds into a stadium. Square themes still come out square, since this only
+/// ever lowers the radius.
+const CODE_FILL_RADIUS_MAX: f32 = 6.0;
+
+/// One fill per visual line a code span covers. A span that survives a wrap
+/// runs to the text's own edges on the lines between its ends.
+fn code_fill_bounds(
+    start: Point<Pixels>,
+    end: Point<Pixels>,
+    line_height: Pixels,
+    ink: Pixels,
+    text_bounds: Bounds<Pixels>,
+) -> Vec<Bounds<Pixels>> {
+    let top_inset = ((line_height - ink) / 2.0).max(px(0.0)) - px(CODE_FILL_PAD_Y);
+    let height = ink + px(CODE_FILL_PAD_Y * 2.0);
+    let rows = if line_height > px(0.0) {
+        ((end.y - start.y) / line_height).round().max(0.0) as usize
+    } else {
+        0
+    };
+
+    (0..=rows)
+        .filter_map(|row| {
+            let left = if row == 0 { start.x } else { text_bounds.left() };
+            let right = if row == rows {
+                end.x
+            } else {
+                text_bounds.right()
+            };
+            if right <= left {
+                return None;
+            }
+            let top = start.y + line_height * row as f32 + top_inset;
+            Some(Bounds::from_corners(
+                point(left - px(CODE_FILL_PAD_X), top),
+                point(right + px(CODE_FILL_PAD_X), top + height),
+            ))
+        })
+        .collect()
+}
+
 pub(super) struct Inline {
     id: ElementId,
     text: SharedString,
     links: Rc<Vec<(Range<usize>, LinkMark)>>,
     highlights: Vec<(Range<usize>, HighlightStyle)>,
+    code_ranges: Vec<Range<usize>>,
     styled_text: StyledText,
     streaming_veil: Option<(StreamingVeil, VeilKey)>,
 
@@ -73,11 +122,20 @@ impl Inline {
             id: id.into(),
             links: Rc::new(links),
             highlights,
+            code_ranges: Vec::new(),
             text: text.clone(),
             styled_text: StyledText::new(text),
             streaming_veil: None,
             state,
         }
+    }
+
+    /// Backtick spans, which take the mono family and a rounded fill. They stay
+    /// part of this one shaped run: an element per span would align by box and
+    /// drop the spans off the shared baseline.
+    pub(super) fn code_ranges(mut self, code_ranges: Vec<Range<usize>>) -> Self {
+        self.code_ranges = code_ranges;
+        self
     }
 
     pub(super) fn streaming_veil(
@@ -87,6 +145,35 @@ impl Inline {
     ) -> Self {
         self.streaming_veil = streaming_veil.map(|veil| (veil, key));
         self
+    }
+
+    /// Painted before the glyphs so the fill lands under them. gpui's own run
+    /// background is a bare rect; this one is rounded and hugs the font's ink
+    /// box instead of the taller line box.
+    fn paint_code_fills(&self, layout: &TextLayout, window: &mut Window, cx: &mut App) {
+        if self.code_ranges.is_empty() {
+            return;
+        }
+        let fill_color = cx.theme().background.raised(2);
+        let radius = cx.theme().radius.min(px(CODE_FILL_RADIUS_MAX));
+        let line_height = layout.line_height();
+        let text_bounds = layout.bounds();
+
+        for range in &self.code_ranges {
+            let (Some(start), Some(end)) = (
+                layout.position_for_index(range.start),
+                layout.position_for_index(range.end),
+            ) else {
+                continue;
+            };
+            let Some(line) = layout.line_layout_for_index(range.start) else {
+                continue;
+            };
+            let ink = line.unwrapped_layout.ascent + line.unwrapped_layout.descent;
+            for fill in code_fill_bounds(start, end, line_height, ink, text_bounds) {
+                window.paint_quad(gpui::fill(fill, fill_color).corner_radii(radius));
+            }
+        }
     }
 
     fn link_for_position(
@@ -355,6 +442,21 @@ impl Element for Inline {
         if ix < self.text.len() {
             runs.push(text_style.to_run(self.text.len() - ix));
         }
+        if !self.code_ranges.is_empty() {
+            let family = cx.theme().mono_font_family.clone();
+            let mut start = 0;
+            for run in &mut runs {
+                let end = start + run.len;
+                if self
+                    .code_ranges
+                    .iter()
+                    .any(|range| range.start <= start && end <= range.end)
+                {
+                    run.font.family = family.clone();
+                }
+                start = end;
+            }
+        }
         if let Some((veil, key)) = &self.streaming_veil {
             runs = veil.runs(*key, self.text.as_ref(), runs, cx);
         }
@@ -400,6 +502,7 @@ impl Element for Inline {
         };
 
         let text_layout = self.styled_text.layout().clone();
+        self.paint_code_fills(&text_layout, window, cx);
         self.styled_text
             .paint(global_id, None, bounds, &mut (), &mut (), window, cx);
 
@@ -607,8 +710,51 @@ fn point_in_text_selection(
 
 #[cfg(test)]
 mod tests {
-    use super::{InlineState, is_openable, point_in_text_selection};
-    use gpui::{point, px};
+    use super::{
+        CODE_FILL_PAD_X, CODE_FILL_PAD_Y, InlineState, code_fill_bounds, is_openable,
+        point_in_text_selection,
+    };
+    use gpui::{Bounds, point, px};
+
+    #[test]
+    fn a_code_fill_hugs_the_ink_box_on_one_line() {
+        let text_bounds = Bounds::from_corners(point(px(0.0), px(0.0)), point(px(400.0), px(21.0)));
+        let fills = code_fill_bounds(
+            point(px(120.0), px(0.0)),
+            point(px(180.0), px(0.0)),
+            px(21.0),
+            px(15.31),
+            text_bounds,
+        );
+
+        assert_eq!(fills.len(), 1, "a span on one line paints one fill");
+        let fill = fills[0];
+        assert_eq!(fill.left(), px(120.0 - CODE_FILL_PAD_X));
+        assert_eq!(fill.right(), px(180.0 + CODE_FILL_PAD_X));
+        assert_eq!(fill.size.height, px(15.31 + CODE_FILL_PAD_Y * 2.0));
+        let ink_center = fill.top() + fill.size.height / 2.0;
+        assert!(
+            (ink_center - px(10.5)).abs() < px(0.01),
+            "the fill centres on the line box, not its top"
+        );
+    }
+
+    #[test]
+    fn a_wrapped_code_fill_splits_per_line() {
+        let text_bounds = Bounds::from_corners(point(px(0.0), px(0.0)), point(px(400.0), px(42.0)));
+        let fills = code_fill_bounds(
+            point(px(360.0), px(0.0)),
+            point(px(40.0), px(21.0)),
+            px(21.0),
+            px(15.31),
+            text_bounds,
+        );
+
+        assert_eq!(fills.len(), 2, "a span across a wrap paints one fill a line");
+        assert_eq!(fills[0].right(), px(400.0 + CODE_FILL_PAD_X));
+        assert_eq!(fills[1].left(), px(0.0 - CODE_FILL_PAD_X));
+        assert_eq!(fills[1].top() - fills[0].top(), px(21.0));
+    }
 
     #[test]
     fn hovered_index_only_changes_on_glyph_transition() {

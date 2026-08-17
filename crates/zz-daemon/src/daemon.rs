@@ -16,7 +16,7 @@ use std::{
 };
 
 use parking_lot::{Condvar, Mutex};
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision, KeyEngine,
     KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts, expand_format_values,
@@ -133,19 +133,24 @@ fn daemon_color_scheme() -> TerminalColorScheme {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
     let process_id = terminal.foreground_process_id().filter(|pid| *pid != 0)?;
     let process_id = Pid::from_u32(process_id);
     let mut system = System::new();
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[process_id]),
-        ProcessRefreshKind::new().with_cwd(UpdateKind::Always),
+        ProcessRefreshKind::new().with_cwd(sysinfo::UpdateKind::Always),
     );
     system
         .process(process_id)
         .and_then(|process| process.cwd())
-        .filter(|path| path.is_dir())
         .map(Path::to_path_buf)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn terminal_working_directory(_terminal: &TerminalSession) -> Option<PathBuf> {
+    None
 }
 
 fn terminal_current_command(terminal: &TerminalSession) -> String {
@@ -2376,6 +2381,9 @@ impl Shared {
                                 env,
                             },
                         ));
+                        let current_path = terminal_working_directory(&session)
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .unwrap_or_default();
                         deferred_terminal_commands.push(
                             DeferredTerminalCommand::SetWordSeparators {
                                 terminal: Arc::clone(&session),
@@ -2386,7 +2394,7 @@ impl Shared {
                         inner.engine.set_pane_runtime_facts(
                             *pane,
                             PaneRuntimeFacts {
-                                current_path: start_path.clone(),
+                                current_path,
                                 start_path,
                                 ..PaneRuntimeFacts::default()
                             },
@@ -6326,9 +6334,10 @@ impl Shared {
         viewport: &TerminalViewport,
         current_command: &str,
     ) {
-        let current_path = viewport.working_directory().map(str::to_owned).or_else(|| {
-            terminal_working_directory(terminal).map(|path| path.to_string_lossy().into_owned())
-        });
+        let current_path = terminal_working_directory(terminal)
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let reported_path = viewport.working_directory().unwrap_or_default().to_owned();
         let pid = terminal.process_id();
         let tty = terminal
             .tty()
@@ -6352,7 +6361,8 @@ impl Shared {
                 pane,
                 PaneRuntimeFacts {
                     current_command: current_command.to_owned(),
-                    current_path: current_path.unwrap_or(previous.current_path),
+                    current_path,
+                    reported_path,
                     start_path: previous.start_path,
                     pid,
                     tty,
@@ -13134,7 +13144,15 @@ mod tests {
     #[test]
     fn buffer_formats_read_named_rows_and_the_top_automatic_buffer() {
         let shared = Arc::new(Shared::new(1));
-        let mut context = ExecutionContext::default();
+        let mut context = {
+            let mut inner = shared.inner.lock();
+            let (_, _, pane) = inner
+                .engine
+                .state
+                .create_session("w")
+                .expect("format target session");
+            ExecutionContext::for_pane(&inner.engine.state, pane).expect("format target pane")
+        };
         shared
             .buffer_command(
                 &context,
@@ -13173,6 +13191,25 @@ mod tests {
             )
             .expect("format automatic buffer");
         assert_eq!(displayed.output, "buffer0|5|bravo|1");
+
+        let pane = context.pane.expect("format target pane").to_string();
+        let targeted = shared
+            .execute(
+                ClientId(1),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-p",
+                        "-t",
+                        pane.as_str(),
+                        "#{buffer_name}|#{buffer_size}|#{buffer_sample}|#{!!:#{buffer_created}}",
+                    ],
+                ),
+            )
+            .expect("format automatic buffer with a pane target");
+        assert_eq!(targeted.output, "buffer0|5|bravo|1");
     }
 
     #[test]
@@ -13983,8 +14020,11 @@ bind - split-window -v -c "#{pane_current_path}"
     #[test]
     fn terminal_agent_and_editor_panes_inherit_live_working_directory() {
         let directory = tempfile::tempdir().expect("temporary working directory");
-        let expected = directory
-            .path()
+        let physical = directory.path().join("physical");
+        fs::create_dir(&physical).expect("physical working directory");
+        let reported = directory.path().join("reported");
+        std::os::unix::fs::symlink(&physical, &reported).expect("working directory symlink");
+        let expected = physical
             .canonicalize()
             .expect("canonical working directory");
         let shared = Arc::new(Shared::new(1));
@@ -13999,7 +14039,12 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("session");
         let first = context.pane.expect("first pane");
         let source = Arc::clone(&shared.inner.lock().terminals[&first]);
-        source.send_text(format!("cd '{}'\n", expected.display()));
+        let reported_path = reported.to_string_lossy().into_owned();
+        source.send_text(format!(
+            "cd '{}'\nprintf '\\033]7;file://workstation{}\\a'\n",
+            reported.display(),
+            reported_path
+        ));
 
         let wait_for_cwd = |terminal: &TerminalSession| {
             let deadline = Instant::now() + Duration::from_secs(5);
@@ -14017,6 +14062,44 @@ bind - split-window -v -c "#{pane_current_path}"
             }
         };
         wait_for_cwd(&source);
+
+        let expected_path = expected.to_string_lossy().into_owned();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let facts = shared
+                .inner
+                .lock()
+                .engine
+                .pane_runtime_facts(first)
+                .cloned()
+                .unwrap_or_default();
+            if facts.current_path == expected_path && facts.reported_path == reported_path {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for pane path facts; facts={facts:?}",
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        let first_target = first.to_string();
+        let paths = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-p",
+                        "-t",
+                        first_target.as_str(),
+                        "#{pane_current_path}|#{pane_path}",
+                    ],
+                ),
+            )
+            .expect("live pane paths");
+        assert_eq!(paths.output, format!("{expected_path}|{reported_path}"));
 
         shared
             .execute(

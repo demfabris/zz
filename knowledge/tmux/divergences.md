@@ -150,7 +150,6 @@ inside a generic “unsupported formats” claim.
 | `pane_fg` | The terminal cell foreground at the cursor is not mirrored into mux facts. | **silent** |
 | `pane_key_mode` | Native copy/view mode is not projected as tmux's pane key mode. | **silent** |
 | `pane_mode` | Native pane mode is not projected as tmux's mode name. | **silent** |
-| `pane_path` | tmux's OSC path field is not separately retained from `pane_current_path`. | **silent** |
 | `pane_pb_state` | Terminal progress-bar state is not mirrored into mux facts. | **silent** |
 | `pane_search_string` | Native per-view search text is not mirrored into mux facts. | **silent** |
 | `pane_start_command` | The original spawn command is not retained in the pane format record. | **silent** |

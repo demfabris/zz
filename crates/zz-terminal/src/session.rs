@@ -8626,6 +8626,20 @@ fn snapshot<'alloc: 'callbacks, 'callbacks>(
     result
 }
 
+fn reported_working_directory(value: &str) -> Option<String> {
+    if value.is_empty() {
+        return None;
+    }
+    if !value.starts_with("file://") {
+        return Some(value.to_owned());
+    }
+    let mut url = url::Url::parse(value).ok()?;
+    url.set_host(Some("localhost")).ok()?;
+    url.to_file_path()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
 fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     terminal: &Terminal<'alloc, 'callbacks>,
     render_state: &mut RenderState<'alloc>,
@@ -8885,13 +8899,10 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     }
     let shared_dictionary = dictionary.shared_dictionary();
     let title = terminal.title().unwrap_or("zz");
-    let working_directory = terminal
-        .pwd()
-        .ok()
-        .filter(|working_directory| !working_directory.is_empty());
+    let working_directory = terminal.pwd().ok().and_then(reported_working_directory);
     let presentation = dictionary.shared_presentation(
         title,
-        working_directory,
+        working_directory.as_deref(),
         hover_link.map(|link| link.uri.as_str()),
     );
     let overlays = dictionary.finish_overlays(overlays);
@@ -9146,6 +9157,31 @@ mod tests {
             SessionStatus::Running,
         )
         .expect("snapshot")
+    }
+
+    #[test]
+    fn reported_working_directories_strip_file_hosts_and_decode_paths() {
+        let (uri, expected) = if cfg!(windows) {
+            (
+                "file://workstation/C:/Users/a%20b/%E7%95%8C",
+                "C:\\Users\\a b\\界",
+            )
+        } else {
+            ("file://workstation/tmp/a%20b/%E7%95%8C", "/tmp/a b/界")
+        };
+        assert_eq!(reported_working_directory(uri).as_deref(), Some(expected));
+        if !cfg!(windows) {
+            assert_eq!(
+                reported_working_directory("file://workstation/tmp/a b").as_deref(),
+                Some("/tmp/a b")
+            );
+        }
+        assert_eq!(
+            reported_working_directory("/reported/path").as_deref(),
+            Some("/reported/path")
+        );
+        assert_eq!(reported_working_directory(""), None);
+        assert_eq!(reported_working_directory("file://[invalid"), None);
     }
 
     fn copy_mode_survives_downward_action(

@@ -37,6 +37,7 @@ pub struct StatusContext {
     pub pane_bottom: Option<u16>,
     pub pane_current_command: String,
     pub pane_current_path: String,
+    pub pane_path: String,
     pub pane_flags: String,
     pub pane_height: Option<u16>,
     pub pane_id: String,
@@ -171,6 +172,7 @@ enum FormatBacking {
     PaneBottom,
     PaneCurrentCommand,
     PaneCurrentPath,
+    PanePath,
     PaneFlags,
     PaneFormat,
     PaneHeight,
@@ -365,7 +367,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_marked", Pane, Zero),
     variable!("pane_marked_set", Pane, Zero),
     variable!("pane_mode", Pane, Empty),
-    variable!("pane_path", Pane, Empty),
+    variable!("pane_path", Pane, PanePath),
     variable!("pane_pb_progress", Pane, Zero),
     variable!("pane_pb_state", Pane, Empty),
     variable!("pane_pid", Pane, PanePid),
@@ -535,6 +537,7 @@ impl StatusContext {
             FormatBacking::PaneBottom => optional_display(self.pane_bottom),
             FormatBacking::PaneCurrentCommand => Cow::Borrowed(self.pane_current_command.as_str()),
             FormatBacking::PaneCurrentPath => Cow::Borrowed(self.pane_current_path.as_str()),
+            FormatBacking::PanePath => Cow::Borrowed(self.pane_path.as_str()),
             FormatBacking::PaneFlags => Cow::Borrowed(self.pane_flags.as_str()),
             FormatBacking::PaneFormat => {
                 Cow::Borrowed(bool_string(format_type == FormatType::Pane))
@@ -871,6 +874,7 @@ impl MuxEngine {
                 .pane_current_command
                 .clone_from(&facts.current_command);
             context.pane_current_path.clone_from(&facts.current_path);
+            context.pane_path.clone_from(&facts.reported_path);
             context.pane_start_path.clone_from(&facts.start_path);
             context.pane_pid = facts.pid;
             context.pane_tty.clone_from(&facts.tty);
@@ -1473,7 +1477,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             "-" => left - right,
             "*" => left * right,
             "/" => left / right,
-            "%" | "%%" | "m" => left % right,
+            "m" => left % right,
             "==" => {
                 if (left - right).abs() < 1e-9 {
                     1.0
@@ -3451,6 +3455,8 @@ mod tests {
         assert_eq!(expand("#{e|+|:2,3}"), "5");
         assert_eq!(expand("#{e|-|:2,5}"), "-3");
         assert_eq!(expand("#{e|m|:7,3}"), "1");
+        assert_eq!(expand("#{e|%|:7,3}"), "");
+        assert_eq!(expand("#{e|%%|:7,3}"), "");
         assert_eq!(expand("#{e|==|:5,5}"), "1");
         assert_eq!(expand("#{e|/|f|3:1,3}"), "0.333");
         assert_eq!(expand("#{e|*|f:2.5,2}"), "5.00");

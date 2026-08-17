@@ -286,6 +286,7 @@ pub struct MuxEngine {
 pub struct PaneRuntimeFacts {
     pub current_command: String,
     pub current_path: String,
+    pub reported_path: String,
     pub start_path: String,
     pub pid: Option<u32>,
     pub tty: String,
@@ -5967,6 +5968,7 @@ mod tests {
         let facts = PaneRuntimeFacts {
             current_command: "fish".to_owned(),
             current_path: "/work/live".to_owned(),
+            reported_path: "/work/reported".to_owned(),
             start_path: "/work/start".to_owned(),
             pid: Some(4242),
             tty: "/dev/ttys007".to_owned(),
@@ -5981,13 +5983,13 @@ mod tests {
                         "display-message",
                         &[
                             "-p",
-                            "#{pane_current_command}|#{pane_current_path}|#{pane_start_path}|#{pane_pid}|#{pane_tty}|#{session_created}|#{cursor_flag}|#{wrap_flag}|#{pid}|#{uid}|#{user}",
+                            "#{pane_current_command}|#{pane_current_path}|#{pane_path}|#{pane_start_path}|#{pane_pid}|#{pane_tty}|#{session_created}|#{cursor_flag}|#{wrap_flag}|#{pid}|#{uid}|#{user}",
                         ],
                     ),
                 )
                 .unwrap()
                 .output,
-            "fish|/work/live|/work/start|4242|/dev/ttys007|55|1|1|41|501|fab"
+            "fish|/work/live|/work/reported|/work/start|4242|/dev/ttys007|55|1|1|41|501|fab"
         );
     }
 
@@ -6152,6 +6154,27 @@ mod tests {
             .execute(&mut context, &command("new-session", &["-s", "work"]))
             .expect("session");
         let first = context.pane.expect("first pane");
+        assert!(engine.set_pane_runtime_facts(
+            first,
+            PaneRuntimeFacts {
+                current_path: "/private/tmp".to_owned(),
+                reported_path: "/tmp".to_owned(),
+                ..PaneRuntimeFacts::default()
+            },
+        ));
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &["-p", "#{pane_current_path}|#{pane_path}"],
+                    ),
+                )
+                .expect("source paths")
+                .output,
+            "/private/tmp|/tmp"
+        );
 
         let window = engine
             .execute(

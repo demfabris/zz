@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-pub use crate::formats::{StatusContext, StatusHooks, expand_status};
+pub use crate::formats::{
+    FormatUniverse, StatusContext, StatusHooks, expand_format_values, expand_status,
+};
 
 pub const DEFAULT_STATUS_LEFT: &str = "";
 pub const DEFAULT_STATUS_RIGHT: &str = "";

@@ -1,15 +1,11 @@
-use std::{
-    borrow::Cow,
-    cmp::Ordering,
-    fmt::Write as _,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{borrow::Cow, cmp::Ordering, collections::BTreeMap, fmt::Write as _, sync::Arc};
 
 use chrono::{Datelike as _, Local, TimeZone as _};
 use glob::{MatchOptions, Pattern};
 use regex::{Captures, RegexBuilder};
 use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{MAX_STATUS_TEXT_BYTES, PaneId, SessionId, WindowId};
+use zz_terminal::parse_x11_color;
 
 use crate::{MuxEngine, PaneKind, layout::CellLayout};
 
@@ -39,6 +35,7 @@ pub struct StatusContext {
     pub pane_at_right: Option<bool>,
     pub pane_at_top: Option<bool>,
     pub pane_bottom: Option<u16>,
+    pub pane_current_command: String,
     pub pane_current_path: String,
     pub pane_flags: String,
     pub pane_height: Option<u16>,
@@ -47,9 +44,12 @@ pub struct StatusContext {
     pub pane_last: Option<bool>,
     pub pane_left: Option<u16>,
     pub pane_right: Option<u16>,
+    pub pane_pid: Option<u32>,
+    pub pane_start_path: String,
     pub pane_synchronized: bool,
     pub pane_title: String,
     pub pane_top: Option<u16>,
+    pub pane_tty: String,
     pub pane_width: Option<u16>,
     pub pane_x: Option<u16>,
     pub pane_y: Option<u16>,
@@ -63,6 +63,7 @@ pub struct StatusContext {
     pub session_attached: usize,
     pub session_attached_list: String,
     pub session_bell: bool,
+    pub session_created: Option<i64>,
     pub session_id: String,
     pub session_many_attached: bool,
     pub session_name: String,
@@ -94,6 +95,23 @@ pub struct StatusContext {
     pub window_visible_layout: String,
     pub window_width: Option<u16>,
     pub window_zoomed: bool,
+    #[doc(hidden)]
+    pub format_now: Option<i64>,
+    #[doc(hidden)]
+    pub format_universe: Arc<FormatUniverse>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FormatUniverse {
+    sessions: Vec<FormatLoopItem>,
+    windows: BTreeMap<String, Vec<FormatLoopItem>>,
+    panes: BTreeMap<String, Vec<FormatLoopItem>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FormatLoopItem {
+    context: StatusContext,
+    active: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -138,6 +156,7 @@ enum FormatKind {
 enum FormatBacking {
     Empty,
     Zero,
+    One,
     ActiveWindowIndex,
     HistoryLimit,
     Host,
@@ -150,6 +169,7 @@ enum FormatBacking {
     PaneAtRight,
     PaneAtTop,
     PaneBottom,
+    PaneCurrentCommand,
     PaneCurrentPath,
     PaneFlags,
     PaneFormat,
@@ -159,9 +179,12 @@ enum FormatBacking {
     PaneLast,
     PaneLeft,
     PaneRight,
+    PanePid,
+    PaneStartPath,
     PaneSynchronized,
     PaneTitle,
     PaneTop,
+    PaneTty,
     PaneWidth,
     PaneX,
     PaneY,
@@ -169,12 +192,12 @@ enum FormatBacking {
     PaneZoomed,
     Pid,
     ServerSessions,
-    SessionActive,
     SessionAlert,
     SessionAlerts,
     SessionAttached,
     SessionAttachedList,
     SessionBell,
+    SessionCreated,
     SessionFormat,
     SessionId,
     SessionManyAttached,
@@ -251,39 +274,39 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("buffer_mode_format", Buffer, Empty),
     variable!("buffer_name", Buffer, Empty),
     variable!("buffer_sample", Buffer, Empty),
-    variable!("buffer_size", Buffer, Zero),
+    variable!("buffer_size", Buffer, Empty),
     variable!("client_activity", Client, Time, Empty),
-    variable!("client_cell_height", Client, Zero),
-    variable!("client_cell_width", Client, Zero),
+    variable!("client_cell_height", Client, Empty),
+    variable!("client_cell_width", Client, Empty),
     variable!("client_colours", Client, Empty),
-    variable!("client_control_mode", Client, Zero),
+    variable!("client_control_mode", Client, Empty),
     variable!("client_created", Client, Time, Empty),
-    variable!("client_discarded", Client, Zero),
+    variable!("client_discarded", Client, Empty),
     variable!("client_flags", Client, Empty),
-    variable!("client_height", Client, Zero),
+    variable!("client_height", Client, Empty),
     variable!("client_key_table", Client, Empty),
     variable!("client_last_session", Client, Empty),
     variable!("client_mode_format", Client, Empty),
     variable!("client_name", Client, Empty),
-    variable!("client_pid", Client, Zero),
-    variable!("client_prefix", Client, Zero),
-    variable!("client_readonly", Client, Zero),
+    variable!("client_pid", Client, Empty),
+    variable!("client_prefix", Client, Empty),
+    variable!("client_readonly", Client, Empty),
     variable!("client_session", Client, Empty),
     variable!("client_termfeatures", Client, Empty),
     variable!("client_termname", Client, Empty),
     variable!("client_termtype", Client, Empty),
     variable!("client_theme", Client, Empty),
     variable!("client_tty", Client, Empty),
-    variable!("client_uid", Client, Zero),
+    variable!("client_uid", Client, Empty),
     variable!("client_user", Client, Empty),
-    variable!("client_utf8", Client, Zero),
-    variable!("client_width", Client, Zero),
-    variable!("client_written", Client, Zero),
+    variable!("client_utf8", Client, Empty),
+    variable!("client_width", Client, Empty),
+    variable!("client_written", Client, Empty),
     variable!("config_files", Server, Empty),
     variable!("cursor_blinking", Terminal, Zero),
     variable!("cursor_character", Terminal, Empty),
     variable!("cursor_colour", Terminal, Empty),
-    variable!("cursor_flag", Terminal, Zero),
+    variable!("cursor_flag", Terminal, One),
     variable!("cursor_shape", Terminal, Zero),
     variable!("cursor_very_visible", Terminal, Zero),
     variable!("cursor_x", Terminal, Zero),
@@ -310,8 +333,8 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("mouse_status_range", Terminal, Empty),
     variable!("mouse_utf8_flag", Terminal, Zero),
     variable!("mouse_word", Terminal, Empty),
-    variable!("mouse_x", Terminal, Zero),
-    variable!("mouse_y", Terminal, Zero),
+    variable!("mouse_x", Terminal, Empty),
+    variable!("mouse_y", Terminal, Empty),
     variable!("next_session_id", Server, NextSessionId),
     variable!("origin_flag", Terminal, Zero),
     variable!("pane_active", Pane, PaneActive),
@@ -321,7 +344,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_at_top", Pane, PaneAtTop),
     variable!("pane_bg", Pane, Empty),
     variable!("pane_bottom", Pane, PaneBottom),
-    variable!("pane_current_command", Pane, Empty),
+    variable!("pane_current_command", Pane, PaneCurrentCommand),
     variable!("pane_current_path", Pane, PaneCurrentPath),
     variable!("pane_dead", Pane, Zero),
     variable!("pane_dead_signal", Pane, Empty),
@@ -345,19 +368,19 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_path", Pane, Empty),
     variable!("pane_pb_progress", Pane, Zero),
     variable!("pane_pb_state", Pane, Empty),
-    variable!("pane_pid", Pane, Zero),
+    variable!("pane_pid", Pane, PanePid),
     variable!("pane_pipe", Pane, Zero),
-    variable!("pane_pipe_pid", Pane, Zero),
+    variable!("pane_pipe_pid", Pane, Empty),
     variable!("pane_right", Pane, PaneRight),
     variable!("pane_search_string", Pane, Empty),
     variable!("pane_start_command", Pane, Empty),
     variable!("pane_start_command_list", Pane, Empty),
-    variable!("pane_start_path", Pane, PaneCurrentPath),
+    variable!("pane_start_path", Pane, PaneStartPath),
     variable!("pane_synchronized", Pane, PaneSynchronized),
     variable!("pane_tabs", Pane, Empty),
     variable!("pane_title", Pane, PaneTitle),
     variable!("pane_top", Pane, PaneTop),
-    variable!("pane_tty", Pane, Empty),
+    variable!("pane_tty", Pane, PaneTty),
     variable!("pane_unseen_changes", Pane, Zero),
     variable!("pane_width", Pane, PaneWidth),
     variable!("pane_x", Pane, PaneX),
@@ -368,7 +391,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("scroll_region_lower", Terminal, Zero),
     variable!("scroll_region_upper", Terminal, Zero),
     variable!("server_sessions", Server, ServerSessions),
-    variable!("session_active", Session, SessionActive),
+    variable!("session_active", Session, Empty),
     variable!("session_activity", Session, Time, Empty),
     variable!("session_activity_flag", Session, Zero),
     variable!("session_alert", Session, SessionAlert),
@@ -376,14 +399,14 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("session_attached", Session, SessionAttached),
     variable!("session_attached_list", Session, SessionAttachedList),
     variable!("session_bell_flag", Session, SessionBell),
-    variable!("session_created", Session, Time, Empty),
+    variable!("session_created", Session, Time, SessionCreated),
     variable!("session_format", Session, SessionFormat),
     variable!("session_group", Session, Empty),
-    variable!("session_group_attached", Session, Zero),
+    variable!("session_group_attached", Session, Empty),
     variable!("session_group_attached_list", Session, Empty),
     variable!("session_group_list", Session, Empty),
-    variable!("session_group_many_attached", Session, Zero),
-    variable!("session_group_size", Session, Zero),
+    variable!("session_group_many_attached", Session, Empty),
+    variable!("session_group_size", Session, Empty),
     variable!("session_grouped", Session, Zero),
     variable!("session_id", Session, SessionId),
     variable!("session_last_attached", Session, Time, Empty),
@@ -418,7 +441,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("window_activity", Window, Time, Empty),
     variable!("window_activity_flag", Window, Zero),
     variable!("window_bell_flag", Window, WindowBell),
-    variable!("window_bigger", Window, Zero),
+    variable!("window_bigger", Window, Empty),
     variable!("window_cell_height", Window, Zero),
     variable!("window_cell_width", Window, Zero),
     variable!("window_end_flag", Window, WindowEnd),
@@ -436,8 +459,8 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
         Window,
         WindowLinkedSessionsList
     ),
-    variable!("window_manual_height", Window, Zero),
-    variable!("window_manual_width", Window, Zero),
+    variable!("window_manual_height", Window, Empty),
+    variable!("window_manual_width", Window, Empty),
     variable!("window_marked_flag", Window, Zero),
     variable!("window_name", Window, WindowName),
     variable!("window_offset_x", Window, Empty),
@@ -450,7 +473,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("window_visible_layout", Window, WindowVisibleLayout),
     variable!("window_width", Window, WindowWidth),
     variable!("window_zoomed_flag", Window, WindowZoomed),
-    variable!("wrap_flag", Terminal, Zero),
+    variable!("wrap_flag", Terminal, One),
 ];
 
 struct ResolvedFormatContext {
@@ -464,6 +487,7 @@ struct ResolvedFormatContext {
 trait FormatVariables {
     fn variable(&self, name: &str) -> Option<Cow<'_, str>>;
     fn variable_kind(&self, name: &str) -> Option<FormatKind>;
+    fn values(&self) -> &StatusContext;
 }
 
 impl StatusContext {
@@ -496,6 +520,7 @@ impl StatusContext {
         match spec.backing {
             FormatBacking::Empty => Cow::Borrowed(""),
             FormatBacking::Zero => Cow::Borrowed("0"),
+            FormatBacking::One => Cow::Borrowed("1"),
             FormatBacking::ActiveWindowIndex => optional_display(self.active_window_index),
             FormatBacking::HistoryLimit => optional_display(self.history_limit),
             FormatBacking::Host => Cow::Borrowed(self.host.as_str()),
@@ -508,6 +533,7 @@ impl StatusContext {
             FormatBacking::PaneAtRight => optional_bool(self.pane_at_right),
             FormatBacking::PaneAtTop => optional_bool(self.pane_at_top),
             FormatBacking::PaneBottom => optional_display(self.pane_bottom),
+            FormatBacking::PaneCurrentCommand => Cow::Borrowed(self.pane_current_command.as_str()),
             FormatBacking::PaneCurrentPath => Cow::Borrowed(self.pane_current_path.as_str()),
             FormatBacking::PaneFlags => Cow::Borrowed(self.pane_flags.as_str()),
             FormatBacking::PaneFormat => {
@@ -519,9 +545,12 @@ impl StatusContext {
             FormatBacking::PaneLast => optional_bool(self.pane_last),
             FormatBacking::PaneLeft => optional_display(self.pane_left),
             FormatBacking::PaneRight => optional_display(self.pane_right),
+            FormatBacking::PanePid => optional_display(self.pane_pid),
+            FormatBacking::PaneStartPath => Cow::Borrowed(self.pane_start_path.as_str()),
             FormatBacking::PaneSynchronized => Cow::Borrowed(bool_string(self.pane_synchronized)),
             FormatBacking::PaneTitle => Cow::Borrowed(self.pane_title.as_str()),
             FormatBacking::PaneTop => optional_display(self.pane_top),
+            FormatBacking::PaneTty => Cow::Borrowed(self.pane_tty.as_str()),
             FormatBacking::PaneWidth => optional_display(self.pane_width),
             FormatBacking::PaneX => optional_display(self.pane_x),
             FormatBacking::PaneY => optional_display(self.pane_y),
@@ -529,7 +558,6 @@ impl StatusContext {
             FormatBacking::PaneZoomed => Cow::Borrowed(bool_string(self.pane_zoomed)),
             FormatBacking::Pid => Cow::Owned(self.pid.to_string()),
             FormatBacking::ServerSessions => Cow::Owned(self.server_sessions.to_string()),
-            FormatBacking::SessionActive => optional_bool(self.session_active),
             FormatBacking::SessionAlert => Cow::Borrowed(self.session_alert.as_str()),
             FormatBacking::SessionAlerts => Cow::Borrowed(self.session_alerts.as_str()),
             FormatBacking::SessionAttached => Cow::Owned(self.session_attached.to_string()),
@@ -537,6 +565,7 @@ impl StatusContext {
                 Cow::Borrowed(self.session_attached_list.as_str())
             }
             FormatBacking::SessionBell => Cow::Borrowed(bool_string(self.session_bell)),
+            FormatBacking::SessionCreated => optional_display(self.session_created),
             FormatBacking::SessionFormat => {
                 Cow::Borrowed(bool_string(format_type == FormatType::Session))
             }
@@ -626,6 +655,10 @@ impl FormatVariables for StatusContext {
     fn variable_kind(&self, name: &str) -> Option<FormatKind> {
         format_variable(name).map(|spec| spec.kind)
     }
+
+    fn values(&self) -> &StatusContext {
+        self
+    }
 }
 
 impl FormatVariables for ResolvedFormatContext {
@@ -646,6 +679,10 @@ impl FormatVariables for ResolvedFormatContext {
 
     fn variable_kind(&self, name: &str) -> Option<FormatKind> {
         format_variable(name).map(|spec| spec.kind)
+    }
+
+    fn values(&self) -> &StatusContext {
+        &self.values
     }
 }
 
@@ -678,8 +715,10 @@ impl FormatContext {
                 .and_then(|window| state.windows.get(&window))
                 .map(|window| window.active_pane)
         });
+        let mut values = engine.build_status_context(session, window, pane, self.active_session);
+        values.format_universe = engine.build_format_universe(self.active_session);
         ResolvedFormatContext {
-            values: engine.build_status_context(session, window, pane, self.active_session),
+            values,
             has_session: session.is_some(),
             has_window: window.is_some(),
             has_pane: pane.is_some(),
@@ -718,15 +757,18 @@ impl MuxEngine {
             host: self.format_host().to_owned(),
             host_short: self.format_host_short().to_owned(),
             next_session_id: self.state.next_session_id().to_string(),
-            pid: std::process::id(),
+            pid: self.format_pid(),
             server_sessions: self.state.sessions.len(),
             socket_path: self.format_socket_path().to_owned(),
-            start_time: i64::try_from(self.format_start_time()).ok(),
-            uid: current_uid(),
-            user: std::env::var("USER")
-                .or_else(|_| std::env::var("USERNAME"))
-                .unwrap_or_default(),
+            start_time: i64::try_from(self.format_start_time())
+                .ok()
+                .filter(|time| *time != 0),
+            uid: self.format_uid().to_owned(),
+            user: self.format_user().to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
+            format_now: i64::try_from(self.format_now())
+                .ok()
+                .filter(|time| *time != 0),
             ..StatusContext::default()
         };
         let Some(session) = session_id.and_then(|id| self.state.sessions.get(&id)) else {
@@ -734,6 +776,7 @@ impl MuxEngine {
         };
         context.session_id = session.id.to_string();
         context.session_name.clone_from(&session.name);
+        context.session_created = session.created;
         context.session_windows = session.windows.len();
         context.session_active = active_session.map(|active| active == session.id);
         context.active_window_index = self
@@ -823,15 +866,30 @@ impl MuxEngine {
             .unwrap_or_default();
         context.pane_title.clone_from(&pane.title);
         context.pane_zoomed = window.zoomed_pane == Some(pane.id);
-        context.pane_current_path = match &pane.kind {
-            PaneKind::Agent(agent) => agent
-                .cwd
-                .as_deref()
-                .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-            PaneKind::Editor(editor) => editor.cwd.clone(),
-            PaneKind::Picker { .. } | PaneKind::Terminal | PaneKind::Browser(_) => String::new(),
-        };
+        if let Some(facts) = self.pane_runtime_facts(pane.id) {
+            context
+                .pane_current_command
+                .clone_from(&facts.current_command);
+            context.pane_current_path.clone_from(&facts.current_path);
+            context.pane_start_path.clone_from(&facts.start_path);
+            context.pane_pid = facts.pid;
+            context.pane_tty.clone_from(&facts.tty);
+        } else {
+            context.pane_current_path = match &pane.kind {
+                PaneKind::Agent(agent) => agent
+                    .cwd
+                    .as_deref()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                PaneKind::Editor(editor) => editor.cwd.clone(),
+                PaneKind::Picker { .. } | PaneKind::Terminal | PaneKind::Browser(_) => {
+                    String::new()
+                }
+            };
+            context
+                .pane_start_path
+                .clone_from(&context.pane_current_path);
+        }
         let geometry = if context.pane_zoomed {
             let (sx, sy) = window.layout.extent();
             Some((sx, sy, 0, 0))
@@ -869,6 +927,67 @@ impl MuxEngine {
         }
         context
     }
+
+    fn build_format_universe(&self, active_session: Option<SessionId>) -> Arc<FormatUniverse> {
+        let mut universe = FormatUniverse::default();
+        for session in self.state.sessions.values() {
+            let active_window = self.state.windows.get(&session.active_window);
+            let session_context = self.build_status_context(
+                Some(session.id),
+                active_window.map(|window| window.id),
+                active_window.map(|window| window.active_pane),
+                active_session,
+            );
+            universe.sessions.push(FormatLoopItem {
+                active: active_session == Some(session.id),
+                context: session_context,
+            });
+
+            let mut windows = Vec::new();
+            for window in session
+                .windows
+                .iter()
+                .filter_map(|window| self.state.windows.get(window))
+            {
+                let window_context = self.build_status_context(
+                    Some(session.id),
+                    Some(window.id),
+                    Some(window.active_pane),
+                    active_session,
+                );
+                windows.push(FormatLoopItem {
+                    active: window.id == session.active_window,
+                    context: window_context,
+                });
+
+                let mut panes = window
+                    .panes
+                    .values()
+                    .map(|pane| FormatLoopItem {
+                        active: pane.id == window.active_pane,
+                        context: self.build_status_context(
+                            Some(session.id),
+                            Some(window.id),
+                            Some(pane.id),
+                            active_session,
+                        ),
+                    })
+                    .collect::<Vec<_>>();
+                panes.sort_by_key(|item| pane_number(&item.context.pane_id));
+                universe.panes.insert(window.id.to_string(), panes);
+            }
+            windows.sort_by_key(|item| item.context.window_index);
+            universe.windows.insert(session.id.to_string(), windows);
+        }
+        Arc::new(universe)
+    }
+}
+
+fn pane_number(value: &str) -> u64 {
+    value
+        .strip_prefix('%')
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or_default()
 }
 
 fn format_variable(name: &str) -> Option<&'static FormatVariableSpec> {
@@ -890,20 +1009,23 @@ const fn bool_string(value: bool) -> &'static str {
     if value { "1" } else { "0" }
 }
 
-fn current_uid() -> String {
-    #[cfg(unix)]
-    {
-        rustix::process::getuid().as_raw().to_string()
-    }
-    #[cfg(not(unix))]
-    {
-        String::new()
-    }
-}
-
 pub trait StatusHooks {
     fn strftime(&mut self, literal: &str) -> String;
     fn shell(&mut self, command: &str) -> String;
+
+    fn variable(&mut self, _name: &str, _context: &StatusContext) -> Option<String> {
+        None
+    }
+
+    fn pane_search(
+        &mut self,
+        _pane: Option<PaneId>,
+        _pattern: &str,
+        _regex: bool,
+        _ignore_case: bool,
+    ) -> usize {
+        0
+    }
 }
 
 pub fn expand_status(
@@ -915,24 +1037,55 @@ pub fn expand_status(
     truncate_output(expander.expand(format, 0, true))
 }
 
-pub(crate) fn expand_format(format: &str, engine: &MuxEngine, context: FormatContext) -> String {
-    struct CommandHooks;
+pub fn expand_format_values(
+    format: &str,
+    context: &StatusContext,
+    hooks: &mut impl StatusHooks,
+) -> String {
+    let mut expander = Expander { context, hooks };
+    truncate_output(expander.expand(format, 0, false))
+}
 
-    impl StatusHooks for CommandHooks {
-        fn strftime(&mut self, literal: &str) -> String {
-            strftime_now(literal)
-        }
+pub(crate) struct CommandHooks {
+    now: Option<i64>,
+}
 
-        fn shell(&mut self, _command: &str) -> String {
-            String::new()
+impl CommandHooks {
+    pub(crate) fn new(now: u64) -> Self {
+        Self {
+            now: i64::try_from(now).ok().filter(|now| *now != 0),
         }
     }
+}
 
+impl StatusHooks for CommandHooks {
+    fn strftime(&mut self, literal: &str) -> String {
+        self.now
+            .and_then(|now| Local.timestamp_opt(now, 0).single())
+            .map_or_else(String::new, |now| format_datetime(&now, literal))
+    }
+
+    fn shell(&mut self, _command: &str) -> String {
+        String::new()
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn expand_format(format: &str, engine: &MuxEngine, context: FormatContext) -> String {
+    let mut hooks = CommandHooks::new(engine.format_now());
+    expand_format_with_hooks(format, engine, context, &mut hooks)
+}
+
+pub(crate) fn expand_format_with_hooks(
+    format: &str,
+    engine: &MuxEngine,
+    context: FormatContext,
+    hooks: &mut impl StatusHooks,
+) -> String {
     let context = context.resolve(engine);
-    let mut hooks = CommandHooks;
     let mut expander = Expander {
         context: &context,
-        hooks: &mut hooks,
+        hooks,
     };
     truncate_output(expander.expand(format, 0, false))
 }
@@ -1031,6 +1184,22 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         let flags = ModifierFlags::from_modifiers(&modifiers);
         let mut value = if flags.literal {
             unescape(copy)
+        } else if flags.character {
+            self.expand_character(copy, depth)
+        } else if let Some(colour_flags) = flags.colour {
+            self.expand_colour(copy, depth, colour_flags)
+        } else if flags.loop_sessions {
+            self.expand_loop(copy, depth, LoopTarget::Sessions, &flags)?
+        } else if flags.loop_windows {
+            self.expand_loop(copy, depth, LoopTarget::Windows, &flags)?
+        } else if flags.loop_panes {
+            self.expand_loop(copy, depth, LoopTarget::Panes, &flags)?
+        } else if flags.name_window {
+            self.expand_name_exists(copy, depth, true)?
+        } else if flags.name_session {
+            self.expand_name_exists(copy, depth, false)?
+        } else if let Some(search_flags) = flags.content_search {
+            self.expand_content_search(copy, depth, search_flags)
         } else if flags.not {
             bool_string(!format_true(&self.expand(copy, depth, false))).to_owned()
         } else if flags.not_not {
@@ -1041,6 +1210,8 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             self.expand_comparison(copy, depth, comparison)?
         } else if let Some(conditional) = copy.strip_prefix('?') {
             self.expand_conditional(conditional, depth, &flags)
+        } else if let Some(expression) = flags.expression {
+            self.expand_expression(copy, depth, expression)
         } else if copy.contains("#{") {
             self.expand(copy, depth, false)
         } else {
@@ -1068,6 +1239,9 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         }
         if let Some((limit, marker)) = flags.limit {
             value = truncate_value(&value, limit, marker.as_deref());
+        }
+        if flags.padding != 0 {
+            value = pad_value(&value, flags.padding);
         }
         if flags.length {
             value = value.len().to_string();
@@ -1123,6 +1297,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 'n' => Some(ModifierKind::Length),
                 'E' => Some(ModifierKind::Expand),
                 'T' => Some(ModifierKind::ExpandTime),
+                'a' => Some(ModifierKind::Character),
                 '!' => Some(ModifierKind::Not),
                 '<' => Some(ModifierKind::Less),
                 '>' => Some(ModifierKind::Greater),
@@ -1144,6 +1319,15 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 't' => ModifierKind::Time,
                 '=' => ModifierKind::Limit,
                 'q' => ModifierKind::Quote,
+                'p' => ModifierKind::Padding,
+                'e' => ModifierKind::Expression,
+                'c' => ModifierKind::Colour,
+                'N' => ModifierKind::NameExists,
+                'S' => ModifierKind::Sessions,
+                'W' => ModifierKind::Windows,
+                'P' => ModifierKind::Panes,
+                'C' => ModifierKind::ContentSearch,
+                'a' => ModifierKind::Character,
                 _ => return None,
             };
             position += 1;
@@ -1192,6 +1376,243 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         } else {
             None
         }
+    }
+
+    fn expand_character(&mut self, copy: &str, depth: usize) -> String {
+        self.expand(copy, depth, false)
+            .parse::<u8>()
+            .ok()
+            .filter(|value| (32..=126).contains(value))
+            .map(char::from)
+            .map_or_else(String::new, |value| value.to_string())
+    }
+
+    fn expand_colour(&mut self, copy: &str, depth: usize, flags: &str) -> String {
+        let value = self.expand(copy, depth, false);
+        format_colour(&value, flags)
+    }
+
+    fn expand_name_exists(
+        &mut self,
+        copy: &str,
+        depth: usize,
+        windows: bool,
+    ) -> Result<String, ()> {
+        let name = self.expand(copy, depth, false);
+        let universe = &self.context.values().format_universe;
+        let exists = if windows {
+            let session = &self.context.values().session_id;
+            if session.is_empty() {
+                return Err(());
+            }
+            universe
+                .windows
+                .get(session)
+                .is_some_and(|items| items.iter().any(|item| item.context.window_name == name))
+        } else {
+            universe
+                .sessions
+                .iter()
+                .any(|item| item.context.session_name == name)
+        };
+        Ok(bool_string(exists).to_owned())
+    }
+
+    fn expand_content_search(&mut self, copy: &str, depth: usize, flags: &str) -> String {
+        let pattern = self.expand(copy, depth, false);
+        let pane = self
+            .context
+            .values()
+            .pane_id
+            .strip_prefix('%')
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(PaneId);
+        self.hooks
+            .pane_search(pane, &pattern, flags.contains('r'), flags.contains('i'))
+            .to_string()
+    }
+
+    fn expand_expression(&mut self, copy: &str, depth: usize, modifier: &Modifier) -> String {
+        let Some(operator) = modifier.args.first() else {
+            return String::new();
+        };
+        let floating = modifier
+            .args
+            .get(1)
+            .is_some_and(|flags| flags.contains('f'));
+        let precision = if let Some(value) = modifier.args.get(2) {
+            let Some(value) = value
+                .parse::<i32>()
+                .ok()
+                .filter(|value| (-100..=100).contains(value))
+            else {
+                return String::new();
+            };
+            value
+        } else if floating {
+            2
+        } else {
+            0
+        };
+        let (left, right) = split_once_top(copy, ',');
+        let Some(right) = right else {
+            return String::new();
+        };
+        let Some(mut left) = parse_expression_number(&self.expand(left, depth, false)) else {
+            return String::new();
+        };
+        let Some(mut right) = parse_expression_number(&self.expand(right, depth, false)) else {
+            return String::new();
+        };
+        if !floating {
+            left = left as i64 as f64;
+            right = right as i64 as f64;
+        }
+        let result = match operator.as_str() {
+            "+" => left + right,
+            "-" => left - right,
+            "*" => left * right,
+            "/" => left / right,
+            "%" | "%%" | "m" => left % right,
+            "==" => {
+                if (left - right).abs() < 1e-9 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            "!=" => {
+                if (left - right).abs() > 1e-9 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            ">" => {
+                if left > right {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            "<" => {
+                if left < right {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            ">=" => {
+                if left >= right {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            "<=" => {
+                if left <= right {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            _ => return String::new(),
+        };
+        let result = if floating {
+            result
+        } else {
+            result as i64 as f64
+        };
+        let precision = usize::try_from(precision).unwrap_or(6);
+        format!("{result:.precision$}")
+    }
+
+    fn expand_loop(
+        &mut self,
+        copy: &str,
+        depth: usize,
+        target: LoopTarget,
+        flags: &ModifierFlags<'_>,
+    ) -> Result<String, ()> {
+        let universe = Arc::clone(&self.context.values().format_universe);
+        let mut items = match target {
+            LoopTarget::Sessions => universe.sessions.clone(),
+            LoopTarget::Windows => universe
+                .windows
+                .get(&self.context.values().session_id)
+                .cloned()
+                .ok_or(())?,
+            LoopTarget::Panes => universe
+                .panes
+                .get(&self.context.values().window_id)
+                .cloned()
+                .ok_or(())?,
+        };
+        sort_loop_items(&mut items, target, flags.loop_sort);
+        if flags.loop_reversed {
+            items.reverse();
+        }
+        let (all, active) = split_once_top(copy, ',');
+        let mut output = String::new();
+        let last = items.len().saturating_sub(1);
+        for index in 0..items.len() {
+            let mut item = items[index].clone();
+            item.context.format_universe = Arc::clone(&universe);
+            let mut dynamic = BTreeMap::from([
+                ("loop_index".to_owned(), index.to_string()),
+                (
+                    "loop_last_flag".to_owned(),
+                    bool_string(index == last).to_owned(),
+                ),
+            ]);
+            if target == LoopTarget::Windows {
+                dynamic.insert(
+                    "window_after_active".to_owned(),
+                    bool_string(index > 0 && items[index - 1].active).to_owned(),
+                );
+                dynamic.insert(
+                    "window_before_active".to_owned(),
+                    bool_string(index + 1 < items.len() && items[index + 1].active).to_owned(),
+                );
+                if let Some(next) = items.get(index + 1) {
+                    dynamic.insert(
+                        "next_window_index".to_owned(),
+                        next.context.window_index.to_string(),
+                    );
+                    dynamic.insert(
+                        "next_window_active".to_owned(),
+                        bool_string(next.active).to_owned(),
+                    );
+                }
+                if index > 0 {
+                    let previous = &items[index - 1];
+                    dynamic.insert(
+                        "prev_window_index".to_owned(),
+                        previous.context.window_index.to_string(),
+                    );
+                    dynamic.insert(
+                        "prev_window_active".to_owned(),
+                        bool_string(previous.active).to_owned(),
+                    );
+                }
+            }
+            let variables = LoopVariables {
+                context: item.context,
+                format_type: target.format_type(),
+                dynamic,
+            };
+            let selected = if item.active {
+                active.unwrap_or(all)
+            } else {
+                all
+            };
+            let mut expander = Expander {
+                context: &variables,
+                hooks: &mut *self.hooks,
+            };
+            output.push_str(&expander.expand(selected, depth, false));
+        }
+        Ok(output)
     }
 
     fn expand_boolean(&mut self, copy: &str, depth: usize, and: bool) -> String {
@@ -1268,9 +1689,16 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
 
     fn lookup(&mut self, key: &str, flags: &ModifierFlags<'_>) -> Option<String> {
         let _kind = self.context.variable_kind(key)?;
-        let mut value = self.context.variable(key)?.into_owned();
+        let mut value = self
+            .hooks
+            .variable(key, self.context.values())
+            .or_else(|| self.context.variable(key).map(Cow::into_owned))?;
         if flags.time.enabled {
-            return Some(format_time_value(&value, &flags.time));
+            return Some(format_time_value(
+                &value,
+                &flags.time,
+                self.context.values().format_now,
+            ));
         }
         if flags.basename {
             value = basename(&value);
@@ -1302,6 +1730,7 @@ enum ModifierKind {
     Length,
     Expand,
     ExpandTime,
+    Character,
     Not,
     NotNot,
     And,
@@ -1317,11 +1746,64 @@ enum ModifierKind {
     Quote,
     Substitute,
     Limit,
+    Padding,
+    Expression,
+    Colour,
+    NameExists,
+    Sessions,
+    Windows,
+    Panes,
+    ContentSearch,
 }
 
 struct Modifier {
     kind: ModifierKind,
     args: Vec<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoopTarget {
+    Sessions,
+    Windows,
+    Panes,
+}
+
+impl LoopTarget {
+    const fn format_type(self) -> FormatType {
+        match self {
+            Self::Sessions => FormatType::Session,
+            Self::Windows => FormatType::Window,
+            Self::Panes => FormatType::Pane,
+        }
+    }
+}
+
+struct LoopVariables {
+    context: StatusContext,
+    format_type: FormatType,
+    dynamic: BTreeMap<String, String>,
+}
+
+impl FormatVariables for LoopVariables {
+    fn variable(&self, name: &str) -> Option<Cow<'_, str>> {
+        if let Some(value) = self.dynamic.get(name) {
+            return Some(Cow::Borrowed(value));
+        }
+        let spec = format_variable(name)?;
+        Some(self.context.resolve(spec, self.format_type))
+    }
+
+    fn variable_kind(&self, name: &str) -> Option<FormatKind> {
+        if self.dynamic.contains_key(name) {
+            Some(FormatKind::String)
+        } else {
+            format_variable(name).map(|spec| spec.kind)
+        }
+    }
+
+    fn values(&self) -> &StatusContext {
+        &self.context
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1333,6 +1815,16 @@ enum Comparison<'a> {
     LessEqual,
     GreaterEqual,
     Match(&'a str),
+}
+
+#[derive(Clone, Copy)]
+enum LoopSort {
+    Index,
+    Name,
+    Activity,
+    Order,
+    Creation,
+    Z,
 }
 
 #[derive(Default)]
@@ -1352,12 +1844,24 @@ struct ModifierFlags<'a> {
     length: bool,
     expand: bool,
     expand_time: bool,
+    character: bool,
     not: bool,
     not_not: bool,
     bool_op: Option<bool>,
     comparison: Option<Comparison<'a>>,
     substitutions: Vec<&'a Modifier>,
     limit: Option<(isize, Option<String>)>,
+    padding: isize,
+    expression: Option<&'a Modifier>,
+    colour: Option<&'a str>,
+    name_window: bool,
+    name_session: bool,
+    loop_sessions: bool,
+    loop_windows: bool,
+    loop_panes: bool,
+    loop_sort: Option<LoopSort>,
+    loop_reversed: bool,
+    content_search: Option<&'a str>,
     time: TimeFlags<'a>,
     quote_shell: bool,
     quote_single: bool,
@@ -1376,6 +1880,7 @@ impl<'a> ModifierFlags<'a> {
                 ModifierKind::Length => flags.length = true,
                 ModifierKind::Expand => flags.expand = true,
                 ModifierKind::ExpandTime => flags.expand_time = true,
+                ModifierKind::Character => flags.character = true,
                 ModifierKind::Not => flags.not = true,
                 ModifierKind::NotNot => flags.not_not = true,
                 ModifierKind::And => flags.bool_op = Some(true),
@@ -1423,7 +1928,6 @@ impl<'a> ModifierFlags<'a> {
                 ModifierKind::Substitute if modifier.args.len() >= 2 => {
                     flags.substitutions.push(modifier);
                 }
-                ModifierKind::Substitute => {}
                 ModifierKind::Limit => {
                     if let Some(limit) = modifier.args.first() {
                         let limit = limit
@@ -1437,10 +1941,311 @@ impl<'a> ModifierFlags<'a> {
                         flags.limit = Some((limit, marker));
                     }
                 }
+                ModifierKind::Padding => {
+                    flags.padding = modifier
+                        .args
+                        .first()
+                        .and_then(|width| width.parse::<isize>().ok())
+                        .filter(|width| (-FORMAT_MAX_WIDTH..=FORMAT_MAX_WIDTH).contains(width))
+                        .unwrap_or_default();
+                }
+                ModifierKind::Expression if (1..=3).contains(&modifier.args.len()) => {
+                    flags.expression = Some(modifier);
+                }
+                ModifierKind::Substitute | ModifierKind::Expression => {}
+                ModifierKind::Colour => {
+                    flags.colour = Some(modifier.args.first().map_or("", String::as_str));
+                }
+                ModifierKind::NameExists => {
+                    if modifier
+                        .args
+                        .first()
+                        .is_none_or(|value| value.contains('w'))
+                    {
+                        flags.name_window = true;
+                    } else if modifier
+                        .args
+                        .first()
+                        .is_some_and(|value| value.contains('s'))
+                    {
+                        flags.name_session = true;
+                    }
+                }
+                ModifierKind::Sessions => {
+                    flags.loop_sessions = true;
+                    let value = modifier.args.first().map_or("", String::as_str);
+                    flags.loop_sort = Some(if value.contains('i') {
+                        LoopSort::Index
+                    } else if value.contains('n') {
+                        LoopSort::Name
+                    } else if value.contains('t') {
+                        LoopSort::Activity
+                    } else {
+                        LoopSort::Index
+                    });
+                    flags.loop_reversed = value.contains('r');
+                }
+                ModifierKind::Windows => {
+                    flags.loop_windows = true;
+                    let value = modifier.args.first().map_or("", String::as_str);
+                    flags.loop_sort = Some(if value.contains('i') {
+                        LoopSort::Order
+                    } else if value.contains('n') {
+                        LoopSort::Name
+                    } else if value.contains('t') {
+                        LoopSort::Activity
+                    } else {
+                        LoopSort::Order
+                    });
+                    flags.loop_reversed = value.contains('r');
+                }
+                ModifierKind::Panes => {
+                    flags.loop_panes = true;
+                    let value = modifier.args.first().map_or("", String::as_str);
+                    flags.loop_sort = Some(if value.contains('i') {
+                        LoopSort::Index
+                    } else if value.contains('z') {
+                        LoopSort::Z
+                    } else {
+                        LoopSort::Creation
+                    });
+                    flags.loop_reversed = value.contains('r');
+                }
+                ModifierKind::ContentSearch => {
+                    flags.content_search = Some(modifier.args.first().map_or("", String::as_str));
+                }
             }
         }
         flags
     }
+}
+
+fn sort_loop_items(items: &mut [FormatLoopItem], target: LoopTarget, sort: Option<LoopSort>) {
+    match (target, sort) {
+        (LoopTarget::Sessions, Some(LoopSort::Name)) => items.sort_by(|left, right| {
+            left.context
+                .session_name
+                .cmp(&right.context.session_name)
+                .then_with(|| {
+                    session_number(&left.context.session_id)
+                        .cmp(&session_number(&right.context.session_id))
+                })
+        }),
+        (LoopTarget::Sessions, Some(LoopSort::Activity)) => items.sort_by(|left, right| {
+            left.context
+                .session_created
+                .cmp(&right.context.session_created)
+                .then_with(|| {
+                    session_number(&left.context.session_id)
+                        .cmp(&session_number(&right.context.session_id))
+                })
+        }),
+        (LoopTarget::Sessions, _) => {
+            items.sort_by_key(|item| session_number(&item.context.session_id));
+        }
+        (LoopTarget::Windows, Some(LoopSort::Name)) => items.sort_by(|left, right| {
+            left.context
+                .window_name
+                .cmp(&right.context.window_name)
+                .then_with(|| left.context.window_index.cmp(&right.context.window_index))
+        }),
+        (LoopTarget::Windows, _) => items.sort_by_key(|item| item.context.window_index),
+        (LoopTarget::Panes, Some(LoopSort::Index)) => {
+            items.sort_by_key(|item| item.context.pane_index);
+        }
+        (LoopTarget::Panes, Some(LoopSort::Z)) => items.sort_by_key(|item| {
+            (
+                item.context.pane_z.unwrap_or_default(),
+                pane_number(&item.context.pane_id),
+            )
+        }),
+        (LoopTarget::Panes, _) => items.sort_by_key(|item| pane_number(&item.context.pane_id)),
+    }
+}
+
+fn session_number(value: &str) -> u64 {
+    value
+        .strip_prefix('$')
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or_default()
+}
+
+fn parse_expression_number(value: &str) -> Option<f64> {
+    if value.is_empty() {
+        return Some(0.0);
+    }
+    let value = value.trim_start();
+    if value.trim_end() != value {
+        return None;
+    }
+    value.parse::<f64>().ok()
+}
+
+fn pad_value(value: &str, width: isize) -> String {
+    let target = width.unsigned_abs();
+    let current = value
+        .chars()
+        .map(|character| character.width().unwrap_or_default())
+        .sum::<usize>();
+    if current >= target {
+        return value.to_owned();
+    }
+    let padding = " ".repeat(target - current);
+    if width < 0 {
+        format!("{padding}{value}")
+    } else {
+        format!("{value}{padding}")
+    }
+}
+
+#[derive(Clone, Copy)]
+enum TmuxColour {
+    Basic(u8),
+    Indexed(u8),
+    Rgb(u32),
+    Default,
+    Terminal,
+    Theme(u8),
+}
+
+fn format_colour(value: &str, flags: &str) -> String {
+    if flags.contains('f') || flags.contains('b') {
+        if value.eq_ignore_ascii_case("none") {
+            return "\u{1b}[0m".to_owned();
+        }
+        return parse_tmux_colour(value)
+            .and_then(|colour| colour_escape(colour, flags.contains('b')))
+            .unwrap_or_default();
+    }
+    parse_tmux_colour(value)
+        .and_then(colour_rgb)
+        .map_or_else(String::new, |colour| format!("{colour:06x}"))
+}
+
+fn parse_tmux_colour(value: &str) -> Option<TmuxColour> {
+    if value.is_empty() || value.trim() != value || value.chars().any(char::is_whitespace) {
+        return None;
+    }
+    if let Some(hex) = value.strip_prefix('#') {
+        if hex.len() == 6 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return u32::from_str_radix(hex, 16).ok().map(TmuxColour::Rgb);
+        }
+        return None;
+    }
+    let lower = value.to_ascii_lowercase();
+    if let Some(index) = lower
+        .strip_prefix("colour")
+        .or_else(|| lower.strip_prefix("color"))
+        .and_then(|value| value.parse::<u8>().ok())
+    {
+        return Some(TmuxColour::Indexed(index));
+    }
+    if lower == "default" {
+        return Some(TmuxColour::Default);
+    }
+    if lower == "terminal" {
+        return Some(TmuxColour::Terminal);
+    }
+    if let Some(index) = [
+        "themeblack",
+        "themewhite",
+        "themelightgrey",
+        "themedarkgrey",
+        "themegreen",
+        "themeyellow",
+        "themered",
+        "themeblue",
+        "themecyan",
+        "thememagenta",
+    ]
+    .iter()
+    .position(|name| *name == lower)
+    {
+        return u8::try_from(index).ok().map(TmuxColour::Theme);
+    }
+    let basic = match lower.as_str() {
+        "black" | "0" => Some(0),
+        "red" | "1" => Some(1),
+        "green" | "2" => Some(2),
+        "yellow" | "3" => Some(3),
+        "blue" | "4" => Some(4),
+        "magenta" | "5" => Some(5),
+        "cyan" | "6" => Some(6),
+        "white" | "7" => Some(7),
+        "brightblack" | "90" => Some(8),
+        "brightred" | "91" => Some(9),
+        "brightgreen" | "92" => Some(10),
+        "brightyellow" | "93" => Some(11),
+        "brightblue" | "94" => Some(12),
+        "brightmagenta" | "95" => Some(13),
+        "brightcyan" | "96" => Some(14),
+        "brightwhite" | "97" => Some(15),
+        _ => None,
+    };
+    if let Some(basic) = basic {
+        return Some(TmuxColour::Basic(basic));
+    }
+    parse_x11_color(value).map(|colour| TmuxColour::Rgb(colour.packed()))
+}
+
+fn colour_rgb(colour: TmuxColour) -> Option<u32> {
+    match colour {
+        TmuxColour::Basic(index) | TmuxColour::Indexed(index) => Some(indexed_colour_rgb(index)),
+        TmuxColour::Rgb(colour) => Some(colour),
+        TmuxColour::Default | TmuxColour::Terminal | TmuxColour::Theme(_) => None,
+    }
+}
+
+fn colour_escape(colour: TmuxColour, background: bool) -> Option<String> {
+    let colour = match colour {
+        TmuxColour::Theme(index) => {
+            let basic = [0, 7, 7, 0, 2, 3, 1, 4, 6, 5].get(usize::from(index))?;
+            TmuxColour::Basic(*basic)
+        }
+        colour => colour,
+    };
+    let base = if background { 40 } else { 30 };
+    Some(match colour {
+        TmuxColour::Basic(index) if index < 8 => format!("\u{1b}[{}m", base + index),
+        TmuxColour::Basic(index) => format!("\u{1b}[{}m", base + 60 + index - 8),
+        TmuxColour::Indexed(index) => format!("\u{1b}[{};5;{index}m", base + 8),
+        TmuxColour::Rgb(colour) => format!(
+            "\u{1b}[{};2;{};{};{}m",
+            base + 8,
+            (colour >> 16) & 0xff,
+            (colour >> 8) & 0xff,
+            colour & 0xff
+        ),
+        TmuxColour::Default | TmuxColour::Terminal => format!("\u{1b}[{}m", base + 9),
+        TmuxColour::Theme(_) => return None,
+    })
+}
+
+fn indexed_colour_rgb(index: u8) -> u32 {
+    const BASIC: [u32; 16] = [
+        0x00_00_00, 0x80_00_00, 0x00_80_00, 0x80_80_00, 0x00_00_80, 0x80_00_80, 0x00_80_80,
+        0xc0_c0_c0, 0x80_80_80, 0xff_00_00, 0x00_ff_00, 0xff_ff_00, 0x00_00_ff, 0xff_00_ff,
+        0x00_ff_ff, 0xff_ff_ff,
+    ];
+    if index < 16 {
+        return BASIC[usize::from(index)];
+    }
+    if index < 232 {
+        let offset = index - 16;
+        let red = offset / 36;
+        let green = offset % 36 / 6;
+        let blue = offset % 6;
+        let level = |value: u8| {
+            if value == 0 {
+                0
+            } else {
+                55 + 40 * u32::from(value)
+            }
+        };
+        return level(red) << 16 | level(green) << 8 | level(blue);
+    }
+    let value = 8 + 10 * u32::from(index - 232);
+    value << 16 | value << 8 | value
 }
 
 fn shorthand(character: char) -> Option<&'static str> {
@@ -2161,26 +2966,21 @@ fn truncate_value(value: &str, limit: isize, marker: Option<&str>) -> String {
     }
 }
 
-fn format_time_value(value: &str, flags: &TimeFlags<'_>) -> String {
+fn format_time_value(value: &str, flags: &TimeFlags<'_>, now: Option<i64>) -> String {
     let Ok(timestamp) = value.parse::<i64>() else {
         return String::new();
     };
     if timestamp <= 0 {
         return String::new();
     }
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_secs()).ok())
-        .unwrap_or_default();
     if flags.relative {
-        return relative_time(timestamp, now);
+        return now.map_or_else(String::new, |now| relative_time(timestamp, now));
     }
     if flags.difference {
-        return now.saturating_sub(timestamp).to_string();
+        return now.map_or_else(String::new, |now| now.saturating_sub(timestamp).to_string());
     }
     if flags.pretty {
-        return pretty_time(timestamp, now);
+        return now.map_or_else(String::new, |now| pretty_time(timestamp, now));
     }
     let Some(time) = Local.timestamp_opt(timestamp, 0).single() else {
         return String::new();
@@ -2244,10 +3044,6 @@ fn relative_time(timestamp: i64, now: i64) -> String {
     } else {
         format!("{seconds}s")
     }
-}
-
-fn strftime_now(format: &str) -> String {
-    format_datetime(&Local::now(), format)
 }
 
 fn format_datetime(time: &chrono::DateTime<Local>, format: &str) -> String {
@@ -2396,6 +3192,7 @@ mod tests {
             match variable.backing {
                 FormatBacking::Empty => assert!(value.is_empty(), "{}", variable.name),
                 FormatBacking::Zero => assert_eq!(value, "0", "{}", variable.name),
+                FormatBacking::One => assert_eq!(value, "1", "{}", variable.name),
                 _ => {}
             }
         }
@@ -2403,9 +3200,40 @@ mod tests {
     }
 
     #[test]
+    fn pin_null_backings_are_empty_instead_of_zero() {
+        let context = context();
+        for name in [
+            "client_cell_height",
+            "client_cell_width",
+            "client_control_mode",
+            "client_discarded",
+            "client_height",
+            "client_pid",
+            "client_prefix",
+            "client_readonly",
+            "client_uid",
+            "client_utf8",
+            "client_width",
+            "client_written",
+            "mouse_x",
+            "mouse_y",
+            "pane_pipe_pid",
+            "session_active",
+            "session_group_attached",
+            "session_group_many_attached",
+            "session_group_size",
+            "window_bigger",
+            "window_manual_height",
+            "window_manual_width",
+        ] {
+            assert_eq!(context.variable(name).as_deref(), Some(""), "{name}");
+        }
+    }
+
+    #[test]
     fn built_scene_backfills_scope_and_reports_live_shapes() {
         let mut engine = MuxEngine::default();
-        engine.set_format_server_context("tower.local", "tower", "/tmp/zz.sock");
+        engine.set_format_server_context("tower.local", "tower", "/tmp/zz.sock", 946_728_000);
         let (session, first_window, first_pane) = engine.state.create_session("work").unwrap();
         engine.state.rename_window(first_window, "shell").unwrap();
         let second_pane = engine
@@ -2614,6 +3442,93 @@ mod tests {
     }
 
     #[test]
+    fn padding_arithmetic_ascii_and_colour_match_the_pin() {
+        assert_eq!(expand("#{p12:window_name}"), "main        ");
+        assert_eq!(expand("#{p-6:window_name}"), "  main");
+        assert_eq!(expand("#{p/x:window_name}"), "main");
+        assert_eq!(expand("#{p6:#{l:界a}}"), "界a   ");
+        assert_eq!(expand("#{p10001:window_name}"), "main");
+        assert_eq!(expand("#{e|+|:2,3}"), "5");
+        assert_eq!(expand("#{e|-|:2,5}"), "-3");
+        assert_eq!(expand("#{e|m|:7,3}"), "1");
+        assert_eq!(expand("#{e|==|:5,5}"), "1");
+        assert_eq!(expand("#{e|/|f|3:1,3}"), "0.333");
+        assert_eq!(expand("#{e|*|f:2.5,2}"), "5.00");
+        assert_eq!(expand("#{e|+|:bad,2}"), "");
+        assert_eq!(expand("#{e|+|f|x:1,2}"), "");
+        assert_eq!(expand("#{e|+|f|2|extra:1,2}"), "");
+        assert_eq!(expand("#{a:98}|#{a:65}|#{a:200}|#{a:nope}"), "b|A||");
+        assert_eq!(expand("#{c:red}"), "800000");
+        assert_eq!(expand("#{c:colour4}"), "000080");
+        assert_eq!(expand("#{c:#7f7f7f}"), "7f7f7f");
+        assert_eq!(expand("#{c/f:red}"), "\u{1b}[31m");
+        assert_eq!(expand("#{c/b:colour4}"), "\u{1b}[48;5;4m");
+        assert_eq!(expand("#{c/fb:red}"), "\u{1b}[41m");
+        assert_eq!(expand("#{c/f:none}"), "\u{1b}[0m");
+        assert_eq!(expand("#{c:notacolour}"), "");
+        assert_eq!(expand("#{c/f:notacolour}"), "");
+        assert_eq!(expand("#{C:needle}|#{C/ri:needle}"), "0|0");
+    }
+
+    #[test]
+    fn name_checks_and_nested_scope_loops_use_the_engine_universe() {
+        let mut engine = MuxEngine::default();
+        let (zeta, first_window, first_pane) = engine.state.create_session("zeta").unwrap();
+        engine.state.rename_window(first_window, "charlie").unwrap();
+        let second_pane = engine
+            .state
+            .split_pane(first_pane, Axis::Horizontal, PaneKind::Terminal)
+            .unwrap();
+        let (second_window, _) = engine
+            .state
+            .create_window(zeta, Some("alpha".to_owned()), PaneKind::Terminal)
+            .unwrap();
+        let (alpha, _, _) = engine.state.create_session("alpha").unwrap();
+        let context = FormatContext {
+            session: Some(zeta),
+            window: Some(first_window),
+            pane: Some(second_pane),
+            active_session: Some(zeta),
+            format_type: FormatType::Pane,
+        };
+
+        assert_eq!(
+            expand_format("#{N/s:alpha}|#{N/w:charlie}|#{N:nope}", &engine, context),
+            "1|1|0"
+        );
+        assert_eq!(
+            expand_format("#{S:#{session_name} }", &engine, context),
+            "zeta alpha "
+        );
+        assert_eq!(
+            expand_format("#{S/n:#{session_name} }", &engine, context),
+            "alpha zeta "
+        );
+        assert_eq!(
+            expand_format("#{S:#{session_name},[#{session_name}]} ", &engine, context),
+            "[zeta]alpha "
+        );
+        assert_eq!(
+            expand_format("#{W:#{window_name},[#{window_name}]}", &engine, context),
+            "charlie[alpha]"
+        );
+        assert_eq!(
+            expand_format("#{P:#{pane_index},[#{pane_index}]}", &engine, context),
+            "0[1]"
+        );
+        assert_eq!(
+            expand_format(
+                "#{S:#{session_name}:#{loop_index}:#{loop_last_flag};}",
+                &engine,
+                context,
+            ),
+            "zeta:0:0;alpha:1:1;"
+        );
+        assert!(engine.state.sessions.contains_key(&alpha));
+        assert!(engine.state.windows.contains_key(&second_window));
+    }
+
+    #[test]
     fn time_expand_again_and_expand_again_with_time_are_distinct() {
         assert_eq!(expand("#{t/f/%Y:start_time}"), "2000");
         assert_eq!(expand("#{t/f/%Y;t/f:start_time}"), "2000");
@@ -2631,11 +3546,8 @@ mod tests {
             "2026 work"
         );
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        context.start_time = Some(i64::try_from(now - 3_661).unwrap());
+        context.format_now = Some(946_731_661);
+        context.start_time = Some(946_728_000);
         assert_eq!(
             expand_status("#{t/r:start_time}", &context, &mut Stub),
             "1h1m"
@@ -2648,7 +3560,7 @@ mod tests {
         let difference = expand_status("#{t/d:start_time}", &context, &mut Stub)
             .parse::<u64>()
             .unwrap();
-        assert!((3_661..=3_663).contains(&difference));
+        assert_eq!(difference, 3_661);
     }
 
     #[test]
@@ -2656,7 +3568,7 @@ mod tests {
         assert_eq!(expand("before#{not_a_tmux_variable}after"), "beforeafter");
         assert_eq!(expand("before#{z:pane_title}after"), "beforeafter");
         assert_eq!(expand("#{z:#{l:foo}}"), "z:foo");
-        assert_eq!(expand("#{p:pane_title}"), "");
+        assert_eq!(expand("#{p:pane_title}"), "/tmp/a b/main");
         assert_eq!(expand("before#{==:one}after"), "before");
     }
 

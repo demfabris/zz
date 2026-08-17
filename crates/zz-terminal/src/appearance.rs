@@ -2180,6 +2180,10 @@ fn x11_colors() -> &'static HashMap<String, Color> {
     })
 }
 
+pub fn parse_x11_color(value: &str) -> Option<Color> {
+    x11_colors().get(&value.to_ascii_lowercase()).copied()
+}
+
 fn parse_finite_range(value: &str, min: f32, max: f32, label: &str) -> Result<f32, String> {
     let parsed = value
         .parse::<f32>()

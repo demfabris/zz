@@ -107,6 +107,11 @@ Traps that produce false divergences:
 - Never kill the last remaining session. tmux's server exits (`exit-empty`), while the zz CLI
   respawns a fresh daemon with a new session `0`, so every later step diverges. The prologue
   already creates session `w` before removing the auto-created session.
+- Never put `#{buffer_full}` in a differential scenario. `display-message -p
+  '#{buffer_full}'` crashes the pinned tmux server; this is a verified pin trap, not a zz failure.
+- `display-message` gets only tmux's newest automatic paste buffer. A named-only `set-buffer -b`
+  setup therefore makes every `buffer_*` value empty on the pin. Add an automatic buffer for a
+  `fmt:` probe; use `list-buffers -F` when the named row itself is what needs testing.
 
 ## Known divergences
 

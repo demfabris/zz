@@ -2,7 +2,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     str::FromStr as _,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use zz_protocol::{
@@ -21,7 +20,7 @@ use zz_terminal::{
 use crate::{
     Binding, KeyTables, LayoutPreset, MuxState, PaneDirection, PaneKind, SplitPlacement,
     SplitSize as LayoutSplitSize, StatusFormats, StatusOption, canonical_command, command_spec,
-    formats::{FormatContext, FormatType, expand_format},
+    formats::{CommandHooks, FormatContext, FormatType, StatusHooks, expand_format_with_hooks},
     layout::PANE_MAXIMUM,
     model::DEFAULT_WINDOW_EXTENT,
     tmux_options::{TmuxOptionScope, match_tmux_option},
@@ -271,11 +270,25 @@ pub struct MuxEngine {
     status: StatusFormats,
     format_host: String,
     format_host_short: String,
+    format_pid: u32,
     format_socket_path: String,
     format_start_time: u64,
+    format_now: u64,
+    format_uid: String,
+    format_user: String,
+    pane_runtime_facts: BTreeMap<PaneId, PaneRuntimeFacts>,
     experimental_agent_pane: bool,
     experimental_editor_pane: bool,
     agent: AgentOptions,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PaneRuntimeFacts {
+    pub current_command: String,
+    pub current_path: String,
+    pub start_path: String,
+    pub pid: Option<u32>,
+    pub tty: String,
 }
 
 /// What an agent pane's daemon-owned adapter is started with.
@@ -320,11 +333,13 @@ impl Default for MuxEngine {
             status: StatusFormats::default(),
             format_host: String::new(),
             format_host_short: String::new(),
+            format_pid: 0,
             format_socket_path: String::new(),
-            format_start_time: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            format_start_time: 0,
+            format_now: 0,
+            format_uid: String::new(),
+            format_user: String::new(),
+            pane_runtime_facts: BTreeMap::new(),
             experimental_agent_pane: false,
             experimental_editor_pane: false,
             agent: AgentOptions::default(),
@@ -354,10 +369,42 @@ impl MuxEngine {
         host: impl Into<String>,
         host_short: impl Into<String>,
         socket_path: impl Into<String>,
+        start_time: u64,
     ) {
         self.format_host = host.into();
         self.format_host_short = host_short.into();
         self.format_socket_path = socket_path.into();
+        self.format_start_time = start_time;
+        self.format_now = start_time;
+    }
+
+    pub const fn set_format_now(&mut self, now: u64) {
+        self.format_now = now;
+    }
+
+    pub fn set_format_server_identity(
+        &mut self,
+        pid: u32,
+        uid: impl Into<String>,
+        user: impl Into<String>,
+    ) {
+        self.format_pid = pid;
+        self.format_uid = uid.into();
+        self.format_user = user.into();
+    }
+
+    pub fn set_pane_runtime_facts(&mut self, pane: PaneId, facts: PaneRuntimeFacts) -> bool {
+        if self.state.pane(pane).is_none() || self.pane_runtime_facts.get(&pane) == Some(&facts) {
+            return false;
+        }
+        self.pane_runtime_facts.insert(pane, facts);
+        self.state.bump_generation();
+        true
+    }
+
+    #[must_use]
+    pub fn pane_runtime_facts(&self, pane: PaneId) -> Option<&PaneRuntimeFacts> {
+        self.pane_runtime_facts.get(&pane)
     }
 
     pub(crate) fn format_host(&self) -> &str {
@@ -372,8 +419,24 @@ impl MuxEngine {
         &self.format_socket_path
     }
 
+    pub(crate) const fn format_pid(&self) -> u32 {
+        self.format_pid
+    }
+
     pub(crate) const fn format_start_time(&self) -> u64 {
         self.format_start_time
+    }
+
+    pub(crate) const fn format_now(&self) -> u64 {
+        self.format_now
+    }
+
+    pub(crate) fn format_uid(&self) -> &str {
+        &self.format_uid
+    }
+
+    pub(crate) fn format_user(&self) -> &str {
+        &self.format_user
     }
 
     #[must_use]
@@ -565,11 +628,21 @@ impl MuxEngine {
         context: &mut ExecutionContext,
         command: &CommandInvocation,
     ) -> Result<Execution, ServerError> {
+        let mut hooks = CommandHooks::new(self.format_now);
+        self.execute_with_format_hooks(context, command, &mut hooks)
+    }
+
+    pub fn execute_with_format_hooks(
+        &mut self,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+        hooks: &mut impl StatusHooks,
+    ) -> Result<Execution, ServerError> {
         let generation = self.state.generation();
         let name = canonical_command(&command.name);
         let mut execution = match name {
             "new-session" => self.new_session(context, &command.args)?,
-            "list-sessions" => self.list_sessions(context, &command.args)?,
+            "list-sessions" => self.list_sessions(context, &command.args, hooks)?,
             "rename-session" => self.rename_session(context, &command.args)?,
             "kill-session" => self.kill_session(context, &command.args)?,
             "attach-session" => self.attach_session(context, &command.args)?,
@@ -581,7 +654,7 @@ impl MuxEngine {
                 let browser = browser_from_args(&options, &positional)?;
                 self.new_window_with_options(context, &options, PaneKind::Browser(browser), None)?
             }
-            "list-windows" => self.list_windows(context, &command.args)?,
+            "list-windows" => self.list_windows(context, &command.args, hooks)?,
             "rename-window" => self.rename_window(context, &command.args)?,
             "select-window" => self.select_window(context, &command.args)?,
             "next-window" => self.step_window(context, &command.args, 1)?,
@@ -604,7 +677,7 @@ impl MuxEngine {
             "select-pane" => self.select_pane(context, &command.args)?,
             "last-pane" => self.last_pane(context, &command.args)?,
             "swap-pane" => self.swap_pane(context, &command.args)?,
-            "list-panes" => self.list_panes(context, &command.args)?,
+            "list-panes" => self.list_panes(context, &command.args, hooks)?,
             "resize-pane" => self.resize_pane(context, &command.args)?,
             "select-layout" | "next-layout" | "previous-layout" => {
                 self.select_layout(context, &command.args, name)?
@@ -619,7 +692,7 @@ impl MuxEngine {
             "focus-sidebar" => self.focus_sidebar(context, &command.args)?,
             "choose-tree" => self.choose_tree(context, &command.args)?,
             "choose-buffer" => self.choose_buffer(context, &command.args)?,
-            "display-message" => self.display_message(context, &command.args)?,
+            "display-message" => self.display_message(context, &command.args, hooks)?,
             "display-panes" => self.display_panes(context, &command.args)?,
             "clear-history" => self.clear_history(context, &command.args)?,
             "bind-key" => self.bind_key(&command.args)?,
@@ -660,6 +733,8 @@ impl MuxEngine {
             .retain(|window, _| self.state.windows.contains_key(window));
         self.window_pane_base_indices
             .retain(|window, _| self.state.windows.contains_key(window));
+        self.pane_runtime_facts
+            .retain(|pane, _| self.state.pane(*pane).is_some());
         self.repair_context(context);
         Ok(execution)
     }
@@ -706,6 +781,13 @@ impl MuxEngine {
         let (session, window, pane) = self
             .state
             .create_session_with_extent_at(name, extent, base_index)?;
+        self.state
+            .sessions
+            .get_mut(&session)
+            .expect("new session exists")
+            .created = i64::try_from(self.format_now)
+            .ok()
+            .filter(|created| *created != 0);
         if let Some(window_name) = options.value("-n") {
             window_name.clone_into(
                 &mut self
@@ -743,6 +825,7 @@ impl MuxEngine {
         &self,
         context: &ExecutionContext,
         args: &[String],
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-sessions", args)?;
         reject_positionals("list-sessions", &positional)?;
@@ -752,7 +835,7 @@ impl MuxEngine {
                 .sessions
                 .values()
                 .map(|session| {
-                    expand_format(
+                    expand_format_with_hooks(
                         format,
                         self,
                         FormatContext {
@@ -762,6 +845,7 @@ impl MuxEngine {
                             active_session: context.session,
                             format_type: FormatType::Session,
                         },
+                        hooks,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -1003,6 +1087,7 @@ impl MuxEngine {
         &self,
         context: &ExecutionContext,
         args: &[String],
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-windows", args)?;
         reject_positionals("list-windows", &positional)?;
@@ -1020,7 +1105,7 @@ impl MuxEngine {
                 .iter()
                 .filter_map(|window| self.state.windows.get(window))
                 .map(|window| {
-                    expand_format(
+                    expand_format_with_hooks(
                         format,
                         self,
                         FormatContext {
@@ -1030,6 +1115,7 @@ impl MuxEngine {
                             active_session: context.session,
                             format_type: FormatType::Window,
                         },
+                        hooks,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -1932,6 +2018,7 @@ impl MuxEngine {
         &self,
         context: &ExecutionContext,
         args: &[String],
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-panes", args)?;
         reject_positionals("list-panes", &positional)?;
@@ -1948,7 +2035,7 @@ impl MuxEngine {
                 .iter()
                 .filter_map(|pane| window.panes.get(pane))
                 .map(|pane| {
-                    expand_format(
+                    expand_format_with_hooks(
                         format,
                         self,
                         FormatContext {
@@ -1958,6 +2045,7 @@ impl MuxEngine {
                             active_session: context.session,
                             format_type: FormatType::Pane,
                         },
+                        hooks,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -2555,6 +2643,7 @@ impl MuxEngine {
         &self,
         context: &ExecutionContext,
         args: &[String],
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("display-message", args)?;
         let pane = match options.value("-t") {
@@ -2569,14 +2658,14 @@ impl MuxEngine {
                 window: target.window,
                 pane: target.pane,
                 active_session: context.session,
-                format_type: FormatType::None,
+                format_type: FormatType::Pane,
             });
         let format = if positional.is_empty() {
             DEFAULT_DISPLAY_MESSAGE.to_owned()
         } else {
             positional.join(" ")
         };
-        let text = expand_format(&format, self, format_context);
+        let text = expand_format_with_hooks(&format, self, format_context, hooks);
         if options.has("-p") {
             Ok(Execution::output(text))
         } else {
@@ -5769,7 +5858,7 @@ mod tests {
                 )
                 .unwrap()
                 .output,
-            "0"
+            ""
         );
     }
 
@@ -5818,6 +5907,19 @@ mod tests {
                 .output,
             "[work] 0:editor, current pane 1"
         );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &["-p", "#{pane_format}|#{window_format}|#{session_format}"],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "1|0|0"
+        );
         let displayed = engine
             .execute(
                 &mut context,
@@ -5848,6 +5950,44 @@ mod tests {
                 pane: None,
                 text: "[] :, current pane ".to_owned(),
             }]
+        );
+    }
+
+    #[test]
+    fn daemon_format_facts_feed_runtime_values_and_session_time() {
+        let mut engine = MuxEngine::default();
+        engine.set_format_server_context("tower.local", "tower", "/tmp/zz.sock", 40);
+        engine.set_format_server_identity(41, "501", "fab");
+        engine.set_format_now(55);
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let pane = context.pane.unwrap();
+        let facts = PaneRuntimeFacts {
+            current_command: "fish".to_owned(),
+            current_path: "/work/live".to_owned(),
+            start_path: "/work/start".to_owned(),
+            pid: Some(4242),
+            tty: "/dev/ttys007".to_owned(),
+        };
+        assert!(engine.set_pane_runtime_facts(pane, facts.clone()));
+        assert!(!engine.set_pane_runtime_facts(pane, facts));
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &[
+                            "-p",
+                            "#{pane_current_command}|#{pane_current_path}|#{pane_start_path}|#{pane_pid}|#{pane_tty}|#{session_created}|#{cursor_flag}|#{wrap_flag}|#{pid}|#{uid}|#{user}",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "fish|/work/live|/work/start|4242|/dev/ttys007|55|1|1|41|501|fab"
         );
     }
 

@@ -5,14 +5,17 @@ use std::{
     fmt::Write as _,
     io::Read as _,
     process::{Child, Stdio},
-    sync::OnceLock,
+    sync::{Arc, OnceLock},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use chrono::Local;
+use glob::{MatchOptions, Pattern};
+use regex::RegexBuilder;
 use zz_mux::{MuxEngine, StatusContext, StatusFormats, StatusHooks, expand_status};
-use zz_protocol::{ClientId, MuxSnapshot, SessionId, StatusLine, WindowId};
+use zz_protocol::{ClientId, MuxSnapshot, PaneId, SessionId, StatusLine, WindowId};
+use zz_terminal::{CellWidth, TerminalSession, TerminalViewport};
 
 use crate::shell_process;
 
@@ -30,6 +33,20 @@ pub(crate) struct StatusRequest {
     pub(crate) client: ClientId,
     pub(crate) formats: StatusFormats,
     pub(crate) context: StatusContext,
+    pub(crate) facts: FormatHookFacts,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct FormatHookFacts {
+    pub(crate) terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
+    pub(crate) buffer: Option<BufferFormatFacts>,
+}
+
+#[derive(Clone)]
+pub(crate) struct BufferFormatFacts {
+    pub(crate) name: String,
+    pub(crate) data: Arc<[u8]>,
+    pub(crate) created: SystemTime,
 }
 
 impl StatusRenderer {
@@ -145,26 +162,50 @@ fn render(
         return StatusLine::default();
     }
     let now = Local::now();
-    let mut hooks = DaemonHooks {
-        cache,
-        touched,
-        refresh,
-        now,
-    };
+    let mut hooks = DaemonFormatHooks::status(&request.facts, cache, touched, refresh, now);
     StatusLine {
         left: expand_status(&request.formats.left, &request.context, &mut hooks),
         right: expand_status(&request.formats.right, &request.context, &mut hooks),
     }
 }
 
-struct DaemonHooks<'a> {
-    cache: &'a mut BTreeMap<String, String>,
-    touched: &'a mut BTreeSet<String>,
+pub(crate) struct DaemonFormatHooks<'a> {
+    facts: &'a FormatHookFacts,
+    cache: Option<&'a mut BTreeMap<String, String>>,
+    touched: Option<&'a mut BTreeSet<String>>,
     refresh: bool,
     now: chrono::DateTime<Local>,
 }
 
-impl StatusHooks for DaemonHooks<'_> {
+impl<'a> DaemonFormatHooks<'a> {
+    pub(crate) fn command(facts: &'a FormatHookFacts) -> Self {
+        Self {
+            facts,
+            cache: None,
+            touched: None,
+            refresh: false,
+            now: Local::now(),
+        }
+    }
+
+    fn status(
+        facts: &'a FormatHookFacts,
+        cache: &'a mut BTreeMap<String, String>,
+        touched: &'a mut BTreeSet<String>,
+        refresh: bool,
+        now: chrono::DateTime<Local>,
+    ) -> Self {
+        Self {
+            facts,
+            cache: Some(cache),
+            touched: Some(touched),
+            refresh,
+            now,
+        }
+    }
+}
+
+impl StatusHooks for DaemonFormatHooks<'_> {
     fn strftime(&mut self, literal: &str) -> String {
         let Ok(items) = chrono::format::StrftimeItems::new(literal).parse() else {
             return literal.to_owned();
@@ -183,16 +224,170 @@ impl StatusHooks for DaemonHooks<'_> {
     }
 
     fn shell(&mut self, command: &str) -> String {
-        self.touched.insert(command.to_owned());
+        let (Some(cache), Some(touched)) = (self.cache.as_deref_mut(), self.touched.as_deref_mut())
+        else {
+            return String::new();
+        };
+        touched.insert(command.to_owned());
         if !self.refresh
-            && let Some(cached) = self.cache.get(command)
+            && let Some(cached) = cache.get(command)
         {
             return cached.clone();
         }
         let output = run_shell(command);
-        self.cache.insert(command.to_owned(), output.clone());
+        cache.insert(command.to_owned(), output.clone());
         output
     }
+
+    fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+        let buffer = self.facts.buffer.as_ref()?;
+        Some(match name {
+            "buffer_created" => buffer
+                .created
+                .duration_since(UNIX_EPOCH)
+                .ok()?
+                .as_secs()
+                .to_string(),
+            "buffer_full" => buffer_full(&buffer.data),
+            "buffer_name" => buffer.name.clone(),
+            "buffer_sample" => buffer_sample(&buffer.data),
+            "buffer_size" => buffer.data.len().to_string(),
+            _ => return None,
+        })
+    }
+
+    fn pane_search(
+        &mut self,
+        pane: Option<PaneId>,
+        pattern: &str,
+        regex: bool,
+        ignore_case: bool,
+    ) -> usize {
+        let Some(viewport) = pane
+            .and_then(|pane| self.facts.terminals.get(&pane))
+            .map(|terminal| terminal.latest_viewport())
+        else {
+            return 0;
+        };
+        search_viewport(&viewport, pattern, regex, ignore_case)
+    }
+}
+
+fn buffer_full(data: &[u8]) -> String {
+    String::from_utf8_lossy(data).into_owned()
+}
+
+fn buffer_sample(data: &[u8]) -> String {
+    let prefix = &data[..data.len().min(200)];
+    let mut output = String::new();
+    let mut index = 0;
+    while index < prefix.len() {
+        let byte = prefix[index];
+        match byte {
+            b'\n' => output.push_str("\\n"),
+            b'\r' => output.push_str("\\r"),
+            b'\t' => output.push_str("\\t"),
+            b'\x08' => output.push_str("\\b"),
+            b'\x07' => output.push_str("\\a"),
+            b'\x0b' => output.push_str("\\v"),
+            b'\x0c' => output.push_str("\\f"),
+            b'\\' => output.push_str("\\\\"),
+            0 if prefix
+                .get(index + 1)
+                .is_some_and(|next| matches!(*next, b'0'..=b'7')) =>
+            {
+                output.push_str("\\000");
+            }
+            0 => output.push_str("\\0"),
+            0x20..=0x7e => output.push(char::from(byte)),
+            0x80..=0xff => {
+                let valid = match std::str::from_utf8(&prefix[index..]) {
+                    Ok(value) => value,
+                    Err(error) if error.valid_up_to() > 0 => {
+                        std::str::from_utf8(&prefix[index..index + error.valid_up_to()])
+                            .expect("UTF-8 validator identified a valid prefix")
+                    }
+                    Err(_) => {
+                        let _ = write!(&mut output, "\\{byte:03o}");
+                        index += 1;
+                        continue;
+                    }
+                };
+                let character = valid.chars().next().expect("valid UTF-8 is nonempty");
+                output.push(character);
+                index += character.len_utf8();
+                continue;
+            }
+            _ => {
+                let _ = write!(&mut output, "\\{byte:03o}");
+            }
+        }
+        index += 1;
+    }
+    let shortened = data.len() > 200 || output.len() > 200;
+    if output.len() > 200 {
+        let boundary = (0..=200)
+            .rev()
+            .find(|index| output.is_char_boundary(*index))
+            .unwrap_or_default();
+        output.truncate(boundary);
+    }
+    if shortened {
+        output.push_str("...");
+    }
+    output
+}
+
+fn search_viewport(
+    viewport: &TerminalViewport,
+    pattern: &str,
+    regex: bool,
+    ignore_case: bool,
+) -> usize {
+    let regex = regex.then(|| {
+        RegexBuilder::new(pattern)
+            .case_insensitive(ignore_case)
+            .build()
+            .ok()
+    });
+    if matches!(regex, Some(None)) {
+        return 0;
+    }
+    let glob = regex
+        .is_none()
+        .then(|| Pattern::new(&format!("*{pattern}*")).ok());
+    for row in 0..viewport.rows {
+        let mut text = String::with_capacity(usize::from(viewport.columns));
+        for cell in viewport.row(row).unwrap_or_default() {
+            if matches!(cell.width(), CellWidth::SpacerHead | CellWidth::SpacerTail) {
+                continue;
+            }
+            if cell.glyph() == 0 {
+                text.push(' ');
+            } else {
+                viewport.push_glyph(*cell, &mut text);
+            }
+        }
+        let text = text.trim_end_matches(|character: char| character.is_ascii_whitespace());
+        let matched = if let Some(Some(regex)) = &regex {
+            regex.is_match(text)
+        } else if let Some(Some(glob)) = &glob {
+            glob.matches_with(
+                text,
+                MatchOptions {
+                    case_sensitive: !ignore_case,
+                    require_literal_separator: false,
+                    require_literal_leading_dot: false,
+                },
+            )
+        } else {
+            false
+        };
+        if matched {
+            return usize::from(row) + 1;
+        }
+    }
+    0
 }
 
 fn run_shell(command: &str) -> String {
@@ -274,8 +469,9 @@ fn first_line(output: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zz_mux::{PaneKind, SplitSize};
+    use zz_mux::{PaneKind, SplitSize, expand_format_values};
     use zz_protocol::Axis;
+    use zz_terminal::{SessionStatus, TerminalViewId};
 
     fn request(client: u64, left: &str, right: &str) -> StatusRequest {
         StatusRequest {
@@ -290,6 +486,7 @@ mod tests {
                 session_name: "work".to_owned(),
                 ..StatusContext::default()
             },
+            facts: FormatHookFacts::default(),
         }
     }
 
@@ -365,6 +562,53 @@ mod tests {
         assert_eq!(
             context.window_layout,
             engine.state.windows[&window].layout.dump()
+        );
+    }
+
+    #[test]
+    fn content_search_reads_visible_terminal_rows() {
+        let pane = PaneId(9);
+        let terminal = Arc::new(TerminalSession::spawn_output_view(
+            "search".to_owned(),
+            "alpha\nbravo\ncharlie".to_owned(),
+        ));
+        terminal.attach_view(TerminalViewId(1));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !matches!(terminal.latest_viewport().status, SessionStatus::Running) {
+            assert!(
+                Instant::now() < deadline,
+                "output view did not become ready"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        let facts = FormatHookFacts {
+            terminals: Arc::new(BTreeMap::from([(pane, terminal)])),
+            buffer: None,
+        };
+        let context = StatusContext {
+            pane_id: pane.to_string(),
+            ..StatusContext::default()
+        };
+        let mut hooks = DaemonFormatHooks::command(&facts);
+        assert_eq!(
+            expand_format_values(
+                "#{C:bravo}|#{C/i:BRAVO}|#{C/r:^charlie$}|#{C:missing}",
+                &context,
+                &mut hooks,
+            ),
+            "2|2|3|0"
+        );
+    }
+
+    #[test]
+    fn buffer_samples_preserve_utf8_and_escape_control_and_invalid_bytes() {
+        assert_eq!(buffer_sample("α\n\t\\".as_bytes()), "α\\n\\t\\\\");
+        assert_eq!(buffer_sample(&[0xff]), "\\377");
+        assert_eq!(buffer_sample(&[0, b'x', 0, b'7']), "\\0x\\0007");
+        assert_eq!(buffer_full(b"a\0b"), "a\0b");
+        assert_eq!(
+            buffer_sample(&vec![b'x'; 201]),
+            format!("{}...", "x".repeat(200))
         );
     }
 

@@ -251,6 +251,7 @@ struct ForegroundSource {
     #[cfg(unix)]
     master: filedescriptor::FileDescriptor,
     shell: Option<u32>,
+    tty: Option<PathBuf>,
 }
 
 impl ForegroundSource {
@@ -260,12 +261,17 @@ impl ForegroundSource {
             rustix::termios::tcgetpgrp(&self.master)
                 .ok()
                 .and_then(|group| u32::try_from(group.as_raw_pid()).ok())
-                .or(self.shell)
+                .filter(|process_id| *process_id != 0)
+                .or_else(|| self.shell_process_id())
         }
         #[cfg(not(unix))]
         {
-            self.shell
+            self.shell_process_id()
         }
+    }
+
+    fn shell_process_id(&self) -> Option<u32> {
+        self.shell.filter(|process_id| *process_id != 0)
     }
 }
 
@@ -275,7 +281,7 @@ struct EventQueueState {
     pending_reliable_bytes: AtomicUsize,
     notification_pending: AtomicBool,
     bell_pending: AtomicBool,
-    foreground: RwLock<Option<ForegroundSource>>,
+    foreground: RwLock<Option<Box<ForegroundSource>>>,
 }
 
 impl EventQueueState {
@@ -557,6 +563,21 @@ impl TerminalSession {
     #[must_use]
     pub fn foreground_process_id(&self) -> Option<u32> {
         self.events.state.foreground.read().as_ref()?.process_id()
+    }
+
+    #[must_use]
+    pub fn process_id(&self) -> Option<u32> {
+        self.events
+            .state
+            .foreground
+            .read()
+            .as_ref()?
+            .shell_process_id()
+    }
+
+    #[must_use]
+    pub fn tty(&self) -> Option<PathBuf> {
+        self.events.state.foreground.read().as_ref()?.tty.clone()
     }
 
     /// Releases the bell latch so the pane's next BEL raises a fresh event. Until
@@ -2188,7 +2209,7 @@ struct Publisher {
 }
 
 impl Publisher {
-    fn set_foreground_source(&self, source: Option<ForegroundSource>) {
+    fn set_foreground_source(&self, source: Option<Box<ForegroundSource>>) {
         *self.state.foreground.write() = source;
     }
 
@@ -2981,6 +3002,7 @@ fn run_terminal(
     let pair = pty_system
         .openpty(geometry.pty_size())
         .map_err(|error| WorkerError::Pty(error.to_string()))?;
+    let tty = pair.master.tty_name();
 
     let mut command = match spawn.command.as_deref() {
         Some(shell_command) => {
@@ -3069,11 +3091,12 @@ fn run_terminal(
     let mut master = Some(pair.master);
     #[cfg(not(windows))]
     let master = Some(pair.master);
-    publisher.set_foreground_source(Some(ForegroundSource {
+    publisher.set_foreground_source(Some(Box::new(ForegroundSource {
         #[cfg(unix)]
         master: foreground_fd,
         shell: shell_process_id,
-    }));
+        tty,
+    })));
 
     #[cfg(any(target_os = "linux", not(unix)))]
     let (output_rx, recycle_tx) = {

@@ -14,7 +14,7 @@ mod tmux_options;
 
 pub use command::{
     AgentOptions, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
-    MAX_WORD_SEPARATORS_BYTES, MuxEffect, MuxEngine,
+    MAX_WORD_SEPARATORS_BYTES, MuxEffect, MuxEngine, PaneRuntimeFacts,
 };
 pub use layout::{CellLayout, SplitSize};
 pub use model::{
@@ -23,8 +23,8 @@ pub use model::{
 };
 pub use parser::{ConfigDiagnostic, ParsedConfig, parse_config};
 pub use status::{
-    DEFAULT_STATUS_INTERVAL, DEFAULT_STATUS_LEFT, DEFAULT_STATUS_RIGHT, StatusContext,
-    StatusFormats, StatusHooks, StatusOption, expand_status,
+    DEFAULT_STATUS_INTERVAL, DEFAULT_STATUS_LEFT, DEFAULT_STATUS_RIGHT, FormatUniverse,
+    StatusContext, StatusFormats, StatusHooks, StatusOption, expand_format_values, expand_status,
 };
 pub use zz_protocol::{Binding, KeyDecision, KeyEngine, KeyTables, canonical_key};
 pub use zz_protocol::{

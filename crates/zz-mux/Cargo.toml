@@ -11,7 +11,6 @@ publish = false
 chrono.workspace = true
 glob = "0.3"
 regex.workspace = true
-rustix.workspace = true
 unicode-width = "0.2.2"
 zz-protocol = { path = "../zz-protocol" }
 zz-terminal = { path = "../zz-terminal", default-features = false }

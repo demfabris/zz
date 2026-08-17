@@ -19,7 +19,8 @@ use parking_lot::{Condvar, Mutex};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use zz_mux::{
     DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision, KeyEngine,
-    KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, parse_config,
+    KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts, expand_format_values,
+    parse_config,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -63,7 +64,10 @@ use crate::{
     lifecycle::DaemonIdentityGuard,
     paths::{default_mux_config, home_directory, is_default_mux_config},
     shell_process,
-    status::{StatusRenderer, StatusRequest, host_names, status_context},
+    status::{
+        BufferFormatFacts, DaemonFormatHooks, FormatHookFacts, StatusRenderer, StatusRequest,
+        host_names, status_context,
+    },
     transport::{LocalTransport, Transport, TransportListener, TransportStream},
 };
 
@@ -130,7 +134,8 @@ fn daemon_color_scheme() -> TerminalColorScheme {
 }
 
 fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
-    let process_id = Pid::from_u32(terminal.foreground_process_id()?);
+    let process_id = terminal.foreground_process_id().filter(|pid| *pid != 0)?;
+    let process_id = Pid::from_u32(process_id);
     let mut system = System::new();
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[process_id]),
@@ -141,6 +146,49 @@ fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
         .and_then(|process| process.cwd())
         .filter(|path| path.is_dir())
         .map(Path::to_path_buf)
+}
+
+fn terminal_current_command(terminal: &TerminalSession) -> String {
+    let Some(process_id) = terminal
+        .foreground_process_id()
+        .filter(|pid| *pid != 0)
+        .map(Pid::from_u32)
+    else {
+        return String::new();
+    };
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[process_id]),
+        ProcessRefreshKind::new(),
+    );
+    system
+        .process(process_id)
+        .map(|process| process.name().to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+fn unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn daemon_uid() -> String {
+    #[cfg(unix)]
+    {
+        rustix::process::getuid().as_raw().to_string()
+    }
+    #[cfg(not(unix))]
+    {
+        String::new()
+    }
+}
+
+fn daemon_user() -> String {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_default()
 }
 
 fn resolve_appearance(
@@ -1552,7 +1600,11 @@ impl Shared {
             host.clone(),
             host_short.clone(),
             socket_path.display().to_string(),
+            unix_timestamp(),
         );
+        state
+            .engine
+            .set_format_server_identity(std::process::id(), daemon_uid(), daemon_user());
         for option in MuxOptionKey::ALL {
             let value = state.engine.mux_option_value(option);
             state
@@ -1720,9 +1772,11 @@ impl Shared {
 
     fn refresh_status(&self, refresh: bool) {
         let requests = {
-            let inner = self.inner.lock();
+            let mut inner = self.inner.lock();
+            inner.engine.set_format_now(unix_timestamp());
             let formats = inner.engine.status_formats().clone();
             let snapshot = inner.engine.state.snapshot();
+            let facts = format_hook_facts(&inner);
             inner
                 .subscribers
                 .keys()
@@ -1738,6 +1792,7 @@ impl Shared {
                             attached,
                             client_focused_window_for_attachment(&inner, client),
                         ),
+                        facts: facts.clone(),
                     }
                 })
                 .collect::<Vec<_>>()
@@ -1896,6 +1951,7 @@ impl Shared {
         color_scheme: Option<TerminalColorScheme>,
     ) -> (ClientId, ServerHello) {
         let mut inner = self.inner.lock();
+        inner.engine.set_format_now(unix_timestamp());
         let client = ClientId(inner.next_client_id);
         inner.next_client_id = inner.next_client_id.saturating_add(1);
         inner.client_instances.insert(client, client_instance_id);
@@ -1956,6 +2012,7 @@ impl Shared {
                 attached,
                 client_focused_window_for_attachment(&inner, client),
             ),
+            facts: format_hook_facts(&inner),
         };
         drop(inner);
         let mut hello = hello;
@@ -2204,7 +2261,12 @@ impl Shared {
                     );
                 }
             }
-            let execution = inner.engine.execute(context, command)?;
+            let facts = format_hook_facts(&inner);
+            let mut hooks = DaemonFormatHooks::command(&facts);
+            inner.engine.set_format_now(unix_timestamp());
+            let execution = inner
+                .engine
+                .execute_with_format_hooks(context, command, &mut hooks)?;
             let selected_panes = inner
                 .engine
                 .state
@@ -2283,7 +2345,12 @@ impl Shared {
                             WordSeparators::new(inner.engine.word_separators_for_pane(*pane)?);
                         let working_directory = inherit_cwd_from
                             .and_then(|source| inner.terminals.get(&source))
-                            .and_then(|terminal| terminal_working_directory(terminal));
+                            .and_then(|terminal| terminal_working_directory(terminal))
+                            .or_else(|| std::env::current_dir().ok());
+                        let start_path = working_directory
+                            .as_deref()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .unwrap_or_default();
                         let appearance = Arc::clone(&inner.appearance);
                         let mut env = vec![
                             ("ZZ_PANE".to_owned(), pane.to_string()),
@@ -2304,7 +2371,7 @@ impl Shared {
                             history_limit,
                             appearance,
                             TerminalSpawn {
-                                working_directory,
+                                working_directory: working_directory.clone(),
                                 command: command.clone(),
                                 env,
                             },
@@ -2316,6 +2383,14 @@ impl Shared {
                             },
                         );
                         inner.terminals.insert(*pane, Arc::clone(&session));
+                        inner.engine.set_pane_runtime_facts(
+                            *pane,
+                            PaneRuntimeFacts {
+                                current_path: start_path.clone(),
+                                start_path,
+                                ..PaneRuntimeFacts::default()
+                            },
+                        );
                         let attached_clients = inner
                             .engine
                             .state
@@ -3299,9 +3374,30 @@ impl Shared {
                 })
             }
             "list-buffers" | "lsb" => {
-                let parsed = parse_buffer_command_args(name, args, &[], &[])?;
+                let parsed = parse_buffer_command_args(name, args, &['F'], &[])?;
                 require_no_positionals(name, &parsed)?;
-                let inner = self.inner.lock();
+                let mut inner = self.inner.lock();
+                if let Some(format) = parsed.value('F') {
+                    inner.engine.set_format_now(unix_timestamp());
+                    let context = inner.engine.format_status_context(None, None, None);
+                    let output = inner
+                        .paste_buffers
+                        .iter()
+                        .map(|buffer| {
+                            let facts = FormatHookFacts {
+                                buffer: Some(buffer_format_facts(buffer)),
+                                ..FormatHookFacts::default()
+                            };
+                            let mut hooks = DaemonFormatHooks::command(&facts);
+                            expand_format_values(format, &context, &mut hooks)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    return Ok(Execution {
+                        output,
+                        effects: Vec::new(),
+                    });
+                }
                 let now = SystemTime::now();
                 let output = inner
                     .paste_buffers
@@ -5998,6 +6094,8 @@ impl Shared {
             .spawn(move || {
                 let mut previous = BTreeMap::<TerminalViewId, Arc<TerminalViewport>>::new();
                 let mut previous_title = None::<String>;
+                let mut previous_foreground = None::<Option<u32>>;
+                let mut current_command = String::new();
                 let mut diff_scratch = TerminalDiffScratch::default();
                 while let Ok(event) = events.recv_blocking() {
                     let Some(terminal) = terminal.upgrade() else {
@@ -6011,6 +6109,23 @@ impl Shared {
                             let mut current =
                                 terminal.latest_viewports().into_iter().collect::<Vec<_>>();
                             current.sort_by_key(|(view, _)| view.0);
+                            let runtime_viewport = current.first().map_or_else(
+                                || terminal.latest_viewport(),
+                                |(_, viewport)| Arc::clone(viewport),
+                            );
+                            if !terminal_status_should_close(&runtime_viewport.status) {
+                                let foreground = terminal.foreground_process_id();
+                                if previous_foreground != Some(foreground) {
+                                    current_command = terminal_current_command(&terminal);
+                                    previous_foreground = Some(foreground);
+                                }
+                                shared.synchronize_pane_runtime(
+                                    pane,
+                                    &terminal,
+                                    &runtime_viewport,
+                                    &current_command,
+                                );
+                            }
                             let referenced_images = current
                                 .iter()
                                 .flat_map(|(_, viewport)| {
@@ -6198,6 +6313,51 @@ impl Shared {
                 .state
                 .update_pane_title(pane, title)
                 .unwrap_or(false)
+        };
+        if changed {
+            self.publish_snapshot();
+        }
+    }
+
+    fn synchronize_pane_runtime(
+        &self,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        viewport: &TerminalViewport,
+        current_command: &str,
+    ) {
+        let current_path = viewport.working_directory().map(str::to_owned).or_else(|| {
+            terminal_working_directory(terminal).map(|path| path.to_string_lossy().into_owned())
+        });
+        let pid = terminal.process_id();
+        let tty = terminal
+            .tty()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let changed = {
+            let mut inner = self.inner.lock();
+            if !inner
+                .terminals
+                .get(&pane)
+                .is_some_and(|current| Arc::ptr_eq(current, terminal))
+            {
+                return;
+            }
+            let previous = inner
+                .engine
+                .pane_runtime_facts(pane)
+                .cloned()
+                .unwrap_or_default();
+            inner.engine.set_pane_runtime_facts(
+                pane,
+                PaneRuntimeFacts {
+                    current_command: current_command.to_owned(),
+                    current_path: current_path.unwrap_or(previous.current_path),
+                    start_path: previous.start_path,
+                    pid,
+                    tty,
+                },
+            )
         };
         if changed {
             self.publish_snapshot();
@@ -10045,6 +10205,25 @@ fn find_buffer<'a>(inner: &'a ServerState, name: Option<&str>) -> Option<&'a Pas
         .find(|buffer| name.map_or(buffer.automatic, |name| buffer.name == name))
 }
 
+fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
+    BufferFormatFacts {
+        name: buffer.name.clone(),
+        data: Arc::clone(&buffer.data),
+        created: buffer.created,
+    }
+}
+
+fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
+    FormatHookFacts {
+        terminals: Arc::new(inner.terminals.clone()),
+        buffer: inner
+            .paste_buffers
+            .iter()
+            .find(|buffer| buffer.automatic)
+            .map(buffer_format_facts),
+    }
+}
+
 fn resolve_buffer<'a>(
     inner: &'a ServerState,
     name: Option<&str>,
@@ -12950,6 +13129,50 @@ mod tests {
         let named = resolve_buffer(&inner, Some("named")).expect("named buffer");
         assert_eq!(named.data.as_ref(), b"alpha-omega");
         assert!(!named.automatic);
+    }
+
+    #[test]
+    fn buffer_formats_read_named_rows_and_the_top_automatic_buffer() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .buffer_command(
+                &context,
+                "set-buffer",
+                &["-b", "named", "alpha"].map(str::to_owned),
+            )
+            .expect("set named buffer");
+        let named = shared
+            .buffer_command(
+                &context,
+                "list-buffers",
+                &[
+                    "-F".to_owned(),
+                    "#{buffer_name}|#{buffer_size}|#{buffer_sample}|#{!!:#{buffer_created}}"
+                        .to_owned(),
+                ],
+            )
+            .expect("format named buffer");
+        assert_eq!(named.output, "named|5|alpha|1");
+
+        shared
+            .buffer_command(&context, "set-buffer", &["bravo".to_owned()])
+            .expect("set automatic buffer");
+        let displayed = shared
+            .execute(
+                ClientId(1),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-p",
+                        "#{buffer_name}|#{buffer_size}|#{buffer_sample}|#{!!:#{buffer_created}}",
+                    ],
+                ),
+            )
+            .expect("format automatic buffer");
+        assert_eq!(displayed.output, "buffer0|5|bravo|1");
     }
 
     #[test]

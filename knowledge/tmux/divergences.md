@@ -110,6 +110,63 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | `bind-key` payloads | Bind-time validation covers names and flags only; positional arity and target errors still surface at keypress, and daemon-side verbs (`capture-pane`, the buffer family) bind with no validation at all. tmux validates the full argument template at bind time. | **silent** edge |
 | Daemon boot | The zz daemon creates a default session `0` at spawn (the GUI's empty workspace expects one); a tmux server boots empty until its first `new-session`. `tmux ls` scripts see one extra session, and every `$N`/`@N`/`%N` id is shifted by the auto-session's objects — which is why the harness diffs layout-string structure with pane numbers stripped. | **silent** |
 
+## Format variables that remain unbacked
+
+These names are registered so parsing matches the pinned 198-name table, but zz still returns an
+empty string where tmux can return data. Each gap is separate on purpose: none of them is hidden
+inside a generic “unsupported formats” claim.
+
+| Variable | Missing backing | Loud or silent? |
+| --- | --- | --- |
+| `buffer_mode_format` | No tmux buffer-mode row formatter; zz's buffer chooser is native. | **silent** |
+| `client_activity` | Client activity time is not fed into format expansion. | **silent** |
+| `client_colours` | The attaching client's terminal color count is not fed into format expansion. | **silent** |
+| `client_created` | Client creation time is not retained as a format fact. | **silent** |
+| `client_flags` | tmux client flags have no zz format projection. | **silent** |
+| `client_key_table` | The per-client key engine does not expose its active table as a format fact. | **silent** |
+| `client_last_session` | The client's previous session is not retained as a format fact. | **silent** |
+| `client_mode_format` | No tmux client-mode row formatter; zz's client surfaces are native. | **silent** |
+| `client_name` | zz client names are not fed through the format hook. | **silent** |
+| `client_session` | The attached session name is not exposed through this client-scoped alias. | **silent** |
+| `client_termfeatures` | Terminal feature negotiation is not represented as a tmux format string. | **silent** |
+| `client_termname` | The attaching client's `TERM` name is not retained as a format fact. | **silent** |
+| `client_termtype` | tmux's terminal-type classification has no zz equivalent. | **silent** |
+| `client_theme` | Client light/dark theme state is not exposed to the format engine. | **silent** |
+| `client_tty` | Native and remote zz clients do not provide a tmux attach-client TTY path. | **silent** |
+| `client_user` | The attach-client user is not fed into format expansion. | **silent** |
+| `config_files` | The config loader does not retain tmux's printable loaded-file list. | **silent** |
+| `cursor_character` | The glyph under the terminal cursor is not mirrored into mux facts. | **silent** |
+| `cursor_colour` | Cursor color is not mirrored into mux facts. | **silent** |
+| `mouse_hyperlink` | Command formats do not receive tmux's mouse-event hyperlink record. | **silent** |
+| `mouse_line` | Command formats do not receive tmux's mouse-event line text. | **silent** |
+| `mouse_pane` | Command formats do not receive tmux's mouse-event pane id. | **silent** |
+| `mouse_status_line` | Command formats do not receive tmux's mouse-event status-line index. | **silent** |
+| `mouse_status_range` | Command formats do not receive tmux's mouse-event status range. | **silent** |
+| `mouse_word` | Command formats do not receive tmux's mouse-event word text. | **silent** |
+| `pane_bg` | The terminal cell background at the cursor is not mirrored into mux facts. | **silent** |
+| `pane_dead_signal` | Exited panes are removed; zz has no retained remain-on-exit signal fact. | **silent** |
+| `pane_dead_status` | Exited panes are removed; zz has no retained remain-on-exit status fact. | **silent** |
+| `pane_dead_time` | Exited panes are removed; zz has no retained remain-on-exit timestamp. | **silent** |
+| `pane_fg` | The terminal cell foreground at the cursor is not mirrored into mux facts. | **silent** |
+| `pane_key_mode` | Native copy/view mode is not projected as tmux's pane key mode. | **silent** |
+| `pane_mode` | Native pane mode is not projected as tmux's mode name. | **silent** |
+| `pane_path` | tmux's OSC path field is not separately retained from `pane_current_path`. | **silent** |
+| `pane_pb_state` | Terminal progress-bar state is not mirrored into mux facts. | **silent** |
+| `pane_search_string` | Native per-view search text is not mirrored into mux facts. | **silent** |
+| `pane_start_command` | The original spawn command is not retained in the pane format record. | **silent** |
+| `pane_start_command_list` | The original spawn argv is not retained in the pane format record. | **silent** |
+| `pane_tabs` | Terminal tab stops are not mirrored into mux facts. | **silent** |
+| `session_activity` | Session activity time is not tracked; `S/t` sorts by creation time instead. | **silent** |
+| `session_group` | Session groups are unsupported, so no group name exists. | **silent** |
+| `session_group_attached_list` | Session groups are unsupported, so no grouped attachment list exists. | **silent** |
+| `session_group_list` | Session groups are unsupported, so no member list exists. | **silent** |
+| `session_last_attached` | Last-attachment time is not tracked. | **silent** |
+| `session_path` | zz has no separate per-session working directory fact. | **silent** |
+| `tree_mode_format` | No tmux tree-mode row formatter; zz's tree chooser is native. | **silent** |
+| `window_activity` | Window activity time is not tracked; `W/t` retains window-index order. | **silent** |
+| `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
+| `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
+
 # Options: 15 of 180
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin.

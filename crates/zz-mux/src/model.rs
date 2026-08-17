@@ -186,6 +186,7 @@ pub struct Window {
 pub struct Session {
     pub id: SessionId,
     pub name: String,
+    pub created: Option<i64>,
     pub windows: Vec<WindowId>,
     pub active_window: WindowId,
     last_window: Option<WindowId>,
@@ -342,6 +343,7 @@ impl MuxState {
             Session {
                 id: session_id,
                 name,
+                created: None,
                 windows: vec![window_id],
                 active_window: window_id,
                 last_window: None,

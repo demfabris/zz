@@ -258,6 +258,70 @@ TUI client, or a Command→Interactive upgrade). Shares the client-seam work wit
   it (phase 6).
 - Fleet broadcast (`--all`) — unchanged from the superset roadmap: composition over features.
 
+# The 100% ledger — consciously parked
+
+Everything below was seen, weighed, and deliberately not done during phase 4. This is the
+checklist for a future 100%-compat assessment: each row is either an accepted divergence to
+re-confirm, a deferred mechanic with an owner phase, or an open question. The operational
+divergence matrix ([divergences](/tmux/divergences.md)) carries the per-command detail;
+this list is the campaign-level index of it plus the items that never got a matrix row.
+
+**Accepted divergences (documented, revisit only deliberately):**
+
+- The CLI error prefix: zz says `zz: mux command failed: …` around tmux's exact message
+  text everywhere except `refresh-client`'s bare `no current client`. rc always matches.
+- `history-limit` default stays 10000 (pin: 2000) — product choice, fenced by a drift test
+  whose allowlist is exactly this one name.
+- `list-commands` is the honest implemented subset, and usage strings show zz's accepted
+  flags rather than the pin's verbatim strings (4e review decision: never advertise a flag
+  that errors).
+- Default (no `-F`) listing line formats (`list-panes`/`list-windows`/`list-sessions`)
+  keep zz's own shapes; the harness and scripts compare through `-F`.
+- Non-UTF-8 argv: pin VIS-octal-escapes (`a\377b`), zz replacement-chars (U+FFFD) —
+  `to_string_lossy` at the CLI boundary; OsString plumbing judged not worth it.
+- `update-environment` markers at session create source from the daemon's environment, not
+  the attaching client's (the wire carries no client environ); diverges when the daemon
+  outlives the shell that started it.
+- Two upstream layout bugs refused rather than reproduced (two-pane `main-*` preset,
+  mixed-parent `-E` spread) — `known/` scenarios pin them.
+- Grouped sessions / linked windows / socket interop / fleet broadcast — the permanent
+  out-of-scope list above; resurrect's grouped-session restore errors loudly by design.
+
+**Deferred mechanics (owner in parentheses):**
+
+- Behavior options wave: `automatic-rename`, `remain-on-exit` + `respawn-pane`/`-window`,
+  `aggressive-resize`, `default-terminal`/`display-time`/`repeat-time`, `mouse` +
+  `escape-time` stored TUI-scoped, lazy-create auto-session (4f — the last phase-4 wave).
+- Array options as a category (`status-format[N]`, `command-alias`, `terminal-features`):
+  indexed spellings parse and answer silently; storage/rendering unimplemented (styles
+  wave / TUI phases).
+- Styles (`#[…]`, `*-style` options) and `source-file -F/-n/-v` (marked *later* in the
+  phase-4 table; styles are TUI-meaningful).
+- `#()` job bodies: both sides strftime the whole string first (pinned by test), but the
+  pin also format-expands `#{…}` *inside* the body before running it; zz hands the shell
+  hook the body raw (phase 5/6 — status-seam surface).
+- `#{S:}` loop ordering follows the pin's global sort criteria default (index); if zz ever
+  grows choose-tree sort commands, the loop default must track the mutable criteria
+  (choose-tree work).
+- Positional-arity validation is unguarded and the daemon buffer family hand-rolls its
+  parsing (phase-0 leftovers); `move-pane -p` is zz-lax.
+- `switch-client` and the TTY attach contract ride the client-seam design (phase 8);
+  control mode is phase 6; `tmux -V`/`$TMUX` shape is phase 7.
+- Exec family, hooks bus, popups/menus (phase 5) — see that section's tiering.
+
+**Open questions (investigate before declaring 100%):**
+
+- The zz-client simulator hang: one 93-minute wedge in `Simulation::boot` (blocking socket
+  read, daemon silent) under full-workspace load; passes solo, immediate rerun green. Four
+  structural suspects cleared; the per-command trail's added lock contention is the
+  surviving hypothesis. PLAUSIBLE, unreproduced.
+- The three documented load-flaky `zz-daemon` tests (`terminal_process_exit_…` and
+  friends) still fail under full-workspace parallel load on CI occasionally — flake, not
+  behavior, but noise in every assessment.
+- macOS-vs-glibc strftime quirks are now load-bearing (the daemon calls libc strftime —
+  the workspace's only `unsafe` block): any future platform (musl, Windows) needs its own
+  parity probe of unknown-`%` handling.
+
 # Risks
 
 - `tmux -V` gating: any answer is a small lie; plugins may exercise version-specific paths.

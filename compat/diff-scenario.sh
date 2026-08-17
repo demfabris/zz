@@ -66,13 +66,19 @@ die() {
   exit 2
 }
 
+# Both CLIs infer a "current pane" from the invoking environment (tmux via
+# TMUX_PANE in cmd_find_inside_pane, zz via ZZ_PANE). Running the harness from
+# inside a real multiplexer would leak that context into the scratch servers
+# and silently change target resolution, so both sides run scrubbed.
 zz_command() {
-  HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
+  env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+    HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
     "$ZZ_BIN" --socket "$ZZ_SOCKET" "$@"
 }
 
 tmux_command() {
-  "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" "$@"
+  env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+    "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" "$@"
 }
 
 side_command() {

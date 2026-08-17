@@ -191,6 +191,9 @@ for scenario in "${scenarios[@]}"; do
     warn "$scenario_name has its expected documented divergence"
   elif [ "$scenario_rc" -ne 0 ]; then
     warn "$scenario_name failed; see $log_file"
+    if [ -f "$log_file" ]; then
+      awk '/divergence$/{show=40} show>0{print "    " $0; show--}' "$log_file" >&2
+    fi
     failed=1
   fi
 done

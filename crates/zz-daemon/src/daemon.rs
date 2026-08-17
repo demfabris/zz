@@ -2522,13 +2522,15 @@ impl Shared {
                             ),
                             ("ZZ_SESSION".to_owned(), Some(pane_session.to_string())),
                         ]);
+                        if let Some(path) = &working_directory {
+                            env.push(("PWD".to_owned(), Some(path.to_string_lossy().into_owned())));
+                        }
                         let spawn = TerminalSpawn {
                             working_directory: working_directory.clone(),
                             command: command.clone(),
-                            terminal_type: inner
-                                .engine
-                                .default_terminal_for_spawn()
-                                .map(str::to_owned),
+                            terminal_type: Some(
+                                inner.engine.default_terminal_for_spawn().to_owned(),
+                            ),
                             env,
                         };
                         let session = Arc::new(TerminalSession::spawn(
@@ -2547,13 +2549,14 @@ impl Shared {
                         );
                         inner.terminals.insert(*pane, Arc::clone(&session));
                         inner.terminal_spawns.insert(*pane, spawn);
-                        inner.engine.set_pane_runtime_facts(
+                        inner.engine.set_pane_runtime_facts_with_hooks(
                             *pane,
                             PaneRuntimeFacts {
                                 current_path,
                                 start_path,
                                 ..PaneRuntimeFacts::default()
                             },
+                            &mut hooks,
                         );
                         let attached_clients = inner
                             .engine
@@ -2576,6 +2579,7 @@ impl Shared {
                         cwd,
                         command,
                         environment,
+                        empty,
                     } => {
                         let previous = inner.terminal_spawns.get(pane).cloned().unwrap_or_default();
                         let history_limit = inner.engine.history_limit_for_pane(*pane)?;
@@ -2630,23 +2634,29 @@ impl Shared {
                                 .iter()
                                 .map(|(name, value)| (name.clone(), Some(value.clone()))),
                         );
+                        if let Some(path) = &working_directory {
+                            env.push(("PWD".to_owned(), Some(path.to_string_lossy().into_owned())));
+                        }
                         let spawn = TerminalSpawn {
                             working_directory: working_directory.clone(),
                             command: command.clone().or(previous.command),
-                            terminal_type: inner
-                                .engine
-                                .default_terminal_for_spawn()
-                                .map(str::to_owned),
+                            terminal_type: Some(
+                                inner.engine.default_terminal_for_spawn().to_owned(),
+                            ),
                             env,
                         };
-                        let session = Arc::new(TerminalSession::spawn(
-                            history_limit,
-                            appearance,
-                            spawn.clone(),
-                        ));
-                        let current_path = terminal_working_directory(&session)
-                            .map(|path| path.to_string_lossy().into_owned())
-                            .unwrap_or_default();
+                        let session = Arc::new(if *empty {
+                            TerminalSession::spawn_empty_with_appearance(history_limit, appearance)
+                        } else {
+                            TerminalSession::spawn(history_limit, appearance, spawn.clone())
+                        });
+                        let current_path = if *empty {
+                            start_path.clone()
+                        } else {
+                            terminal_working_directory(&session)
+                                .map(|path| path.to_string_lossy().into_owned())
+                                .unwrap_or_default()
+                        };
                         deferred_terminal_commands.push(
                             DeferredTerminalCommand::SetWordSeparators {
                                 terminal: Arc::clone(&session),
@@ -2655,13 +2665,14 @@ impl Shared {
                         );
                         inner.terminals.insert(*pane, Arc::clone(&session));
                         inner.terminal_spawns.insert(*pane, spawn);
-                        inner.engine.set_pane_runtime_facts(
+                        inner.engine.set_pane_runtime_facts_with_hooks(
                             *pane,
                             PaneRuntimeFacts {
                                 current_path,
                                 start_path,
                                 ..PaneRuntimeFacts::default()
                             },
+                            &mut hooks,
                         );
                         let attached_clients = inner
                             .attached
@@ -5904,13 +5915,19 @@ impl Shared {
         }
         let mut key_engine = inner.key_engines.remove(&client).unwrap_or_default();
         let table = key_engine.active_table().map(str::to_owned);
-        let repeat_time_ms = client_attached_session(&inner, client)
-            .map_or(500, |session| inner.engine.repeat_time_for_session(session));
-        let decision = key_engine.handle_with_repeat_time(
+        let (initial_repeat_time_ms, repeat_time_ms) = client_attached_session(&inner, client)
+            .map_or((0, 500), |session| {
+                (
+                    inner.engine.initial_repeat_time_for_session(session),
+                    inner.engine.repeat_time_for_session(session),
+                )
+            });
+        let decision = key_engine.handle_with_repeat_times(
             &inner.engine.keys,
             key,
             Instant::now(),
             Duration::from_millis(u64::from(repeat_time_ms)),
+            Duration::from_millis(u64::from(initial_repeat_time_ms)),
         );
         inner.key_engines.insert(client, key_engine);
         if decision != KeyDecision::Pass {
@@ -6710,12 +6727,13 @@ impl Shared {
 
     fn close_exited_terminal(self: &Arc<Self>, pane: PaneId, terminal: &Arc<TerminalSession>) {
         let status = terminal.latest_viewport().status.clone();
-        let (failed, dead_status) = match status {
-            zz_terminal::SessionStatus::Exited(status) => (
-                status.code != 0 || status.signal.is_some(),
-                status.signal.is_none().then_some(status.code),
-            ),
-            zz_terminal::SessionStatus::Failed(_) => (true, None),
+        let (failed, dead_status, dead_signal) = match status {
+            zz_terminal::SessionStatus::Exited(status) => {
+                let failed = status.code != 0 || status.signal.is_some();
+                let dead_status = status.signal.is_none().then_some(status.code);
+                (failed, dead_status, status.signal.clone())
+            }
+            zz_terminal::SessionStatus::Failed(_) => (true, None, None),
             zz_terminal::SessionStatus::Starting | zz_terminal::SessionStatus::Running => return,
         };
         let Some((mut context, retained, changed)) = ({
@@ -6735,10 +6753,16 @@ impl Shared {
                 .retain_exited_pane(pane, failed)
                 .unwrap_or(false);
             let changed = if retained {
+                let facts = format_hook_facts(&inner);
+                let mut hooks = DaemonFormatHooks::command(&facts);
                 inner
                     .engine
-                    .state
-                    .mark_pane_dead(pane, dead_status)
+                    .mark_pane_dead_with_hooks(
+                        pane,
+                        dead_status,
+                        dead_signal.as_deref(),
+                        &mut hooks,
+                    )
                     .unwrap_or(false)
             } else {
                 false
@@ -6838,16 +6862,20 @@ impl Shared {
                 .pane_runtime_facts(pane)
                 .cloned()
                 .unwrap_or_default();
-            inner.engine.set_pane_runtime_facts(
+            let facts = format_hook_facts(&inner);
+            let mut hooks = DaemonFormatHooks::command(&facts);
+            inner.engine.set_pane_runtime_facts_with_hooks(
                 pane,
                 PaneRuntimeFacts {
                     current_command: current_command.to_owned(),
                     current_path,
+                    dead_signal: previous.dead_signal,
                     reported_path,
                     start_path: previous.start_path,
                     pid,
                     tty,
                 },
+                &mut hooks,
             )
         };
         if changed {
@@ -12377,15 +12405,61 @@ mod tests {
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("respawn-pane", ["-t", &pane.to_string(), "sleep 30"]),
+                &CommandInvocation::new(
+                    "respawn-pane",
+                    ["-E", "-t", &pane.to_string(), "sleep 30"],
+                ),
             )
-            .expect("respawn dead pane");
+            .expect("respawn dead pane empty");
+        let empty = {
+            let inner = shared.inner.lock();
+            let replacement = Arc::clone(&inner.terminals[&pane]);
+            assert!(!Arc::ptr_eq(&previous, &replacement));
+            assert!(!inner.engine.state.pane(pane).unwrap().dead);
+            assert_eq!(inner.engine.state.windows[&window].layout.project(), layout);
+            assert_eq!(replacement.process_id(), None);
+            assert_eq!(replacement.foreground_process_id(), None);
+            assert_eq!(
+                inner.terminal_spawns[&pane].command.as_deref(),
+                Some("sleep 30")
+            );
+            replacement
+        };
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let viewport = empty.latest_viewport_for(TerminalViewId(late_client.0));
+            if viewport.as_ref().is_some_and(|viewport| {
+                matches!(viewport.status, SessionStatus::Running)
+                    && matches!(viewport.mode, TerminalMode::Live)
+            }) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "empty pane did not publish a live viewport"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("respawn-pane", ["-t", &pane.to_string()]),
+            )
+            .expect("respawn empty pane without kill");
         {
             let inner = shared.inner.lock();
             let replacement = &inner.terminals[&pane];
-            assert!(!Arc::ptr_eq(&previous, replacement));
+            assert!(!Arc::ptr_eq(&empty, replacement));
             assert!(!inner.engine.state.pane(pane).unwrap().dead);
             assert_eq!(inner.engine.state.windows[&window].layout.project(), layout);
+            assert_eq!(
+                inner.terminal_spawns[&pane].command.as_deref(),
+                Some("sleep 30")
+            );
         }
 
         shared
@@ -12396,6 +12470,78 @@ mod tests {
                 &CommandInvocation::new("kill-pane", ["-t", &pane.to_string()]),
             )
             .expect("clean up respawned pane");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retained_signal_exit_exposes_the_tmux_signal_name() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["-g", "remain-on-exit", "on"]),
+            )
+            .expect("enable retained exits");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "signal-fixture", "kill -TERM $$"]),
+            )
+            .expect("create signalled terminal pane");
+        let pane = context.pane.expect("terminal pane");
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(pane)
+                .is_some_and(|pane| pane.dead)
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "signalled terminal did not become retained-dead"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "display-message",
+                        [
+                            "-p",
+                            "-t",
+                            &pane.to_string(),
+                            "#{pane_dead}:#{pane_dead_status}:#{pane_dead_signal}",
+                        ],
+                    ),
+                )
+                .expect("read signal facts")
+                .output,
+            "1::term"
+        );
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-pane", ["-t", &pane.to_string()]),
+            )
+            .expect("clean up retained signal pane");
     }
 
     #[test]
@@ -14121,14 +14267,6 @@ mod tests {
                 ClientId(7),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("set-option", ["-s", "default-terminal", "zz-term"]),
-            )
-            .expect("default terminal");
-        shared
-            .execute(
-                ClientId(7),
-                ClientKind::Command,
-                &mut context,
                 &CommandInvocation::new(
                     "set-environment",
                     ["-g", "-h", "HIDDENPROBE", "newhidden"],
@@ -14144,6 +14282,10 @@ mod tests {
             )
             .expect("session");
         let pane = context.pane.expect("terminal pane");
+        assert_eq!(
+            shared.inner.lock().terminal_spawns[&pane].terminal_type,
+            Some("tmux-256color".to_owned())
+        );
         shared
             .execute(
                 ClientId(7),
@@ -14177,7 +14319,9 @@ mod tests {
                 )
                 .expect("capture terminal")
                 .output;
-            if captured.contains("PHASE4D_SEEDED=[daemon] DISPLAY=[unset] HP=[] TERM=[zz-term]") {
+            if captured
+                .contains("PHASE4D_SEEDED=[daemon] DISPLAY=[unset] HP=[] TERM=[tmux-256color]")
+            {
                 break;
             }
             assert!(
@@ -14883,8 +15027,12 @@ bind - split-window -v -c "#{pane_current_path}"
     #[test]
     fn terminal_cwd_flag_prefers_a_valid_literal_and_bogus_paths_land_in_home() {
         let donor_directory = tempfile::tempdir().expect("donor working directory");
-        let donor_path = donor_directory
-            .path()
+        let donor_physical = donor_directory.path().join("physical");
+        fs::create_dir(&donor_physical).expect("physical donor working directory");
+        let donor_literal = donor_directory.path().join("literal");
+        std::os::unix::fs::symlink(&donor_physical, &donor_literal)
+            .expect("literal donor working directory");
+        let donor_path = donor_physical
             .canonicalize()
             .expect("canonical donor working directory");
         let literal_directory = tempfile::tempdir().expect("literal working directory");
@@ -14901,7 +15049,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &mut context,
                 &CommandInvocation::new(
                     "new-session",
-                    ["-s", "cwd", "-c", donor_path.to_string_lossy().as_ref()],
+                    ["-s", "cwd", "-c", donor_literal.to_string_lossy().as_ref()],
                 ),
             )
             .expect("session with literal cwd");
@@ -14923,6 +15071,44 @@ bind - split-window -v -c "#{pane_current_path}"
             }
         };
         wait_for_cwd(&donor_terminal, &donor_path);
+        assert_eq!(
+            shared.inner.lock().terminal_spawns[&donor].working_directory,
+            Some(donor_literal.clone())
+        );
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("display-message", ["-p", "#{pane_start_path}"],),
+                )
+                .expect("literal pane start path")
+                .output,
+            donor_literal.to_string_lossy()
+        );
+        donor_terminal.send_text("printf 'ZZ_LITERAL_PWD=[%s]\\n' \"$PWD\"\n");
+        let expected_pwd = format!("ZZ_LITERAL_PWD=[{}]", donor_literal.display());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let captured = shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("capture-pane", ["-pJ", "-t", &donor.to_string()]),
+                )
+                .expect("capture literal PWD")
+                .output;
+            if captured.contains(&expected_pwd) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "literal PWD did not reach the child; expected={expected_pwd:?}, captured={captured:?}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
 
         shared
             .execute(
@@ -17805,6 +17991,30 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("split-window", ["-h"]),
             )
             .expect("split pane");
+        let panes = shared.inner.lock().engine.state.windows[&window]
+            .pane_order()
+            .to_vec();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let settled = {
+                let inner = shared.inner.lock();
+                panes.iter().all(|pane| {
+                    inner.engine.pane_runtime_facts(*pane).is_some_and(|facts| {
+                        !facts.current_command.is_empty()
+                            && facts.pid.is_some()
+                            && !facts.tty.is_empty()
+                    })
+                })
+            };
+            if settled {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pane runtime facts did not settle before split resize"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
         let split = {
             let inner = shared.inner.lock();
             let mut splits = Vec::new();
@@ -20838,11 +21048,14 @@ bind - split-window -v -c "#{pane_current_path}"
             "primary"
         );
 
+        let expected_window_name = shared.inner.lock().engine.state.windows[&window]
+            .name
+            .clone();
         open_binding(&mut context, ",");
         {
             let inner = shared.inner.lock();
             let prompt = &inner.command_prompts[&client];
-            assert_eq!(prompt.input, "0");
+            assert_eq!(prompt.input, expected_window_name);
             assert_eq!(prompt.template.as_deref(), Some("rename-window -- '%%'"));
         }
         replace_and_submit(&mut context, "editor");

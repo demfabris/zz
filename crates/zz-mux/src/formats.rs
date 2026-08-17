@@ -38,6 +38,7 @@ pub struct StatusContext {
     pub pane_current_command: String,
     pub pane_current_path: String,
     pub pane_dead: Option<bool>,
+    pub pane_dead_signal: String,
     pub pane_dead_status: Option<u32>,
     pub pane_path: String,
     pub pane_flags: String,
@@ -175,6 +176,7 @@ enum FormatBacking {
     PaneCurrentCommand,
     PaneCurrentPath,
     PaneDead,
+    PaneDeadSignal,
     PaneDeadStatus,
     PanePath,
     PaneFlags,
@@ -353,7 +355,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_current_command", Pane, PaneCurrentCommand),
     variable!("pane_current_path", Pane, PaneCurrentPath),
     variable!("pane_dead", Pane, PaneDead),
-    variable!("pane_dead_signal", Pane, Empty),
+    variable!("pane_dead_signal", Pane, PaneDeadSignal),
     variable!("pane_dead_status", Pane, PaneDeadStatus),
     variable!("pane_dead_time", Pane, Time, Empty),
     variable!("pane_fg", Pane, Empty),
@@ -542,6 +544,11 @@ impl StatusContext {
             FormatBacking::PaneCurrentCommand => Cow::Borrowed(self.pane_current_command.as_str()),
             FormatBacking::PaneCurrentPath => Cow::Borrowed(self.pane_current_path.as_str()),
             FormatBacking::PaneDead => optional_bool(self.pane_dead),
+            FormatBacking::PaneDeadSignal => Cow::Borrowed(if self.pane_dead == Some(true) {
+                self.pane_dead_signal.as_str()
+            } else {
+                ""
+            }),
             FormatBacking::PaneDeadStatus => optional_display(self.pane_dead_status),
             FormatBacking::PanePath => Cow::Borrowed(self.pane_path.as_str()),
             FormatBacking::PaneFlags => Cow::Borrowed(self.pane_flags.as_str()),
@@ -886,6 +893,7 @@ impl MuxEngine {
             context.pane_start_path.clone_from(&facts.start_path);
             context.pane_pid = facts.pid;
             context.pane_tty.clone_from(&facts.tty);
+            context.pane_dead_signal.clone_from(&facts.dead_signal);
         } else {
             context.pane_current_path = match &pane.kind {
                 PaneKind::Agent(agent) => agent

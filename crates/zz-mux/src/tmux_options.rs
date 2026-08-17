@@ -332,7 +332,7 @@ fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
     Some(match name {
         "default-terminal" => TmuxOptionDefault::String("tmux-256color"),
         "escape-time" => TmuxOptionDefault::Scalar("10"),
-        "base-index" | "pane-base-index" => TmuxOptionDefault::Scalar("0"),
+        "base-index" | "initial-repeat-time" | "pane-base-index" => TmuxOptionDefault::Scalar("0"),
         "buffer-limit" => TmuxOptionDefault::Scalar("50"),
         "copy-command" => TmuxOptionDefault::String(""),
         "history-limit" => TmuxOptionDefault::Scalar("2000"),
@@ -547,6 +547,7 @@ mod tests {
                 ("base-index", TmuxOptionDefault::Scalar("0")),
                 ("display-time", TmuxOptionDefault::Scalar("750")),
                 ("history-limit", TmuxOptionDefault::Scalar("2000")),
+                ("initial-repeat-time", TmuxOptionDefault::Scalar("0")),
                 ("mouse", TmuxOptionDefault::Scalar("on")),
                 ("prefix", TmuxOptionDefault::Scalar("C-b")),
                 ("renumber-windows", TmuxOptionDefault::Scalar("off")),

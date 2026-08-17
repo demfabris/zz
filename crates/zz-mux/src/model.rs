@@ -186,6 +186,7 @@ pub struct Pane {
     pub bell: bool,
     pub dead: bool,
     pub dead_status: Option<u32>,
+    pub(crate) empty: bool,
     input_options: InputOptions,
 }
 
@@ -347,6 +348,7 @@ impl MuxState {
             bell: false,
             dead: false,
             dead_status: None,
+            empty: false,
             input_options: InputOptions::default(),
         };
         let window = Window {
@@ -454,6 +456,7 @@ impl MuxState {
             bell: false,
             dead: false,
             dead_status: None,
+            empty: false,
             input_options: InputOptions::default(),
         };
         let window = Window {
@@ -950,6 +953,7 @@ impl MuxState {
                 bell: false,
                 dead: false,
                 dead_status: None,
+                empty: false,
                 input_options: InputOptions::default(),
             },
         );
@@ -2372,11 +2376,12 @@ impl MuxState {
         let pane = self
             .pane_mut(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-        if pane.dead && pane.dead_status == status {
+        if pane.dead && pane.dead_status == status && !pane.empty {
             return Ok(false);
         }
         pane.dead = true;
         pane.dead_status = status;
+        pane.empty = false;
         self.bump_generation();
         Ok(true)
     }
@@ -2385,11 +2390,26 @@ impl MuxState {
         let pane = self
             .pane_mut(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-        if !pane.dead && pane.dead_status.is_none() {
+        if !pane.dead && pane.dead_status.is_none() && !pane.empty {
             return Ok(false);
         }
         pane.dead = false;
         pane.dead_status = None;
+        pane.empty = false;
+        self.bump_generation();
+        Ok(true)
+    }
+
+    pub fn mark_pane_empty(&mut self, pane: PaneId) -> Result<bool, ServerError> {
+        let pane = self
+            .pane_mut(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        if !pane.dead && pane.dead_status.is_none() && pane.empty {
+            return Ok(false);
+        }
+        pane.dead = false;
+        pane.dead_status = None;
+        pane.empty = true;
         self.bump_generation();
         Ok(true)
     }

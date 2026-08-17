@@ -249,7 +249,7 @@ pub struct TerminalEvents {
 
 struct ForegroundSource {
     #[cfg(unix)]
-    master: filedescriptor::FileDescriptor,
+    master: Arc<parking_lot::Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     shell: Option<u32>,
     tty: Option<PathBuf>,
 }
@@ -258,9 +258,10 @@ impl ForegroundSource {
     fn process_id(&self) -> Option<u32> {
         #[cfg(unix)]
         {
-            rustix::termios::tcgetpgrp(&self.master)
-                .ok()
-                .and_then(|group| u32::try_from(group.as_raw_pid()).ok())
+            self.master
+                .lock()
+                .process_group_leader()
+                .and_then(|group| u32::try_from(group).ok())
                 .filter(|process_id| *process_id != 0)
                 .or_else(|| self.shell_process_id())
         }
@@ -513,6 +514,36 @@ impl TerminalSession {
         text: String,
         appearance: Arc<TerminalAppearance>,
     ) -> Self {
+        Self::spawn_surface_with_appearance(
+            title,
+            text,
+            appearance,
+            MAX_OUTPUT_VIEW_SCROLLBACK,
+            true,
+        )
+    }
+
+    #[must_use]
+    pub fn spawn_empty_with_appearance(
+        max_scrollback: usize,
+        appearance: Arc<TerminalAppearance>,
+    ) -> Self {
+        Self::spawn_surface_with_appearance(
+            String::new(),
+            String::new(),
+            appearance,
+            max_scrollback.min(MAX_HISTORY_LIMIT),
+            false,
+        )
+    }
+
+    fn spawn_surface_with_appearance(
+        title: String,
+        text: String,
+        appearance: Arc<TerminalAppearance>,
+        max_scrollback: usize,
+        frozen: bool,
+    ) -> Self {
         let (command_tx, command_rx) = command_channel();
         let commands = CommandSender {
             commands: command_tx,
@@ -536,9 +567,21 @@ impl TerminalSession {
 
         let worker_publisher = publisher.clone();
         if let Err(error) = thread::Builder::new()
-            .name("zz-output-view".into())
+            .name(if frozen {
+                "zz-output-view".into()
+            } else {
+                "zz-empty-pane".into()
+            })
             .spawn(move || {
-                output_view_worker(command_rx, worker_publisher, title, text, appearance);
+                output_view_worker(
+                    command_rx,
+                    worker_publisher,
+                    title,
+                    text,
+                    appearance,
+                    max_scrollback,
+                    frozen,
+                );
             })
         {
             publisher.fail(&WorkerError::Thread(error.to_string()));
@@ -548,7 +591,7 @@ impl TerminalSession {
             commands,
             events,
             latest,
-            max_scrollback: MAX_OUTPUT_VIEW_SCROLLBACK,
+            max_scrollback,
             word_separators: RwLock::new(WordSeparators::default()),
         }
     }
@@ -2465,8 +2508,18 @@ fn output_view_worker(
     title: String,
     text: String,
     appearance: Arc<TerminalAppearance>,
+    max_scrollback: usize,
+    frozen: bool,
 ) {
-    if let Err(error) = run_output_view(&command_rx, &publisher, &title, &text, &appearance) {
+    if let Err(error) = run_output_view(
+        &command_rx,
+        &publisher,
+        &title,
+        &text,
+        &appearance,
+        max_scrollback,
+        frozen,
+    ) {
         log::error!("command output view stopped: {error}");
         publisher.fail(&error);
     }
@@ -2588,19 +2641,23 @@ fn run_output_view(
     title: &str,
     text: &str,
     appearance: &TerminalAppearance,
+    max_scrollback: usize,
+    frozen: bool,
 ) -> Result<(), WorkerError> {
     install_kitty_png_decoder();
     let mut geometry = Geometry::default();
     let mut terminal = Terminal::new(TerminalOptions {
         cols: geometry.columns,
         rows: geometry.rows,
-        max_scrollback: MAX_OUTPUT_VIEW_SCROLLBACK,
+        max_scrollback,
     })?;
     let reported_color_scheme = Rc::new(Cell::new(ghostty_color_scheme(appearance.color_scheme)));
     let color_scheme_source = Rc::clone(&reported_color_scheme);
     terminal.on_color_scheme(move |_| Some(color_scheme_source.get()))?;
     apply_terminal_appearance(&mut terminal, appearance)?;
-    write_output_view_content(&mut terminal, title, text);
+    if frozen {
+        write_output_view_content(&mut terminal, title, text);
+    }
 
     let mut render_state = RenderState::new()?;
     let mut row_iterator = RowIterator::new()?;
@@ -2621,11 +2678,21 @@ fn run_output_view(
         crossbeam_channel::select_biased! {
             recv(command_rx) -> message => match message {
                 Ok(Command::AttachView(view_id)) => {
-                    if let Entry::Vacant(entry) = active_views.entry(view_id) {
-                        let state = inactive_views
-                            .remove(&view_id)
-                            .map_or_else(|| output_view_state(&mut terminal).map(Box::new), Ok)?;
-                        entry.insert(state);
+                    if frozen {
+                        if let Entry::Vacant(entry) = active_views.entry(view_id) {
+                            let state = inactive_views
+                                .remove(&view_id)
+                                .map_or_else(|| output_view_state(&mut terminal).map(Box::new), Ok)?;
+                            entry.insert(state);
+                        }
+                    } else {
+                        activate_view(
+                            &mut terminal,
+                            view_id,
+                            &mut active_views,
+                            &mut inactive_views,
+                            &word_separators,
+                        )?;
                     }
                     if let Some(state) = active_views.get_mut(&view_id) {
                         let _ = refresh_view_search(
@@ -2650,8 +2717,18 @@ fn run_output_view(
                     )?;
                 }
                 Ok(Command::DetachView(view_id)) => {
-                    if let Some(state) = active_views.remove(&view_id) {
-                        inactive_views.insert(view_id, state);
+                    if frozen {
+                        if let Some(state) = active_views.remove(&view_id) {
+                            inactive_views.insert(view_id, state);
+                        }
+                    } else {
+                        deactivate_view(
+                            &mut terminal,
+                            view_id,
+                            &mut active_views,
+                            &mut inactive_views,
+                            &word_separators,
+                        )?;
                     }
                     search_worker.cancel(view_id);
                     publish_active_views(
@@ -2669,8 +2746,17 @@ fn run_output_view(
                     )?;
                 }
                 Ok(Command::ReleaseView(view_id)) => {
-                    active_views.remove(&view_id);
-                    inactive_views.remove(&view_id);
+                    if frozen {
+                        active_views.remove(&view_id);
+                        inactive_views.remove(&view_id);
+                    } else {
+                        release_view(
+                            &mut terminal,
+                            view_id,
+                            &mut active_views,
+                            &mut inactive_views,
+                        )?;
+                    }
                     search_worker.forget(view_id);
                     publish_active_views(
                         &mut terminal,
@@ -2695,8 +2781,24 @@ fn run_output_view(
                             geometry.cell_width_px,
                             geometry.cell_height_px,
                         )?;
-                        for view in active_views.values_mut().chain(inactive_views.values_mut()) {
-                            refresh_output_view(&mut terminal, view)?;
+                        for view in inactive_views.values_mut() {
+                            if frozen {
+                                refresh_output_view(&mut terminal, view)?;
+                            } else {
+                                view.invalidate_layout();
+                            }
+                        }
+                        for view in active_views.values_mut() {
+                            if frozen {
+                                refresh_output_view(&mut terminal, view)?;
+                            } else {
+                                view.invalidate_layout();
+                                reconcile_view_screen(
+                                    &mut terminal,
+                                    view,
+                                    &word_separators,
+                                )?;
+                            }
                         }
                         publish_active_views(
                             &mut terminal,
@@ -2755,7 +2857,7 @@ fn run_output_view(
                         &word_separators,
                         &bound_pasted_images,
                     )?;
-                    let closed = state.copy_mode.is_none();
+                    let closed = frozen && state.copy_mode.is_none();
                     match result {
                         ViewActionResult::Snapshot | ViewActionResult::ContentSnapshot if !closed => {
                             publish_active_views(
@@ -3019,7 +3121,7 @@ fn run_terminal(
     };
     command.env(
         "TERM",
-        spawn.terminal_type.as_deref().unwrap_or("xterm-256color"),
+        spawn.terminal_type.as_deref().unwrap_or("tmux-256color"),
     );
     for (key, value) in &spawn.env {
         if let Some(value) = value {
@@ -3064,7 +3166,7 @@ fn run_terminal(
     let wake_rx =
         wake_rx.ok_or_else(|| WorkerError::Pty("terminal wake pipe unavailable".to_owned()))?;
     #[cfg(unix)]
-    let (drain_fd, mut writer, foreground_fd) = {
+    let (drain_fd, mut writer) = {
         let dup = || {
             pair.master
                 .as_raw_fd()
@@ -3073,17 +3175,15 @@ fn run_terminal(
         };
         let drain_fd = dup()?;
         let writer_fd = dup()?;
-        let foreground_fd = dup()?;
         let _ = rustix::io::fcntl_setfd(&drain_fd, rustix::io::FdFlags::CLOEXEC);
         let _ = rustix::io::fcntl_setfd(&writer_fd, rustix::io::FdFlags::CLOEXEC);
-        let _ = rustix::io::fcntl_setfd(&foreground_fd, rustix::io::FdFlags::CLOEXEC);
         rustix::io::ioctl_fionbio(&drain_fd, true).map_err(|errno| {
             WorkerError::Pty(format!(
                 "failed to make the PTY master nonblocking: {errno}"
             ))
         })?;
         let writer: Box<dyn Write + Send> = Box::new(PtyWriter { fd: writer_fd });
-        (drain_fd, writer, foreground_fd)
+        (drain_fd, writer)
     };
     #[cfg(not(unix))]
     let reader = pair
@@ -3095,13 +3195,13 @@ fn run_terminal(
         .master
         .take_writer()
         .map_err(|error| WorkerError::Pty(error.to_string()))?;
-    #[cfg(windows)]
+    #[cfg(not(unix))]
     let mut master = Some(pair.master);
-    #[cfg(not(windows))]
-    let master = Some(pair.master);
+    #[cfg(unix)]
+    let master = Arc::new(parking_lot::Mutex::new(pair.master));
     publisher.set_foreground_source(Some(Box::new(ForegroundSource {
         #[cfg(unix)]
-        master: foreground_fd,
+        master: Arc::clone(&master),
         shell: shell_process_id,
         tty,
     })));
@@ -3409,6 +3509,12 @@ fn run_terminal(
                         search_refresh_due = None;
                         geometry = next;
                         reported_size.set(geometry.size_report());
+                        #[cfg(unix)]
+                        master
+                            .lock()
+                            .resize(geometry.pty_size())
+                            .map_err(|error| WorkerError::Pty(error.to_string()))?;
+                        #[cfg(not(unix))]
                         if let Some(master) = &master {
                             master
                                 .resize(geometry.pty_size())
@@ -13760,6 +13866,40 @@ mod tests {
     }
 
     #[test]
+    fn empty_surface_is_live_pty_free_and_ignores_input() {
+        let session = TerminalSession::spawn_empty_with_appearance(
+            64,
+            Arc::new(TerminalAppearance::default()),
+        );
+        let view = TerminalViewId(91);
+        session.attach_view(view);
+
+        let viewport = wait_for_test_viewport(&session, |viewport| {
+            matches!(viewport.mode, TerminalMode::Live)
+                && matches!(viewport.status, SessionStatus::Running)
+        });
+        assert_eq!(viewport.columns, INITIAL_COLUMNS);
+        assert_eq!(viewport.rows, INITIAL_ROWS);
+        assert_eq!(session.process_id(), None);
+        assert_eq!(session.foreground_process_id(), None);
+        assert_eq!(session.tty(), None);
+
+        session.send_text("ZZ_EMPTY_MUST_STAY_BLANK");
+        let capture = session
+            .capture(CaptureOptions::default())
+            .expect("capture empty surface");
+        assert!(!capture.contains("ZZ_EMPTY_MUST_STAY_BLANK"));
+
+        session.resize(23, 7, 8, 18);
+        let viewport = wait_for_test_viewport(&session, |viewport| {
+            viewport.columns == 23
+                && viewport.rows == 7
+                && matches!(viewport.mode, TerminalMode::Live)
+        });
+        assert_eq!(viewport.status, SessionStatus::Running);
+    }
+
+    #[test]
     fn live_appearance_update_preserves_command_output_and_resets_colors() {
         let mut initial = TerminalAppearance {
             background: Color::rgb(0x11, 0x22, 0x33),
@@ -14038,7 +14178,7 @@ mod tests {
                 contents
             };
 
-        assert!(capture(47, None, Vec::new()).contains("ZZ_TERM:xterm-256color"));
+        assert!(capture(47, None, Vec::new()).contains("ZZ_TERM:tmux-256color"));
         assert!(capture(48, Some("zz-term"), Vec::new()).contains("ZZ_TERM:zz-term"));
         assert!(
             capture(

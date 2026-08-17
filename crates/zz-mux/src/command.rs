@@ -60,6 +60,7 @@ const DEFAULT_AUTOMATIC_RENAME_FORMAT: &str =
     "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}";
 const DEFAULT_TERMINAL: &str = "tmux-256color";
 const DEFAULT_DISPLAY_TIME_MS: u32 = 750;
+const DEFAULT_INITIAL_REPEAT_TIME_MS: u32 = 0;
 const DEFAULT_REPEAT_TIME_MS: u32 = 500;
 const MAX_REPEAT_TIME_MS: u32 = 2_000_000;
 pub const MAX_WORD_SEPARATORS_BYTES: usize = 8 * 1024;
@@ -107,6 +108,7 @@ pub enum MuxEffect {
         cwd: Option<String>,
         command: Option<String>,
         environment: Vec<(String, String)>,
+        empty: bool,
     },
     PanesRemoved(Vec<PaneId>),
     PaneRelocated {
@@ -305,6 +307,14 @@ impl SetClipboard {
             Self::Off => "off",
         }
     }
+
+    const fn toggled(self) -> Self {
+        match self {
+            Self::Off => Self::External,
+            Self::External => Self::Off,
+            Self::On => Self::On,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -343,6 +353,15 @@ impl RemainOnExit {
             Self::On => "on",
             Self::Failed => "failed",
             Self::Key => "key",
+        }
+    }
+
+    const fn toggled(self) -> Self {
+        match self {
+            Self::Off => Self::On,
+            Self::On => Self::Off,
+            Self::Failed => Self::Failed,
+            Self::Key => Self::Key,
         }
     }
 }
@@ -390,6 +409,8 @@ pub struct MuxEngine {
     default_terminal: Option<String>,
     global_display_time_ms: u32,
     session_display_time_ms: BTreeMap<SessionId, u32>,
+    global_initial_repeat_time_ms: u32,
+    session_initial_repeat_time_ms: BTreeMap<SessionId, u32>,
     global_repeat_time_ms: u32,
     session_repeat_time_ms: BTreeMap<SessionId, u32>,
     server_user_options: UserOptions,
@@ -419,6 +440,7 @@ pub struct MuxEngine {
 pub struct PaneRuntimeFacts {
     pub current_command: String,
     pub current_path: String,
+    pub dead_signal: String,
     pub reported_path: String,
     pub start_path: String,
     pub pid: Option<u32>,
@@ -476,6 +498,8 @@ impl Default for MuxEngine {
             default_terminal: None,
             global_display_time_ms: DEFAULT_DISPLAY_TIME_MS,
             session_display_time_ms: BTreeMap::new(),
+            global_initial_repeat_time_ms: DEFAULT_INITIAL_REPEAT_TIME_MS,
+            session_initial_repeat_time_ms: BTreeMap::new(),
             global_repeat_time_ms: DEFAULT_REPEAT_TIME_MS,
             session_repeat_time_ms: BTreeMap::new(),
             server_user_options: UserOptions::new(),
@@ -584,12 +608,67 @@ impl MuxEngine {
     }
 
     pub fn set_pane_runtime_facts(&mut self, pane: PaneId, facts: PaneRuntimeFacts) -> bool {
-        if self.state.pane(pane).is_none() || self.pane_runtime_facts.get(&pane) == Some(&facts) {
+        let mut hooks = CommandHooks::new(self.format_now);
+        self.set_pane_runtime_facts_with_hooks(pane, facts, &mut hooks)
+    }
+
+    pub fn set_pane_runtime_facts_with_hooks(
+        &mut self,
+        pane: PaneId,
+        mut facts: PaneRuntimeFacts,
+        hooks: &mut impl StatusHooks,
+    ) -> bool {
+        if self.state.pane(pane).is_none() {
+            return false;
+        }
+        facts.dead_signal = tmux_signal_name(&facts.dead_signal);
+        let command_changed = self
+            .pane_runtime_facts
+            .get(&pane)
+            .map_or(!facts.current_command.is_empty(), |previous| {
+                previous.current_command != facts.current_command
+            });
+        if self.pane_runtime_facts.get(&pane) == Some(&facts) {
             return false;
         }
         self.pane_runtime_facts.insert(pane, facts);
         self.state.bump_generation();
+        if command_changed {
+            self.refresh_automatic_window_name_for_pane(pane, hooks);
+        }
         true
+    }
+
+    pub fn mark_pane_dead(
+        &mut self,
+        pane: PaneId,
+        status: Option<u32>,
+        signal: Option<&str>,
+    ) -> Result<bool, ServerError> {
+        let mut hooks = CommandHooks::new(self.format_now);
+        self.mark_pane_dead_with_hooks(pane, status, signal, &mut hooks)
+    }
+
+    pub fn mark_pane_dead_with_hooks(
+        &mut self,
+        pane: PaneId,
+        status: Option<u32>,
+        signal: Option<&str>,
+        hooks: &mut impl StatusHooks,
+    ) -> Result<bool, ServerError> {
+        if self.state.pane(pane).is_none() {
+            return Err(ServerError::MissingTarget(pane.to_string()));
+        }
+        let dead_signal = signal.map_or_else(String::new, tmux_signal_name);
+        let facts = self.pane_runtime_facts.entry(pane).or_default();
+        let facts_changed = facts.dead_signal != dead_signal;
+        facts.dead_signal = dead_signal;
+        let state_changed = self.state.mark_pane_dead(pane, status)?;
+        if facts_changed && !state_changed {
+            self.state.bump_generation();
+        }
+        let name_changed = self.refresh_automatic_window_name_for_pane(pane, hooks);
+        Ok(facts_changed || state_changed || name_changed)
     }
 
     #[must_use]
@@ -792,8 +871,16 @@ impl MuxEngine {
     }
 
     #[must_use]
-    pub fn default_terminal_for_spawn(&self) -> Option<&str> {
-        self.default_terminal.as_deref()
+    pub fn default_terminal_for_spawn(&self) -> &str {
+        self.default_terminal.as_deref().unwrap_or(DEFAULT_TERMINAL)
+    }
+
+    #[must_use]
+    pub fn initial_repeat_time_for_session(&self, session: SessionId) -> u32 {
+        self.session_initial_repeat_time_ms
+            .get(&session)
+            .copied()
+            .unwrap_or(self.global_initial_repeat_time_ms)
     }
 
     #[must_use]
@@ -847,6 +934,55 @@ impl MuxEngine {
         self.window_automatic_rename_formats
             .get(&window)
             .map_or(self.global_automatic_rename_format.as_str(), String::as_str)
+    }
+
+    fn refresh_automatic_window_name_for_pane(
+        &mut self,
+        pane: PaneId,
+        hooks: &mut impl StatusHooks,
+    ) -> bool {
+        let Some(window) = self.state.window_for_pane(pane) else {
+            return false;
+        };
+        let Some(window_state) = self.state.windows.get(&window) else {
+            return false;
+        };
+        if window_state.active_pane != pane
+            || !self
+                .state
+                .window_automatic_rename(window)
+                .unwrap_or_default()
+        {
+            return false;
+        }
+        let session = window_state.session;
+        let pane_dead = window_state.panes[&pane].dead;
+        let format = self.automatic_rename_format_for_window(window).to_owned();
+        if !pane_dead
+            && !self.pane_runtime_facts.contains_key(&pane)
+            && format == DEFAULT_AUTOMATIC_RENAME_FORMAT
+        {
+            return false;
+        }
+        let name = expand_format_with_hooks(
+            &format,
+            self,
+            FormatContext {
+                session: Some(session),
+                window: Some(window),
+                pane: None,
+                active_session: Some(session),
+                format_type: FormatType::Window,
+            },
+            hooks,
+        );
+        let changed = self.state.windows[&window].name != name;
+        if changed {
+            self.state
+                .rename_window(window, name)
+                .expect("automatic rename window exists");
+        }
+        changed
     }
 
     fn remain_on_exit_for_window(&self, window: WindowId) -> RemainOnExit {
@@ -983,8 +1119,8 @@ impl MuxEngine {
             "set-agent-provider" => self.set_agent_provider(context, &command.args)?,
             "restart-agent-pane" => self.restart_agent_pane(context, &command.args)?,
             "set-editor-path" => self.set_editor_path(context, &command.args)?,
-            "select-pane" => self.select_pane(context, &command.args)?,
-            "last-pane" => self.last_pane(context, &command.args)?,
+            "select-pane" => self.select_pane(context, &command.args, hooks)?,
+            "last-pane" => self.last_pane(context, &command.args, hooks)?,
             "swap-pane" => self.swap_pane(context, &command.args)?,
             "list-panes" => self.list_panes(context, &command.args, hooks)?,
             "resize-pane" => self.resize_pane(context, &command.args)?,
@@ -992,7 +1128,7 @@ impl MuxEngine {
                 self.select_layout(context, &command.args, name)?
             }
             "rotate-window" => self.rotate_window(context, &command.args)?,
-            "kill-pane" => self.kill_pane(context, &command.args)?,
+            "kill-pane" => self.kill_pane(context, &command.args, hooks)?,
             "respawn-pane" => self.respawn_pane(context, &command.args, hooks)?,
             "respawn-window" => self.respawn_window(context, &command.args, hooks)?,
             "send-keys" => self.send_keys(context, &command.args)?,
@@ -1010,8 +1146,8 @@ impl MuxEngine {
             "unbind-key" => self.unbind_key(&command.args)?,
             "list-keys" => self.list_keys(&command.args)?,
             "list-commands" => self.list_commands(context, &command.args, hooks)?,
-            "set-option" => self.set_option(context, &command.args, false)?,
-            "set-window-option" => self.set_option(context, &command.args, true)?,
+            "set-option" => self.set_option(context, &command.args, false, hooks)?,
+            "set-window-option" => self.set_option(context, &command.args, true, hooks)?,
             "show-options" => self.show_options(context, &command.args, false)?,
             "show-window-options" => self.show_options(context, &command.args, true)?,
             "set-environment" => self.set_environment(context, &command.args, hooks)?,
@@ -1039,6 +1175,19 @@ impl MuxEngine {
             _ => return Err(ServerError::UnsupportedCommand(command.name.clone())),
         };
 
+        let created_panes = execution
+            .effects
+            .iter()
+            .filter_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } | MuxEffect::PaneMaterialized { pane, .. } => {
+                    Some(*pane)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for pane in created_panes {
+            self.refresh_automatic_window_name_for_pane(pane, hooks);
+        }
         if self.state.generation() != generation {
             execution.effects.push(MuxEffect::SnapshotChanged);
         }
@@ -1054,6 +1203,8 @@ impl MuxEngine {
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_display_time_ms
             .retain(|session, _| self.state.sessions.contains_key(session));
+        self.session_initial_repeat_time_ms
+            .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_repeat_time_ms
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_user_options
@@ -1061,6 +1212,8 @@ impl MuxEngine {
         self.window_user_options
             .retain(|window, _| self.state.windows.contains_key(window));
         self.pane_user_options
+            .retain(|pane, _| self.state.pane(*pane).is_some());
+        self.pane_runtime_facts
             .retain(|pane, _| self.state.pane(*pane).is_some());
         self.session_environments
             .retain(|session, _| self.state.sessions.contains_key(session));
@@ -2414,6 +2567,7 @@ impl MuxEngine {
         &mut self,
         context: &mut ExecutionContext,
         args: &[String],
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("select-pane", args)?;
         if positional.len() > 1 {
@@ -2452,7 +2606,7 @@ impl MuxEngine {
                 .window_for_pane(start)
                 .expect("resolved pane has a window");
             let pane = self.state.last_pane(window)?;
-            self.select_pane_target(context, pane, options.has("-Z"))?;
+            self.select_pane_target(context, pane, options.has("-Z"), hooks)?;
             return Ok(Execution::default());
         }
         let pane = if let Some(direction) = direction {
@@ -2467,7 +2621,7 @@ impl MuxEngine {
             self.state.update_pane_title(pane, title)?;
             return Ok(Execution::default());
         }
-        self.select_pane_target(context, pane, options.has("-Z"))?;
+        self.select_pane_target(context, pane, options.has("-Z"), hooks)?;
         Ok(Execution::default())
     }
 
@@ -2476,9 +2630,11 @@ impl MuxEngine {
         context: &mut ExecutionContext,
         pane: PaneId,
         preserve_zoom: bool,
+        hooks: &mut impl StatusHooks,
     ) -> Result<(), ServerError> {
         if self.state.select_pane_with_zoom(pane, preserve_zoom)? {
             *context = ExecutionContext::for_pane(&self.state, pane).expect("selected pane exists");
+            self.refresh_automatic_window_name_for_pane(pane, hooks);
         }
         Ok(())
     }
@@ -2487,6 +2643,7 @@ impl MuxEngine {
         &mut self,
         context: &mut ExecutionContext,
         args: &[String],
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("last-pane", args)?;
         if !positional.is_empty() {
@@ -2496,7 +2653,7 @@ impl MuxEngine {
         }
         let window = self.resolve_window(options.value("-t"), context.session, context.window)?;
         let pane = self.state.last_pane(window)?;
-        self.select_pane_target(context, pane, options.has("-Z"))?;
+        self.select_pane_target(context, pane, options.has("-Z"), hooks)?;
         Ok(Execution::default())
     }
 
@@ -2890,6 +3047,7 @@ impl MuxEngine {
         &mut self,
         context: &ExecutionContext,
         args: &[String],
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-pane", args)?;
         reject_positionals("kill-pane", &positional)?;
@@ -2922,7 +3080,10 @@ impl MuxEngine {
         for target in targets {
             panes.extend(self.state.kill_pane(target)?);
         }
-        if !self.state.windows.contains_key(&window) {
+        if self.state.windows.contains_key(&window) {
+            let active_pane = self.state.windows[&window].active_pane;
+            self.refresh_automatic_window_name_for_pane(active_pane, hooks);
+        } else {
             self.renumber_session_if_enabled(session)?;
         }
         Ok(Execution::effect(MuxEffect::PanesRemoved(panes)))
@@ -2945,7 +3106,7 @@ impl MuxEngine {
                 "respawn pane failed: pane {pane} is not a terminal"
             )));
         }
-        if !pane_state.dead && !options.has("-k") {
+        if !pane_state.dead && !pane_state.empty && !options.has("-k") {
             return Err(ServerError::InvalidCommand(format!(
                 "respawn pane failed: pane {} still active",
                 self.pane_target_description(pane)?
@@ -2954,12 +3115,18 @@ impl MuxEngine {
         let (_, cwd) = spawn_cwd_source(self, &options, Some(pane), &PaneKind::Terminal, hooks);
         let environment = respawn_environment(&options);
         let command = shell_command_positional(&positional);
-        self.state.revive_pane(pane)?;
+        let empty = options.has("-E");
+        if empty {
+            self.state.mark_pane_empty(pane)?;
+        } else {
+            self.state.revive_pane(pane)?;
+        }
         Ok(Execution::effect(MuxEffect::PaneRespawned {
             pane,
             cwd,
             command,
             environment,
+            empty,
         }))
     }
 
@@ -2976,7 +3143,12 @@ impl MuxEngine {
             .windows
             .get(&window)
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
-        if !options.has("-k") && window_state.panes.values().any(|pane| !pane.dead) {
+        if !options.has("-k")
+            && window_state
+                .panes
+                .values()
+                .any(|pane| !pane.dead && !pane.empty)
+        {
             return Err(ServerError::InvalidCommand(format!(
                 "respawn window failed: window {} still active",
                 self.window_target_description(window)?
@@ -3000,11 +3172,16 @@ impl MuxEngine {
         let (_, cwd) = spawn_cwd_source(self, &options, Some(pane), &PaneKind::Terminal, hooks);
         let environment = respawn_environment(&options);
         let command = shell_command_positional(&positional);
+        let empty = options.has("-E");
         let mut removed = Vec::new();
         for other in other_panes {
             removed.extend(self.state.kill_pane(other)?);
         }
-        self.state.revive_pane(pane)?;
+        if empty {
+            self.state.mark_pane_empty(pane)?;
+        } else {
+            self.state.revive_pane(pane)?;
+        }
         let mut effects = Vec::with_capacity(2);
         if !removed.is_empty() {
             effects.push(MuxEffect::PanesRemoved(removed));
@@ -3014,6 +3191,7 @@ impl MuxEngine {
             cwd,
             command,
             environment,
+            empty,
         });
         Ok(Execution {
             output: String::new(),
@@ -3449,7 +3627,8 @@ impl MuxEngine {
                     .map(format_command)
                     .collect::<Vec<_>>()
                     .join(" \\; ");
-                format!("bind-key -T {table} {key} {commands}")
+                let repeat = if binding.repeat { " -r" } else { "" };
+                format!("bind-key{repeat} -T {table} {key} {commands}")
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -3515,6 +3694,7 @@ impl MuxEngine {
         context: &ExecutionContext,
         args: &[String],
         force_window: bool,
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let command = if force_window {
             "set-window-option"
@@ -3596,11 +3776,11 @@ impl MuxEngine {
             "synchronize-panes" => self.set_synchronize_panes(value, &options, target),
             "mouse" => self.set_mouse(value, &options, target),
             "escape-time" => self.set_escape_time(value, &options),
-            "automatic-rename" => self.set_automatic_rename(value, &options, target),
+            "automatic-rename" => self.set_automatic_rename(value, &options, target, hooks),
             "automatic-rename-format" => self.set_automatic_rename_format(value, &options, target),
             "remain-on-exit" => self.set_remain_on_exit(value, &options, target),
             "default-terminal" => self.set_default_terminal(value, &options),
-            "display-time" | "repeat-time" => {
+            "display-time" | "initial-repeat-time" | "repeat-time" => {
                 self.set_behavior_time(table_option.name, value, &options, target)
             }
             "buffer-limit" => self.set_buffer_limit(value, &options),
@@ -4041,6 +4221,11 @@ impl MuxEngine {
                     .get(&session)
                     .map(|value| (value.to_string(), false))
                     .or_else(inherited),
+                "initial-repeat-time" => self
+                    .session_initial_repeat_time_ms
+                    .get(&session)
+                    .map(|value| (value.to_string(), false))
+                    .or_else(inherited),
                 "repeat-time" => self
                     .session_repeat_time_ms
                     .get(&session)
@@ -4153,6 +4338,7 @@ impl MuxEngine {
             "copy-command" => self.copy_command.clone(),
             "history-limit" => self.global_history_limit.to_string(),
             "display-time" => self.global_display_time_ms.to_string(),
+            "initial-repeat-time" => self.global_initial_repeat_time_ms.to_string(),
             "message-limit" => self.message_limit.to_string(),
             "mode-keys" => self.global_mode_keys.as_str().to_owned(),
             "mouse" => tmux_flag(self.global_mouse).to_owned(),
@@ -4161,7 +4347,7 @@ impl MuxEngine {
             "renumber-windows" => tmux_flag(self.global_renumber_windows).to_owned(),
             "repeat-time" => self.global_repeat_time_ms.to_string(),
             "set-clipboard" => self.set_clipboard.as_str().to_owned(),
-            "status" => tmux_flag(self.status.enabled).to_owned(),
+            "status" => self.status.lines_string(),
             "status-interval" => self.status.interval.as_secs().to_string(),
             "status-left" => self.status.left.clone(),
             "status-right" => self.status.right.clone(),
@@ -4259,21 +4445,21 @@ impl MuxEngine {
         if options.has("-o") {
             return already_set_or_quiet(options, option);
         }
-        let value = value.ok_or_else(|| {
-            ServerError::InvalidCommand(format!("set-option {option} needs a value"))
-        })?;
         let changed = match option {
             "experimental-agent-pane" => {
                 self.experimental_agent_pane =
-                    parse_flag_value(Some(value), self.experimental_agent_pane)?;
+                    parse_flag_value(value, self.experimental_agent_pane)?;
                 MuxOptionKey::ExperimentalAgentPane
             }
             "experimental-editor-pane" => {
                 self.experimental_editor_pane =
-                    parse_flag_value(Some(value), self.experimental_editor_pane)?;
+                    parse_flag_value(value, self.experimental_editor_pane)?;
                 MuxOptionKey::ExperimentalEditorPane
             }
             "agent-command" | "agent-claude-code-command" => {
+                let value = value.ok_or_else(|| {
+                    ServerError::InvalidCommand(format!("set-option {option} needs a value"))
+                })?;
                 if value.len() > MAX_AGENT_COMMAND_BYTES {
                     return Err(ServerError::InvalidCommand(format!(
                         "{option} exceeds {MAX_AGENT_COMMAND_BYTES} bytes"
@@ -4293,7 +4479,7 @@ impl MuxEngine {
                 }
             }
             "agent-auto-approve" => {
-                self.agent.auto_approve = parse_flag_value(Some(value), self.agent.auto_approve)?;
+                self.agent.auto_approve = parse_flag_value(value, self.agent.auto_approve)?;
                 MuxOptionKey::AgentAutoApprove
             }
             _ => unreachable!("native option is catalogued"),
@@ -4329,19 +4515,18 @@ impl MuxEngine {
                 self.set_clipboard = if unset {
                     SetClipboard::default()
                 } else {
-                    match value.ok_or_else(|| {
-                        ServerError::InvalidCommand(
-                            "set-option set-clipboard needs a value".to_owned(),
-                        )
-                    })? {
-                        "on" => SetClipboard::On,
-                        "external" => SetClipboard::External,
-                        "off" => SetClipboard::Off,
-                        value => {
-                            return Err(ServerError::InvalidCommand(format!(
-                                "invalid set-clipboard value: {value}"
-                            )));
-                        }
+                    match value {
+                        None | Some("") => self.set_clipboard.toggled(),
+                        Some(value) => match value {
+                            "on" => SetClipboard::On,
+                            "external" => SetClipboard::External,
+                            "off" => SetClipboard::Off,
+                            value => {
+                                return Err(ServerError::InvalidCommand(format!(
+                                    "invalid set-clipboard value: {value}"
+                                )));
+                            }
+                        },
                     }
                 };
                 MuxOptionKey::SetClipboard
@@ -4747,6 +4932,14 @@ impl MuxEngine {
         options: &Options,
     ) -> Result<Execution, ServerError> {
         let unset = option_is_unset(options);
+        if option == StatusOption::Enabled && !unset && value.is_none_or(str::is_empty) {
+            let changed = self.status.toggle_enabled_choice();
+            return Ok(if changed {
+                Execution::effect(MuxEffect::StatusFormatsChanged)
+            } else {
+                Execution::default()
+            });
+        }
         let appended = (!unset && options.has("-a"))
             .then(|| self.status.format(option))
             .flatten()
@@ -5028,6 +5221,7 @@ impl MuxEngine {
         value: Option<&str>,
         options: &Options,
         target: TmuxOptionTarget,
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let unset = option_is_unset(options);
         if options.has("-o") && !unset {
@@ -5067,6 +5261,32 @@ impl MuxEngine {
                 self.state.set_window_automatic_rename(window, next)?;
             }
             _ => unreachable!("automatic-rename has window scope"),
+        }
+        let panes = match target {
+            TmuxOptionTarget::GlobalWindow => self
+                .state
+                .windows
+                .values()
+                .filter(|window| {
+                    self.state
+                        .window_automatic_rename(window.id)
+                        .unwrap_or_default()
+                })
+                .map(|window| window.active_pane)
+                .collect::<Vec<_>>(),
+            TmuxOptionTarget::Window(window)
+                if self
+                    .state
+                    .window_automatic_rename(window)
+                    .unwrap_or_default() =>
+            {
+                vec![self.state.windows[&window].active_pane]
+            }
+            TmuxOptionTarget::Window(_) => Vec::new(),
+            _ => unreachable!("automatic-rename has window scope"),
+        };
+        for pane in panes {
+            self.refresh_automatic_window_name_for_pane(pane, hooks);
         }
         Ok(Execution::default())
     }
@@ -5154,11 +5374,7 @@ impl MuxEngine {
                 self.global_remain_on_exit = if unset {
                     RemainOnExit::Off
                 } else {
-                    parse_remain_on_exit(value.ok_or_else(|| {
-                        ServerError::InvalidCommand(
-                            "set-option remain-on-exit needs a value".to_owned(),
-                        )
-                    })?)?
+                    parse_remain_on_exit(value, self.global_remain_on_exit)?
                 };
             }
             TmuxOptionTarget::Window(window) => {
@@ -5176,11 +5392,7 @@ impl MuxEngine {
                 } else if unset {
                     self.window_remain_on_exit.remove(&window);
                 } else {
-                    let next = parse_remain_on_exit(value.ok_or_else(|| {
-                        ServerError::InvalidCommand(
-                            "set-option remain-on-exit needs a value".to_owned(),
-                        )
-                    })?)?;
+                    let next = parse_remain_on_exit(value, self.remain_on_exit_for_window(window))?;
                     self.window_remain_on_exit.insert(window, next);
                 }
             }
@@ -5188,11 +5400,7 @@ impl MuxEngine {
                 if unset {
                     self.pane_remain_on_exit.remove(&pane);
                 } else {
-                    let next = parse_remain_on_exit(value.ok_or_else(|| {
-                        ServerError::InvalidCommand(
-                            "set-option remain-on-exit needs a value".to_owned(),
-                        )
-                    })?)?;
+                    let next = parse_remain_on_exit(value, self.remain_on_exit_for_pane(pane)?)?;
                     self.pane_remain_on_exit.insert(pane, next);
                 }
             }
@@ -5238,9 +5446,15 @@ impl MuxEngine {
         let unset = option_is_unset(options);
         if options.has("-o") && !unset {
             let already = match (option, target) {
-                ("display-time" | "repeat-time", TmuxOptionTarget::GlobalSession) => true,
+                (
+                    "display-time" | "initial-repeat-time" | "repeat-time",
+                    TmuxOptionTarget::GlobalSession,
+                ) => true,
                 ("display-time", TmuxOptionTarget::Session(session)) => {
                     self.session_display_time_ms.contains_key(&session)
+                }
+                ("initial-repeat-time", TmuxOptionTarget::Session(session)) => {
+                    self.session_initial_repeat_time_ms.contains_key(&session)
                 }
                 ("repeat-time", TmuxOptionTarget::Session(session)) => {
                     self.session_repeat_time_ms.contains_key(&session)
@@ -5251,15 +5465,15 @@ impl MuxEngine {
                 return already_set_or_quiet(options, option);
             }
         }
-        let maximum = if option == "repeat-time" {
+        let maximum = if matches!(option, "initial-repeat-time" | "repeat-time") {
             MAX_REPEAT_TIME_MS
         } else {
             i32::MAX.cast_unsigned()
         };
-        let default = if option == "repeat-time" {
-            DEFAULT_REPEAT_TIME_MS
-        } else {
-            DEFAULT_DISPLAY_TIME_MS
+        let default = match option {
+            "initial-repeat-time" => DEFAULT_INITIAL_REPEAT_TIME_MS,
+            "repeat-time" => DEFAULT_REPEAT_TIME_MS,
+            _ => DEFAULT_DISPLAY_TIME_MS,
         };
         let parsed = if unset {
             default
@@ -5280,6 +5494,16 @@ impl MuxEngine {
                     self.session_display_time_ms.remove(&session);
                 } else {
                     self.session_display_time_ms.insert(session, parsed);
+                }
+            }
+            ("initial-repeat-time", TmuxOptionTarget::GlobalSession) => {
+                self.global_initial_repeat_time_ms = parsed;
+            }
+            ("initial-repeat-time", TmuxOptionTarget::Session(session)) => {
+                if unset {
+                    self.session_initial_repeat_time_ms.remove(&session);
+                } else {
+                    self.session_initial_repeat_time_ms.insert(session, parsed);
                 }
             }
             ("repeat-time", TmuxOptionTarget::GlobalSession) => {
@@ -5519,6 +5743,98 @@ fn option_is_unset(options: &Options) -> bool {
     options.has("-u") || options.has("-U")
 }
 
+fn tmux_signal_name(value: &str) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        return String::new();
+    }
+    let lower = value.to_ascii_lowercase();
+    let short = lower.strip_prefix("sig").unwrap_or(&lower);
+    if matches!(
+        short,
+        "hup"
+            | "int"
+            | "quit"
+            | "ill"
+            | "trap"
+            | "abrt"
+            | "emt"
+            | "fpe"
+            | "kill"
+            | "bus"
+            | "segv"
+            | "sys"
+            | "pipe"
+            | "alrm"
+            | "term"
+            | "urg"
+            | "stop"
+            | "tstp"
+            | "cont"
+            | "chld"
+            | "ttin"
+            | "ttou"
+            | "io"
+            | "xcpu"
+            | "xfsz"
+            | "vtalrm"
+            | "prof"
+            | "winch"
+            | "info"
+            | "usr1"
+            | "usr2"
+    ) {
+        return short.to_owned();
+    }
+    for (description, name) in [
+        ("hangup", "hup"),
+        ("interrupt", "int"),
+        ("quit", "quit"),
+        ("illegal instruction", "ill"),
+        ("trace/bpt trap", "trap"),
+        ("trace trap", "trap"),
+        ("abort trap", "abrt"),
+        ("aborted", "abrt"),
+        ("emt trap", "emt"),
+        ("floating point exception", "fpe"),
+        ("killed", "kill"),
+        ("bus error", "bus"),
+        ("segmentation fault", "segv"),
+        ("bad system call", "sys"),
+        ("broken pipe", "pipe"),
+        ("alarm clock", "alrm"),
+        ("terminated", "term"),
+        ("urgent i/o condition", "urg"),
+        ("stopped (signal)", "stop"),
+        ("stopped (tty input)", "ttin"),
+        ("stopped (tty output)", "ttou"),
+        ("stopped", "tstp"),
+        ("continued", "cont"),
+        ("child exited", "chld"),
+        ("i/o possible", "io"),
+        ("cpu time limit exceeded", "xcpu"),
+        ("cputime limit exceeded", "xcpu"),
+        ("file size limit exceeded", "xfsz"),
+        ("filesize limit exceeded", "xfsz"),
+        ("virtual timer expired", "vtalrm"),
+        ("profiling timer expired", "prof"),
+        ("window size changes", "winch"),
+        ("window changed", "winch"),
+        ("information request", "info"),
+        ("user defined signal 1", "usr1"),
+        ("user defined signal 2", "usr2"),
+    ] {
+        if lower.starts_with(description) {
+            return name.to_owned();
+        }
+    }
+    let number = lower
+        .split(|character: char| !character.is_ascii_digit())
+        .rfind(|part| !part.is_empty())
+        .map(str::to_owned);
+    number.unwrap_or(lower)
+}
+
 fn parse_tmux_flag_value(value: Option<&str>, current: bool) -> Result<bool, ServerError> {
     let Some(value) = value else {
         return Ok(!current);
@@ -5543,7 +5859,16 @@ fn parse_tmux_flag_value(value: Option<&str>, current: bool) -> Result<bool, Ser
     Err(ServerError::InvalidCommand(format!("bad value: {value}")))
 }
 
-fn parse_remain_on_exit(value: &str) -> Result<RemainOnExit, ServerError> {
+fn parse_remain_on_exit(
+    value: Option<&str>,
+    current: RemainOnExit,
+) -> Result<RemainOnExit, ServerError> {
+    let Some(value) = value else {
+        return Ok(current.toggled());
+    };
+    if value.is_empty() {
+        return Ok(current.toggled());
+    }
     match value {
         "off" => Ok(RemainOnExit::Off),
         "on" => Ok(RemainOnExit::On),
@@ -8079,6 +8404,7 @@ mod tests {
         let facts = PaneRuntimeFacts {
             current_command: "fish".to_owned(),
             current_path: "/work/live".to_owned(),
+            dead_signal: String::new(),
             reported_path: "/work/reported".to_owned(),
             start_path: "/work/start".to_owned(),
             pid: Some(4242),
@@ -9573,6 +9899,20 @@ mod tests {
         assert!(listed.lines().any(|line| {
             line == "bind-key -T prefix x new-window -n one \\; new-window -n two"
         }));
+        engine
+            .execute(
+                &mut context,
+                &command("bind-key", &["-r", "z", "new-window"]),
+            )
+            .expect("repeat binding");
+        assert!(
+            engine
+                .execute(&mut context, &command("list-keys", &["-T", "prefix"]))
+                .unwrap()
+                .output
+                .lines()
+                .any(|line| line == "bind-key -r -T prefix z new-window")
+        );
 
         for args in [
             &["x", ";", "new-window"][..],
@@ -9938,6 +10278,7 @@ mod tests {
                 "tmux-256color",
             ),
             ("show-options", vec!["-gv", "display-time"], "750"),
+            ("show-options", vec!["-gv", "initial-repeat-time"], "0"),
             ("show-options", vec!["-gv", "repeat-time"], "500"),
         ] {
             assert_eq!(
@@ -9958,7 +10299,7 @@ mod tests {
                 .output,
             format!("automatic-rename-format \"{DEFAULT_AUTOMATIC_RENAME_FORMAT}\"")
         );
-        assert_eq!(engine.default_terminal_for_spawn(), None);
+        assert_eq!(engine.default_terminal_for_spawn(), "tmux-256color");
     }
 
     #[test]
@@ -9973,6 +10314,7 @@ mod tests {
         for args in [
             &["mouse", "on"] as &[&str],
             &["display-time", "1200"],
+            &["initial-repeat-time", "900"],
             &["repeat-time", "650"],
         ] {
             engine
@@ -9982,6 +10324,7 @@ mod tests {
         for (name, expected) in [
             ("mouse", "on"),
             ("display-time", "1200"),
+            ("initial-repeat-time", "900"),
             ("repeat-time", "650"),
         ] {
             assert_eq!(
@@ -9992,6 +10335,7 @@ mod tests {
                 expected
             );
         }
+        assert_eq!(engine.initial_repeat_time_for_session(session), 900);
         assert_eq!(engine.repeat_time_for_session(session), 650);
 
         engine
@@ -10072,14 +10416,14 @@ mod tests {
                 &command("set-option", &["-s", "default-terminal", "zz-term"]),
             )
             .unwrap();
-        assert_eq!(engine.default_terminal_for_spawn(), Some("zz-term"));
+        assert_eq!(engine.default_terminal_for_spawn(), "zz-term");
         engine
             .execute(
                 &mut context,
                 &command("set-option", &["-su", "default-terminal"]),
             )
             .unwrap();
-        assert_eq!(engine.default_terminal_for_spawn(), None);
+        assert_eq!(engine.default_terminal_for_spawn(), "tmux-256color");
         assert_eq!(
             engine
                 .execute(
@@ -10099,6 +10443,10 @@ mod tests {
             ),
             (vec!["-s", "escape-time", "-1"], "value is too small: -1"),
             (
+                vec!["-g", "initial-repeat-time", "2000001"],
+                "value is too large: 2000001",
+            ),
+            (
                 vec!["-g", "repeat-time", "2000001"],
                 "value is too large: 2000001",
             ),
@@ -10109,14 +10457,142 @@ mod tests {
             ));
         }
 
-        for name in ["mouse", "display-time", "repeat-time"] {
+        for name in [
+            "mouse",
+            "display-time",
+            "initial-repeat-time",
+            "repeat-time",
+        ] {
             engine
                 .execute(&mut context, &command("set-option", &["-u", name]))
                 .unwrap();
         }
         assert!(engine.mouse_for_session(session));
         assert_eq!(engine.display_time_for_session(session), 750);
+        assert_eq!(engine.initial_repeat_time_for_session(session), 0);
         assert_eq!(engine.repeat_time_for_session(session), 500);
+    }
+
+    #[test]
+    fn bare_flag_and_choice_options_toggle_like_the_pin() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+
+        for expected in ["off", "on"] {
+            engine
+                .execute(&mut context, &command("set-option", &["-g", "mouse"]))
+                .unwrap();
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", &["-gv", "mouse"]))
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
+
+        for expected in ["on", "off"] {
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-window-option", &["-g", "remain-on-exit"]),
+                )
+                .unwrap();
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &command("show-window-options", &["-gv", "remain-on-exit"]),
+                    )
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-g", "remain-on-exit", "failed"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-g", "remain-on-exit"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-window-options", &["-gv", "remain-on-exit"]),
+                )
+                .unwrap()
+                .output,
+            "failed"
+        );
+
+        for expected in ["off", "external"] {
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-option", &["-s", "set-clipboard"]),
+                )
+                .unwrap();
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &command("show-options", &["-sv", "set-clipboard"]),
+                    )
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "set-clipboard", "on"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "set-clipboard"]),
+            )
+            .unwrap();
+        assert_eq!(engine.mux_option_value(MuxOptionKey::SetClipboard), "on");
+
+        engine
+            .execute(&mut context, &command("set-option", &["-g", "status", "2"]))
+            .unwrap();
+        engine
+            .execute(&mut context, &command("set-option", &["-g", "status"]))
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-options", &["-gv", "status"]))
+                .unwrap()
+                .output,
+            "2"
+        );
+
+        for expected in ["on", "off"] {
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-option", &["-g", "experimental-agent-pane"]),
+                )
+                .unwrap();
+            assert_eq!(
+                engine.mux_option_value(MuxOptionKey::ExperimentalAgentPane),
+                expected
+            );
+        }
     }
 
     #[test]
@@ -10167,6 +10643,92 @@ mod tests {
             .unwrap();
         let first_named = context.window.unwrap();
         assert!(!engine.state.window_automatic_rename(first_named).unwrap());
+    }
+
+    #[test]
+    fn runtime_facts_apply_automatic_window_names_and_dead_signals() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let pane = context.pane.unwrap();
+        let window = context.window.unwrap();
+
+        assert!(engine.set_pane_runtime_facts(
+            pane,
+            PaneRuntimeFacts {
+                current_command: "sleep".to_owned(),
+                ..PaneRuntimeFacts::default()
+            },
+        ));
+        assert_eq!(engine.state.windows[&window].name, "sleep");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("list-windows", &["-F", "#{window_name}"]),
+                )
+                .unwrap()
+                .output,
+            "sleep"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-window-option",
+                    &["automatic-rename-format", "PFX-#{pane_current_command}-SFX"],
+                ),
+            )
+            .unwrap();
+        assert!(engine.set_pane_runtime_facts(
+            pane,
+            PaneRuntimeFacts {
+                current_command: "fish".to_owned(),
+                ..PaneRuntimeFacts::default()
+            },
+        ));
+        assert_eq!(engine.state.windows[&window].name, "PFX-fish-SFX");
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-u", "automatic-rename-format"]),
+            )
+            .unwrap();
+        assert!(
+            engine
+                .mark_pane_dead(pane, None, Some("Terminated: 15"))
+                .unwrap()
+        );
+        assert_eq!(engine.state.windows[&window].name, "fish[dead]");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        ["-p", "#{pane_dead}:#{pane_dead_status}:#{pane_dead_signal}"].as_slice(),
+                    ),
+                )
+                .unwrap()
+                .output,
+            "1::term"
+        );
+
+        engine
+            .execute(&mut context, &command("rename-window", &["manual"]))
+            .unwrap();
+        assert!(engine.set_pane_runtime_facts(
+            pane,
+            PaneRuntimeFacts {
+                current_command: "vim".to_owned(),
+                ..PaneRuntimeFacts::default()
+            },
+        ));
+        assert_eq!(engine.state.windows[&window].name, "manual");
     }
 
     #[test]
@@ -10248,6 +10810,7 @@ mod tests {
                     cwd: Some(cwd),
                     command: Some(command),
                     environment,
+                    empty: false,
                 },
                 MuxEffect::SnapshotChanged,
             ] if *actual == pane
@@ -10291,6 +10854,70 @@ mod tests {
                 )
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn respawn_empty_is_live_and_can_be_respawned_without_kill() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let pane = context.pane.unwrap();
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("list-commands", &["respawn-pane"]),)
+                .unwrap()
+                .output,
+            "respawn-pane (respawnp) [-Ek] [-c start-directory] [-e environment] [-t target-pane] [shell-command [argument ...]]"
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("list-commands", &["respawn-window"]),)
+                .unwrap()
+                .output,
+            "respawn-window (respawnw) [-Ek] [-c start-directory] [-e environment] [-t target-window] [shell-command [argument ...]]"
+        );
+        engine.state.mark_pane_dead(pane, Some(7)).unwrap();
+
+        let empty = engine
+            .execute(
+                &mut context,
+                &command(
+                    "respawn-pane",
+                    &["-E", "-t", &pane.to_string(), "printf ready"],
+                ),
+            )
+            .unwrap();
+        assert!(matches!(
+            empty.effects.as_slice(),
+            [MuxEffect::PaneRespawned {
+                pane: actual,
+                command: Some(command),
+                empty: true,
+                ..
+            }, MuxEffect::SnapshotChanged] if *actual == pane && command == "printf ready"
+        ));
+        let pane_state = engine.state.pane(pane).unwrap();
+        assert!(!pane_state.dead);
+        assert!(pane_state.empty);
+
+        let respawned = engine
+            .execute(
+                &mut context,
+                &command("respawn-pane", &["-t", &pane.to_string()]),
+            )
+            .unwrap();
+        assert!(matches!(
+            respawned.effects.as_slice(),
+            [MuxEffect::PaneRespawned {
+                pane: actual,
+                command: None,
+                empty: false,
+                ..
+            }, MuxEffect::SnapshotChanged] if *actual == pane
+        ));
+        assert!(!engine.state.pane(pane).unwrap().empty);
     }
 
     #[test]

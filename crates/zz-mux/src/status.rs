@@ -12,6 +12,7 @@ pub const MAX_STATUS_FORMAT_BYTES: usize = 4 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StatusFormats {
     pub enabled: bool,
+    pub lines: u8,
     pub interval: Duration,
     pub left: String,
     pub right: String,
@@ -21,6 +22,7 @@ impl Default for StatusFormats {
     fn default() -> Self {
         Self {
             enabled: true,
+            lines: 1,
             interval: DEFAULT_STATUS_INTERVAL,
             left: DEFAULT_STATUS_LEFT.to_owned(),
             right: DEFAULT_STATUS_RIGHT.to_owned(),
@@ -29,6 +31,27 @@ impl Default for StatusFormats {
 }
 
 impl StatusFormats {
+    #[must_use]
+    pub fn lines_string(&self) -> String {
+        match self.lines {
+            0 => "off".to_owned(),
+            1 => "on".to_owned(),
+            lines => lines.to_string(),
+        }
+    }
+
+    pub fn toggle_enabled_choice(&mut self) -> bool {
+        let next = match self.lines {
+            0 => 1,
+            1 => 0,
+            lines => lines,
+        };
+        let changed = self.lines != next;
+        self.lines = next;
+        self.enabled = next != 0;
+        changed
+    }
+
     #[must_use]
     pub fn format(&self, option: StatusOption) -> Option<&str> {
         match option {
@@ -44,9 +67,11 @@ impl StatusFormats {
             StatusOption::Enabled => {
                 let next = match value {
                     Some(value) => parse_enabled(value)?,
-                    None => defaults.enabled,
+                    None => defaults.lines,
                 };
-                Ok(std::mem::replace(&mut self.enabled, next) != next)
+                let changed = std::mem::replace(&mut self.lines, next) != next;
+                self.enabled = next != 0;
+                Ok(changed)
             }
             StatusOption::Interval => {
                 let next = match value {
@@ -104,10 +129,14 @@ impl StatusOption {
     }
 }
 
-fn parse_enabled(value: &str) -> Result<bool, &'static str> {
+fn parse_enabled(value: &str) -> Result<u8, &'static str> {
     match value {
-        "on" | "1" | "2" | "3" | "4" | "5" => Ok(true),
-        "off" | "0" => Ok(false),
+        "on" | "1" => Ok(1),
+        "off" | "0" => Ok(0),
+        "2" => Ok(2),
+        "3" => Ok(3),
+        "4" => Ok(4),
+        "5" => Ok(5),
         _ => Err("status expects on, off, or a line count in 1..5"),
     }
 }
@@ -135,15 +164,22 @@ mod tests {
         let mut formats = StatusFormats::default();
         assert_eq!(formats.set(StatusOption::Enabled, Some("off")), Ok(true));
         assert!(!formats.enabled);
+        assert_eq!(formats.lines, 0);
         assert_eq!(formats.set(StatusOption::Enabled, Some("2")), Ok(true));
         assert!(formats.enabled);
-        assert_eq!(formats.set(StatusOption::Enabled, Some("on")), Ok(false));
+        assert_eq!(formats.lines, 2);
+        assert!(!formats.toggle_enabled_choice());
+        assert_eq!(formats.lines_string(), "2");
+        assert_eq!(formats.set(StatusOption::Enabled, Some("on")), Ok(true));
+        assert_eq!(formats.lines, 1);
+        assert!(formats.toggle_enabled_choice());
+        assert_eq!(formats.lines_string(), "off");
         assert!(
             formats
                 .set(StatusOption::Enabled, Some("sometimes"))
                 .is_err()
         );
-        assert!(formats.enabled);
+        assert!(!formats.enabled);
         assert_eq!(formats.set(StatusOption::Interval, Some("5")), Ok(true));
         assert_eq!(formats.interval, Duration::from_secs(5));
         assert_eq!(formats.set(StatusOption::Interval, Some("0")), Ok(true));

@@ -557,6 +557,7 @@ mod tests {
             client: ClientId(client),
             formats: StatusFormats {
                 enabled: true,
+                lines: 1,
                 interval: Duration::from_secs(15),
                 left: left.to_owned(),
                 right: right.to_owned(),

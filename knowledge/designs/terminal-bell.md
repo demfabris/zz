@@ -41,7 +41,7 @@ A program rings BEL in a pane:
   kind icon. The dot rides the marker, not the trailing slot, because every non-host row's
   trailing controls only surface on hover . a notification the pointer has to find is no
   notification.
-* `window_flags()` in `crates/zz-mux/src/status.rs` appends `!` for a window containing a
+* `window_flags()` in `crates/zz-mux/src/formats.rs` appends `!` for a window containing a
   belled pane, next to the existing `*` and `Z`. tmux semantics, tmux glyph.
 * The workspace window showing that pane calls `Window::request_attention()` . dock bounce
   on macOS, urgency hint on Linux, taskbar flash on Windows. gpui already no-ops the call

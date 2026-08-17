@@ -12,9 +12,9 @@ timestamp: 2026-08-16T00:00:00-03:00
 The harness feeds each scenario command to zz and tmux at commit
 `d77c9dc6aa021e4bc61f0da128c591af695e6466`. After each command, it queries both servers
 with matching explicit `list-sessions`, `list-windows`, and `list-panes` formats. The
-runner compares command exit classes and topology as strict results, and — since the
-cell-authoritative layout shipped — geometry diffs exactly under `--strict-geometry`,
-which is how CI runs it.
+runner compares command exit classes and topology as strict results. It also compares `fmt:` query
+output as a separate strict channel. Geometry differences fail under `--strict-geometry`, which is
+how CI runs the harness.
 
 `compat/run.sh` builds `target/debug/zz` with your normal environment before the scenario
 runner creates its scratch `HOME` and `XDG_CONFIG_HOME`. The tmux fetcher clones and builds
@@ -49,10 +49,12 @@ against the pin. Since the cell-authoritative layout landed, a headless zz windo
 at tmux's 80x24 and every layout operation runs the pin's integer arithmetic, which is what
 makes exact-geometry diffing possible.
 
+FMT differences fail in both modes. `--strict-geometry` changes only GEO handling.
+
 # Reading results
 
 The runner writes `compat/results/summary.md`. Each row gives the number of executed steps,
-whether the scenario stayed TOPO-clean, and how many steps produced a GEO difference.
+TOPO and FMT status, and the number of steps that produced a GEO difference.
 
 Open `compat/results/<scenario>.log` for the command status and per-step unified diffs:
 
@@ -67,9 +69,11 @@ Open `compat/results/<scenario>.log` for the command status and per-step unified
   leaf ids limits GEO to bracket structure and geometry. TOPO and GEO both miss a pane assignment
   permutation among equal-sized panes; the harness accepts that blind spot. The runner reports
   these differences by default and fails them under `--strict-geometry`.
+- `FMT` compares stdout from a shared `fmt:` line byte for byte. Both `display-message -p`
+  invocations must exit zero. A matching error still fails the FMT step.
 
-The log also captures each step's stdout and stderr for debugging, but the comparison covers
-only the exit class and the TOPO/GEO snapshots; command output itself is never diffed.
+The log captures each step's stdout and stderr. The runner ignores stdout for ordinary command
+lines; only `fmt:` lines enter the FMT comparison.
 
 The runner starts zz on a short `/tmp/zzc-<pid>.sock` path and starts tmux with
 `-L zzc-<pid> -f /dev/null`. Its exit trap stops both servers and removes both socket files.
@@ -81,12 +85,16 @@ command on each line; the runner skips blank lines and lines beginning with `#`.
 and flags that both command catalogs support, and target panes by index rather than by raw
 `%N` IDs.
 
-The runner handles simple shell quoting when it turns each line into an argument array, and
-rejects any line containing a shell metacharacter (`$`, backtick, `;`, `&`, `|`, `<`, `>`)
-before parsing it. Prefix a command with `zz-only:` or `tmux-only:` only when a scenario needs
-side-specific setup. The shared corpus should use the same command on both sides. A
-side-prefixed line skips the exit-class comparison for that step, but the query trio still
-runs afterward — both servers must converge to the same topology by the end of the step.
+The runner handles shell quoting for command lines and rejects `$`, backtick, `;`, `&`, `|`, `<`,
+and `>` before parsing them. Prefix a command with `zz-only:` or `tmux-only:` when a scenario needs
+side-specific setup. A side-prefixed line skips the exit-class comparison for that step, but the
+query trio still runs afterward.
+
+Use `fmt: <format>` for a shared format assertion. The runner passes the payload as one argv value
+to `display-message -p` on each side, without `eval`. This path accepts `#{}`, `?`, commas, colons,
+semicolons, comparison and logic operators, and `/` delimiters. It rejects an empty payload, `$`,
+backticks, either quote character, and `#(`. The `#(` guard prevents a tmux format from starting a
+shell command during the differential run.
 
 After each line, the harness runs the query trio. Scenario files should contain state changes,
 not their own `list-*` assertions.
@@ -109,7 +117,8 @@ The two current entries pin the deliberate refusals of upstream layout bugs:
 `known-spread-mixed.txt` (the pin's `-E` corrupts a parent mixing leaf and node children).
 Both cite their divergence-matrix rows.
 
-Keep the `known/` set narrow. Move a scenario into the normal corpus when zz closes the gap.
+Keep the `known/` set narrow. Move a scenario into the normal corpus when zz closes the gap. The
+known-scenario exemption never covers an FMT difference.
 
 # Key files
 
@@ -117,7 +126,7 @@ Keep the `known/` set narrow. Move a scenario into the normal corpus when zz clo
 | --- | --- |
 | `compat/run.sh` | Builds both binaries, selects scenarios, and writes the summary |
 | `compat/fetch-tmux.sh` | Acquires and verifies the pinned tmux binary |
-| `compat/diff-scenario.sh` | Runs one scenario and emits per-step TOPO/GEO diffs |
+| `compat/diff-scenario.sh` | Runs one scenario and emits per-step TOPO, GEO, and FMT diffs |
 | `compat/scenarios/` | Holds the shared and known-divergence corpora |
 
 # Related

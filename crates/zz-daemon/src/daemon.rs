@@ -63,7 +63,7 @@ use crate::{
     lifecycle::DaemonIdentityGuard,
     paths::{default_mux_config, home_directory, is_default_mux_config},
     shell_process,
-    status::{StatusRenderer, StatusRequest, status_context},
+    status::{StatusRenderer, StatusRequest, host_names, status_context},
     transport::{LocalTransport, Transport, TransportListener, TransportStream},
 };
 
@@ -1547,6 +1547,12 @@ impl Shared {
             appearance_provenance,
             ..ServerState::default()
         };
+        let (host, host_short) = host_names();
+        state.engine.set_format_server_context(
+            host.clone(),
+            host_short.clone(),
+            socket_path.display().to_string(),
+        );
         for option in MuxOptionKey::ALL {
             let value = state.engine.mux_option_value(option);
             state

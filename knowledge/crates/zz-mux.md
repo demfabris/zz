@@ -35,9 +35,10 @@ window-scoped `set-window-option`, and emits `MuxEffect::MuxOptionChanged` so th
 `browser-egress`; both were deleted with the QUIC transport on 2026-08-01, as were the `pair` command
 and the `listen` option.
 
-`lib.rs` is a thin facade over four private modules: `command` (the `MuxEngine` executor +
+`lib.rs` is a thin facade over five private modules: `command` (the `MuxEngine` executor +
 `MuxEffect`), `model` (`MuxState`, the sessions/windows/panes/splits tree), `parser`
-(`parse_config` for `.tmux.conf`), and `status` (the FORMATS subset behind the `StatusHooks` seam).
+(`parse_config` for `.tmux.conf`), `formats` (the FORMATS engine behind the `StatusHooks` seam),
+and `status` (the `status-*` option state).
 It re-exports the shared command catalog and key model from `zz-protocol`, while the daemon remains
 the runtime authority that mutates and resolves those tables.
 
@@ -50,7 +51,8 @@ counter bumped on every mutation. Each `Window` owns its panes (`BTreeMap<PaneId
 recursive [`LayoutNode`](/concepts/split-pane-layout.md) split tree, a canonical `pane_order` vector,
 a most-recently-used `last_panes` history, `zoomed_pane`, and `previous_layout`/`last_layout` for
 layout undo. A `Pane` is an ID, a title, a `PaneKind` . `Picker { inherit_cwd_from }`, `Terminal`,
-`Browser(BrowserDescriptor)`, or `Agent(AgentDescriptor)` . and packed per-pane `InputOptions` (the
+`Browser(BrowserDescriptor)`, `Agent(AgentDescriptor)`, or `Editor(EditorDescriptor)` . and packed
+per-pane `InputOptions` (the
 `synchronize-panes` override bits). `Picker` is the runtime-free pending state a new pane sits in
 until the user chooses its kind; `Agent` carries the provider (Codex or Claude Code), working
 directory, and opaque ACP session ID the GUI restores a native Agent pane from. Pane titles are live
@@ -85,7 +87,8 @@ that the prediction matches the mutation.
 | `crates/zz-mux/src/command.rs` | `MuxEngine`: executes tmux-style commands, parses options/`-t` targets, emits `MuxEffect`s, and holds server/session/window options including `history-trickle`. See [commands](/tmux/commands.md). |
 | `crates/zz-protocol/src/key.rs` | `KeyTables`/`KeyEngine`: root/prefix/copy-mode and overlay tables, default prefix `C-b`, bind/unbind, key folding, and the prefix-mode state machine. See [key tables](/tmux/key-tables.md). |
 | `crates/zz-mux/src/parser.rs` | `parse_config`: the `.tmux.conf` tokenizer producing `CommandInvocation`s + diagnostics. See [conf parser](/tmux/conf-parser.md). |
-| `crates/zz-mux/src/status.rs` | `StatusFormats`/`StatusOption`, `StatusContext`, and `expand_status`: the tmux FORMATS subset behind the `StatusHooks` seam that keeps the clock and `#()` out of this crate. See [status line](/tmux/status-line.md). |
+| `crates/zz-mux/src/formats.rs` | The 198-name tmux format registry, scope backfill, scalar modifiers, recursive expansion, and the `StatusHooks` seam that keeps `#()` execution outside this crate. See [status line](/tmux/status-line.md). |
+| `crates/zz-mux/src/status.rs` | `StatusFormats` and `StatusOption` state. |
 
 # Related
 

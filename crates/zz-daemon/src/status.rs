@@ -12,7 +12,7 @@ use std::{
 
 use chrono::Local;
 use zz_mux::{MuxEngine, StatusContext, StatusFormats, StatusHooks, expand_status};
-use zz_protocol::{Axis, ClientId, MuxSnapshot, SessionId, StatusLine, WindowId};
+use zz_protocol::{ClientId, MuxSnapshot, SessionId, StatusLine, WindowId};
 
 use crate::shell_process;
 
@@ -73,12 +73,12 @@ pub(crate) fn status_context(
     attached: Option<SessionId>,
     focused_window: Option<WindowId>,
 ) -> StatusContext {
-    let (host, host_short) = host_names();
-    let mut context = StatusContext {
-        host: host.clone(),
-        host_short: host_short.clone(),
-        ..StatusContext::default()
-    };
+    let mut context = engine.format_status_context(attached, focused_window, None);
+    if context.host.is_empty() {
+        let (host, host_short) = host_names();
+        context.host.clone_from(host);
+        context.host_short.clone_from(host_short);
+    }
     let Some(session) = snapshot
         .sessions
         .iter()
@@ -86,51 +86,39 @@ pub(crate) fn status_context(
     else {
         return context;
     };
-    context.session_name.clone_from(&session.name);
-    context.session_windows = session.windows.len();
-
     let focused_window = focused_window
         .filter(|focused| session.windows.iter().any(|window| window.id == *focused))
         .unwrap_or(session.active_window);
-    let Some(window) = session
-        .windows
-        .iter()
-        .find(|window| window.id == focused_window)
-    else {
-        return context;
-    };
-    context.window_index = window.index;
-    context.window_name.clone_from(&window.name);
-    context.window_panes = window.panes.len();
-    context.window_width = engine.window_extent(window.id, Axis::Horizontal);
-    context.window_height = engine.window_extent(window.id, Axis::Vertical);
-    context.window_layout = engine
-        .state
-        .windows
-        .get(&window.id)
-        .map(|window| window.layout.dump())
-        .unwrap_or_default();
-    context.window_active = Some(true);
-    context.window_zoomed = window.zoomed_pane.is_some();
-    context.window_bell = window.panes.values().any(|pane| pane.bell);
-
-    context.pane_index = engine
-        .pane_index(window.id, window.active_pane)
-        .unwrap_or_default();
-    if let Some(pane) = window.panes.get(&window.active_pane) {
-        context.pane_id = pane.id.to_string();
-        context.pane_title.clone_from(&pane.title);
-        if let Some((columns, rows)) = engine.pane_geometry(pane.id) {
-            context.pane_width = Some(columns);
-            context.pane_height = Some(rows);
-        }
-        context.pane_active = Some(true);
-        context.pane_synchronized = pane.synchronized_input;
+    if context.window_active.is_some() {
+        context.window_active = Some(true);
     }
+    if context.pane_active.is_some() {
+        context.pane_active = Some(true);
+    }
+    context.session_active = Some(true);
+    context.session_attached = session.viewers.len();
+    context.session_many_attached = session.viewers.len() > 1;
+    context.session_attached_list = session
+        .viewers
+        .iter()
+        .map(|viewer| viewer.name.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    let active_viewers = session
+        .viewers
+        .iter()
+        .filter(|viewer| viewer.window == focused_window)
+        .collect::<Vec<_>>();
+    context.window_active_clients = active_viewers.len();
+    context.window_active_clients_list = active_viewers
+        .iter()
+        .map(|viewer| viewer.name.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
     context
 }
 
-fn host_names() -> &'static (String, String) {
+pub(crate) fn host_names() -> &'static (String, String) {
     static HOST: OnceLock<(String, String)> = OnceLock::new();
     HOST.get_or_init(|| {
         let host = sysinfo::System::host_name()
@@ -287,6 +275,7 @@ fn first_line(output: &[u8]) -> String {
 mod tests {
     use super::*;
     use zz_mux::{PaneKind, SplitSize};
+    use zz_protocol::Axis;
 
     fn request(client: u64, left: &str, right: &str) -> StatusRequest {
         StatusRequest {

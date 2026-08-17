@@ -1,0 +1,12 @@
+split-window -h -t w:0.0
+split-window -v -t w:0.1
+rename-window -t w:0 '/tmp/a b/main'
+fmt: #{==:3,3}|#{!=:3,4}|#{<:a,b}|#{>:b,a}|#{<=:a,a}|#{>=:b,a}|#{?#{==:#{window_panes},3},three,many}
+fmt: #{&&:1,#{!:#{l:0}}}|#{||:0,#{==:#{window_panes},3}}
+fmt: #{b:window_name}|#{d:window_name}|#{n:window_name}
+fmt: #{q:window_name}
+fmt: #{s/a/A/:window_name}|#{s/M/X/i:window_name}
+fmt: #{m:*/main,#{window_name}}|#{m/ri:MAIN,#{window_name}}
+fmt: #{E:window_name}|#{T;=/12/...:window_name}
+fmt: before#{not_a_tmux_variable}after|before#{z:window_name}after
+fmt: #{=/4/...:window_name}|#{=-4:window_name}

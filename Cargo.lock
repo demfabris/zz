@@ -10779,6 +10779,11 @@ dependencies = [
 name = "zz-mux"
 version = "0.2.0-beta.2"
 dependencies = [
+ "chrono",
+ "glob",
+ "regex",
+ "rustix 1.1.4",
+ "unicode-width",
  "zz-protocol",
  "zz-terminal",
 ]

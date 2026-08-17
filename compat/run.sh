@@ -110,8 +110,8 @@ trap cleanup_summary EXIT
 
 {
   printf '# tmux compatibility summary\n\n'
-  printf '| Scenario | Steps | TOPO clean? | GEO divergences |\n'
-  printf '| --- | ---: | :---: | ---: |\n'
+  printf '| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? |\n'
+  printf '| --- | ---: | :---: | ---: | :---: |\n'
 } >"$SUMMARY_TMP"
 
 failed=0
@@ -144,14 +144,17 @@ for scenario in "${scenarios[@]}"; do
   steps="?"
   topo_clean="?"
   geo_divergences="?"
+  fmt_clean="?"
   if [ -n "$metadata" ]; then
     read -r -a metadata_tokens <<<"$metadata"
     topo_count=""
+    fmt_count=""
     for token in "${metadata_tokens[@]}"; do
       case "$token" in
       steps=*) steps="${token#steps=}" ;;
       topo_divergences=*) topo_count="${token#topo_divergences=}" ;;
       geo_divergences=*) geo_divergences="${token#geo_divergences=}" ;;
+      fmt_divergences=*) fmt_count="${token#fmt_divergences=}" ;;
       esac
     done
     if [ "$topo_count" = "0" ]; then
@@ -159,17 +162,22 @@ for scenario in "${scenarios[@]}"; do
     elif [ -n "$topo_count" ]; then
       topo_clean="no"
     fi
+    if [ "$fmt_count" = "0" ]; then
+      fmt_clean="yes"
+    elif [ -n "$fmt_count" ]; then
+      fmt_clean="no"
+    fi
   fi
 
-  printf '| %s | %s | %s | %s |\n' \
-    "$scenario_name" "$steps" "$topo_clean" "$geo_divergences" >>"$SUMMARY_TMP"
+  printf '| %s | %s | %s | %s | %s |\n' \
+    "$scenario_name" "$steps" "$topo_clean" "$geo_divergences" "$fmt_clean" >>"$SUMMARY_TMP"
 
   expected=0
   case "$scenario_relative" in
   known/*) expected=1 ;;
   esac
 
-  if [ "$scenario_rc" -eq 1 ] && [ "$expected" -eq 1 ]; then
+  if [ "$scenario_rc" -eq 1 ] && [ "$expected" -eq 1 ] && [ "$fmt_count" = "0" ]; then
     warn "$scenario_name has its expected documented divergence"
   elif [ "$scenario_rc" -ne 0 ]; then
     warn "$scenario_name failed; see $log_file"

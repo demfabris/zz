@@ -255,6 +255,10 @@ impl Window {
     pub fn pane_order(&self) -> &[PaneId] {
         &self.pane_order
     }
+
+    pub(crate) fn last_pane(&self) -> Option<PaneId> {
+        self.last_panes.first().copied()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -273,6 +277,10 @@ impl MuxState {
     #[must_use]
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    pub(crate) const fn next_session_id(&self) -> SessionId {
+        SessionId(self.next_session_id)
     }
 
     pub fn create_session(
@@ -650,7 +658,8 @@ impl MuxState {
         let window_id = self
             .window_for_pane(target)
             .ok_or_else(|| ServerError::MissingTarget(target.to_string()))?;
-        let pane_id = self.allocate_pane_id();
+        let pane_id = PaneId(self.next_pane_id);
+        let next_pane_id = &mut self.next_pane_id;
         let next_split_id = &mut self.next_split_id;
         let mut ids = || {
             let id = SplitId(*next_split_id);
@@ -670,6 +679,7 @@ impl MuxState {
                 &mut ids,
             )
             .map_err(|error| split_layout_error(error, target))?;
+        *next_pane_id = (*next_pane_id).saturating_add(1);
         window.panes.insert(
             pane_id,
             Pane {
@@ -3688,7 +3698,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_split_keeps_the_cell_tree_and_divider_allocator_unchanged() {
+    fn failed_split_keeps_the_cell_tree_and_allocators_unchanged() {
         let mut state = MuxState::default();
         let (_, window, first) = state.create_session("main").unwrap();
         let narrow = state
@@ -3703,6 +3713,7 @@ mod tests {
             )
             .unwrap();
         let layout = state.windows[&window].layout.clone();
+        let next_pane_id = state.next_pane_id;
         let next_split_id = state.next_split_id;
         let generation = state.generation();
 
@@ -3714,8 +3725,13 @@ mod tests {
         );
         assert_eq!(state.windows[&window].layout, layout);
         assert_eq!(state.windows[&window].panes.len(), 2);
+        assert_eq!(state.next_pane_id, next_pane_id);
         assert_eq!(state.next_split_id, next_split_id);
         assert_eq!(state.generation(), generation);
+        let next = state
+            .split_pane(first, Axis::Horizontal, PaneKind::Terminal)
+            .unwrap();
+        assert_eq!(next, PaneId(next_pane_id));
         assert!(state.validate().is_ok());
     }
 

@@ -3,6 +3,7 @@
 //! Pure state, commands, layouts, key tables, and tmux-compatible parsing.
 
 mod command;
+mod formats;
 mod layout;
 #[cfg(test)]
 mod layout_pin_tests;

@@ -1204,7 +1204,7 @@ fn handle_command_response(
     match response {
         CommandResponse::Error {
             request_id: 0,
-            error: ServerError::MissingTarget(target),
+            error: ServerError::MissingTarget(target) | ServerError::SessionNotFound(target),
         } => match attempt {
             AttachAttempt::Remembered => {
                 *attempt = AttachAttempt::Default;

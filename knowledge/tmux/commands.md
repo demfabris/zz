@@ -19,8 +19,9 @@ command name, dispatches to a handler, and, if the state `generation` advanced, 
 `SnapshotChanged` effect and repairs the `ExecutionContext` (`session`/`window`/`pane`) so the
 current target stays valid after the mutation.
 
-Errors are structured `ServerError`s (`MissingTarget`, `AmbiguousTarget`, `InvalidTarget`,
-`UnsupportedCommand`, `InvalidCommand`). Most handlers validate before mutation. tmux orders some
+Errors are structured `ServerError`s. Target lookup uses `SessionNotFound`, `WindowNotFound`, and
+`PaneNotFound`, displayed as tmux's `can't find TYPE: COMPONENT`; internal stable-ID failures retain
+`MissingTarget`. Other command errors use `UnsupportedCommand` and `InvalidCommand`. Most handlers validate before mutation. tmux orders some
 mutations before later failures; `select-layout`, for example, unzooms its resolved window before it
 parses a custom layout. The daemon publishes any generation change at the command boundary even
 when the handler returns an error.
@@ -37,11 +38,11 @@ flags (`-Zs`) split into `-Z -s`. Target resolution lives in `MuxState`:
 
 | Target | Resolver | Accepts |
 | --- | --- | --- |
-| `-t $N` / session name | `resolve_session` | `$id`, exact session name, unique name prefix (`work` still beats `workshop` exactly; `wor` fails with the candidates named), or current/first session. |
-| `-t @N` / `:index` / name | `resolve_window` | `@id`, `:index`, window name (unique within session), or current window. |
-| `-t %N` | `resolve_pane` | `%id` only (validated live), or the window's active pane. |
+| `-t $N` / session name | `resolve_session` | `$id`, exact name, `=name` exact-only escape, unique prefix, unique `fnmatch` pattern (`*`, `?`, `[…]`, with `/` ordinary), or the current/first session. An empty string means current. |
+| `-t @N` / `:index` / name | `resolve_window` | `@id`; wrapped `+N`/`-N`; `{start}`/`^`, `{end}`/`$`, `{last}`/`!`, `{next}`/`+`, `{previous}`/`-`; numeric index; exact name; `=name` exact-only escape; unique prefix; unique `fnmatch`; or current. The first session/window component that fails names itself in the error. |
+| `-t %N` / pane index | `resolve_pane` | `%id`, pane index, wrapped `+N`/`-N`, `!`/`{last}`, a window target's active pane, or current. Compound failures report only the failing pane component. |
 | `-t:.+` / `-t:.-` | `select-pane` | canonical next/previous pane in `pane_order`. |
-| `-t` on `new-window` / `new-browser` / `break-pane` | `window_destination` | tmux's target-window-with-index form: the destination index need not exist yet. `$id`, `@id`, and a bare non-numeric session name pick a session (lowest free index); `[session]:index` and a bare numeric target pick an exact index in the current session — even when a session shares the name, matching `cmd-find.c`'s window-first order — and a taken index fails with `index in use: N` unless `-k` replaces it. |
+| `-t` on `new-window` / `new-browser` / `break-pane` | `resolve_window_index_target` | The same centralized grammar in tmux's target-window-with-index mode. A numeric or `+N`/`-N` destination may name an unused index; existing names, patterns, and tokens contribute their resolved index. A taken `new-window` index fails with `create window failed: index N in use` unless `-k` replaces it. |
 
 # Schema: commands (name | aliases | purpose)
 
@@ -57,7 +58,7 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `kill-session` | . | Remove a session and its windows/panes. `-a` keeps the target and kills every other session; `-C` clears the session's pane bells and kills nothing, outranking `-a` as in tmux. Positional targets are refused — tmux's bound is zero arguments, and the kill commands are too destructive to guess. |
 | `attach-session` | `attach` | Attach the client to a session (`Attach` effect); `-d` detaches the session's other clients. Client flags zz has no model for (`-r` read-only, `-x`, `-E`, `-c`, `-f`) are rejected instead of swallowed. |
 | `detach-client` | `detach` | Detach (`Detach(DetachScope)` effect). No flags detaches the caller, `-a` detaches every *other* attached client, `-s` detaches every client on that session (the caller included). `-t` (target client), `-P`, and `-E` are rejected: zz has no client-name selector. |
-| `new-window` | `neww` | Create a terminal window at the `-t` destination. `-d` creates without selecting, `-a` inserts after the target and shifts the run of windows above it up, `-k` replaces whatever holds the index, `-S` selects an existing window with the `-n` name instead of creating one. |
+| `new-window` | `neww` | Create a terminal window at the `-t` destination. `-d` creates without selecting, `-a` inserts after an occupied target but keeps an explicitly free index, `-k` replaces whatever holds the index, `-S` selects an existing window with the `-n` name instead of creating one. |
 | `new-browser` | . | *zz-native:* create a browser window (`-p` profile, URL positional); shares `new-window`'s destination options. |
 | `list-windows` | `lsw` | List a session's windows. |
 | `rename-window` | `renamew` | Rename a window (duplicates allowed). |
@@ -75,12 +76,12 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `set-agent-session` | . | *zz-native/internal:* atomically persist an Agent pane's opaque ACP session ID and optional absolute cwd (`-t`, `-c`). |
 | `set-agent-provider` | . | *zz-native/internal:* persist `codex` or `claude-code` for an Agent pane, clear its provider-bound session ID, and restart its adapter (`-t`). |
 | `restart-agent-pane` | . | *zz-native/internal:* replace an Agent pane's daemon-owned ACP adapter (`-t`). |
-| `select-pane` | `selectp` | Select by target/direction (`-L/-R/-U/-D`), `-l` last, `-Z` keep zoom; `-T` updates only the pane title. |
+| `select-pane` | `selectp` | Select by target/direction (`-L/-R/-U/-D`), `-l` last, `-Z` keep zoom; `-T` updates only the pane title. A cross-window target changes that window's active pane without changing the session's current window. |
 | `last-pane` | `lastp` | Return to the previously active pane (`-Z`). |
 | `swap-pane` | `swapp` | Exchange two layout leaves (`-U/-D/-s/-t`, `-d` keep slot, `-Z`). |
 | `list-panes` | `lsp` | List a window's panes. |
-| `resize-pane` | `resizep` | Resize relatively (`-L/-R/-U/-D` by cells: a shared positional adjustment, tmux's attached form `-R10`, default `1`; adjustments are integers) or absolutely (`-x`/`-y` in cells or `N%`) or `-Z` toggle zoom. With no direction and no `-x`/`-y` the command is a no-op, as in tmux; unknown flags (`-M`, `-T`) are rejected. Sizes in cells need the geometry the daemon reports per pane; without it the command errors instead of guessing. |
-| `select-layout` | `selectl` | Apply a named preset or checksummed layout string, restore with `-o`, spread with `-E`, or cycle with `-n`/`-p`. A layout string ignores its pane numbers, assigns the current `pane_order` through the leaves, removes extra bottom-right cells, allocates new divider ids, and adopts the encoded window extent. Too few cells fail with tmux's `have N panes but need M` error. |
+| `resize-pane` | `resizep` | Resize relatively (`-L/-R/-U/-D` by cells: a shared positional adjustment, tmux's attached form `-R10`, default `1`; adjustments are integers) or absolutely (`-x`/`-y` in cells or `N%`) or `-Z` toggle zoom. Absolute percentages accept 0 through 1000, then normal layout limits clamp the result. With no direction and no `-x`/`-y` the command is a no-op, as in tmux; unknown flags (`-M`, `-T`) are rejected. Sizes in cells need the geometry the daemon reports per pane; without it the command errors instead of guessing. |
+| `select-layout` | `selectl` | Apply a named preset or checksummed layout string, restore with `-o`, spread with `-E`, or cycle with `-n`/`-p`. The first `-o` with no saved layout succeeds silently and saves the current layout for the next restore. A layout string ignores its pane numbers, assigns the current `pane_order` through the leaves, removes extra bottom-right cells, allocates new divider ids, and adopts the encoded window extent. Too few cells fail with tmux's `have N panes but need M` error. |
 | `next-layout` / `previous-layout` | `nextl` / `prevl` | Cycle the seven presets. |
 | `rotate-window` | `rotatew` | Rotate surfaces through layout slots (`-D`,`-U`,`-Z`). |
 | `kill-pane` | `killp` | Remove a pane (removes the window if it was the last); `-a` keeps the target and kills every other pane in its window. |
@@ -93,7 +94,7 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `choose-buffer` | . | Open the paste-buffer chooser (`-Z`,`-t`); `-Z` is accepted and already true, as for `choose-tree`. |
 | `display-panes` | `displayp` | Pane-number overlay (`-d` duration). `-b` is accepted and already true: the effect returns immediately, so nothing was ever blocked. |
 | `clear-history` | `clearhist` | Clear a pane's scrollback (`-H` unsupported). |
-| `bind-key` / `unbind-key` | `bind` / `unbind` | Add/remove key bindings (`-n`,`-r`,`-T`,`-N`). Payloads validate at bind time (names + flags — tmux validates the full template): unknown names error `unknown command: X`, cataloged commands get their flags checked, daemon-side verbs are accepted unvalidated, and a real-but-unimplemented tmux command errors as unsupported so config import counts it. |
+| `bind-key` / `unbind-key` | `bind` / `unbind` | Add/remove key bindings (`-n`,`-r`,`-T`,`-N`). Empty `{}` installs an empty command list, and a single trailing escaped separator is ignored. Payloads validate at bind time (names + flags — tmux validates the full template): unknown names error `unknown command: X`, cataloged commands get their flags checked, daemon-side verbs are accepted unvalidated, and a real-but-unimplemented tmux command errors as unsupported so config import counts it. |
 | `list-keys` | `lsk` | Print bindings as `bind-key` lines; `-T` limits the table. tmux's other selectors are rejected, not ignored: `-n` is not a tmux `list-keys` flag at all, and `-1`/`-N`/`-a`/`-O`/`-P`/`-r` plus the `[key]` positional have no zz form. |
 | `set-option` / `set-window-option` | `set` / `setw` | Set options (see below). |
 | `source-file` | `source` | Load config files: every path is globbed like tmux (matches load in glob order; `conf.d/*.conf` works), then sourced in order. Without `-q` a path or glob that matches nothing warns; `-q` keeps it silent. `-` (stdin) is refused loudly — the daemon has no caller stdin. `-F`/`-n`/`-v`/`-t` are rejected. |

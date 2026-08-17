@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v57)
+title: zz wire protocol (v58)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-08-15T00:00:00Z
+timestamp: 2026-08-17T00:00:00-03:00
 ---
 
 # Overview
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 57`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 58`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (57) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (58) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -190,7 +190,9 @@ rows rather than a packed terminal frame, and a lost chunk would leave a hole in
 
 `ProtocolMismatch { client, server }`, `MissingTarget(String)`, `AmbiguousTarget(String)`,
 `InvalidTarget(String)`, `UnsupportedCommand(String)`, `InvalidCommand(String)`,
-`PaneNotAttached(PaneId)`, `PaneExited(PaneId)`, `Internal(String)`.
+`PaneNotAttached(PaneId)`, `PaneExited(PaneId)`, `Internal(String)`,
+`SessionNotFound(String)`, `WindowNotFound(String)`, `PaneNotFound(String)`. The last three carry
+tmux target-lookup wording and only the normalized component that failed.
 
 # Attachment, presence, and per-client views
 
@@ -324,7 +326,7 @@ unbounded `#()` script off the wire.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 57`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 58`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
 - **Any change that affects an already shipped encoding** (new enum variants, reordered fields,

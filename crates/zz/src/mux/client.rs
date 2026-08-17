@@ -3684,11 +3684,11 @@ impl MuxClient {
         match response {
             CommandResponse::Error {
                 request_id: 0,
-                error: ServerError::MissingTarget(_),
+                error: ServerError::MissingTarget(_) | ServerError::SessionNotFound(_),
             } if self.retry_default_after_missing_session() => {}
             CommandResponse::Error {
                 request_id: 0,
-                error: ServerError::MissingTarget(_),
+                error: ServerError::MissingTarget(_) | ServerError::SessionNotFound(_),
             } if self.core.attached_session().is_none()
                 && self.core.snapshot().sessions.is_empty() =>
             {
@@ -5079,7 +5079,7 @@ mod tests {
                     remote,
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id: 0,
-                        error: ServerError::MissingTarget("9".to_owned()),
+                        error: ServerError::SessionNotFound("9".to_owned()),
                     }),
                     cx,
                 );
@@ -7091,7 +7091,7 @@ mod tests {
                     HostId::LOCAL,
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id: 0,
-                        error: ServerError::MissingTarget(String::new()),
+                        error: ServerError::SessionNotFound(String::new()),
                     }),
                     cx,
                 );
@@ -7263,7 +7263,7 @@ mod tests {
                     HostId::LOCAL,
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id,
-                        error: ServerError::MissingTarget("%2".to_owned()),
+                        error: ServerError::PaneNotFound("%2".to_owned()),
                     }),
                     cx,
                 );
@@ -7278,7 +7278,7 @@ mod tests {
             &*notifications.borrow(),
             &[(
                 ClientMessageKind::Error,
-                "swap-pane: target not found: %2".to_owned(),
+                "swap-pane: can't find pane: %2".to_owned(),
             )]
         );
     }
@@ -7376,7 +7376,7 @@ mod tests {
                     remote,
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id,
-                        error: ServerError::MissingTarget("9".to_owned()),
+                        error: ServerError::SessionNotFound("9".to_owned()),
                     }),
                     cx,
                 );
@@ -7391,7 +7391,7 @@ mod tests {
             &*notifications.borrow(),
             &[(
                 ClientMessageKind::Error,
-                "kill-session: target not found: 9".to_owned(),
+                "kill-session: can't find session: 9".to_owned(),
             )]
         );
     }

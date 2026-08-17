@@ -1,7 +1,7 @@
 use zz_protocol::{
     BrowserDescriptor, ClientHello, ClientInstanceId, ClientKind, Event, EventPayload, GuiResponse,
     InputMessage, MuxOptionKey, MuxSnapshot, PROTOCOL_VERSION, PaneId, PaneKindSnapshot,
-    PaneSnapshot, PasteUploadPurpose, ProtocolMessage, encode_protocol_message,
+    PaneSnapshot, PasteUploadPurpose, ProtocolMessage, ServerError, encode_protocol_message,
 };
 use zz_terminal::TerminalColorScheme;
 
@@ -10,8 +10,24 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_fifty_seven() {
-    assert_eq!(PROTOCOL_VERSION, 57);
+fn protocol_version_on_this_commit_is_fifty_eight() {
+    assert_eq!(PROTOCOL_VERSION, 58);
+}
+
+#[test]
+fn target_lookup_errors_use_tmux_wording() {
+    assert_eq!(
+        ServerError::SessionNotFound("work".to_owned()).to_string(),
+        "can't find session: work"
+    );
+    assert_eq!(
+        ServerError::WindowNotFound("logs".to_owned()).to_string(),
+        "can't find window: logs"
+    );
+    assert_eq!(
+        ServerError::PaneNotFound("9".to_owned()).to_string(),
+        "can't find pane: 9"
+    );
 }
 
 #[test]
@@ -35,7 +51,7 @@ fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x39, 0x00, 0x00, 0x39, 0x00, 0x00, 0x00, 0x00,
+            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3a, 0x00, 0x00, 0x3a, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00,
         ]
     );

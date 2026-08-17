@@ -17,7 +17,7 @@ complements the [compatibility philosophy](/tmux/tmux-compat.md) (the contract) 
 
 **State anchor:** the "implemented surface" section reflects
 [PR #4](https://github.com/demfabris/zz/pull/4) (`fix/tmux-compat-hunt-v2`, merged 2026-08-16
-as `53b523e`) plus the phase 3d layout-string and phase 4a index-option source dated
+as `53b523e`) plus the phase 3d layout-string, phase 4a index-option, and phase 4b target-grammar source dated
 2026-08-17. PR #4 corrected the
 hunt-claim regressions, including two implemented backwards
 (`new-window -t` bare-target order, positional targets on the kill commands) plus the
@@ -104,12 +104,9 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | `send-keys -N` (no keys) | Arms the **invoking client's** count prefix; tmux stores it on the pane mode, so another client's (or a Command client's) `-N` is a silent no-op in zz. | **silent** edge |
 | `send-keys -X` | `select-line`/`copy-end-of-line` ignore counts; flags written after the verb (`-X copy-selection -C`) parse as positionals; no "not in a mode" error. | **silent** |
 | `send-keys -H` | Bytes `80`–`ff` refused; tmux writes the raw byte (`KeyToken::Literal` carries UTF-8). | loud |
-| `new-window` | `-S` skips tmux's target-index gating and "multiple windows named" error; `-a` onto a free index gives N+1 where tmux gives N. | **silent** |
-| Session `-t` | No `fnmatch` patterns (`work*`), no `=name` exact-match escape, `-t ""` errors instead of meaning the current session. | loud |
-| Brace blocks | Empty `{}` and a trailing `\;` error; tmux accepts both. | loud |
+| `new-window` | `-S` skips tmux's target-index gating and "multiple windows named" error. | **silent** |
 | Unguarded commands | Closed by the [drop-in plan](/designs/tmux-drop-in.md)'s phase 0: every engine command rejects options centrally from its catalog `CommandSpec` — flags tmux has at the pin but zz lacks error as unsupported (and count in config-import skip reports); flags tmux doesn't have error as invalid. Residual: the daemon-side `capture-pane`/buffer family still hand-rolls parsing. | loud |
 | `bind-key` payloads | Bind-time validation covers names and flags only; positional arity and target errors still surface at keypress, and daemon-side verbs (`capture-pane`, the buffer family) bind with no validation at all. tmux validates the full argument template at bind time. | **silent** edge |
-| Error strings | Several differ (zz `index in use: 2` vs tmux `create window failed: index 2 in use`). | cosmetic |
 | Daemon boot | The zz daemon creates a default session `0` at spawn (the GUI's empty workspace expects one); a tmux server boots empty until its first `new-session`. `tmux ls` scripts see one extra session, and every `$N`/`@N`/`%N` id is shifted by the auto-session's objects — which is why the harness diffs layout-string structure with pane numbers stripped. | **silent** |
 
 # Options: 15 of 180

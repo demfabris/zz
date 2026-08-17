@@ -1,0 +1,3 @@
+# Failed targets must agree on exit class and leave state unchanged.
+select-window -t missing:0
+select-pane -t w:0.999

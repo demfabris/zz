@@ -1,4 +1,4 @@
-use zz_mux::{COMMAND_SPECS, ExecutionContext, MuxEngine};
+use zz_mux::{COMMAND_SPECS, ExecutionContext, MuxEffect, MuxEngine};
 use zz_protocol::{CommandInvocation, ServerError};
 
 fn command(name: &str, args: &[&str]) -> CommandInvocation {
@@ -135,9 +135,12 @@ fn option_value_starting_with_dash_is_not_validated_as_a_flag() {
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
 
-    let error = engine
+    let sent = engine
         .execute(&mut context, &command("send-keys", &["-t", "-1"]))
-        .unwrap_err();
+        .expect("previous pane target");
 
-    assert_eq!(error, ServerError::InvalidTarget("-1".to_owned()));
+    assert!(matches!(
+        sent.effects.as_slice(),
+        [MuxEffect::SendKeys { .. }]
+    ));
 }

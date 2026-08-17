@@ -332,7 +332,7 @@ fn bind_key_validates_payloads_before_storing_them() {
 }
 
 #[test]
-fn bind_key_surfaces_block_diagnostics_and_preserves_empty_errors() {
+fn bind_key_surfaces_block_diagnostics_and_accepts_empty_endings() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
 
@@ -344,19 +344,31 @@ fn bind_key_surfaces_block_diagnostics_and_preserves_empty_errors() {
         .unwrap_err();
     assert!(matches!(error, ServerError::InvalidCommand(message)
         if message == "unterminated quote"));
-    let empty_block = engine
+    engine
         .execute(&mut context, &command("bind-key", &["x", "{}"]))
-        .unwrap_err();
-    assert!(matches!(empty_block, ServerError::InvalidCommand(message)
-        if message == "bind-key command block is empty"));
-    let empty_chain = engine
+        .expect("empty block");
+    assert!(
+        engine
+            .keys
+            .get("prefix", "x")
+            .expect("empty binding")
+            .commands
+            .is_empty()
+    );
+    engine
         .execute(
             &mut context,
-            &command("bind-key", &["x", "new-window", ";"]),
+            &command("bind-key", &["y", "new-window", ";"]),
         )
-        .unwrap_err();
-    assert!(matches!(empty_chain, ServerError::InvalidCommand(message)
-        if message == "bind-key command chain contains an empty command"));
+        .expect("trailing separator");
+    assert_eq!(
+        engine
+            .keys
+            .get("prefix", "y")
+            .expect("trailing binding")
+            .commands,
+        [CommandInvocation::new("new-window", [] as [&str; 0])]
+    );
 }
 
 #[test]
@@ -442,7 +454,8 @@ fn new_window_dash_t_prefers_a_window_index_then_a_session_name() {
     let error = engine
         .execute(&mut context, &command("new-window", &["-t", "3"]))
         .unwrap_err();
-    assert!(matches!(error, ServerError::InvalidCommand(message) if message == "index in use: 3"));
+    assert!(matches!(error, ServerError::InvalidCommand(message)
+        if message == "create window failed: index 3 in use"));
 
     engine
         .execute(&mut context, &command("new-window", &["-t", "work"]))
@@ -452,7 +465,7 @@ fn new_window_dash_t_prefers_a_window_index_then_a_session_name() {
     let error = engine
         .execute(&mut context, &command("new-window", &["-t", "work:nope"]))
         .unwrap_err();
-    assert!(matches!(error, ServerError::MissingTarget(target) if target == "work:nope"));
+    assert!(matches!(error, ServerError::WindowNotFound(target) if target == "nope"));
 }
 
 #[test]
@@ -952,6 +965,36 @@ fn resize_pane_dash_x_uses_headless_cells_and_percentages() {
 }
 
 #[test]
+fn resize_pane_accepts_percentages_above_one_hundred_and_clamps_layout() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let top = context.pane.unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &[]))
+        .unwrap();
+    let bottom = context.pane.unwrap();
+
+    engine
+        .execute(&mut context, &command("resize-pane", &["-y", "125%"]))
+        .expect("oversized percentage");
+    assert_eq!(pane_size(&engine, top), (80, 1));
+    assert_eq!(pane_size(&engine, bottom), (80, 22));
+
+    let window = context.window.unwrap();
+    let layout = engine.state.windows[&window].layout.clone();
+    let generation = engine.state.generation();
+    let error = engine
+        .execute(&mut context, &command("resize-pane", &["-y", "1001%"]))
+        .unwrap_err();
+    assert!(matches!(error, ServerError::InvalidCommand(message) if message == "height too large"));
+    assert_eq!(engine.state.windows[&window].layout, layout);
+    assert_eq!(engine.state.generation(), generation);
+}
+
+#[test]
 fn resize_pane_rejects_an_unparseable_adjustment() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
@@ -965,7 +1008,7 @@ fn resize_pane_rejects_an_unparseable_adjustment() {
         .execute(&mut context, &command("resize-pane", &["-R", "wide"]))
         .unwrap_err();
     assert!(
-        matches!(error, ServerError::InvalidCommand(message) if message == "invalid resize adjustment: wide")
+        matches!(error, ServerError::InvalidCommand(message) if message == "adjustment invalid")
     );
     let window = engine.state.windows.values().next().expect("window");
     let panes = window.pane_order();
@@ -1012,7 +1055,7 @@ fn resize_pane_validates_every_used_argument_before_mutating() {
         .unwrap_err();
     assert!(matches!(
         error,
-        ServerError::InvalidCommand(message) if message == "invalid resize adjustment: bogus"
+        ServerError::InvalidCommand(message) if message == "adjustment invalid"
     ));
     assert_eq!(engine.state.windows[&window].layout, layout);
     assert_eq!(engine.state.generation(), generation);
@@ -1569,8 +1612,7 @@ fn session_targets_accept_a_unique_prefix() {
         .execute(&mut context, &command("new-window", &["-t", "wor"]))
         .unwrap_err();
     assert!(
-        matches!(&error, ServerError::AmbiguousTarget(message)
-            if message == "wor matches work, workshop"),
+        matches!(&error, ServerError::WindowNotFound(target) if target == "wor"),
         "{error:?}"
     );
 }
@@ -1647,7 +1689,7 @@ fn resize_pane_takes_attached_adjustments_and_rejects_unknown_flags() {
         .execute(&mut context, &command("resize-pane", &["-R", "10.5"]))
         .unwrap_err();
     assert!(matches!(&error, ServerError::InvalidCommand(message)
-        if message == "invalid resize adjustment: 10.5"));
+        if message == "adjustment invalid"));
 }
 
 #[test]

@@ -7,10 +7,11 @@ use std::{
 
 use zz_protocol::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, COMMAND_SPECS, ChooseTreeKind,
-    CommandInvocation, CommandSpec, DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND,
-    DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken,
-    MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, PaneId, PaneKindSnapshot,
-    ServerError, SessionId, TerminalUiCommand, WindowId, normalize_browser_profile_name,
+    CommandInvocation, CommandSpec, DAEMON_COMMAND_SPECS, DEFAULT_AGENT_AUTO_APPROVE,
+    DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE,
+    EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, PaneId,
+    PaneKindSnapshot, ServerError, SessionId, TerminalUiCommand, WindowId,
+    normalize_browser_profile_name,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, DEFAULT_HISTORY_LIMIT,
@@ -3169,13 +3170,23 @@ impl MuxEngine {
                 "list-commands accepts at most one command".to_owned(),
             ));
         }
+        let listed_spec = |name: &str| {
+            command_spec(name).or_else(|| {
+                DAEMON_COMMAND_SPECS
+                    .iter()
+                    .find(|spec| spec.name == name || spec.aliases.contains(&name))
+            })
+        };
         let mut specs =
             if let Some(name) = positional.first() {
-                vec![command_spec(name).ok_or_else(|| {
+                vec![listed_spec(name).ok_or_else(|| {
                     ServerError::InvalidCommand(format!("unknown command: {name}"))
                 })?]
             } else {
-                COMMAND_SPECS.iter().collect::<Vec<_>>()
+                COMMAND_SPECS
+                    .iter()
+                    .chain(DAEMON_COMMAND_SPECS.iter())
+                    .collect::<Vec<_>>()
             };
         specs.sort_by_key(|spec| spec.name);
         let format = options.value("-F").unwrap_or(DEFAULT_LIST_COMMANDS_FORMAT);
@@ -11949,11 +11960,24 @@ mod tests {
             .execute(&mut context, &command("list-commands", &[]))
             .unwrap();
         let rows = commands.output.lines().collect::<Vec<_>>();
-        assert_eq!(rows.len(), COMMAND_SPECS.len());
+        assert_eq!(rows.len(), COMMAND_SPECS.len() + DAEMON_COMMAND_SPECS.len());
         assert!(rows.windows(2).all(|rows| rows[0] < rows[1]));
         assert!(rows.contains(&"kill-server "));
         assert!(rows.contains(&"list-commands (lscm) [-F format] [command]"));
         assert!(rows.contains(&"start-server (start) "));
+        assert!(rows.contains(
+            &"capture-pane (capturep) [-aCeFHJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
+        ));
+        assert!(rows.contains(
+            &"paste-buffer (pasteb) [-dprS] [-s separator] [-b buffer-name] [-t target-pane]"
+        ));
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("list-commands", &["capturep"]))
+                .unwrap()
+                .output,
+            "capture-pane (capturep) [-aCeFHJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
+        );
         assert_eq!(
             engine
                 .execute(&mut context, &command("start", &[]))

@@ -213,6 +213,85 @@ pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "switch-mode",
 ];
 
+/// Implemented tmux commands the daemon dispatches outside the engine
+/// (capture-pane and the buffer family). They never route through spec
+/// parsing, so these rows exist only so `list-commands` tells the truth
+/// about them; usage strings are copied verbatim from the pin.
+pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
+    CommandSpec {
+        name: "capture-pane",
+        aliases: &["capturep"],
+        description: "Capture the contents of a pane",
+        usage: "[-aCeFHJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]",
+        options: &[],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "delete-buffer",
+        aliases: &["deleteb"],
+        description: "Delete a paste buffer",
+        usage: "[-b buffer-name]",
+        options: &[],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "list-buffers",
+        aliases: &["lsb"],
+        description: "List paste buffers",
+        usage: "[-F format] [-f filter] [-O order]",
+        options: &[],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "load-buffer",
+        aliases: &["loadb"],
+        description: "Load a file into a paste buffer",
+        usage: "[-b buffer-name] [-t target-client] path",
+        options: &[],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "paste-buffer",
+        aliases: &["pasteb"],
+        description: "Insert the contents of a paste buffer into a pane",
+        usage: "[-dprS] [-s separator] [-b buffer-name] [-t target-pane]",
+        options: &[],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "save-buffer",
+        aliases: &["saveb"],
+        description: "Save a paste buffer to a file",
+        usage: "[-a] [-b buffer-name] path",
+        options: &[],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "set-buffer",
+        aliases: &["setb"],
+        description: "Set the contents of a paste buffer",
+        usage: "[-aw] [-b buffer-name] [-n new-buffer-name] [-t target-client] [data]",
+        options: &[],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "show-buffer",
+        aliases: &["showb"],
+        description: "Display the contents of a paste buffer",
+        usage: "[-b buffer-name]",
+        options: &[],
+        positionals: &[],
+        variadic: None,
+    },
+];
+
 /// Every tmux-compatible command currently executable by the mux engine.
 pub static COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {

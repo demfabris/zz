@@ -9,8 +9,8 @@ mod snapshot;
 mod terminal_codec;
 
 pub use catalog::{
-    COMMAND_SPECS, CommandOptionSpec, CommandSpec, CommandValueKind, canonical_command,
-    command_spec,
+    COMMAND_SPECS, CommandOptionSpec, CommandSpec, CommandValueKind, DAEMON_COMMAND_SPECS,
+    canonical_command, command_spec,
 };
 pub use framing::{MAX_ENCODED_FRAME_BYTES, MAX_FRAME_BYTES, ProtocolError};
 pub use id::{ClientId, ClientInstanceId, PaneId, SessionId, SplitId, WindowId};

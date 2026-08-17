@@ -328,6 +328,13 @@ this list is the campaign-level index of it plus the items that never got a matr
   divergently. When implementing an option, test the effect AT the default, not
   only after an explicit set.
 
+- Wire discipline (from the v59 audit): postcard structs serialize positionally, so
+  struct fields must be APPENDED, never inserted — v59's `WindowSnapshot::automatic_rename`
+  went in mid-struct and is safe only because every frame's envelope version-gates
+  before deserialization (framing.rs). Two future changes would turn that into silent
+  corruption: version negotiation accepting N−1, or any frame path skipping the
+  envelope check. Keep the gate strict; append from now on.
+
 **Open questions (investigate before declaring 100%):**
 
 - The zz-client simulator hang: one 93-minute wedge in `Simulation::boot` (blocking socket

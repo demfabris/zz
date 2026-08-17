@@ -176,11 +176,7 @@ impl CellLayout {
         let Some(prefix) = bytes.get(..5) else {
             return Err(LayoutParseError::InvalidLayout);
         };
-        if prefix[4] != b','
-            || !prefix[..4]
-                .iter()
-                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
-        {
+        if prefix[4] != b',' || !prefix[..4].iter().all(u8::is_ascii_hexdigit) {
             return Err(LayoutParseError::InvalidLayout);
         }
         let expected = prefix[..4].iter().fold(0_u16, |value, byte| {
@@ -188,6 +184,7 @@ impl CellLayout {
                 + u16::from(match byte {
                     b'0'..=b'9' => byte - b'0',
                     b'a'..=b'f' => byte - b'a' + 10,
+                    b'A'..=b'F' => byte - b'A' + 10,
                     _ => 0,
                 })
         });
@@ -721,14 +718,20 @@ impl<'a> LayoutParser<'a> {
         self.expect(b',')?;
         let yoff = self.number()?;
         let geometry = CellGeometry { sx, sy, xoff, yoff };
-        match self.peek()? {
-            b',' => {
+        if self.peek() == Some(b',') {
+            let saved = self.cursor;
+            self.cursor += 1;
+            while matches!(self.peek(), Some(b'0'..=b'9')) {
                 self.cursor += 1;
-                self.pane_number()?;
-                Some(ParsedNode::Leaf { geometry })
             }
-            b'{' => self.parse_children(depth, Axis::Horizontal, geometry, b'}'),
-            b'[' => self.parse_children(depth, Axis::Vertical, geometry, b']'),
+            if self.peek() == Some(b'x') {
+                self.cursor = saved;
+            }
+        }
+        match self.peek() {
+            Some(b'{') => self.parse_children(depth, Axis::Horizontal, geometry, b'}'),
+            Some(b'[') => self.parse_children(depth, Axis::Vertical, geometry, b']'),
+            Some(b',' | b'}' | b']') | None => Some(ParsedNode::Leaf { geometry }),
             _ => None,
         }
     }
@@ -765,14 +768,6 @@ impl<'a> LayoutParser<'a> {
             self.cursor += 1;
         }
         (self.cursor > start).then_some(value)
-    }
-
-    fn pane_number(&mut self) -> Option<()> {
-        let start = self.cursor;
-        while matches!(self.peek(), Some(b'0'..=b'9')) {
-            self.cursor += 1;
-        }
-        (self.cursor > start).then_some(())
     }
 
     fn expect(&mut self, expected: u8) -> Option<()> {
@@ -2915,10 +2910,23 @@ mod tests {
             CellLayout::parse("0000,80x24,0,0,0"),
             Err(LayoutParseError::InvalidLayout)
         );
+        let parsed = CellLayout::parse("B25D,80x24,0,0,0").unwrap();
+        let mut ids = allocator(20);
         assert_eq!(
-            CellLayout::parse("B25D,80x24,0,0,0"),
-            Err(LayoutParseError::InvalidLayout)
+            parsed.into_layout(&[PaneId(7)], &mut ids).dump(),
+            checksummed("80x24,0,0,7")
         );
+        for malformed in [
+            "b25,80x24,0,0,0",
+            "0b25d,80x24,0,0,0",
+            "0xb25d,80x24,0,0,0",
+            " b25d,80x24,0,0,0",
+        ] {
+            assert_eq!(
+                CellLayout::parse(malformed),
+                Err(LayoutParseError::InvalidLayout)
+            );
+        }
         assert_eq!(
             CellLayout::parse(&checksummed("80x24,0,0,0garbage")),
             Err(LayoutParseError::InvalidLayout)
@@ -2930,6 +2938,19 @@ mod tests {
         assert_eq!(
             CellLayout::parse(&checksummed("80x24,0,0{40x23,0,0,0,39x24,41,0,1}")),
             Err(LayoutParseError::SizeMismatch)
+        );
+    }
+
+    #[test]
+    fn parsed_layout_leaf_pane_numbers_are_optional() {
+        let with_ids = CellLayout::parse("8205,80x24,0,0{40x24,0,0,0,39x24,41,0,1}").unwrap();
+        let without_ids = CellLayout::parse("347e,80x24,0,0{40x24,0,0,39x24,41,0}").unwrap();
+        let panes = [PaneId(7), PaneId(8)];
+        let mut with_ids_allocator = allocator(20);
+        let mut without_ids_allocator = allocator(20);
+        assert_eq!(
+            with_ids.into_layout(&panes, &mut with_ids_allocator),
+            without_ids.into_layout(&panes, &mut without_ids_allocator)
         );
     }
 

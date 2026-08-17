@@ -20,7 +20,10 @@ command name, dispatches to a handler, and, if the state `generation` advanced, 
 current target stays valid after the mutation.
 
 Errors are structured `ServerError`s (`MissingTarget`, `AmbiguousTarget`, `InvalidTarget`,
-`UnsupportedCommand`, `InvalidCommand`) and never partially apply after validation fails.
+`UnsupportedCommand`, `InvalidCommand`). Most handlers validate before mutation. tmux orders some
+mutations before later failures; `select-layout`, for example, unzooms its resolved window before it
+parses a custom layout. The daemon publishes any generation change at the command boundary even
+when the handler returns an error.
 `catalog.rs` is the shared renderer-free source for canonical names, aliases, descriptions,
 accepted flags/options, and completion value kinds; `canonical_command` and the native
 [command palette](/concepts/command-palette.md) both consume it.

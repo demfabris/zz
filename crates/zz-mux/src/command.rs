@@ -413,7 +413,6 @@ impl MuxEngine {
     }
 
     /// Apply one parsed command and return side effects for the daemon adapter.
-    /// A validation failure leaves command-specific state untouched.
     pub fn execute(
         &mut self,
         context: &mut ExecutionContext,
@@ -1982,6 +1981,18 @@ impl MuxEngine {
                     .resolve_window(target, context.session, context.window)?;
                 (window, window_active_pane(&self.state, window)?)
             };
+
+        if self
+            .state
+            .windows
+            .get_mut(&window)
+            .expect("window was resolved")
+            .zoomed_pane
+            .take()
+            .is_some()
+        {
+            self.state.bump_generation();
+        }
 
         if command == "next-layout" || options.has("-n") {
             self.state.cycle_layout(window, 1)?;
@@ -7853,6 +7864,43 @@ mod tests {
         );
         assert_eq!(engine.state.windows[&window].layout, before);
         assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
+    fn select_layout_unzooms_before_success_or_failure() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let window = context.window.unwrap();
+
+        engine
+            .execute(&mut context, &command("resize-pane", &["-Z"]))
+            .unwrap();
+        let layout = engine.state.windows[&window].layout.clone();
+        let generation = engine.state.generation();
+        assert!(matches!(
+            engine.execute(&mut context, &command("select-layout", &["bogus"])),
+            Err(ServerError::InvalidCommand(message)) if message == "invalid layout: bogus"
+        ));
+        assert_eq!(engine.state.windows[&window].layout, layout);
+        assert_eq!(engine.state.windows[&window].zoomed_pane, None);
+        assert_eq!(engine.state.generation(), generation + 1);
+
+        engine
+            .execute(&mut context, &command("resize-pane", &["-Z"]))
+            .unwrap();
+        let generation = engine.state.generation();
+        let execution = engine
+            .execute(&mut context, &command("select-layout", &[]))
+            .unwrap();
+        assert_eq!(engine.state.windows[&window].zoomed_pane, None);
+        assert_eq!(engine.state.generation(), generation + 1);
+        assert_eq!(execution.effects, [MuxEffect::SnapshotChanged]);
     }
 
     #[test]

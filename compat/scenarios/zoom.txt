@@ -2,3 +2,5 @@
 split-window -h -t w:0.0
 resize-pane -Z -t w:0.1
 resize-pane -Z -t w:0.1
+resize-pane -Z -t w:0.1
+select-layout -t w:0 bogus

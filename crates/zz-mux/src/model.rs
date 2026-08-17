@@ -846,7 +846,6 @@ impl MuxState {
         debug_assert!(split_ids_exhausted, "preset consumes one split ID per edge");
         window.previous_layout = Some(Box::new(previous));
         window.last_layout = Some(preset);
-        window.zoomed_pane = None;
         self.bump_generation();
         Ok(())
     }
@@ -893,7 +892,6 @@ impl MuxState {
         let window = self.windows.get_mut(&window).expect("window was resolved");
         let previous = std::mem::replace(&mut window.layout, next);
         window.previous_layout = Some(Box::new(previous));
-        window.zoomed_pane = None;
         window.last_extent_probe = None;
         self.bump_generation();
         Ok(())
@@ -981,7 +979,6 @@ impl MuxState {
             .spread(pane)
             .map_err(|error| pane_layout_error(error, pane))?;
         window.previous_layout = Some(Box::new(previous));
-        window.zoomed_pane = None;
         self.bump_generation();
         Ok(())
     }
@@ -3534,8 +3531,6 @@ mod tests {
         let panes = state.windows[&window].panes.clone();
         let pane_order = state.windows[&window].pane_order.clone();
         let mut retired_splits = layout_splits(&state.windows[&window].layout);
-        state.toggle_zoom(target).unwrap();
-
         for (preset, expected) in [
             (
                 LayoutPreset::EvenHorizontal,

@@ -2116,6 +2116,27 @@ impl Shared {
             }
             return result;
         }
+        let generation = self.inner.lock().engine.state.generation();
+        let result = self.execute_with_mux_source_inner(client, kind, context, command, mux_source);
+        let publish_snapshot = {
+            let inner = self.inner.lock();
+            let current = inner.engine.state.generation();
+            current != generation && inner.last_published_mux_generation != current
+        };
+        if publish_snapshot {
+            self.publish_snapshot();
+        }
+        result
+    }
+
+    fn execute_with_mux_source_inner(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+        mux_source: MuxOptionSource,
+    ) -> Result<Execution, DaemonError> {
         let mut terminals_to_watch = Vec::new();
         let mut client_events = Vec::new();
         let mut direct_events = Vec::new();
@@ -18748,6 +18769,67 @@ bind - split-window -v -c "#{pane_current_path}"
             })
         });
         assert!(closed.is_some());
+    }
+
+    #[test]
+    fn command_error_that_mutates_mux_state_publishes_snapshot() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (window, first) = {
+            let mut inner = shared.inner.lock();
+            let (_, window, first) = inner
+                .engine
+                .state
+                .create_session("work")
+                .expect("create session");
+            inner
+                .engine
+                .state
+                .split_pane(first, zz_protocol::Axis::Horizontal, PaneKind::Terminal)
+                .expect("split window");
+            inner.engine.state.toggle_zoom(first).expect("zoom pane");
+            (window, first)
+        };
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, first)
+            .expect("command context");
+        shared.publish_snapshot();
+        take_reliable_messages(&mailbox);
+        let generation = shared.inner.lock().engine.state.generation();
+
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("select-layout", ["bogus"]),
+            )
+            .expect_err("invalid layout");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "invalid layout: bogus"
+        ));
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.state.windows[&window].zoomed_pane, None);
+            assert_eq!(inner.engine.state.generation(), generation + 1);
+            assert_eq!(inner.last_published_mux_generation, generation + 1);
+        }
+        let snapshots = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Snapshot(snapshot),
+                    ..
+                }) => Some(snapshot),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].generation, generation + 1);
+        assert_eq!(snapshots[0].sessions[0].windows[0].zoomed_pane, None);
     }
 
     #[test]

@@ -62,8 +62,10 @@ Open `compat/results/<scenario>.log` for the command status and per-step unified
 - `GEO` compares window and pane cell dimensions plus each window's `#{window_layout}`
   string, normalized to its structural body: the checksum and the leaf pane numbers are
   stripped before diffing, because pane ids are opaque values both parsers ignore and the
-  zz daemon's auto-session shifts id allocation by one (see the divergence matrix). The
-  runner reports these differences by default and fails them under `--strict-geometry`.
+  zz daemon's auto-session shifts id allocation by one (see the divergence matrix). Stripping
+  leaf ids limits GEO to bracket structure and geometry. TOPO and GEO both miss a pane assignment
+  permutation among equal-sized panes; the harness accepts that blind spot. The runner reports
+  these differences by default and fails them under `--strict-geometry`.
 
 The log also captures each step's stdout and stderr for debugging, but the comparison covers
 only the exit class and the TOPO/GEO snapshots; command output itself is never diffed.

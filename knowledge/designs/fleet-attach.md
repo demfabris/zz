@@ -68,8 +68,8 @@ laptop GUI ──┬── unix socket ──────── laptop daemon   
 The persistent sidebar is the cross-machine surface. Every daemon is one zz-logo + hostname row and
 every machine can expand into session/window/pane navigation; only the local tree auto-expands when
 it first joins the fleet. Clicking a machine row attaches its daemon-selected current/default
-session, while clicking a descendant attaches that exact owning session before selecting it. One
-host's session is on screen at a time.
+session, lazily creating numeric `0` if that daemon is empty, while clicking a descendant attaches
+that exact owning session before selecting it. One host's session is on screen at a time.
 
 # Scope decisions
 
@@ -125,10 +125,12 @@ agent, and `~/.ssh/config` aliases just work. The ssh child's lifetime is owned 
 
 - Configured hosts connect in the background at GUI boot. Each connection keeps its latest snapshot
   even while another host is attached, which lets the merged tree, bell flags, and connection state
-  remain live without switching machines.
+  remain live without switching machines. Registration and resync do not create a session on those
+  background daemons.
 - The sidebar projects every daemon's session/window/pane hierarchy under its machine row. Clicking
-  a machine row asks that daemon to select its current/default session; clicking any descendant
-  attaches its owning session before selecting it. Clicking the local hostname while viewing remote
+  a machine row asks that daemon to select its current/default session, or lazily create the next
+  numeric session if it is empty; clicking any descendant attaches its owning session before
+  selecting it. Clicking the local hostname while viewing remote
   switches back symmetrically. A spinner represents connecting/reconnecting/loading, an X
   represents failure, and connected hosts carry no status label. Only the local tree auto-expands;
   remote trees remain user-controlled.

@@ -5692,40 +5692,31 @@ mod tests {
             (mux, remote)
         });
 
+        wait_for_mux(cx, &mux, "process-backed remote connection", |mux| {
+            mux.connections.get(&remote).is_some_and(|connection| {
+                connection.state == HostState::Connected && connection.snapshot.is_some()
+            })
+        });
+        cx.update(|cx| {
+            mux.update(cx, |mux, cx| {
+                assert!(mux.attach_to_host_default(remote, cx));
+            });
+        });
         wait_for_mux(
             cx,
             &mux,
-            "process-backed remote connection and snapshot",
+            "lazily created process-backed remote session",
             |mux| {
-                mux.connections.get(&remote).is_some_and(|connection| {
-                    connection.state == HostState::Connected
-                        && connection
-                            .snapshot
-                            .as_ref()
-                            .is_some_and(|snapshot| !snapshot.sessions.is_empty())
-                })
+                mux.attached_host == remote
+                    && mux.core.attached_session().is_some()
+                    && !mux.core.snapshot().sessions.is_empty()
+                    && !mux.viewports.is_empty()
             },
         );
         let (session, session_name) = cx.update(|cx| {
             let mux = mux.read(cx);
-            let session = mux.connections[&remote]
-                .snapshot
-                .as_ref()
-                .unwrap()
-                .sessions
-                .first()
-                .unwrap();
+            let session = mux.core.snapshot().sessions.first().unwrap();
             (session.id, session.name.clone())
-        });
-        cx.update(|cx| {
-            mux.update(cx, |mux, cx| {
-                assert!(mux.attach_to_host(remote, session, cx));
-            });
-        });
-        wait_for_mux(cx, &mux, "first process-backed remote frame", |mux| {
-            mux.attached_host == remote
-                && mux.core.attached_session() == Some(session)
-                && !mux.viewports.is_empty()
         });
         let pane = cx.update(|cx| {
             let mux = mux.read(cx);
@@ -5823,33 +5814,23 @@ mod tests {
             "remote connection and connect-time snapshot",
             |mux| {
                 let connection = mux.connections.get(&remote).unwrap();
-                connection.state == HostState::Connected
-                    && connection
-                        .snapshot
-                        .as_ref()
-                        .is_some_and(|snapshot| !snapshot.sessions.is_empty())
+                connection.state == HostState::Connected && connection.snapshot.is_some()
             },
         );
 
-        let remote_session = cx.update(|cx| {
-            let mux = mux.read(cx);
-            mux.connections[&remote]
-                .snapshot
-                .as_ref()
-                .expect("connect-time remote snapshot")
-                .sessions
-                .first()
-                .expect("remote default session")
-                .id
-        });
-
         cx.update(|cx| {
             mux.update(cx, |mux, cx| {
-                mux.attach_to_host(remote, remote_session, cx);
+                assert!(mux.attach_to_host_default(remote, cx));
             });
         });
         wait_for_mux(cx, &mux, "remote Attached response", |mux| {
-            mux.attached_host == remote && mux.core.attached_session() == Some(remote_session)
+            mux.attached_host == remote && mux.core.attached_session().is_some()
+        });
+        let remote_session = cx.update(|cx| {
+            let mux = mux.read(cx);
+            mux.core
+                .attached_session()
+                .expect("lazily created remote session")
         });
         cx.update(|cx| {
             let mux = mux.read(cx);

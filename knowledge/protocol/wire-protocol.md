@@ -77,7 +77,7 @@ fields in declaration order.
 | `ServerHello(ServerHello)` | `protocol_version: u16`, `server_id: u64`, `client_id: ClientId`, `client_instance_id: ClientInstanceId`, `capabilities: Vec<String>` (≤64 entries, ≤256 B each), `appearance: TerminalAppearance`, `appearance_provenance: AppearanceProvenance`, `mux_options: MuxOptions`, `status: StatusLine`, `key_tables: Vec<KeyTableSnapshot>` | Daemon → client handshake reply; echoes the accepted process identity, while every key table (root, prefix, copy-mode, copy-mode-vi, custom) lets clients label key hints and render binding help and capabilities describe optional behavior |
 | `CommandRequest(CommandRequest)` | `request_id: u64`, `command: CommandInvocation` | tmux-style command from any client |
 | `CommandResponse(CommandResponse)` | `Success { request_id, output }` / `Error { request_id, error: ServerError }` | Command result |
-| `Attach { session: String }` | target string | Interactive attach request. A session holds a set of attached clients, so a second device never collides with the first |
+| `Attach { session: String }` | target string | Interactive attach request. An empty target lazily creates the next numeric session when the daemon has none; explicit missing targets and Command-kind attaches do not create. A session holds a set of attached clients, so a second device never collides with the first |
 | `Attached { session: SessionId, snapshot: MuxSnapshot }` | resolved id + full state | Attach acknowledgement |
 | `Detach` | . | Interactive detach; drops the sending client's attachment and leaves every other viewer attached. The connection stays open, and the client remains a subscriber that can send another `Attach` |
 | `SetColorScheme(TerminalColorScheme)` | light/dark | Client-driven appearance change |
@@ -202,14 +202,18 @@ tmux target-lookup wording and only the normalized component that failed.
 
 The daemon keys attachment as `attached: BTreeMap<SessionId, BTreeSet<ClientId>>`, so any number of
 devices can hold one session at once and no error variant exists for a session that is already
-attached. Each attached client owns its own terminal view (`TerminalViewId(client.0)`), key engine,
-focused window, and overlay state. A pane's PTY takes its geometry from **one** owning viewer,
-**latest active wins**: `terminal_geometry_owner` picks the visible viewer with the highest
-daemon-global terminal-input sequence (ties broken by lowest `ClientId`), and columns, rows, and both
-cell-pixel dimensions all come from that client. Typing in a pane reclaims its geometry. The
-min-of-viewers rule this doc used to describe was reversed on 2026-07-31 because it produced
-geometries no client actually had; see
-[multi-device attach](/designs/multi-device-attach.md).
+attached. Registration itself does not attach or create a session. An Interactive empty-target
+attach to an empty daemon creates and attaches the next numeric session atomically from the caller's
+perspective; the first one is `0` with ids `$0`, `@0`, and `%0`. Each attached client owns its own
+terminal view (`TerminalViewId(client.0)`), key engine, focused window, and overlay state.
+
+With `aggressive-resize` off, a pane's PTY takes its geometry from **one** owning viewer, **latest
+active wins**: `terminal_geometry_owner` picks the visible viewer with the highest daemon-global
+terminal-input sequence (ties broken by lowest `ClientId`), and columns, rows, and both cell-pixel
+dimensions all come from that client. Typing in a pane reclaims its geometry. With the option on,
+columns and rows become the componentwise minima across viewers focused on that window; cell-pixel
+dimensions still come from the latest-input eligible viewer. Both policies feed the existing
+guarded window-extent write-back. See [multi-device attach](/designs/multi-device-attach.md).
 
 `attach-session -d` evicts the other viewers of the target session: each victim receives
 `EventPayload::Detached { session, by: Some(device) }` naming the stealer's `device_name` (or
@@ -436,7 +440,7 @@ server → ServerHello { protocol_version: 59, server_id, client_id: c11, client
 client → SetConfigOverrides { entries: [("theme", "Catppuccin Mocha"),
                                         ("font-size", "13"),
                                         ("prefix", "C-a"), ("mode-keys", "vi"), ...] }
-client → Attach { session: "$0" }
+client → Attach { session: "" }      // attach current, or lazily create numeric 0 if empty
 server → Attached { session: $0, snapshot: MuxSnapshot { generation, sessions, focused_window } }
 server → Event { sequence: 1, payload: TerminalViewport { pane: %3, viewport } }   // Terminal lane
 server → Event { sequence: 2, payload: MuxOptionsChanged { options } }             // Control lane

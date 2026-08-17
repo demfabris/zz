@@ -1776,15 +1776,6 @@ impl Shared {
             self.load_config_file(&config, &mut context, 0)?;
         }
         self.apply_stored_mux_config_overrides("startup-mux-replay");
-        if self.inner.lock().engine.state.sessions.is_empty() {
-            self.execute(
-                ClientId(u64::MAX),
-                ClientKind::Command,
-                &mut context,
-                &CommandInvocation::new("new-session", ["-s", "0"]),
-            )?;
-        }
-        self.exit_empty_armed.store(true, Ordering::Release);
         // Building the runtime is what warms the adapter cache, so a daemon
         // that has agent panes enabled pays the npx download before the first
         // pane asks for it.
@@ -1795,7 +1786,6 @@ impl Shared {
                 let _ = self.agent_runtime();
             }
         }
-        self.request_shutdown_if_empty(&self.inner.lock());
         Ok(())
     }
 
@@ -2412,6 +2402,9 @@ impl Shared {
             let execution = inner
                 .engine
                 .execute_with_format_hooks(context, command, &mut hooks)?;
+            if !inner.engine.state.sessions.is_empty() {
+                self.exit_empty_armed.store(true, Ordering::Release);
+            }
             let selected_panes = inner
                 .engine
                 .state
@@ -2471,6 +2464,17 @@ impl Shared {
                     }
                 }
             }
+            let resized_windows = focused_windows_before
+                .iter()
+                .filter_map(|((session, attached_client), previous)| {
+                    let state = inner.engine.state.sessions.get(session)?;
+                    let current = client_focused_window(&inner, *attached_client, state);
+                    (*previous != current).then_some([*previous, current])
+                })
+                .flatten()
+                .collect::<BTreeSet<_>>();
+            let resized_panes = panes_for_windows(&inner, &resized_windows);
+            snapshot_changed |= write_back_terminal_geometries(&mut inner, &resized_panes, true);
             for effect in &execution.effects {
                 match effect {
                     MuxEffect::PaneCreated {
@@ -3118,6 +3122,19 @@ impl Shared {
                     }
                     MuxEffect::ModeKeysChanged { window } => {
                         retarget_copy_mode_tables(&mut inner, *window);
+                    }
+                    MuxEffect::AggressiveResizeChanged { window } => {
+                        let windows = window.map_or_else(
+                            || inner.engine.state.windows.keys().copied().collect(),
+                            |window| BTreeSet::from([window]),
+                        );
+                        let panes = panes_for_windows(&inner, &windows);
+                        snapshot_changed |=
+                            write_back_terminal_geometries(&mut inner, &panes, false);
+                        for (terminal, geometry) in terminal_resizes_for_panes(&inner, &panes) {
+                            deferred_terminal_commands
+                                .push(DeferredTerminalCommand::Resize { terminal, geometry });
+                        }
                     }
                     MuxEffect::MuxOptionChanged { option } => {
                         let value = inner.engine.mux_option_value(*option);
@@ -4102,6 +4119,7 @@ impl Shared {
         }
         let terminals = session_terminals(&inner, session);
         let unfocused_copy_mode_exits = unfocused_copy_sessions(&mut inner);
+        write_back_terminal_geometries(&mut inner, &affected_panes, true);
         let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
         let mut snapshot = inner.engine.state.snapshot();
         let presence = snapshot_presence(&inner);
@@ -4137,10 +4155,24 @@ impl Shared {
     }
 
     fn attach_target(
-        &self,
+        self: &Arc<Self>,
         client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
         target: &str,
     ) -> Result<(SessionId, MuxSnapshot), ServerError> {
+        if kind == ClientKind::Interactive
+            && target.is_empty()
+            && self.inner.lock().engine.state.sessions.is_empty()
+        {
+            self.execute(
+                client,
+                ClientKind::Command,
+                context,
+                &CommandInvocation::new("new-session", ["-A", "-d"]),
+            )
+            .map_err(daemon_server_error)?;
+        }
         let session = {
             let inner = self.inner.lock();
             inner.engine.state.resolve_session(
@@ -4151,6 +4183,23 @@ impl Shared {
                     .default_context()
                     .map(|context| context.0),
             )?
+        };
+        let (window, pane) = {
+            let inner = self.inner.lock();
+            let session_state = inner
+                .engine
+                .state
+                .sessions
+                .get(&session)
+                .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?;
+            let window = session_state.active_window;
+            let pane = inner.engine.state.windows[&window].active_pane;
+            (window, pane)
+        };
+        *context = ExecutionContext {
+            session: Some(session),
+            window: Some(window),
+            pane: Some(pane),
         };
         let snapshot = self.attach(client, session)?;
         Ok((session, snapshot))
@@ -4238,6 +4287,7 @@ impl Shared {
         inner.choose_buffers.remove(&client);
         let _ = take_display_panes(&mut inner, client);
         let command_output = take_command_output(&mut inner, client);
+        write_back_terminal_geometries(&mut inner, &affected_panes, true);
         let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
         drop(inner);
         self.fail_gui_requests_for(client);
@@ -10650,15 +10700,102 @@ fn terminal_geometry_owner(inner: &ServerState, pane: PaneId) -> Option<ClientId
         .map(|(client, _)| *client)
 }
 
+fn aggressive_terminal_geometry(inner: &ServerState, pane: PaneId) -> Option<TerminalGeometry> {
+    let window = inner.engine.state.window_for_pane(pane)?;
+    let window_state = inner.engine.state.windows.get(&window)?;
+    if window_state
+        .zoomed_pane
+        .is_some_and(|zoomed| zoomed != pane)
+    {
+        return None;
+    }
+    let geometries = inner.terminal_geometries.get(&pane)?;
+    let mut candidates = geometries.iter().filter(|(client, _)| {
+        client_focused_window_for_attachment(inner, **client) == Some(window)
+    });
+    let (first_client, first_geometry) = candidates.next()?;
+    let mut owner = (*first_client, *first_geometry);
+    let mut columns = first_geometry.columns;
+    let mut rows = first_geometry.rows;
+    for (client, geometry) in candidates {
+        columns = columns.min(geometry.columns);
+        rows = rows.min(geometry.rows);
+        let current_key = (
+            Reverse(
+                inner
+                    .client_terminal_input_sequences
+                    .get(client)
+                    .copied()
+                    .unwrap_or_default(),
+            ),
+            client.0,
+        );
+        let owner_key = (
+            Reverse(
+                inner
+                    .client_terminal_input_sequences
+                    .get(&owner.0)
+                    .copied()
+                    .unwrap_or_default(),
+            ),
+            owner.0.0,
+        );
+        if current_key < owner_key {
+            owner = (*client, *geometry);
+        }
+    }
+    Some(TerminalGeometry {
+        columns,
+        rows,
+        ..owner.1
+    })
+}
+
 fn terminal_resize_for_pane(
     inner: &ServerState,
     pane: PaneId,
 ) -> Option<(Arc<TerminalSession>, TerminalGeometry)> {
-    let geometries = inner.terminal_geometries.get(&pane)?;
-    let owner = terminal_geometry_owner(inner, pane)?;
-    let geometry = *geometries.get(&owner)?;
+    let window = inner.engine.state.window_for_pane(pane)?;
+    let geometry = if inner.engine.state.window_aggressive_resize(window).ok()? {
+        aggressive_terminal_geometry(inner, pane)?
+    } else {
+        let geometries = inner.terminal_geometries.get(&pane)?;
+        let owner = terminal_geometry_owner(inner, pane)?;
+        *geometries.get(&owner)?
+    };
     let terminal = inner.terminals.get(&pane).cloned()?;
     Some((terminal, geometry))
+}
+
+fn write_back_terminal_geometries(
+    inner: &mut ServerState,
+    panes: &BTreeSet<PaneId>,
+    aggressive_only: bool,
+) -> bool {
+    let measurements = panes
+        .iter()
+        .filter_map(|pane| {
+            let window = inner.engine.state.window_for_pane(*pane)?;
+            if aggressive_only && !inner.engine.state.window_aggressive_resize(window).ok()? {
+                return None;
+            }
+            terminal_resize_for_pane(inner, *pane)
+                .map(|(_, geometry)| (*pane, geometry.columns, geometry.rows))
+        })
+        .collect::<Vec<_>>();
+    measurements
+        .into_iter()
+        .fold(false, |changed, (pane, columns, rows)| {
+            inner.engine.set_pane_geometry(pane, columns, rows) || changed
+        })
+}
+
+fn panes_for_windows(inner: &ServerState, windows: &BTreeSet<WindowId>) -> BTreeSet<PaneId> {
+    windows
+        .iter()
+        .filter_map(|window| inner.engine.state.windows.get(window))
+        .flat_map(|window| window.panes.keys().copied())
+        .collect()
 }
 
 fn terminal_resizes_after_client_input(
@@ -11577,24 +11714,26 @@ fn handle_connection<S: TransportStream>(
                 );
                 let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
             }
-            ProtocolMessage::Attach { session } => match shared.attach_target(client, &session) {
-                Ok((session, snapshot)) => {
-                    outbound.reset_kitty_images();
-                    outbound.reset_pasted_images();
-                    let _ =
-                        outbound.enqueue_reliable(&ProtocolMessage::Attached { session, snapshot });
-                    shared.send_resync(client, &outbound);
-                    shared.publish_snapshot();
+            ProtocolMessage::Attach { session } => {
+                match shared.attach_target(client, hello.kind, &mut context, &session) {
+                    Ok((session, snapshot)) => {
+                        outbound.reset_kitty_images();
+                        outbound.reset_pasted_images();
+                        let _ = outbound
+                            .enqueue_reliable(&ProtocolMessage::Attached { session, snapshot });
+                        shared.send_resync(client, &outbound);
+                        shared.publish_snapshot();
+                    }
+                    Err(error) => {
+                        let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
+                            CommandResponse::Error {
+                                request_id: 0,
+                                error,
+                            },
+                        ));
+                    }
                 }
-                Err(error) => {
-                    let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
-                        CommandResponse::Error {
-                            request_id: 0,
-                            error,
-                        },
-                    ));
-                }
-            },
+            }
             ProtocolMessage::Detach => {
                 shared.detach(client);
             }
@@ -19337,6 +19476,169 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn aggressive_resize_uses_the_smallest_geometry_for_each_viewed_window() {
+        let shared = Arc::new(Shared::new(1));
+        let (first_client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (second_client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (session, first_pane, _) =
+            output_view_session_fixture(&shared, "aggressive", "first window");
+        let (first_window, second_window, second_pane) = {
+            let mut inner = shared.inner.lock();
+            let first_window = inner
+                .engine
+                .state
+                .window_for_pane(first_pane)
+                .expect("first window");
+            let (second_window, second_pane) = inner
+                .engine
+                .state
+                .create_window_at(
+                    session,
+                    None,
+                    Some("second".to_owned()),
+                    PaneKind::Terminal,
+                    false,
+                )
+                .expect("second window");
+            let terminal = Arc::new(TerminalSession::spawn_output_view(
+                "second window".to_owned(),
+                String::new(),
+            ));
+            inner.terminals.insert(second_pane, terminal);
+            (first_window, second_window, second_pane)
+        };
+        shared
+            .attach(first_client, session)
+            .expect("attach first client");
+        shared
+            .attach(second_client, session)
+            .expect("attach second client");
+
+        let mut first_context = ExecutionContext {
+            session: Some(session),
+            window: Some(first_window),
+            pane: Some(first_pane),
+        };
+        let mut second_context = first_context.clone();
+        let resize = |client, context: &mut ExecutionContext, pane, columns, rows| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::ResizeTerminal {
+                        pane,
+                        columns,
+                        rows,
+                        cell_width_px: 8,
+                        cell_height_px: 16,
+                    },
+                )
+                .expect("record terminal geometry");
+        };
+        resize(first_client, &mut first_context, first_pane, 200, 30);
+        resize(second_client, &mut second_context, first_pane, 100, 60);
+        assert_eq!(
+            shared.inner.lock().engine.pane_geometry(first_pane),
+            Some((200, 30))
+        );
+
+        let effect = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut first_context,
+                &CommandInvocation::new("set-window-option", ["-g", "aggressive-resize", "on"]),
+            )
+            .expect("enable aggressive resize");
+        assert_eq!(
+            effect.effects,
+            vec![
+                MuxEffect::AggressiveResizeChanged { window: None },
+                MuxEffect::SnapshotChanged,
+            ]
+        );
+        assert_eq!(
+            shared.inner.lock().engine.pane_geometry(first_pane),
+            Some((100, 30))
+        );
+        assert_eq!(
+            terminal_resize_for_pane(&shared.inner.lock(), first_pane)
+                .expect("aggressive geometry")
+                .1
+                .columns,
+            100
+        );
+        assert_eq!(
+            terminal_resize_for_pane(&shared.inner.lock(), first_pane)
+                .expect("aggressive geometry")
+                .1
+                .rows,
+            30
+        );
+
+        shared
+            .execute(
+                first_client,
+                ClientKind::Interactive,
+                &mut first_context,
+                &CommandInvocation::new("select-window", ["-t", &second_window.to_string()]),
+            )
+            .expect("first client views the second window");
+        resize(first_client, &mut first_context, second_pane, 160, 50);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.pane_geometry(first_pane), Some((100, 60)));
+            assert_eq!(inner.engine.pane_geometry(second_pane), Some((160, 50)));
+        }
+
+        let mut command_context = first_context.clone();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new("select-window", ["-t", &first_window.to_string()]),
+            )
+            .expect("move every viewer to the first window");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new("select-window", ["-t", &second_window.to_string()]),
+            )
+            .expect("move every viewer to the second window");
+        resize(second_client, &mut second_context, second_pane, 90, 20);
+        assert_eq!(
+            shared.inner.lock().engine.pane_geometry(second_pane),
+            Some((90, 20))
+        );
+
+        shared
+            .execute(
+                first_client,
+                ClientKind::Interactive,
+                &mut first_context,
+                &CommandInvocation::new("select-window", ["-t", &first_window.to_string()]),
+            )
+            .expect("park the larger client on the first window");
+        let inner = shared.inner.lock();
+        assert_eq!(
+            client_focused_window_for_attachment(&inner, first_client),
+            Some(first_window)
+        );
+        assert_eq!(
+            client_focused_window_for_attachment(&inner, second_client),
+            Some(second_window)
+        );
+        assert_eq!(inner.engine.pane_geometry(first_pane), Some((200, 30)));
+        assert_eq!(inner.engine.pane_geometry(second_pane), Some((90, 20)));
+    }
+
+    #[test]
     fn multi_client_window_focus_isolated_stamped_and_falls_back_after_kill() {
         let shared = Arc::new(Shared::new(1));
         let first_mailbox = OutboundMailbox::new();
@@ -22501,16 +22803,86 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn killing_the_last_session_requests_shutdown_with_no_interactive_client() {
+    fn initialize_leaves_a_fresh_daemon_empty_alive_and_unarmed() {
         let shared = Arc::new(Shared::new(1));
         shared.initialize(false).expect("initialize daemon state");
+        let mut context = ExecutionContext::default();
+
+        let listing = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("list-sessions", [] as [&str; 0]),
+            )
+            .expect("list an empty daemon");
+        assert_eq!(listing.output, "");
+        assert_eq!(context, ExecutionContext::default());
+        assert!(shared.inner.lock().engine.state.sessions.is_empty());
+        assert!(!shared.exit_empty_armed.load(Ordering::Acquire));
         assert!(!shared.stopping.load(Ordering::Acquire));
+
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        shared.unregister(client);
+        assert!(!shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn first_command_session_uses_zero_ids_and_arms_last_session_shutdown() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        let mut context = ExecutionContext::default();
+
+        let created = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d"]),
+            )
+            .expect("create first command session");
+        assert_eq!(created.output, "");
+        assert_eq!(context.session, Some(SessionId(0)));
+        assert_eq!(context.window, Some(WindowId(0)));
+        assert_eq!(context.pane, Some(PaneId(0)));
+        assert!(shared.exit_empty_armed.load(Ordering::Acquire));
+        for (command, args, expected) in [
+            (
+                "list-sessions",
+                vec!["-F", "#{session_id}:#{session_name}"],
+                "$0:0",
+            ),
+            (
+                "list-windows",
+                vec!["-t", "0", "-F", "#{window_id}:#{window_index}"],
+                "@0:0",
+            ),
+            (
+                "list-panes",
+                vec!["-t", "0:0", "-F", "#{pane_id}:#{pane_index}"],
+                "%0:0",
+            ),
+        ] {
+            assert_eq!(
+                shared
+                    .execute(
+                        ClientId(u64::MAX),
+                        ClientKind::Command,
+                        &mut context,
+                        &CommandInvocation::new(command, args),
+                    )
+                    .expect("read first allocation")
+                    .output,
+                expected
+            );
+        }
 
         shared
             .execute(
                 ClientId(u64::MAX),
                 ClientKind::Command,
-                &mut ExecutionContext::default(),
+                &mut context,
                 &CommandInvocation::new("kill-session", ["-t", "0"]),
             )
             .expect("kill the last session");
@@ -22525,12 +22897,23 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.initialize(false).expect("initialize daemon state");
         let (client, _) =
             shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let mut context = ExecutionContext::default();
+        let (session, snapshot) = shared
+            .attach_target(client, ClientKind::Interactive, &mut context, "")
+            .expect("attach to the lazily created session");
+        assert_eq!(session, SessionId(0));
+        assert_eq!(context.session, Some(SessionId(0)));
+        assert_eq!(context.window, Some(WindowId(0)));
+        assert_eq!(context.pane, Some(PaneId(0)));
+        assert_eq!(snapshot.sessions[0].name, "0");
+        assert_eq!(snapshot.sessions[0].windows[0].id, WindowId(0));
+        assert_eq!(snapshot.sessions[0].windows[0].active_pane, PaneId(0));
 
         shared
             .execute(
                 ClientId(u64::MAX),
                 ClientKind::Command,
-                &mut ExecutionContext::default(),
+                &mut context,
                 &CommandInvocation::new("kill-session", ["-t", "0"]),
             )
             .expect("kill the last session");
@@ -22551,11 +22934,90 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.initialize(false).expect("initialize daemon state");
         let (client, _) =
             shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        shared
+            .attach_target(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                "",
+            )
+            .expect("attach to the lazily created session");
 
         shared.unregister(client);
 
         assert!(!shared.inner.lock().engine.state.sessions.is_empty());
         assert!(!shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn only_default_interactive_attach_materializes_an_empty_daemon() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        let (command, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        let mut command_context = ExecutionContext::default();
+        let command_error = shared
+            .attach_target(command, ClientKind::Command, &mut command_context, "")
+            .expect_err("a command attach must not create a session");
+        assert!(matches!(
+            command_error,
+            ServerError::SessionNotFound(target) if target == "current session"
+        ));
+        assert!(shared.inner.lock().engine.state.sessions.is_empty());
+
+        let (interactive, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let mut interactive_context = ExecutionContext::default();
+        let explicit_error = shared
+            .attach_target(
+                interactive,
+                ClientKind::Interactive,
+                &mut interactive_context,
+                "missing",
+            )
+            .expect_err("an explicit missing target must not create a session");
+        assert!(matches!(
+            explicit_error,
+            ServerError::SessionNotFound(target) if target == "missing"
+        ));
+        assert!(shared.inner.lock().engine.state.sessions.is_empty());
+    }
+
+    #[test]
+    fn concurrent_default_interactive_attaches_share_session_zero() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        let (first, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (second, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let handles = [first, second].map(|client| {
+            let shared = Arc::clone(&shared);
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                let mut context = ExecutionContext::default();
+                barrier.wait();
+                let attached = shared
+                    .attach_target(client, ClientKind::Interactive, &mut context, "")
+                    .expect("attach to the shared lazy session");
+                (attached.0, context)
+            })
+        });
+        barrier.wait();
+        for handle in handles {
+            let (session, context) = handle.join().expect("attach thread");
+            assert_eq!(session, SessionId(0));
+            assert_eq!(context.session, Some(SessionId(0)));
+            assert_eq!(context.window, Some(WindowId(0)));
+            assert_eq!(context.pane, Some(PaneId(0)));
+        }
+        let inner = shared.inner.lock();
+        assert_eq!(inner.engine.state.sessions.len(), 1);
+        assert_eq!(
+            inner.attached.get(&SessionId(0)),
+            Some(&BTreeSet::from([first, second]))
+        );
     }
 
     #[test]

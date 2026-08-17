@@ -18,13 +18,14 @@ attached to the same session.
 
 For mux sessions, persistence means daemon-lifetime, in-memory persistence. There is **no on-disk
 session restoration**: a daemon crash, `kill-server`, logout, or reboot destroys PTYs, and a fresh
-daemon starts empty. Client-owned state such as browser storage, recent pages, Agent choices, and
-main-window bounds is separately persisted to disk as called out below.
+daemon starts empty. Its first default Interactive attach lazily creates numeric session `0`; a
+Command client does not. Client-owned state such as browser storage, recent pages, Agent choices,
+and main-window bounds is separately persisted to disk as called out below.
 
 # Daemon lifecycle
 
-The daemon is a single long-lived process per user, started on demand by the GUI or by any
-state-creating CLI command, and bound to one owner-only endpoint. On Unix the auto-spawned daemon
+The daemon is a single long-lived process per user, started on demand by the GUI or by any CLI
+command, and bound to one owner-only endpoint. On Unix the auto-spawned daemon
 is detached into its own process group (`process_group(0)` in `spawn_daemon`, `crates/zz/src/lib.rs`),
 so terminal signals aimed at the launching client (Ctrl+C, tty hangup) never reach the daemon:
 
@@ -34,7 +35,7 @@ so terminal signals aimed at the launching client (Ctrl+C, tty hangup) never rea
 | Single instance | A live endpoint makes `bind` return `AddrInUse` → `DaemonError::AlreadyRunning`; a dead one is unlinked and rebound |
 | Owner-only | `restrict_socket_permissions` sets Unix `0o600`; the Windows pipe is user-SID scoped |
 | Stay alive | Serves connections until `request_shutdown` sets `stopping`; **outlives GUI detach** while sessions exist |
-| Stop | `kill-server` (never auto-starts a daemon), or nothing-left-to-serve: zero sessions **and** zero interactive clients (`subscribers`), armed only after startup seeds the default session; `SocketGuard::Drop` unlinks the Unix socket |
+| Stop | `kill-server` (never auto-starts a daemon), or nothing-left-to-serve: zero sessions **and** zero interactive clients (`subscribers`), armed once the daemon has created a session; `SocketGuard::Drop` unlinks the Unix socket |
 | Recover | `terminate_incompatible_daemon` safely stops a daemon whose protocol version no longer matches |
 
 zz deliberately diverges from tmux's `exit-empty` here. tmux can key on sessions alone because its
@@ -49,8 +50,10 @@ left the window on an unrecoverable "zz daemon stopped" screen. Now:
   remain.
 - **Live sessions still win.** A GUI quit with sessions open leaves the daemon and its PTYs running,
   preserving the multiplexer guarantee that sessions are there on relaunch.
-- The check lives in `Shared::request_shutdown_if_empty` and is called from `initialize`, the
-  `execute` effect loop, and `Shared::unregister` (the funnel every disconnect path reaches through
+- **A never-used empty daemon stays alive and unarmed.** A read-only CLI query may auto-start it;
+  only a successful command that leaves a session arms the normal last-session shutdown rule.
+- The check lives in `Shared::request_shutdown_if_empty` and is called from the `execute` effect
+  loop and `Shared::unregister` (the funnel every disconnect path reaches through
   `ClientRegistrationGuard::Drop`).
 
 The client-local `quit-daemon-on-exit = true` opts out: app quit then sends `kill-server` instead of
@@ -95,7 +98,7 @@ sends a request and disconnects.
 |------|-----------------------------|
 | Connect | `handle_connection` reads `ClientHello` (protocol version plus an optional `device_name`), `validate_hello` checks the version |
 | Register | `register` mints a `ClientId`, records the device name, adds interactive clients to `subscribers` (their `OutboundMailbox`), returns `ServerHello` + capabilities |
-| Attach | `Attach{session}` → `attach_target` → `attach`: inserts the client into `attached[session]` and removes it from every other session's set, seeds `visible_terminals`, calls `TerminalSession::attach_view(TerminalViewId(client.0))` on every terminal in the session, recomputes PTY sizes, and returns a `MuxSnapshot` stamped for that client; then a full resync of visible panes |
+| Attach | `Attach{session}` → `attach_target` → `attach`: an Interactive empty target lazily runs idempotent detached `new-session` only when no sessions exist; then it inserts the client into `attached[session]`, removes it from every other session's set, seeds `visible_terminals`, calls `TerminalSession::attach_view(TerminalViewId(client.0))` on every terminal in the session, recomputes PTY sizes, and returns a `MuxSnapshot` stamped for that client; then a full resync of visible panes |
 | Steal | `attach-session -d` attaches, then `evict_other_clients` sends each peer `EventPayload::Detached { session, by: Some(device) }` and tears its per-client state down. A command-only client cannot attach, but its `-d` still evicts |
 | Detach | `Detach` → `detach` → `detach_client_state`: clears the client's attachment, visible terminals, focus, geometry, overlays, key state, and in-flight GUI requests, then calls `TerminalSession::detach_view` for its views, **keeping the connection, subscriber, and `Arc<TerminalSession>` alive** for a later `Attach` |
 | Disconnect | EOF/reset, a protocol error, or a panic drops `ClientRegistrationGuard` → `unregister`: performs the detach cleanup, removes the client from `subscribers`, and permanently releases its terminal views |
@@ -118,11 +121,15 @@ Attaching more devices forks what each person looks through. The session underne
 | Focused window (`focused_windows: BTreeMap<ClientId, WindowId>`, falling back to `session.active_window` when the entry names a window that is gone) | `session.active_window`, window and pane names |
 | Reported pane geometry, key engine and prefix state, command prompt, choosers, command output | The PTY, its scrollback, and every process inside it |
 
-PTY size is arbitrated rather than last-writer-wins. `terminal_resize_for_pane` takes `min(columns)`
-and `min(rows)` across the clients **currently viewing** the pane, breaking ties on the lowest
-`ClientId`, and recomputes on a resize report, a visibility change, an attach, and a detach.
-Navigating the laptop to another window drops it out of that set, and the pane re-expands for the
-desktop still watching.
+PTY size is arbitrated rather than last-writer-wins. With `aggressive-resize` off,
+`terminal_resize_for_pane` uses the visible viewer with the newest terminal-input sequence, with the
+lowest `ClientId` breaking a tie; columns, rows, and cell pixels all come from that owner. With it
+on, columns and rows become the componentwise minima across clients currently viewing the pane's
+window, while cell pixels come from the newest eligible viewer. The same measurement feeds the
+window extent through the fixed zoom gate, active-pane single writer, one-cell dead-band, and repeat
+memo. Resize reports, focus changes, option changes, attach, and detach recompute the affected
+panes. Navigating the laptop to another window removes it from that window's aggressive candidate
+set.
 
 Presence rides the snapshot. `snapshot_presence` turns the attached set into
 `SessionViewer { name, window, is_self }` rows named from `ClientHello.device_name` (`device-{id}`
@@ -137,7 +144,8 @@ of its own.
 A network drop is an involuntary detach, and the client hides it. A remote host whose ssh forward
 dies moves to `HostState::Reconnecting { attempt }`: the last snapshot and terminal frames
 stay on screen, `MuxClient` redials on a 1/2/4/8/16/30-second backoff, and a successful dial
-re-attaches the same session, or the default session when the daemon no longer has it. The daemon
+re-attaches the same session, or the default session when one exists. If the daemon is empty, the
+fallback default Interactive attach lazily creates the next numeric session. The daemon
 sees an ordinary disconnect followed by an ordinary attach, so PTYs, scrollback, and the other
 devices attached to that session never notice.
 

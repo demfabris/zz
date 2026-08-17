@@ -76,8 +76,8 @@ send-keys, and client events. It contains no GPUI or CEF code; live browser rend
    guarded termination still accepts v1 records that contain only PID and start time.
 3. Resolves [appearance](/terminal/appearance.md) from built-in defaults (external configs are
    never read; the client's import flow owns those) and sources the zz-owned `zz/mux.conf`
-   [in tmux grammar](/tmux/conf-parser.md); ensures at least one session (`new-session -s 0`), then
-   arms `exit_empty_armed` so the shutdown check cannot fire during config replay.
+   [in tmux grammar](/tmux/conf-parser.md). A fresh daemon remains empty and unarmed unless config
+   creates a session. The first default Interactive attach lazily creates the next numeric session.
 4. Loops on a **non-blocking** `accept()`. Unix waits in `poll(2)` for listener readiness, with a
    100 ms timeout bounding shutdown detection; Windows retains the 20 ms fallback poll. Every
    accepted stream is reset to blocking mode (required on BSD-derived Unix hosts where accepted
@@ -107,7 +107,8 @@ strands the window on a dead daemon. Requiring zero interactive clients too make
 when the app quits instead.
 
 `request_shutdown_if_empty` takes the whole `&ServerState` (not only `&MuxState`) and is called from
-three places: `initialize` after arming, the `execute` effect loop, and `Shared::unregister`. Every
+the `execute` effect loop and `Shared::unregister`. A successful command that leaves any session
+arms the guard before its effects are processed; a fresh never-had-session daemon stays unarmed. Every
 actual disconnect funnels through `unregister` via `ClientRegistrationGuard::Drop` (EOF/reset,
 protocol error, or panic), so that is the one place that can notice the last subscriber leaving.
 `ProtocolMessage::Detach` stays inside the connection loop and does not run `unregister`.
@@ -301,6 +302,11 @@ interactive clients as the user has devices. Per-client maps carry the rest:
   terminal-input sequence; absent/equal sequences tie on the lowest `ClientId`, and a viewer without
   a geometry report falls through to the next-ranked viewer. Columns, rows, and both cell-pixel
   dimensions come from that one owner. Input only resizes panes when the computed owner changes.
+- **Aggressive window size.** The inherited window flag `aggressive-resize` defaults off. ON takes
+  the componentwise smallest columns and rows reported by clients whose focused window is the pane's
+  window; cell pixels still come from the latest-input eligible viewer. Focus, attach, detach, and
+  option changes feed the result through the existing guarded window-extent write-back and resize
+  the PTY. A window with one viewer is unchanged.
 - **Window focus.** `focused_windows: BTreeMap<ClientId, WindowId>` is a daemon-side overlay; pane
   focus and zoom stay shared. `stamp_snapshot_for_client` writes each subscriber's own
   `focused_window` and the session's `viewers` list into the copy it sends, so one snapshot
@@ -335,6 +341,7 @@ interactive clients as the user has devices. Per-client maps carry the rest:
 | `SendKeys{pane, keys}` | `resolve_input_sinks` → `send_tokens` to terminals / `BrowserCommand::SendKeys` to the GUI |
 | `FocusSidebar{pane}` | Validate the invoking interactive attachment, retire competing native surfaces, and publish `EventPayload::FocusSidebar` to that client |
 | `Attach { session, detach_others }` / `Detach` | `attach` / `detach` for the interactive client; detach clears per-client attachment state without closing the connection or removing its subscriber, and the same connection can attach again. A command-only client cannot attach but still runs `evict_other_clients` when `detach_others` is set |
+| `AggressiveResizeChanged { window }` | Recompute the target window, or every window for a global change, through the existing measurement write-back and queue matching PTY resizes |
 | `KillServer` | `request_shutdown` . set `stopping` and unwind the accept loop, unconditionally. Emitted by the `kill-server` command, which the GUI sends on quit only when `quit-daemon-on-exit = true` |
 | `SnapshotChanged` | `publish_snapshot` + refresh visibility/choose-tree/choose-buffer/display-panes overlays |
 
@@ -357,7 +364,8 @@ before starting the new terminal watcher or publishing its changed snapshot; thi
 nonempty-but-unattached intermediate client state. `ServerHello` advertises this behavior as
 `new-session-attach-v1`, allowing newer GUIs to send an explicit `attach-session` fallback to older
 same-protocol persistent daemons. Startup and short-lived command clients still create sessions
-without acquiring an interactive attachment.
+only when they explicitly execute `new-session`. A default Interactive attach materializes the
+next numeric session when the daemon is empty.
 
 # Examples
 
@@ -373,11 +381,12 @@ Daemon::new(default_socket_path()).run_foreground()?;
 
 // Short-lived CLI client: one request, one response.
 let mut client = CommandClient::connect(&default_socket_path())?;
+client.execute(CommandInvocation::new("new-session", ["-d"]))?;
 let output = client.execute(CommandInvocation::new("send-keys", ["-t", "%0", "ls", "Enter"]))?;
 
-// Interactive GPUI client: attach, then stream events off `recv()`.
+// Interactive GPUI client: an empty target creates session 0 if the daemon is empty.
 let client = InteractiveClient::connect(&path)?;
-client.attach("0")?;
+client.attach("")?;
 loop { let message = client.recv()?; /* reconcile snapshot / apply terminal frames */ }
 ```
 

@@ -52,11 +52,14 @@ the daemon spawns and owns the ACP child, and this crate reduces the stream it p
    that speaks the same wire protocol (`zz attach [session]`).
 5. **CLI command mode** . any other leading argument (`list-panes`, `split-window`, `kill-server`,
    …) is sent through a short-lived `zz_daemon::CommandClient` to an existing or freshly spawned
-   daemon; output prints to stdout and the process exits without opening GPUI. `--version`/`-V` is
+   daemon. A read-only command can leave a newly spawned daemon empty; the first explicit
+   `new-session` then receives numeric name `0` and zero-based ids. Output prints to stdout and the
+   process exits without opening GPUI. `--version`/`-V` is
    answered in place, before that connection: routing it to the daemon would spawn one just to
    report an unknown command.
 6. **GUI mode** . no arguments: `run_app` connects (or spawns-and-connects)
-   `zz_daemon::InteractiveClient`, boots CEF (`zz_browser::bootstrap`), builds `MuxClient` +
+   `zz_daemon::InteractiveClient`; its default attach lazily creates session `0` if that daemon is
+   empty. It boots CEF (`zz_browser::bootstrap`), builds `MuxClient` +
    `BrowserController` + `AgentController`, opens the one native window (`AppShell` → `AppView`),
    restores its last usable bounds through `window/state.rs`, and wires window close / app-quit to
    both shutdown paths so CEF drains its message loop before the process exits. ACP sessions are not
@@ -265,8 +268,9 @@ built:
   no sessions *and* no interactive clients, so closing the last pane leaves it running and reveals
   the panel. A daemon advertising `new-session-attach-v1` performs the attachment as part of that
   command; for an older same-protocol persistent daemon, `MuxClient` follows it with `attach-session`
-  on the same ordered connection. An initial empty-daemon attach miss requests a resync rather than
-  becoming a connection error, and a late request-zero `PaneExited` **or `PaneNotAttached`** response
+  on the same ordered connection. The current daemon satisfies an initial default attach by lazily
+  creating the workspace; an attach miss from an older daemon or a race still requests a resync
+  rather than becoming a connection error. A late request-zero `PaneExited` **or `PaneNotAttached`** response
   from terminal input or resize racing last-pane teardown is non-fatal, so the resulting empty
   snapshot still reveals the panel. Both spellings matter: a pane-only teardown answers `PaneExited`,
   while closing the *last* pane ends the session and detaches the client first, so the same late

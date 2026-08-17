@@ -35,6 +35,10 @@ cargo xtask bundle-cef --release --output dist/zz
 dist\zz\zz.exe
 ```
 
+A daemon started by a CLI query can remain empty. The GUI's first default Interactive attach
+materializes numeric session `0` only when no session exists, so CLI-first allocation keeps tmux's
+zero-based session/window/pane ids.
+
 The normal development loop is `just run <mac|linux>`. On Linux this runs the binary straight from
 Cargo; on macOS it builds an unoptimized, locally signed bundle separately from the release output
 and launches a fresh app instance. `just run` does not accept `windows`. Extra args are

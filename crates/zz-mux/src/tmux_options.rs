@@ -339,7 +339,7 @@ fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
         "display-time" => TmuxOptionDefault::Scalar("750"),
         "message-limit" => TmuxOptionDefault::Scalar("1000"),
         "mode-keys" => TmuxOptionDefault::Scalar("emacs"),
-        "renumber-windows" | "synchronize-panes" | "remain-on-exit" => {
+        "aggressive-resize" | "renumber-windows" | "synchronize-panes" | "remain-on-exit" => {
             TmuxOptionDefault::Scalar("off")
         }
         "prefix" => TmuxOptionDefault::Scalar("C-b"),
@@ -570,6 +570,7 @@ mod tests {
                     "word-separators",
                     TmuxOptionDefault::String("!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"),
                 ),
+                ("aggressive-resize", TmuxOptionDefault::Scalar("off")),
                 ("automatic-rename", TmuxOptionDefault::Scalar("on")),
                 (
                     "automatic-rename-format",

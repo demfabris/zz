@@ -237,12 +237,6 @@ collect_geometry() {
   printf 'LIST-WINDOWS w\n' >>"$snapshot"
   if query_side "$side" "$windows_file" "$errors" "list-windows -t w geometry" \
     list-windows -t w -F '#{window_index}:#{window_width}x#{window_height}:#{window_layout}'; then
-    # Pane numbers in a layout string are opaque ids the parser ignores, and the zz
-    # daemon's auto-session shifts allocation by one, so the diff compares only the
-    # structural body: strip the checksum and the leaf pane ids from both sides.
-    sed -E 's/^([0-9]+:[0-9]+x[0-9]+:)[0-9a-f]{4},/\1/; s/([0-9]+x[0-9]+,[0-9]+,[0-9]+),[0-9]+([],}]|$)/\1\2/g' \
-      "$windows_file" >"$windows_file.norm"
-    mv "$windows_file.norm" "$windows_file"
     cat "$windows_file" >>"$snapshot"
     while IFS=: read -r window_index _; do
       [ -n "$window_index" ] || continue
@@ -320,8 +314,6 @@ fi
 
 run_setup zz "zz new-session -d -s w" new-session -d -s w ||
   die "could not create zz scenario session"
-run_setup zz "zz kill-session -t 0" kill-session -t 0 ||
-  die "could not remove zz auto-session"
 # Window 0's default name is process-derived in tmux and index-derived in zz;
 # pin it so #{window_name} diffs mean something.
 run_setup zz "zz rename-window -t w:0 main" rename-window -t w:0 main ||

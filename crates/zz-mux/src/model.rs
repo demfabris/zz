@@ -14,6 +14,7 @@ use crate::layout::{CellLayout, LayoutError, SplitSize};
 pub(crate) const DEFAULT_WINDOW_EXTENT: (u16, u16) = (80, 24);
 const SYNCHRONIZE_PANES: u8 = 1 << 0;
 const AUTOMATIC_RENAME: u8 = 1 << 1;
+const AGGRESSIVE_RESIZE: u8 = 1 << 2;
 const LAYOUT_COORDINATE_MAX: u32 = 1_000_000;
 const MAX_AGENT_SESSION_ID_BYTES: usize = 16 * 1024;
 const MAX_WINDOW_INDEX: u32 = i32::MAX.cast_unsigned();
@@ -129,6 +130,28 @@ impl InputOptions {
         } else {
             self.values &= !AUTOMATIC_RENAME;
             self.overrides &= !AUTOMATIC_RENAME;
+        }
+    }
+
+    const fn aggressive_resize(self) -> Option<bool> {
+        if self.overrides & AGGRESSIVE_RESIZE == 0 {
+            None
+        } else {
+            Some(self.values & AGGRESSIVE_RESIZE != 0)
+        }
+    }
+
+    fn set_aggressive_resize(&mut self, value: Option<bool>) {
+        if let Some(value) = value {
+            self.overrides |= AGGRESSIVE_RESIZE;
+            if value {
+                self.values |= AGGRESSIVE_RESIZE;
+            } else {
+                self.values &= !AGGRESSIVE_RESIZE;
+            }
+        } else {
+            self.values &= !AGGRESSIVE_RESIZE;
+            self.overrides &= !AGGRESSIVE_RESIZE;
         }
     }
 }
@@ -1678,6 +1701,55 @@ impl MuxState {
             self.input_options.set_automatic_rename(value);
             self.bump_generation();
         }
+    }
+
+    #[must_use]
+    pub fn global_aggressive_resize(&self) -> bool {
+        self.input_options.aggressive_resize().unwrap_or(false)
+    }
+
+    pub fn set_global_aggressive_resize(&mut self, value: Option<bool>) {
+        if self.input_options.aggressive_resize() != value {
+            self.input_options.set_aggressive_resize(value);
+            self.bump_generation();
+        }
+    }
+
+    pub fn window_aggressive_resize(&self, window: WindowId) -> Result<bool, ServerError> {
+        let window = self
+            .windows
+            .get(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+        Ok(window
+            .input_options
+            .aggressive_resize()
+            .unwrap_or_else(|| self.global_aggressive_resize()))
+    }
+
+    pub fn window_aggressive_resize_override(
+        &self,
+        window: WindowId,
+    ) -> Result<Option<bool>, ServerError> {
+        self.windows
+            .get(&window)
+            .map(|window| window.input_options.aggressive_resize())
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))
+    }
+
+    pub fn set_window_aggressive_resize(
+        &mut self,
+        window: WindowId,
+        value: Option<bool>,
+    ) -> Result<(), ServerError> {
+        let window = self
+            .windows
+            .get_mut(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+        if window.input_options.aggressive_resize() != value {
+            window.input_options.set_aggressive_resize(value);
+            self.bump_generation();
+        }
+        Ok(())
     }
 
     pub fn window_automatic_rename(&self, window: WindowId) -> Result<bool, ServerError> {

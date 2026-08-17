@@ -28,6 +28,10 @@ ordinary detached CLI behavior. The daemon advertises this execution contract wi
 device steals a session from the user's other devices; the engine itself tracks no attachments, so
 evicting the displaced clients is the daemon's half of that effect.
 
+Fresh state has no session. A Command caller's first `new-session` receives name `0` and ids
+`$0`/`@0`/`%0`; the daemon separately materializes that same next numeric session when an
+Interactive client sends an empty-target attach to an empty server.
+
 One global server option exists for remote attach and carries no engine behavior beyond validation
 and provenance: `history-trickle` (0 to 10,000 rows, default 2,000). It is server-scoped, rejects a
 window-scoped `set-window-option`, and emits `MuxEffect::MuxOptionChanged` so the daemon republishes
@@ -52,8 +56,8 @@ recursive [`LayoutNode`](/concepts/split-pane-layout.md) split tree, a canonical
 a most-recently-used `last_panes` history, `zoomed_pane`, and `previous_layout`/`last_layout` for
 layout undo. A `Pane` is an ID, a title, a `PaneKind` . `Picker { inherit_cwd_from }`, `Terminal`,
 `Browser(BrowserDescriptor)`, `Agent(AgentDescriptor)`, or `Editor(EditorDescriptor)` . and packed
-per-pane `InputOptions` (the
-`synchronize-panes` override bits). `Picker` is the runtime-free pending state a new pane sits in
+per-pane/window `InputOptions` (including `synchronize-panes`, `automatic-rename`, and
+`aggressive-resize` override bits). `Picker` is the runtime-free pending state a new pane sits in
 until the user chooses its kind; `Agent` carries the provider (Codex or Claude Code), working
 directory, and opaque ACP session ID the GUI restores a native Agent pane from. Pane titles are live
 metadata updated independently of explicit window names; tmux-compatible `select-pane -T` changes a

@@ -165,6 +165,9 @@ pub enum MuxEffect {
     ModeKeysChanged {
         window: Option<WindowId>,
     },
+    AggressiveResizeChanged {
+        window: Option<WindowId>,
+    },
     MuxOptionChanged {
         option: MuxOptionKey,
     },
@@ -3773,6 +3776,7 @@ impl MuxEngine {
             )));
         }
         match table_option.name {
+            "aggressive-resize" => self.set_aggressive_resize(value, &options, target),
             "synchronize-panes" => self.set_synchronize_panes(value, &options, target),
             "mouse" => self.set_mouse(value, &options, target),
             "escape-time" => self.set_escape_time(value, &options),
@@ -4254,6 +4258,11 @@ impl MuxEngine {
                 _ => inherited(),
             },
             TmuxOptionTarget::Window(window) => match option.name {
+                "aggressive-resize" => self
+                    .state
+                    .window_aggressive_resize_override(window)?
+                    .map(|value| (tmux_flag(value).to_owned(), false))
+                    .or_else(inherited),
                 "automatic-rename" => self
                     .state
                     .window_automatic_rename_override(window)?
@@ -4354,6 +4363,7 @@ impl MuxEngine {
             "synchronize-panes" => tmux_flag(self.state.global_synchronize_panes()).to_owned(),
             "update-environment" => UPDATE_ENVIRONMENT_DEFAULT.to_owned(),
             "word-separators" => self.global_word_separators.clone(),
+            "aggressive-resize" => tmux_flag(self.state.global_aggressive_resize()).to_owned(),
             "automatic-rename" => tmux_flag(self.state.global_automatic_rename()).to_owned(),
             "automatic-rename-format" => self.global_automatic_rename_format.clone(),
             "remain-on-exit" => self.global_remain_on_exit.as_str().to_owned(),
@@ -5289,6 +5299,58 @@ impl MuxEngine {
             self.refresh_automatic_window_name_for_pane(pane, hooks);
         }
         Ok(Execution::default())
+    }
+
+    fn set_aggressive_resize(
+        &mut self,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            let already = match target {
+                TmuxOptionTarget::GlobalWindow => true,
+                TmuxOptionTarget::Window(window) => self
+                    .state
+                    .window_aggressive_resize_override(window)?
+                    .is_some(),
+                _ => unreachable!("aggressive-resize has window scope"),
+            };
+            if already {
+                return already_set_or_quiet(options, "aggressive-resize");
+            }
+        }
+        let window = match target {
+            TmuxOptionTarget::GlobalWindow => {
+                let next = if unset {
+                    None
+                } else {
+                    Some(parse_tmux_flag_value(
+                        value,
+                        self.state.global_aggressive_resize(),
+                    )?)
+                };
+                self.state.set_global_aggressive_resize(next);
+                None
+            }
+            TmuxOptionTarget::Window(window) => {
+                let next = if unset {
+                    None
+                } else {
+                    Some(parse_tmux_flag_value(
+                        value,
+                        self.state.window_aggressive_resize(window)?,
+                    )?)
+                };
+                self.state.set_window_aggressive_resize(window, next)?;
+                Some(window)
+            }
+            _ => unreachable!("aggressive-resize has window scope"),
+        };
+        Ok(Execution::effect(MuxEffect::AggressiveResizeChanged {
+            window,
+        }))
     }
 
     fn set_automatic_rename_format(
@@ -10265,6 +10327,11 @@ mod tests {
         for (command_name, args, expected) in [
             ("show-options", vec!["-gv", "mouse"], "on"),
             ("show-options", vec!["-sv", "escape-time"], "10"),
+            (
+                "show-window-options",
+                vec!["-gv", "aggressive-resize"],
+                "off",
+            ),
             ("show-window-options", vec!["-gv", "automatic-rename"], "on"),
             (
                 "show-window-options",
@@ -10300,6 +10367,105 @@ mod tests {
             format!("automatic-rename-format \"{DEFAULT_AUTOMATIC_RENAME_FORMAT}\"")
         );
         assert_eq!(engine.default_terminal_for_spawn(), "tmux-256color");
+    }
+
+    #[test]
+    fn aggressive_resize_stores_inherits_and_unsets_window_values() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let window = context.window.unwrap();
+
+        let global = engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-g", "aggressive-resize", "on"]),
+            )
+            .unwrap();
+        assert_eq!(
+            global.effects,
+            vec![
+                MuxEffect::AggressiveResizeChanged { window: None },
+                MuxEffect::SnapshotChanged,
+            ]
+        );
+        assert!(engine.state.global_aggressive_resize());
+        assert!(engine.state.window_aggressive_resize(window).unwrap());
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-window-options", &["-gv", "aggressive-resize"]),
+                )
+                .unwrap()
+                .output,
+            "on"
+        );
+
+        let local = engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["aggressive-resize", "off"]),
+            )
+            .unwrap();
+        assert_eq!(
+            local.effects,
+            vec![
+                MuxEffect::AggressiveResizeChanged {
+                    window: Some(window),
+                },
+                MuxEffect::SnapshotChanged,
+            ]
+        );
+        assert!(!engine.state.window_aggressive_resize(window).unwrap());
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-window-options", &["-v", "aggressive-resize"]),
+                )
+                .unwrap()
+                .output,
+            "off"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-u", "aggressive-resize"]),
+            )
+            .unwrap();
+        assert!(engine.state.window_aggressive_resize(window).unwrap());
+        assert_eq!(
+            engine
+                .state
+                .window_aggressive_resize_override(window)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-wAv", "aggressive-resize"]),
+                )
+                .unwrap()
+                .output,
+            "on"
+        );
+
+        let error = engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["aggressive-resize", "maybe"]),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ServerError::InvalidCommand(message) if message == "bad value: maybe"
+        ));
     }
 
     #[test]

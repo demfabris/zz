@@ -62,13 +62,11 @@ Open `compat/results/<scenario>.log` for the command status and per-step unified
   both servers refused the command.
 - `TOPO` compares session/window counts, names, active indexes, and pane indexes. Any
   difference fails a normal scenario.
-- `GEO` compares window and pane cell dimensions plus each window's `#{window_layout}`
-  string, normalized to its structural body: the checksum and the leaf pane numbers are
-  stripped before diffing, because pane ids are opaque values both parsers ignore and the
-  zz daemon's auto-session shifts id allocation by one (see the divergence matrix). Stripping
-  leaf ids limits GEO to bracket structure and geometry. TOPO and GEO both miss a pane assignment
-  permutation among equal-sized panes; the harness accepts that blind spot. The runner reports
-  these differences by default and fails them under `--strict-geometry`.
+- `GEO` compares window and pane cell dimensions plus each window's complete raw
+  `#{window_layout}` string, including its checksum and leaf pane ids. Zero-based boot allocation
+  now aligns the two sides, so this catches pane assignment permutations as well as structure and
+  geometry. The runner reports these differences by default and fails them under
+  `--strict-geometry`.
 - `FMT` compares stdout from a shared `fmt:` line byte for byte. Both `display-message -p`
   invocations must exit zero. A matching error still fails the FMT step.
 - `OUT` compares stdout from any shared query command prefixed with `out:` byte for byte. Both
@@ -111,9 +109,9 @@ Traps that produce false divergences:
 - Every `new-window` needs `-n <name>`. Default window names are process-derived in tmux —
   and refreshed by the `automatic-rename` timer roughly 500ms later — but index-derived in zz.
   The runner's prologue renames window 0 to `main` on both sides for the same reason.
-- Never kill the last remaining session. tmux's server exits (`exit-empty`), while the zz CLI
-  respawns a fresh daemon with a new session `0`, so every later step diverges. The prologue
-  already creates session `w` before removing the auto-created session.
+- Never kill scenario session `w`. The post-step TOPO, GEO, FMT, and OUT probes target `w`, so
+  removing it turns every later probe into a fixture failure. Both sides create `w` explicitly;
+  there is no auto-created session to remove.
 - Never put `#{buffer_full}` in a differential scenario. `display-message -p
   '#{buffer_full}'` crashes the pinned tmux server; this is a verified pin trap, not a zz failure.
 - `display-message` gets only tmux's newest automatic paste buffer. A named-only `set-buffer -b`
@@ -131,6 +129,10 @@ Both cite their divergence-matrix rows.
 
 Keep the `known/` set narrow. Move a scenario into the normal corpus when zz closes the gap. The
 known-scenario exemption never covers an FMT or OUT difference.
+
+`aggressive-resize.txt` covers stored option readback only. The harness has one short-lived CLI
+client per side, so multi-client viewer selection belongs to daemon and convergence tests rather
+than this corpus.
 
 # Key files
 

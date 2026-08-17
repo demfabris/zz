@@ -51,6 +51,8 @@ flags (`-Zs`) split into `-Z -s`. Target resolution lives in `MuxState`:
 When `new-session` omits `-s`, `next_session_name` selects the first unused canonical decimal name
 (`0`, `1`, …). It marks numeric names in a bounded `n + 1` occupancy bitmap and materializes only the
 winning string; noncanonical lookalikes such as `00` do not reserve `0`.
+Because a Command-spawned daemon starts empty, its first `new-session` receives name `0` and the
+first session, window, and pane ids are `$0`, `@0`, and `%0`.
 
 | Command | Aliases | Purpose |
 | --- | --- | --- |
@@ -123,11 +125,12 @@ Options handled by `set-option`/`set-window-option`: `synchronize-panes` (global
 `history-limit` (session, default 10000, 0–1,000,000), `word-separators` (session, `-a` append), `mode-keys` (`vi`→`copy-mode-vi`,
 `emacs`→`copy-mode`), `prefix`, `set-clipboard` (`on`/`external`/`off`), `copy-command`, `status`,
 `status-interval`, `status-left`, `status-right`, `base-index`, `pane-base-index`, and
-`renumber-windows`; `mouse` (session flag, default `off`), `escape-time` (server milliseconds,
+`renumber-windows`; `mouse` (session flag, default `on`), `escape-time` (server milliseconds,
 default `10`), `automatic-rename` (window flag, default `on`), `automatic-rename-format` (window
 string), `remain-on-exit` (window/pane choice: `off`, `on`, `failed`, or `key`),
-`default-terminal` (server string, stored default `screen`), `display-time` (session milliseconds,
-default `750`), and `repeat-time` (session milliseconds, default `500`, maximum `2000000`). The
+`default-terminal` (server string, default `tmux-256color`), `display-time` (session milliseconds,
+default `750`), `repeat-time` (session milliseconds, default `500`, maximum `2000000`), and
+`aggressive-resize` (global-window/window flag, default `off`). The
 matcher checks exact names and unique prefixes against all 180 tmux option names plus
 68 hook entries. The matched table entry chooses server, session, window, or pane scope. `set` versus
 `setw` and the `-s`/`-w`/`-p` spelling cannot change that declared scope. A table entry declared as
@@ -142,10 +145,13 @@ renamer does not evaluate it. Retained terminal exits keep the last viewport and
 `pane_dead` plus normal-exit `pane_dead_status`; input is swallowed, `kill-pane` still removes the
 pane, and the respawn commands replace its daemon-owned terminal session. An explicit
 `default-terminal` seeds `TERM` for future spawns, with a per-spawn environment override winning;
-the unset path preserves zz's existing `xterm-256color` export despite the stored `screen` default.
+the unset path restores `tmux-256color`.
 `repeat-time` supplies the attached session's repeatable-binding deadline, including zero to disable
-the repeat window. `mouse` and `escape-time` are storage-only until the TUI attach client consumes
-them.
+the repeat window. With `aggressive-resize` ON, each window takes the componentwise smallest rows
+and columns among clients actually viewing it; changing client focus, attachment, or the option
+recomputes the affected windows through the normal guarded measurement write-back. Cell-pixel
+dimensions come from the latest-input eligible viewer. OFF retains that latest-input owner's whole
+geometry. `mouse` and `escape-time` are storage-only until the TUI attach client consumes them.
 
 For the index trio, `-u` and `-U` restore inheritance and ignore a trailing value, `-o` checks the
 target override slot and yields to either unset flag, and the handler accepts `-a`. tmux flag values accept

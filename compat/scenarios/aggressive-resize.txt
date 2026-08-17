@@ -1,0 +1,2 @@
+set-window-option -g aggressive-resize on
+out: show-window-options -gv aggressive-resize

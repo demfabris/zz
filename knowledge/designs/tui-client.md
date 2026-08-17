@@ -49,7 +49,7 @@ Ship each rung independently; never let a higher rung block a lower one.
    `zz attach` in a TTY dispatches to it) and live-smoked end to end: attach,
    typing, prefix engine + PREFIX indicator, command prompt, `split-window <cmd>`,
    pane navigation, detach-client push, Ctrl-\ detach, reattach with layout
-   intact, fresh-daemon auto-create. Known gap: a bare `split-window` opens a
+   intact, fresh empty-daemon lazy-create on Interactive attach. Known gap: a bare `split-window` opens a
    Picker pane the TUI can only placeholder — use the command prompt's
    `split-window <cmd>` form, or teach the daemon a TUI-kind default later.
 2. **Agent panes as text.** ACP transcripts are structured data; a terminal is

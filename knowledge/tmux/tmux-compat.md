@@ -32,6 +32,8 @@ specific upstream files that were consulted, for example:
 | Choosers | `cmd-choose-tree.c`, `mode-tree.c`, `window-tree.c`, `window-buffer.c` |
 | Targets `$`/`@`/`%` | `cmd-find.c` |
 | Layouts / splits / resize | `layout.c`, `layout-set.c`, `cmd-select-layout.c`, `cmd-resize-pane.c` |
+| Client-driven window sizing | `resize.c`, `server-client.c`, `options-table.c` |
+| Empty-server boot and first IDs | `server.c`, `session.c`, `window.c` |
 | Options and environments | `options-table.c`, `cmd-set-option.c`, `cmd-show-options.c`, `options.c`, `cmd-set-environment.c`, `cmd-show-environment.c`, `environ.c` |
 | Status options and FORMATS subset | `options-table.c`, `status.c`, `format.c`, `tmux.1` |
 
@@ -46,7 +48,7 @@ shell code. Concretely:
   ([commands](/tmux/commands.md)), root/prefix/`copy-mode`/`copy-mode-vi` key tables with repeat
   bindings and `send-keys -X` ([key tables](/tmux/key-tables.md)), the seven named layouts, lossless
   zoom, swap/rotate/break/join, `synchronize-panes`/`history-limit`/`word-separators`/`mode-keys`
-  options, the eight phase-4f behavior options, retained dead panes with in-place
+  options, the nine phase-4f behavior options, retained dead panes with in-place
   `respawn-pane`/`respawn-window`, native [copy mode](/tmux/copy-mode.md),
   [choose-tree/choose-buffer](/tmux/choose-tree.md),
   command prompt, pane-number overlay, the `status`/`status-interval`/`status-left`/`status-right`
@@ -70,8 +72,20 @@ shell code. Concretely:
 
 zz reimplements the *behavior*; the daemon sources the zz-owned `~/.config/zz/mux.conf` on startup
 and applies the supported subset, logging and skipping the rest. It never reads `~/.tmux.conf`; the
-client's import flow copies a user's tmux config there verbatim (see the
+client’s import flow copies a user's tmux config there verbatim (see the
 [conf parser](/tmux/conf-parser.md)).
+
+# Empty boot and lazy Interactive attach
+
+A daemon started by a Command client begins with no sessions, windows, or panes. The first explicit
+`new-session` therefore takes numeric name `0` and ids `$0`, `@0`, and `%0`, matching the pinned
+server's zero-based allocation. A registered client or background fleet connection alone does not
+materialize anything.
+
+An Interactive client that sends `Attach { session: "" }` while the daemon is still empty lazily
+creates the next numeric session and attaches to it. This keeps the native GUI and TUI from landing
+on an empty first-run surface without shifting ids for CLI scripts. An explicit missing target and
+a Command-kind attach remain errors.
 
 # Related
 

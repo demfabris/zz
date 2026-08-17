@@ -88,8 +88,9 @@ Ghostty appearance keys into `zz/config` as concrete values. Neither original is
 touched, and the offer never returns. You can run either import again later from
 Settings.
 
-What you get is an empty workspace with the first few keys printed on it. Press
-<kbd>Enter</kbd> for a session, and you are in a terminal.
+The first GUI attach lazily creates session `0`, so you land in a terminal immediately. The empty
+workspace with its key hints appears only after the connected GUI loses its last session; press
+<kbd>Enter</kbd> there to create a replacement.
 
 Closing the window **detaches**. The daemon keeps every PTY, layout, and browser
 URL alive, and relaunching puts you back where you were. The daemon does not

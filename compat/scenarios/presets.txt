@@ -1,0 +1,8 @@
+# Named presets over three panes.
+split-window -h -t w:0.0
+split-window -h -t w:0.1
+select-layout -t w:0 even-horizontal
+select-layout -t w:0 even-vertical
+select-layout -t w:0 main-horizontal
+select-layout -t w:0 main-vertical
+select-layout -t w:0 tiled

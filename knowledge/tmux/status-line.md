@@ -4,7 +4,7 @@ title: tmux status line in the sidebar
 description: The daemon expands status-left and status-right from the zz-owned mux.conf into text and publishes it per client; the workspace sidebar renders it as a stacked bottom section instead of a bottom bar.
 resource: crates/zz-mux/src/status.rs
 tags: [tmux, status-line, formats, sidebar, options]
-timestamp: 2026-07-25T00:00:00Z
+timestamp: 2026-08-17T00:00:00-03:00
 ---
 
 # Overview
@@ -48,15 +48,15 @@ Clients receive `StatusLine { left, right }` in `ServerHello` on connect, and in
 
 Global only. zz renders one status section per window, so a per-session or per-window status has
 nothing to attach to. All four are accepted from the zz-owned `zz/mux.conf`, from `source-file`,
-and from `set-option` at runtime, and all four support `-u` (restore the tmux default) and `-a`
+and from `set-option` at runtime, and all four support `-u` (restore the zz default) and `-a`
 (append, for the two format strings).
 
 | Option | Default | Meaning in zz |
 | --- | --- | --- |
 | `status` | `on` | Whether the section renders at all. tmux's line counts (`2`..`5`) parse as on . one stacked section either way. |
 | `status-interval` | `15` | Seconds between re-runs of `#()` and re-reads of the clock. `0` disables the periodic refresh, as in tmux. |
-| `status-left` | `[#S] ` | First line of the section. |
-| `status-right` | `` "#{=21:pane_title}" %H:%M %d-%b-%y `` | Second line of the section. |
+| `status-left` | empty | First line of the section. tmux defaults `[#S] `; zz's chrome already names the session, so the default is empty. |
+| `status-right` | empty | Second line of the section. tmux defaults `` "#{=21:pane_title}" %H:%M %d-%b-%y ``. |
 
 A half that expands to nothing is dropped, and a section with no halves is not rendered. `status
 off` costs no height rather than leaving an empty footer. The collapsed sidebar rail drops the section
@@ -78,10 +78,19 @@ variable expands to nothing, which is tmux's own rule.
 | `#(uptime)` | shell command output, first line only |
 | `#[fg=green,bold]` | style directives, **dropped** |
 
-Variables resolve against the client's current view (its attached session, that session's active
-window, that window's active pane): `session_name`, `session_windows`, `window_index`, `window_name`,
-`window_panes`, `window_flags`, `window_zoomed_flag`, `pane_index`, `pane_id`, `pane_title`,
-`pane_synchronized`, `host`, `host_short`.
+Variables resolve against the client's current view (its attached session, the window that client
+focuses, that window's active pane): `session_name`, `session_windows`, `window_index`,
+`window_name`, `window_panes`, `window_width`, `window_height`, `window_layout`, `window_active`,
+`window_flags`, `window_zoomed_flag`, `window_bell_flag`, `pane_index`, `pane_id`, `pane_title`,
+`pane_width`, `pane_height`, `pane_active`, `pane_synchronized`, `host`, `host_short`. The
+`window_layout` value is the checksummed cell tree that `select-layout <string>` accepts. On the
+status line the focused window plays tmux's "current window" role, so `window_active` and
+`pane_active` read `1` and `#F` keeps its `*` there. The per-row values appear in
+`list-*`/`display-message` output.
+The four geometry variables always answer from the cell-authoritative layout tree: a headless
+window is born at tmux's `default-size` 80x24 and reports its exact allocations, a drawn window
+tracks the measuring client, and a zoomed pane reports the full window extent (tmux swaps in a
+one-leaf layout during zoom; zz mirrors the observable).
 
 Two decisions:
 

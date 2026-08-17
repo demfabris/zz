@@ -262,7 +262,8 @@ impl TimelineModel {
         let rows = Arc::make_mut(&mut self.rows);
         for (entry_index, row_index, id, entry) in replacements {
             store_entries.push(entry.clone());
-            debug_assert!(rows[row_index].replace_entry(id, entry));
+            let replaced = rows[row_index].replace_entry(id, entry);
+            debug_assert!(replaced);
             self.entry_revisions[entry_index] = revisions[entry_index];
         }
 

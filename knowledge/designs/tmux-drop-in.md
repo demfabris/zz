@@ -53,7 +53,7 @@ before the grind because tmux's own default bindings hit them (phase 1), the dif
 harness before the geometry rework it steers (phase 2 before 3), and `base-index` first in the
 grind because index arithmetic touches everything (phase 4).
 
-## Phase 0 — the floor (~1 week)
+## Phase 0 — the floor (shipped 2026-08-16)
 
 Catalog-driven unknown-flag rejection: every command rejects flags absent from its
 `CommandSpec`, deleting the hand-rolled allowlists — 36 distinct sites in `command.rs` today
@@ -63,9 +63,12 @@ small. After this, every remaining gap is loud — the precondition for claiming
 at all. Note: this makes currently-swallowed flags *louder* (by design); the fixes land in
 phases 1 and 4.
 
-## Phase 1 — superset rework + stock-binding blockers (~2 weeks)
+## Phase 1 — superset rework + stock-binding blockers (shipped 2026-08-16)
 
-Move every GUI-motivated divergence off tmux names:
+Move every GUI-motivated divergence off tmux names (shipped: picker renamed `split-picker`,
+key-bound `split-window` gives terminals, `select-window` bounds at zero positionals; the
+stock-binding blockers below shipped the same day — `source-file` `-F`/`-n` moved to the
+phase-4 grind, `-` stdin is a loud refusal):
 
 - Stop routing key-bound `split-window` to the picker; zz's *default* bindings bind a zz verb,
   imported tmux bindings get pure tmux behavior. Also closes the TUI's bare-split-opens-picker
@@ -75,16 +78,21 @@ Move every GUI-motivated divergence off tmux names:
   `attach-session` half landed in PR #4).
 
 Then the divergences tmux's **own default bindings** hit — a drop-in whose mouse wheel errors
-is not a drop-in:
+is not a drop-in (all shipped 2026-08-16):
 
-- `copy-mode -e`/`-M`/`-q` (stock `WheelUpPane`/`MouseDrag1Pane`/menu bindings use all three).
-- `send-keys -N` with no keys (arms the copy-mode count; stock vi digit bindings).
-- Bell-clear on window activation (today `next-window -a` re-picks the same window forever).
-- `source-file` globbing, `-` stdin, `-F`/`-n` (`conf.d/*.conf` currently matches nothing).
-- `bind-key` payload validation at bind time — today an unsupported command inside a binding
-  is stored silently and only fails at keypress, invisible to the import report.
+- `copy-mode -e`/`-M`/`-q` landed (stock `WheelUpPane`/`MouseDrag1Pane`/menu bindings use all
+  three); `-k`/`-H`/`-S`/`-s` stay loud.
+- `send-keys -N` with no keys arms the client's copy-mode count prefix (stock vi digit
+  bindings work; the prefix is client-scoped where tmux's is pane-mode-scoped — see the
+  divergence matrix).
+- Window activation clears its panes' bells, so `next-window -a` steps instead of re-picking
+  the same window, and the terminal bell latch is released on the same transition.
+- `source-file` globs every path (`conf.d/*.conf` works); `-` stdin is a loud refusal;
+  `-F`/`-n`/`-v` are deferred to the phase-4 grind (options table row below).
+- `bind-key` payloads validate at bind time (names + flags; arity and targets still surface
+  at keypress), and invalid config lines now reach the import report.
 
-## Phase 2 — the differential harness (~1 week)
+## Phase 2 — the differential harness (shipped 2026-08-16)
 
 **Not control mode.** The harness is: one command script fed to zz and to the pinned tmux,
 diff `list-sessions`/`list-windows`/`list-panes` output with *explicit `-F` formats* on both
@@ -97,24 +105,37 @@ to convergence, rather than being validated by it. Control mode itself moves to 
 control client is a worse differential tool (it streams `%output` for every pane and adds a
 transport layer to debug).
 
-## Phase 3 — cell-authoritative layout (~2–3 weeks)
+Shipped as `compat/` (see [the compat harness playbook](/playbooks/compat-harness.md)): the
+2a format vocabulary landed first (geometry, activity flags, tmux-style scope backfill), then
+the per-step runner with strict TOPO/exit-class diffing, report-only GEO, a
+`scenarios/known/` set for accepted divergences, and a Linux CI leg with the pin cached. The
+seven-scenario corpus runs TOPO-clean against the pin; every GEO hunk is phase-3 steering
+data.
 
-Make absolute cells the layout truth in `zz-mux` (`model.rs` split/resize/preset math), with
-ratios derived for rendering — reversing today's direction. Closes the entire silent-geometry
-block of the divergence matrix at once: nested-resize sibling drift, the 10–90% clamp vs
-`PANE_MINIMUM` (1 cell), `-f` pane numbering, tmux's integer spread on window resize. Enables
-faithful serialized layout strings (`select-layout` compat, resurrect-style save/restore).
+## Phase 3 — cell-authoritative layout (shipped 2026-08-17)
 
-- No rendering/bench impact: layout math is a handful of nodes on state change; the draw
-  pipeline consumes the same pixel rects; `bench/` measures PTY throughput and never touches
-  layout.
-- Blast radius, verified: the `[0.1, 0.9]` clamp is **engine-side** (`set_split_ratio` is the
-  single ratio write path; add-pane and join-pane hard-reject out of range), so every client
-  is bound by it today — the clamps move as part of this phase, not just the GUI's copy. The
-  TUI resolves ratios to floored cells and the FFI exposes only flat pane lists, so both
-  follow the engine without their own changes.
-- GUI feel decision: dividers step by whole cells (tmux-like), or the drag stays smooth and
-  commits the rounded cell count on release. Decide by trying both.
+Cells are the layout truth: `zz-mux/src/layout.rs` is an n-ary cell-tree port of the pin's
+`layout.c` (splits, remove-gifts-space, window resize spread, resize-pane victim walks, all
+seven presets, leaf-gated spread), owned per window by `model.rs`; the wire ratio tree is a
+derived projection with stable divider ids, so no protocol, FFI, TUI, or iOS surface moved.
+See [split-pane layout](/concepts/split-pane-layout.md) for the shipped architecture.
+
+- Validated by 48 golden fixtures captured from the pin binary
+  (`compat/gen-layout-fixtures.sh`) replayed in CI debug AND release, and by the harness
+  running `--strict-geometry` clean across the corpus — strict geometry is now the CI
+  contract, with each window's layout string structurally diffed at every step.
+- Layout strings shipped both directions: `dump()` and `parse()` (case-insensitive
+  checksum, optional leaf ids, 256-deep cap where the pin spins), `select-layout <string>`
+  with the pin's exact bottom-right trim, and `#{window_layout}`.
+- Windows are born at tmux's 80x24 headless, honor `new-session -x/-y`, and track a drawing
+  client through a guarded measurement write-back (dead-band + repeat memo fixed point);
+  divider drags stay smooth and commit the cell-snapped ratio on release (the feel decision
+  landed on commit-on-release).
+- The review rounds killed a daemon-aborting resolver recursion, a drag-override feedback
+  loop into the write-back, unpublished mutations (generation-diff catch-alls now guard
+  both daemon boundaries), and select-layout's missing unzoom-first; two upstream layout
+  bugs (two-pane main-* presets, mixed-parent `-E` spread) are refused and documented in
+  [the divergence matrix](/tmux/divergences.md) with `known/` harness scenarios.
 
 ## Phase 4 — the grind (~2–3 months, parallelizable)
 
@@ -126,6 +147,7 @@ faithful serialized layout strings (`select-layout` compat, resurrect-style save
 | Styles (`#[…]`, `*-style`) | meaningful on the TUI surface; GUI maps to theme | 2 weeks |
 | The gap commands | the 16 buildable ones (18 in the matrix minus `link-`/`unlink-window`, decision 3), plus `start-server` as a no-op (TPM's bootstrap runs `tmux start-server\; show-environment`; config sourcing already skips it, the CLI errors today) and basic `refresh-client` | 3 weeks |
 | Target grammar | session `-t` fnmatch (`work*`), `=name` exact-match, empty `-t` = current; empty `{}` and trailing `\;` acceptance | 1 week |
+| `source-file -F`/`-n`/`-v` | format-expanded paths, parse-only, verbose printing — deferred from phase 1 | days |
 
 `switch-client` is **not** mechanical: a pane script's `switch-client` must retarget some
 *other* Interactive client's attachment, and the only pane→client seam today is

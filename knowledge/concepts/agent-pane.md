@@ -36,7 +36,7 @@ The whole runtime sits behind `zz-daemon`'s `agent` cargo feature, which is on b
 (`default = ["daemon", "agent"]`); `zz-tui` and `zz-client-ffi` link `zz-daemon` with
 `default-features = false` and never pull in `agent-client-protocol` at all.
 
-`new-pane` still creates a runtime-free picker first. Choosing **Agent**, or issuing
+`split-picker` still creates a runtime-free picker first. Choosing **Agent**, or issuing
 `select-pane-kind -t %N agent`, materializes that leaf in place, preserving its `%pane` ID and split
 geometry. On the local host, the picker passes `agent-working-directory` through
 `select-pane-kind -c` when configured. That explicit directory wins. A remote host never receives

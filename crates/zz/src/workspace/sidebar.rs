@@ -54,8 +54,9 @@ use crate::{
         nav::{
             HostIndicator, MuxTreeHost, MuxTreeModel, MuxTreePaneKind, MuxTreeWindow, TreeNode,
             TreeNodeKind, TreeTarget, activate_nav as activate_sidebar, activation_for_target,
-            active_tree_target, expand_path_to, kill_target_command, new_pane_command,
-            new_window_command, pane_label, select_window_command, session_initial, session_label,
+            active_tree_target, expand_path_to, kill_target_command, new_window_command,
+            pane_label, select_window_command, session_initial, session_label,
+            split_picker_command,
         },
     },
     window::{corners::WindowCorners, drag::window_drag_handle},
@@ -795,7 +796,7 @@ impl WorkspaceSidebar {
                         if let Some(pane) = active_pane {
                             right_mux
                                 .read(cx)
-                                .execute(new_pane_command(pane, Axis::Horizontal));
+                                .execute(split_picker_command(pane, Axis::Horizontal));
                         }
                     }),
             )
@@ -807,7 +808,7 @@ impl WorkspaceSidebar {
                         if let Some(pane) = active_pane {
                             bottom_mux
                                 .read(cx)
-                                .execute(new_pane_command(pane, Axis::Vertical));
+                                .execute(split_picker_command(pane, Axis::Vertical));
                         }
                     }),
             )
@@ -1998,7 +1999,7 @@ fn render_new_pane_action(
     .on_click(move |_, _, cx| {
         cx.stop_propagation();
         mux.read(cx)
-            .execute_on_host(host, new_pane_command(active_pane, Axis::Horizontal));
+            .execute_on_host(host, split_picker_command(active_pane, Axis::Horizontal));
     })
     .into_any_element()
 }
@@ -3489,12 +3490,12 @@ mod tests {
             CommandInvocation::new("kill-pane", ["-t", "%21"])
         );
         assert_eq!(
-            new_pane_command(PaneId(21), Axis::Horizontal),
-            CommandInvocation::new("new-pane", ["-h", "-t", "%21"])
+            split_picker_command(PaneId(21), Axis::Horizontal),
+            CommandInvocation::new("split-picker", ["-h", "-t", "%21"])
         );
         assert_eq!(
-            new_pane_command(PaneId(21), Axis::Vertical),
-            CommandInvocation::new("new-pane", ["-v", "-t", "%21"])
+            split_picker_command(PaneId(21), Axis::Vertical),
+            CommandInvocation::new("split-picker", ["-v", "-t", "%21"])
         );
     }
 

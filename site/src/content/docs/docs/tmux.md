@@ -4,7 +4,7 @@ description: What works, what doesn't, and how zz relates to real tmux.
 ---
 
 zz reimplements tmux in Rust; it never runs or links tmux. Behavior is
-checked against a pinned upstream commit. 58 canonical commands (plus
+checked against a pinned upstream commit. 59 canonical commands (plus
 aliases) work, along with the seven named layouts and the root, prefix,
 copy-mode, and copy-mode-vi key tables.
 

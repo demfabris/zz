@@ -87,10 +87,10 @@ Every key is normalized before lookup, bind, unbind, and prefix comparison:
 selectors); `unbind-key -a` is explicitly unsupported. `list-keys` renders every binding as
 `bind-key -T <table> <key> <commands>`. See [the command layer](/tmux/commands.md) for flag parsing.
 
-The daemon preserves these stored commands exactly. At key-execution time only, a binding whose
-canonical command is `split-window` (or `splitw`) is routed to the native `new-pane` picker with the
-same arguments. Consequently custom prefixes, prefix-table keys, root bindings, targets, axes, and
-cwd forms remain authoritative; direct CLI/command-prompt `split-window` requests stay terminal-only.
+The daemon preserves and executes these stored commands exactly — there is no key-time rewriting.
+A binding of `split-window` (or `splitw`), whether imported from a tmux config or typed at
+`prefix :`, creates a plain terminal split like tmux. zz's *default* `%`/`"` bindings name the
+zz-native `split-picker` verb instead, which is what opens the pane-kind picker.
 
 # Default bindings (seeded in `KeyTables::default`)
 

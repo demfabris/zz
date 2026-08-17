@@ -1,0 +1,10 @@
+# Pane splitting, index targeting, selection history, and deletion.
+split-window -h -t w:0.0 -p 50
+split-window -v -t w:0.1 -p 25
+split-window -h -t w:0.2 -p 50
+select-pane -t w:0.0
+select-pane -t w:0.2
+last-pane -t w:0
+kill-pane -t w:0.1
+select-pane -t w:0.0
+last-pane -t w:0

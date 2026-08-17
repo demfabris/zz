@@ -1144,7 +1144,7 @@ impl SettingsView {
                                 group.child(Self::boolean_setting(
                                     ConfigKey::ExperimentalEditorPane,
                                     "Editor pane",
-                                    "Offer the Editor pane in the new-pane picker. Not ready \
+                                    "Offer the Editor pane in the pane picker. Not ready \
                                      for prime time; expect rough edges. Turning this off \
                                      blocks new editor panes everywhere (picker, command \
                                      palette, CLI); editor panes that are already open keep \
@@ -1157,7 +1157,7 @@ impl SettingsView {
                                 group.child(Self::boolean_setting(
                                     ConfigKey::ExperimentalAgentPane,
                                     "Agent pane",
-                                    "Offer the Agent pane in the new-pane picker. Not ready \
+                                    "Offer the Agent pane in the pane picker. Not ready \
                                      for prime time; expect rough edges. Turning this off \
                                      blocks new agent panes everywhere (picker, command \
                                      palette, CLI); agent panes that are already open keep \

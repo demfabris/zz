@@ -41,7 +41,7 @@ send-keys, and client events. It contains no GPUI or CEF code; live browser rend
 | Accept connections, one thread per client | `run_foreground` accept loop → `handle_connection` |
 | Serialize + execute commands | `Shared::execute` / `execute_command_request` (mux engine under one lock) |
 | Fan terminal frames + persist live pane titles | `watch_terminal` → `synchronize_pane_title` / `publish_terminal_for_pane` → mux snapshots + per-client `OutboundMailbox` |
-| Route interactive input + `send-keys` | `input` / `input_text` / `input_key`, `execute_key_commands`, `resolve_input_sinks`, `send_tokens`; key-bound `split-window` commands retain their arguments but enter the native picker flow |
+| Route interactive input + `send-keys` | `input` / `input_text` / `input_key`, `execute_key_commands`, `resolve_input_sinks`, `send_tokens`; stored bindings execute exactly as written |
 | Attach/detach interactive clients | `attach` / `attach_target` / `detach`, `register` / `unregister`, `evict_other_clients` for `attach-session -d` |
 | Serve repair requests after a coalesced drop | `send_full` (`RequestFull`), `send_history` (`HistoryRequest` → `HistoryChunk`), `AgentRuntime::replay` (`AgentReplay` → `AgentUpdates`) |
 | Journal and fan out agent transcripts | `agent::journal::AgentJournal` under `<data>/zz/daemon/agent-journal`, `agent::fanout::AgentFanout` → the mailbox's `agent` lane |
@@ -346,11 +346,10 @@ composer input the client owns, and its prompts arrive as `AgentPrompt`, not as 
 `EventPayload::PrefixArmed` transitions of that cursor to the owning client, which uses them to
 claim in-flight sequence keys from focus contexts that never reach the daemon.
 
-`execute_key_commands` is the boundary between configured tmux bindings and ordinary command
-requests. It leaves the configured prefix/key and stored `Binding` unchanged, but routes a canonical
-`split-window`/`splitw` invoked by a key to `new-pane` with the original arguments and source span.
-Thus custom `zz/mux.conf` bindings open the picker, while a direct CLI or command-prompt
-`split-window` still creates a terminal immediately.
+`execute_key_commands` executes stored `Binding`s exactly as written — a key-bound
+`split-window`/`splitw` creates a terminal like tmux, from defaults and imported configs alike.
+The pane-kind picker is reached only through the zz-native `split-picker` verb, which zz's default
+`%`/`"` bindings name directly.
 
 `new-session` also emits `Attach` after its initial terminal is created; `-d` suppresses it. For an interactive client,
 the daemon switches that client to the new session and publishes `ProtocolMessage::Attached`

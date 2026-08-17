@@ -510,7 +510,7 @@ imports reload the page.
 - `workspace/sidebar.rs` builds a `MuxTreeModel` (session → window → pane, pane order taken from
   each window's `LayoutNode`) from `MuxSnapshot`, renders it as a full-height indented
   `uniform_list` tree whose top strip **is** the window's title bar (traffic lights, drag region,
-  double-click), and issues `CommandInvocation`s (`new-session`, `new-pane`,
+  double-click), and issues `CommandInvocation`s (`new-session`, `split-picker`,
   `kill-session`/`kill-window`/`kill-pane`) from hover-revealed row actions. Row labels
   ellipsis-truncate (`min_w_0` + `overflow_hidden` + `text_ellipsis`) inside a **reserved action
   gutter**: the trailing action strip is `flex_none` and merely `invisible()` until hover, so it

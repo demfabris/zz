@@ -49,8 +49,8 @@ impl Default for KeyTables {
         };
         for (key, command) in [
             ("c", "new-window"),
-            ("%", "split-window -h"),
-            ("\"", "split-window -v"),
+            ("%", "split-picker -h"),
+            ("\"", "split-picker -v"),
             ("!", "break-pane"),
             ("x", "kill-pane"),
             ("&", "kill-window"),
@@ -541,6 +541,14 @@ impl KeyEngine {
     #[must_use]
     pub fn active_table(&self) -> Option<&str> {
         self.table.as_deref()
+    }
+
+    pub fn set_repeat_count(&mut self, count: usize) {
+        self.repeat_count = if count == 0 {
+            None
+        } else {
+            Some(u16::try_from(count.min(9_999)).expect("clamped repeat count fits in u16"))
+        };
     }
 
     fn take_pending_jump_target(&mut self, key: &str) -> Option<KeyDecision> {
@@ -1100,11 +1108,11 @@ mod tests {
         );
         assert_eq!(
             tables.get("prefix", "%").unwrap().commands,
-            vec![CommandInvocation::new("split-window", ["-h"])]
+            vec![CommandInvocation::new("split-picker", ["-h"])]
         );
         assert_eq!(
             tables.get("prefix", "\"").unwrap().commands,
-            vec![CommandInvocation::new("split-window", ["-v"])]
+            vec![CommandInvocation::new("split-picker", ["-v"])]
         );
         assert_eq!(
             tables.get("prefix", "?").unwrap().commands,

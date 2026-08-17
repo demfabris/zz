@@ -11,8 +11,8 @@ use std::{
 };
 
 use chrono::Local;
-use zz_mux::{StatusContext, StatusFormats, StatusHooks, expand_status};
-use zz_protocol::{ClientId, MuxSnapshot, SessionId, StatusLine, WindowId};
+use zz_mux::{MuxEngine, StatusContext, StatusFormats, StatusHooks, expand_status};
+use zz_protocol::{Axis, ClientId, MuxSnapshot, SessionId, StatusLine, WindowId};
 
 use crate::shell_process;
 
@@ -69,6 +69,7 @@ impl StatusRenderer {
 
 pub(crate) fn status_context(
     snapshot: &MuxSnapshot,
+    engine: &MuxEngine,
     attached: Option<SessionId>,
     focused_window: Option<WindowId>,
 ) -> StatusContext {
@@ -101,19 +102,38 @@ pub(crate) fn status_context(
     context.window_index = window.index;
     context.window_name.clone_from(&window.name);
     context.window_panes = window.panes.len();
+    context.window_width = engine.window_extent(window.id, Axis::Horizontal);
+    context.window_height = engine.window_extent(window.id, Axis::Vertical);
+    context.window_layout = engine
+        .state
+        .windows
+        .get(&window.id)
+        .map(|window| window.layout.dump())
+        .unwrap_or_default();
+    context.window_active = Some(true);
     context.window_zoomed = window.zoomed_pane.is_some();
     context.window_bell = window.panes.values().any(|pane| pane.bell);
 
-    let mut order = Vec::with_capacity(window.panes.len());
-    window.layout.panes(&mut order);
-    context.pane_index = order
-        .iter()
-        .position(|pane| *pane == window.active_pane)
+    context.pane_index = engine
+        .state
+        .windows
+        .get(&window.id)
+        .and_then(|window| {
+            window
+                .pane_order()
+                .iter()
+                .position(|pane| *pane == window.active_pane)
+        })
         .and_then(|index| u32::try_from(index).ok())
         .unwrap_or_default();
     if let Some(pane) = window.panes.get(&window.active_pane) {
         context.pane_id = pane.id.to_string();
         context.pane_title.clone_from(&pane.title);
+        if let Some((columns, rows)) = engine.pane_geometry(pane.id) {
+            context.pane_width = Some(columns);
+            context.pane_height = Some(rows);
+        }
+        context.pane_active = Some(true);
         context.pane_synchronized = pane.synchronized_input;
     }
     context
@@ -275,6 +295,7 @@ fn first_line(output: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zz_mux::{PaneKind, SplitSize};
 
     fn request(client: u64, left: &str, right: &str) -> StatusRequest {
         StatusRequest {
@@ -320,6 +341,42 @@ mod tests {
         request.formats.enabled = false;
         let status = renderer.render_initial(&request);
         assert!(status.is_empty());
+    }
+
+    #[test]
+    fn status_pane_index_uses_pane_order_when_layout_order_differs() {
+        let mut engine = MuxEngine::default();
+        let (session, window, target) = engine.state.create_session("work").unwrap();
+        let source = engine
+            .state
+            .split_pane(target, Axis::Horizontal, PaneKind::Terminal)
+            .unwrap();
+        engine
+            .state
+            .join_pane(
+                source,
+                target,
+                Axis::Vertical,
+                SplitSize::Default,
+                true,
+                false,
+                false,
+            )
+            .unwrap();
+        let snapshot = engine.state.snapshot();
+        let mut layout_order = Vec::new();
+        snapshot.sessions[0].windows[0]
+            .layout
+            .panes(&mut layout_order);
+
+        assert_eq!(layout_order, [source, target]);
+        assert_eq!(engine.state.windows[&window].pane_order(), [target, source]);
+        let context = status_context(&snapshot, &engine, Some(session), Some(window));
+        assert_eq!(context.pane_index, 1);
+        assert_eq!(
+            context.window_layout,
+            engine.state.windows[&window].layout.dump()
+        );
     }
 
     #[test]

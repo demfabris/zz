@@ -1,94 +1,102 @@
 ---
 type: Concept
-title: Binary split-pane layout tree
-description: How a window's panes are arranged as a recursive binary LayoutNode tree of ^split nodes with axes and ratios, plus the reconciliation, resize, directional-navigation, and preset logic in model.rs.
-resource: crates/zz-mux/src/model.rs
-tags: [layout, splits, panes, tree, tmux]
-timestamp: 2026-07-20T00:00:00Z
+title: Cell-authoritative split-pane layout
+description: How a window's panes are arranged as an n-ary cell tree ported from tmux's layout.c — split/resize/preset algorithms in layout.rs, the derived binary wire projection with stable ^split ids, measurement-driven window extent, and the invariants model.rs enforces.
+resource: crates/zz-mux/src/layout.rs
+tags: [layout, splits, panes, cells, tree, tmux]
+timestamp: 2026-08-17T00:00:00-03:00
 ---
 
 # Overview
 
-Every zz window arranges its panes as a **recursive binary tree**, the `LayoutNode` defined in
-[`crates/zz-protocol`](/crates/zz-protocol.md) and owned per-window inside
-[`MuxState`](/crates/zz-mux.md). A node is either a leaf `Pane(%id)` or a
-`Split { id: ^SplitId, axis, ratio, first, second }`. This one structure expresses arbitrarily nested
-tmux layouts while keeping surfaces (PTYs / browser sessions) stable: operations rebuild the *tree*,
-never the panes. `^split` IDs are monotonically allocated and stable, so a divider drag or nested
-resize adjusts exactly the split that was grabbed and a rebuilt layout can never reuse a retired ID.
-The tree stores only proportions; concrete geometry is computed on demand and never persisted.
+Every zz window arranges its panes as an **n-ary tree measured in terminal cells** — a faithful
+Rust port of the pinned tmux's `layout.c` engine, living in `crates/zz-mux/src/layout.rs` and
+owned per-window inside [`MuxState`](/crates/zz-mux.md). Cells are the truth: a node carries
+`sx/sy/xoff/yoff` in cells, the root's extent IS the window size, and every split, resize,
+preset, and kill runs tmux's exact integer arithmetic — validated against 48 golden fixtures
+captured from the pinned tmux binary (`crates/zz-mux/tests/fixtures/layout-pin.txt`, regenerated
+by `compat/gen-layout-fixtures.sh`) and by the differential harness running `--strict-geometry`
+clean. Ratios exist only as a derived projection for clients.
 
-# Schema: `LayoutNode`
+# The kernel: `CellLayout`
 
-| Variant | Fields | Meaning |
-| --- | --- | --- |
-| `Pane` | `PaneId` | A leaf surface (pending picker, terminal, browser, or Agent). |
-| `Split` | `id: SplitId`, `axis: Axis`, `ratio: f32`, `first: Box<LayoutNode>`, `second: Box<LayoutNode>` | An interior divider; `ratio` is `first`'s share. |
+`CellNode` is a `Leaf { pane, geometry }` or a `Node { axis, geometry, children }`; each child
+except the first carries the `SplitId` of the border on its leading edge. Invariants (tmux
+`layout_check`): on a node's axis, child extents plus one border cell between neighbors sum to
+the node's extent; children match the node on the other axis; every node has ≥ 2 children; every
+leaf is at least `PANE_MINIMUM` (1 cell); same-axis nesting is legal (kills produce it, exactly
+like tmux). `PANE_MAXIMUM` is 10,000.
 
-`Axis::Horizontal` places `first`/`second` side-by-side (a vertical divider, tmux `-h`);
-`Axis::Vertical` (the default) stacks them (a horizontal divider, tmux `-v`). Ratios are clamped to
-`[MIN_SPLIT_RATIO, MAX_SPLIT_RATIO]` = `[0.1, 0.9]`. `LayoutNode` provides `contains`, `panes`,
-`splits`, and `contains_split` helpers used throughout the model.
+The tmux algorithms, with their load-bearing quirks:
 
-# Core operations (model.rs)
+- **split** (`layout_split_pane`): default gives the new pane `((extent+1)/2)−1`, the border
+  eats a cell, `-l`/`-p` resolve against the target pane (the window under `-f`), sizes clamp to
+  `[PANE_MINIMUM, extent−2]`, and a too-small box refuses with tmux's exact
+  "no space for a new pane". Full-size splits insert at the head/tail of the root and of the
+  pane order.
+- **remove**: the space is gifted to the following sibling (else the preceding one); a parent
+  left with one child is spliced away with a bare replace — never merged, so nested same-axis
+  nodes survive exactly as in the pin.
+- **resize** (window): round-robin integer spread, earliest children absorb remainders; the
+  layout never shrinks below its minimum, so it can exceed the requested extent.
+- **resize-pane**: tmux's victim walks — grow takes from the first sibling after (then before)
+  with headroom, shrink gives to the immediate next sibling; the last child inverts; absolute
+  targets convert to deltas.
+- **presets**: all seven (`even-*`, `main-*` ± mirrored, `tiled`) with the pin's defaults
+  (main-pane-height 24, main-pane-width 80). Spread biases remainders to the first children;
+  tiled biases them to the last column/row. Two deliberate divergences: with exactly two panes
+  the pin never sizes the lone "other" pane (an upstream bug that violates tmux's own
+  invariant) — zz sizes it; and `select-layout -E` on a parent mixing leaf and node children
+  (the pin spreads only leaves over the full extent, corrupting the sums) is refused rather
+  than reproduced. See [the divergence matrix](/tmux/divergences.md).
+- **layout strings**: `dump()` emits tmux's checksummed `layout-custom.c` format. `parse()` checks
+  the checksum and geometry tree, ignores the serialized pane numbers, and caps nesting at 256
+  cells. `select-layout <string>` assigns the window's `pane_order` through the parsed leaves,
+  removes extra bottom-right cells with tmux's sibling gifting, allocates new divider ids, and
+  adopts the encoded extent. The 48 pin fixtures cover both replay and parse-to-dump round trips.
 
-| Operation | Helper | Behavior |
-| --- | --- | --- |
-| Split a pane | `insert_existing_pane` | `split_pane_with` inserts the new leaf beside the target under a `SplitPlacement` (`ratio` = the new pane's share, `before`, `full_size`, `detached`); plain `split_pane` is that with the `0.5`-after-and-focus default. |
-| Remove a pane | `remove_leaf` | `kill_pane`/`break_pane`/`join_pane` collapse the split by moving the owned sibling into its parent, preserving descendant allocations. |
-| Reparent a pane | `insert_existing_pane` | `join-pane` moves an existing leaf beside a target through the same placement (`-b` before, `-f` full-size, `-p` ratio). |
-| Swap two leaves | `swap_layout_panes` | `swap-pane` exchanges leaves, keeping split IDs/ratios. |
-| Rotate | `remap_layout_panes` | `rotate-window` walks surfaces through slots via a pane→pane remap. |
-| Exact resize | `set_split_ratio` | `resize-split` (divider drag commit) sets one `^split`'s ratio. |
-| Directional resize | `resize_boundary` | `resize-pane -L/-R/-U/-D` (`resize_pane`) and `-x`/`-y` (`resize_pane_to`) move **one** boundary: the deepest on-axis ancestor holding the pane in its `first` subtree (the divider touching the pane's right/bottom edge), falling back to the deepest ancestor holding it in `second` when the pane already ends at the window edge. A positive delta always moves that divider right/down, so `-R` grows a pane that has a neighbor to its right and shrinks one pinned to the window edge, which is what `layout_resize_pane` in tmux does with its last-cell/previous-cell rule. The tree stores proportions, so the space that move frees is shared proportionally within each side instead of being taken cell-for-cell from the adjacent pane as in tmux. |
+# Wire projection and divider identity
 
-# Layout reconciliation (presets)
+Clients still receive the binary ratio `LayoutNode` ([snapshots](/protocol/snapshots.md)):
+`project()` folds each child list right-associatively, computing `ratio = first / (first + rest
++ inner borders)`, and stamps each fold with the divider's stable `SplitId` — the GUI's drag
+handles survive unrelated mutations. A divider drag arrives as `ResizeSplit` basis points and
+maps onto `set_divider_ratio`, which converts the ratio back to cells over the same denominator
+and runs the sibling resize walk, so every committed drag lands on whole cells.
+`swapped_layout`/`joined_layout` remain pure client-side predictors on the wire tree.
 
-`select-layout` and `next/previous-layout` rebuild **only the tree** from the window's `pane_order`,
-preserving PTYs, browser sessions, pane IDs, focus history, and pane options. `build_preset_layout`
-allocates fresh `^split` IDs per edge and dispatches to:
+# Window extent
 
-- `combine_equal_nodes` . a balanced binary split giving every pane equal extent (`even-horizontal`,
-  `even-vertical`, and the rows/columns of `tiled`);
-- `build_main_layout` . a `0.5` root split with one main pane and a balanced secondary stack
-  (`main-horizontal`, `main-vertical`, and their `-mirrored` variants that swap `first`/`second`);
-- `build_tiled_layout` . a near-square grid of rows of equal columns.
+Windows are born at tmux's `default-size` (80x24) or inherit their session's active-window
+extent; `new-session -x/-y` is honored. A drawing client's per-pane measurements update the
+extent through a guarded reconstruction (`MuxEngine::set_pane_geometry`): only the zoomed pane
+counts while zoomed (applied directly), only the active pane otherwise, a one-cell dead-band and
+a repeat memo guarantee a fixed point (the naive per-pane write-back oscillated). Detached
+windows keep their last extent, like tmux. A zoomed pane reports the full window extent to
+formats; the tree underneath is untouched.
 
-The prior tree is saved to `previous_layout` so `select-layout -o` (`restore_previous_layout`) can
-toggle back, but only if the saved layout still matches the current pane count and has valid ratios;
-otherwise it errors without mutating. `select-layout -E` (`spread_layout` /
-`spread_first_uneven_ancestor`) resets the nearest uneven ancestor split to `0.5`. Any layout mutation
-clears `zoomed_pane`, so lossless zoom (`resize-pane -Z`, which never alters the tree) is dropped when
-the geometry changes.
+# Invariants (model.rs)
 
-# Target resolution and directional navigation
-
-Directional `select-pane -L/-R/-U/-D` and `last-pane` derive spatial neighbors from this same tree.
-`collect_pane_rects` walks the layout into a bounded `LAYOUT_COORDINATE_MAX` (`1_000_000`)-unit
-logical rectangle space (via `split_coordinate`), then `directional_candidates` finds panes sharing
-the relevant edge (with tmux-style **wrapping** across a window edge) whose orthogonal ranges overlap.
-Ties are broken by the window's most-recently-used `last_panes` history. Relative targets `-t:.+` /
-`-t:.-` step through `pane_order` instead (`next_pane`/`previous_pane`).
-
-# Invariants
-
-`MuxState::validate()` guarantees the tree stays consistent: the set of layout leaves exactly equals
-the window's `panes` map and its `pane_order`; every `^split` ID is globally unique across all
-windows; all ratios are finite and within `[0.1, 0.9]`; and the `active_pane`, `zoomed_pane`, and
-`last_panes` all reference live panes.
+`MuxState::validate()` asserts the kernel invariant per window plus: layout leaves equal the
+pane map and `pane_order`, split ids globally unique, `zoomed_pane` is the active pane, and the
+chaos suite (`tests/chaos.rs`) holds it under interleaved mutation. Pane order is maintained
+tmux-style: splits insert after the target (before with `-b`, head/tail with `-f`), `join-pane`
+always inserts after (reproducing the pin's pass-by-value `-b` quirk), and a single-pane
+`break-pane` moves the window itself, preserving its id.
 
 # Key files
 
 | File | Role |
 | --- | --- |
-| `crates/zz-mux/src/model.rs` | All layout mutation, preset building, rect collection, directional nav, and `validate`. |
-| `crates/zz-protocol/src/snapshot.rs` | `LayoutNode`, `Axis`, and the `contains`/`panes`/`splits` helpers. |
+| `crates/zz-mux/src/layout.rs` | The cell kernel: algorithms, projection, layout-string parse/dump, validation |
+| `crates/zz-mux/src/layout_pin_tests.rs` | Replays the 48 pin-captured fixtures through the kernel |
+| `crates/zz-mux/src/model.rs` | `MuxState` write paths wrapping the kernel; invariants |
+| `crates/zz-mux/src/command.rs` | Command surface: sizes, percentages, measurement feed |
+| `compat/gen-layout-fixtures.sh` | Regenerates the golden fixtures from the pinned binary |
 
 # Related
 
-- Mutated through [commands](/tmux/commands.md) (`split-window`, `select-layout`, `resize-pane`,
-  `swap-pane`, `rotate-window`, `join-pane`, `break-pane`); the tree ships in
-  [snapshots](/protocol/snapshots.md).
-- Owned by [MuxState in crates/zz-mux](/crates/zz-mux.md); `^split` IDs defined in the
-  [protocol IDs](/protocol/ids.md). Layout behavior checked against `layout.c`/`layout-set.c` in the
-  [tmux upstream reference](/references/tmux-upstream.md).
+- [tmux divergence matrix](/tmux/divergences.md) . the deliberate two-pane preset divergence
+- [compat harness playbook](/playbooks/compat-harness.md) . the strict-geometry differential gate
+- [snapshots](/protocol/snapshots.md) . the derived wire projection
+- [tmux drop-in plan](/designs/tmux-drop-in.md) . phase 3, which this page documents

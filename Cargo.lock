@@ -10753,6 +10753,7 @@ dependencies = [
  "crossbeam-channel",
  "futures-lite",
  "getrandom 0.4.3",
+ "glob",
  "interprocess",
  "log",
  "parking_lot",

@@ -168,14 +168,18 @@ pub struct StatusContext {
     pub window_index: u32,
     pub window_name: String,
     pub window_panes: usize,
-    /// `None` is the status-line view, whose focused window is always current.
-    /// Explicit command/list rows set whether this is the session's active window.
+    pub window_width: Option<u16>,
+    pub window_height: Option<u16>,
+    pub window_layout: String,
     pub window_active: Option<bool>,
     pub window_zoomed: bool,
     pub window_bell: bool,
     pub pane_index: u32,
     pub pane_id: String,
     pub pane_title: String,
+    pub pane_width: Option<u16>,
+    pub pane_height: Option<u16>,
+    pub pane_active: Option<bool>,
     pub pane_synchronized: bool,
     pub host: String,
     pub host_short: String,
@@ -194,12 +198,19 @@ impl StatusContext {
             "window_index" => Cow::Owned(self.window_index.to_string()),
             "window_name" => Cow::Borrowed(self.window_name.as_str()),
             "window_panes" => Cow::Owned(self.window_panes.to_string()),
+            "window_width" => optional_number(self.window_width),
+            "window_height" => optional_number(self.window_height),
+            "window_layout" => Cow::Borrowed(self.window_layout.as_str()),
+            "window_active" => Cow::Borrowed(optional_flag(self.window_active)),
             "window_flags" => Cow::Owned(self.window_flags()),
             "window_zoomed_flag" => Cow::Borrowed(flag(self.window_zoomed)),
             "window_bell_flag" => Cow::Borrowed(flag(self.window_bell)),
             "pane_index" => Cow::Owned(self.pane_index.to_string()),
             "pane_id" => Cow::Borrowed(self.pane_id.as_str()),
             "pane_title" => Cow::Borrowed(self.pane_title.as_str()),
+            "pane_width" => optional_number(self.pane_width),
+            "pane_height" => optional_number(self.pane_height),
+            "pane_active" => Cow::Borrowed(optional_flag(self.pane_active)),
             "pane_synchronized" => Cow::Borrowed(flag(self.pane_synchronized)),
             "host" => Cow::Borrowed(self.host.as_str()),
             "host_short" => Cow::Borrowed(self.host_short.as_str()),
@@ -222,14 +233,19 @@ impl StatusContext {
         })
     }
 
+    /// `None` is the status-line view, whose focused window is always current;
+    /// the daemon also fills `Some(true)` there since tmux's status line
+    /// resolves against the current window. Command/list rows set the real
+    /// per-row value.
     fn window_flags(&self) -> String {
-        // tmux's flag order: current, bell, zoomed.
+        // tmux's flag order: activity, bell, silence, current, last, marked,
+        // zoomed; zz models bell, current, and zoomed.
         let mut flags = String::new();
-        if self.window_active.unwrap_or(true) {
-            flags.push('*');
-        }
         if self.window_bell {
             flags.push('!');
+        }
+        if self.window_active.unwrap_or(true) {
+            flags.push('*');
         }
         if self.window_zoomed {
             flags.push('Z');
@@ -269,11 +285,19 @@ impl FormatContext {
                 self.session
                     .filter(|session| state.sessions.contains_key(session))
             });
+        let window = window.or_else(|| {
+            session
+                .and_then(|session| state.sessions.get(&session))
+                .map(|session| session.active_window)
+                .filter(|window| state.windows.contains_key(window))
+        });
+        let pane = pane.or_else(|| {
+            window
+                .and_then(|window| state.windows.get(&window))
+                .map(|window| window.active_pane)
+        });
 
-        let mut context = StatusContext {
-            window_active: Some(false),
-            ..StatusContext::default()
-        };
+        let mut context = StatusContext::default();
         if let Some(session) = session.and_then(|session| state.sessions.get(&session)) {
             context.session_id = session.id.to_string();
             context.session_name.clone_from(&session.name);
@@ -284,6 +308,10 @@ impl FormatContext {
             context.window_index = window.index;
             context.window_name.clone_from(&window.name);
             context.window_panes = window.panes.len();
+            let (width, height) = window.layout.extent();
+            context.window_width = Some(width);
+            context.window_height = Some(height);
+            context.window_layout = window.layout.dump();
             context.window_active = state
                 .sessions
                 .get(&window.session)
@@ -300,6 +328,10 @@ impl FormatContext {
                     .unwrap_or_default();
                 context.pane_id = pane.id.to_string();
                 context.pane_title.clone_from(&pane.title);
+                let geometry = window.displayed_pane_geometry(pane.id);
+                context.pane_width = geometry.map(|geometry| geometry.0);
+                context.pane_height = geometry.map(|geometry| geometry.1);
+                context.pane_active = Some(window.active_pane == pane.id);
                 context.pane_synchronized =
                     state.pane_synchronize_panes(pane.id).unwrap_or_default();
             }
@@ -334,6 +366,10 @@ impl FormatVariables for ResolvedFormatContext {
                         | "window_index"
                         | "window_name"
                         | "window_panes"
+                        | "window_width"
+                        | "window_height"
+                        | "window_layout"
+                        | "window_active"
                         | "window_flags"
                         | "window_zoomed_flag"
                         | "window_bell_flag"
@@ -341,7 +377,13 @@ impl FormatVariables for ResolvedFormatContext {
             || (!self.has_pane
                 && matches!(
                     name,
-                    "pane_index" | "pane_id" | "pane_title" | "pane_synchronized"
+                    "pane_index"
+                        | "pane_id"
+                        | "pane_title"
+                        | "pane_width"
+                        | "pane_height"
+                        | "pane_active"
+                        | "pane_synchronized"
                 ));
         if missing {
             Some(Cow::Borrowed(""))
@@ -365,6 +407,17 @@ pub(crate) fn expand_format(format: &str, state: &MuxState, context: FormatConte
     }
 
     expand_with_context(format, &context.resolve(state), &mut CommandHooks)
+}
+
+fn optional_number(value: Option<u16>) -> Cow<'static, str> {
+    value.map_or(Cow::Borrowed(""), |value| Cow::Owned(value.to_string()))
+}
+
+const fn optional_flag(value: Option<bool>) -> &'static str {
+    match value {
+        Some(value) => flag(value),
+        None => "",
+    }
 }
 
 const fn flag(set: bool) -> &'static str {
@@ -617,12 +670,18 @@ mod tests {
             window_index: 1,
             window_name: "frontend".to_owned(),
             window_panes: 2,
-            window_active: None,
+            window_width: Some(160),
+            window_height: Some(50),
+            window_layout: "e582,160x50,0,0,7".to_owned(),
+            window_active: Some(true),
             window_zoomed: false,
             window_bell: false,
             pane_index: 0,
             pane_id: "%7".to_owned(),
             pane_title: "cargo watch --workspace".to_owned(),
+            pane_width: Some(80),
+            pane_height: Some(50),
+            pane_active: Some(true),
             pane_synchronized: false,
             host: "tower.local".to_owned(),
             host_short: "tower".to_owned(),
@@ -645,6 +704,27 @@ mod tests {
         assert_eq!(expand("#{session_id}:#{window_id}"), "$4:@5");
         assert_eq!(expand("#{window_panes} panes"), "2 panes");
         assert_eq!(expand("#{session_windows}"), "3");
+        assert_eq!(expand("#{window_layout}"), "e582,160x50,0,0,7");
+        assert_eq!(
+            expand("#{window_width}x#{window_height}:#{window_active}"),
+            "160x50:1"
+        );
+        assert_eq!(
+            expand("#{pane_width}x#{pane_height}:#{pane_active}"),
+            "80x50:1"
+        );
+    }
+
+    #[test]
+    fn missing_geometry_and_activity_variables_expand_to_nothing() {
+        assert_eq!(
+            expand_status(
+                "#{window_width}:#{window_height}:#{window_active}:#{pane_width}:#{pane_height}:#{pane_active}",
+                &StatusContext::default(),
+                &mut Stub,
+            ),
+            ":::::"
+        );
     }
 
     #[test]
@@ -709,9 +789,33 @@ mod tests {
             )
         };
         assert_eq!(flags(false, false), "*");
-        assert_eq!(flags(true, false), "*!");
+        assert_eq!(flags(true, false), "!*");
         assert_eq!(flags(false, true), "*Z");
-        assert_eq!(flags(true, true), "*!Z");
+        assert_eq!(flags(true, true), "!*Z");
+        assert_eq!(
+            expand_status(
+                "#F",
+                &StatusContext {
+                    window_active: None,
+                    window_bell: true,
+                    ..context()
+                },
+                &mut Stub,
+            ),
+            "!*"
+        );
+        assert_eq!(
+            expand_status(
+                "#F",
+                &StatusContext {
+                    window_active: Some(false),
+                    window_bell: true,
+                    ..context()
+                },
+                &mut Stub,
+            ),
+            "!"
+        );
         assert_eq!(
             expand_status(
                 "#{?window_bell_flag,rang,quiet}",
@@ -767,7 +871,6 @@ mod tests {
                 crate::PaneKind::Terminal,
             )
             .unwrap();
-
         assert_eq!(
             expand_format(
                 "#{session_id}:#S #{session_windows}[#F]|#{window_index}|#{pane_index}",
@@ -778,7 +881,7 @@ mod tests {
                     pane: None,
                 },
             ),
-            format!("{session}:work 2[]||")
+            format!("{session}:work 2[*]|1|1")
         );
         assert_eq!(
             expand_format(

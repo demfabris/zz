@@ -1,11 +1,7 @@
-use std::{
-    env,
-    error::Error,
-    fs,
-    path::{Path, PathBuf},
-    process::ExitCode,
-};
+use std::{env, error::Error, fs, path::PathBuf, process::ExitCode};
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use std::path::Path;
 #[cfg(target_os = "macos")]
 use std::{
     collections::{BTreeSet, HashMap},
@@ -22,6 +18,7 @@ use std::{
 use cargo_metadata::Message;
 
 const APP_NAME: &str = "zz";
+#[cfg(target_os = "macos")]
 const BUNDLE_SHORT_VERSION_KEY: &str = "CFBundleShortVersionString";
 #[cfg(target_os = "macos")]
 const BUNDLE_VERSION_KEY: &str = "CFBundleVersion";
@@ -194,6 +191,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn product_version(version: &str) -> &str {
     version.split(['-', '+']).next().unwrap_or(version)
 }
@@ -1163,12 +1161,15 @@ fn macos_helper_apps(app: &Path) -> Vec<PathBuf> {
 mod option_tests {
     use std::path::PathBuf;
 
-    use super::{BuildProfile, BundleOptions, parse_bundle_options, product_version};
+    #[cfg(target_os = "macos")]
+    use super::product_version;
+    use super::{BuildProfile, BundleOptions, parse_bundle_options};
 
     fn arguments(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn strips_prerelease_and_build_metadata_from_product_versions() {
         assert_eq!(product_version("0.2.0"), "0.2.0");

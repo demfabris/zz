@@ -1,6 +1,11 @@
+#![deny(clippy::debug_assert_with_mut_call)]
+
 //! Pure state, commands, layouts, key tables, and tmux-compatible parsing.
 
 mod command;
+mod layout;
+#[cfg(test)]
+mod layout_pin_tests;
 mod model;
 mod parser;
 mod status;
@@ -9,6 +14,7 @@ pub use command::{
     AgentOptions, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
     MAX_WORD_SEPARATORS_BYTES, MuxEffect, MuxEngine,
 };
+pub use layout::{CellLayout, SplitSize};
 pub use model::{
     LayoutPreset, MuxState, Pane, PaneDirection, PaneKind, Session, SplitPlacement, Window,
     joined_layout, swapped_layout,

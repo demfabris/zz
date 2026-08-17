@@ -832,8 +832,8 @@ const RECENTS = ['https://gpui.rs/', 'https://ghostty.org/', 'https://github.com
 		}
 	}
 
-	// split-window replaces one leaf with a fresh 0.5 binary split; new-pane is
-	// an unresolved picker pane (key.rs:45-46, daemon.rs:7547-7554).
+	// split-window replaces one leaf with a fresh 0.5 binary split; split-picker
+	// is an unresolved picker pane (the default %/" bindings in key.rs).
 	function nextPaneId(): string {
 		while (canvas.querySelector(`[data-pane="td-${paneCounter}"]`)) paneCounter++;
 		return `td-${paneCounter++}`;

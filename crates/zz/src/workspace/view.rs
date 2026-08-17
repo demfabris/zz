@@ -69,9 +69,6 @@ use crate::{
 };
 use zz_ui::Colorize as _;
 
-const MIN_SPLIT_RATIO: f32 = 0.1;
-const MAX_SPLIT_RATIO: f32 = 0.9;
-
 const MIN_DROP_EDGE: f32 = 80.0;
 const DROP_EDGE_FRACTION: f32 = 0.25;
 const DROP_PREVIEW_MORPH: Duration = Duration::from_millis(180);
@@ -227,7 +224,7 @@ struct SplitDrag {
 struct SplitDragState {
     drag: SplitDrag,
     ratio: f32,
-    committed: bool,
+    committed_snapshot_revision: Option<u64>,
 }
 
 struct SplitDragPreview;
@@ -560,6 +557,8 @@ pub struct AppView {
     empty_workspace_focus_pending: bool,
     window_handle: AnyWindowHandle,
     split_drag: Option<SplitDragState>,
+    terminal_resize_suppressed: Rc<Cell<bool>>,
+    snapshot_revision: u64,
     pane_drag: Option<PaneDragState>,
     pane_drop_preview: Rc<Cell<DropPreviewFrame>>,
     pane_layout_override: Option<PaneLayoutOverride>,
@@ -578,12 +577,22 @@ impl AppView {
     ) -> Self {
         agent_controller.update(cx, |controller, _| controller.attach_mux(mux.clone()));
         let mut observed_revision = AppRevision::for_mux(mux.read(cx));
+        let mut observed_snapshot = mux.read(cx).snapshot();
         cx.observe(&mux, move |view, mux, cx| {
             view.drain_gui_requests(cx);
+            let snapshot = mux.read(cx).snapshot();
+            let snapshot_arrived = !Arc::ptr_eq(&snapshot, &observed_snapshot);
+            if snapshot_arrived {
+                observed_snapshot = snapshot;
+                view.snapshot_revision = view.snapshot_revision.wrapping_add(1).max(1);
+            }
             let revision = AppRevision::for_mux(mux.read(cx));
-            if revision != observed_revision {
+            let revision_changed = revision != observed_revision;
+            if revision_changed {
                 observed_revision = revision;
                 view.register_agent_panes(cx);
+            }
+            if revision_changed || snapshot_arrived {
                 cx.notify();
             }
             view.drain_agent_events(cx);
@@ -725,6 +734,8 @@ impl AppView {
             empty_workspace_focus_pending: false,
             window_handle,
             split_drag: None,
+            terminal_resize_suppressed: Rc::new(Cell::new(false)),
+            snapshot_revision: 0,
             pane_drag: None,
             pane_drop_preview: Rc::new(Cell::new(DropPreviewFrame::default())),
             pane_layout_override: None,
@@ -1065,8 +1076,18 @@ impl AppView {
                             wanted_terminals.insert(*pane);
                             if !self.terminals.contains_key(pane) {
                                 let mux = self.mux.clone();
+                                let terminal_resize_suppressed =
+                                    Rc::clone(&self.terminal_resize_suppressed);
                                 let pane = *pane;
-                                let view = cx.new(|cx| TerminalView::new(pane, mux, window, cx));
+                                let view = cx.new(|cx| {
+                                    TerminalView::new(
+                                        pane,
+                                        mux,
+                                        terminal_resize_suppressed,
+                                        window,
+                                        cx,
+                                    )
+                                });
                                 self.terminals.insert(pane, view);
                             }
                         }
@@ -1560,15 +1581,15 @@ impl AppView {
         let Some(mut drag) = self.split_drag else {
             return;
         };
-        if !drag.committed && !cx.has_active_drag() {
+        if drag.committed_snapshot_revision.is_none() && !cx.has_active_drag() {
             let ratio_basis_points = split_ratio_basis(drag.ratio);
             if ratio_basis_points == split_ratio_basis(drag.drag.start_ratio) {
-                self.split_drag = None;
+                self.set_split_drag(None);
                 return;
             }
             drag.ratio = f32::from(ratio_basis_points) / f32::from(SPLIT_RATIO_BASIS);
-            drag.committed = true;
-            self.split_drag = Some(drag);
+            drag.committed_snapshot_revision = Some(self.snapshot_revision);
+            self.set_split_drag(Some(drag));
             self.mux
                 .read(cx)
                 .send_input(zz_protocol::InputMessage::ResizeSplit {
@@ -1577,19 +1598,28 @@ impl AppView {
                     ratio_basis_points,
                 });
         }
+        if drag
+            .committed_snapshot_revision
+            .is_some_and(|revision| revision != self.snapshot_revision)
+        {
+            self.set_split_drag(None);
+            return;
+        }
         let Some(window) = active_window
             .filter(|window| window.id == drag.drag.window && window.zoomed_pane.is_none())
         else {
-            self.split_drag = None;
+            self.set_split_drag(None);
             return;
         };
-        let Some(snapshot_ratio) = layout_split_ratio(&window.layout, drag.drag.split) else {
-            self.split_drag = None;
-            return;
-        };
-        if drag.committed && split_ratio_basis(snapshot_ratio) == split_ratio_basis(drag.ratio) {
-            self.split_drag = None;
+        if !window.layout.contains_split(drag.drag.split) {
+            self.set_split_drag(None);
         }
+    }
+
+    fn set_split_drag(&mut self, split_drag: Option<SplitDragState>) {
+        self.split_drag = split_drag;
+        self.terminal_resize_suppressed
+            .set(self.split_drag.is_some());
     }
 
     fn reconcile_pane_layout_override(
@@ -1771,21 +1801,20 @@ impl AppView {
         cx: &mut Context<Self>,
     ) {
         let drag = *event.drag(cx);
-        if self
-            .split_drag
-            .is_some_and(|state| state.drag.split == drag.split && state.committed)
-        {
+        if self.split_drag.is_some_and(|state| {
+            state.drag.split == drag.split && state.committed_snapshot_revision.is_some()
+        }) {
             return;
         }
         let ratio = split_ratio_from_pointer(drag.axis, event.event.position, event.bounds);
         if self.split_drag.is_none_or(|state| {
             state.drag.split != drag.split || state.ratio.to_bits() != ratio.to_bits()
         }) {
-            self.split_drag = Some(SplitDragState {
+            self.set_split_drag(Some(SplitDragState {
                 drag,
                 ratio,
-                committed: false,
-            });
+                committed_snapshot_revision: None,
+            }));
             cx.notify();
         }
         cx.stop_propagation();
@@ -1800,11 +1829,11 @@ impl AppView {
         };
         let ratio_basis_points = split_ratio_basis(state.ratio);
         if ratio_basis_points == split_ratio_basis(state.drag.start_ratio) {
-            self.split_drag = None;
+            self.set_split_drag(None);
         } else {
             state.ratio = f32::from(ratio_basis_points) / f32::from(SPLIT_RATIO_BASIS);
-            state.committed = true;
-            self.split_drag = Some(state);
+            state.committed_snapshot_revision = Some(self.snapshot_revision);
+            self.set_split_drag(Some(state));
             self.mux
                 .read(cx)
                 .send_input(zz_protocol::InputMessage::ResizeSplit {
@@ -2601,24 +2630,6 @@ fn lerp_pixels(from: Pixels, to: Pixels, delta: f32) -> Pixels {
     from + (to - from) * delta
 }
 
-fn layout_split_ratio(node: &LayoutNode, split: SplitId) -> Option<f32> {
-    let LayoutNode::Split {
-        id,
-        ratio,
-        first,
-        second,
-        ..
-    } = node
-    else {
-        return None;
-    };
-    if *id == split {
-        Some(*ratio)
-    } else {
-        layout_split_ratio(first, split).or_else(|| layout_split_ratio(second, split))
-    }
-}
-
 fn split_ratio_from_pointer(axis: Axis, pointer: Point<Pixels>, bounds: Bounds<Pixels>) -> f32 {
     let (offset, extent) = match axis {
         Axis::Horizontal => (
@@ -2633,7 +2644,7 @@ fn split_ratio_from_pointer(axis: Axis, pointer: Point<Pixels>, bounds: Bounds<P
     if extent <= 0.0 {
         return 0.5;
     }
-    (offset / extent).clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO)
+    (offset / extent).clamp(0.0, 1.0)
 }
 
 #[allow(
@@ -2650,6 +2661,7 @@ mod tests {
     use std::cell::RefCell;
 
     use super::*;
+    use crate::terminal::view::GridSize;
     use gpui::{Modifiers, TestAppContext, point};
 
     #[derive(Debug, PartialEq)]
@@ -3197,6 +3209,185 @@ mod tests {
     }
 
     #[gpui::test]
+    fn committed_split_drag_lives_until_same_generation_snapshot_arrives(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let (workspace, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            captured_mux.replace(Some(mux.clone()));
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux: Entity<MuxClient> = mux_slot.borrow().clone().expect("captured mux");
+        let snapshot = two_pane_snapshot(PaneId(2));
+        let generation = snapshot.generation;
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), snapshot, cx);
+        });
+        cx.run_until_parked();
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.set_split_drag(Some(SplitDragState {
+                drag: SplitDrag {
+                    window: WindowId(0),
+                    split: SplitId(0),
+                    start_ratio: 0.5,
+                    axis: Axis::Horizontal,
+                },
+                ratio: 0.6,
+                committed_snapshot_revision: Some(workspace.snapshot_revision),
+            }));
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(workspace.read_with(cx, |workspace, _| workspace.split_drag.is_some()));
+
+        let acknowledged = two_pane_snapshot(PaneId(2));
+        assert_eq!(acknowledged.generation, generation);
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), acknowledged, cx);
+        });
+        cx.run_until_parked();
+        assert!(workspace.read_with(cx, |workspace, _| workspace.split_drag.is_none()));
+    }
+
+    #[gpui::test]
+    fn split_drag_defers_terminal_resize_until_override_release(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let (workspace, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            captured_mux.replace(Some(mux.clone()));
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux: Entity<MuxClient> = mux_slot.borrow().clone().expect("captured mux");
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), two_pane_snapshot(PaneId(2)), cx);
+        });
+        cx.run_until_parked();
+
+        let terminal =
+            workspace.read_with(cx, |workspace, _| workspace.terminals[&PaneId(0)].clone());
+        let sent = mux.update(cx, |mux, _| mux.record_input_for_test());
+        let update_geometry = |grid_size, cx: &mut gpui::VisualTestContext| {
+            terminal.update(cx, |terminal, cx| {
+                terminal.update_geometry(
+                    grid_size,
+                    Bounds::new(point(px(0.0), px(0.0)), gpui::size(px(960.0), px(384.0))),
+                    Bounds::new(point(px(0.0), px(0.0)), gpui::size(px(960.0), px(384.0))),
+                    px(8.0),
+                    px(16.0),
+                    None,
+                    None,
+                    None,
+                    cx,
+                );
+            });
+        };
+        let before = GridSize {
+            columns: 80,
+            rows: 24,
+            cell_width_px: 8,
+            cell_height_px: 16,
+        };
+        let during = GridSize {
+            columns: 120,
+            ..before
+        };
+        update_geometry(before, cx);
+        sent.borrow_mut().clear();
+
+        workspace.update(cx, |workspace, _| {
+            workspace.set_split_drag(Some(SplitDragState {
+                drag: SplitDrag {
+                    window: WindowId(0),
+                    split: SplitId(0),
+                    start_ratio: 0.5,
+                    axis: Axis::Horizontal,
+                },
+                ratio: 0.6,
+                committed_snapshot_revision: Some(workspace.snapshot_revision),
+            }));
+        });
+        update_geometry(during, cx);
+        assert!(sent.borrow().is_empty());
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.snapshot_revision = workspace.snapshot_revision.wrapping_add(1);
+            workspace.reconcile_split_drag(None, cx);
+        });
+        update_geometry(during, cx);
+        {
+            let sent = sent.borrow();
+            assert_eq!(sent.len(), 1);
+            assert!(matches!(
+                &sent[0],
+                InputMessage::ResizeTerminal {
+                    pane,
+                    columns,
+                    rows,
+                    cell_width_px,
+                    cell_height_px,
+                } if *pane == PaneId(0)
+                    && *columns == 120
+                    && *rows == 24
+                    && *cell_width_px == 8
+                    && *cell_height_px == 16
+            ));
+        }
+        update_geometry(during, cx);
+        assert_eq!(sent.borrow().len(), 1);
+        sent.borrow_mut().clear();
+
+        workspace.update(cx, |workspace, _| {
+            workspace.set_split_drag(Some(SplitDragState {
+                drag: SplitDrag {
+                    window: WindowId(0),
+                    split: SplitId(0),
+                    start_ratio: 0.5,
+                    axis: Axis::Horizontal,
+                },
+                ratio: 0.4,
+                committed_snapshot_revision: Some(workspace.snapshot_revision),
+            }));
+        });
+        update_geometry(before, cx);
+        workspace.update(cx, |workspace, cx| {
+            workspace.snapshot_revision = workspace.snapshot_revision.wrapping_add(1);
+            workspace.reconcile_split_drag(None, cx);
+        });
+        update_geometry(during, cx);
+        assert!(sent.borrow().is_empty());
+    }
+
+    #[gpui::test]
     fn directional_focus_crosses_pane_kinds(cx: &mut TestAppContext) {
         cx.update(zz_ui::init);
         let mux_slot = Rc::new(RefCell::new(None));
@@ -3604,7 +3795,7 @@ mod tests {
     }
 
     #[test]
-    fn split_drag_ratio_tracks_each_axis_and_clamps_to_usable_panes() {
+    fn split_drag_ratio_tracks_each_axis_across_the_full_layout() {
         let bounds = Bounds::new(point(px(100.0), px(50.0)), gpui::size(px(800.0), px(400.0)));
         assert_eq!(
             split_ratio_basis(split_ratio_from_pointer(
@@ -3628,7 +3819,7 @@ mod tests {
                 point(px(10.0), px(80.0)),
                 bounds,
             )),
-            1_000
+            0
         );
         assert_eq!(
             split_ratio_basis(split_ratio_from_pointer(
@@ -3636,7 +3827,7 @@ mod tests {
                 point(px(120.0), px(900.0)),
                 bounds,
             )),
-            9_000
+            10_000
         );
         assert_eq!(split_ratio_basis(0.456_74), 4_567);
     }

@@ -267,7 +267,7 @@ fn activate_sidebar_target(
             Ok(None)
         }
         SidebarTarget::NewPane(target) => {
-            execute_target(client, "new-pane", target.to_string())?;
+            execute_target(client, "split-picker", target.to_string())?;
             model.sidebar.focused = false;
             Ok(None)
         }

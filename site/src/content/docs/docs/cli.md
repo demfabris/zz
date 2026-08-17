@@ -25,7 +25,7 @@ pane's lifetime, visible in `choose-tree` and `display-panes`.
 | `zz split-browser [-p profile] [URL]` | split into a browser pane |
 | `zz set-browser-url -t %N URL` | navigate a browser pane |
 | `zz capture-browser -t %N -o /tmp/out.png` | screenshot a browser pane (absolute path) |
-| `zz new-pane [-h\|-v]` | split into an empty pane and pick its type |
+| `zz split-picker [-h\|-v]` | split into an empty pane and pick its type |
 | `zz tools` | the command catalog written for agents |
 
 Two more verbs, `zz agent-send` and `zz send-last-output`, talk to an Agent

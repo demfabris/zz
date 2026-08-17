@@ -1,0 +1,9 @@
+# Pane commands resolve session and window targets to their active panes.
+split-window -h -t w
+split-window -v -t w:0
+resize-pane -t w -L 5
+resize-pane -t w:0 -U 2
+select-layout -t w tiled
+select-layout -t w: even-vertical
+kill-pane -t w
+kill-pane -t w:0

@@ -99,12 +99,11 @@ sidebar pane label) describes `npm run dev` while that command owns the PTY. Uns
 macOS's legacy `/bin/bash` use the unchanged default-shell path. `ZZ_SHELL_INTEGRATION=none` disables
 the injection without preventing applications from publishing OSC 0/2 themselves.
 
-At key-execution time, the daemon routes any configured binding whose canonical command is
-`split-window` to `new-pane`, retaining its target, axis, size, and cwd arguments. The configured
-prefix and key remain untouched. `new-pane` creates `PaneKind::Picker` with no `TerminalSession` and
-remembers the donor pane only so a later Terminal selection can inherit the same live cwd.
-`PaneMaterialized{Terminal}` follows the spawn pipeline above, while a Browser selection creates no
-daemon-side runtime. Direct command requests for `split-window` remain terminal-only.
+`split-picker` (bound on zz's default `%`/`"` keys) creates `PaneKind::Picker` with no
+`TerminalSession` and remembers the donor pane only so a later Terminal selection can inherit the
+same live cwd. `PaneMaterialized{Terminal}` follows the spawn pipeline above, while a Browser
+selection creates no daemon-side runtime. `split-window` — key-bound, CLI, or command-prompt —
+always creates a terminal immediately, like tmux.
 
 `MuxEffect::PanesRemoved` removes the map's owning `Arc<TerminalSession>`, which closes the command
 side and shuts down the worker even when the shell is idle. The event sender then closes and wakes the

@@ -78,3 +78,5 @@ run_fixture "shrink-perp-limit" "split-window -h -t w:0.0" "split-window -v -t w
 run_fixture "shrink-perp-limit2" "split-window -h -t w:0.0" "split-window -v -t w:0.1" "split-window -h -t w:0.2" "resize-pane -t w:0.2 -L 30" "resize-window -t w -x 4 -y 24"
 run_fixture "main-horizontal-tall" "split-window -h -t w:0.0" "split-window -h -t w:0.0" "resize-window -t w -x 80 -y 40" "select-layout -t w main-horizontal"
 run_fixture "main-vertical-wide" "split-window -v -t w:0.0" "split-window -v -t w:0.0" "resize-window -t w -x 200 -y 24" "select-layout -t w main-vertical"
+run_fixture "spread-skips-node-child-root" "split-window -h -t w:0.0" "split-window -v -t w:0.1" "resize-pane -t w:0.0 -x 60" "select-layout -t w:0.2 -E"
+run_fixture "spread-stops-at-inner-column" "split-window -h -t w:0.0" "split-window -v -t w:0.1" "resize-pane -t w:0.1 -y 15" "select-layout -t w:0.2 -E"

@@ -349,3 +349,21 @@ main-vertical-wide
     resize-window -t w -x 200 -y 24
     select-layout -t w main-vertical
 
+spread-skips-node-child-root
+  layout: 6039,80x24,0,0{60x24,0,0,0,19x24,61,0[19x12,61,0,1,19x11,61,13,2]}
+  panes:  0:60x24 1:19x12 2:19x11 
+  steps:
+    split-window -h -t w:0.0
+    split-window -v -t w:0.1
+    resize-pane -t w:0.0 -x 60
+    select-layout -t w:0.2 -E
+
+spread-stops-at-inner-column
+  layout: d67e,80x24,0,0{40x24,0,0,0,39x24,41,0[39x12,41,0,1,39x11,41,13,2]}
+  panes:  0:40x24 1:39x12 2:39x11 
+  steps:
+    split-window -h -t w:0.0
+    split-window -v -t w:0.1
+    resize-pane -t w:0.1 -y 15
+    select-layout -t w:0.2 -E
+

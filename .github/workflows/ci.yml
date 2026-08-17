@@ -76,10 +76,15 @@ jobs:
       - name: Test workspace
         run: cargo test --workspace --all-features
 
-      - name: Run tmux compatibility harness
+      - name: Test zz-mux release profile
         if: runner.os == 'Linux'
         timeout-minutes: 15
-        run: compat/run.sh
+        run: cargo test --release -p zz-mux
+
+      - name: Run strict tmux compatibility harness
+        if: runner.os == 'Linux'
+        timeout-minutes: 15
+        run: compat/run.sh --strict-geometry
 
       - name: Build and validate CEF bundle
         run: cargo xtask bundle-cef --release --output target/cef-bundle

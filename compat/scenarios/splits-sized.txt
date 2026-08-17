@@ -1,0 +1,6 @@
+# Cell, percentage, before, and full-size split forms.
+split-window -h -l 30 -t w:0.0
+split-window -v -p 25 -t w:0.1
+split-window -h -b -t w:0.2
+split-window -v -f -t w:0.0
+split-window -h -l 20% -t w:0.4

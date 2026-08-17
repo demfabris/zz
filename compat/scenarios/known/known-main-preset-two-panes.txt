@@ -1,0 +1,3 @@
+# The pin leaves stale geometry in a two-pane main-horizontal preset.
+split-window -v -t w:0.0
+select-layout -t w:0 main-horizontal

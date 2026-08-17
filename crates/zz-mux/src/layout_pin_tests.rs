@@ -286,7 +286,7 @@ fn fixtures() -> Vec<Fixture<'static>> {
 #[test]
 fn pinned_tmux_layout_fixtures_replay_exactly() {
     let fixtures = fixtures();
-    assert_eq!(fixtures.len(), 46);
+    assert_eq!(fixtures.len(), 48);
     for fixture in fixtures {
         let mut replay = Replay::new();
         for step in fixture.steps {

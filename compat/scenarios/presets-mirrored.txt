@@ -1,0 +1,7 @@
+# Mirrored main presets and ancestor spreading after an uneven resize.
+split-window -h -t w:0.0
+split-window -h -t w:0.1
+select-layout -t w:0 main-horizontal-mirrored
+select-layout -t w:0 main-vertical-mirrored
+resize-pane -t w:0.0 -x 60
+select-layout -t w:0 -E

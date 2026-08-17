@@ -1,0 +1,5 @@
+# Removing the middle pane preserves the nested same-axis collapse.
+split-window -h -t w:0.0
+split-window -v -t w:0.1
+split-window -h -t w:0.2
+kill-pane -t w:0.1

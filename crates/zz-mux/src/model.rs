@@ -1457,6 +1457,12 @@ impl MuxState {
                 .then_some(id)
                 .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
         }
+        if target.starts_with('%') {
+            let pane = self.resolve_pane(Some(target), current_window, None)?;
+            return self
+                .window_for_pane(pane)
+                .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
+        }
         let (session_target, window_target) = target
             .split_once(':')
             .map_or((None, target), |(session, window)| (Some(session), window));
@@ -1470,7 +1476,18 @@ impl MuxState {
             Some("") | None => self.resolve_session(None, current_session)?,
             Some(session) => self.resolve_session(Some(session), current_session)?,
         };
-        self.resolve_window_in_session(window_target, session, target)
+        match self.resolve_window_in_session(window_target, session, target) {
+            Ok(window) => Ok(window),
+            Err(error) => {
+                if !window_target.contains('.') {
+                    return Err(error);
+                }
+                let Ok(pane) = self.resolve_pane(Some(target), current_window, None) else {
+                    return Err(error);
+                };
+                self.window_for_pane(pane).ok_or(error)
+            }
+        }
     }
 
     fn resolve_window_in_session(
@@ -1550,13 +1567,37 @@ impl MuxState {
             .or_else(|| current_window.filter(|window| self.windows.contains_key(window)));
         let current_session = current_window
             .and_then(|window| self.windows.get(&window).map(|window| window.session));
-        if let Ok(index) = target.parse::<u32>() {
+        let pane_error = if let Ok(index) = target.parse::<u32>() {
             let window = self.resolve_window(None, current_session, current_window)?;
-            return self.resolve_pane_index(target, window, index);
-        }
+            match self.resolve_pane_index(target, window, index) {
+                Ok(pane) => return Ok(pane),
+                Err(error) => error,
+            }
+        } else {
+            ServerError::InvalidTarget(target.to_owned())
+        };
 
         let Some((window_target, pane_index)) = target.rsplit_once('.') else {
-            return Err(ServerError::InvalidTarget(target.to_owned()));
+            let window = match self.resolve_window(Some(target), current_session, current_window) {
+                Ok(window) => window,
+                Err(ServerError::MissingTarget(_)) if !target.contains(':') => {
+                    let session = match self.resolve_session(Some(target), current_session) {
+                        Ok(session) => session,
+                        Err(ServerError::MissingTarget(_)) => return Err(pane_error),
+                        Err(error) => return Err(error),
+                    };
+                    self.sessions
+                        .get(&session)
+                        .map(|session| session.active_window)
+                        .ok_or_else(|| ServerError::MissingTarget(target.to_owned()))?
+                }
+                Err(error) => return Err(error),
+            };
+            return self
+                .windows
+                .get(&window)
+                .map(|window| window.active_pane)
+                .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
         };
         let index = pane_index
             .parse::<u32>()
@@ -2324,7 +2365,7 @@ impl MuxState {
         id
     }
 
-    fn bump_generation(&mut self) {
+    pub(crate) fn bump_generation(&mut self) {
         self.generation = self.generation.saturating_add(1);
     }
 }
@@ -3256,9 +3297,53 @@ mod tests {
             absolute_pane,
             "absolute pane ids retain priority over index parsing"
         );
+        for target in ["a", "b", "a:b"] {
+            assert_eq!(
+                state
+                    .resolve_pane(Some(target), Some(second_window), Some(second_pane))
+                    .unwrap(),
+                third_pane
+            );
+        }
+        for target in ["a:0", "a:shell"] {
+            assert_eq!(
+                state
+                    .resolve_pane(Some(target), Some(second_window), Some(second_pane))
+                    .unwrap(),
+                first_pane
+            );
+        }
         assert!(matches!(
-            state.resolve_pane(Some("a:b"), Some(second_window), Some(second_pane)),
-            Err(ServerError::InvalidTarget(target)) if target == "a:b"
+            state.resolve_pane(Some("a:b.9"), Some(second_window), Some(second_pane)),
+            Err(ServerError::MissingTarget(target)) if target == "a:b.9"
+        ));
+    }
+
+    #[test]
+    fn window_targets_accept_pane_forms_like_tmux() {
+        let mut state = MuxState::default();
+        let (session, first_window, _first_pane) = state.create_session("a").unwrap();
+        state.rename_window(first_window, "shell").unwrap();
+        let (second_window, second_pane) = state
+            .create_window(session, Some("b".to_owned()), PaneKind::Terminal)
+            .unwrap();
+        for target in ["a:shell.0", "a:0.0", "0.0"] {
+            assert_eq!(
+                state
+                    .resolve_window(Some(target), Some(session), Some(first_window))
+                    .unwrap(),
+                first_window
+            );
+        }
+        assert_eq!(
+            state
+                .resolve_window(Some(&second_pane.to_string()), Some(session), None)
+                .unwrap(),
+            second_window
+        );
+        assert!(matches!(
+            state.resolve_window(Some("a:shell.9"), Some(session), Some(first_window)),
+            Err(ServerError::MissingTarget(_))
         ));
     }
 

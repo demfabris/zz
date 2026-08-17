@@ -432,16 +432,23 @@ impl CellLayout {
         Ok(changed)
     }
 
+    /// The pinned tmux spreads only leaf children and corrupts the cell sums of a
+    /// parent that mixes leaves with nested nodes; zz refuses that parent instead
+    /// and stops the walk where the pin would have stopped after corrupting.
     pub(crate) fn spread(&mut self, pane: PaneId) -> Result<bool, LayoutError> {
         let path = pane_path(&self.root, pane).ok_or(LayoutError::UnknownPane)?;
         for depth in (0..path.len()).rev() {
             let parent_path = &path[..depth];
             let parent =
                 node_at_path_mut(&mut self.root, parent_path).ok_or(LayoutError::UnknownPane)?;
-            if spread_node(parent) {
-                fix_offsets(&mut self.root);
-                self.debug_validate();
-                return Ok(true);
+            match spread_node(parent) {
+                SpreadCell::Changed => {
+                    fix_offsets(&mut self.root);
+                    self.debug_validate();
+                    return Ok(true);
+                }
+                SpreadCell::Refused => break,
+                SpreadCell::Unchanged => {}
             }
         }
         self.debug_validate();
@@ -971,26 +978,39 @@ fn collapse_single_child(root: &mut CellNode, parent_path: &[usize]) {
     );
 }
 
-fn spread_node(node: &mut CellNode) -> bool {
+enum SpreadCell {
+    Changed,
+    Unchanged,
+    Refused,
+}
+
+fn spread_node(node: &mut CellNode) -> SpreadCell {
     let CellNode::Node {
         axis,
         geometry,
         children,
     } = node
     else {
-        return false;
+        return SpreadCell::Unchanged;
     };
-    let count = children.len();
-    if count <= 1 {
-        return false;
+    let leaves = children
+        .iter()
+        .filter(|child| matches!(child.node, CellNode::Leaf { .. }))
+        .count();
+    if leaves <= 1 {
+        return SpreadCell::Unchanged;
     }
+    if leaves != children.len() {
+        return SpreadCell::Refused;
+    }
+    let count = children.len();
     let size = usize::from(geometry.extent(*axis));
     if size < count - 1 {
-        return false;
+        return SpreadCell::Unchanged;
     }
     let each = (size - (count - 1)) / count;
     if each == 0 {
-        return false;
+        return SpreadCell::Unchanged;
     }
     let mut remainder = size - (count - 1) - each * count;
     let mut changed = false;
@@ -1002,7 +1022,11 @@ fn spread_node(node: &mut CellNode) -> bool {
         resize_adjust(&mut child.node, *axis, change);
         changed |= change != 0;
     }
-    changed
+    if changed {
+        SpreadCell::Changed
+    } else {
+        SpreadCell::Unchanged
+    }
 }
 
 fn make_children(
@@ -2072,6 +2096,65 @@ mod tests {
             sizes(&layout, &[PaneId(0), PaneId(1), PaneId(2)]),
             [(27, 24), (26, 24), (26, 24)]
         );
+    }
+
+    #[test]
+    fn spread_skips_parents_with_node_children_like_the_pin() {
+        let mut layout = CellLayout::new(PaneId(0), 80, 24);
+        let mut ids = allocator(1);
+        layout
+            .split(
+                PaneId(0),
+                Axis::Horizontal,
+                SplitSize::Default,
+                false,
+                false,
+                PaneId(1),
+                &mut ids,
+            )
+            .unwrap();
+        layout
+            .split(
+                PaneId(1),
+                Axis::Vertical,
+                SplitSize::Default,
+                false,
+                false,
+                PaneId(2),
+                &mut ids,
+            )
+            .unwrap();
+        layout
+            .resize_pane_to(PaneId(0), Axis::Horizontal, 60)
+            .unwrap();
+        let before = sizes(&layout, &[PaneId(0), PaneId(1), PaneId(2)]);
+        assert!(!layout.spread(PaneId(2)).unwrap());
+        assert_eq!(sizes(&layout, &[PaneId(0), PaneId(1), PaneId(2)]), before);
+    }
+
+    #[test]
+    fn spread_refuses_a_mixed_parent_the_pin_corrupts() {
+        let mut layout = three_horizontal();
+        let mut ids = allocator(3);
+        layout
+            .split(
+                PaneId(1),
+                Axis::Vertical,
+                SplitSize::Default,
+                false,
+                false,
+                PaneId(3),
+                &mut ids,
+            )
+            .unwrap();
+        layout
+            .resize_pane_to(PaneId(0), Axis::Horizontal, 10)
+            .unwrap();
+        let panes = [PaneId(0), PaneId(1), PaneId(3), PaneId(2)];
+        let before = sizes(&layout, &panes);
+        assert!(!layout.spread(PaneId(0)).unwrap());
+        assert_eq!(sizes(&layout, &panes), before);
+        layout.validate().unwrap();
     }
 
     #[test]

@@ -3748,7 +3748,7 @@ impl Shared {
                     cell_width_px,
                     cell_height_px,
                 } => {
-                    let resize = {
+                    let (resize, layout_changed) = {
                         let mut inner = self.inner.lock();
                         if !inner.terminals.contains_key(&pane) {
                             return Err(ServerError::PaneExited(pane).into());
@@ -3766,12 +3766,15 @@ impl Shared {
                             },
                         );
                         let resize = terminal_resize_for_pane(&inner, pane);
+                        let mut layout_changed = false;
                         if let Some((_, geometry)) = &resize {
-                            inner
-                                .engine
-                                .set_pane_geometry(pane, geometry.columns, geometry.rows);
+                            layout_changed = inner.engine.set_pane_geometry(
+                                pane,
+                                geometry.columns,
+                                geometry.rows,
+                            );
                         }
-                        resize
+                        (resize, layout_changed)
                     };
                     if let Some((terminal, geometry)) = resize {
                         terminal.resize(
@@ -3780,6 +3783,9 @@ impl Shared {
                             geometry.cell_width_px,
                             geometry.cell_height_px,
                         );
+                    }
+                    if layout_changed {
+                        self.publish_snapshot();
                     }
                 }
                 InputMessage::TerminalView {
@@ -3946,7 +3952,7 @@ impl Shared {
             ))
             .into());
         }
-        let changed = {
+        {
             let mut inner = self.inner.lock();
             if !inner.subscribers.contains_key(&client) {
                 return Err(ServerError::InvalidCommand(
@@ -3991,11 +3997,9 @@ impl Shared {
                 window,
                 split,
                 f32::from(ratio_basis_points) / f32::from(SPLIT_RATIO_BASIS),
-            )?
-        };
-        if changed {
-            self.publish_snapshot();
+            )?;
         }
+        self.publish_snapshot();
         Ok(())
     }
 
@@ -16543,6 +16547,30 @@ bind - split-window -v -c "#{pane_current_path}"
                     LayoutNode::Split { ratio, .. }
                         if (ratio - 53.0 / 79.0).abs() < f32::EPSILON
                 )
+            )
+        }));
+
+        let generation = shared.inner.lock().engine.state.generation();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeSplit {
+                    window,
+                    split,
+                    ratio_basis_points: 6_751,
+                },
+            )
+            .expect("cell-snapped resize");
+        assert_eq!(shared.inner.lock().engine.state.generation(), generation);
+        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Snapshot(snapshot),
+                    ..
+                }) if snapshot.generation == generation
             )
         }));
 

@@ -4,7 +4,7 @@ title: tmux divergence matrix
 description: "Every known divergence from tmux at the pinned reference commit: the 38 missing commands and why, behavioral gaps on the implemented surface, the 12-of-180 options coverage, and the protocol-level differences — the drop-in-replacement gap, enumerated."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
-timestamp: 2026-08-16T00:00:00Z
+timestamp: 2026-08-17T00:00:00-03:00
 ---
 
 # Overview
@@ -17,7 +17,8 @@ complements the [compatibility philosophy](/tmux/tmux-compat.md) (the contract) 
 
 **State anchor:** the "implemented surface" section reflects
 [PR #4](https://github.com/demfabris/zz/pull/4) (`fix/tmux-compat-hunt-v2`, merged 2026-08-16
-as `53b523e`), which corrected the hunt-claim regressions — two of them implemented backwards
+as `53b523e`) plus the phase 3d layout-string source dated 2026-08-17. PR #4 corrected the
+hunt-claim regressions, including two implemented backwards
 (`new-window -t` bare-target order, positional targets on the kill commands) plus the
 `kill-session -C`, `new-session -A`, `resize-pane` attached-adjustment, `send-keys -H`/`-l`,
 `copy-mode -du`, window-step-error, and boolean-case fixes.
@@ -104,6 +105,7 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | Unguarded commands | Closed by the [drop-in plan](/designs/tmux-drop-in.md)'s phase 0: every engine command rejects options centrally from its catalog `CommandSpec` — flags tmux has at the pin but zz lacks error as unsupported (and count in config-import skip reports); flags tmux doesn't have error as invalid. Residual: the daemon-side `capture-pane`/buffer family still hand-rolls parsing. | loud |
 | `bind-key` payloads | Bind-time validation covers names and flags only; positional arity and target errors still surface at keypress, and daemon-side verbs (`capture-pane`, the buffer family) bind with no validation at all. tmux validates the full argument template at bind time. | **silent** edge |
 | Error strings | Several differ (zz `index in use: 2` vs tmux `create window failed: index 2 in use`). | cosmetic |
+| Daemon boot | The zz daemon creates a default session `0` at spawn (the GUI's empty workspace expects one); a tmux server boots empty until its first `new-session`. `tmux ls` scripts see one extra session, and every `$N`/`@N`/`%N` id is shifted by the auto-session's objects — which is why the harness diffs layout-string structure with pane numbers stripped. | **silent** |
 
 # Options: 12 of 180
 
@@ -125,7 +127,6 @@ The ones real dotfiles set most, roughly by frequency: `base-index`, `pane-base-
 | Env contract | `$TMUX`, `$TMUX_PANE` | `ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET` — every `[ -n "$TMUX" ]` script sees "not in tmux". |
 | Binary argv | `-L -S -f -2 -C -u` | `--socket`, `--host`; none of tmux's binary flags. |
 | Control mode `-CC` | What iTerm2 integration speaks. | Never — zz owns both ends. |
-| Layout strings | `select-layout` accepts serialized layouts; tmux-resurrect depends on them. | Never — `LayoutNode` with stable `SplitId`s is richer; dump/restore, if ever, is native. |
 | Session groups | `new-session -t`. | Cataloged, rejected. |
 | Presentation | Status line, prompts, choosers drawn as terminal escapes. | All native GPUI — `#[…]` styles dropped, `status-style`/`-format`/`-justify`/`-position` out of scope. |
 

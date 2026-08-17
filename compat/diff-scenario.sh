@@ -2,6 +2,7 @@
 # Runs one command corpus against zz and pinned tmux, comparing topology and
 # geometry after every command.
 set -euo pipefail
+set +B
 
 COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SCENARIOS_DIR="$COMPAT_DIR/scenarios"
@@ -226,7 +227,13 @@ collect_geometry() {
   : >"$errors"
   printf 'LIST-WINDOWS w\n' >>"$snapshot"
   if query_side "$side" "$windows_file" "$errors" "list-windows -t w geometry" \
-    list-windows -t w -F '#{window_index}:#{window_width}x#{window_height}'; then
+    list-windows -t w -F '#{window_index}:#{window_width}x#{window_height}:#{window_layout}'; then
+    # Pane numbers in a layout string are opaque ids the parser ignores, and the zz
+    # daemon's auto-session shifts allocation by one, so the diff compares only the
+    # structural body: strip the checksum and the leaf pane ids from both sides.
+    sed -E 's/^([0-9]+:[0-9]+x[0-9]+:)[0-9a-f]{4},/\1/; s/([0-9]+x[0-9]+,[0-9]+,[0-9]+),[0-9]+([],}]|$)/\1\2/g' \
+      "$windows_file" >"$windows_file.norm"
+    mv "$windows_file.norm" "$windows_file"
     cat "$windows_file" >>"$snapshot"
     while IFS=: read -r window_index _; do
       [ -n "$window_index" ] || continue

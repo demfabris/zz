@@ -59,8 +59,11 @@ Open `compat/results/<scenario>.log` for the command status and per-step unified
   both servers refused the command.
 - `TOPO` compares session/window counts, names, active indexes, and pane indexes. Any
   difference fails a normal scenario.
-- `GEO` compares window and pane cell dimensions. The runner reports these differences by
-  default and fails them under `--strict-geometry`.
+- `GEO` compares window and pane cell dimensions plus each window's `#{window_layout}`
+  string, normalized to its structural body: the checksum and the leaf pane numbers are
+  stripped before diffing, because pane ids are opaque values both parsers ignore and the
+  zz daemon's auto-session shifts id allocation by one (see the divergence matrix). The
+  runner reports these differences by default and fails them under `--strict-geometry`.
 
 The log also captures each step's stdout and stderr for debugging, but the comparison covers
 only the exit class and the TOPO/GEO snapshots; command output itself is never diffed.

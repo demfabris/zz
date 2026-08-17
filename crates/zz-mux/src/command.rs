@@ -1997,8 +1997,11 @@ impl MuxEngine {
             }
             self.state.restore_previous_layout(window)?;
         } else if let Some(name) = positional.first() {
-            self.state
-                .select_layout(window, parse_layout_preset(name)?)?;
+            if let Some(preset) = parse_layout_preset(name)? {
+                self.state.select_layout(window, preset)?;
+            } else {
+                self.state.select_layout_string(window, name)?;
+            }
         } else if let Some(last) = self.state.last_layout(window)? {
             self.state.select_layout(window, last)?;
         }
@@ -3259,32 +3262,25 @@ fn parse_pane_percentage(value: &str) -> Result<u8, ServerError> {
     Ok(percentage)
 }
 
-fn parse_layout_preset(value: &str) -> Result<LayoutPreset, ServerError> {
+fn parse_layout_preset(value: &str) -> Result<Option<LayoutPreset>, ServerError> {
     if let Some(exact) = LayoutPreset::ALL
         .into_iter()
         .find(|preset| preset.name() == value)
     {
-        return Ok(exact);
+        return Ok(Some(exact));
     }
     let mut matches = LayoutPreset::ALL
         .into_iter()
         .filter(|preset| preset.name().starts_with(value));
     let Some(first) = matches.next() else {
-        if value.contains([',', '{', '}']) {
-            return Err(ServerError::UnsupportedCommand(
-                "select-layout serialized layout".to_owned(),
-            ));
-        }
-        return Err(ServerError::InvalidCommand(format!(
-            "unknown layout: {value}"
-        )));
+        return Ok(None);
     };
     if matches.next().is_some() {
         return Err(ServerError::InvalidCommand(format!(
             "ambiguous layout: {value}"
         )));
     }
-    Ok(first)
+    Ok(Some(first))
 }
 
 fn already_set_or_quiet(options: &Options, option: &str) -> Result<Execution, ServerError> {
@@ -7678,7 +7674,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_commands_cycle_target_restore_and_reject_non_native_layouts() {
+    fn layout_commands_cycle_target_restore_and_validate_names() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -7769,13 +7765,94 @@ mod tests {
                 &mut context,
                 &command("select-layout", &["b25f,80x24,0,0{40x24,0,0,0}"]),
             ),
-            Err(ServerError::UnsupportedCommand(_))
+            Err(ServerError::InvalidCommand(message))
+                if message == "invalid layout: b25f,80x24,0,0{40x24,0,0,0}"
         ));
         assert!(matches!(
             engine.execute(&mut context, &command("next-layout", &["-n"])),
             Err(ServerError::InvalidCommand(message))
                 if message == "next-layout does not support -n"
         ));
+    }
+
+    #[test]
+    fn select_layout_applies_serialized_layouts_and_reports_window_layout() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("split-window", &["-h", "-t", "w:0.0"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("split-window", &["-v", "-t", "w:0.1"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "select-layout",
+                    &[
+                        "-t",
+                        "w:0",
+                        "b78d,120x30,0,0{50x30,0,0,9,69x30,51,0[69x14,51,0,8,69x15,51,15,7]}",
+                    ],
+                ),
+            )
+            .unwrap();
+        let first_dump = "6e85,120x30,0,0{50x30,0,0,0,69x30,51,0[69x14,51,0,1,69x15,51,15,2]}";
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("list-windows", &["-t", "w", "-F", "#{window_layout}"]),
+                )
+                .unwrap()
+                .output,
+            first_dump
+        );
+
+        engine
+            .execute(&mut context, &command("kill-pane", &["-t", "w:0.1"]))
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "select-layout",
+                    &[
+                        "-t",
+                        "w:0",
+                        "e7f0,100x20,0,0[100x9,0,0{49x9,0,0,50,50x9,50,0,51},100x10,0,10,52]",
+                    ],
+                ),
+            )
+            .unwrap();
+        let window = context.window.unwrap();
+        assert_eq!(
+            engine.state.windows[&window].layout.dump(),
+            "eaf9,100x20,0,0{49x20,0,0,0,50x20,50,0,2}"
+        );
+
+        let before = engine.state.windows[&window].layout.clone();
+        assert_eq!(
+            engine.execute(
+                &mut context,
+                &command("select-layout", &["-t", "w:0", "0000,80x24,0,0,0"],),
+            ),
+            Err(ServerError::InvalidCommand(
+                "invalid layout: 0000,80x24,0,0,0".to_owned()
+            ))
+        );
+        assert_eq!(engine.state.windows[&window].layout, before);
+        assert!(engine.state.validate().is_ok());
     }
 
     #[test]

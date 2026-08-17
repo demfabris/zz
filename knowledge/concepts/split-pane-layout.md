@@ -4,7 +4,7 @@ title: Cell-authoritative split-pane layout
 description: How a window's panes are arranged as an n-ary cell tree ported from tmux's layout.c — split/resize/preset algorithms in layout.rs, the derived binary wire projection with stable ^split ids, measurement-driven window extent, and the invariants model.rs enforces.
 resource: crates/zz-mux/src/layout.rs
 tags: [layout, splits, panes, cells, tree, tmux]
-timestamp: 2026-08-16T00:00:00-03:00
+timestamp: 2026-08-17T00:00:00-03:00
 ---
 
 # Overview
@@ -49,8 +49,11 @@ The tmux algorithms, with their load-bearing quirks:
   invariant) — zz sizes it; and `select-layout -E` on a parent mixing leaf and node children
   (the pin spreads only leaves over the full extent, corrupting the sums) is refused rather
   than reproduced. See [the divergence matrix](/tmux/divergences.md).
-- **layout strings**: `dump()` emits tmux's checksummed `layout-custom.c` format; parsing is
-  future work.
+- **layout strings**: `dump()` emits tmux's checksummed `layout-custom.c` format. `parse()` checks
+  the checksum and geometry tree, ignores the serialized pane numbers, and caps nesting at 256
+  cells. `select-layout <string>` assigns the window's `pane_order` through the parsed leaves,
+  removes extra bottom-right cells with tmux's sibling gifting, allocates new divider ids, and
+  adopts the encoded extent. The 48 pin fixtures cover both replay and parse-to-dump round trips.
 
 # Wire projection and divider identity
 
@@ -85,7 +88,7 @@ always inserts after (reproducing the pin's pass-by-value `-b` quirk), and a sin
 
 | File | Role |
 | --- | --- |
-| `crates/zz-mux/src/layout.rs` | The cell kernel: algorithms, projection, dump, validation |
+| `crates/zz-mux/src/layout.rs` | The cell kernel: algorithms, projection, layout-string parse/dump, validation |
 | `crates/zz-mux/src/layout_pin_tests.rs` | Replays the 48 pin-captured fixtures through the kernel |
 | `crates/zz-mux/src/model.rs` | `MuxState` write paths wrapping the kernel; invariants |
 | `crates/zz-mux/src/command.rs` | Command surface: sizes, percentages, measurement feed |

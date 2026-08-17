@@ -11,6 +11,7 @@ use crate::model::LayoutPreset;
 
 pub(crate) const PANE_MINIMUM: u16 = 1;
 pub(crate) const PANE_MAXIMUM: u16 = 10_000;
+const MAX_LAYOUT_DEPTH: usize = 256;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) struct CellGeometry {
@@ -42,6 +43,29 @@ pub(crate) struct CellChild {
 #[derive(Clone, PartialEq, Debug)]
 pub struct CellLayout {
     root: CellNode,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) struct ParsedLayout {
+    root: ParsedNode,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+enum ParsedNode {
+    Leaf {
+        geometry: CellGeometry,
+    },
+    Node {
+        axis: Axis,
+        geometry: CellGeometry,
+        children: Vec<ParsedNode>,
+    },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum LayoutParseError {
+    InvalidLayout,
+    SizeMismatch,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -97,6 +121,37 @@ impl CellNode {
     }
 }
 
+impl ParsedNode {
+    fn geometry(&self) -> CellGeometry {
+        match self {
+            Self::Leaf { geometry } | Self::Node { geometry, .. } => *geometry,
+        }
+    }
+
+    fn geometry_mut(&mut self) -> &mut CellGeometry {
+        match self {
+            Self::Leaf { geometry } | Self::Node { geometry, .. } => geometry,
+        }
+    }
+
+    fn extent(&self, axis: Axis) -> u16 {
+        self.geometry().extent(axis)
+    }
+
+    fn set_extent(&mut self, axis: Axis, size: u16) {
+        self.geometry_mut().set_extent(axis, size);
+    }
+}
+
+impl LayoutParseError {
+    pub(crate) const fn cause(self) -> &'static str {
+        match self {
+            Self::InvalidLayout => "invalid layout",
+            Self::SizeMismatch => "size mismatch after applying layout",
+        }
+    }
+}
+
 impl CellLayout {
     pub(crate) fn new(pane: PaneId, sx: u16, sy: u16) -> Self {
         let sx = sx.clamp(PANE_MINIMUM, PANE_MAXIMUM);
@@ -114,6 +169,43 @@ impl CellLayout {
         };
         layout.debug_validate();
         layout
+    }
+
+    pub(crate) fn parse(input: &str) -> Result<ParsedLayout, LayoutParseError> {
+        let bytes = input.as_bytes();
+        let Some(prefix) = bytes.get(..5) else {
+            return Err(LayoutParseError::InvalidLayout);
+        };
+        if prefix[4] != b','
+            || !prefix[..4]
+                .iter()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return Err(LayoutParseError::InvalidLayout);
+        }
+        let expected = prefix[..4].iter().fold(0_u16, |value, byte| {
+            value * 16
+                + u16::from(match byte {
+                    b'0'..=b'9' => byte - b'0',
+                    b'a'..=b'f' => byte - b'a' + 10,
+                    _ => 0,
+                })
+        });
+        let body = &bytes[5..];
+        if expected != layout_checksum(body) {
+            return Err(LayoutParseError::InvalidLayout);
+        }
+        let mut parser = LayoutParser::new(body);
+        let mut root = parser
+            .parse_node(0)
+            .ok_or(LayoutParseError::InvalidLayout)?;
+        if !parser.is_done() {
+            return Err(LayoutParseError::InvalidLayout);
+        }
+        if !correct_parsed_root_size(&mut root) || !check_parsed_node(&root) {
+            return Err(LayoutParseError::SizeMismatch);
+        }
+        Ok(ParsedLayout { root })
     }
 
     pub(crate) fn extent(&self) -> (u16, u16) {
@@ -533,12 +625,11 @@ impl CellLayout {
         project_node(&self.root)
     }
 
-    pub(crate) fn dump(&self) -> String {
+    #[must_use]
+    pub fn dump(&self) -> String {
         let mut body = String::new();
         dump_node(&self.root, &mut body);
-        let checksum = body.bytes().fold(0_u16, |checksum, byte| {
-            checksum.rotate_right(1).wrapping_add(u16::from(byte))
-        });
+        let checksum = layout_checksum(body.as_bytes());
         format!("{checksum:04x},{body}")
     }
 
@@ -554,6 +645,377 @@ impl CellLayout {
     fn debug_validate(&self) {
         let result = self.validate();
         debug_assert!(result.is_ok(), "{result:?}");
+    }
+}
+
+impl ParsedLayout {
+    pub(crate) fn pane_count(&self) -> usize {
+        count_parsed_panes(&self.root)
+    }
+
+    pub(crate) fn trim_bottom_right(&mut self) {
+        let mut path = Vec::new();
+        parsed_bottom_right_path(&self.root, &mut path);
+        let Some((&index, parent_path)) = path.split_last() else {
+            return;
+        };
+        let collapse = {
+            let Some(ParsedNode::Node { axis, children, .. }) =
+                parsed_node_at_path_mut(&mut self.root, parent_path)
+            else {
+                return;
+            };
+            let gift = children[index].extent(*axis).saturating_add(1);
+            let Some(neighbour) = index.checked_sub(1) else {
+                return;
+            };
+            parsed_resize_adjust(&mut children[neighbour], *axis, i32::from(gift));
+            children.remove(index);
+            children.len() == 1
+        };
+        if collapse {
+            collapse_parsed_single_child(&mut self.root, parent_path);
+        }
+    }
+
+    pub(crate) fn into_layout(
+        self,
+        panes: &[PaneId],
+        ids: &mut dyn FnMut() -> SplitId,
+    ) -> CellLayout {
+        debug_assert_eq!(panes.len(), self.pane_count());
+        let mut panes = panes.iter().copied();
+        let root = assign_parsed_node(self.root, &mut panes);
+        let panes_exhausted = panes.next().is_none();
+        debug_assert!(panes_exhausted);
+        let mut layout = CellLayout { root };
+        fix_offsets(&mut layout.root);
+        layout.refresh_divider_ids(ids);
+        layout
+    }
+}
+
+struct LayoutParser<'a> {
+    input: &'a [u8],
+    cursor: usize,
+}
+
+impl<'a> LayoutParser<'a> {
+    const fn new(input: &'a [u8]) -> Self {
+        Self { input, cursor: 0 }
+    }
+
+    fn is_done(&self) -> bool {
+        self.cursor == self.input.len()
+    }
+
+    fn parse_node(&mut self, depth: usize) -> Option<ParsedNode> {
+        if depth >= MAX_LAYOUT_DEPTH {
+            return None;
+        }
+        let sx = self.number()?;
+        self.expect(b'x')?;
+        let sy = self.number()?;
+        self.expect(b',')?;
+        let xoff = self.number()?;
+        self.expect(b',')?;
+        let yoff = self.number()?;
+        let geometry = CellGeometry { sx, sy, xoff, yoff };
+        match self.peek()? {
+            b',' => {
+                self.cursor += 1;
+                self.pane_number()?;
+                Some(ParsedNode::Leaf { geometry })
+            }
+            b'{' => self.parse_children(depth, Axis::Horizontal, geometry, b'}'),
+            b'[' => self.parse_children(depth, Axis::Vertical, geometry, b']'),
+            _ => None,
+        }
+    }
+
+    fn parse_children(
+        &mut self,
+        depth: usize,
+        axis: Axis,
+        geometry: CellGeometry,
+        closing: u8,
+    ) -> Option<ParsedNode> {
+        self.cursor += 1;
+        let mut children = vec![self.parse_node(depth + 1)?];
+        while self.peek() == Some(b',') {
+            self.cursor += 1;
+            children.push(self.parse_node(depth + 1)?);
+        }
+        self.expect(closing)?;
+        if children.len() < 2 {
+            return None;
+        }
+        Some(ParsedNode::Node {
+            axis,
+            geometry,
+            children,
+        })
+    }
+
+    fn number(&mut self) -> Option<u16> {
+        let start = self.cursor;
+        let mut value = 0_u16;
+        while let Some(byte @ b'0'..=b'9') = self.peek() {
+            value = value.checked_mul(10)?.checked_add(u16::from(byte - b'0'))?;
+            self.cursor += 1;
+        }
+        (self.cursor > start).then_some(value)
+    }
+
+    fn pane_number(&mut self) -> Option<()> {
+        let start = self.cursor;
+        while matches!(self.peek(), Some(b'0'..=b'9')) {
+            self.cursor += 1;
+        }
+        (self.cursor > start).then_some(())
+    }
+
+    fn expect(&mut self, expected: u8) -> Option<()> {
+        if self.peek()? != expected {
+            return None;
+        }
+        self.cursor += 1;
+        Some(())
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.input.get(self.cursor).copied()
+    }
+}
+
+fn layout_checksum(layout: &[u8]) -> u16 {
+    layout.iter().fold(0_u16, |checksum, byte| {
+        checksum.rotate_right(1).wrapping_add(u16::from(*byte))
+    })
+}
+
+fn correct_parsed_root_size(root: &mut ParsedNode) -> bool {
+    let ParsedNode::Node {
+        axis,
+        geometry,
+        children,
+    } = root
+    else {
+        return true;
+    };
+    let Some(last) = children.last() else {
+        return false;
+    };
+    let along = children.iter().try_fold(0_u32, |total, child| {
+        total.checked_add(u32::from(child.extent(*axis)) + 1)
+    });
+    let Some(along) = along.and_then(|total| total.checked_sub(1)) else {
+        return false;
+    };
+    let Ok(along) = u16::try_from(along) else {
+        return false;
+    };
+    let (sx, sy) = match axis {
+        Axis::Horizontal => (along, last.geometry().sy),
+        Axis::Vertical => (last.geometry().sx, along),
+    };
+    if geometry.sx != sx || geometry.sy != sy {
+        geometry.sx = sx;
+        geometry.sy = sy;
+    }
+    true
+}
+
+fn check_parsed_node(node: &ParsedNode) -> bool {
+    let ParsedNode::Node {
+        axis,
+        geometry,
+        children,
+    } = node
+    else {
+        let geometry = node.geometry();
+        return geometry.sx >= PANE_MINIMUM && geometry.sy >= PANE_MINIMUM;
+    };
+    if children.len() < 2 {
+        return false;
+    }
+    let mut extent = 0_u32;
+    for child in children {
+        let child_geometry = child.geometry();
+        let cross_matches = match axis {
+            Axis::Horizontal => child_geometry.sy == geometry.sy,
+            Axis::Vertical => child_geometry.sx == geometry.sx,
+        };
+        if !cross_matches || !check_parsed_node(child) {
+            return false;
+        }
+        let Some(next) = extent.checked_add(u32::from(child.extent(*axis)) + 1) else {
+            return false;
+        };
+        extent = next;
+    }
+    extent.checked_sub(1) == Some(u32::from(geometry.extent(*axis)))
+}
+
+fn count_parsed_panes(node: &ParsedNode) -> usize {
+    match node {
+        ParsedNode::Leaf { .. } => 1,
+        ParsedNode::Node { children, .. } => children
+            .iter()
+            .map(count_parsed_panes)
+            .fold(0_usize, usize::saturating_add),
+    }
+}
+
+fn parsed_bottom_right_path(node: &ParsedNode, path: &mut Vec<usize>) {
+    let ParsedNode::Node { children, .. } = node else {
+        return;
+    };
+    let index = children.len() - 1;
+    path.push(index);
+    parsed_bottom_right_path(&children[index], path);
+}
+
+fn parsed_node_at_path_mut<'a>(
+    mut node: &'a mut ParsedNode,
+    path: &[usize],
+) -> Option<&'a mut ParsedNode> {
+    for index in path {
+        let ParsedNode::Node { children, .. } = node else {
+            return None;
+        };
+        node = children.get_mut(*index)?;
+    }
+    Some(node)
+}
+
+fn parsed_resize_check(node: &ParsedNode, axis: Axis) -> u16 {
+    match node {
+        ParsedNode::Leaf { geometry } => geometry.extent(axis).saturating_sub(PANE_MINIMUM),
+        ParsedNode::Node {
+            axis: node_axis,
+            children,
+            ..
+        } if *node_axis == axis => children.iter().fold(0_u16, |available, child| {
+            available.saturating_add(parsed_resize_check(child, axis))
+        }),
+        ParsedNode::Node { children, .. } => children
+            .iter()
+            .map(|child| parsed_resize_check(child, axis))
+            .min()
+            .unwrap_or(0),
+    }
+}
+
+fn parsed_resize_adjust(node: &mut ParsedNode, axis: Axis, change: i32) {
+    if change == 0 {
+        return;
+    }
+    let size = i32::from(node.extent(axis)) + change;
+    let size = u16::try_from(size).unwrap_or(if size < 0 { 0 } else { u16::MAX });
+    node.set_extent(axis, size);
+    let ParsedNode::Node {
+        axis: node_axis,
+        children,
+        ..
+    } = node
+    else {
+        return;
+    };
+    if *node_axis != axis {
+        for child in children {
+            parsed_resize_adjust(child, axis, change);
+        }
+        return;
+    }
+    let mut remaining = change;
+    while remaining != 0 {
+        let mut changed = false;
+        for child in &mut *children {
+            if remaining == 0 {
+                break;
+            }
+            if remaining > 0 {
+                parsed_resize_adjust(child, axis, 1);
+                remaining -= 1;
+                changed = true;
+            } else if parsed_resize_check(child, axis) > 0 {
+                parsed_resize_adjust(child, axis, -1);
+                remaining += 1;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
+fn collapse_parsed_single_child(root: &mut ParsedNode, parent_path: &[usize]) {
+    if parent_path.is_empty() {
+        let replacement = match root {
+            ParsedNode::Node { children, .. } if children.len() == 1 => Some(children.remove(0)),
+            _ => None,
+        };
+        if let Some(replacement) = replacement {
+            *root = replacement;
+        }
+        return;
+    }
+    let grandparent_path = &parent_path[..parent_path.len() - 1];
+    let index = parent_path[parent_path.len() - 1];
+    let Some(ParsedNode::Node { children, .. }) = parsed_node_at_path_mut(root, grandparent_path)
+    else {
+        return;
+    };
+    let parent = children.remove(index);
+    let (axis, geometry, mut parent_children) = match parent {
+        ParsedNode::Node {
+            axis,
+            geometry,
+            children,
+        } => (axis, geometry, children),
+        leaf @ ParsedNode::Leaf { .. } => {
+            children.insert(index, leaf);
+            return;
+        }
+    };
+    if parent_children.len() == 1 {
+        children.insert(index, parent_children.remove(0));
+    } else {
+        children.insert(
+            index,
+            ParsedNode::Node {
+                axis,
+                geometry,
+                children: parent_children,
+            },
+        );
+    }
+}
+
+fn assign_parsed_node(node: ParsedNode, panes: &mut impl Iterator<Item = PaneId>) -> CellNode {
+    match node {
+        ParsedNode::Leaf { geometry } => CellNode::Leaf {
+            pane: panes.next().expect("parsed pane count was checked"),
+            geometry,
+        },
+        ParsedNode::Node {
+            axis,
+            geometry,
+            children,
+        } => CellNode::Node {
+            axis,
+            geometry,
+            children: children
+                .into_iter()
+                .enumerate()
+                .map(|(index, node)| CellChild {
+                    divider: (index != 0).then_some(SplitId(0)),
+                    node: assign_parsed_node(node, panes),
+                })
+                .collect(),
+        },
     }
 }
 
@@ -1561,6 +2023,19 @@ mod tests {
         }
     }
 
+    fn checksummed(body: &str) -> String {
+        format!("{:04x},{body}", layout_checksum(body.as_bytes()))
+    }
+
+    fn nested_layout(depth: usize) -> (String, u16) {
+        if depth == 0 {
+            return ("1x1,0,0,0".to_owned(), 1);
+        }
+        let (child, child_width) = nested_layout(depth - 1);
+        let width = child_width + 2;
+        (format!("{width}x1,0,0{{{child},1x1,0,0,0}}"), width)
+    }
+
     fn geometry(layout: &CellLayout, pane: u64) -> CellGeometry {
         layout.pane_geometry(PaneId(pane)).unwrap()
     }
@@ -2415,6 +2890,77 @@ mod tests {
         maximum.resize(u16::MAX, u16::MAX);
         assert_eq!(maximum.extent(), (PANE_MAXIMUM, PANE_MAXIMUM));
         assert_eq!(CellLayout::new(PaneId(0), 0, 0).extent(), (1, 1));
+    }
+
+    #[test]
+    fn parsed_layout_corrects_the_root_and_assigns_dfs_panes() {
+        let input = checksummed("999x999,9,9{40x24,8,8,111,39x24,9,9,222}");
+        let parsed = CellLayout::parse(&input).unwrap();
+        assert_eq!(parsed.pane_count(), 2);
+        let mut ids = allocator(20);
+        let layout = parsed.into_layout(&[PaneId(7), PaneId(8)], &mut ids);
+        assert_eq!(
+            layout.dump(),
+            checksummed("80x24,0,0{40x24,0,0,7,39x24,41,0,8}")
+        );
+        let LayoutNode::Split { id, .. } = layout.project() else {
+            panic!("expected parsed split");
+        };
+        assert_eq!(id, SplitId(20));
+    }
+
+    #[test]
+    fn parsed_layout_rejects_checksum_grammar_and_size_errors() {
+        assert_eq!(
+            CellLayout::parse("0000,80x24,0,0,0"),
+            Err(LayoutParseError::InvalidLayout)
+        );
+        assert_eq!(
+            CellLayout::parse("B25D,80x24,0,0,0"),
+            Err(LayoutParseError::InvalidLayout)
+        );
+        assert_eq!(
+            CellLayout::parse(&checksummed("80x24,0,0,0garbage")),
+            Err(LayoutParseError::InvalidLayout)
+        );
+        assert_eq!(
+            CellLayout::parse(&checksummed("80x24,0,0{80x24,0,0,0}")),
+            Err(LayoutParseError::InvalidLayout)
+        );
+        assert_eq!(
+            CellLayout::parse(&checksummed("80x24,0,0{40x23,0,0,0,39x24,41,0,1}")),
+            Err(LayoutParseError::SizeMismatch)
+        );
+    }
+
+    #[test]
+    fn parsed_layout_trims_the_bottom_right_cell_with_tmux_gifting() {
+        let input = checksummed("100x20,0,0[100x9,0,0{49x9,0,0,50,50x9,50,0,51},100x10,0,10,52]");
+        let mut parsed = CellLayout::parse(&input).unwrap();
+        assert_eq!(parsed.pane_count(), 3);
+        parsed.trim_bottom_right();
+        assert_eq!(parsed.pane_count(), 2);
+        let mut ids = allocator(30);
+        let layout = parsed.into_layout(&[PaneId(7), PaneId(8)], &mut ids);
+        assert_eq!(
+            layout.dump(),
+            checksummed("100x20,0,0{49x20,0,0,7,50x20,50,0,8}")
+        );
+        let LayoutNode::Split { id, .. } = layout.project() else {
+            panic!("expected trimmed split");
+        };
+        assert_eq!(id, SplitId(30));
+    }
+
+    #[test]
+    fn parsed_layout_enforces_the_protocol_depth_budget() {
+        let accepted = nested_layout(MAX_LAYOUT_DEPTH - 1).0;
+        assert!(CellLayout::parse(&checksummed(&accepted)).is_ok());
+        let rejected = nested_layout(MAX_LAYOUT_DEPTH).0;
+        assert_eq!(
+            CellLayout::parse(&checksummed(&rejected)),
+            Err(LayoutParseError::InvalidLayout)
+        );
     }
 
     #[test]

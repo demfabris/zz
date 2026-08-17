@@ -4,7 +4,7 @@ title: tmux status line in the sidebar
 description: The daemon expands status-left and status-right from the zz-owned mux.conf into text and publishes it per client; the workspace sidebar renders it as a stacked bottom section instead of a bottom bar.
 resource: crates/zz-mux/src/status.rs
 tags: [tmux, status-line, formats, sidebar, options]
-timestamp: 2026-07-25T00:00:00Z
+timestamp: 2026-08-17T00:00:00-03:00
 ---
 
 # Overview
@@ -80,11 +80,13 @@ variable expands to nothing, which is tmux's own rule.
 
 Variables resolve against the client's current view (its attached session, the window that client
 focuses, that window's active pane): `session_name`, `session_windows`, `window_index`,
-`window_name`, `window_panes`, `window_width`, `window_height`, `window_active`, `window_flags`,
-`window_zoomed_flag`, `window_bell_flag`, `pane_index`, `pane_id`, `pane_title`, `pane_width`,
-`pane_height`, `pane_active`, `pane_synchronized`, `host`, `host_short`. On the status line the
-focused window plays tmux's "current window" role, so `window_active` and `pane_active` read `1`
-and `#F` keeps its `*` there — the per-row values appear in `list-*`/`display-message` output.
+`window_name`, `window_panes`, `window_width`, `window_height`, `window_layout`, `window_active`,
+`window_flags`, `window_zoomed_flag`, `window_bell_flag`, `pane_index`, `pane_id`, `pane_title`,
+`pane_width`, `pane_height`, `pane_active`, `pane_synchronized`, `host`, `host_short`. The
+`window_layout` value is the checksummed cell tree that `select-layout <string>` accepts. On the
+status line the focused window plays tmux's "current window" role, so `window_active` and
+`pane_active` read `1` and `#F` keeps its `*` there. The per-row values appear in
+`list-*`/`display-message` output.
 The four geometry variables always answer from the cell-authoritative layout tree: a headless
 window is born at tmux's `default-size` 80x24 and reports its exact allocations, a drawn window
 tracks the measuring client, and a zoomed pane reports the full window extent (tmux swaps in a

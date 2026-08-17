@@ -170,6 +170,7 @@ pub struct StatusContext {
     pub window_panes: usize,
     pub window_width: Option<u16>,
     pub window_height: Option<u16>,
+    pub window_layout: String,
     pub window_active: Option<bool>,
     pub window_zoomed: bool,
     pub window_bell: bool,
@@ -199,6 +200,7 @@ impl StatusContext {
             "window_panes" => Cow::Owned(self.window_panes.to_string()),
             "window_width" => optional_number(self.window_width),
             "window_height" => optional_number(self.window_height),
+            "window_layout" => Cow::Borrowed(self.window_layout.as_str()),
             "window_active" => Cow::Borrowed(optional_flag(self.window_active)),
             "window_flags" => Cow::Owned(self.window_flags()),
             "window_zoomed_flag" => Cow::Borrowed(flag(self.window_zoomed)),
@@ -309,6 +311,7 @@ impl FormatContext {
             let (width, height) = window.layout.extent();
             context.window_width = Some(width);
             context.window_height = Some(height);
+            context.window_layout = window.layout.dump();
             context.window_active = state
                 .sessions
                 .get(&window.session)
@@ -365,6 +368,7 @@ impl FormatVariables for ResolvedFormatContext {
                         | "window_panes"
                         | "window_width"
                         | "window_height"
+                        | "window_layout"
                         | "window_active"
                         | "window_flags"
                         | "window_zoomed_flag"
@@ -668,6 +672,7 @@ mod tests {
             window_panes: 2,
             window_width: Some(160),
             window_height: Some(50),
+            window_layout: "e582,160x50,0,0,7".to_owned(),
             window_active: Some(true),
             window_zoomed: false,
             window_bell: false,
@@ -699,6 +704,7 @@ mod tests {
         assert_eq!(expand("#{session_id}:#{window_id}"), "$4:@5");
         assert_eq!(expand("#{window_panes} panes"), "2 panes");
         assert_eq!(expand("#{session_windows}"), "3");
+        assert_eq!(expand("#{window_layout}"), "e582,160x50,0,0,7");
         assert_eq!(
             expand("#{window_width}x#{window_height}:#{window_active}"),
             "160x50:1"

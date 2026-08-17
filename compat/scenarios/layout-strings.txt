@@ -1,0 +1,6 @@
+split-window -h -t w:0.0
+split-window -v -t w:0.1
+select-layout -t w:0 b78d,120x30,0,0{50x30,0,0,9,69x30,51,0[69x14,51,0,8,69x15,51,15,7]}
+kill-pane -t w:0.1
+select-layout -t w:0 e7f0,100x20,0,0[100x9,0,0{49x9,0,0,50,50x9,50,0,51},100x10,0,10,52]
+select-layout -t w:0 0000,80x24,0,0,0

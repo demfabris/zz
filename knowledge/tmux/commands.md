@@ -4,7 +4,7 @@ title: tmux command set (command.rs)
 description: "MuxEngine, the tmux-style command executor: canonical names + aliases, shared option/flag parsing, -t target resolution, and structured MuxEffect side effects for the daemon."
 resource: crates/zz-mux/src/command.rs
 tags: [tmux, commands, mux-engine, targets, effects]
-timestamp: 2026-08-15T00:00:00Z
+timestamp: 2026-08-17T00:00:00-03:00
 ---
 
 # Overview
@@ -77,7 +77,7 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `swap-pane` | `swapp` | Exchange two layout leaves (`-U/-D/-s/-t`, `-d` keep slot, `-Z`). |
 | `list-panes` | `lsp` | List a window's panes. |
 | `resize-pane` | `resizep` | Resize relatively (`-L/-R/-U/-D` by cells: a shared positional adjustment, tmux's attached form `-R10`, default `1`; adjustments are integers) or absolutely (`-x`/`-y` in cells or `N%`) or `-Z` toggle zoom. With no direction and no `-x`/`-y` the command is a no-op, as in tmux; unknown flags (`-M`, `-T`) are rejected. Sizes in cells need the geometry the daemon reports per pane; without it the command errors instead of guessing. |
-| `select-layout` | `selectl` | Apply a named preset / `-o` restore / `-E` spread / `-n`/`-p` cycle. |
+| `select-layout` | `selectl` | Apply a named preset or checksummed layout string, restore with `-o`, spread with `-E`, or cycle with `-n`/`-p`. A layout string ignores its pane numbers, assigns the current `pane_order` through the leaves, removes extra bottom-right cells, allocates new divider ids, and adopts the encoded window extent. Too few cells fail with tmux's `have N panes but need M` error. |
 | `next-layout` / `previous-layout` | `nextl` / `prevl` | Cycle the seven presets. |
 | `rotate-window` | `rotatew` | Rotate surfaces through layout slots (`-D`,`-U`,`-Z`). |
 | `kill-pane` | `killp` | Remove a pane (removes the window if it was the last); `-a` keeps the target and kills every other pane in its window. |

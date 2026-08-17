@@ -851,6 +851,54 @@ impl MuxState {
         Ok(())
     }
 
+    pub fn select_layout_string(
+        &mut self,
+        window: WindowId,
+        layout: &str,
+    ) -> Result<(), ServerError> {
+        let panes = self
+            .windows
+            .get(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?
+            .pane_order
+            .clone();
+        let mut parsed = CellLayout::parse(layout)
+            .map_err(|error| ServerError::InvalidCommand(format!("{}: {layout}", error.cause())))?;
+        let cells = parsed.pane_count();
+        if panes.len() > cells {
+            return Err(ServerError::InvalidCommand(format!(
+                "have {} panes but need {cells}: {layout}",
+                panes.len()
+            )));
+        }
+        while parsed.pane_count() > panes.len() {
+            parsed.trim_bottom_right();
+        }
+        let split_ids = (0..panes.len().saturating_sub(1))
+            .map(|_| self.allocate_split_id())
+            .collect::<Vec<_>>();
+        let mut split_ids = split_ids.into_iter();
+        let mut ids = || {
+            split_ids
+                .next()
+                .expect("parsed layout has one split ID per edge")
+        };
+        let next = parsed.into_layout(&panes, &mut ids);
+        let split_ids_exhausted = split_ids.next().is_none();
+        debug_assert!(
+            split_ids_exhausted,
+            "parsed layout consumes one fresh ID per split"
+        );
+
+        let window = self.windows.get_mut(&window).expect("window was resolved");
+        let previous = std::mem::replace(&mut window.layout, next);
+        window.previous_layout = Some(Box::new(previous));
+        window.zoomed_pane = None;
+        window.last_extent_probe = None;
+        self.bump_generation();
+        Ok(())
+    }
+
     pub fn cycle_layout(
         &mut self,
         window: WindowId,
@@ -3573,6 +3621,82 @@ mod tests {
             [(39, 7), (40, 7), (39, 7), (40, 7), (80, 8)].to_vec()
         );
         assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn serialized_layouts_adopt_extent_assign_pane_order_and_trim_bottom_right() {
+        let mut state = MuxState::default();
+        let (_, window, first) = state.create_session("work").unwrap();
+        let second = state
+            .split_pane(first, Axis::Horizontal, PaneKind::Terminal)
+            .unwrap();
+        let third = state
+            .split_pane(second, Axis::Vertical, PaneKind::Terminal)
+            .unwrap();
+        let original = state.windows[&window].layout.clone();
+        let retired = layout_splits(&original);
+        let input = "b78d,120x30,0,0{50x30,0,0,9,69x30,51,0[69x14,51,0,8,69x15,51,15,7]}";
+
+        state.select_layout_string(window, input).unwrap();
+        let applied = state.windows[&window].layout.clone();
+        assert_eq!(applied.extent(), (120, 30));
+        assert_eq!(applied.panes_in_order(), [first, second, third]);
+        assert_eq!(pane_size(&applied, first), (50, 30));
+        assert_eq!(pane_size(&applied, second), (69, 14));
+        assert_eq!(pane_size(&applied, third), (69, 15));
+        assert!(
+            layout_splits(&applied)
+                .iter()
+                .all(|split| !retired.contains(split))
+        );
+
+        state.restore_previous_layout(window).unwrap();
+        assert!(same_layout_geometry(
+            &state.windows[&window].layout,
+            &original
+        ));
+        state.restore_previous_layout(window).unwrap();
+        assert!(same_layout_geometry(
+            &state.windows[&window].layout,
+            &applied
+        ));
+
+        state.kill_pane(second).unwrap();
+        state
+            .select_layout_string(
+                window,
+                "e7f0,100x20,0,0[100x9,0,0{49x9,0,0,50,50x9,50,0,51},100x10,0,10,52]",
+            )
+            .unwrap();
+        let trimmed = &state.windows[&window].layout;
+        assert_eq!(trimmed.extent(), (100, 20));
+        assert_eq!(trimmed.panes_in_order(), [first, third]);
+        assert_eq!(pane_size(trimmed, first), (49, 20));
+        assert_eq!(pane_size(trimmed, third), (50, 20));
+        assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn serialized_layout_have_need_error_is_atomic() {
+        let mut state = MuxState::default();
+        let (_, window, first) = state.create_session("work").unwrap();
+        state
+            .split_pane(first, Axis::Horizontal, PaneKind::Terminal)
+            .unwrap();
+        let before = state.windows[&window].layout.clone();
+        let generation = state.generation();
+        let next_split_id = state.next_split_id;
+        let input = "b25d,80x24,0,0,0";
+
+        assert_eq!(
+            state.select_layout_string(window, input),
+            Err(ServerError::InvalidCommand(format!(
+                "have 2 panes but need 1: {input}"
+            )))
+        );
+        assert_eq!(state.windows[&window].layout, before);
+        assert_eq!(state.generation(), generation);
+        assert_eq!(state.next_split_id, next_split_id);
     }
 
     #[test]

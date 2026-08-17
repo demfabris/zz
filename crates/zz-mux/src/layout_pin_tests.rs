@@ -323,3 +323,31 @@ fn pinned_tmux_layout_fixtures_replay_exactly() {
         }
     }
 }
+
+#[test]
+fn pinned_tmux_layout_fixtures_parse_and_dump_exactly() {
+    let fixtures = fixtures();
+    assert_eq!(fixtures.len(), 48);
+    for fixture in fixtures {
+        let mut replay = Replay::new();
+        for step in fixture.steps {
+            replay.run(step);
+        }
+        let panes = replay.layout.panes_in_order();
+        let parsed = CellLayout::parse(fixture.expected_layout).unwrap();
+        assert_eq!(
+            parsed.pane_count(),
+            panes.len(),
+            "{} pane count",
+            fixture.name
+        );
+        let mut next_split_id = 10_000;
+        let mut ids = || {
+            let id = SplitId(next_split_id);
+            next_split_id += 1;
+            id
+        };
+        let rebuilt = parsed.into_layout(&panes, &mut ids);
+        assert_eq!(rebuilt.dump(), fixture.expected_layout, "{}", fixture.name);
+    }
+}

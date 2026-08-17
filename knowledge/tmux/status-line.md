@@ -55,8 +55,8 @@ and from `set-option` at runtime, and all four support `-u` (restore the zz defa
 | --- | --- | --- |
 | `status` | `on` | Whether the section renders at all. tmux's line counts (`2`..`5`) parse as on . one stacked section either way. |
 | `status-interval` | `15` | Seconds between re-runs of `#()` and re-reads of the clock. `0` disables the periodic refresh, as in tmux. |
-| `status-left` | empty | First line of the section. tmux defaults `[#S] `; zz's chrome already names the session, so the default is empty. |
-| `status-right` | empty | Second line of the section. tmux defaults `` "#{=21:pane_title}" %H:%M %d-%b-%y ``. |
+| `status-left` | `[#{session_name}] ` | First line of the section, matching the pinned tmux default. |
+| `status-right` | `#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}"#{=21:pane_title}" %H:%M %d-%b-%y` | Second line of the section, matching the pinned tmux default. |
 
 A half that expands to nothing is dropped, and a section with no halves is not rendered. `status
 off` costs no height rather than leaving an empty footer. The collapsed sidebar rail drops the section

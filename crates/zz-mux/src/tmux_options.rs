@@ -11,10 +11,12 @@ pub(crate) struct TmuxOption {
     pub(crate) name: &'static str,
     pub(crate) scope: TmuxOptionScope,
     pub(crate) default: Option<TmuxOptionDefault>,
+    pub(crate) is_array: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TmuxOptionDefault {
+    Array(&'static str),
     String(&'static str),
     Scalar(&'static str),
 }
@@ -22,7 +24,7 @@ pub(crate) enum TmuxOptionDefault {
 impl TmuxOptionDefault {
     pub(crate) const fn value(self) -> &'static str {
         match self {
-            Self::String(value) | Self::Scalar(value) => value,
+            Self::Array(value) | Self::String(value) | Self::Scalar(value) => value,
         }
     }
 
@@ -30,6 +32,10 @@ impl TmuxOptionDefault {
         matches!(self, Self::String(_))
     }
 }
+
+pub(crate) const STATUS_LEFT_DEFAULT: &str = "[#{session_name}] ";
+pub(crate) const STATUS_RIGHT_DEFAULT: &str = "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y";
+pub(crate) const UPDATE_ENVIRONMENT_DEFAULT: &str = "DISPLAY KRB5CCNAME MSYSTEM SSH_ASKPASS SSH_AUTH_SOCK SSH_AGENT_PID SSH_CONNECTION WAYLAND_DISPLAY WINDOWID XAUTHORITY XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE";
 
 const SERVER_OPTIONS: &[&str] = &[
     "backspace",
@@ -317,6 +323,7 @@ pub(crate) fn tmux_options() -> impl Iterator<Item = TmuxOption> {
             name,
             scope,
             default: tmux_option_default(name),
+            is_array: tmux_option_is_array(name),
         })
     })
 }
@@ -333,12 +340,82 @@ fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
         "set-clipboard" => TmuxOptionDefault::Scalar("external"),
         "status" => TmuxOptionDefault::Scalar("on"),
         "status-interval" => TmuxOptionDefault::Scalar("15"),
-        "status-left" => TmuxOptionDefault::String("[#{session_name}] "),
-        "status-right" => TmuxOptionDefault::String(
-            "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y",
-        ),
+        "status-left" => TmuxOptionDefault::String(STATUS_LEFT_DEFAULT),
+        "status-right" => TmuxOptionDefault::String(STATUS_RIGHT_DEFAULT),
+        "update-environment" => TmuxOptionDefault::Array(UPDATE_ENVIRONMENT_DEFAULT),
         "word-separators" => TmuxOptionDefault::String("!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"),
         _ => return None,
+    })
+}
+
+fn tmux_option_is_array(name: &str) -> bool {
+    matches!(
+        name,
+        "command-alias"
+            | "codepoint-widths"
+            | "terminal-overrides"
+            | "terminal-features"
+            | "user-keys"
+            | "status-format"
+            | "update-environment"
+            | "pane-colours"
+            | "alert-activity"
+            | "alert-bell"
+            | "alert-silence"
+            | "command-error"
+            | "pane-died"
+            | "pane-exited"
+            | "pane-focus-in"
+            | "pane-focus-out"
+            | "pane-mode-changed"
+            | "pane-set-clipboard"
+            | "pane-title-changed"
+            | "session-closed"
+            | "session-created"
+            | "session-renamed"
+            | "session-window-changed"
+            | "window-layout-changed"
+            | "window-linked"
+            | "window-pane-changed"
+            | "window-renamed"
+            | "window-resized"
+            | "window-unlinked"
+    ) || name.starts_with("after-")
+        || name.starts_with("client-")
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ParsedTmuxOption<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) index: Option<String>,
+}
+
+pub(crate) fn parse_tmux_option(input: &str) -> Result<ParsedTmuxOption<'_>, ()> {
+    if input.is_empty() {
+        return Err(());
+    }
+    let Some(open) = input.find('[') else {
+        return Ok(ParsedTmuxOption {
+            name: input,
+            index: None,
+        });
+    };
+    let rest = &input[open + 1..];
+    let Some(close) = rest.find(']') else {
+        return Err(());
+    };
+    if close == 0 || open + close + 2 != input.len() {
+        return Err(());
+    }
+    let raw = &rest[..close];
+    let index = if raw.bytes().all(|byte| byte.is_ascii_digit()) {
+        raw.parse::<u32>().map_err(|_| ())?.to_string()
+    } else {
+        raw.to_owned()
+    };
+    Ok(ParsedTmuxOption {
+        name: &input[..open],
+        index: Some(index),
     })
 }
 
@@ -392,6 +469,55 @@ mod tests {
     }
 
     #[test]
+    fn indexed_spellings_follow_the_pin_grammar() {
+        assert_eq!(
+            parse_tmux_option("status-format[000]").unwrap(),
+            ParsedTmuxOption {
+                name: "status-format",
+                index: Some("0".to_owned()),
+            }
+        );
+        assert_eq!(
+            parse_tmux_option("@plain[key]").unwrap(),
+            ParsedTmuxOption {
+                name: "@plain",
+                index: Some("key".to_owned()),
+            }
+        );
+        assert_eq!(
+            parse_tmux_option("name]tail").unwrap(),
+            ParsedTmuxOption {
+                name: "name]tail",
+                index: None,
+            }
+        );
+        for invalid in ["", "name[]", "name[0", "name[0]tail", "name[4294967296]"] {
+            assert!(parse_tmux_option(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn array_metadata_matches_the_pin_table() {
+        let arrays = tmux_options()
+            .filter(|option| option.is_array)
+            .map(|option| option.name)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(arrays.len(), 76);
+        for name in [
+            "command-alias",
+            "codepoint-widths",
+            "terminal-overrides",
+            "terminal-features",
+            "user-keys",
+            "status-format",
+            "update-environment",
+            "pane-colours",
+        ] {
+            assert!(arrays.contains(name), "{name}");
+        }
+    }
+
+    #[test]
     fn implemented_options_carry_their_pin_defaults_and_types() {
         let implemented = tmux_options()
             .filter_map(|option| option.default.map(|default| (option.name, default)))
@@ -414,9 +540,11 @@ mod tests {
                 ),
                 (
                     "status-right",
-                    TmuxOptionDefault::String(
-                        "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y",
-                    ),
+                    TmuxOptionDefault::String(STATUS_RIGHT_DEFAULT),
+                ),
+                (
+                    "update-environment",
+                    TmuxOptionDefault::Array(UPDATE_ENVIRONMENT_DEFAULT),
                 ),
                 (
                     "word-separators",

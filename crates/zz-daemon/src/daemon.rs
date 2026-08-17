@@ -2,6 +2,7 @@ use std::{
     borrow::Cow,
     cmp::Reverse,
     collections::{BTreeMap, BTreeSet, VecDeque},
+    ffi::OsStr,
     fmt::Write as _,
     fs,
     io::{ErrorKind, Read, Seek, SeekFrom, Write},
@@ -131,6 +132,45 @@ fn daemon_color_scheme() -> TerminalColorScheme {
         Ok("light") => TerminalColorScheme::Light,
         _ => TerminalColorScheme::Dark,
     }
+}
+
+fn mode_keys_from_environment(visual: Option<&OsStr>, editor: Option<&OsStr>) -> &'static str {
+    let Some(editor) = visual.or(editor) else {
+        return "emacs";
+    };
+    let editor = editor.to_string_lossy();
+    let basename = editor.rsplit('/').next().unwrap_or(&editor);
+    if basename.contains("vi") {
+        "vi"
+    } else {
+        "emacs"
+    }
+}
+
+fn daemon_environment() -> Vec<(String, String)> {
+    let mut environment = std::env::vars_os()
+        .map(|(name, value)| {
+            (
+                name.to_string_lossy().into_owned(),
+                value.to_string_lossy().into_owned(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    if let Ok(cwd) = std::env::current_dir() {
+        let cwd = environment
+            .get("PWD")
+            .filter(|pwd| !pwd.is_empty())
+            .filter(|pwd| {
+                fs::canonicalize(pwd)
+                    .ok()
+                    .zip(fs::canonicalize(&cwd).ok())
+                    .is_some_and(|(pwd, cwd)| pwd == cwd)
+            })
+            .cloned()
+            .unwrap_or_else(|| cwd.to_string_lossy().into_owned());
+        environment.insert("PWD".to_owned(), cwd);
+    }
+    environment.into_iter().collect()
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1576,13 +1616,15 @@ impl Drop for ClientRegistrationGuard<'_> {
 impl Shared {
     #[cfg(test)]
     fn with_appearance(server_id: u64, appearance: Arc<TerminalAppearance>) -> Self {
-        Self::configured(
+        Self::configured_with_boot_environment(
             server_id,
             appearance,
             AppearanceProvenance::default(),
             false,
             std::env::temp_dir().join("zz-test-paste"),
             std::env::temp_dir().join("zz-test.sock"),
+            "emacs",
+            std::iter::empty::<(String, String)>(),
         )
     }
 
@@ -1594,12 +1636,46 @@ impl Shared {
         paste_directory: PathBuf,
         socket_path: PathBuf,
     ) -> Self {
+        let visual = std::env::var_os("VISUAL");
+        let editor = std::env::var_os("EDITOR");
+        Self::configured_with_boot_environment(
+            server_id,
+            appearance,
+            appearance_provenance,
+            load_user_config,
+            paste_directory,
+            socket_path,
+            mode_keys_from_environment(visual.as_deref(), editor.as_deref()),
+            daemon_environment(),
+        )
+    }
+
+    fn configured_with_boot_environment<I, K, V>(
+        server_id: u64,
+        appearance: Arc<TerminalAppearance>,
+        appearance_provenance: AppearanceProvenance,
+        load_user_config: bool,
+        paste_directory: PathBuf,
+        socket_path: PathBuf,
+        default_mode_keys: &str,
+        environment: I,
+    ) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
         let mut state = ServerState {
             active_color_scheme: appearance.color_scheme,
             appearance,
             appearance_provenance,
             ..ServerState::default()
         };
+        state
+            .engine
+            .set_default_mode_keys(default_mode_keys)
+            .expect("daemon mode-keys default is valid");
+        state.engine.seed_global_environment(environment);
         let (host, host_short) = host_names();
         state.engine.set_format_server_context(
             host.clone(),
@@ -3661,6 +3737,7 @@ impl Shared {
         }
         inner.attached.retain(|_, clients| !clients.is_empty());
         inner.attached.entry(session).or_default().insert(client);
+        inner.engine.mark_session_active(session);
         let visible = visible_terminal_panes(&inner, client, session);
         affected_panes.extend(visible.iter().copied());
         inner.visible_terminals.insert(client, visible);
@@ -4067,6 +4144,14 @@ impl Shared {
     fn note_terminal_input(&self, client: ClientId, pane: PaneId) {
         let resizes = {
             let mut inner = self.inner.lock();
+            let session = client_is_attached_to_pane(&inner, client, pane)
+                .then(|| inner.engine.state.window_for_pane(pane))
+                .flatten()
+                .and_then(|window| inner.engine.state.windows.get(&window))
+                .map(|window| window.session);
+            if let Some(session) = session {
+                inner.engine.mark_session_active(session);
+            }
             terminal_resizes_after_client_input(&mut inner, client, pane)
         };
         apply_terminal_resizes(resizes);
@@ -11358,6 +11443,147 @@ mod tests {
         }
     }
 
+    #[test]
+    fn editor_sniff_matches_the_pin_basename_rule() {
+        for editor in ["vi", "vim", "nvim", "gvim", "/usr/bin/evil"] {
+            assert_eq!(
+                mode_keys_from_environment(None, Some(OsStr::new(editor))),
+                "vi",
+                "{editor}"
+            );
+        }
+        for editor in ["emacsclient", "VI", "/usr/bin/emacs"] {
+            assert_eq!(
+                mode_keys_from_environment(None, Some(OsStr::new(editor))),
+                "emacs",
+                "{editor}"
+            );
+        }
+        assert_eq!(mode_keys_from_environment(None, None), "emacs");
+        assert_eq!(
+            mode_keys_from_environment(Some(OsStr::new("")), Some(OsStr::new("vim"))),
+            "emacs"
+        );
+    }
+
+    #[test]
+    fn configured_engine_receives_boot_defaults_before_initialization() {
+        let shared = Shared::configured_with_boot_environment(
+            1,
+            Arc::new(TerminalAppearance::default()),
+            AppearanceProvenance::default(),
+            false,
+            std::env::temp_dir().join("zz-test-paste"),
+            std::env::temp_dir().join("zz-test.sock"),
+            "vi",
+            [("PHASE4D_BOOT", "seeded")],
+        );
+        let mut inner = shared.inner.lock();
+        assert_eq!(inner.engine.mux_option_value(MuxOptionKey::ModeKeys), "vi");
+        assert_eq!(
+            inner
+                .engine
+                .execute(
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("show-environment", ["-g", "PHASE4D_BOOT"],),
+                )
+                .unwrap()
+                .output,
+            "PHASE4D_BOOT=seeded"
+        );
+    }
+
+    #[test]
+    fn attach_and_attached_key_input_update_session_activity() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(ClientKind::Interactive, None, None, mailbox);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "A"]),
+            )
+            .unwrap();
+        let first = context.session.expect("first session");
+        let first_pane = context.pane.expect("first pane");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "B"]),
+            )
+            .unwrap();
+        let second = context.session.expect("second session");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .most_recent_context()
+                .map(|context| context.0),
+            Some(second)
+        );
+
+        shared.attach(client, first).unwrap();
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .most_recent_context()
+                .map(|context| context.0),
+            Some(first)
+        );
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "C"]),
+            )
+            .unwrap();
+        let third = context.session.expect("third session");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .most_recent_context()
+                .map(|context| context.0),
+            Some(third)
+        );
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::Key {
+                    pane: first_pane,
+                    input: test_key(KeyCode::Character('x'), Modifiers::default(), Some("x")),
+                    text_follows: false,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .most_recent_context()
+                .map(|context| context.0),
+            Some(first)
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn envelope_mismatch_gets_a_legible_reply_before_disconnect() {
@@ -13333,6 +13559,80 @@ mod tests {
             .expect("show captured named buffer")
             .output;
         assert!(shown.contains("ZZ_DETACHED_BUFFER_OK"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn seeded_global_environment_and_session_markers_reach_terminal_spawn() {
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .inner
+            .lock()
+            .engine
+            .seed_global_environment([("PHASE4D_SEEDED", "daemon"), ("HIDDENPROBE", "daemonval")]);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-environment",
+                    ["-g", "-h", "HIDDENPROBE", "newhidden"],
+                ),
+            )
+            .expect("hidden global environment");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "seeded-environment"]),
+            )
+            .expect("session");
+        let pane = context.pane.expect("terminal pane");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-buffer",
+                    [
+                        "printf 'PHASE4D_SEEDED=[%s] DISPLAY=[%s] HP=[%s]\\n' \"$PHASE4D_SEEDED\" \"${DISPLAY-unset}\" \"${HIDDENPROBE-}\"\n",
+                    ],
+                ),
+            )
+            .expect("shell probe");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("paste-buffer", ["-t", &pane.to_string()]),
+            )
+            .expect("paste shell probe");
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let captured = shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("capture-pane", ["-p", "-t", &pane.to_string()]),
+                )
+                .expect("capture terminal")
+                .output;
+            if captured.contains("PHASE4D_SEEDED=[daemon] DISPLAY=[unset] HP=[]") {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "seeded environment did not reach terminal spawn"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     fn paste_upload_fixture(

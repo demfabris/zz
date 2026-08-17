@@ -87,7 +87,12 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | --- | --- | --- |
 | `copy-mode` | `-k -H -S -s` rejected (`-e`/`-q`/`-M` — the stock-binding trio — are implemented). | loud |
 | `source-file` | No `-` stdin (refused loudly), no `-F`/`-n`/`-v`. Globbing works. | loud |
-| `show-options` on unimplemented names | Catalogued options without zz storage have no invented value or default and print nothing, including under `-A`. Implemented values and every `@` user option retain normal scope and inheritance readback. | **silent**, honest omission |
+| `show-options` on unimplemented names | Catalogued scalar options without zz storage have no invented value and print nothing, including under `-A`. Bare and indexed array spellings use the same empty-success path. Implemented scalars and every stored `@` user option retain normal scope and inheritance readback. | **silent**, honest omission |
+| Array options | zz parses tmux's `name[index]` grammar but stores and renders none of the pin's 76 array options. Bare and indexed set/show requests succeed with no output. Indexed `@` or table scalars follow tmux: set returns `not an array`, while show reads the scalar through the indexed spelling. | **silent**, honest omission |
+| `history-limit` default | zz keeps 10,000 lines for its product default; the pin keeps 2,000. `show-options -g history-limit` prints the effective 10,000 value. | **silent**, deliberate |
+| Plain option listings | No-argument listings contain tmux table names and `@` user names. The six zz-native settings stay available through explicit-name queries and never appear as unknown words in tmux-parsing scripts. | **silent**, zz extension hidden from tmux listings |
+| Session environment updates | Both servers seed their global environment at boot. tmux copies each `update-environment` name from the creating client's environment; zz has no client-environment field and copies from the daemon's boot environment. They differ when the daemon outlives the shell that started it. Missing names become unset markers on both. | **silent**, bounded |
+| Non-UTF-8 command arguments | tmux prints a byte such as `a\377b` with octal vis escaping. zz converts argv with `to_string_lossy` before escaping and prints `a<U+FFFD>b`. | **silent**, accepted edge |
 | Alerts | Bell-only: `monitor-activity`/`monitor-silence` don't exist. Matches tmux defaults, ignores those configs. | **silent** |
 | `select-layout main-*` with 2 panes | The pin never sizes the lone "other" pane (layout-set.c:264-269, :458-463), leaving stale geometry that fails tmux's own `layout_check`; zz sizes it (80x24 → main 80x22 + other 80x1). Deliberate: zz refuses to reproduce an upstream bug. | **silent**, zz more correct |
 | `select-layout -E` on a mixed parent | The pin spreads only leaf children (layout.c `layout_cell_is_tiled`) but divides the parent's full extent among them, so a parent mixing leaves with nested nodes gets corrupt sums (observed: 40+42+39 in an 80-wide window, last pane at xoff 84). Every later operation on that corrupted window keeps diverging: one `-E` produced four geometry divergences, three downstream, so the known scenario has one causal step but the divergence is not bounded to it. zz refuses that spread and stops the walk where the pin stops. All-leaf parents are exact (48 pin fixtures + `known/known-spread-mixed.txt`). | **silent**, zz more correct |
@@ -174,11 +179,15 @@ Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-pan
 targeting, format, and close-triggered renumbering behavior. (`set-option` also accepts six
 zz-native names — the agent/editor/history-trickle keys — which don't count toward tmux
 coverage.) `show-options` and `show-window-options` expose implemented values with tmux's exact
-string escaping, value-only and inherited forms. Free-form `@` names are pure string storage at
+string escaping, value-only and inherited forms. Their no-argument listings contain tmux names and
+`@` names only; explicit queries still expose zz-native settings. Free-form `@` names are pure string storage at
 server, global-session, session, global-window, window, and pane scope, including append and unset;
-this is the storage seam TPM and plugins use. Global and per-session environment overlays have
-`set-environment`/`show-environment` readback and are merged into new terminal PTYs, including
-hidden and child-unset entries. Everything else is reported-and-skipped by the
+this is the storage seam TPM and plugins use. zz parses indexed spellings for scalars and arrays,
+but array storage remains an honest empty-success omission. Global and per-session environment
+overlays have `set-environment`/`show-environment` readback and are merged into new terminal PTYs,
+including hidden and child-unset entries. The daemon seeds the global map from its process
+environment, and `new-session` copies the fixed `update-environment` names or writes unset markers.
+Everything else is reported-and-skipped by the
 [conf parser](/tmux/conf-parser.md).
 The ones real dotfiles set most, roughly by frequency: `escape-time`, `mouse`,
 `default-terminal`, `terminal-overrides`, `set-titles`, `automatic-rename`,
@@ -192,7 +201,7 @@ readback/storage does not pretend those behaviors exist.
 
 | Area | tmux | zz |
 | --- | --- | --- |
-| Env contract | `$TMUX`, `$TMUX_PANE`, plus global/session overlays | Global/session overlays reach new PTYs, and `ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET` identify the workspace; every `[ -n "$TMUX" ]` script still sees "not in tmux". |
+| Env contract | `$TMUX`, `$TMUX_PANE`, plus server-seeded global and client-updated session overlays | Daemon-seeded global and session overlays reach new PTYs, and `ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET` identify the workspace; every `[ -n "$TMUX" ]` script still sees "not in tmux". |
 | Binary argv | `-L -S -f -2 -C -u` | `--socket`, `--host`; none of tmux's binary flags. |
 | Control mode `-CC` | What iTerm2 integration speaks. | Never — zz owns both ends. |
 | Session groups | `new-session -t`. | Cataloged, rejected. |

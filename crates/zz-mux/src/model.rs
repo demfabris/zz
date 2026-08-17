@@ -1541,6 +1541,16 @@ impl MuxState {
         })
     }
 
+    /// Sessions in tmux's listing order: the pin keeps them in an RB tree
+    /// keyed by strcmp on the name, so every session enumeration a script can
+    /// observe is name-sorted, not creation-sorted.
+    #[must_use]
+    pub fn sessions_by_name(&self) -> Vec<&Session> {
+        let mut sessions = self.sessions.values().collect::<Vec<_>>();
+        sessions.sort_by(|left, right| left.name.as_bytes().cmp(right.name.as_bytes()));
+        sessions
+    }
+
     #[must_use]
     pub fn most_recent_context(&self) -> Option<(SessionId, WindowId, PaneId)> {
         self.last_active_session

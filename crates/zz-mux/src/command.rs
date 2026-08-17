@@ -24,7 +24,10 @@ use crate::{
     formats::{CommandHooks, FormatContext, FormatType, StatusHooks, expand_format_with_hooks},
     layout::PANE_MAXIMUM,
     model::DEFAULT_WINDOW_EXTENT,
-    tmux_options::{TmuxOption, TmuxOptionScope, match_tmux_option, tmux_options},
+    tmux_options::{
+        TmuxOption, TmuxOptionScope, UPDATE_ENVIRONMENT_DEFAULT, match_tmux_option,
+        parse_tmux_option, tmux_options,
+    },
 };
 
 const MAX_COPY_COMMAND_BYTES: usize = 8 * 1024;
@@ -434,6 +437,35 @@ impl MuxEngine {
         self.format_user = user.into();
     }
 
+    pub fn set_default_mode_keys(&mut self, value: &str) -> Result<(), ServerError> {
+        self.global_mode_keys = parse_mode_keys(Some(value), self.global_mode_keys)?;
+        Ok(())
+    }
+
+    pub fn seed_global_environment<I, K, V>(&mut self, entries: I)
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        self.global_environment = entries
+            .into_iter()
+            .map(|(name, value)| {
+                (
+                    name.into(),
+                    EnvironmentEntry {
+                        value: Some(value.into()),
+                        hidden: false,
+                    },
+                )
+            })
+            .collect();
+    }
+
+    pub fn mark_session_active(&mut self, session: SessionId) {
+        self.state.mark_session_active(session);
+    }
+
     pub fn set_pane_runtime_facts(&mut self, pane: PaneId, facts: PaneRuntimeFacts) -> bool {
         if self.state.pane(pane).is_none() || self.pane_runtime_facts.get(&pane) == Some(&facts) {
             return false;
@@ -824,9 +856,6 @@ impl MuxEngine {
         self.pane_runtime_facts
             .retain(|pane, _| self.state.pane(*pane).is_some());
         self.repair_context(context);
-        if let Some(session) = context.session {
-            self.state.mark_session_active(session);
-        }
         Ok(execution)
     }
 
@@ -868,6 +897,7 @@ impl MuxEngine {
         let (session, window, pane) = self
             .state
             .create_session_with_extent_at(name, extent, base_index)?;
+        self.seed_session_environment(session);
         self.state
             .sessions
             .get_mut(&session)
@@ -920,8 +950,8 @@ impl MuxEngine {
         if let Some(format) = options.value("-F") {
             let output = self
                 .state
-                .sessions
-                .values()
+                .sessions_by_name()
+                .into_iter()
                 .map(|session| {
                     expand_format_with_hooks(
                         format,
@@ -942,8 +972,8 @@ impl MuxEngine {
         }
         let output = self
             .state
-            .sessions
-            .values()
+            .sessions_by_name()
+            .into_iter()
             .map(|session| {
                 format!(
                     "{}: {} windows (id {})",
@@ -2896,13 +2926,28 @@ impl MuxEngine {
             ));
         }
         let value = positional.get(1).map(String::as_str);
-        if option.starts_with('@') {
-            return self.set_user_option(context, option, value, &options, force_window);
+        let parsed = match parse_tmux_option(option) {
+            Ok(parsed) => parsed,
+            Err(()) if options.has("-q") => return Ok(Execution::default()),
+            Err(()) => {
+                return Err(ServerError::InvalidCommand(format!(
+                    "invalid option: {option}"
+                )));
+            }
+        };
+        if parsed.index.is_some() && (parsed.name.starts_with('@') || is_native_option(parsed.name))
+        {
+            return Err(ServerError::InvalidCommand(format!(
+                "not an array: {option}"
+            )));
         }
-        if is_native_option(option) {
-            return self.set_native_option(option, value, &options, force_window);
+        if parsed.name.starts_with('@') {
+            return self.set_user_option(context, parsed.name, value, &options, force_window);
         }
-        let table_option = match match_tmux_option(option) {
+        if is_native_option(parsed.name) {
+            return self.set_native_option(parsed.name, value, &options, force_window);
+        }
+        let table_option = match match_tmux_option(parsed.name) {
             Ok(Some(option)) => option,
             Ok(None) | Err(()) if options.has("-q") => return Ok(Execution::default()),
             Ok(None) => {
@@ -2916,7 +2961,10 @@ impl MuxEngine {
                 )));
             }
         };
-        if table_option.default.is_none() {
+        if table_option.is_array {
+            return Ok(Execution::default());
+        }
+        if table_option.default.is_none() && parsed.index.is_none() {
             return Err(ServerError::UnsupportedCommand(format!(
                 "set-option {}",
                 table_option.name
@@ -2932,6 +2980,11 @@ impl MuxEngine {
             Err(_) if options.has("-q") => return Ok(Execution::default()),
             Err(error) => return Err(error),
         };
+        if parsed.index.is_some() {
+            return Err(ServerError::InvalidCommand(format!(
+                "not an array: {option}"
+            )));
+        }
         match table_option.name {
             "synchronize-panes" => self.set_synchronize_panes(value, &options, target),
             "buffer-limit" => self.set_buffer_limit(value, &options),
@@ -3032,7 +3085,9 @@ impl MuxEngine {
                 }
             }
             for option in tmux_options().filter(|option| {
-                option.default.is_some() && option_scope_matches_target(option.scope, target)
+                !option.is_array
+                    && option.default.is_some()
+                    && option_scope_matches_target(option.scope, target)
             }) {
                 if let Some((value, inherited)) =
                     self.tmux_option_readback(option, target, include_inherited)?
@@ -3050,26 +3105,30 @@ impl MuxEngine {
                     );
                 }
             }
-            if target == TmuxOptionTarget::Server {
-                for name in NATIVE_OPTIONS {
-                    let (value, is_string) = self.native_option_readback(name);
-                    push_shown_option(&mut lines, name, &value, is_string, false, value_only);
-                }
-            }
             return Ok(Execution::output(lines.join("\n")));
         };
 
-        if argument.starts_with('@') {
+        let parsed = match parse_tmux_option(argument) {
+            Ok(parsed) => parsed,
+            Err(()) if options.has("-q") => return Ok(Execution::default()),
+            Err(()) => {
+                return Err(ServerError::InvalidCommand(format!(
+                    "invalid option: {argument}"
+                )));
+            }
+        };
+        if parsed.name.starts_with('@') {
             let target = match self.resolve_user_option_target(context, &options, force_window) {
                 Ok(target) => target,
                 Err(_) if options.has("-q") => return Ok(Execution::default()),
                 Err(error) => return Err(error),
             };
             if let Some((value, inherited)) =
-                self.user_option_readback(target, argument, include_inherited)
+                self.user_option_readback(target, parsed.name, include_inherited)
             {
                 let mut lines = Vec::new();
-                push_shown_option(&mut lines, argument, value, true, inherited, value_only);
+                let name = indexed_option_name(parsed.name, parsed.index.as_deref());
+                push_shown_option(&mut lines, &name, value, true, inherited, value_only);
                 return Ok(Execution::output(lines.remove(0)));
             }
             if options.has("-q") {
@@ -3079,13 +3138,14 @@ impl MuxEngine {
                 "invalid option: {argument}"
             )));
         }
-        if is_native_option(argument) {
-            let (value, is_string) = self.native_option_readback(argument);
+        if is_native_option(parsed.name) {
+            let (value, is_string) = self.native_option_readback(parsed.name);
             let mut lines = Vec::new();
-            push_shown_option(&mut lines, argument, &value, is_string, false, value_only);
+            let name = indexed_option_name(parsed.name, parsed.index.as_deref());
+            push_shown_option(&mut lines, &name, &value, is_string, false, value_only);
             return Ok(Execution::output(lines.remove(0)));
         }
-        let option = match match_tmux_option(argument) {
+        let option = match match_tmux_option(parsed.name) {
             Ok(Some(option)) => option,
             Ok(None) | Err(()) if options.has("-q") => return Ok(Execution::default()),
             Ok(None) => {
@@ -3099,6 +3159,9 @@ impl MuxEngine {
                 )));
             }
         };
+        if option.is_array {
+            return Ok(Execution::default());
+        }
         if option.default.is_none() {
             return Ok(Execution::default());
         }
@@ -3114,9 +3177,10 @@ impl MuxEngine {
             return Ok(Execution::default());
         };
         let mut lines = Vec::new();
+        let name = indexed_option_name(option.name, parsed.index.as_deref());
         push_shown_option(
             &mut lines,
-            option.name,
+            &name,
             &value,
             option
                 .default
@@ -3430,9 +3494,30 @@ impl MuxEngine {
             "status-left" => self.status.left.clone(),
             "status-right" => self.status.right.clone(),
             "synchronize-panes" => tmux_flag(self.state.global_synchronize_panes()).to_owned(),
+            "update-environment" => UPDATE_ENVIRONMENT_DEFAULT.to_owned(),
             "word-separators" => self.global_word_separators.clone(),
             _ => return None,
         })
+    }
+
+    fn seed_session_environment(&mut self, session: SessionId) {
+        let environment = UPDATE_ENVIRONMENT_DEFAULT
+            .split_ascii_whitespace()
+            .map(|name| {
+                let value = self
+                    .global_environment
+                    .get(name)
+                    .and_then(|entry| entry.value.clone());
+                (
+                    name.to_owned(),
+                    EnvironmentEntry {
+                        value,
+                        hidden: false,
+                    },
+                )
+            })
+            .collect();
+        self.session_environments.insert(session, environment);
     }
 
     fn native_option_readback(&self, name: &str) -> (String, bool) {
@@ -4259,6 +4344,10 @@ fn push_shown_option(
         value.to_owned()
     };
     lines.push(format!("{name} {value}"));
+}
+
+fn indexed_option_name(name: &str, index: Option<&str>) -> String {
+    index.map_or_else(|| name.to_owned(), |index| format!("{name}[{index}]"))
 }
 
 fn tmux_args_escape(value: &str) -> String {
@@ -5493,6 +5582,80 @@ mod tests {
     }
 
     #[test]
+    fn command_targeting_does_not_change_the_most_recent_session() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-d", "-s", "A"]))
+            .expect("first session");
+        let first = context.session.expect("first session");
+        engine
+            .execute(&mut context, &command("new-session", &["-d", "-s", "B"]))
+            .expect("second session");
+        let second = context.session.expect("second session");
+        let (session, window, pane) = engine.state.most_recent_context().expect("recent context");
+        let mut command_context = ExecutionContext {
+            session: Some(session),
+            window: Some(window),
+            pane: Some(pane),
+        };
+
+        engine
+            .execute(
+                &mut command_context,
+                &command("select-window", &["-t", "A:0"]),
+            )
+            .expect("target first session");
+
+        assert_eq!(command_context.session, Some(first));
+        assert_eq!(
+            engine.state.most_recent_context().map(|context| context.0),
+            Some(second)
+        );
+    }
+
+    #[test]
+    fn most_recent_session_controls_empty_session_window_targets() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-d", "-s", "A"]))
+            .expect("first session");
+        engine
+            .execute(&mut context, &command("new-window", &["-d", "-t", "A"]))
+            .expect("second window in first session");
+        engine
+            .execute(&mut context, &command("new-session", &["-d", "-s", "B"]))
+            .expect("second session");
+        let (session, window, pane) = engine.state.most_recent_context().expect("recent context");
+        let mut command_context = ExecutionContext {
+            session: Some(session),
+            window: Some(window),
+            pane: Some(pane),
+        };
+        engine
+            .execute(
+                &mut command_context,
+                &command("select-window", &["-t", "A:0"]),
+            )
+            .expect("target first session");
+
+        let (session, window, pane) = engine.state.most_recent_context().expect("recent context");
+        let mut followup_context = ExecutionContext {
+            session: Some(session),
+            window: Some(window),
+            pane: Some(pane),
+        };
+        assert!(matches!(
+            engine.execute(
+                &mut followup_context,
+                &command("list-panes", &["-t", ":1"]),
+            ),
+            Err(ServerError::WindowNotFound(target)) if target == "1"
+        ));
+    }
+
+    #[test]
     fn first_window_uses_the_default_extent() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -6040,6 +6203,38 @@ mod tests {
                 session,
                 detach_others: true,
             }]
+        );
+    }
+
+    #[test]
+    fn session_listing_is_name_sorted_but_the_s_loop_stays_creation_sorted() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        for name in ["w", "A", "B"] {
+            engine
+                .execute(&mut context, &command("new-session", &["-d", "-s", name]))
+                .unwrap();
+        }
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("list-sessions", &["-F", "#{session_name}"]),
+                )
+                .unwrap()
+                .output,
+            "A\nB\nw"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("display-message", &["-p", "#{S:#{session_name} }"]),
+                )
+                .unwrap()
+                .output,
+            "w A B "
         );
     }
 
@@ -8617,6 +8812,233 @@ mod tests {
     }
 
     #[test]
+    fn option_table_defaults_match_the_engine_except_history_limit() {
+        let engine = MuxEngine::default();
+        let mismatches = tmux_options()
+            .filter_map(|option| option.default.map(|default| (option, default)))
+            .filter_map(|(option, default)| {
+                let runtime = engine
+                    .global_tmux_option_value(option.name)
+                    .unwrap_or_else(|| panic!("missing runtime default for {}", option.name));
+                (runtime != default.value()).then_some(option.name)
+            })
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(mismatches, BTreeSet::from(["history-limit"]));
+    }
+
+    #[test]
+    fn status_readback_uses_the_pin_defaults() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "status-left"]),
+                )
+                .unwrap()
+                .output,
+            "status-left \"[#{session_name}] \""
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "status-right"]),
+                )
+                .unwrap()
+                .output,
+            "status-right \"#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\\\"#{=21:pane_title}\\\" %H:%M %d-%b-%y\""
+        );
+    }
+
+    #[test]
+    fn fed_mode_keys_default_precedes_explicit_configuration() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine.set_default_mode_keys("vi").unwrap();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let pane = context.pane.expect("pane");
+
+        assert_eq!(
+            engine.copy_mode_table_for_pane(pane).unwrap(),
+            "copy-mode-vi"
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-options", &["-g", "mode-keys"]),)
+                .unwrap()
+                .output,
+            "mode-keys vi"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-gw", "mode-keys", "emacs"]),
+            )
+            .unwrap();
+        assert_eq!(engine.copy_mode_table_for_pane(pane).unwrap(), "copy-mode");
+    }
+
+    #[test]
+    fn indexed_option_spellings_route_like_the_pin() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+
+        for args in [
+            &["-g", "status-format", "value"] as &[&str],
+            &["-g", "status-format[0]", "value"],
+            &["-g", "command-alias[0]", "value"],
+            &["-g", "terminal-features[0]", "value"],
+            &["-g", "update-environment[0]", "value"],
+            &["-gw", "pane-colors[0]", "value"],
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("set-option", args))
+                    .unwrap(),
+                Execution::default()
+            );
+        }
+        for argument in ["status-format", "status-format[0]", "pane-colors[0]"] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", &["-g", argument]),)
+                    .unwrap()
+                    .output,
+                ""
+            );
+        }
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "@plain", "solo"]),
+            )
+            .unwrap();
+        for index in ["0", "7", "key"] {
+            let spelling = format!("@plain[{index}]");
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", &["-gv", &spelling]),)
+                    .unwrap()
+                    .output,
+                "solo"
+            );
+        }
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "@plain[000]"]),
+                )
+                .unwrap()
+                .output,
+            "@plain[0] solo"
+        );
+
+        for args in [
+            &["-g", "@arr[0]", "first"] as &[&str],
+            &["-gq", "@arr[0]", "first"],
+            &["-g", "base-index[0]", "1"],
+            &["-gq", "base-index[0]", "1"],
+            &["-g", "escape-time[0]", "1"],
+        ] {
+            let spelling = args[1];
+            assert!(matches!(
+                engine.execute(&mut context, &command("set-option", args)),
+                Err(ServerError::InvalidCommand(message))
+                    if message == format!("not an array: {spelling}")
+            ));
+        }
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "base-index[000]"]),
+                )
+                .unwrap()
+                .output,
+            "base-index[0] 0"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "escape-time[0]"]),
+                )
+                .unwrap()
+                .output,
+            ""
+        );
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("show-options", &["-g", "status-format[]"]),
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "invalid option: status-format[]"
+        ));
+    }
+
+    #[test]
+    fn plain_option_listings_expose_only_tmux_and_user_names() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        for args in [
+            &["-s", "@listed", "server"] as &[&str],
+            &["-g", "@listed", "global-session"],
+            &["@listed", "session"],
+            &["-gw", "@listed", "global-window"],
+            &["-w", "@listed", "window"],
+            &["-p", "@listed", "pane"],
+        ] {
+            engine
+                .execute(&mut context, &command("set-option", args))
+                .unwrap();
+        }
+        let tmux_names = tmux_options()
+            .map(|option| option.name)
+            .collect::<BTreeSet<_>>();
+        for args in [&["-s"] as &[&str], &["-g"], &[], &["-gw"], &["-w"], &["-p"]] {
+            let output = engine
+                .execute(&mut context, &command("show-options", args))
+                .unwrap()
+                .output;
+            assert!(output.lines().any(|line| line.starts_with("@listed ")));
+            for line in output.lines() {
+                let name = line
+                    .split_ascii_whitespace()
+                    .next()
+                    .expect("listed option name")
+                    .trim_end_matches('*');
+                assert!(name.starts_with('@') || tmux_names.contains(name), "{line}");
+                assert!(!is_native_option(name), "{line}");
+            }
+        }
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-s", "history-trickle"]),
+                )
+                .unwrap()
+                .output,
+            "history-trickle 2000"
+        );
+    }
+
+    #[test]
     fn user_options_are_exact_pure_storage_at_every_scope() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -8819,6 +9241,60 @@ mod tests {
             ),
             Err(ServerError::InvalidCommand(message)) if message == "unknown variable: MISSING"
         ));
+    }
+
+    #[test]
+    fn global_environment_seed_populates_session_update_markers() {
+        let mut engine = MuxEngine::default();
+        engine.seed_global_environment([
+            ("DISPLAY", ":7"),
+            ("SSH_AUTH_SOCK", "/tmp/agent.sock"),
+            ("PHASE4D_EXTRA", "global"),
+        ]);
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.expect("session");
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-environment", &["-g", "PHASE4D_EXTRA"]),
+                )
+                .unwrap()
+                .output,
+            "PHASE4D_EXTRA=global"
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-environment", &["KRB5CCNAME"]),)
+                .unwrap()
+                .output,
+            "-KRB5CCNAME"
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-environment", &[]))
+                .unwrap()
+                .output
+                .lines()
+                .count(),
+            13
+        );
+        let environment = engine
+            .environment_for_session(session)
+            .unwrap()
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(environment["DISPLAY"].as_deref(), Some(":7"));
+        assert_eq!(
+            environment["SSH_AUTH_SOCK"].as_deref(),
+            Some("/tmp/agent.sock")
+        );
+        assert_eq!(environment["KRB5CCNAME"], None);
+        assert_eq!(environment["PHASE4D_EXTRA"].as_deref(), Some("global"));
     }
 
     #[test]

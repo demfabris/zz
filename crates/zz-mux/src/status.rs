@@ -4,8 +4,8 @@ pub use crate::formats::{
     FormatUniverse, StatusContext, StatusHooks, expand_format_values, expand_status,
 };
 
-pub const DEFAULT_STATUS_LEFT: &str = "";
-pub const DEFAULT_STATUS_RIGHT: &str = "";
+pub const DEFAULT_STATUS_LEFT: &str = crate::tmux_options::STATUS_LEFT_DEFAULT;
+pub const DEFAULT_STATUS_RIGHT: &str = crate::tmux_options::STATUS_RIGHT_DEFAULT;
 pub const DEFAULT_STATUS_INTERVAL: Duration = Duration::from_secs(15);
 pub const MAX_STATUS_FORMAT_BYTES: usize = 4 * 1024;
 

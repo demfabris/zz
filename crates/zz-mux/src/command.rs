@@ -6,8 +6,8 @@ use std::{
 };
 
 use zz_protocol::{
-    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind, CommandInvocation,
-    CommandSpec, DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND,
+    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, COMMAND_SPECS, ChooseTreeKind,
+    CommandInvocation, CommandSpec, DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND,
     DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken,
     MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, PaneId, PaneKindSnapshot,
     ServerError, SessionId, TerminalUiCommand, WindowId, normalize_browser_profile_name,
@@ -20,8 +20,12 @@ use zz_terminal::{
 
 use crate::{
     Binding, KeyTables, LayoutPreset, MuxState, PaneDirection, PaneKind, SplitPlacement,
-    SplitSize as LayoutSplitSize, StatusFormats, StatusOption, canonical_command, command_spec,
-    formats::{CommandHooks, FormatContext, FormatType, StatusHooks, expand_format_with_hooks},
+    SplitSize as LayoutSplitSize, StatusContext, StatusFormats, StatusOption, canonical_command,
+    command_spec,
+    formats::{
+        CommandHooks, FormatContext, FormatType, StatusHooks, expand_format_time_with_hooks,
+        expand_format_with_hooks,
+    },
     layout::PANE_MAXIMUM,
     model::DEFAULT_WINDOW_EXTENT,
     tmux_options::{
@@ -36,6 +40,8 @@ const MAX_COMMAND_PROMPT_TEMPLATE_BYTES: usize = 8 * 1024;
 const DEFAULT_DISPLAY_PANES_DURATION_MS: u32 = 1_000;
 const DEFAULT_DISPLAY_MESSAGE: &str =
     "[#{session_name}] #{window_index}:#{window_name}, current pane #{pane_index}";
+const DEFAULT_LIST_COMMANDS_FORMAT: &str =
+    "#{command_list_name}#{?command_list_alias, (#{command_list_alias}),} #{command_list_usage}";
 pub const DEFAULT_BUFFER_LIMIT: usize = 50;
 const MAX_BUFFER_LIMIT: usize = i32::MAX.cast_unsigned() as usize;
 const DEFAULT_HISTORY_TRICKLE: usize = 2_000;
@@ -176,6 +182,47 @@ pub enum DetachScope {
 pub struct Execution {
     pub output: String,
     pub effects: Vec<MuxEffect>,
+}
+
+struct ListCommandHooks<'a, H> {
+    inner: &'a mut H,
+    spec: &'a CommandSpec,
+}
+
+impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
+    fn strftime(&mut self, literal: &str) -> String {
+        self.inner.strftime(literal)
+    }
+
+    fn shell(&mut self, command: &str) -> String {
+        self.inner.shell(command)
+    }
+
+    fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        match name {
+            "command_list_name" => Some(self.spec.name.to_owned()),
+            "command_list_alias" => Some(
+                self.spec
+                    .aliases
+                    .first()
+                    .copied()
+                    .unwrap_or_default()
+                    .to_owned(),
+            ),
+            "command_list_usage" => Some(self.spec.usage.to_owned()),
+            _ => self.inner.variable(name, context),
+        }
+    }
+
+    fn pane_search(
+        &mut self,
+        pane: Option<PaneId>,
+        pattern: &str,
+        regex: bool,
+        ignore_case: bool,
+    ) -> usize {
+        self.inner.pane_search(pane, pattern, regex, ignore_case)
+    }
 }
 
 impl Execution {
@@ -750,6 +797,10 @@ impl MuxEngine {
             "attach-session" => self.attach_session(context, &command.args)?,
             "has-session" => self.has_session(context, &command.args)?,
             "detach-client" => self.detach_client(context, &command.args)?,
+            "list-clients" | "refresh-client" | "show-messages" => {
+                parse_command_options(name, &command.args)?;
+                return Err(ServerError::UnsupportedCommand(name.to_owned()));
+            }
             "new-window" => self.new_window(context, &command.args, PaneKind::Terminal, hooks)?,
             "new-browser" => {
                 let (options, positional) = parse_command_options("new-browser", &command.args)?;
@@ -769,6 +820,9 @@ impl MuxEngine {
             "previous-window" => self.step_window(context, &command.args, -1)?,
             "last-window" => self.last_window(context, &command.args)?,
             "kill-window" => self.kill_window(context, &command.args)?,
+            "move-window" => self.move_window(context, &command.args)?,
+            "swap-window" => self.swap_window(context, &command.args)?,
+            "find-window" => self.find_window(context, &command.args)?,
             "split-picker" => self.split_picker(context, &command.args, hooks)?,
             "split-window" => self.split_window(context, &command.args, None, hooks)?,
             "split-browser" => self.split_browser(context, &command.args, hooks)?,
@@ -806,6 +860,7 @@ impl MuxEngine {
             "bind-key" => self.bind_key(&command.args)?,
             "unbind-key" => self.unbind_key(&command.args)?,
             "list-keys" => self.list_keys(&command.args)?,
+            "list-commands" => self.list_commands(context, &command.args, hooks)?,
             "set-option" => self.set_option(context, &command.args, false)?,
             "set-window-option" => self.set_option(context, &command.args, true)?,
             "show-options" => self.show_options(context, &command.args, false)?,
@@ -822,6 +877,11 @@ impl MuxEngine {
                         "reload-config does not take arguments".to_owned(),
                     ));
                 }
+            }
+            "start-server" => {
+                let (_, positional) = parse_command_options("start-server", &command.args)?;
+                reject_positionals("start-server", &positional)?;
+                Execution::default()
             }
             "kill-server" => {
                 parse_command_options("kill-server", &command.args)?;
@@ -1224,21 +1284,31 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-windows", args)?;
         reject_positionals("list-windows", &positional)?;
-        let session_id = self
+        let target_session = self
             .state
             .resolve_session(options.value("-t"), context.session)?;
-        let session = self
-            .state
-            .sessions
-            .get(&session_id)
-            .ok_or_else(|| ServerError::MissingTarget(session_id.to_string()))?;
-        if let Some(format) = options.value("-F") {
-            let output = session
-                .windows
-                .iter()
-                .filter_map(|window| self.state.windows.get(window))
-                .map(|window| {
-                    expand_format_with_hooks(
+        let session_ids = if options.has("-a") {
+            self.state
+                .sessions_by_name()
+                .into_iter()
+                .map(|session| session.id)
+                .collect::<Vec<_>>()
+        } else {
+            vec![target_session]
+        };
+        let mut output = Vec::new();
+        for session_id in session_ids {
+            let session = self
+                .state
+                .sessions
+                .get(&session_id)
+                .ok_or_else(|| ServerError::MissingTarget(session_id.to_string()))?;
+            for window_id in &session.windows {
+                let Some(window) = self.state.windows.get(window_id) else {
+                    continue;
+                };
+                if let Some(format) = options.value("-F") {
+                    output.push(expand_format_with_hooks(
                         format,
                         self,
                         FormatContext {
@@ -1249,33 +1319,30 @@ impl MuxEngine {
                             format_type: FormatType::Window,
                         },
                         hooks,
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            return Ok(Execution::output(output));
-        }
-        let output = session
-            .windows
-            .iter()
-            .filter_map(|id| self.state.windows.get(id))
-            .map(|window| {
+                    ));
+                    continue;
+                }
                 let active = if window.id == session.active_window {
                     '*'
                 } else {
                     '-'
                 };
-                format!(
-                    "{}: {}{} ({} panes) [id {}]",
+                let prefix = if options.has("-a") {
+                    format!("{}:", session.name)
+                } else {
+                    String::new()
+                };
+                output.push(format!(
+                    "{prefix}{}: {}{} ({} panes) [id {}]",
                     window.index,
                     window.name,
                     active,
                     window.panes.len(),
                     window.id
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+                ));
+            }
+        }
+        let output = output.join("\n");
         Ok(Execution::output(output))
     }
 
@@ -1515,6 +1582,170 @@ impl MuxEngine {
             self.renumber_session_if_enabled(session)?;
         }
         Ok(Execution::effect(MuxEffect::PanesRemoved(panes)))
+    }
+
+    fn move_window(
+        &mut self,
+        context: &mut ExecutionContext,
+        args: &[String],
+    ) -> Result<Execution, ServerError> {
+        let (options, positional) = parse_command_options("move-window", args)?;
+        reject_positionals("move-window", &positional)?;
+        if options.has("-r") {
+            let session = self
+                .state
+                .resolve_session(options.value("-t"), context.session)?;
+            let base_index = self.base_index_for_session(session);
+            self.state.renumber_windows(session, base_index)?;
+            return Ok(Execution::default());
+        }
+
+        let source = self.resolve_window(options.value("-s"), context.session, context.window)?;
+        let source_session = self.state.windows[&source].session;
+        let source_panes = self.state.windows[&source].pane_order().to_vec();
+        let destination = window_destination(&self.state, options.value("-t"), context)?;
+        let destination_session = destination.session;
+        let base_index = self.base_index_for_session(destination_session);
+        if options.value("-s").is_none() && self.renumber_windows_for_session(source_session) {
+            let removed_windows = usize::from(source_session != destination_session);
+            self.state.validate_renumber_capacity(
+                source_session,
+                self.base_index_for_session(source_session),
+                removed_windows,
+            )?;
+        }
+        let destination_index = if options.has("-a") || options.has("-b") {
+            let target = destination
+                .index
+                .and_then(|index| self.state.window_at_index(destination_session, index))
+                .unwrap_or(self.state.sessions[&destination_session].active_window);
+            let target_index = self.state.windows[&target].index;
+            let index = if options.has("-b") {
+                target_index
+            } else {
+                target_index
+                    .checked_add(1)
+                    .ok_or_else(|| ServerError::InvalidCommand("no free window index".to_owned()))?
+            };
+            self.state.shift_windows_up(destination_session, index)?;
+            index
+        } else {
+            destination.index.map_or_else(
+                || {
+                    self.state
+                        .next_window_index(destination_session, base_index)
+                },
+                Ok,
+            )?
+        };
+
+        let detached = options.has("-d");
+        let original_context = context.clone();
+        let removed = self.state.move_window(
+            source,
+            destination_session,
+            destination_index,
+            options.has("-k"),
+            !detached,
+        )?;
+        if options.value("-s").is_none() {
+            self.renumber_session_if_enabled(source_session)?;
+        }
+
+        if detached && original_context.window == Some(source) {
+            let window = if self.state.sessions.contains_key(&source_session) {
+                session_active_window(&self.state, source_session)?
+            } else {
+                session_active_window(&self.state, destination_session)?
+            };
+            *context =
+                ExecutionContext::for_pane(&self.state, window_active_pane(&self.state, window)?)
+                    .expect("moved window leaves a valid command context");
+        } else if !detached {
+            *context =
+                ExecutionContext::for_pane(&self.state, window_active_pane(&self.state, source)?)
+                    .expect("moved window has an active pane");
+        }
+
+        let mut effects = Vec::new();
+        if !removed.is_empty() {
+            effects.push(MuxEffect::PanesRemoved(removed));
+        }
+        if source_session != destination_session {
+            effects.extend(
+                source_panes
+                    .into_iter()
+                    .map(|pane| MuxEffect::PaneRelocated {
+                        pane,
+                        from: source_session,
+                        to: destination_session,
+                    }),
+            );
+        }
+        Ok(Execution {
+            output: String::new(),
+            effects,
+        })
+    }
+
+    fn swap_window(
+        &mut self,
+        context: &ExecutionContext,
+        args: &[String],
+    ) -> Result<Execution, ServerError> {
+        let (options, positional) = parse_command_options("swap-window", args)?;
+        reject_positionals("swap-window", &positional)?;
+        let source = self.resolve_window(options.value("-s"), context.session, context.window)?;
+        let target = self.resolve_window(options.value("-t"), context.session, context.window)?;
+        if source == target {
+            return Ok(Execution::default());
+        }
+        let source_session = self.state.windows[&source].session;
+        let target_session = self.state.windows[&target].session;
+        let source_panes = self.state.windows[&source].pane_order().to_vec();
+        let target_panes = self.state.windows[&target].pane_order().to_vec();
+        self.state.swap_windows(source, target, options.has("-d"))?;
+
+        let mut effects = Vec::new();
+        if source_session != target_session {
+            effects.extend(
+                source_panes
+                    .into_iter()
+                    .map(|pane| MuxEffect::PaneRelocated {
+                        pane,
+                        from: source_session,
+                        to: target_session,
+                    }),
+            );
+            effects.extend(
+                target_panes
+                    .into_iter()
+                    .map(|pane| MuxEffect::PaneRelocated {
+                        pane,
+                        from: target_session,
+                        to: source_session,
+                    }),
+            );
+        }
+        Ok(Execution {
+            output: String::new(),
+            effects,
+        })
+    }
+
+    fn find_window(
+        &self,
+        context: &ExecutionContext,
+        args: &[String],
+    ) -> Result<Execution, ServerError> {
+        let (options, positional) = parse_command_options("find-window", args)?;
+        if positional.len() != 1 {
+            return Err(ServerError::InvalidCommand(
+                "find-window requires exactly one match string".to_owned(),
+            ));
+        }
+        self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        Ok(Execution::default())
     }
 
     fn split_window(
@@ -2164,20 +2395,34 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-panes", args)?;
         reject_positionals("list-panes", &positional)?;
-        let window_id =
+        let target_window =
             self.resolve_window(options.value("-t"), context.session, context.window)?;
-        let window = self
-            .state
-            .windows
-            .get(&window_id)
-            .ok_or_else(|| ServerError::MissingTarget(window_id.to_string()))?;
-        if let Some(format) = options.value("-F") {
-            let output = window
-                .pane_order()
-                .iter()
-                .filter_map(|pane| window.panes.get(pane))
-                .map(|pane| {
-                    expand_format_with_hooks(
+        let target_session = self.state.windows[&target_window].session;
+        let window_ids = if options.has("-a") {
+            self.state
+                .sessions_by_name()
+                .into_iter()
+                .flat_map(|session| session.windows.iter().copied())
+                .collect::<Vec<_>>()
+        } else if options.has("-s") {
+            self.state.sessions[&target_session].windows.clone()
+        } else {
+            vec![target_window]
+        };
+        let mut output = Vec::new();
+        for window_id in window_ids {
+            let window = self
+                .state
+                .windows
+                .get(&window_id)
+                .ok_or_else(|| ServerError::MissingTarget(window_id.to_string()))?;
+            let session = &self.state.sessions[&window.session];
+            for pane_id in window.pane_order() {
+                let Some(pane) = window.panes.get(pane_id) else {
+                    continue;
+                };
+                if let Some(format) = options.value("-F") {
+                    output.push(expand_format_with_hooks(
                         format,
                         self,
                         FormatContext {
@@ -2188,17 +2433,9 @@ impl MuxEngine {
                             format_type: FormatType::Pane,
                         },
                         hooks,
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            return Ok(Execution::output(output));
-        }
-        let output = window
-            .pane_order()
-            .iter()
-            .filter_map(|pane| window.panes.get(pane))
-            .map(|pane| {
+                    ));
+                    continue;
+                }
                 let kind = match pane.kind {
                     PaneKind::Picker { .. } => "picker",
                     PaneKind::Terminal => "terminal",
@@ -2211,10 +2448,27 @@ impl MuxEngine {
                 } else {
                     '-'
                 };
-                format!("{}: {kind}{active} {}", pane.id, pane.title)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+                let prefix = if options.has("-a") {
+                    format!("{}:{}.", session.name, window.index)
+                } else if options.has("-s") {
+                    format!("{}.", window.index)
+                } else {
+                    String::new()
+                };
+                let pane_label = if options.has("-a") || options.has("-s") {
+                    self.pane_index(window_id, pane.id)
+                        .expect("listed pane has an index")
+                        .to_string()
+                } else {
+                    pane.id.to_string()
+                };
+                output.push(format!(
+                    "{prefix}{pane_label}: {kind}{active} {}",
+                    pane.title
+                ));
+            }
+        }
+        let output = output.join("\n");
         Ok(Execution::output(output))
     }
 
@@ -2807,7 +3061,7 @@ impl MuxEngine {
         } else {
             positional.join(" ")
         };
-        let text = expand_format_with_hooks(&format, self, format_context, hooks);
+        let text = expand_format_time_with_hooks(&format, self, format_context, hooks);
         if options.has("-p") {
             Ok(Execution::output(text))
         } else {
@@ -2901,6 +3155,50 @@ impl MuxEngine {
             .collect::<Vec<_>>()
             .join("\n");
         Ok(Execution::output(output))
+    }
+
+    fn list_commands(
+        &self,
+        context: &ExecutionContext,
+        args: &[String],
+        hooks: &mut impl StatusHooks,
+    ) -> Result<Execution, ServerError> {
+        let (options, positional) = parse_command_options("list-commands", args)?;
+        if positional.len() > 1 {
+            return Err(ServerError::InvalidCommand(
+                "list-commands accepts at most one command".to_owned(),
+            ));
+        }
+        let mut specs =
+            if let Some(name) = positional.first() {
+                vec![command_spec(name).ok_or_else(|| {
+                    ServerError::InvalidCommand(format!("unknown command: {name}"))
+                })?]
+            } else {
+                COMMAND_SPECS.iter().collect::<Vec<_>>()
+            };
+        specs.sort_by_key(|spec| spec.name);
+        let format = options.value("-F").unwrap_or(DEFAULT_LIST_COMMANDS_FORMAT);
+        let mut output = Vec::with_capacity(specs.len());
+        for spec in specs {
+            let mut item_hooks = ListCommandHooks {
+                inner: &mut *hooks,
+                spec,
+            };
+            output.push(expand_format_with_hooks(
+                format,
+                self,
+                FormatContext {
+                    session: context.session,
+                    window: context.window,
+                    pane: context.pane,
+                    active_session: context.session,
+                    format_type: FormatType::None,
+                },
+                &mut item_hooks,
+            ));
+        }
+        Ok(Execution::output(output.join("\n")))
     }
 
     fn set_option(
@@ -11253,6 +11551,415 @@ mod tests {
                 } if actual == axis
             ));
         }
+    }
+
+    #[test]
+    fn move_window_supports_insertion_replacement_and_cross_session_moves() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "alpha"]))
+            .unwrap();
+        let alpha = context.session.unwrap();
+        let main = context.window.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "alpha:1", "-n", "target"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "alpha:2", "-n", "moving"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "alpha:5", "-n", "spare"]),
+            )
+            .unwrap();
+        let target = engine.state.window_named(alpha, "target").unwrap();
+        let moving = engine.state.window_named(alpha, "moving").unwrap();
+        let spare = engine.state.window_named(alpha, "spare").unwrap();
+        let target_pane = engine.state.windows[&target].active_pane;
+
+        let snapshot = engine.state.snapshot();
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("move-window", &["-s", "alpha:spare", "-t", "alpha:2"]),
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "index in use: 2"
+        ));
+        assert_eq!(engine.state.snapshot(), snapshot);
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "move-window",
+                    &["-a", "-d", "-s", "alpha:spare", "-t", "alpha:target"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            window_layout(&engine, alpha),
+            ["0:0", "1:target", "2:spare", "3:moving"]
+        );
+        assert_eq!(engine.state.sessions[&alpha].active_window, main);
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "move-window",
+                    &["-b", "-s", "alpha:moving", "-t", "alpha:target"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            window_layout(&engine, alpha),
+            ["0:0", "1:moving", "2:target", "3:spare"]
+        );
+        assert_eq!(context.window, Some(moving));
+        assert_eq!(engine.state.sessions[&alpha].active_window, moving);
+
+        let replaced = engine
+            .execute(
+                &mut context,
+                &command(
+                    "move-window",
+                    &["-d", "-k", "-s", "alpha:spare", "-t", "alpha:2"],
+                ),
+            )
+            .unwrap();
+        assert!(
+            replaced
+                .effects
+                .contains(&MuxEffect::PanesRemoved(vec![target_pane]))
+        );
+        assert!(!engine.state.windows.contains_key(&target));
+        assert_eq!(
+            window_layout(&engine, alpha),
+            ["0:0", "1:moving", "2:spare"]
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "beta", "-n", "home"]),
+            )
+            .unwrap();
+        let beta = session_named(&engine.state, "beta").unwrap();
+        let spare_pane = engine.state.windows[&spare].active_pane;
+        let moved = engine
+            .execute(
+                &mut context,
+                &command("move-window", &["-d", "-s", "alpha:spare", "-t", "beta:4"]),
+            )
+            .unwrap();
+        assert!(moved.effects.contains(&MuxEffect::PaneRelocated {
+            pane: spare_pane,
+            from: alpha,
+            to: beta,
+        }));
+        assert_eq!(engine.state.windows[&spare].session, beta);
+        assert_eq!(engine.state.windows[&spare].index, 4);
+        assert_eq!(engine.state.sessions[&alpha].active_window, moving);
+        assert_eq!(engine.state.windows[&main].session, alpha);
+        assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
+    fn move_window_renumbers_from_base_index_and_preflights_option_compaction() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "base-index", "1"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "renumber-windows", "on"]),
+            )
+            .unwrap();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let work = context.session.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "work:3", "-n", "three"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-t", "work:5", "-n", "five"]),
+            )
+            .unwrap();
+        let five = context.window.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "remote"]),
+            )
+            .unwrap();
+        let remote = session_named(&engine.state, "remote").unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("select-window", &["-t", "work:five"]),
+            )
+            .unwrap();
+
+        engine
+            .execute(
+                &mut context,
+                &command("move-window", &["-d", "-t", "remote:4"]),
+            )
+            .unwrap();
+        assert_eq!(engine.state.windows[&five].session, remote);
+        assert_eq!(engine.state.windows[&five].index, 4);
+        assert_eq!(window_layout(&engine, work), ["1:1", "2:three"]);
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "work:9", "-n", "nine"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("move-window", &["-r", "-s", "missing", "-t", "work"]),
+            )
+            .unwrap();
+        assert_eq!(window_layout(&engine, work), ["1:1", "2:three", "3:nine"]);
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "base-index", "2147483647"]),
+            )
+            .unwrap();
+        let snapshot = engine.state.snapshot();
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("move-window", &["-t", "remote:7"]),
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "no free window index"
+        ));
+        assert_eq!(engine.state.snapshot(), snapshot);
+        assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
+    fn swap_window_exchanges_slots_and_dash_d_selects_destination_slots() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-s", "alpha", "-n", "first"]),
+            )
+            .unwrap();
+        let alpha = context.session.unwrap();
+        let first = context.window.unwrap();
+        let first_pane = context.pane.unwrap();
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "second"]))
+            .unwrap();
+        let second = context.window.unwrap();
+        let second_pane = context.pane.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("select-window", &["-t", "alpha:first"]),
+            )
+            .unwrap();
+
+        engine
+            .execute(
+                &mut context,
+                &command("swap-window", &["-s", "alpha:first", "-t", "alpha:second"]),
+            )
+            .unwrap();
+        assert_eq!(engine.state.windows[&first].index, 1);
+        assert_eq!(engine.state.windows[&second].index, 0);
+        assert_eq!(engine.state.sessions[&alpha].active_window, second);
+        assert_eq!(engine.state.windows[&first].active_pane, first_pane);
+        assert_eq!(engine.state.windows[&second].active_pane, second_pane);
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "swap-window",
+                    &["-d", "-s", "alpha:first", "-t", "alpha:second"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(engine.state.windows[&first].index, 0);
+        assert_eq!(engine.state.windows[&second].index, 1);
+        assert_eq!(engine.state.sessions[&alpha].active_window, first);
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "beta", "-n", "third"]),
+            )
+            .unwrap();
+        let beta = session_named(&engine.state, "beta").unwrap();
+        let third = engine.state.window_named(beta, "third").unwrap();
+        let third_pane = engine.state.windows[&third].active_pane;
+        let swapped = engine
+            .execute(
+                &mut context,
+                &command("swap-window", &["-s", "alpha:first", "-t", "beta:third"]),
+            )
+            .unwrap();
+        assert!(swapped.effects.contains(&MuxEffect::PaneRelocated {
+            pane: first_pane,
+            from: alpha,
+            to: beta,
+        }));
+        assert!(swapped.effects.contains(&MuxEffect::PaneRelocated {
+            pane: third_pane,
+            from: beta,
+            to: alpha,
+        }));
+        assert_eq!(engine.state.windows[&first].session, beta);
+        assert_eq!(engine.state.windows[&third].session, alpha);
+        assert_eq!(engine.state.sessions[&alpha].active_window, third);
+        assert_eq!(engine.state.sessions[&beta].active_window, first);
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "swap-window",
+                    &["-d", "-s", &first.to_string(), "-t", &third.to_string()],
+                ),
+            )
+            .unwrap();
+        assert_eq!(engine.state.windows[&first].session, alpha);
+        assert_eq!(engine.state.windows[&third].session, beta);
+        assert_eq!(engine.state.sessions[&alpha].active_window, first);
+        assert_eq!(engine.state.sessions[&beta].active_window, third);
+        assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
+    fn gap_queries_are_silent_sorted_and_catalog_backed() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "w"]))
+            .unwrap();
+        engine
+            .execute(&mut context, &command("new-session", &["-d", "-s", "B"]))
+            .unwrap();
+        engine
+            .execute(&mut context, &command("new-session", &["-d", "-s", "A"]))
+            .unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-d", "-t", "B:0"]))
+            .unwrap();
+        engine
+            .execute(&mut context, &command("new-window", &["-d", "-t", "B:2"]))
+            .unwrap();
+
+        let windows = engine
+            .execute(
+                &mut context,
+                &command(
+                    "list-windows",
+                    &["-a", "-F", "#{session_name}:#{window_index}"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(windows.output, "A:0\nB:0\nB:2\nw:0");
+        let panes = engine
+            .execute(
+                &mut context,
+                &command(
+                    "list-panes",
+                    &["-a", "-F", "#{session_name}:#{window_index}.#{pane_index}"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(panes.output, "A:0.0\nB:0.0\nB:0.1\nB:2.0\nw:0.0");
+        let session_panes = engine
+            .execute(
+                &mut context,
+                &command(
+                    "list-panes",
+                    &[
+                        "-s",
+                        "-t",
+                        "B:0",
+                        "-F",
+                        "#{session_name}:#{window_index}.#{pane_index}",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert_eq!(session_panes.output, "B:0.0\nB:0.1\nB:2.0");
+
+        for pattern in ["ma*", "zzz*"] {
+            let found = engine
+                .execute(
+                    &mut context,
+                    &command("find-window", &["-CiNrTZ", "-t", "w:0", pattern]),
+                )
+                .unwrap();
+            assert_eq!(found, Execution::default());
+        }
+
+        let row = engine
+            .execute(&mut context, &command("list-commands", &["move-window"]))
+            .unwrap();
+        assert_eq!(
+            row.output,
+            "move-window (movew) [-abdkr] [-s src-window] [-t dst-window]"
+        );
+        let formatted = engine
+            .execute(
+                &mut context,
+                &command(
+                    "list-commands",
+                    &[
+                        "-F",
+                        "#{command_list_name}|#{command_list_alias}|#{command_list_usage}",
+                        "start",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert_eq!(formatted.output, "start-server|start|");
+        let commands = engine
+            .execute(&mut context, &command("list-commands", &[]))
+            .unwrap();
+        let rows = commands.output.lines().collect::<Vec<_>>();
+        assert_eq!(rows.len(), COMMAND_SPECS.len());
+        assert!(rows.windows(2).all(|rows| rows[0] < rows[1]));
+        assert!(rows.contains(&"kill-server "));
+        assert!(rows.contains(&"list-commands (lscm) [-F format] [command]"));
+        assert!(rows.contains(&"start-server (start) "));
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("start", &[]))
+                .unwrap(),
+            Execution::default()
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: tmux divergence matrix
-description: "Every known divergence from tmux at the pinned reference commit: the 34 missing commands and why, behavioral gaps on the implemented surface, the 15-of-180 options coverage, and the protocol-level differences."
+description: "Every known divergence from tmux at the pinned reference commit: the 26 missing commands and why, behavioral gaps on the implemented surface, the 15-of-180 options coverage, and the protocol-level differences."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-17T00:00:00-03:00
@@ -17,7 +17,7 @@ complements the [compatibility philosophy](/tmux/tmux-compat.md) (the contract) 
 
 **State anchor:** the "implemented surface" section reflects
 [PR #4](https://github.com/demfabris/zz/pull/4) (`fix/tmux-compat-hunt-v2`, merged 2026-08-16
-as `53b523e`) plus the phase 3d layout-string and phase 4a–4d source dated 2026-08-17. PR #4 corrected the
+as `53b523e`) plus the phase 3d layout-string and phase 4a–4e source dated 2026-08-17. PR #4 corrected the
 hunt-claim regressions, including two implemented backwards
 (`new-window -t` bare-target order, positional targets on the kill commands) plus the
 `kill-session -C`, `new-session -A`, `resize-pane` attached-adjustment, `send-keys -H`/`-l`,
@@ -27,14 +27,15 @@ The one-line read: everything marked **silent** below is a bug by zz's own doctr
 must mean what tmux means, or error loudly); everything loud is a choice; the "genuine gaps"
 command block plus the remaining options grind is the actual drop-in backlog.
 
-# Missing commands (34 of ~92)
+# Missing commands (26 of ~92)
 
-zz's engine catalog holds 63 verbs, 13 of them zz-native, so 50 tmux verbs run in
-[`MuxEngine`](/tmux/commands.md); 8 more are implemented daemon-side because they need IO
-(`capture-pane` and `set-`/`show-`/`list-`/`load-`/`save-`/`delete-`/`paste-buffer`). That
-leaves 34 of tmux's ~92 commands absent, in three deliberate groups.
+zz's shared catalog holds 71 verbs: 14 zz-native and 57 tmux. `MuxEngine` runs 54 of the tmux
+verbs, while the daemon runs the cataloged `list-clients`, `refresh-client`, and `show-messages`
+because they need client or message state. The daemon also implements 8 uncataloged tmux verbs:
+`capture-pane` and `set-`/`show-`/`list-`/`load-`/`save-`/`delete-`/`paste-buffer`. That leaves 26
+of tmux's ~92 commands absent, in three deliberate groups.
 
-## Refused — config must never execute programs (11)
+## Refused — config must never execute programs (10)
 
 The command catalog is the security boundary: a sourced config can only invoke cataloged
 commands, so these are reported and skipped, never run. See the roadmap's never-list for the
@@ -49,9 +50,8 @@ doctrine.
 | `pipe-pane` | Streams pane output into a shell command. |
 | `lock-client` / `lock-server` / `lock-session` | Lock by spawning an external lock program. |
 | `server-access` | Per-user ACLs for a shared server socket. |
-| `start-server` | Explicit server start; the zz daemon has its own lifecycle. |
 
-## Superseded by native GUI chrome (8)
+## Superseded by native GUI chrome (7)
 
 | Command | What it does in tmux |
 | --- | --- |
@@ -61,22 +61,16 @@ doctrine.
 | `customize-mode` | Interactive options browser. |
 | `choose-client` | Chooser listing attached clients. |
 | `clock-mode` | Full-pane clock. |
-| `refresh-client` | Force redraw / control-mode subscriptions. |
 | `suspend-client` | Ctrl-Z the attaching client. |
 
-## Genuine gaps — buildable, nothing blocks them (14)
+## Genuine gaps — buildable, nothing blocks them (8)
 
 | Command | What it does | Weight |
 | --- | --- | --- |
 | `switch-client` | Move the attached client to another session; scripts use `-t` constantly. | high |
-| `move-window` / `swap-window` | Relocate / exchange windows. | medium |
 | `respawn-pane` / `respawn-window` | Restart the dead command in place (`remain-on-exit` workflow). | medium |
-| `find-window` | Search windows by name/title/content. | medium |
-| `list-clients` | Enumerate attached clients. | low |
-| `list-commands` | Print the command list (trivial: the catalog exists). | low |
 | `link-window` / `unlink-window` | One window shared into several sessions; zz has no linked-window model. | low |
 | `resize-window` | Manual window sizing decoupled from clients. | low |
-| `show-messages` | Server message log. | low |
 | `clear-prompt-history` / `show-prompt-history` | Prompt history management. | low |
 
 Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassessed.
@@ -85,6 +79,9 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 
 | Where | Divergence | Loud or silent? |
 | --- | --- | --- |
+| `find-window` | Detached CLI calls validate the target and return success with no output, including for zero matches. zz does not open tmux's attached-client window-tree chooser. | **silent**, bounded |
+| `list-commands` | zz lists the 71 `COMMAND_SPECS` rows in tmux's line format with pin usage strings. It omits unimplemented tmux commands so feature probes can take their fallback path. | **silent**, deliberate |
+| `refresh-client` | Detached command clients receive tmux's exact `no current client` error. zz does not implement attached-client redraws or control-mode subscriptions. | loud |
 | `copy-mode` | `-k -H -S -s` rejected (`-e`/`-q`/`-M` — the stock-binding trio — are implemented). | loud |
 | `source-file` | No `-` stdin (refused loudly), no `-F`/`-n`/`-v`. Globbing works. | loud |
 | `show-options` on unimplemented names | Catalogued scalar options without zz storage have no invented value and print nothing, including under `-A`. Bare and indexed array spellings use the same empty-success path. Implemented scalars and every stored `@` user option retain normal scope and inheritance readback. | **silent**, honest omission |
@@ -129,14 +126,14 @@ inside a generic “unsupported formats” claim.
 | `client_key_table` | The per-client key engine does not expose its active table as a format fact. | **silent** |
 | `client_last_session` | The client's previous session is not retained as a format fact. | **silent** |
 | `client_mode_format` | No tmux client-mode row formatter; zz's client surfaces are native. | **silent** |
-| `client_name` | zz client names are not fed through the format hook. | **silent** |
-| `client_session` | The attached session name is not exposed through this client-scoped alias. | **silent** |
+| `client_name` | `list-clients` supplies the registry name; status-line expansion still lacks a client row context. | **silent** |
+| `client_session` | `list-clients` supplies the attached session name; status-line expansion still lacks a client row context. | **silent** |
 | `client_termfeatures` | Terminal feature negotiation is not represented as a tmux format string. | **silent** |
 | `client_termname` | The attaching client's `TERM` name is not retained as a format fact. | **silent** |
 | `client_termtype` | tmux's terminal-type classification has no zz equivalent. | **silent** |
-| `client_theme` | Client light/dark theme state is not exposed to the format engine. | **silent** |
+| `client_theme` | `list-clients` supplies the retained light/dark theme; status-line expansion still lacks a client row context. | **silent** |
 | `client_tty` | Native and remote zz clients do not provide a tmux attach-client TTY path. | **silent** |
-| `client_user` | The attach-client user is not fed into format expansion. | **silent** |
+| `client_user` | `list-clients` uses the daemon user because the local socket does not retain a separate attach-client user. | **silent**, bounded |
 | `config_files` | The config loader does not retain tmux's printable loaded-file list. | **silent** |
 | `cursor_character` | The glyph under the terminal cursor is not mirrored into mux facts. | **silent** |
 | `cursor_colour` | Cursor color is not mirrored into mux facts. | **silent** |

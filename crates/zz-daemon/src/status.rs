@@ -40,6 +40,8 @@ pub(crate) struct StatusRequest {
 pub(crate) struct FormatHookFacts {
     pub(crate) terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
     pub(crate) buffer: Option<BufferFormatFacts>,
+    pub(crate) client: Option<ClientFormatFacts>,
+    pub(crate) message: Option<MessageFormatFacts>,
 }
 
 #[derive(Clone)]
@@ -47,6 +49,27 @@ pub(crate) struct BufferFormatFacts {
     pub(crate) name: String,
     pub(crate) data: Arc<[u8]>,
     pub(crate) created: SystemTime,
+}
+
+#[derive(Clone)]
+pub(crate) struct ClientFormatFacts {
+    pub(crate) name: String,
+    pub(crate) session: String,
+    pub(crate) width: u16,
+    pub(crate) height: u16,
+    pub(crate) termname: String,
+    pub(crate) uid: String,
+    pub(crate) user: String,
+    pub(crate) flags: String,
+    pub(crate) theme: String,
+    pub(crate) line: usize,
+}
+
+#[derive(Clone)]
+pub(crate) struct MessageFormatFacts {
+    pub(crate) number: u64,
+    pub(crate) text: String,
+    pub(crate) time: SystemTime,
 }
 
 impl StatusRenderer {
@@ -206,6 +229,37 @@ impl<'a> DaemonFormatHooks<'a> {
 }
 
 impl StatusHooks for DaemonFormatHooks<'_> {
+    /// Byte parity with the pin requires the PLATFORM's strftime: tmux's
+    /// `format_strftime` is plain libc strftime, and libcs disagree about
+    /// unknown `%` sequences (glibc passes them through, BSD eats them), so a
+    /// reimplementation cannot match both. Zero return maps to empty output,
+    /// mirroring format.c's too-long/empty handling. This is the workspace's
+    /// only unsafe block; it exists because matching the platform means
+    /// calling the platform.
+    #[cfg(unix)]
+    #[allow(unsafe_code)]
+    fn strftime(&mut self, literal: &str) -> String {
+        let Ok(format) = std::ffi::CString::new(literal) else {
+            return literal.to_owned();
+        };
+        let time = self.now.timestamp() as libc::time_t;
+        let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
+        if unsafe { libc::localtime_r(&raw const time, &raw mut tm) }.is_null() {
+            return literal.to_owned();
+        }
+        let mut buffer = [0u8; 8192];
+        let written = unsafe {
+            libc::strftime(
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                format.as_ptr(),
+                &raw const tm,
+            )
+        };
+        String::from_utf8_lossy(&buffer[..written]).into_owned()
+    }
+
+    #[cfg(not(unix))]
     fn strftime(&mut self, literal: &str) -> String {
         let Ok(items) = chrono::format::StrftimeItems::new(literal).parse() else {
             return literal.to_owned();
@@ -240,20 +294,45 @@ impl StatusHooks for DaemonFormatHooks<'_> {
     }
 
     fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
-        let buffer = self.facts.buffer.as_ref()?;
-        Some(match name {
-            "buffer_created" => buffer
-                .created
-                .duration_since(UNIX_EPOCH)
-                .ok()?
-                .as_secs()
-                .to_string(),
-            "buffer_full" => buffer_full(&buffer.data),
-            "buffer_name" => buffer.name.clone(),
-            "buffer_sample" => buffer_sample(&buffer.data),
-            "buffer_size" => buffer.data.len().to_string(),
-            _ => return None,
-        })
+        match name {
+            "buffer_created" => Some(
+                self.facts
+                    .buffer
+                    .as_ref()?
+                    .created
+                    .duration_since(UNIX_EPOCH)
+                    .ok()?
+                    .as_secs()
+                    .to_string(),
+            ),
+            "buffer_full" => Some(buffer_full(&self.facts.buffer.as_ref()?.data)),
+            "buffer_name" => Some(self.facts.buffer.as_ref()?.name.clone()),
+            "buffer_sample" => Some(buffer_sample(&self.facts.buffer.as_ref()?.data)),
+            "buffer_size" => Some(self.facts.buffer.as_ref()?.data.len().to_string()),
+            "client_flags" => Some(self.facts.client.as_ref()?.flags.clone()),
+            "client_height" => Some(self.facts.client.as_ref()?.height.to_string()),
+            "client_name" => Some(self.facts.client.as_ref()?.name.clone()),
+            "client_session" => Some(self.facts.client.as_ref()?.session.clone()),
+            "client_termname" => Some(self.facts.client.as_ref()?.termname.clone()),
+            "client_theme" => Some(self.facts.client.as_ref()?.theme.clone()),
+            "client_uid" => Some(self.facts.client.as_ref()?.uid.clone()),
+            "client_user" => Some(self.facts.client.as_ref()?.user.clone()),
+            "client_width" => Some(self.facts.client.as_ref()?.width.to_string()),
+            "line" => Some(self.facts.client.as_ref()?.line.to_string()),
+            "message_number" => Some(self.facts.message.as_ref()?.number.to_string()),
+            "message_text" => Some(self.facts.message.as_ref()?.text.clone()),
+            "message_time" => Some(
+                self.facts
+                    .message
+                    .as_ref()?
+                    .time
+                    .duration_since(UNIX_EPOCH)
+                    .ok()?
+                    .as_secs()
+                    .to_string(),
+            ),
+            _ => None,
+        }
     }
 
     fn pane_search(
@@ -584,6 +663,7 @@ mod tests {
         let facts = FormatHookFacts {
             terminals: Arc::new(BTreeMap::from([(pane, terminal)])),
             buffer: None,
+            ..FormatHookFacts::default()
         };
         let context = StatusContext {
             pane_id: pane.to_string(),

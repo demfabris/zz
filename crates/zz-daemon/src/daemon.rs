@@ -20,8 +20,8 @@ use parking_lot::{Condvar, Mutex};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision, KeyEngine,
-    KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts, expand_format_values,
-    parse_config,
+    KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts, canonical_command,
+    expand_format_values, parse_config,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -66,8 +66,8 @@ use crate::{
     paths::{default_mux_config, home_directory, is_default_mux_config},
     shell_process,
     status::{
-        BufferFormatFacts, DaemonFormatHooks, FormatHookFacts, StatusRenderer, StatusRequest,
-        host_names, status_context,
+        BufferFormatFacts, ClientFormatFacts, DaemonFormatHooks, FormatHookFacts,
+        MessageFormatFacts, StatusRenderer, StatusRequest, host_names, status_context,
     },
     transport::{LocalTransport, Transport, TransportListener, TransportStream},
 };
@@ -103,6 +103,7 @@ const MAX_COMMAND_PROMPT_HISTORY: usize = 100;
 const MAX_COMMAND_PROMPT_HISTORY_SNAPSHOT_ITEMS: usize = 20;
 const MAX_COMMAND_PROMPT_HISTORY_SNAPSHOT_BYTES: usize = 32 * 1024;
 const MAX_COMMAND_PROMPT_OUTPUT_BYTES: usize = 1024 * 1024;
+const MESSAGE_LIMIT: usize = 1_000;
 const COMMAND_PROMPT_OUTPUT_TRUNCATED: &str = "… output truncated";
 const MAX_CHOOSE_TREE_ITEMS: usize = 4_096;
 const MAX_CHOOSE_TREE_ITEM_BYTES: usize = 512;
@@ -217,6 +218,28 @@ fn unix_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn command_log_line(command: &CommandInvocation) -> String {
+    let mut line = canonical_command(&command.name).to_owned();
+    for argument in &command.args {
+        line.push(' ');
+        line.push_str(argument);
+    }
+    line
+}
+
+fn push_server_message(inner: &mut ServerState, text: String) {
+    let number = inner.next_message_number;
+    inner.next_message_number = inner.next_message_number.wrapping_add(1);
+    inner.message_log.push_back(ServerMessage {
+        number,
+        time: SystemTime::now(),
+        text,
+    });
+    while inner.message_log.len() > MESSAGE_LIMIT {
+        inner.message_log.pop_front();
+    }
 }
 
 fn daemon_uid() -> String {
@@ -1355,6 +1378,9 @@ enum DaemonCommandDispatch {
     DebugMarker,
     Tools,
     Buffer,
+    ListClients,
+    ShowMessages,
+    RefreshClient,
 }
 
 const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
@@ -1379,6 +1405,12 @@ const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
     ("deleteb", DaemonCommandDispatch::Buffer),
     ("paste-buffer", DaemonCommandDispatch::Buffer),
     ("pasteb", DaemonCommandDispatch::Buffer),
+    ("list-clients", DaemonCommandDispatch::ListClients),
+    ("lsc", DaemonCommandDispatch::ListClients),
+    ("show-messages", DaemonCommandDispatch::ShowMessages),
+    ("showmsgs", DaemonCommandDispatch::ShowMessages),
+    ("refresh-client", DaemonCommandDispatch::RefreshClient),
+    ("refresh", DaemonCommandDispatch::RefreshClient),
 ];
 
 fn daemon_command_dispatch(name: &str) -> Option<DaemonCommandDispatch> {
@@ -2175,6 +2207,16 @@ impl Shared {
         request_id: u64,
         command: &CommandInvocation,
     ) -> CommandResponse {
+        {
+            let mut inner = self.inner.lock();
+            let client_name = inner
+                .client_names
+                .get(&client)
+                .cloned()
+                .unwrap_or_else(|| format!("client-{}", client.0));
+            let command = command_log_line(command);
+            push_server_message(&mut inner, format!("{client_name} command: {command}"));
+        }
         match self.execute(client, kind, context, command) {
             Ok(execution) => {
                 if kind == ClientKind::Interactive
@@ -2251,6 +2293,15 @@ impl Shared {
                     DaemonCommandDispatch::Tools => Ok(workspace_tools_catalog()),
                     DaemonCommandDispatch::Buffer => {
                         self.buffer_command(context, &command.name, &command.args)
+                    }
+                    DaemonCommandDispatch::ListClients => {
+                        self.list_clients(context, &command.name, &command.args)
+                    }
+                    DaemonCommandDispatch::ShowMessages => {
+                        self.show_messages(&command.name, &command.args)
+                    }
+                    DaemonCommandDispatch::RefreshClient => {
+                        self.refresh_client(client, kind, &command.name, &command.args)
                     }
                 }
             });
@@ -2870,6 +2921,7 @@ impl Shared {
                         direct_events.push(EventPayload::DisplayPanes { state: Some(state) });
                     }
                     MuxEffect::DisplayMessage { pane, text } => {
+                        push_server_message(&mut inner, text.clone());
                         direct_events.push(EventPayload::ClientMessage {
                             pane: *pane,
                             kind: ClientMessageKind::Info,
@@ -3399,6 +3451,160 @@ impl Shared {
             output,
             effects: Vec::new(),
         })
+    }
+
+    fn list_clients(
+        &self,
+        context: &ExecutionContext,
+        name: &str,
+        args: &[String],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_buffer_command_args(name, args, &['F', 't'], &[])?;
+        require_no_positionals(name, &parsed)?;
+        let mut inner = self.inner.lock();
+        let target = parsed
+            .value('t')
+            .map(|target| {
+                inner
+                    .engine
+                    .state
+                    .resolve_session(Some(target), context.session)
+            })
+            .transpose()?;
+        inner.engine.set_format_now(unix_timestamp());
+        let mut clients = inner
+            .attached
+            .iter()
+            .flat_map(|(session, clients)| {
+                clients
+                    .iter()
+                    .copied()
+                    .map(|client| (client, *session))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        clients.sort_by(|(left, _), (right, _)| {
+            let left_name = inner
+                .client_names
+                .get(left)
+                .cloned()
+                .unwrap_or_else(|| format!("device-{}", left.0));
+            let right_name = inner
+                .client_names
+                .get(right)
+                .cloned()
+                .unwrap_or_else(|| format!("device-{}", right.0));
+            left_name.cmp(&right_name).then(left.0.cmp(&right.0))
+        });
+        let format = parsed.value('F').unwrap_or(
+            "#{client_name}: #{session_name} [#{client_width}x#{client_height} #{client_termname}] #{?#{!=:#{client_uid},#{uid}},[user #{?client_user,#{client_user},#{client_uid},}] ,}#{?client_flags,(,}#{client_flags}#{?client_flags,),}",
+        );
+        let mut output = Vec::new();
+        for (line, (client, session_id)) in clients.into_iter().enumerate() {
+            if target.is_some_and(|target| target != session_id) {
+                continue;
+            }
+            let session = inner
+                .engine
+                .state
+                .sessions
+                .get(&session_id)
+                .ok_or_else(|| ServerError::MissingTarget(session_id.to_string()))?;
+            let focused = client_focused_window(&inner, client, session);
+            let format_context =
+                inner
+                    .engine
+                    .format_status_context(Some(session_id), Some(focused), None);
+            let facts = FormatHookFacts {
+                client: Some(ClientFormatFacts {
+                    name: inner
+                        .client_names
+                        .get(&client)
+                        .cloned()
+                        .unwrap_or_else(|| format!("device-{}", client.0)),
+                    session: session.name.clone(),
+                    width: 0,
+                    height: 0,
+                    termname: String::new(),
+                    uid: format_context.uid.clone(),
+                    user: format_context.user.clone(),
+                    flags: String::new(),
+                    theme: inner
+                        .client_color_schemes
+                        .get(&client)
+                        .copied()
+                        .unwrap_or_default()
+                        .as_str()
+                        .to_owned(),
+                    line,
+                }),
+                ..FormatHookFacts::default()
+            };
+            let mut hooks = DaemonFormatHooks::command(&facts);
+            output.push(expand_format_values(format, &format_context, &mut hooks));
+        }
+        Ok(Execution {
+            output: output.join("\n"),
+            effects: Vec::new(),
+        })
+    }
+
+    fn show_messages(&self, name: &str, args: &[String]) -> Result<Execution, DaemonError> {
+        let parsed = parse_buffer_command_args(name, args, &[], &[])?;
+        require_no_positionals(name, &parsed)?;
+        let mut inner = self.inner.lock();
+        inner.engine.set_format_now(unix_timestamp());
+        let context = inner.engine.format_status_context(None, None, None);
+        let output = inner
+            .message_log
+            .iter()
+            .rev()
+            .map(|message| {
+                let facts = FormatHookFacts {
+                    message: Some(MessageFormatFacts {
+                        number: message.number,
+                        text: message.text.clone(),
+                        time: message.time,
+                    }),
+                    ..FormatHookFacts::default()
+                };
+                let mut hooks = DaemonFormatHooks::command(&facts);
+                expand_format_values("#{t/p:message_time}: #{message_text}", &context, &mut hooks)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok(Execution {
+            output,
+            effects: Vec::new(),
+        })
+    }
+
+    fn refresh_client(
+        &self,
+        client: ClientId,
+        _kind: ClientKind,
+        name: &str,
+        args: &[String],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_buffer_command_args(
+            name,
+            args,
+            &['A', 'B', 'C', 'F', 'f', 'r', 't'],
+            &['c', 'D', 'l', 'L', 'R', 'S', 'U'],
+        )?;
+        if parsed.positional.len() > 1 {
+            return Err(ServerError::InvalidCommand(
+                "refresh-client accepts at most one adjustment".to_owned(),
+            )
+            .into());
+        }
+        if client_attached_session(&self.inner.lock(), client).is_none() {
+            return Err(ServerError::InvalidCommand("no current client".to_owned()).into());
+        }
+        Err(
+            ServerError::UnsupportedCommand("refresh-client interactive behavior".to_owned())
+                .into(),
+        )
     }
 
     fn buffer_command(
@@ -8258,6 +8464,8 @@ struct ServerState {
     choose_buffers: BTreeMap<ClientId, ChooseBufferSession>,
     display_panes: BTreeMap<ClientId, DisplayPanesSession>,
     command_history: Vec<String>,
+    message_log: VecDeque<ServerMessage>,
+    next_message_number: u64,
     paste_buffers: Vec<PasteBuffer>,
     automatic_paste_buffer_limit: AutomaticPasteBufferLimit,
     active_copy_pipes: usize,
@@ -9264,6 +9472,13 @@ struct PasteBuffer {
     created: SystemTime,
     automatic: bool,
     utf8: bool,
+}
+
+#[derive(Clone, Debug)]
+struct ServerMessage {
+    number: u64,
+    time: SystemTime,
+    text: String,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -10325,6 +10540,7 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
             .iter()
             .find(|buffer| buffer.automatic)
             .map(buffer_format_facts),
+        ..FormatHookFacts::default()
     }
 }
 
@@ -19491,6 +19707,268 @@ bind - split-window -v -c "#{pane_current_path}"
             })
         });
         assert!(closed.is_some());
+    }
+
+    #[test]
+    fn list_clients_uses_attached_registry_name_order_and_session_filtering() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "z"]),
+            )
+            .unwrap();
+        let z = context.session.unwrap();
+        shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "A"]),
+            )
+            .unwrap();
+        let a = context.session.unwrap();
+
+        let (zeta, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("zeta".to_owned()),
+            Some(TerminalColorScheme::Dark),
+            OutboundMailbox::new(),
+        );
+        let (alpha, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("alpha".to_owned()),
+            Some(TerminalColorScheme::Light),
+            OutboundMailbox::new(),
+        );
+        let (_detached, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("ghost".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(zeta, z).unwrap();
+        shared.attach(alpha, a).unwrap();
+
+        let listed = shared
+            .execute(
+                ClientId(91),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("list-clients", [] as [&str; 0]),
+            )
+            .unwrap();
+        assert_eq!(listed.output, "alpha: A [0x0 ] \nzeta: z [0x0 ] ");
+
+        let filtered = shared
+            .execute(
+                ClientId(91),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "lsc",
+                    [
+                        "-t",
+                        "z",
+                        "-F",
+                        "#{line}:#{client_name}:#{session_name}:#{client_width}x#{client_height}:#{client_termname}",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert_eq!(filtered.output, "1:zeta:z:0x0:");
+    }
+
+    #[test]
+    fn show_messages_logs_commands_newest_first_and_bounds_the_ring() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "work"]),
+            )
+            .unwrap();
+
+        let displayed = shared.execute_command_request(
+            client,
+            ClientKind::Command,
+            &mut context,
+            1,
+            &CommandInvocation::new("display-message", ["hello"]),
+        );
+        assert!(matches!(
+            displayed,
+            CommandResponse::Success { output, .. } if output.is_empty()
+        ));
+        let shown = shared.execute_command_request(
+            client,
+            ClientKind::Command,
+            &mut context,
+            2,
+            &CommandInvocation::new("showmsgs", [] as [&str; 0]),
+        );
+        let CommandResponse::Success { output, .. } = shown else {
+            panic!("show-messages should succeed");
+        };
+        let lines = output.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].ends_with(": client-7 command: show-messages"));
+        assert!(lines[1].ends_with(": hello"));
+        assert!(lines[2].ends_with(": client-7 command: display-message hello"));
+        assert!(lines.iter().all(|line| {
+            let bytes = line.as_bytes();
+            bytes.get(2) == Some(&b':') && bytes.get(5) == Some(&b':')
+        }));
+
+        let mut inner = shared.inner.lock();
+        inner.message_log.clear();
+        inner.next_message_number = 0;
+        for number in 0..=MESSAGE_LIMIT {
+            push_server_message(&mut inner, format!("message-{number}"));
+        }
+        assert_eq!(inner.message_log.len(), MESSAGE_LIMIT);
+        assert_eq!(inner.message_log.front().unwrap().number, 1);
+        assert_eq!(inner.message_log.front().unwrap().text, "message-1");
+        assert_eq!(
+            inner.message_log.back().unwrap().number,
+            MESSAGE_LIMIT as u64
+        );
+        assert_eq!(
+            inner.message_log.back().unwrap().text,
+            format!("message-{MESSAGE_LIMIT}")
+        );
+    }
+
+    #[test]
+    fn detached_refresh_client_accepts_the_pin_grammar_then_errors_exactly() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        let error = shared
+            .execute(
+                ClientId(5),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "refresh",
+                    [
+                        "-cDlLRSU",
+                        "-A",
+                        "%0:on",
+                        "-B",
+                        "name:what:format",
+                        "-C",
+                        "80x24",
+                        "-F",
+                        "focused",
+                        "-f",
+                        "focused",
+                        "-r",
+                        "%0:report",
+                        "-t",
+                        "client",
+                        "+1",
+                    ],
+                ),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "no current client"
+        ));
+    }
+
+    #[test]
+    fn move_and_swap_window_publish_topology_snapshots() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("desktop".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "work", "-n", "main"]),
+            )
+            .unwrap();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-window", ["-d", "-n", "other"]),
+            )
+            .unwrap();
+        take_reliable_messages(&mailbox);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("move-window", ["-d", "-s", "work:other", "-t", "work:5"]),
+            )
+            .unwrap();
+        let moved = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Snapshot(snapshot),
+                    ..
+                }) => Some(snapshot),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let moved = moved.last().expect("move publishes a snapshot");
+        assert_eq!(
+            moved.sessions[0]
+                .windows
+                .iter()
+                .map(|window| (window.index, window.name.as_str()))
+                .collect::<Vec<_>>(),
+            [(0, "main"), (5, "other")]
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("swap-window", ["-s", "work:0", "-t", "work:5"]),
+            )
+            .unwrap();
+        let swapped = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Snapshot(snapshot),
+                    ..
+                }) => Some(snapshot),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let swapped = swapped.last().expect("swap publishes a snapshot");
+        assert_eq!(
+            swapped.sessions[0]
+                .windows
+                .iter()
+                .map(|window| (window.index, window.name.as_str()))
+                .collect::<Vec<_>>(),
+            [(0, "other"), (5, "main")]
+        );
     }
 
     #[test]

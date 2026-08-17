@@ -1037,8 +1037,12 @@ pub fn expand_status(
     context: &StatusContext,
     hooks: &mut impl StatusHooks,
 ) -> String {
-    let mut expander = Expander { context, hooks };
-    truncate_output(expander.expand(format, 0, true))
+    let mut expander = Expander {
+        context,
+        hooks,
+        time: true,
+    };
+    truncate_output(expander.expand(format, 0))
 }
 
 pub fn expand_format_values(
@@ -1046,8 +1050,12 @@ pub fn expand_format_values(
     context: &StatusContext,
     hooks: &mut impl StatusHooks,
 ) -> String {
-    let mut expander = Expander { context, hooks };
-    truncate_output(expander.expand(format, 0, false))
+    let mut expander = Expander {
+        context,
+        hooks,
+        time: false,
+    };
+    truncate_output(expander.expand(format, 0))
 }
 
 pub(crate) struct CommandHooks {
@@ -1086,24 +1094,56 @@ pub(crate) fn expand_format_with_hooks(
     context: FormatContext,
     hooks: &mut impl StatusHooks,
 ) -> String {
+    expand_format_inner(format, engine, context, hooks, false)
+}
+
+/// The pin's `format_expand_time` surface: the whole string passes through
+/// strftime at every expansion level before `#{}` parsing, so `%` sequences
+/// are subject to the platform's strftime exactly like display-message is in
+/// tmux (cmd-display-message.c uses `format_expand_time`).
+pub(crate) fn expand_format_time_with_hooks(
+    format: &str,
+    engine: &MuxEngine,
+    context: FormatContext,
+    hooks: &mut impl StatusHooks,
+) -> String {
+    expand_format_inner(format, engine, context, hooks, true)
+}
+
+fn expand_format_inner(
+    format: &str,
+    engine: &MuxEngine,
+    context: FormatContext,
+    hooks: &mut impl StatusHooks,
+    time: bool,
+) -> String {
     let context = context.resolve(engine);
     let mut expander = Expander {
         context: &context,
         hooks,
+        time,
     };
-    truncate_output(expander.expand(format, 0, false))
+    truncate_output(expander.expand(format, 0))
 }
 
 struct Expander<'a, V: FormatVariables + ?Sized, H: StatusHooks> {
     context: &'a V,
     hooks: &'a mut H,
+    time: bool,
 }
 
 impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
-    fn expand(&mut self, format: &str, depth: usize, literal_time: bool) -> String {
+    fn expand(&mut self, format: &str, depth: usize) -> String {
         if depth == FORMAT_LOOP_LIMIT || format.is_empty() {
             return String::new();
         }
+        let time_expanded;
+        let format = if self.time && format.contains('%') {
+            time_expanded = self.hooks.strftime(format);
+            time_expanded.as_str()
+        } else {
+            format
+        };
         let mut output = String::with_capacity(format.len());
         let mut literal = String::new();
         let mut index = 0usize;
@@ -1137,7 +1177,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     let Some(end) = find_plain_group_end(format, after_next, '(', ')') else {
                         break;
                     };
-                    self.flush(&mut output, &mut literal, literal_time);
+                    self.flush(&mut output, &mut literal);
                     output.push_str(&self.hooks.shell(&format[after_next..end]));
                     index = end + 1;
                 }
@@ -1145,7 +1185,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     let Some(end) = find_format_end(format, index) else {
                         break;
                     };
-                    self.flush(&mut output, &mut literal, literal_time);
+                    self.flush(&mut output, &mut literal);
                     match self.expand_replacement(&format[after_next..end], depth + 1) {
                         Ok(value) => output.push_str(&value),
                         Err(()) => break,
@@ -1154,7 +1194,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 }
                 _ => {
                     if let Some(name) = shorthand(next) {
-                        self.flush(&mut output, &mut literal, literal_time);
+                        self.flush(&mut output, &mut literal);
                         output.push_str(&self.context.variable(name).unwrap_or_default());
                     } else {
                         literal.push('#');
@@ -1164,19 +1204,15 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 }
             }
         }
-        self.flush(&mut output, &mut literal, literal_time);
+        self.flush(&mut output, &mut literal);
         output
     }
 
-    fn flush(&mut self, output: &mut String, literal: &mut String, literal_time: bool) {
+    fn flush(&mut self, output: &mut String, literal: &mut String) {
         if literal.is_empty() {
             return;
         }
-        if literal_time {
-            output.push_str(&self.hooks.strftime(literal));
-        } else {
-            output.push_str(literal);
-        }
+        output.push_str(literal);
         literal.clear();
     }
 
@@ -1205,9 +1241,9 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         } else if let Some(search_flags) = flags.content_search {
             self.expand_content_search(copy, depth, search_flags)
         } else if flags.not {
-            bool_string(!format_true(&self.expand(copy, depth, false))).to_owned()
+            bool_string(!format_true(&self.expand(copy, depth))).to_owned()
         } else if flags.not_not {
-            bool_string(format_true(&self.expand(copy, depth, false))).to_owned()
+            bool_string(format_true(&self.expand(copy, depth))).to_owned()
         } else if let Some(and) = flags.bool_op {
             self.expand_boolean(copy, depth, and)
         } else if let Some(comparison) = flags.comparison {
@@ -1217,20 +1253,21 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         } else if let Some(expression) = flags.expression {
             self.expand_expression(copy, depth, expression)
         } else if copy.contains("#{") {
-            self.expand(copy, depth, false)
+            self.expand(copy, depth)
         } else {
             self.lookup(copy, &flags).unwrap_or_default()
         };
 
         if flags.expand {
-            value = self.expand(&value, depth, false);
+            value = self.expand(&value, depth);
         } else if flags.expand_time {
-            value = self.hooks.strftime(&value);
-            value = self.expand(&value, depth, false);
+            let previous = std::mem::replace(&mut self.time, true);
+            value = self.expand(&value, depth);
+            self.time = previous;
         }
         for substitution in flags.substitutions {
-            let pattern = self.expand(&substitution.args[0], depth, false);
-            let replacement = self.expand(&substitution.args[1], depth, false);
+            let pattern = self.expand(&substitution.args[0], depth);
+            let replacement = self.expand(&substitution.args[1], depth);
             value = substitute(
                 &value,
                 &pattern,
@@ -1361,7 +1398,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     let start = position + 1;
                     let end = find_modifier_argument(body, start, wrapper)?;
                     let value = unescape(&body[start..end]);
-                    args.push(self.expand(&value, depth, false));
+                    args.push(self.expand(&value, depth));
                     position = end;
                     if is_modifier_end(body.as_bytes()[position]) {
                         break;
@@ -1370,7 +1407,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             } else {
                 let end = find_modifier_argument(body, position, 0)?;
                 let value = unescape(&body[position..end]);
-                args.push(self.expand(&value, depth, false));
+                args.push(self.expand(&value, depth));
                 position = end;
             }
             modifiers.push(Modifier { kind, args });
@@ -1383,7 +1420,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
     }
 
     fn expand_character(&mut self, copy: &str, depth: usize) -> String {
-        self.expand(copy, depth, false)
+        self.expand(copy, depth)
             .parse::<u8>()
             .ok()
             .filter(|value| (32..=126).contains(value))
@@ -1392,7 +1429,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
     }
 
     fn expand_colour(&mut self, copy: &str, depth: usize, flags: &str) -> String {
-        let value = self.expand(copy, depth, false);
+        let value = self.expand(copy, depth);
         format_colour(&value, flags)
     }
 
@@ -1402,7 +1439,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         depth: usize,
         windows: bool,
     ) -> Result<String, ()> {
-        let name = self.expand(copy, depth, false);
+        let name = self.expand(copy, depth);
         let universe = &self.context.values().format_universe;
         let exists = if windows {
             let session = &self.context.values().session_id;
@@ -1423,7 +1460,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
     }
 
     fn expand_content_search(&mut self, copy: &str, depth: usize, flags: &str) -> String {
-        let pattern = self.expand(copy, depth, false);
+        let pattern = self.expand(copy, depth);
         let pane = self
             .context
             .values()
@@ -1462,10 +1499,10 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         let Some(right) = right else {
             return String::new();
         };
-        let Some(mut left) = parse_expression_number(&self.expand(left, depth, false)) else {
+        let Some(mut left) = parse_expression_number(&self.expand(left, depth)) else {
             return String::new();
         };
-        let Some(mut right) = parse_expression_number(&self.expand(right, depth, false)) else {
+        let Some(mut right) = parse_expression_number(&self.expand(right, depth)) else {
             return String::new();
         };
         if !floating {
@@ -1477,7 +1514,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             "-" => left - right,
             "*" => left * right,
             "/" => left / right,
-            "m" => left % right,
+            "m" | "%" => left % right,
             "==" => {
                 if (left - right).abs() < 1e-9 {
                     1.0
@@ -1613,8 +1650,9 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             let mut expander = Expander {
                 context: &variables,
                 hooks: &mut *self.hooks,
+                time: self.time,
             };
-            output.push_str(&expander.expand(selected, depth, false));
+            output.push_str(&expander.expand(selected, depth));
         }
         Ok(output)
     }
@@ -1624,7 +1662,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         let mut rest = copy;
         loop {
             let (operand, next) = split_once_top(rest, ',');
-            let truth = format_true(&self.expand(operand, depth, false));
+            let truth = format_true(&self.expand(operand, depth));
             result = if and {
                 result && truth
             } else {
@@ -1648,8 +1686,8 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         let Some(right) = right else {
             return Err(());
         };
-        let left = self.expand(left, depth, false);
-        let right = self.expand(right, depth, false);
+        let left = self.expand(left, depth);
+        let right = self.expand(right, depth);
         let value = match comparison {
             Comparison::Equal => bool_string(left == right).to_owned(),
             Comparison::NotEqual => bool_string(left != right).to_owned(),
@@ -1673,7 +1711,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         for pair in parts[..paired].chunks_exact(2) {
             let condition = pair[0];
             let found = self.lookup(condition, flags).unwrap_or_else(|| {
-                let expanded = self.expand(condition, depth, false);
+                let expanded = self.expand(condition, depth);
                 if expanded == condition {
                     String::new()
                 } else {
@@ -1681,22 +1719,22 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 }
             });
             if format_true(&found) {
-                return self.expand(pair[1], depth, false);
+                return self.expand(pair[1], depth);
             }
         }
         if parts.len() % 2 == 1 {
-            self.expand(parts[parts.len() - 1], depth, false)
+            self.expand(parts[parts.len() - 1], depth)
         } else {
             String::new()
         }
     }
 
     fn lookup(&mut self, key: &str, flags: &ModifierFlags<'_>) -> Option<String> {
-        let _kind = self.context.variable_kind(key)?;
-        let mut value = self
-            .hooks
-            .variable(key, self.context.values())
-            .or_else(|| self.context.variable(key).map(Cow::into_owned))?;
+        let hooked = self.hooks.variable(key, self.context.values());
+        if hooked.is_none() && self.context.variable_kind(key).is_none() {
+            return None;
+        }
+        let mut value = hooked.or_else(|| self.context.variable(key).map(Cow::into_owned))?;
         if flags.time.enabled {
             return Some(format_time_value(
                 &value,
@@ -3455,7 +3493,7 @@ mod tests {
         assert_eq!(expand("#{e|+|:2,3}"), "5");
         assert_eq!(expand("#{e|-|:2,5}"), "-3");
         assert_eq!(expand("#{e|m|:7,3}"), "1");
-        assert_eq!(expand("#{e|%|:7,3}"), "");
+        assert_eq!(expand("#{e|%|:7,3}"), "1");
         assert_eq!(expand("#{e|%%|:7,3}"), "");
         assert_eq!(expand("#{e|==|:5,5}"), "1");
         assert_eq!(expand("#{e|/|f|3:1,3}"), "0.333");
@@ -3536,8 +3574,15 @@ mod tests {
 
     #[test]
     fn time_expand_again_and_expand_again_with_time_are_distinct() {
-        assert_eq!(expand("#{t/f/%Y:start_time}"), "2000");
-        assert_eq!(expand("#{t/f/%Y;t/f:start_time}"), "2000");
+        assert_eq!(
+            expand_format_values("#{t/f/%Y:start_time}", &context(), &mut Stub),
+            "2000"
+        );
+        assert_eq!(
+            expand_format_values("#{t/f/%Y;t/f:start_time}", &context(), &mut Stub),
+            "2000"
+        );
+        assert_eq!(expand("#{t/f/%Y:start_time}"), "2026");
         assert!(!expand("#{t:start_time}").is_empty());
         assert_eq!(expand("#{t:session_created}"), "");
         let mut context = context();

@@ -27,7 +27,7 @@ mutations before later failures; `select-layout`, for example, unzooms its resol
 parses a custom layout. The daemon publishes any generation change at the command boundary even
 when the handler returns an error.
 `catalog.rs` is the shared renderer-free source for canonical names, aliases, descriptions,
-accepted flags/options, and completion value kinds; `canonical_command` and the native
+pin usage strings, accepted flags/options, and completion value kinds; `canonical_command` and the native
 [command palette](/concepts/command-palette.md) both consume it.
 
 # Argument parsing and `-t` targets
@@ -59,13 +59,18 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `kill-session` | . | Remove a session and its windows/panes. `-a` keeps the target and kills every other session; `-C` clears the session's pane bells and kills nothing, outranking `-a` as in tmux. Positional targets are refused — tmux's bound is zero arguments, and the kill commands are too destructive to guess. |
 | `attach-session` | `attach` | Attach the client to a session (`Attach` effect); `-d` detaches the session's other clients. Client flags zz has no model for (`-r` read-only, `-x`, `-E`, `-c`, `-f`) are rejected instead of swallowed. |
 | `detach-client` | `detach` | Detach (`Detach(DetachScope)` effect). No flags detaches the caller, `-a` detaches every *other* attached client, `-s` detaches every client on that session (the caller included). `-t` (target client), `-P`, and `-E` are rejected: zz has no client-name selector. |
+| `list-clients` | `lsc` | List attached clients from the daemon registry, sorted by client name. `-t` filters by session and `-F` expands client formats. zz reports unknown client dimensions as `0x0` and leaves the unavailable terminal name and flags empty. Detached command connections do not appear. |
+| `refresh-client` | `refresh` | Parse tmux's complete argument grammar, then return `no current client` for a detached command client. Attached-client redraw and control-mode behavior remain unsupported. |
 | `new-window` | `neww` | Create a terminal window at the `-t` destination. `-d` creates without selecting, `-a` inserts after an occupied target but keeps an explicitly free index, `-k` replaces whatever holds the index, `-S` selects an existing window with the `-n` name instead of creating one. |
 | `new-browser` | . | *zz-native:* create a browser window (`-p` profile, URL positional); shares `new-window`'s destination options. |
-| `list-windows` | `lsw` | List a session's windows. |
+| `list-windows` | `lsw` | List a session's windows. `-a` lists every session in bytewise name order, then each session's windows by index. |
 | `rename-window` | `renamew` | Rename a window (duplicates allowed). |
 | `select-window` | `selectw` | Activate a window. `-n`/`-p`/`-l` are the `next-window`/`previous-window`/`last-window` commands (`-n` wins over `-p` wins over `-l`, as in tmux); `-T` on a target that is already current behaves like `last-window`. |
-| `next-window` / `previous-window` | `next` / `previous` | Step windows (wraps). A step that would land on the current window errors `no next window` / `no previous window`, tmux's strings; `-t` picks the session; `-a` steps to the next/previous window holding an alert (any pane with a latched bell) with the same error when none qualifies. |
+| `next-window` / `previous-window` | `next` / `prev` | Step windows (wraps). A step that would land on the current window errors `no next window` / `no previous window`, tmux's strings; `-t` picks the session; `-a` steps to the next/previous window holding an alert (any pane with a latched bell) with the same error when none qualifies. |
 | `kill-window` | `killw` | Remove a window; `-a` keeps the target and kills every other window in its session. |
+| `move-window` | `movew` | Move a stable window to another index or session. `-a` and `-b` insert around an occupied target, `-d` avoids selecting the moved window unless `-k` replaces the current destination, `-k` replaces an occupied index, and standalone `-r` renumbers from `base-index`. An occupied destination without `-k` returns `index in use: N`. |
+| `swap-window` | `swapw` | Exchange two window slots within one session or across sessions while window ids, panes, names, and layouts travel together. `-d` selects the destination slots after the swap. |
+| `find-window` | `findw` | Accept tmux's `-CiNrTZ` search grammar and validate `-t`. Detached CLI calls return success with no output for both matches and zero matches; zz does not open a GUI chooser. |
 | `split-picker` | . | *zz-native:* split into a runtime-free picker (`-h` horizontal, else vertical); accepts the `split-window` target/size/cwd options. Bound on zz's default `%`/`"` keys. Renamed from `new-pane` (the pinned tmux owns that name for floating panes). |
 | `split-window` | `splitw` | Split a terminal pane and inherit the target pane's live cwd; key-bound, CLI, and command-prompt invocations all create a terminal, like tmux. The new pane's share comes from `-l` (cells, or `N%`) or legacy `-p N`; `-b` puts it left/above, `-f` spans the whole window, `-d` leaves focus on the target. |
 | `split-browser` | . | *zz-native:* split into a browser pane (`-p` profile, URL positional). |
@@ -80,7 +85,7 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `select-pane` | `selectp` | Select by target/direction (`-L/-R/-U/-D`), `-l` last, `-Z` keep zoom; `-T` updates only the pane title. A cross-window target changes that window's active pane without changing the session's current window. |
 | `last-pane` | `lastp` | Return to the previously active pane (`-Z`). |
 | `swap-pane` | `swapp` | Exchange two layout leaves (`-U/-D/-s/-t`, `-d` keep slot, `-Z`). |
-| `list-panes` | `lsp` | List a window's panes. |
+| `list-panes` | `lsp` | List a window's panes. `-s` lists every window in the target session; `-a` lists every session in bytewise name order. Both keep window-index and pane order within each session. |
 | `resize-pane` | `resizep` | Resize relatively (`-L/-R/-U/-D` by cells: a shared positional adjustment, tmux's attached form `-R10`, default `1`; adjustments are integers) or absolutely (`-x`/`-y` in cells or `N%`) or `-Z` toggle zoom. Absolute percentages accept 0 through 1000, then normal layout limits clamp the result. With no direction and no `-x`/`-y` the command is a no-op, as in tmux; unknown flags (`-M`, `-T`) are rejected. Sizes in cells need the geometry the daemon reports per pane; without it the command errors instead of guessing. |
 | `select-layout` | `selectl` | Apply a named preset or checksummed layout string, restore with `-o`, spread with `-E`, or cycle with `-n`/`-p`. The first `-o` with no saved layout succeeds silently and saves the current layout for the next restore. A layout string ignores its pane numbers, assigns the current `pane_order` through the leaves, removes extra bottom-right cells, allocates new divider ids, and adopts the encoded window extent. Too few cells fail with tmux's `have N panes but need M` error. |
 | `next-layout` / `previous-layout` | `nextl` / `prevl` | Cycle the seven presets. |
@@ -93,10 +98,12 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `focus-sidebar` | . | *zz-native:* show and focus the workspace sidebar (`-t`). |
 | `choose-tree` | . | Open the pane chooser; `-s`/`-w` route to the sidebar (`-s`,`-w`,`-Z`,`-t`). `-Z` is accepted and already true: zz's chooser is a full-window overlay, so there is nothing left to zoom. |
 | `choose-buffer` | . | Open the paste-buffer chooser (`-Z`,`-t`); `-Z` is accepted and already true, as for `choose-tree`. |
+| `show-messages` | `showmsgs` | Print the daemon's 1,000-entry message ring newest first with tmux's pretty timestamps. The daemon records command-client invocations before execution and `display-message` events without `-p`. |
 | `display-panes` | `displayp` | Pane-number overlay (`-d` duration). `-b` is accepted and already true: the effect returns immediately, so nothing was ever blocked. |
 | `clear-history` | `clearhist` | Clear a pane's scrollback (`-H` unsupported). |
 | `bind-key` / `unbind-key` | `bind` / `unbind` | Add/remove key bindings (`-n`,`-r`,`-T`,`-N`). Empty `{}` installs an empty command list, and a single trailing escaped separator is ignored. Payloads validate at bind time (names + flags — tmux validates the full template): unknown names error `unknown command: X`, cataloged commands get their flags checked, daemon-side verbs are accepted unvalidated, and a real-but-unimplemented tmux command errors as unsupported so config import counts it. |
 | `list-keys` | `lsk` | Print bindings as `bind-key` lines; `-T` limits the table. tmux's other selectors are rejected, not ignored: `-n` is not a tmux `list-keys` flag at all, and `-1`/`-N`/`-a`/`-O`/`-P`/`-r` plus the `[key]` positional have no zz form. |
+| `list-commands` | `lscm` | Print `COMMAND_SPECS` in canonical-name order with tmux's `name (alias) usage` line shape and literal pin usage strings. `-F` formats rows and an optional command limits the result. The list excludes commands zz does not implement. |
 | `set-option` / `set-window-option` | `set` / `setw` | Set typed options (see below) or exact free-form `@name` strings. User options support set, append, and unset at server, global-session, session, global-window, window, and pane scope. Indexed scalars return tmux's `not an array`; table-known arrays parse and take the documented empty-success omission path. |
 | `show-options` | `show` | List options stored at the resolved scope or print one named option. `-v` prints only its raw value, `-A` includes an inherited named/table value with `*` after the name, `-q` suppresses unknown-name and target errors, and `-s`/`-g`/`-w`/`-p` select scope for `@` names. Implemented scalar and stored `@` values also read through valid `name[index]` spellings. Implemented string values use the pin's `args_escape` byte shape; `-H` adds no rows because zz has no hooks. A table-known unimplemented name or array prints nothing. Plain listings expose tmux and `@` names only; explicit-name queries still reach zz-native settings. |
 | `show-window-options` | `showw` | Window-scoped spelling of `show-options` with the pin's `-g`, `-t`, and `-v` surface. A table-known option still routes by its declared scope, so spelling this command cannot turn a session option into a window option. |
@@ -104,6 +111,7 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `show-environment` | `showenv` | List or read the exact global/per-session overlay. The daemon seeds the global map from its boot environment; `new-session` copies the fixed `update-environment` names and writes unset markers for missing names. Normal output is `NAME=value` or `-NAME`; `-s` emits shell-ready export/unset statements with tmux's escaping, `-h` selects hidden entries, and an absent exact name errors `unknown variable: NAME`. A hidden exact name without `-h` succeeds with empty output. |
 | `source-file` | `source` | Load config files: every path is globbed like tmux (matches load in glob order; `conf.d/*.conf` works), then sourced in order. Without `-q` a path or glob that matches nothing warns; `-q` keeps it silent. `-` (stdin) is refused loudly — the daemon has no caller stdin. `-F`/`-n`/`-v`/`-t` are rejected. |
 | `reload-config` | . | *zz-native:* reload tmux + Ghostty config (`ReloadConfig` effect, no args). |
+| `start-server` | `start` | Ensure the daemon is running, then return success with no output. The CLI's normal connection path starts a missing daemon before the no-op reaches the engine. |
 | `kill-server` | . | Stop the daemon (`KillServer` effect). |
 
 Options handled by `set-option`/`set-window-option`: `synchronize-panes` (global→window→pane scope,

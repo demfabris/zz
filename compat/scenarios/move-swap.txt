@@ -1,0 +1,12 @@
+new-window -d -t w -n spare
+new-session -d -s z -n zed
+move-window -a -s w:main -t w:spare
+move-window -s z:zed -t w:spare
+move-window -k -s z:zed -t w:spare
+move-window -r -t w
+swap-window -s w:0 -t w:1
+find-window -t w:0 'ma*'
+find-window -t w:0 'zzz*'
+out: list-clients
+show-messages
+start-server

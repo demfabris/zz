@@ -573,6 +573,234 @@ impl MuxState {
         Ok(())
     }
 
+    pub fn move_window(
+        &mut self,
+        source: WindowId,
+        destination_session: SessionId,
+        destination_index: u32,
+        kill: bool,
+        select: bool,
+    ) -> Result<Vec<PaneId>, ServerError> {
+        let source_session = self
+            .windows
+            .get(&source)
+            .ok_or_else(|| ServerError::MissingTarget(source.to_string()))?
+            .session;
+        let source_index = self.windows[&source].index;
+        let source_was_active = self.sessions[&source_session].active_window == source;
+        if !self.sessions.contains_key(&destination_session) {
+            return Err(ServerError::MissingTarget(destination_session.to_string()));
+        }
+        let occupant = self.window_at_index(destination_session, destination_index);
+        if occupant == Some(source) {
+            return Err(ServerError::InvalidCommand(format!(
+                "same index: {destination_index}"
+            )));
+        }
+        if occupant.is_some() && !kill {
+            return Err(ServerError::InvalidCommand(format!(
+                "index in use: {destination_index}"
+            )));
+        }
+
+        let force_select = occupant
+            .is_some_and(|occupant| self.sessions[&destination_session].active_window == occupant);
+        let mut removed_panes = Vec::new();
+        if let Some(occupant) = occupant {
+            let removed = self
+                .windows
+                .remove(&occupant)
+                .expect("destination occupant exists");
+            removed_panes.extend(removed.pane_order);
+            self.sessions
+                .get_mut(&destination_session)
+                .expect("destination session exists")
+                .forget_window(occupant);
+        }
+
+        let source_fallback = if source_was_active {
+            let session = &self.sessions[&source_session];
+            session
+                .last_window()
+                .filter(|window| *window != source && session.windows.contains(window))
+                .or_else(|| {
+                    let candidates = session
+                        .windows
+                        .iter()
+                        .copied()
+                        .filter_map(|window| {
+                            if window == source {
+                                (source_session == destination_session)
+                                    .then_some((window, destination_index))
+                            } else {
+                                Some((window, self.windows[&window].index))
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    candidates
+                        .iter()
+                        .filter(|(_, index)| *index < source_index)
+                        .max_by_key(|(_, index)| *index)
+                        .or_else(|| candidates.iter().max_by_key(|(_, index)| *index))
+                        .map(|(window, _)| *window)
+                })
+        } else {
+            None
+        };
+        if source_session != destination_session {
+            let source_state = self
+                .sessions
+                .get_mut(&source_session)
+                .expect("source session exists");
+            source_state.forget_window(source);
+            if let Some(fallback) = source_fallback {
+                source_state.active_window = fallback;
+                source_state.last_window = None;
+            }
+        }
+        {
+            let window = self.windows.get_mut(&source).expect("source window exists");
+            window.session = destination_session;
+            window.index = destination_index;
+        }
+        if source_session != destination_session {
+            self.sessions
+                .get_mut(&destination_session)
+                .expect("destination session exists")
+                .windows
+                .push(source);
+        }
+
+        let destination_was_empty = self.sessions[&destination_session].windows.len() == 1
+            && self.sessions[&destination_session].windows[0] == source;
+        if destination_was_empty {
+            let destination = self
+                .sessions
+                .get_mut(&destination_session)
+                .expect("destination session exists");
+            destination.active_window = source;
+            destination.last_window = None;
+            self.clear_window_bells(source);
+        } else if select || force_select {
+            self.activate_window(destination_session, source);
+        } else if source_session == destination_session
+            && source_was_active
+            && let Some(fallback) = source_fallback
+        {
+            let session = self
+                .sessions
+                .get_mut(&source_session)
+                .expect("source session exists");
+            session.active_window = fallback;
+            session.last_window = None;
+            self.clear_window_bells(fallback);
+        }
+
+        if source_session != destination_session {
+            let source_empty = self.sessions[&source_session].windows.is_empty();
+            if source_empty {
+                self.sessions.remove(&source_session);
+            } else if let Some(fallback) = source_fallback {
+                self.clear_window_bells(fallback);
+            }
+        }
+        self.sort_session_windows(destination_session);
+        if source_session != destination_session && self.sessions.contains_key(&source_session) {
+            self.sort_session_windows(source_session);
+        }
+        self.bump_generation();
+        Ok(removed_panes)
+    }
+
+    pub fn swap_windows(
+        &mut self,
+        source: WindowId,
+        target: WindowId,
+        select_destination: bool,
+    ) -> Result<(), ServerError> {
+        if source == target {
+            return Ok(());
+        }
+        let source_state = self
+            .windows
+            .get(&source)
+            .ok_or_else(|| ServerError::MissingTarget(source.to_string()))?;
+        let target_state = self
+            .windows
+            .get(&target)
+            .ok_or_else(|| ServerError::MissingTarget(target.to_string()))?;
+        let source_session = source_state.session;
+        let source_index = source_state.index;
+        let target_session = target_state.session;
+        let target_index = target_state.index;
+
+        if source_session == target_session {
+            let session = self
+                .sessions
+                .get_mut(&source_session)
+                .expect("window session exists");
+            session.active_window = swap_window_id(session.active_window, source, target);
+            session.last_window = session
+                .last_window
+                .map(|window| swap_window_id(window, source, target));
+        } else {
+            let source_state = self
+                .sessions
+                .get_mut(&source_session)
+                .expect("source session exists");
+            for window in &mut source_state.windows {
+                if *window == source {
+                    *window = target;
+                }
+            }
+            if source_state.active_window == source {
+                source_state.active_window = target;
+            }
+            if source_state.last_window == Some(source) {
+                source_state.last_window = Some(target);
+            }
+
+            let target_state = self
+                .sessions
+                .get_mut(&target_session)
+                .expect("target session exists");
+            for window in &mut target_state.windows {
+                if *window == target {
+                    *window = source;
+                }
+            }
+            if target_state.active_window == target {
+                target_state.active_window = source;
+            }
+            if target_state.last_window == Some(target) {
+                target_state.last_window = Some(source);
+            }
+        }
+
+        {
+            let source_state = self.windows.get_mut(&source).expect("source window exists");
+            source_state.session = target_session;
+            source_state.index = target_index;
+        }
+        {
+            let target_state = self.windows.get_mut(&target).expect("target window exists");
+            target_state.session = source_session;
+            target_state.index = source_index;
+        }
+        self.sort_session_windows(source_session);
+        if source_session != target_session {
+            self.sort_session_windows(target_session);
+        }
+        if select_destination {
+            self.activate_window(target_session, source);
+            if source_session != target_session {
+                self.activate_window(source_session, target);
+            }
+        }
+        self.bump_generation();
+        Ok(())
+    }
+
     pub fn renumber_windows(
         &mut self,
         session: SessionId,
@@ -2763,7 +2991,11 @@ impl MuxState {
         Ok(())
     }
 
-    fn next_window_index(&self, session: SessionId, base_index: u32) -> Result<u32, ServerError> {
+    pub(crate) fn next_window_index(
+        &self,
+        session: SessionId,
+        base_index: u32,
+    ) -> Result<u32, ServerError> {
         if base_index > MAX_WINDOW_INDEX {
             return Err(ServerError::InvalidCommand(
                 "no free window index".to_owned(),
@@ -2810,6 +3042,16 @@ impl MuxState {
 
     pub(crate) fn bump_generation(&mut self) {
         self.generation = self.generation.saturating_add(1);
+    }
+}
+
+fn swap_window_id(value: WindowId, source: WindowId, target: WindowId) -> WindowId {
+    if value == source {
+        target
+    } else if value == target {
+        source
+    } else {
+        value
     }
 }
 

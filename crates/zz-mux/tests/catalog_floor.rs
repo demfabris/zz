@@ -14,7 +14,7 @@ fn assert_unknown_flag(command: &str, flag: &str, error: &ServerError) {
 
 #[test]
 fn every_catalog_command_rejects_a_mechanically_absent_flag() {
-    assert_eq!(COMMAND_SPECS.len(), 63);
+    assert_eq!(COMMAND_SPECS.len(), 71);
     for spec in COMMAND_SPECS {
         let candidate = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
             .chars()

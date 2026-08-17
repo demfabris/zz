@@ -70,6 +70,7 @@ pub enum MuxEffect {
         pane: PaneId,
         kind: PaneKindSnapshot,
         inherit_cwd_from: Option<PaneId>,
+        cwd: Option<String>,
         /// tmux-style shell command for terminal panes; `None` runs the
         /// default shell. Always `None` for other kinds.
         command: Option<String>,
@@ -78,6 +79,7 @@ pub enum MuxEffect {
         pane: PaneId,
         kind: PaneKindSnapshot,
         inherit_cwd_from: Option<PaneId>,
+        cwd: Option<String>,
         command: Option<String>,
     },
     PanesRemoved(Vec<PaneId>),
@@ -642,18 +644,24 @@ impl MuxEngine {
         let generation = self.state.generation();
         let name = canonical_command(&command.name);
         let mut execution = match name {
-            "new-session" => self.new_session(context, &command.args)?,
+            "new-session" => self.new_session(context, &command.args, hooks)?,
             "list-sessions" => self.list_sessions(context, &command.args, hooks)?,
             "rename-session" => self.rename_session(context, &command.args)?,
             "kill-session" => self.kill_session(context, &command.args)?,
             "attach-session" => self.attach_session(context, &command.args)?,
             "has-session" => self.has_session(context, &command.args)?,
             "detach-client" => self.detach_client(context, &command.args)?,
-            "new-window" => self.new_window(context, &command.args, PaneKind::Terminal)?,
+            "new-window" => self.new_window(context, &command.args, PaneKind::Terminal, hooks)?,
             "new-browser" => {
                 let (options, positional) = parse_command_options("new-browser", &command.args)?;
                 let browser = browser_from_args(&options, &positional)?;
-                self.new_window_with_options(context, &options, PaneKind::Browser(browser), None)?
+                self.new_window_with_options(
+                    context,
+                    &options,
+                    PaneKind::Browser(browser),
+                    None,
+                    hooks,
+                )?
             }
             "list-windows" => self.list_windows(context, &command.args, hooks)?,
             "rename-window" => self.rename_window(context, &command.args)?,
@@ -662,9 +670,9 @@ impl MuxEngine {
             "previous-window" => self.step_window(context, &command.args, -1)?,
             "last-window" => self.last_window(context, &command.args)?,
             "kill-window" => self.kill_window(context, &command.args)?,
-            "split-picker" => self.split_picker(context, &command.args)?,
-            "split-window" => self.split_window(context, &command.args, None)?,
-            "split-browser" => self.split_browser(context, &command.args)?,
+            "split-picker" => self.split_picker(context, &command.args, hooks)?,
+            "split-window" => self.split_window(context, &command.args, None, hooks)?,
+            "split-browser" => self.split_browser(context, &command.args, hooks)?,
             "select-pane-kind" => self.select_pane_kind(context, &command.args)?,
             "break-pane" => self.break_pane(context, &command.args)?,
             "join-pane" | "move-pane" => self.join_pane(context, &command.args, name)?,
@@ -744,6 +752,7 @@ impl MuxEngine {
         &mut self,
         context: &mut ExecutionContext,
         args: &[String],
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("new-session", args)?;
         let command = shell_command_positional(&positional);
@@ -767,13 +776,8 @@ impl MuxEngine {
                 }));
             }
         }
-        let inherit_cwd_from = spawn_cwd_source(
-            "new-session",
-            &self.state,
-            &options,
-            context.pane,
-            &PaneKind::Terminal,
-        )?;
+        let (inherit_cwd_from, cwd) =
+            spawn_cwd_source(self, &options, context.pane, &PaneKind::Terminal, hooks);
         let name = options
             .value("-s")
             .map_or_else(|| next_session_name(&self.state), str::to_owned);
@@ -808,6 +812,7 @@ impl MuxEngine {
             pane,
             kind: PaneKindSnapshot::Terminal,
             inherit_cwd_from,
+            cwd,
             command,
         }];
         if !detached {
@@ -985,10 +990,11 @@ impl MuxEngine {
         context: &mut ExecutionContext,
         args: &[String],
         kind: PaneKind,
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("new-window", args)?;
         let command = shell_command_positional(&positional);
-        self.new_window_with_options(context, &options, kind, command)
+        self.new_window_with_options(context, &options, kind, command, hooks)
     }
 
     fn new_window_with_options(
@@ -997,6 +1003,7 @@ impl MuxEngine {
         options: &Options,
         kind: PaneKind,
         command: Option<String>,
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let destination = window_destination(&self.state, options.value("-t"), context)?;
         let session = destination.session;
@@ -1015,8 +1022,14 @@ impl MuxEngine {
             }
             return Ok(Execution::default());
         }
-        let inherit_cwd_from =
-            spawn_cwd_source("new-window", &self.state, options, context.pane, &kind)?;
+        let origin = match context.pane {
+            Some(pane) => Some(pane),
+            None => Some(window_active_pane(
+                &self.state,
+                session_active_window(&self.state, session)?,
+            )?),
+        };
+        let (inherit_cwd_from, cwd) = spawn_cwd_source(self, options, origin, &kind, hooks);
         let index = if options.has("-a") {
             let target = match destination.index {
                 Some(index) => index,
@@ -1076,6 +1089,7 @@ impl MuxEngine {
             pane,
             kind: snapshot_kind,
             inherit_cwd_from,
+            cwd,
             command,
         });
         Ok(Execution {
@@ -1390,6 +1404,7 @@ impl MuxEngine {
         context: &mut ExecutionContext,
         args: &[String],
         kind: Option<PaneKind>,
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("split-window", args)?;
         let command = shell_command_positional(&positional);
@@ -1399,6 +1414,7 @@ impl MuxEngine {
             kind.unwrap_or(PaneKind::Terminal),
             command,
             split_size(&options),
+            hooks,
         )
     }
 
@@ -1406,6 +1422,7 @@ impl MuxEngine {
         &mut self,
         context: &mut ExecutionContext,
         args: &[String],
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("split-picker", args)?;
         if !positional.is_empty() {
@@ -1414,19 +1431,15 @@ impl MuxEngine {
             ));
         }
         let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
-        let inherit_cwd_from = spawn_cwd_source(
-            "split-picker",
-            &self.state,
-            &options,
-            Some(target),
-            &PaneKind::Terminal,
-        )?;
+        let (inherit_cwd_from, _) =
+            spawn_cwd_source(self, &options, Some(target), &PaneKind::Terminal, hooks);
         self.split_window_with_options(
             context,
             &options,
             PaneKind::Picker { inherit_cwd_from },
             None,
             split_size(&options),
+            hooks,
         )
     }
 
@@ -1434,10 +1447,18 @@ impl MuxEngine {
         &mut self,
         context: &mut ExecutionContext,
         args: &[String],
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("split-browser", args)?;
         let browser = browser_from_args(&options, &positional)?;
-        self.split_window_with_options(context, &options, PaneKind::Browser(browser), None, None)
+        self.split_window_with_options(
+            context,
+            &options,
+            PaneKind::Browser(browser),
+            None,
+            None,
+            hooks,
+        )
     }
 
     fn select_pane_kind(
@@ -1511,6 +1532,7 @@ impl MuxEngine {
             pane,
             kind: snapshot_kind,
             inherit_cwd_from,
+            cwd: None,
             command: None,
         }))
     }
@@ -1812,6 +1834,7 @@ impl MuxEngine {
         kind: PaneKind,
         command: Option<String>,
         size: Option<SplitSize<'_>>,
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let axis = if options.has("-h") {
@@ -1821,8 +1844,7 @@ impl MuxEngine {
         };
         let placement = self.split_placement(options, size)?;
         let snapshot_kind = pane_kind_snapshot(&kind);
-        let inherit_cwd_from =
-            spawn_cwd_source("split-window", &self.state, options, Some(target), &kind)?;
+        let (inherit_cwd_from, cwd) = spawn_cwd_source(self, options, Some(target), &kind, hooks);
         let pane = self.state.split_pane_with(target, axis, kind, placement)?;
         if !placement.detached {
             *context =
@@ -1832,6 +1854,7 @@ impl MuxEngine {
             pane,
             kind: snapshot_kind,
             inherit_cwd_from,
+            cwd,
             command,
         }))
     }
@@ -4064,23 +4087,30 @@ fn shell_command_positional(positional: &[String]) -> Option<String> {
 }
 
 fn spawn_cwd_source(
-    command: &str,
-    state: &MuxState,
+    engine: &MuxEngine,
     options: &Options,
     origin: Option<PaneId>,
     kind: &PaneKind,
-) -> Result<Option<PaneId>, ServerError> {
+    hooks: &mut impl StatusHooks,
+) -> (Option<PaneId>, Option<String>) {
     if !matches!(kind, PaneKind::Terminal) {
-        return Ok(None);
+        return (None, None);
     }
-    match options.value("-c") {
-        None | Some("#{pane_current_path}") => {
-            Ok(origin.and_then(|origin| state.cwd_donor(origin)))
-        }
-        Some(_) => Err(ServerError::InvalidCommand(format!(
-            "{command} -c currently supports only #{{pane_current_path}}"
-        ))),
-    }
+    let inherit_cwd_from = origin.and_then(|origin| engine.state.cwd_donor(origin));
+    let cwd = options.value("-c").and_then(|value| {
+        let format_context = origin
+            .and_then(|pane| ExecutionContext::for_pane(&engine.state, pane))
+            .map_or_else(FormatContext::default, |origin| FormatContext {
+                session: origin.session,
+                window: origin.window,
+                pane: origin.pane,
+                active_session: origin.session,
+                format_type: FormatType::Pane,
+            });
+        let expanded = expand_format_with_hooks(value, engine, format_context, hooks);
+        (!expanded.is_empty()).then_some(expanded)
+    });
+    (inherit_cwd_from, cwd)
 }
 
 fn browser_from_args(
@@ -5994,7 +6024,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_splits_inherit_the_target_pane_working_directory() {
+    fn terminal_splits_expand_cwd_and_keep_the_target_pane_as_donor() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -6009,6 +6039,7 @@ mod tests {
             plain.effects.first(),
             Some(MuxEffect::PaneCreated {
                 inherit_cwd_from: Some(source),
+                cwd: None,
                 ..
             }) if *source == first
         ));
@@ -6035,13 +6066,38 @@ mod tests {
             tmux_style.effects.first(),
             Some(MuxEffect::PaneCreated {
                 inherit_cwd_from: Some(source),
+                cwd: None,
                 ..
             }) if *source == second
         ));
+        let third = context.pane.expect("third pane");
 
+        let literal = engine
+            .execute(&mut context, &command("split-window", &["-c", "/tmp"]))
+            .expect("literal cwd split");
         assert!(matches!(
-            engine.execute(&mut context, &command("split-window", &["-c", "/tmp"]),),
-            Err(ServerError::InvalidCommand(_))
+            literal.effects.first(),
+            Some(MuxEffect::PaneCreated {
+                inherit_cwd_from: Some(source),
+                cwd: Some(cwd),
+                ..
+            }) if *source == third && cwd == "/tmp"
+        ));
+        let literal_pane = context.pane.expect("literal cwd pane");
+
+        let empty = engine
+            .execute(
+                &mut context,
+                &command("split-window", &["-c", "#{not_a_tmux_variable}"]),
+            )
+            .expect("empty cwd format split");
+        assert!(matches!(
+            empty.effects.first(),
+            Some(MuxEffect::PaneCreated {
+                inherit_cwd_from: Some(source),
+                cwd: None,
+                ..
+            }) if *source == literal_pane
         ));
     }
 
@@ -6147,7 +6203,7 @@ mod tests {
     }
 
     #[test]
-    fn new_windows_and_sessions_inherit_the_previous_pane_working_directory() {
+    fn new_windows_and_sessions_expand_cwd_and_keep_the_origin_pane_as_donor() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -6176,18 +6232,35 @@ mod tests {
             "/private/tmp|/tmp"
         );
 
-        let window = engine
+        let mut outside = ExecutionContext::default();
+        let formatted = engine
             .execute(
-                &mut context,
-                &command("new-window", &["-c", "#{pane_current_path}"]),
+                &mut outside,
+                &command(
+                    "new-window",
+                    &["-d", "-t", "work", "-c", "#{pane_current_path}"],
+                ),
             )
-            .expect("new window");
+            .expect("formatted cwd window from outside a pane");
+        assert!(matches!(
+            formatted.effects.first(),
+            Some(MuxEffect::PaneCreated {
+                inherit_cwd_from: Some(source),
+                cwd: Some(cwd),
+                ..
+            }) if *source == first && cwd == "/private/tmp"
+        ));
+
+        let window = engine
+            .execute(&mut context, &command("new-window", &["-c", "/tmp"]))
+            .expect("literal cwd window");
         assert!(matches!(
             window.effects.first(),
             Some(MuxEffect::PaneCreated {
                 inherit_cwd_from: Some(source),
+                cwd: Some(cwd),
                 ..
-            }) if *source == first
+            }) if *source == first && cwd == "/tmp"
         ));
         let second = context.pane.expect("second pane");
         assert_ne!(second, first);
@@ -6195,20 +6268,16 @@ mod tests {
         let session = engine
             .execute(
                 &mut context,
-                &command("new-session", &["-s", "next", "-c", "#{pane_current_path}"]),
+                &command("new-session", &["-s", "next", "-c", "/tmp"]),
             )
-            .expect("new session");
+            .expect("literal cwd session");
         assert!(matches!(
             session.effects.first(),
             Some(MuxEffect::PaneCreated {
                 inherit_cwd_from: Some(source),
+                cwd: Some(cwd),
                 ..
-            }) if *source == second
-        ));
-
-        assert!(matches!(
-            engine.execute(&mut context, &command("new-window", &["-c", "/tmp"])),
-            Err(ServerError::InvalidCommand(_))
+            }) if *source == second && cwd == "/tmp"
         ));
     }
 

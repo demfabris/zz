@@ -2337,20 +2337,28 @@ impl Shared {
                         pane,
                         kind: PaneKindSnapshot::Terminal,
                         inherit_cwd_from,
+                        cwd,
                         command,
                     }
                     | MuxEffect::PaneMaterialized {
                         pane,
                         kind: PaneKindSnapshot::Terminal,
                         inherit_cwd_from,
+                        cwd,
                         command,
                     } => {
                         let history_limit = inner.engine.history_limit_for_pane(*pane)?;
                         let word_separators =
                             WordSeparators::new(inner.engine.word_separators_for_pane(*pane)?);
-                        let working_directory = inherit_cwd_from
-                            .and_then(|source| inner.terminals.get(&source))
-                            .and_then(|terminal| terminal_working_directory(terminal))
+                        let working_directory = cwd
+                            .as_deref()
+                            .map(PathBuf::from)
+                            .filter(|path| path.is_dir())
+                            .or_else(|| {
+                                inherit_cwd_from
+                                    .and_then(|source| inner.terminals.get(&source))
+                                    .and_then(|terminal| terminal_working_directory(terminal))
+                            })
                             .or_else(|| std::env::current_dir().ok());
                         let start_path = working_directory
                             .as_deref()
@@ -14014,6 +14022,83 @@ bind - split-window -v -c "#{pane_current_path}"
                 ..
             }
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_cwd_flag_prefers_a_valid_literal_and_falls_back_to_the_donor() {
+        let donor_directory = tempfile::tempdir().expect("donor working directory");
+        let donor_path = donor_directory
+            .path()
+            .canonicalize()
+            .expect("canonical donor working directory");
+        let literal_directory = tempfile::tempdir().expect("literal working directory");
+        let literal_path = literal_directory
+            .path()
+            .canonicalize()
+            .expect("canonical literal working directory");
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-s", "cwd", "-c", donor_path.to_string_lossy().as_ref()],
+                ),
+            )
+            .expect("session with literal cwd");
+        let donor = context.pane.expect("donor pane");
+        let donor_terminal = Arc::clone(&shared.inner.lock().terminals[&donor]);
+        let wait_for_cwd = |terminal: &TerminalSession, expected: &Path| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if terminal_working_directory(terminal).as_deref() == Some(expected) {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "timed out waiting for terminal cwd; expected={expected:?}, pid={:?}, cwd={:?}",
+                    terminal.foreground_process_id(),
+                    terminal_working_directory(terminal),
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        };
+        wait_for_cwd(&donor_terminal, &donor_path);
+
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "split-window",
+                    ["-h", "-c", literal_path.to_string_lossy().as_ref()],
+                ),
+            )
+            .expect("split with valid literal cwd");
+        let literal = context.pane.expect("literal cwd pane");
+        let literal_terminal = Arc::clone(&shared.inner.lock().terminals[&literal]);
+        wait_for_cwd(&literal_terminal, &literal_path);
+
+        let bogus_path = literal_directory.path().join("missing");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "split-window",
+                    ["-v", "-c", bogus_path.to_string_lossy().as_ref()],
+                ),
+            )
+            .expect("split with bogus literal cwd");
+        let fallback = context.pane.expect("fallback cwd pane");
+        let fallback_terminal = Arc::clone(&shared.inner.lock().terminals[&fallback]);
+        wait_for_cwd(&fallback_terminal, &literal_path);
     }
 
     #[cfg(unix)]

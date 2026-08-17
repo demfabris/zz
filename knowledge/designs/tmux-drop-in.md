@@ -112,24 +112,30 @@ the per-step runner with strict TOPO/exit-class diffing, report-only GEO, a
 seven-scenario corpus runs TOPO-clean against the pin; every GEO hunk is phase-3 steering
 data.
 
-## Phase 3 — cell-authoritative layout (~2–3 weeks)
+## Phase 3 — cell-authoritative layout (shipped 2026-08-17)
 
-Make absolute cells the layout truth in `zz-mux` (`model.rs` split/resize/preset math), with
-ratios derived for rendering — reversing today's direction. Closes the entire silent-geometry
-block of the divergence matrix at once: nested-resize sibling drift, the 10–90% clamp vs
-`PANE_MINIMUM` (1 cell), `-f` pane numbering, tmux's integer spread on window resize. Enables
-faithful serialized layout strings (`select-layout` compat, resurrect-style save/restore).
+Cells are the layout truth: `zz-mux/src/layout.rs` is an n-ary cell-tree port of the pin's
+`layout.c` (splits, remove-gifts-space, window resize spread, resize-pane victim walks, all
+seven presets, leaf-gated spread), owned per window by `model.rs`; the wire ratio tree is a
+derived projection with stable divider ids, so no protocol, FFI, TUI, or iOS surface moved.
+See [split-pane layout](/concepts/split-pane-layout.md) for the shipped architecture.
 
-- No rendering/bench impact: layout math is a handful of nodes on state change; the draw
-  pipeline consumes the same pixel rects; `bench/` measures PTY throughput and never touches
-  layout.
-- Blast radius, verified: the `[0.1, 0.9]` clamp is **engine-side** (`set_split_ratio` is the
-  single ratio write path; add-pane and join-pane hard-reject out of range), so every client
-  is bound by it today — the clamps move as part of this phase, not just the GUI's copy. The
-  TUI resolves ratios to floored cells and the FFI exposes only flat pane lists, so both
-  follow the engine without their own changes.
-- GUI feel decision: dividers step by whole cells (tmux-like), or the drag stays smooth and
-  commits the rounded cell count on release. Decide by trying both.
+- Validated by 48 golden fixtures captured from the pin binary
+  (`compat/gen-layout-fixtures.sh`) replayed in CI debug AND release, and by the harness
+  running `--strict-geometry` clean across the corpus — strict geometry is now the CI
+  contract, with each window's layout string structurally diffed at every step.
+- Layout strings shipped both directions: `dump()` and `parse()` (case-insensitive
+  checksum, optional leaf ids, 256-deep cap where the pin spins), `select-layout <string>`
+  with the pin's exact bottom-right trim, and `#{window_layout}`.
+- Windows are born at tmux's 80x24 headless, honor `new-session -x/-y`, and track a drawing
+  client through a guarded measurement write-back (dead-band + repeat memo fixed point);
+  divider drags stay smooth and commit the cell-snapped ratio on release (the feel decision
+  landed on commit-on-release).
+- The review rounds killed a daemon-aborting resolver recursion, a drag-override feedback
+  loop into the write-back, unpublished mutations (generation-diff catch-alls now guard
+  both daemon boundaries), and select-layout's missing unzoom-first; two upstream layout
+  bugs (two-pane main-* presets, mixed-parent `-E` spread) are refused and documented in
+  [the divergence matrix](/tmux/divergences.md) with `known/` harness scenarios.
 
 ## Phase 4 — the grind (~2–3 months, parallelizable)
 

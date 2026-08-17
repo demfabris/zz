@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fmt::Write as _,
     path::PathBuf,
     str::FromStr as _,
 };
@@ -23,7 +24,7 @@ use crate::{
     formats::{CommandHooks, FormatContext, FormatType, StatusHooks, expand_format_with_hooks},
     layout::PANE_MAXIMUM,
     model::DEFAULT_WINDOW_EXTENT,
-    tmux_options::{TmuxOptionScope, match_tmux_option},
+    tmux_options::{TmuxOption, TmuxOptionScope, match_tmux_option, tmux_options},
 };
 
 const MAX_COPY_COMMAND_BYTES: usize = 8 * 1024;
@@ -249,6 +250,27 @@ enum TmuxOptionTarget {
     Pane(PaneId),
 }
 
+type UserOptions = BTreeMap<String, String>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EnvironmentEntry {
+    value: Option<String>,
+    hidden: bool,
+}
+
+type Environment = BTreeMap<String, EnvironmentEntry>;
+
+static EMPTY_ENVIRONMENT: Environment = Environment::new();
+
+const NATIVE_OPTIONS: &[&str] = &[
+    "history-trickle",
+    "experimental-agent-pane",
+    "experimental-editor-pane",
+    "agent-command",
+    "agent-claude-code-command",
+    "agent-auto-approve",
+];
+
 #[derive(Debug)]
 pub struct MuxEngine {
     pub state: MuxState,
@@ -269,6 +291,14 @@ pub struct MuxEngine {
     window_pane_base_indices: BTreeMap<WindowId, u32>,
     global_word_separators: String,
     session_word_separators: BTreeMap<SessionId, String>,
+    server_user_options: UserOptions,
+    global_session_user_options: UserOptions,
+    session_user_options: BTreeMap<SessionId, UserOptions>,
+    global_window_user_options: UserOptions,
+    window_user_options: BTreeMap<WindowId, UserOptions>,
+    pane_user_options: BTreeMap<PaneId, UserOptions>,
+    global_environment: Environment,
+    session_environments: BTreeMap<SessionId, Environment>,
     status: StatusFormats,
     format_host: String,
     format_host_short: String,
@@ -333,6 +363,14 @@ impl Default for MuxEngine {
             window_pane_base_indices: BTreeMap::new(),
             global_word_separators: DEFAULT_WORD_SEPARATORS.to_owned(),
             session_word_separators: BTreeMap::new(),
+            server_user_options: UserOptions::new(),
+            global_session_user_options: UserOptions::new(),
+            session_user_options: BTreeMap::new(),
+            global_window_user_options: UserOptions::new(),
+            window_user_options: BTreeMap::new(),
+            pane_user_options: BTreeMap::new(),
+            global_environment: Environment::new(),
+            session_environments: BTreeMap::new(),
             status: StatusFormats::default(),
             format_host: String::new(),
             format_host_short: String::new(),
@@ -604,6 +642,35 @@ impl MuxEngine {
             .map_or(self.global_word_separators.as_str(), String::as_str)
     }
 
+    pub fn environment_for_session(
+        &self,
+        session: SessionId,
+    ) -> Result<Vec<(String, Option<String>)>, ServerError> {
+        if !self.state.sessions.contains_key(&session) {
+            return Err(ServerError::MissingTarget(session.to_string()));
+        }
+        let mut environment = BTreeMap::new();
+        for (name, entry) in &self.global_environment {
+            let value = if entry.hidden {
+                None
+            } else {
+                entry.value.clone()
+            };
+            environment.insert(name.clone(), value);
+        }
+        if let Some(overlay) = self.session_environments.get(&session) {
+            for (name, entry) in overlay {
+                let value = if entry.hidden {
+                    None
+                } else {
+                    entry.value.clone()
+                };
+                environment.insert(name.clone(), value);
+            }
+        }
+        Ok(environment.into_iter().collect())
+    }
+
     /// The effective native copy-mode key table for a pane's window.
     pub fn copy_mode_table_for_pane(&self, pane: PaneId) -> Result<&'static str, ServerError> {
         let window = self
@@ -709,6 +776,10 @@ impl MuxEngine {
             "list-keys" => self.list_keys(&command.args)?,
             "set-option" => self.set_option(context, &command.args, false)?,
             "set-window-option" => self.set_option(context, &command.args, true)?,
+            "show-options" => self.show_options(context, &command.args, false)?,
+            "show-window-options" => self.show_options(context, &command.args, true)?,
+            "set-environment" => self.set_environment(context, &command.args, hooks)?,
+            "show-environment" => self.show_environment(context, &command.args)?,
             "source-file" => Self::source_file(&command.args)?,
             "reload-config" => {
                 parse_command_options("reload-config", &command.args)?;
@@ -738,6 +809,14 @@ impl MuxEngine {
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_word_separators
             .retain(|session, _| self.state.sessions.contains_key(session));
+        self.session_user_options
+            .retain(|session, _| self.state.sessions.contains_key(session));
+        self.window_user_options
+            .retain(|window, _| self.state.windows.contains_key(window));
+        self.pane_user_options
+            .retain(|pane, _| self.state.pane(*pane).is_some());
+        self.session_environments
+            .retain(|session, _| self.state.sessions.contains_key(session));
         self.window_mode_keys
             .retain(|window, _| self.state.windows.contains_key(window));
         self.window_pane_base_indices
@@ -745,6 +824,9 @@ impl MuxEngine {
         self.pane_runtime_facts
             .retain(|pane, _| self.state.pane(*pane).is_some());
         self.repair_context(context);
+        if let Some(session) = context.session {
+            self.state.mark_session_active(session);
+        }
         Ok(execution)
     }
 
@@ -2814,6 +2896,9 @@ impl MuxEngine {
             ));
         }
         let value = positional.get(1).map(String::as_str);
+        if option.starts_with('@') {
+            return self.set_user_option(context, option, value, &options, force_window);
+        }
         if is_native_option(option) {
             return self.set_native_option(option, value, &options, force_window);
         }
@@ -2831,7 +2916,7 @@ impl MuxEngine {
                 )));
             }
         };
-        if !is_implemented_tmux_option(table_option.name) {
+        if table_option.default.is_none() {
             return Err(ServerError::UnsupportedCommand(format!(
                 "set-option {}",
                 table_option.name
@@ -2864,6 +2949,531 @@ impl MuxEngine {
                 value,
                 &options,
             ),
+        }
+    }
+
+    fn set_user_option(
+        &mut self,
+        context: &ExecutionContext,
+        option: &str,
+        value: Option<&str>,
+        options: &Options,
+        force_window: bool,
+    ) -> Result<Execution, ServerError> {
+        let target = match self.resolve_user_option_target(context, options, force_window) {
+            Ok(target) => target,
+            Err(_) if options.has("-q") => return Ok(Execution::default()),
+            Err(error) => return Err(error),
+        };
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset && self.user_option_at_target(target, option).is_some() {
+            return already_set_or_quiet(options, option);
+        }
+        if unset {
+            if options.has("-U")
+                && let TmuxOptionTarget::Window(window) = target
+            {
+                let panes = self
+                    .state
+                    .windows
+                    .get(&window)
+                    .map(|window| window.pane_order().to_vec())
+                    .unwrap_or_default();
+                for pane in panes {
+                    if let Some(values) = self.pane_user_options.get_mut(&pane) {
+                        values.remove(option);
+                    }
+                }
+            }
+            self.user_options_at_target_mut(target).remove(option);
+            return Ok(Execution::default());
+        }
+        let value = value.ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
+        let values = self.user_options_at_target_mut(target);
+        if options.has("-a")
+            && let Some(current) = values.get_mut(option)
+        {
+            current.push_str(value);
+        } else {
+            values.insert(option.to_owned(), value.to_owned());
+        }
+        Ok(Execution::default())
+    }
+
+    fn show_options(
+        &self,
+        context: &ExecutionContext,
+        args: &[String],
+        force_window: bool,
+    ) -> Result<Execution, ServerError> {
+        let command = if force_window {
+            "show-window-options"
+        } else {
+            "show-options"
+        };
+        let (options, positional) = parse_command_options(command, args)?;
+        if positional.len() > 1 {
+            return Err(ServerError::InvalidCommand(
+                "show-options accepts at most one option".to_owned(),
+            ));
+        }
+        let value_only = options.has("-v");
+        let include_inherited = options.has("-A");
+        let Some(argument) = positional.first() else {
+            let target = match self.resolve_user_option_target(context, &options, force_window) {
+                Ok(target) => target,
+                Err(_) if options.has("-q") => return Ok(Execution::default()),
+                Err(error) => return Err(error),
+            };
+            let mut lines = Vec::new();
+            if let Some(values) = self.user_options_at_target(target) {
+                for (name, value) in values {
+                    push_shown_option(&mut lines, name, value, true, false, value_only);
+                }
+            }
+            for option in tmux_options().filter(|option| {
+                option.default.is_some() && option_scope_matches_target(option.scope, target)
+            }) {
+                if let Some((value, inherited)) =
+                    self.tmux_option_readback(option, target, include_inherited)?
+                {
+                    push_shown_option(
+                        &mut lines,
+                        option.name,
+                        &value,
+                        option
+                            .default
+                            .expect("implemented option has a default")
+                            .is_string(),
+                        inherited,
+                        value_only,
+                    );
+                }
+            }
+            if target == TmuxOptionTarget::Server {
+                for name in NATIVE_OPTIONS {
+                    let (value, is_string) = self.native_option_readback(name);
+                    push_shown_option(&mut lines, name, &value, is_string, false, value_only);
+                }
+            }
+            return Ok(Execution::output(lines.join("\n")));
+        };
+
+        if argument.starts_with('@') {
+            let target = match self.resolve_user_option_target(context, &options, force_window) {
+                Ok(target) => target,
+                Err(_) if options.has("-q") => return Ok(Execution::default()),
+                Err(error) => return Err(error),
+            };
+            if let Some((value, inherited)) =
+                self.user_option_readback(target, argument, include_inherited)
+            {
+                let mut lines = Vec::new();
+                push_shown_option(&mut lines, argument, value, true, inherited, value_only);
+                return Ok(Execution::output(lines.remove(0)));
+            }
+            if options.has("-q") {
+                return Ok(Execution::default());
+            }
+            return Err(ServerError::InvalidCommand(format!(
+                "invalid option: {argument}"
+            )));
+        }
+        if is_native_option(argument) {
+            let (value, is_string) = self.native_option_readback(argument);
+            let mut lines = Vec::new();
+            push_shown_option(&mut lines, argument, &value, is_string, false, value_only);
+            return Ok(Execution::output(lines.remove(0)));
+        }
+        let option = match match_tmux_option(argument) {
+            Ok(Some(option)) => option,
+            Ok(None) | Err(()) if options.has("-q") => return Ok(Execution::default()),
+            Ok(None) => {
+                return Err(ServerError::InvalidCommand(format!(
+                    "invalid option: {argument}"
+                )));
+            }
+            Err(()) => {
+                return Err(ServerError::InvalidCommand(format!(
+                    "ambiguous option: {argument}"
+                )));
+            }
+        };
+        if option.default.is_none() {
+            return Ok(Execution::default());
+        }
+        let target =
+            match self.resolve_tmux_option_target(context, &options, force_window, option.scope) {
+                Ok(target) => target,
+                Err(_) if options.has("-q") => return Ok(Execution::default()),
+                Err(error) => return Err(error),
+            };
+        let Some((value, inherited)) =
+            self.tmux_option_readback(option, target, include_inherited)?
+        else {
+            return Ok(Execution::default());
+        };
+        let mut lines = Vec::new();
+        push_shown_option(
+            &mut lines,
+            option.name,
+            &value,
+            option
+                .default
+                .expect("implemented option has a default")
+                .is_string(),
+            inherited,
+            value_only,
+        );
+        Ok(Execution::output(lines.remove(0)))
+    }
+
+    fn set_environment(
+        &mut self,
+        context: &ExecutionContext,
+        args: &[String],
+        hooks: &mut impl StatusHooks,
+    ) -> Result<Execution, ServerError> {
+        let (options, positional) = parse_command_options("set-environment", args)?;
+        if !(1..=2).contains(&positional.len()) {
+            return Err(ServerError::InvalidCommand(
+                "set-environment needs a variable and optional value".to_owned(),
+            ));
+        }
+        let name = &positional[0];
+        validate_environment_name(name)?;
+        let target_session = if options.has("-g") {
+            self.state
+                .resolve_session(options.value("-t"), context.session)
+                .ok()
+        } else {
+            Some(
+                self.state
+                    .resolve_session(options.value("-t"), context.session)?,
+            )
+        };
+        let mut value = positional.get(1).cloned();
+        if options.has("-F")
+            && let Some(raw) = value.as_deref()
+        {
+            value = Some(expand_format_with_hooks(
+                raw,
+                self,
+                self.environment_format_context(target_session, context.session),
+                hooks,
+            ));
+        }
+        if (options.has("-r") || options.has("-u")) && value.is_some() {
+            let flag = if options.has("-u") { "-u" } else { "-r" };
+            return Err(ServerError::InvalidCommand(format!(
+                "can't specify a value with {flag}"
+            )));
+        }
+        let environment = if options.has("-g") {
+            &mut self.global_environment
+        } else {
+            self.session_environments
+                .entry(target_session.expect("local environment has a session"))
+                .or_default()
+        };
+        if options.has("-u") {
+            environment.remove(name);
+        } else if options.has("-r") {
+            environment.insert(
+                name.clone(),
+                EnvironmentEntry {
+                    value: None,
+                    hidden: false,
+                },
+            );
+        } else {
+            let value = value
+                .ok_or_else(|| ServerError::InvalidCommand("no value specified".to_owned()))?;
+            environment.insert(
+                name.clone(),
+                EnvironmentEntry {
+                    value: Some(value),
+                    hidden: options.has("-h"),
+                },
+            );
+        }
+        Ok(Execution::default())
+    }
+
+    fn show_environment(
+        &self,
+        context: &ExecutionContext,
+        args: &[String],
+    ) -> Result<Execution, ServerError> {
+        let (options, positional) = parse_command_options("show-environment", args)?;
+        if positional.len() > 1 {
+            return Err(ServerError::InvalidCommand(
+                "show-environment accepts at most one variable".to_owned(),
+            ));
+        }
+        let environment = if options.has("-g") {
+            if let Some(target) = options.value("-t") {
+                self.state.resolve_session(Some(target), context.session)?;
+            }
+            &self.global_environment
+        } else {
+            let session = self
+                .state
+                .resolve_session(options.value("-t"), context.session)?;
+            self.session_environments
+                .get(&session)
+                .unwrap_or(&EMPTY_ENVIRONMENT)
+        };
+        if let Some(name) = positional.first() {
+            let entry = environment
+                .get(name)
+                .ok_or_else(|| ServerError::InvalidCommand(format!("unknown variable: {name}")))?;
+            return Ok(Execution::output(
+                environment_line(name, entry, &options).unwrap_or_default(),
+            ));
+        }
+        let output = environment
+            .iter()
+            .filter_map(|(name, entry)| environment_line(name, entry, &options))
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok(Execution::output(output))
+    }
+
+    fn resolve_user_option_target(
+        &self,
+        context: &ExecutionContext,
+        options: &Options,
+        force_window: bool,
+    ) -> Result<TmuxOptionTarget, ServerError> {
+        if options.has("-s") {
+            return Ok(TmuxOptionTarget::Server);
+        }
+        if options.has("-p") {
+            return self
+                .resolve_pane(options.value("-t"), context.window, context.pane)
+                .map(TmuxOptionTarget::Pane);
+        }
+        if force_window || options.has("-w") {
+            if options.has("-g") {
+                return Ok(TmuxOptionTarget::GlobalWindow);
+            }
+            return self
+                .resolve_option_window(context, options, force_window)
+                .map(TmuxOptionTarget::Window);
+        }
+        if options.has("-g") {
+            return Ok(TmuxOptionTarget::GlobalSession);
+        }
+        let window = self.resolve_option_window(context, options, false)?;
+        Ok(TmuxOptionTarget::Session(
+            self.state.windows[&window].session,
+        ))
+    }
+
+    fn user_option_at_target(&self, target: TmuxOptionTarget, name: &str) -> Option<&str> {
+        self.user_options_at_target(target)?
+            .get(name)
+            .map(String::as_str)
+    }
+
+    fn user_options_at_target(&self, target: TmuxOptionTarget) -> Option<&UserOptions> {
+        match target {
+            TmuxOptionTarget::Server => Some(&self.server_user_options),
+            TmuxOptionTarget::GlobalSession => Some(&self.global_session_user_options),
+            TmuxOptionTarget::Session(session) => self.session_user_options.get(&session),
+            TmuxOptionTarget::GlobalWindow => Some(&self.global_window_user_options),
+            TmuxOptionTarget::Window(window) => self.window_user_options.get(&window),
+            TmuxOptionTarget::Pane(pane) => self.pane_user_options.get(&pane),
+        }
+    }
+
+    fn user_options_at_target_mut(&mut self, target: TmuxOptionTarget) -> &mut UserOptions {
+        match target {
+            TmuxOptionTarget::Server => &mut self.server_user_options,
+            TmuxOptionTarget::GlobalSession => &mut self.global_session_user_options,
+            TmuxOptionTarget::Session(session) => {
+                self.session_user_options.entry(session).or_default()
+            }
+            TmuxOptionTarget::GlobalWindow => &mut self.global_window_user_options,
+            TmuxOptionTarget::Window(window) => self.window_user_options.entry(window).or_default(),
+            TmuxOptionTarget::Pane(pane) => self.pane_user_options.entry(pane).or_default(),
+        }
+    }
+
+    fn user_option_readback<'a>(
+        &'a self,
+        target: TmuxOptionTarget,
+        name: &str,
+        include_inherited: bool,
+    ) -> Option<(&'a str, bool)> {
+        if let Some(value) = self.user_option_at_target(target, name) {
+            return Some((value, false));
+        }
+        if !include_inherited {
+            return None;
+        }
+        let parent = match target {
+            TmuxOptionTarget::Session(_) => self.global_session_user_options.get(name),
+            TmuxOptionTarget::Window(_) => self.global_window_user_options.get(name),
+            TmuxOptionTarget::Pane(pane) => self
+                .state
+                .window_for_pane(pane)
+                .and_then(|window| self.window_user_options.get(&window))
+                .and_then(|values| values.get(name))
+                .or_else(|| self.global_window_user_options.get(name)),
+            _ => None,
+        }?;
+        Some((parent, true))
+    }
+
+    fn tmux_option_readback(
+        &self,
+        option: TmuxOption,
+        target: TmuxOptionTarget,
+        include_inherited: bool,
+    ) -> Result<Option<(String, bool)>, ServerError> {
+        let inherited = || {
+            include_inherited
+                .then(|| {
+                    self.global_tmux_option_value(option.name)
+                        .or_else(|| option.default.map(|default| default.value().to_owned()))
+                })
+                .flatten()
+                .map(|value| (value, true))
+        };
+        let value = match target {
+            TmuxOptionTarget::Server
+            | TmuxOptionTarget::GlobalSession
+            | TmuxOptionTarget::GlobalWindow => self
+                .global_tmux_option_value(option.name)
+                .or_else(|| option.default.map(|default| default.value().to_owned()))
+                .map(|value| (value, false)),
+            TmuxOptionTarget::Session(session) => match option.name {
+                "history-limit" => self
+                    .session_history_limits
+                    .get(&session)
+                    .map(|value| (value.to_string(), false))
+                    .or_else(inherited),
+                "base-index" => self
+                    .session_base_indices
+                    .get(&session)
+                    .map(|value| (value.to_string(), false))
+                    .or_else(inherited),
+                "renumber-windows" => self
+                    .session_renumber_windows
+                    .get(&session)
+                    .map(|value| (tmux_flag(*value).to_owned(), false))
+                    .or_else(inherited),
+                "word-separators" => self
+                    .session_word_separators
+                    .get(&session)
+                    .map(|value| (value.clone(), false))
+                    .or_else(inherited),
+                _ => inherited(),
+            },
+            TmuxOptionTarget::Window(window) => match option.name {
+                "mode-keys" => self
+                    .window_mode_keys
+                    .get(&window)
+                    .map(|value| (value.as_str().to_owned(), false))
+                    .or_else(inherited),
+                "pane-base-index" => self
+                    .window_pane_base_indices
+                    .get(&window)
+                    .map(|value| (value.to_string(), false))
+                    .or_else(inherited),
+                "synchronize-panes" => self
+                    .state
+                    .window_synchronize_override(window)?
+                    .map(|value| (tmux_flag(value).to_owned(), false))
+                    .or_else(inherited),
+                _ => inherited(),
+            },
+            TmuxOptionTarget::Pane(pane) => match option.name {
+                "synchronize-panes" => self
+                    .state
+                    .pane_synchronize_override(pane)?
+                    .map(|value| (tmux_flag(value).to_owned(), false))
+                    .or_else(|| {
+                        include_inherited.then(|| {
+                            (
+                                tmux_flag(
+                                    self.state
+                                        .pane_synchronize_panes(pane)
+                                        .expect("pane target was resolved"),
+                                )
+                                .to_owned(),
+                                true,
+                            )
+                        })
+                    }),
+                _ => None,
+            },
+        };
+        Ok(value)
+    }
+
+    fn global_tmux_option_value(&self, name: &str) -> Option<String> {
+        Some(match name {
+            "base-index" => self.global_base_index.to_string(),
+            "buffer-limit" => self.buffer_limit.to_string(),
+            "copy-command" => self.copy_command.clone(),
+            "history-limit" => self.global_history_limit.to_string(),
+            "mode-keys" => self.global_mode_keys.as_str().to_owned(),
+            "pane-base-index" => self.global_pane_base_index.to_string(),
+            "prefix" => self.mux_option_value(MuxOptionKey::Prefix),
+            "renumber-windows" => tmux_flag(self.global_renumber_windows).to_owned(),
+            "set-clipboard" => self.set_clipboard.as_str().to_owned(),
+            "status" => tmux_flag(self.status.enabled).to_owned(),
+            "status-interval" => self.status.interval.as_secs().to_string(),
+            "status-left" => self.status.left.clone(),
+            "status-right" => self.status.right.clone(),
+            "synchronize-panes" => tmux_flag(self.state.global_synchronize_panes()).to_owned(),
+            "word-separators" => self.global_word_separators.clone(),
+            _ => return None,
+        })
+    }
+
+    fn native_option_readback(&self, name: &str) -> (String, bool) {
+        match name {
+            "history-trickle" => (self.history_trickle.to_string(), false),
+            "experimental-agent-pane" => {
+                (tmux_flag(self.experimental_agent_pane).to_owned(), false)
+            }
+            "experimental-editor-pane" => {
+                (tmux_flag(self.experimental_editor_pane).to_owned(), false)
+            }
+            "agent-command" => (self.agent.command.clone(), true),
+            "agent-claude-code-command" => (self.agent.claude_code_command.clone(), true),
+            "agent-auto-approve" => (tmux_flag(self.agent.auto_approve).to_owned(), false),
+            _ => unreachable!("native option is catalogued"),
+        }
+    }
+
+    fn environment_format_context(
+        &self,
+        session: Option<SessionId>,
+        active_session: Option<SessionId>,
+    ) -> FormatContext {
+        let window = session.and_then(|session| {
+            self.state
+                .sessions
+                .get(&session)
+                .map(|session| session.active_window)
+        });
+        let pane = window.and_then(|window| {
+            self.state
+                .windows
+                .get(&window)
+                .map(|window| window.active_pane)
+        });
+        FormatContext {
+            session,
+            window,
+            pane,
+            active_session,
+            format_type: FormatType::Pane,
         }
     }
 
@@ -3602,36 +4212,180 @@ impl MuxEngine {
 }
 
 fn is_native_option(option: &str) -> bool {
+    NATIVE_OPTIONS.contains(&option)
+}
+
+fn option_scope_matches_target(scope: TmuxOptionScope, target: TmuxOptionTarget) -> bool {
     matches!(
-        option,
-        "history-trickle"
-            | "experimental-agent-pane"
-            | "experimental-editor-pane"
-            | "agent-command"
-            | "agent-claude-code-command"
-            | "agent-auto-approve"
+        (scope, target),
+        (TmuxOptionScope::Server, TmuxOptionTarget::Server)
+            | (
+                TmuxOptionScope::Session,
+                TmuxOptionTarget::GlobalSession | TmuxOptionTarget::Session(_)
+            )
+            | (
+                TmuxOptionScope::Window,
+                TmuxOptionTarget::GlobalWindow | TmuxOptionTarget::Window(_)
+            )
+            | (
+                TmuxOptionScope::WindowPane,
+                TmuxOptionTarget::GlobalWindow
+                    | TmuxOptionTarget::Window(_)
+                    | TmuxOptionTarget::Pane(_)
+            )
     )
 }
 
-fn is_implemented_tmux_option(option: &str) -> bool {
-    matches!(
-        option,
-        "base-index"
-            | "buffer-limit"
-            | "copy-command"
-            | "history-limit"
-            | "mode-keys"
-            | "pane-base-index"
-            | "prefix"
-            | "renumber-windows"
-            | "set-clipboard"
-            | "status"
-            | "status-interval"
-            | "status-left"
-            | "status-right"
-            | "synchronize-panes"
-            | "word-separators"
-    )
+fn push_shown_option(
+    lines: &mut Vec<String>,
+    name: &str,
+    value: &str,
+    is_string: bool,
+    inherited: bool,
+    value_only: bool,
+) {
+    if value_only {
+        lines.push(value.to_owned());
+        return;
+    }
+    let name = if inherited {
+        format!("{name}*")
+    } else {
+        name.to_owned()
+    };
+    let value = if is_string {
+        tmux_args_escape(value)
+    } else {
+        value.to_owned()
+    };
+    lines.push(format!("{name} {value}"));
+}
+
+fn tmux_args_escape(value: &str) -> String {
+    if value.is_empty() {
+        return "''".to_owned();
+    }
+    let double_quoted = value.bytes().any(|byte| b" #';${}%".contains(&byte));
+    let single_quoted = !double_quoted && value.bytes().any(|byte| b" \"".contains(&byte));
+    let bytes = value.as_bytes();
+    if bytes.len() == 1 && bytes[0] != b' ' && (double_quoted || single_quoted || bytes[0] == b'~')
+    {
+        return format!("\\{}", char::from(bytes[0]));
+    }
+
+    let escaped = tmux_vis(value, double_quoted);
+    if single_quoted {
+        format!("'{escaped}'")
+    } else if double_quoted {
+        if escaped.starts_with('~') {
+            format!("\"\\{escaped}\"")
+        } else {
+            format!("\"{escaped}\"")
+        }
+    } else if escaped.starts_with('~') {
+        format!("\\{escaped}")
+    } else {
+        escaped
+    }
+}
+
+fn tmux_vis(value: &str, double_quoted: bool) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    let mut characters = value.chars().peekable();
+    while let Some(character) = characters.next() {
+        if !character.is_ascii() {
+            escaped.push(character);
+            continue;
+        }
+        let byte = character as u8;
+        if byte == b'$'
+            && double_quoted
+            && characters
+                .peek()
+                .is_some_and(|next| next.is_ascii_alphabetic() || matches!(*next, '_' | '{'))
+        {
+            escaped.push('\\');
+            escaped.push('$');
+            continue;
+        }
+        if byte == b'\\' || byte == b'"' && double_quoted {
+            escaped.push('\\');
+            escaped.push(character);
+            continue;
+        }
+        if byte == b' ' || byte.is_ascii_graphic() {
+            escaped.push(character);
+            continue;
+        }
+        match byte {
+            b'\n' => escaped.push_str("\\n"),
+            b'\r' => escaped.push_str("\\r"),
+            0x08 => escaped.push_str("\\b"),
+            0x07 => escaped.push_str("\\a"),
+            0x0b => escaped.push_str("\\v"),
+            b'\t' => escaped.push_str("\\t"),
+            0x0c => escaped.push_str("\\f"),
+            0 => {
+                escaped.push_str("\\0");
+                if characters
+                    .peek()
+                    .is_some_and(|next| matches!(*next, '0'..='7'))
+                {
+                    escaped.push_str("00");
+                }
+            }
+            _ => write!(escaped, "\\{byte:03o}").expect("writing to a string cannot fail"),
+        }
+    }
+    escaped
+}
+
+fn tmux_flag(value: bool) -> &'static str {
+    if value { "on" } else { "off" }
+}
+
+fn validate_environment_name(name: &str) -> Result<(), ServerError> {
+    if name.is_empty() {
+        return Err(ServerError::InvalidCommand(
+            "empty variable name".to_owned(),
+        ));
+    }
+    if name.contains('=') {
+        return Err(ServerError::InvalidCommand(
+            "variable name contains =".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn environment_line(name: &str, entry: &EnvironmentEntry, options: &Options) -> Option<String> {
+    if options.has("-h") != entry.hidden {
+        return None;
+    }
+    if !options.has("-s") {
+        return Some(match &entry.value {
+            Some(value) => format!("{name}={value}"),
+            None => format!("-{name}"),
+        });
+    }
+    Some(match &entry.value {
+        Some(value) => format!(
+            "{name}=\"{}\"; export {name};",
+            shell_environment_escape(value)
+        ),
+        None => format!("unset {name};"),
+    })
+}
+
+fn shell_environment_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(character, '$' | '`' | '"' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
 }
 
 fn option_is_unset(options: &Options) -> bool {
@@ -4676,6 +5430,65 @@ mod tests {
                 MuxEffect::PaneCreated { pane: created, .. },
                 MuxEffect::SnapshotChanged,
             ] if *created == pane
+        ));
+    }
+
+    #[test]
+    fn most_recent_context_drives_originless_new_session_cwd() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "first"]),
+            )
+            .expect("first session");
+        let first = context.session.expect("first session id");
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "second"]),
+            )
+            .expect("second session");
+        let second = context.session.expect("second session id");
+        let second_pane = context.pane.expect("second session pane");
+        assert!(engine.set_pane_runtime_facts(
+            second_pane,
+            PaneRuntimeFacts {
+                current_path: "/private/tmp".to_owned(),
+                ..PaneRuntimeFacts::default()
+            },
+        ));
+
+        assert_eq!(
+            engine.state.default_context().map(|state| state.0),
+            Some(first)
+        );
+        let (session, window, pane) = engine.state.most_recent_context().expect("recent context");
+        assert_eq!(session, second);
+
+        let mut command_context = ExecutionContext {
+            session: Some(session),
+            window: Some(window),
+            pane: Some(pane),
+        };
+        let execution = engine
+            .execute(
+                &mut command_context,
+                &command(
+                    "new-session",
+                    &["-d", "-s", "third", "-c", "#{pane_current_path}"],
+                ),
+            )
+            .expect("originless new session");
+        assert!(matches!(
+            execution.effects.first(),
+            Some(MuxEffect::PaneCreated {
+                inherit_cwd_from: Some(source),
+                cwd: Some(cwd),
+                ..
+            }) if *source == second_pane && cwd == "/private/tmp"
         ));
     }
 
@@ -7698,6 +8511,314 @@ mod tests {
             &["-g", "history-limit", &(MAX_HISTORY_LIMIT + 1).to_string()],
         );
         assert!(engine.execute(&mut context, &invalid).is_err());
+    }
+
+    #[test]
+    fn show_options_uses_pin_escaping_and_declared_scope_readback() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+
+        assert_eq!(tmux_args_escape(""), "''");
+        assert_eq!(tmux_args_escape("#"), "\\#");
+        assert_eq!(tmux_args_escape("a b"), "\"a b\"");
+        assert_eq!(tmux_args_escape("a\"b"), "'a\"b'");
+        assert_eq!(tmux_args_escape("~value"), "\\~value");
+        assert_eq!(tmux_args_escape("${value}"), "\"\\${value}\"");
+        assert_eq!(tmux_args_escape("line\nnext"), "line\\nnext");
+        assert_eq!(tmux_args_escape("界"), "界");
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "base-index", "1"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-options", &["base-index"]))
+                .unwrap()
+                .output,
+            ""
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-A", "base-index"]),
+                )
+                .unwrap()
+                .output,
+            "base-index* 1"
+        );
+        engine
+            .execute(&mut context, &command("set-option", &["base-index", "2"]))
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-window-options", &["-v", "base-index"]),
+                )
+                .unwrap()
+                .output,
+            "2"
+        );
+
+        let status_left = "left ${session_name} right";
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "status-left", status_left]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "status-left"]),
+                )
+                .unwrap()
+                .output,
+            "status-left \"left \\${session_name} right\""
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gv", "status-left"]),
+                )
+                .unwrap()
+                .output,
+            status_left
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gq", "not-an-option"]),
+                )
+                .unwrap()
+                .output,
+            ""
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gA", "escape-time"]),
+                )
+                .unwrap()
+                .output,
+            ""
+        );
+    }
+
+    #[test]
+    fn user_options_are_exact_pure_storage_at_every_scope() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+
+        for args in [
+            &["-s", "@scope", "server"] as &[&str],
+            &["-g", "@scope", "global-session"],
+            &["@scope", "session"],
+            &["-gw", "@scope", "global-window"],
+            &["-w", "@scope", "window"],
+            &["-p", "@scope", "pane"],
+        ] {
+            engine
+                .execute(&mut context, &command("set-option", args))
+                .unwrap();
+        }
+        for (args, expected) in [
+            (&["-sv", "@scope"] as &[&str], "server"),
+            (&["-gv", "@scope"], "global-session"),
+            (&["-v", "@scope"], "session"),
+            (&["-gwv", "@scope"], "global-window"),
+            (&["-wv", "@scope"], "window"),
+            (&["-pv", "@scope"], "pane"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", args))
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "@plugin", "one two"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-ga", "@plugin", " three"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "@plug", "exact"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-options", &["-g", "@plugin"]),)
+                .unwrap()
+                .output,
+            "@plugin \"one two three\""
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-options", &["-gv", "@plug"]),)
+                .unwrap()
+                .output,
+            "exact"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "@inherited", "parent"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-A", "@inherited"]),
+                )
+                .unwrap()
+                .output,
+            "@inherited* parent"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["@inherited", "child"]),
+            )
+            .unwrap();
+        engine
+            .execute(&mut context, &command("set-option", &["-u", "@inherited"]))
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-A", "@inherited"]),
+                )
+                .unwrap()
+                .output,
+            "@inherited* parent"
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-options", &["-q", "@missing"]),)
+                .unwrap()
+                .output,
+            ""
+        );
+    }
+
+    #[test]
+    fn environments_read_back_and_merge_with_pin_shell_syntax() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "first"]))
+            .unwrap();
+        let first = context.session.unwrap();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "second"]))
+            .unwrap();
+        let second = context.session.unwrap();
+
+        for args in [
+            &["-g", "GLOBAL", "global"] as &[&str],
+            &["-g", "SHARED", "global"],
+            &["-gF", "GLOBAL_FORMAT", "#{session_name}"],
+            &["-t", "first", "SHARED", "session"],
+            &["-t", "first", "QUOTED", "a$b`c\"d\\e"],
+            &["-ht", "first", "SECRET", "hidden"],
+            &["-rt", "first", "REMOVED"],
+            &["-Ft", "first", "FORMATTED", "#{session_name}"],
+        ] {
+            engine
+                .execute(&mut context, &command("set-environment", args))
+                .unwrap();
+        }
+
+        for (args, expected) in [
+            (&["-g", "GLOBAL"] as &[&str], "GLOBAL=global"),
+            (&["-g", "GLOBAL_FORMAT"], "GLOBAL_FORMAT=second"),
+            (&["-t", "first", "SHARED"], "SHARED=session"),
+            (
+                &["-st", "first", "QUOTED"],
+                r#"QUOTED="a\$b\`c\"d\\e"; export QUOTED;"#,
+            ),
+            (&["-t", "first", "SECRET"], ""),
+            (&["-ht", "first", "SECRET"], "SECRET=hidden"),
+            (&["-t", "first", "REMOVED"], "-REMOVED"),
+            (&["-st", "first", "REMOVED"], "unset REMOVED;"),
+            (&["-t", "first", "FORMATTED"], "FORMATTED=first"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-environment", args))
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
+
+        let first_environment = engine
+            .environment_for_session(first)
+            .unwrap()
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(first_environment["GLOBAL"].as_deref(), Some("global"));
+        assert_eq!(first_environment["SHARED"].as_deref(), Some("session"));
+        assert_eq!(first_environment["SECRET"], None);
+        assert_eq!(first_environment["REMOVED"], None);
+        let second_environment = engine
+            .environment_for_session(second)
+            .unwrap()
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(second_environment["SHARED"].as_deref(), Some("global"));
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-environment", &["-ut", "first", "SHARED"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .environment_for_session(first)
+                .unwrap()
+                .into_iter()
+                .collect::<BTreeMap<_, _>>()["SHARED"]
+                .as_deref(),
+            Some("global")
+        );
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("show-environment", &["-t", "first", "MISSING"]),
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "unknown variable: MISSING"
+        ));
     }
 
     #[test]

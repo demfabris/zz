@@ -32,7 +32,7 @@ specific upstream files that were consulted, for example:
 | Choosers | `cmd-choose-tree.c`, `mode-tree.c`, `window-tree.c`, `window-buffer.c` |
 | Targets `$`/`@`/`%` | `cmd-find.c` |
 | Layouts / splits / resize | `layout.c`, `layout-set.c`, `cmd-select-layout.c`, `cmd-resize-pane.c` |
-| Options (`history-limit`, `word-separators`, `mode-keys`, `synchronize-panes`) | `options-table.c`, `cmd-set-option.c`, `window.c` |
+| Options and environments | `options-table.c`, `cmd-set-option.c`, `cmd-show-options.c`, `options.c`, `cmd-set-environment.c`, `cmd-show-environment.c`, `environ.c` |
 | Status options and FORMATS subset | `options-table.c`, `status.c`, `format.c`, `tmux.1` |
 
 # Scope of emulation
@@ -41,25 +41,26 @@ Only a deliberately supported subset is implemented; **supported commands must n
 partial semantics**, and unsupported input is reported and skipped rather than approximated or run as
 shell code. Concretely:
 
-- **Emulated:** sessions/windows/panes/splits, target resolution, ~57 tmux commands and their aliases
+- **Emulated:** sessions/windows/panes/splits, target resolution, 58 tmux commands and their aliases
   ([commands](/tmux/commands.md)), root/prefix/`copy-mode`/`copy-mode-vi` key tables with repeat
   bindings and `send-keys -X` ([key tables](/tmux/key-tables.md)), the seven named layouts, lossless
   zoom, swap/rotate/break/join, `synchronize-panes`/`history-limit`/`word-separators`/`mode-keys`
   options, native [copy mode](/tmux/copy-mode.md), [choose-tree/choose-buffer](/tmux/choose-tree.md),
   command prompt, pane-number overlay, the `status`/`status-interval`/`status-left`/`status-right`
   options with a documented [FORMATS subset](/tmux/status-line.md) (including `#()` command
-  substitution), and the [`.tmux.conf` subset](/tmux/conf-parser.md). Since 2026-08-09 this also
-  covers tmux's environment contract (`ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET` in terminal panes, with the
-  CLI resolving untargeted commands against the invoking pane the way `$TMUX_PANE` does),
+  substitution), exact option readback, free-form `@` storage at every scope, global/session
+  environment overlays and readback, and the [`.tmux.conf` subset](/tmux/conf-parser.md). Since
+  2026-08-09 this also covers tmux's environment contract (`ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET` in
+  terminal panes, with the CLI resolving untargeted commands against the invoking pane the way
+  `$TMUX_PANE` does and originless Command clients falling back to the most-recent session),
   `[shell-command]` positionals on `new-session`/`new-window`/`split-window`, `last-window`,
   cell-accurate `resize-pane`, and `%if` blocks skipped-with-diagnostic instead of executed; the
   scriptability layer (`-F` formats, `display-message`, compound targets) is tracked in the
   [tmux superset roadmap](/designs/tmux-superset-roadmap.md).
 - **Out of scope as shipped** (this list describes current behavior; the 2026-08-16
-  [drop-in plan](/designs/tmux-drop-in.md) schedules most of it — control mode, layout strings,
+  [drop-in plan](/designs/tmux-drop-in.md) schedules most of it — control mode,
   hooks, exec commands, styles, cell-size placement — with the permanent exclusions named
-  there): binary/socket compatibility with a real tmux server, control mode, serialized tmux
-  layout strings, the rest of the status-line options (`status-style`, `status-justify`,
+  there): binary/socket compatibility with a real tmux server, control mode, the rest of the status-line options (`status-style`, `status-justify`,
   `status-position`, `status-format`), plugins, hooks, `#[…]` styling, floating panes, and
   cell-size placement. These are rejected with diagnostics, not partially applied. The one
   exception is `#[…]`, which is dropped from a status format rather than failing it.

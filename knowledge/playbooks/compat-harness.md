@@ -1,7 +1,7 @@
 ---
 type: Playbook
 title: Running the tmux compatibility harness
-description: How to run the pinned tmux differential corpus, read topology and geometry results, and record known divergences.
+description: How to run the pinned tmux differential corpus, read topology, geometry, format, and query-stdout results, and record known divergences.
 resource: compat/run.sh
 tags: [tmux, compatibility, differential-testing, geometry, playbook]
 timestamp: 2026-08-16T00:00:00-03:00
@@ -12,9 +12,9 @@ timestamp: 2026-08-16T00:00:00-03:00
 The harness feeds each scenario command to zz and tmux at commit
 `d77c9dc6aa021e4bc61f0da128c591af695e6466`. After each command, it queries both servers
 with matching explicit `list-sessions`, `list-windows`, and `list-panes` formats. The
-runner compares command exit classes and topology as strict results. It also compares `fmt:` query
-output as a separate strict channel. Geometry differences fail under `--strict-geometry`, which is
-how CI runs the harness.
+runner compares command exit classes and topology as strict results. It also compares `fmt:` format
+queries and generic `out:` command stdout as separate byte-exact strict channels. Geometry
+differences fail under `--strict-geometry`, which is how CI runs the harness.
 
 `compat/run.sh` builds `target/debug/zz` with your normal environment before the scenario
 runner creates its scratch `HOME` and `XDG_CONFIG_HOME`. The tmux fetcher clones and builds
@@ -49,12 +49,12 @@ against the pin. Since the cell-authoritative layout landed, a headless zz windo
 at tmux's 80x24 and every layout operation runs the pin's integer arithmetic, which is what
 makes exact-geometry diffing possible.
 
-FMT differences fail in both modes. `--strict-geometry` changes only GEO handling.
+FMT and OUT differences fail in both modes. `--strict-geometry` changes only GEO handling.
 
 # Reading results
 
 The runner writes `compat/results/summary.md`. Each row gives the number of executed steps,
-TOPO and FMT status, and the number of steps that produced a GEO difference.
+TOPO, FMT, and OUT status, plus the number of steps that produced a GEO difference.
 
 Open `compat/results/<scenario>.log` for the command status and per-step unified diffs:
 
@@ -71,9 +71,11 @@ Open `compat/results/<scenario>.log` for the command status and per-step unified
   these differences by default and fails them under `--strict-geometry`.
 - `FMT` compares stdout from a shared `fmt:` line byte for byte. Both `display-message -p`
   invocations must exit zero. A matching error still fails the FMT step.
+- `OUT` compares stdout from any shared query command prefixed with `out:` byte for byte. Both
+  commands must exit zero; matching failures still fail the OUT step.
 
 The log captures each step's stdout and stderr. The runner ignores stdout for ordinary command
-lines; only `fmt:` lines enter the FMT comparison.
+lines; `fmt:` and `out:` lines enter their respective stdout comparisons.
 
 The runner starts zz on a short `/tmp/zzc-<pid>.sock` path and starts tmux with
 `-L zzc-<pid> -f /dev/null`. Its exit trap stops both servers and removes both socket files.
@@ -96,8 +98,13 @@ semicolons, comparison and logic operators, and `/` delimiters. It rejects an em
 backticks, either quote character, and `#(`. The `#(` guard prevents a tmux format from starting a
 shell command during the differential run.
 
-After each line, the harness runs the query trio. Scenario files should contain state changes,
-not their own `list-*` assertions.
+Use `out: <command...>` for a shared query whose own stdout is the assertion, such as
+`out: show-options -gv @plugin`. It uses the same no-eval guards as `fmt:` and splits the payload
+into one argv entry per whitespace-delimited token, so quotes, `$`, backticks, and `#(` are rejected.
+Put values requiring spaces into an earlier ordinary setup command, then query them by name.
+
+After each line, the harness runs the query trio. Scenario files should contain state changes plus
+explicit `fmt:` or `out:` assertions, not ordinary `list-*` assertions whose stdout is ignored.
 
 Traps that produce false divergences:
 
@@ -123,7 +130,7 @@ The two current entries pin the deliberate refusals of upstream layout bugs:
 Both cite their divergence-matrix rows.
 
 Keep the `known/` set narrow. Move a scenario into the normal corpus when zz closes the gap. The
-known-scenario exemption never covers an FMT difference.
+known-scenario exemption never covers an FMT or OUT difference.
 
 # Key files
 
@@ -131,7 +138,7 @@ known-scenario exemption never covers an FMT difference.
 | --- | --- |
 | `compat/run.sh` | Builds both binaries, selects scenarios, and writes the summary |
 | `compat/fetch-tmux.sh` | Acquires and verifies the pinned tmux binary |
-| `compat/diff-scenario.sh` | Runs one scenario and emits per-step TOPO, GEO, and FMT diffs |
+| `compat/diff-scenario.sh` | Runs one scenario and emits per-step TOPO, GEO, FMT, and OUT diffs |
 | `compat/scenarios/` | Holds the shared and known-divergence corpora |
 
 # Related

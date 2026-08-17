@@ -10,6 +10,25 @@ pub(crate) enum TmuxOptionScope {
 pub(crate) struct TmuxOption {
     pub(crate) name: &'static str,
     pub(crate) scope: TmuxOptionScope,
+    pub(crate) default: Option<TmuxOptionDefault>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TmuxOptionDefault {
+    String(&'static str),
+    Scalar(&'static str),
+}
+
+impl TmuxOptionDefault {
+    pub(crate) const fn value(self) -> &'static str {
+        match self {
+            Self::String(value) | Self::Scalar(value) => value,
+        }
+    }
+
+    pub(crate) const fn is_string(self) -> bool {
+        matches!(self, Self::String(_))
+    }
 }
 
 const SERVER_OPTIONS: &[&str] = &[
@@ -285,7 +304,7 @@ const ALIASES: &[(&str, &str)] = &[
     ("pane-colors", "pane-colours"),
 ];
 
-fn tmux_options() -> impl Iterator<Item = TmuxOption> {
+pub(crate) fn tmux_options() -> impl Iterator<Item = TmuxOption> {
     [
         (TmuxOptionScope::Server, SERVER_OPTIONS),
         (TmuxOptionScope::Session, SESSION_OPTIONS),
@@ -294,10 +313,32 @@ fn tmux_options() -> impl Iterator<Item = TmuxOption> {
     ]
     .into_iter()
     .flat_map(|(scope, names)| {
-        names
-            .iter()
-            .copied()
-            .map(move |name| TmuxOption { name, scope })
+        names.iter().copied().map(move |name| TmuxOption {
+            name,
+            scope,
+            default: tmux_option_default(name),
+        })
+    })
+}
+
+fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
+    Some(match name {
+        "base-index" | "pane-base-index" => TmuxOptionDefault::Scalar("0"),
+        "buffer-limit" => TmuxOptionDefault::Scalar("50"),
+        "copy-command" => TmuxOptionDefault::String(""),
+        "history-limit" => TmuxOptionDefault::Scalar("2000"),
+        "mode-keys" => TmuxOptionDefault::Scalar("emacs"),
+        "prefix" => TmuxOptionDefault::Scalar("C-b"),
+        "renumber-windows" | "synchronize-panes" => TmuxOptionDefault::Scalar("off"),
+        "set-clipboard" => TmuxOptionDefault::Scalar("external"),
+        "status" => TmuxOptionDefault::Scalar("on"),
+        "status-interval" => TmuxOptionDefault::Scalar("15"),
+        "status-left" => TmuxOptionDefault::String("[#{session_name}] "),
+        "status-right" => TmuxOptionDefault::String(
+            "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y",
+        ),
+        "word-separators" => TmuxOptionDefault::String("!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"),
+        _ => return None,
     })
 }
 
@@ -348,5 +389,43 @@ mod tests {
         );
         assert!(match_tmux_option("status-l").is_err());
         assert_eq!(match_tmux_option("not-an-option"), Ok(None));
+    }
+
+    #[test]
+    fn implemented_options_carry_their_pin_defaults_and_types() {
+        let implemented = tmux_options()
+            .filter_map(|option| option.default.map(|default| (option.name, default)))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            implemented,
+            vec![
+                ("buffer-limit", TmuxOptionDefault::Scalar("50")),
+                ("copy-command", TmuxOptionDefault::String("")),
+                ("set-clipboard", TmuxOptionDefault::Scalar("external")),
+                ("base-index", TmuxOptionDefault::Scalar("0")),
+                ("history-limit", TmuxOptionDefault::Scalar("2000")),
+                ("prefix", TmuxOptionDefault::Scalar("C-b")),
+                ("renumber-windows", TmuxOptionDefault::Scalar("off")),
+                ("status", TmuxOptionDefault::Scalar("on")),
+                ("status-interval", TmuxOptionDefault::Scalar("15")),
+                (
+                    "status-left",
+                    TmuxOptionDefault::String("[#{session_name}] ")
+                ),
+                (
+                    "status-right",
+                    TmuxOptionDefault::String(
+                        "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y",
+                    ),
+                ),
+                (
+                    "word-separators",
+                    TmuxOptionDefault::String("!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"),
+                ),
+                ("mode-keys", TmuxOptionDefault::Scalar("emacs")),
+                ("pane-base-index", TmuxOptionDefault::Scalar("0")),
+                ("synchronize-panes", TmuxOptionDefault::Scalar("off")),
+            ]
+        );
     }
 }

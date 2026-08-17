@@ -365,7 +365,7 @@ pub struct TerminalSpawn {
     /// exits. `None` spawns the interactive default shell.
     pub command: Option<String>,
     /// Extra environment (`ZZ_PANE` etc.) layered over the defaults.
-    pub env: Vec<(String, String)>,
+    pub env: Vec<(String, Option<String>)>,
 }
 
 pub struct TerminalSession {
@@ -3016,13 +3016,17 @@ fn run_terminal(
         }
         None => crate::shell_integration::default_shell_command(),
     };
+    for (key, value) in &spawn.env {
+        if let Some(value) = value {
+            command.env(key, value);
+        } else {
+            command.env_remove(key);
+        }
+    }
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
     command.env("TERM_PROGRAM", "zz");
     command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
-    for (key, value) in &spawn.env {
-        command.env(key, value);
-    }
     if let Some(working_directory) = &spawn.working_directory {
         command.cwd(working_directory);
     }
@@ -13955,6 +13959,49 @@ mod tests {
         });
         assert!(matches!(viewport.status, SessionStatus::Running));
         assert!(session.foreground_process_id().is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_command_applies_spawn_environment_additions_and_removals() {
+        let session = TerminalSession::spawn(
+            DEFAULT_HISTORY_LIMIT,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                command: Some(
+                    "read _; printf 'ZZ_PHASE4D_SET=%s\\n' \"$ZZ_PHASE4D_SET\"; if [ \"${ZZ_PHASE4D_REMOVE+x}\" = x ]; then printf 'ZZ_PHASE4D_REMOVE=set\\n'; else printf 'ZZ_PHASE4D_REMOVE=unset\\n'; fi; read _"
+                        .to_owned(),
+                ),
+                env: vec![
+                    ("ZZ_PHASE4D_SET".to_owned(), Some("session".to_owned())),
+                    (
+                        "ZZ_PHASE4D_REMOVE".to_owned(),
+                        Some("daemon".to_owned()),
+                    ),
+                    ("ZZ_PHASE4D_REMOVE".to_owned(), None),
+                ],
+                ..TerminalSpawn::default()
+            },
+        );
+        session.attach_view(TerminalViewId(47));
+        wait_for_test_viewport(&session, |viewport| {
+            matches!(viewport.status, SessionStatus::Running)
+        });
+        session.send_text("ready\n");
+
+        let viewport = wait_for_test_viewport(&session, |viewport| {
+            let mut contents = String::new();
+            for cell in viewport.cells.iter() {
+                viewport.push_glyph(*cell, &mut contents);
+            }
+            contents.contains("ZZ_PHASE4D_REMOVE")
+        });
+        let mut contents = String::new();
+        for cell in viewport.cells.iter() {
+            viewport.push_glyph(*cell, &mut contents);
+        }
+        assert!(contents.contains("ZZ_PHASE4D_SET=session"), "{contents:?}");
+        assert!(contents.contains("ZZ_PHASE4D_REMOVE=unset"), "{contents:?}");
     }
 
     #[cfg(unix)]

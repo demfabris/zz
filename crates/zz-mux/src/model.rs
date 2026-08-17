@@ -269,6 +269,7 @@ pub struct MuxState {
     next_window_id: u64,
     next_pane_id: u64,
     next_split_id: u64,
+    last_active_session: Option<SessionId>,
     input_options: InputOptions,
     pub sessions: BTreeMap<SessionId, Session>,
     pub windows: BTreeMap<WindowId, Window>,
@@ -349,6 +350,7 @@ impl MuxState {
                 last_window: None,
             },
         );
+        self.last_active_session = Some(session_id);
         self.bump_generation();
         Ok((session_id, window_id, pane_id))
     }
@@ -1537,6 +1539,23 @@ impl MuxState {
             let window = self.windows.get(&session.active_window)?;
             Some((session.id, window.id, window.active_pane))
         })
+    }
+
+    #[must_use]
+    pub fn most_recent_context(&self) -> Option<(SessionId, WindowId, PaneId)> {
+        self.last_active_session
+            .and_then(|session| self.sessions.get(&session))
+            .and_then(|session| {
+                let window = self.windows.get(&session.active_window)?;
+                Some((session.id, window.id, window.active_pane))
+            })
+            .or_else(|| self.default_context())
+    }
+
+    pub(crate) fn mark_session_active(&mut self, session: SessionId) {
+        if self.sessions.contains_key(&session) {
+            self.last_active_session = Some(session);
+        }
     }
 
     pub fn resolve_session(

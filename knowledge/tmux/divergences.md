@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: tmux divergence matrix
-description: "Every known divergence from tmux at the pinned reference commit: the 38 missing commands and why, behavioral gaps on the implemented surface, the 15-of-180 options coverage, and the protocol-level differences — the drop-in-replacement gap, enumerated."
+description: "Every known divergence from tmux at the pinned reference commit: the 34 missing commands and why, behavioral gaps on the implemented surface, the 15-of-180 options coverage, and the protocol-level differences."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-17T00:00:00-03:00
@@ -17,8 +17,7 @@ complements the [compatibility philosophy](/tmux/tmux-compat.md) (the contract) 
 
 **State anchor:** the "implemented surface" section reflects
 [PR #4](https://github.com/demfabris/zz/pull/4) (`fix/tmux-compat-hunt-v2`, merged 2026-08-16
-as `53b523e`) plus the phase 3d layout-string, phase 4a index-option, and phase 4b target-grammar source dated
-2026-08-17. PR #4 corrected the
+as `53b523e`) plus the phase 3d layout-string and phase 4a–4d source dated 2026-08-17. PR #4 corrected the
 hunt-claim regressions, including two implemented backwards
 (`new-window -t` bare-target order, positional targets on the kill commands) plus the
 `kill-session -C`, `new-session -A`, `resize-pane` attached-adjustment, `send-keys -H`/`-l`,
@@ -28,12 +27,12 @@ The one-line read: everything marked **silent** below is a bug by zz's own doctr
 must mean what tmux means, or error loudly); everything loud is a choice; the "genuine gaps"
 command block plus the remaining options grind is the actual drop-in backlog.
 
-# Missing commands (38 of ~92)
+# Missing commands (34 of ~92)
 
-zz's engine catalog holds 59 verbs, 13 of them zz-native, so 46 tmux verbs run in
+zz's engine catalog holds 63 verbs, 13 of them zz-native, so 50 tmux verbs run in
 [`MuxEngine`](/tmux/commands.md); 8 more are implemented daemon-side because they need IO
 (`capture-pane` and `set-`/`show-`/`list-`/`load-`/`save-`/`delete-`/`paste-buffer`). That
-leaves 38 of tmux's ~92 commands absent, in three deliberate groups.
+leaves 34 of tmux's ~92 commands absent, in three deliberate groups.
 
 ## Refused — config must never execute programs (11)
 
@@ -65,14 +64,12 @@ doctrine.
 | `refresh-client` | Force redraw / control-mode subscriptions. |
 | `suspend-client` | Ctrl-Z the attaching client. |
 
-## Genuine gaps — buildable, nothing blocks them (18)
+## Genuine gaps — buildable, nothing blocks them (14)
 
 | Command | What it does | Weight |
 | --- | --- | --- |
 | `switch-client` | Move the attached client to another session; scripts use `-t` constantly. | high |
-| `show-options` / `show-window-options` | Read options back — how scripts read state. | high |
 | `move-window` / `swap-window` | Relocate / exchange windows. | medium |
-| `set-environment` / `show-environment` | Edit the session environment new panes inherit. | medium |
 | `respawn-pane` / `respawn-window` | Restart the dead command in place (`remain-on-exit` workflow). | medium |
 | `find-window` | Search windows by name/title/content. | medium |
 | `list-clients` | Enumerate attached clients. | low |
@@ -90,6 +87,7 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | --- | --- | --- |
 | `copy-mode` | `-k -H -S -s` rejected (`-e`/`-q`/`-M` — the stock-binding trio — are implemented). | loud |
 | `source-file` | No `-` stdin (refused loudly), no `-F`/`-n`/`-v`. Globbing works. | loud |
+| `show-options` on unimplemented names | Catalogued options without zz storage have no invented value or default and print nothing, including under `-A`. Implemented values and every `@` user option retain normal scope and inheritance readback. | **silent**, honest omission |
 | Alerts | Bell-only: `monitor-activity`/`monitor-silence` don't exist. Matches tmux defaults, ignores those configs. | **silent** |
 | `select-layout main-*` with 2 panes | The pin never sizes the lone "other" pane (layout-set.c:264-269, :458-463), leaving stale geometry that fails tmux's own `layout_check`; zz sizes it (80x24 → main 80x22 + other 80x1). Deliberate: zz refuses to reproduce an upstream bug. | **silent**, zz more correct |
 | `select-layout -E` on a mixed parent | The pin spreads only leaf children (layout.c `layout_cell_is_tiled`) but divides the parent's full extent among them, so a parent mixing leaves with nested nodes gets corrupt sums (observed: 40+42+39 in an 80-wide window, last pane at xoff 84). Every later operation on that corrupted window keeps diverging: one `-E` produced four geometry divergences, three downstream, so the known scenario has one causal step but the divergence is not bounded to it. zz refuses that spread and stops the walk where the pin stops. All-leaf parents are exact (48 pin fixtures + `known/known-spread-mixed.txt`). | **silent**, zz more correct |
@@ -155,7 +153,7 @@ inside a generic “unsupported formats” claim.
 | `pane_start_command` | The original spawn command is not retained in the pane format record. | **silent** |
 | `pane_start_command_list` | The original spawn argv is not retained in the pane format record. | **silent** |
 | `pane_tabs` | Terminal tab stops are not mirrored into mux facts. | **silent** |
-| `session_activity` | Session activity time is not tracked; `S/t` sorts by creation time instead. | **silent** |
+| `session_activity` | No activity timestamp is exposed; `S/t` still sorts by creation time. The daemon separately tracks only the most-recent session needed for targetless Command-client context. | **silent** |
 | `session_group` | Session groups are unsupported, so no group name exists. | **silent** |
 | `session_group_attached_list` | Session groups are unsupported, so no grouped attachment list exists. | **silent** |
 | `session_group_list` | Session groups are unsupported, so no member list exists. | **silent** |
@@ -175,17 +173,26 @@ Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-pan
 `renumber-windows`. The index trio follows tmux's session/window inheritance, allocation,
 targeting, format, and close-triggered renumbering behavior. (`set-option` also accepts six
 zz-native names — the agent/editor/history-trickle keys — which don't count toward tmux
-coverage.) Everything else is reported-and-skipped by the [conf parser](/tmux/conf-parser.md).
+coverage.) `show-options` and `show-window-options` expose implemented values with tmux's exact
+string escaping, value-only and inherited forms. Free-form `@` names are pure string storage at
+server, global-session, session, global-window, window, and pane scope, including append and unset;
+this is the storage seam TPM and plugins use. Global and per-session environment overlays have
+`set-environment`/`show-environment` readback and are merged into new terminal PTYs, including
+hidden and child-unset entries. Everything else is reported-and-skipped by the
+[conf parser](/tmux/conf-parser.md).
 The ones real dotfiles set most, roughly by frequency: `escape-time`, `mouse`,
 `default-terminal`, `terminal-overrides`, `set-titles`, `automatic-rename`,
 `aggressive-resize`, `remain-on-exit`, `monitor-activity`, `display-time`, `repeat-time`, and
 the whole `*-style` family (styles are on the never-list).
+The behavior-bearing options `mouse`, `escape-time`, `automatic-rename`, `aggressive-resize`,
+`remain-on-exit`, and `set-titles` remain outside this wave and are tracked for wave 4f;
+readback/storage does not pretend those behaviors exist.
 
 # Protocol and process level
 
 | Area | tmux | zz |
 | --- | --- | --- |
-| Env contract | `$TMUX`, `$TMUX_PANE` | `ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET` — every `[ -n "$TMUX" ]` script sees "not in tmux". |
+| Env contract | `$TMUX`, `$TMUX_PANE`, plus global/session overlays | Global/session overlays reach new PTYs, and `ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET` identify the workspace; every `[ -n "$TMUX" ]` script still sees "not in tmux". |
 | Binary argv | `-L -S -f -2 -C -u` | `--socket`, `--host`; none of tmux's binary flags. |
 | Control mode `-CC` | What iTerm2 integration speaks. | Never — zz owns both ends. |
 | Session groups | `new-session -t`. | Cataloged, rejected. |

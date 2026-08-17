@@ -333,6 +333,7 @@ steps=0
 topo_divergences=0
 geo_divergences=0
 fmt_divergences=0
+out_divergences=0
 
 while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   raw_line="${raw_line%$'\r'}"
@@ -344,11 +345,16 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   run_zz=1
   run_tmux=1
   is_fmt=0
+  is_out=0
   command_text="$line"
   case "$line" in
   fmt:*)
     is_fmt=1
     command_text="${line#fmt:}"
+    ;;
+  out:*)
+    is_out=1
+    command_text="${line#out:}"
     ;;
   zz-only:*)
     run_tmux=0
@@ -361,19 +367,24 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   esac
   command_text="${command_text#"${command_text%%[![:space:]]*}"}"
   command_text="${command_text%"${command_text##*[![:space:]]}"}"
-  if [ "$is_fmt" -eq 0 ] && [[ "$command_text" == fmt:* ]]; then
-    die "fmt lines must run on both sides: $line"
+  if [ "$is_fmt" -eq 0 ] && [ "$is_out" -eq 0 ] &&
+    [[ "$command_text" == fmt:* || "$command_text" == out:* ]]; then
+    die "query lines must run on both sides: $line"
   fi
   [ -n "$command_text" ] || die "empty command after side prefix: $line"
 
   command_args=()
-  if [ "$is_fmt" -eq 1 ]; then
+  if [ "$is_fmt" -eq 1 ] || [ "$is_out" -eq 1 ]; then
     case "$command_text" in
     *'$'* | *'`'* | *"'"* | *'"'* | *'#('*)
-      die "unsupported content in fmt line: $command_text"
+      die "unsupported content in query line: $command_text"
       ;;
     esac
-    command_args=(display-message -p "$command_text")
+    if [ "$is_fmt" -eq 1 ]; then
+      command_args=(display-message -p "$command_text")
+    else
+      read -r -a command_args <<<"$command_text"
+    fi
   else
     case "$command_text" in
     *'$'* | *'`'* | *';'* | *'&'* | *'|'* | *'<'* | *'>'*)
@@ -390,6 +401,7 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   topo_step_diverged=0
   geo_step_diverged=0
   fmt_step_diverged=0
+  out_step_diverged=0
   zz_stdout="$SCRATCH_DIR/step-$steps.zz.stdout"
   zz_stderr="$SCRATCH_DIR/step-$steps.zz.stderr"
   tmux_stdout="$SCRATCH_DIR/step-$steps.tmux.stdout"
@@ -448,6 +460,13 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
       fmt_step_diverged=1
     elif ! compare_snapshot FMT "$steps" "$zz_stdout" "$tmux_stdout"; then
       fmt_step_diverged=1
+    fi
+  elif [ "$is_out" -eq 1 ]; then
+    if [ "$zz_rc" -ne 0 ] || [ "$tmux_rc" -ne 0 ]; then
+      printf 'OUT QUERY: failure\n' >>"$LOG_FILE"
+      out_step_diverged=1
+    elif ! compare_snapshot OUT "$steps" "$zz_stdout" "$tmux_stdout"; then
+      out_step_diverged=1
     fi
   elif [ "$run_zz" -eq 1 ] && [ "$run_tmux" -eq 1 ]; then
     if { [ "$zz_rc" -eq 0 ] && [ "$tmux_rc" -ne 0 ]; } ||
@@ -520,15 +539,20 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   if [ "$fmt_step_diverged" -eq 1 ]; then
     fmt_divergences=$((fmt_divergences + 1))
   fi
+  if [ "$out_step_diverged" -eq 1 ]; then
+    out_divergences=$((out_divergences + 1))
+  fi
 done <"$SCENARIO_FILE"
 
 [ "$steps" -gt 0 ] || die "scenario contains no commands: $SCENARIO_FILE"
 
-printf '\nSUMMARY steps=%d topo_divergences=%d geo_divergences=%d fmt_divergences=%d\n' \
-  "$steps" "$topo_divergences" "$geo_divergences" "$fmt_divergences" >>"$LOG_FILE"
+printf '\nSUMMARY steps=%d topo_divergences=%d geo_divergences=%d fmt_divergences=%d out_divergences=%d\n' \
+  "$steps" "$topo_divergences" "$geo_divergences" "$fmt_divergences" \
+  "$out_divergences" >>"$LOG_FILE"
 
-printf '%s: %d step(s), %d TOPO divergence(s), %d GEO divergence(s), %d FMT divergence(s)\n' \
-  "$scenario_name" "$steps" "$topo_divergences" "$geo_divergences" "$fmt_divergences"
+printf '%s: %d step(s), %d TOPO divergence(s), %d GEO divergence(s), %d FMT divergence(s), %d OUT divergence(s)\n' \
+  "$scenario_name" "$steps" "$topo_divergences" "$geo_divergences" "$fmt_divergences" \
+  "$out_divergences"
 
 if [ "$topo_divergences" -gt 0 ]; then
   exit 1
@@ -537,5 +561,8 @@ if [ "$STRICT_GEOMETRY" -eq 1 ] && [ "$geo_divergences" -gt 0 ]; then
   exit 1
 fi
 if [ "$fmt_divergences" -gt 0 ]; then
+  exit 1
+fi
+if [ "$out_divergences" -gt 0 ]; then
   exit 1
 fi

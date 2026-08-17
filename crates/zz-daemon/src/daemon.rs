@@ -2366,21 +2366,21 @@ impl Shared {
                             .map(|path| path.to_string_lossy().into_owned())
                             .unwrap_or_default();
                         let appearance = Arc::clone(&inner.appearance);
-                        let mut env = vec![
-                            ("ZZ_PANE".to_owned(), pane.to_string()),
-                            (
-                                "ZZ_SOCKET".to_owned(),
-                                self.socket_path.display().to_string(),
-                            ),
-                        ];
-                        if let Some(session) = inner
+                        let pane_session = inner
                             .engine
                             .state
                             .window_for_pane(*pane)
                             .map(|window| inner.engine.state.windows[&window].session)
-                        {
-                            env.push(("ZZ_SESSION".to_owned(), session.to_string()));
-                        }
+                            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+                        let mut env = inner.engine.environment_for_session(pane_session)?;
+                        env.extend([
+                            ("ZZ_PANE".to_owned(), Some(pane.to_string())),
+                            (
+                                "ZZ_SOCKET".to_owned(),
+                                Some(self.socket_path.display().to_string()),
+                            ),
+                            ("ZZ_SESSION".to_owned(), Some(pane_session.to_string())),
+                        ]);
                         let session = Arc::new(TerminalSession::spawn(
                             history_limit,
                             appearance,
@@ -10998,15 +10998,16 @@ fn handle_connection<S: TransportStream>(
             .origin
             .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane))
             .or_else(|| {
-                inner
-                    .engine
-                    .state
-                    .default_context()
-                    .map(|(session, window, pane)| ExecutionContext {
-                        session: Some(session),
-                        window: Some(window),
-                        pane: Some(pane),
-                    })
+                let fallback = if hello.kind == ClientKind::Command {
+                    inner.engine.state.most_recent_context()
+                } else {
+                    inner.engine.state.default_context()
+                };
+                fallback.map(|(session, window, pane)| ExecutionContext {
+                    session: Some(session),
+                    window: Some(window),
+                    pane: Some(pane),
+                })
             })
             .unwrap_or_default()
     };

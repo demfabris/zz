@@ -14,7 +14,8 @@ timestamp: 2026-08-17T00:00:00-03:00
 of [`MuxEffect`](#effects) side effects the daemon acts on. `MuxEngine` owns the `MuxState`, the
 [`KeyTables`](/tmux/key-tables.md), and the tmux options that are not per-window layout: `mode-keys`
 (global + per-window), `set-clipboard`, `copy-command`, `buffer-limit`, `history-limit`
-(global + per-session), and `word-separators` (global + per-session). `execute` canonicalizes the
+(global + per-session), and `word-separators` (global + per-session). It also owns free-form `@`
+option maps at every tmux scope and global/per-session process-environment overlays. `execute` canonicalizes the
 command name, dispatches to a handler, and, if the state `generation` advanced, appends a
 `SnapshotChanged` effect and repairs the `ExecutionContext` (`session`/`window`/`pane`) so the
 current target stays valid after the mutation.
@@ -52,7 +53,7 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 
 | Command | Aliases | Purpose |
 | --- | --- | --- |
-| `new-session` | `new` | Create a session (with its first window + terminal pane) and request attachment for an interactive caller; command-only callers remain detached. `-A` attaches when the session already exists (bare `-A` resolves the current session, `-D` detaches its other clients, and `-d` is ignored on the attach path, as in tmux); `-t` (session groups) and the valued options zz has no model for (`-e`,`-F`,`-f`,`-x`,`-y`) are cataloged but rejected so their values can never leak into the pane command. |
+| `new-session` | `new` | Create a session (with its first window + terminal pane) and request attachment for an interactive caller; command-only callers remain detached. A targetless Command client starts from the most-recent session, so `-c '#{pane_current_path}'` expands against the same origin the pin selects. `-A` attaches when the session already exists (bare `-A` resolves the current session, `-D` detaches its other clients, and `-d` is ignored on the attach path, as in tmux); `-t` (session groups) and the valued options zz has no model for (`-e`,`-F`,`-f`,`-x`,`-y`) are cataloged but rejected so their values can never leak into the pane command. |
 | `list-sessions` | `ls` | List sessions. |
 | `rename-session` | `rename` | Rename a session (rejects duplicate names). |
 | `kill-session` | . | Remove a session and its windows/panes. `-a` keeps the target and kills every other session; `-C` clears the session's pane bells and kills nothing, outranking `-a` as in tmux. Positional targets are refused — tmux's bound is zero arguments, and the kill commands are too destructive to guess. |
@@ -96,7 +97,11 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `clear-history` | `clearhist` | Clear a pane's scrollback (`-H` unsupported). |
 | `bind-key` / `unbind-key` | `bind` / `unbind` | Add/remove key bindings (`-n`,`-r`,`-T`,`-N`). Empty `{}` installs an empty command list, and a single trailing escaped separator is ignored. Payloads validate at bind time (names + flags — tmux validates the full template): unknown names error `unknown command: X`, cataloged commands get their flags checked, daemon-side verbs are accepted unvalidated, and a real-but-unimplemented tmux command errors as unsupported so config import counts it. |
 | `list-keys` | `lsk` | Print bindings as `bind-key` lines; `-T` limits the table. tmux's other selectors are rejected, not ignored: `-n` is not a tmux `list-keys` flag at all, and `-1`/`-N`/`-a`/`-O`/`-P`/`-r` plus the `[key]` positional have no zz form. |
-| `set-option` / `set-window-option` | `set` / `setw` | Set options (see below). |
+| `set-option` / `set-window-option` | `set` / `setw` | Set typed options (see below) or exact free-form `@name` strings. User options support set, append, and unset at server, global-session, session, global-window, window, and pane scope. |
+| `show-options` | `show` | List options stored at the resolved scope or print one named option. `-v` prints only its raw value, `-A` includes an inherited named/table value with `*` after the name, `-q` suppresses unknown-name and target errors, and `-s`/`-g`/`-w`/`-p` select scope for `@` names. Implemented string values use the pin's `args_escape` byte shape; `-H` adds no rows because zz has no hooks. A table-known unimplemented name prints nothing rather than inventing state. |
+| `show-window-options` | `showw` | Window-scoped spelling of `show-options` with the pin's `-g`, `-t`, and `-v` surface. A table-known option still routes by its declared scope, so spelling this command cannot turn a session option into a window option. |
+| `set-environment` | `setenv` | Store a global or per-session environment overlay. `-F` expands the value as a format, `-h` hides it from children, `-r` records a child-unset marker, and `-u` deletes the stored entry. New terminal PTYs apply global then session entries over the daemon environment. |
+| `show-environment` | `showenv` | List or read the exact global/per-session overlay. Normal output is `NAME=value` or `-NAME`; `-s` emits shell-ready export/unset statements with tmux's escaping, `-h` selects hidden entries, and an absent exact name errors `unknown variable: NAME`. |
 | `source-file` | `source` | Load config files: every path is globbed like tmux (matches load in glob order; `conf.d/*.conf` works), then sourced in order. Without `-q` a path or glob that matches nothing warns; `-q` keeps it silent. `-` (stdin) is refused loudly — the daemon has no caller stdin. `-F`/`-n`/`-v`/`-t` are rejected. |
 | `reload-config` | . | *zz-native:* reload tmux + Ghostty config (`ReloadConfig` effect, no args). |
 | `kill-server` | . | Stop the daemon (`KillServer` effect). |
@@ -110,7 +115,9 @@ Options handled by `set-option`/`set-window-option`: `synchronize-panes` (global
 68 hook entries. The matched table entry chooses server, session, window, or pane scope. `set` versus
 `setw` and the `-s`/`-w`/`-p` spelling cannot change that declared scope. A table entry declared as
 both window and pane lets `-p` select pane scope. `-q` silences unknown or ambiguous names; config
-import reports a known unimplemented name as a skip.
+import reports a known unimplemented name as a skip. Names beginning with `@` bypass table matching:
+they are exact string keys whose scope comes from the command flags, preserving the plugin-storage
+contract without pretending the stored value has behavior.
 
 For the index trio, `-u` and `-U` restore inheritance and ignore a trailing value, `-o` checks the
 target override slot and yields to either unset flag, and the handler accepts `-a`. tmux flag values accept

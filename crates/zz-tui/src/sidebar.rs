@@ -434,6 +434,8 @@ mod tests {
             kind,
             synchronized_input: false,
             bell,
+            dead: false,
+            dead_status: None,
         }
     }
 
@@ -444,6 +446,7 @@ mod tests {
             id: WindowId(id),
             index,
             name: name.to_owned(),
+            automatic_rename: true,
             active_pane: browser,
             zoomed_pane: None,
             layout: LayoutNode::Split {

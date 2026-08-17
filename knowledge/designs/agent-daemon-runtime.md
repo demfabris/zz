@@ -26,7 +26,7 @@ runs on the daemon's machine, which is the correct machine).
 
 # Ownership shift
 
-| Concern | Before (v52) | Current (v58) |
+| Concern | Before (v52) | Current (v59) |
 | --- | --- | --- |
 | Adapter child, stdio, ACP session | GUI (`AgentController` runtime tasks) | daemon `agent::host`, one thread per pane |
 | Auto-approve, queued prompts, stderr tail, session ops | GUI runtime half | daemon `agent::host` |
@@ -37,14 +37,15 @@ runs on the daemon's machine, which is the correct machine).
 | `agent-send --submit` | daemon → GUI round-trip (`request_from_gui`) | daemon dispatches directly into the host; `ComposerAppend` keeps the GUI round-trip |
 | Adopting the ACP session ID, naming a pane after its first prompt | GUI, via `set-agent-session` / `select-pane -T` round trips | daemon (`adopt_agent_session`, `title_agent_pane`); the GUI keeps its own titling for the pane it drives |
 
-# Wire surface (v58)
+# Wire surface (v59)
 
 v53 moved the runtime into the daemon. v54 completed its session and restart controls. v55 gives
 each client process a stable identity and acknowledges restored prompts so reconnects remain
 owner-specific and do not resurrect consumed drafts. v56 removes the provider task-event, parked,
 and abandoned-turn stream vocabulary. v57 removes the turn-diff request/reply and adds a bounded
 `AgentGitSummary` to `AgentPaneWire`. v58 appends the typed tmux target-lookup errors used by mux
-commands; the Agent pane payload is unchanged. Postcard
+commands; the Agent pane payload is unchanged. v59 adds timed client messages and retained-pane
+snapshot fields; the Agent pane payload remains unchanged. Postcard
 cannot carry the ACP SDK's JSON-shaped types
 (`serde_json::Map` metas, `RawValue` params), so every stream item crosses as an opaque JSON
 blob with a byte cap, and the client deserializes into the same `RuntimeEvent`-shaped enum the

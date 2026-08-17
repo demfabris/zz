@@ -14,7 +14,8 @@ timestamp: 2026-08-17T00:00:00-03:00
 of [`MuxEffect`](#effects) side effects the daemon acts on. `MuxEngine` owns the `MuxState`, the
 [`KeyTables`](/tmux/key-tables.md), and the tmux options that are not per-window layout: `mode-keys`
 (global + per-window), `set-clipboard`, `copy-command`, `buffer-limit`, `message-limit`, `history-limit`
-(global + per-session), and `word-separators` (global + per-session). It also owns free-form `@`
+(global + per-session), `word-separators` (global + per-session), and the phase-4f behavior-option
+overrides. It also owns free-form `@`
 option maps at every tmux scope and global/per-session process-environment overlays. `execute` canonicalizes the
 command name, dispatches to a handler, and, if the state `generation` advanced, appends a
 `SnapshotChanged` effect and repairs the `ExecutionContext` (`session`/`window`/`pane`) so the
@@ -53,7 +54,7 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 
 | Command | Aliases | Purpose |
 | --- | --- | --- |
-| `new-session` | `new` | Create a session (with its first window + terminal pane) and request attachment for an interactive caller; command-only callers remain detached. A targetless Command client starts from the most-recent session, so `-c '#{pane_current_path}'` expands against the same origin the pin selects. `-A` attaches when the session already exists (bare `-A` resolves the current session, `-D` detaches its other clients, and `-d` is ignored on the attach path, as in tmux); `-t` (session groups) and the valued options zz has no model for (`-e`,`-F`,`-f`,`-x`,`-y`) are cataloged but rejected so their values can never leak into the pane command. |
+| `new-session` | `new` | Create a session (with its first window + terminal pane) and request attachment for an interactive caller; command-only callers remain detached. A targetless Command client starts from the most-recent session, so `-c '#{pane_current_path}'` expands against the same origin the pin selects. A first-window `-n` installs window-local `automatic-rename off`. `-A` attaches when the session already exists (bare `-A` resolves the current session, `-D` detaches its other clients, and `-d` is ignored on the attach path, as in tmux); `-t` (session groups) and the valued options zz has no model for (`-e`,`-F`,`-f`,`-x`,`-y`) are cataloged but rejected so their values can never leak into the pane command. |
 | `list-sessions` | `ls` | List sessions. |
 | `rename-session` | `rename` | Rename a session (rejects duplicate names). |
 | `kill-session` | . | Remove a session and its windows/panes. `-a` keeps the target and kills every other session; `-C` clears the session's pane bells and kills nothing, outranking `-a` as in tmux. Positional targets are refused — tmux's bound is zero arguments, and the kill commands are too destructive to guess. |
@@ -61,10 +62,10 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `detach-client` | `detach` | Detach (`Detach(DetachScope)` effect). No flags detaches the caller, `-a` detaches every *other* attached client, `-s` detaches every client on that session (the caller included). `-t` (target client), `-P`, and `-E` are rejected: zz has no client-name selector. |
 | `list-clients` | `lsc` | List attached clients from the daemon registry, sorted by client name. `-t` filters by session and `-F` expands client formats. zz reports unknown client dimensions as `0x0` and leaves the unavailable terminal name and flags empty. Detached command connections do not appear. |
 | `refresh-client` | `refresh` | Parse tmux's complete argument grammar, then return `no current client` for a detached command client. Attached-client redraw and control-mode behavior remain unsupported. |
-| `new-window` | `neww` | Create a terminal window at the `-t` destination. `-d` creates without selecting, `-a` inserts after an occupied target but keeps an explicitly free index, `-k` replaces whatever holds the index, `-S` selects an existing window with the `-n` name instead of creating one. |
+| `new-window` | `neww` | Create a terminal window at the `-t` destination. `-d` creates without selecting, `-a` inserts after an occupied target but keeps an explicitly free index, `-k` replaces whatever holds the index, `-S` selects an existing window with the `-n` name instead of creating one. An explicit `-n` also installs the pin's window-local `automatic-rename off`. |
 | `new-browser` | . | *zz-native:* create a browser window (`-p` profile, URL positional); shares `new-window`'s destination options. |
 | `list-windows` | `lsw` | List a session's windows. `-a` lists every session in bytewise name order, then each session's windows by index. |
-| `rename-window` | `renamew` | Rename a window (duplicates allowed). |
+| `rename-window` | `renamew` | Rename a window (duplicates allowed) and install a window-local `automatic-rename off`, so scripts observe the same explicit-name pin as tmux. |
 | `select-window` | `selectw` | Activate a window. `-n`/`-p`/`-l` are the `next-window`/`previous-window`/`last-window` commands (`-n` wins over `-p` wins over `-l`, as in tmux); `-T` on a target that is already current behaves like `last-window`. |
 | `next-window` / `previous-window` | `next` / `prev` | Step windows (wraps). A step that would land on the current window errors `no next window` / `no previous window`, tmux's strings; `-t` picks the session; `-a` steps to the next/previous window holding an alert (any pane with a latched bell) with the same error when none qualifies. |
 | `kill-window` | `killw` | Remove a window; `-a` keeps the target and kills every other window in its session. |
@@ -91,6 +92,8 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `next-layout` / `previous-layout` | `nextl` / `prevl` | Cycle the seven presets. |
 | `rotate-window` | `rotatew` | Rotate surfaces through layout slots (`-D`,`-U`,`-Z`). |
 | `kill-pane` | `killp` | Remove a pane (removes the window if it was the last); `-a` keeps the target and kills every other pane in its window. |
+| `respawn-pane` | `respawnp` | Restart a terminal pane in the same stable pane id and layout leaf. A live pane needs `-k`; otherwise the command reports tmux's `pane SESSION:WINDOW.PANE still active`. `-c` replaces the stored cwd, repeated `-e NAME=VALUE` entries overlay the session environment, and an omitted command/cwd reuses the prior spawn recipe. `-E` is rejected. |
+| `respawn-window` | `respawnw` | Restart a terminal window in place. The first pane keeps its id, the other panes are removed, and the layout collapses to that retained leaf. Live panes need `-k`; `-c`, repeated `-e`, stored command/cwd reuse, and the `-E` rejection match `respawn-pane`. |
 | `send-keys` | `send` | Send keys/text (`-l` literal, concatenating its arguments byte-for-byte like tmux; `-H` hexadecimal ASCII codes, `0x` prefix accepted — high bytes tmux would write raw are refused because `KeyToken::Literal` carries UTF-8) or `-X` copy-mode actions. `-N` is a repeat count: the whole key list is sent N times, and an `-X` action repeats only when its window-copy handler reads tmux's repeat prefix (movements, jumps, searches); everything else runs once. A bare `-N <n>` with no keys and no `-X` arms the client's copy-mode repeat prefix (tmux's `wme->prefix`), consumed by the next copy-mode command. Flags with no zz model (`-R` terminal reset, `-M`, `-K`, `-F`) are rejected rather than dropped. |
 | `copy-mode` | . | Enter copy mode (`-u` page up, `-d` page down, combinable — tmux applies `-u` then `-d`). `-e` latches exit-at-bottom on fresh entry: scroll-down/page-down/halfpage-down landing at the live bottom with no selection leaves copy mode (cursor-down never does), and `-ed` at the bottom exits instantly. `-q` pops copy mode and returns (silent when no mode is active; other flags in the invocation are dead, as in tmux). `-M` is tmux's mouse-drag entry — without a mouse event tmux no-ops silently, and zz commands never carry one, so it emits nothing. `-k`/`-H`/`-S`/`-s` are rejected. |
 | `copy-mode-search-prompt` | . | *zz-native:* open the native copy-mode search prompt (`-b` backward). |
@@ -99,7 +102,8 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `choose-tree` | . | Open the pane chooser; `-s`/`-w` route to the sidebar (`-s`,`-w`,`-Z`,`-t`). `-Z` is accepted and already true: zz's chooser is a full-window overlay, so there is nothing left to zoom. |
 | `choose-buffer` | . | Open the paste-buffer chooser (`-Z`,`-t`); `-Z` is accepted and already true, as for `choose-tree`. |
 | `show-messages` | `showmsgs` | Print the daemon's message ring newest first with tmux's timestamps. The server-scoped `message-limit` bounds retention at insertion time and defaults to 1,000. Successful command-client invocations produce `command:` entries; failures produce one `message:` entry with the error. `display-message` without `-p` also adds an entry. |
-| `display-panes` | `displayp` | Pane-number overlay (`-d` duration). `-b` is accepted and already true: the effect returns immediately, so nothing was ever blocked. |
+| `display-message` | `display` | Expand a pane-scoped format. `-p` prints it; otherwise the daemon records it and sends a native toast whose timeout is the target session's effective `display-time`. Zero keeps the toast until manual dismissal. |
+| `display-panes` | `displayp` | Pane-number overlay (`-d` duration). An omitted `-d` uses the target session's effective `display-time`; zero installs no deadline and input closes the overlay. `-b` is accepted and already true: the effect returns immediately, so nothing was ever blocked. |
 | `clear-history` | `clearhist` | Clear a pane's scrollback (`-H` unsupported). |
 | `bind-key` / `unbind-key` | `bind` / `unbind` | Add/remove key bindings (`-n`,`-r`,`-T`,`-N`). Empty `{}` installs an empty command list, and a single trailing escaped separator is ignored. Payloads validate at bind time (names + flags — tmux validates the full template): unknown names error `unknown command: X`, cataloged commands get their flags checked, daemon-side verbs are accepted unvalidated, and a real-but-unimplemented tmux command errors as unsupported so config import counts it. |
 | `list-keys` | `lsk` | Print bindings as `bind-key` lines; `-T` limits the table. tmux's other selectors are rejected, not ignored: `-n` is not a tmux `list-keys` flag at all, and `-1`/`-N`/`-a`/`-O`/`-P`/`-r` plus the `[key]` positional have no zz form. |
@@ -119,13 +123,29 @@ Options handled by `set-option`/`set-window-option`: `synchronize-panes` (global
 `history-limit` (session, default 10000, 0–1,000,000), `word-separators` (session, `-a` append), `mode-keys` (`vi`→`copy-mode-vi`,
 `emacs`→`copy-mode`), `prefix`, `set-clipboard` (`on`/`external`/`off`), `copy-command`, `status`,
 `status-interval`, `status-left`, `status-right`, `base-index`, `pane-base-index`, and
-`renumber-windows`. The matcher checks exact names and unique prefixes against all 180 tmux option names plus
+`renumber-windows`; `mouse` (session flag, default `off`), `escape-time` (server milliseconds,
+default `10`), `automatic-rename` (window flag, default `on`), `automatic-rename-format` (window
+string), `remain-on-exit` (window/pane choice: `off`, `on`, `failed`, or `key`),
+`default-terminal` (server string, stored default `screen`), `display-time` (session milliseconds,
+default `750`), and `repeat-time` (session milliseconds, default `500`, maximum `2000000`). The
+matcher checks exact names and unique prefixes against all 180 tmux option names plus
 68 hook entries. The matched table entry chooses server, session, window, or pane scope. `set` versus
 `setw` and the `-s`/`-w`/`-p` spelling cannot change that declared scope. A table entry declared as
 both window and pane lets `-p` select pane scope. `-q` silences unknown or ambiguous names; config
 import reports a known unimplemented name as a skip. Names beginning with `@` bypass table matching:
 they are exact string keys whose scope comes from the command flags, preserving the plugin-storage
 contract without pretending the stored value has behavior.
+
+`automatic-rename` gates the desktop's active-pane-derived tab label. Explicit window names pin a
+window-local `off`; `automatic-rename-format` is stored and readable but the presentation-only
+renamer does not evaluate it. Retained terminal exits keep the last viewport and expose
+`pane_dead` plus normal-exit `pane_dead_status`; input is swallowed, `kill-pane` still removes the
+pane, and the respawn commands replace its daemon-owned terminal session. An explicit
+`default-terminal` seeds `TERM` for future spawns, with a per-spawn environment override winning;
+the unset path preserves zz's existing `xterm-256color` export despite the stored `screen` default.
+`repeat-time` supplies the attached session's repeatable-binding deadline, including zero to disable
+the repeat window. `mouse` and `escape-time` are storage-only until the TUI attach client consumes
+them.
 
 For the index trio, `-u` and `-U` restore inheritance and ignore a trailing value, `-o` checks the
 target override slot and yields to either unset flag, and the handler accepts `-a`. tmux flag values accept
@@ -159,9 +179,9 @@ same active → focus-history → layout-order rule as `cwd_donor`.
 
 # Effects
 
-`MuxEffect` variants returned to the daemon adapter include: `PaneCreated`, `PanesRemoved`,
+`MuxEffect` variants returned to the daemon adapter include: `PaneCreated`, `PaneRespawned`, `PanesRemoved`,
 `PaneRelocated`, `SendKeys`, `TerminalView` (scroll/copy-mode), `TerminalUi` (search prompt),
-`CommandPrompt`, `FocusSidebar`, `ChooseTree`, `ChooseBuffer`, `DisplayPanes`, `BufferLimitChanged`,
+`CommandPrompt`, `FocusSidebar`, `ChooseTree`, `ChooseBuffer`, `DisplayMessage`, `DisplayPanes`, `BufferLimitChanged`,
 `WordSeparatorsChanged`, `ModeKeysChanged`, `Attach`, `Detach(DetachScope)` (`Client`, `Others`, or
 `Session`, which the daemon maps onto its attached-client table), `SourceFile { path, quiet }`,
 `ReloadConfig`, `KillServer`, and `SnapshotChanged` (appended whenever the mux generation advanced).

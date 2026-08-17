@@ -79,6 +79,7 @@ pub enum CoreEvent {
         pane: Option<PaneId>,
         kind: ClientMessageKind,
         text: String,
+        duration_ms: Option<u32>,
     },
     Clipboard {
         pane: PaneId,
@@ -487,8 +488,25 @@ impl ClientCore {
             EventPayload::Bell { pane } => self.events.push_back(CoreEvent::Bell { pane }),
             EventPayload::FocusSidebar => self.events.push_back(CoreEvent::FocusSidebar),
             EventPayload::ClientMessage { pane, kind, text } => {
-                self.events
-                    .push_back(CoreEvent::ClientMessage { pane, kind, text });
+                self.events.push_back(CoreEvent::ClientMessage {
+                    pane,
+                    kind,
+                    text,
+                    duration_ms: None,
+                });
+            }
+            EventPayload::TimedClientMessage {
+                pane,
+                kind,
+                text,
+                duration_ms,
+            } => {
+                self.events.push_back(CoreEvent::ClientMessage {
+                    pane,
+                    kind,
+                    text,
+                    duration_ms: Some(duration_ms),
+                });
             }
             EventPayload::Clipboard {
                 pane,
@@ -742,6 +760,8 @@ mod tests {
                         kind: PaneKindSnapshot::Terminal,
                         synchronized_input: false,
                         bell: false,
+                        dead: false,
+                        dead_status: None,
                     },
                 )
             })
@@ -757,6 +777,7 @@ mod tests {
                     id: WindowId(0),
                     index: 0,
                     name: "win".to_owned(),
+                    automatic_rename: true,
                     active_pane: first,
                     zoomed_pane: None,
                     layout: LayoutNode::Pane(first),

@@ -364,6 +364,7 @@ pub struct TerminalSpawn {
     /// tmux-style shell command run under `sh -c`; the pane closes when it
     /// exits. `None` spawns the interactive default shell.
     pub command: Option<String>,
+    pub terminal_type: Option<String>,
     /// Extra environment (`ZZ_PANE` etc.) layered over the defaults.
     pub env: Vec<(String, Option<String>)>,
 }
@@ -3016,6 +3017,10 @@ fn run_terminal(
         }
         None => crate::shell_integration::default_shell_command(),
     };
+    command.env(
+        "TERM",
+        spawn.terminal_type.as_deref().unwrap_or("xterm-256color"),
+    );
     for (key, value) in &spawn.env {
         if let Some(value) = value {
             command.env(key, value);
@@ -3023,7 +3028,6 @@ fn run_terminal(
             command.env_remove(key);
         }
     }
-    command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
     command.env("TERM_PROGRAM", "zz");
     command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
@@ -14002,6 +14006,48 @@ mod tests {
         }
         assert!(contents.contains("ZZ_PHASE4D_SET=session"), "{contents:?}");
         assert!(contents.contains("ZZ_PHASE4D_REMOVE=unset"), "{contents:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_type_seeds_term_and_spawn_environment_can_override_it() {
+        let capture =
+            |view: u64, terminal_type: Option<&str>, env: Vec<(String, Option<String>)>| {
+                let session = TerminalSession::spawn(
+                    DEFAULT_HISTORY_LIMIT,
+                    Arc::new(TerminalAppearance::default()),
+                    TerminalSpawn {
+                        command: Some("printf 'ZZ_TERM:%s\\n' \"$TERM\"; read _".to_owned()),
+                        terminal_type: terminal_type.map(str::to_owned),
+                        env,
+                        ..TerminalSpawn::default()
+                    },
+                );
+                session.attach_view(TerminalViewId(view));
+                let viewport = wait_for_test_viewport(&session, |viewport| {
+                    let mut contents = String::new();
+                    for cell in viewport.cells.iter() {
+                        viewport.push_glyph(*cell, &mut contents);
+                    }
+                    contents.contains("ZZ_TERM:")
+                });
+                let mut contents = String::new();
+                for cell in viewport.cells.iter() {
+                    viewport.push_glyph(*cell, &mut contents);
+                }
+                contents
+            };
+
+        assert!(capture(47, None, Vec::new()).contains("ZZ_TERM:xterm-256color"));
+        assert!(capture(48, Some("zz-term"), Vec::new()).contains("ZZ_TERM:zz-term"));
+        assert!(
+            capture(
+                49,
+                Some("zz-term"),
+                vec![("TERM".to_owned(), Some("override".to_owned()))]
+            )
+            .contains("ZZ_TERM:override")
+        );
     }
 
     #[cfg(unix)]

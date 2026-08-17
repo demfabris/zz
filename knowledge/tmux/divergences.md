@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: tmux divergence matrix
-description: "Every known divergence from tmux at the pinned reference commit: the 26 missing commands and why, behavioral gaps on the implemented surface, the 16-of-180 options coverage, and the protocol-level differences."
+description: "Every known divergence from tmux at the pinned reference commit: the 24 missing commands and why, behavioral gaps on the implemented surface, the 24-of-180 options coverage, and the protocol-level differences."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-17T00:00:00-03:00
@@ -17,7 +17,7 @@ complements the [compatibility philosophy](/tmux/tmux-compat.md) (the contract) 
 
 **State anchor:** the "implemented surface" section reflects
 [PR #4](https://github.com/demfabris/zz/pull/4) (`fix/tmux-compat-hunt-v2`, merged 2026-08-16
-as `53b523e`) plus the phase 3d layout-string and phase 4a–4e source dated 2026-08-17. PR #4 corrected the
+as `53b523e`) plus the phase 3d layout-string and phase 4a–4f-1 source dated 2026-08-17. PR #4 corrected the
 hunt-claim regressions, including two implemented backwards
 (`new-window -t` bare-target order, positional targets on the kill commands) plus the
 `kill-session -C`, `new-session -A`, `resize-pane` attached-adjustment, `send-keys -H`/`-l`,
@@ -27,12 +27,12 @@ The one-line read: everything marked **silent** below is a bug by zz's own doctr
 must mean what tmux means, or error loudly); everything loud is a choice; the "genuine gaps"
 command block plus the remaining options grind is the actual drop-in backlog.
 
-# Missing commands (26 of ~92)
+# Missing commands (24 of ~92)
 
-zz's shared catalog holds 71 verbs: 14 zz-native and 57 tmux. `MuxEngine` runs 54 of the tmux
+zz's shared catalog holds 73 verbs: 14 zz-native and 59 tmux. `MuxEngine` runs 56 of the tmux
 verbs, while the daemon runs the cataloged `list-clients`, `refresh-client`, and `show-messages`
 because they need client or message state. The daemon also implements 8 uncataloged tmux verbs:
-`capture-pane` and `set-`/`show-`/`list-`/`load-`/`save-`/`delete-`/`paste-buffer`. That leaves 26
+`capture-pane` and `set-`/`show-`/`list-`/`load-`/`save-`/`delete-`/`paste-buffer`. That leaves 24
 of tmux's ~92 commands absent, in three deliberate groups.
 
 ## Refused — config must never execute programs (10)
@@ -63,12 +63,11 @@ doctrine.
 | `clock-mode` | Full-pane clock. |
 | `suspend-client` | Ctrl-Z the attaching client. |
 
-## Genuine gaps — buildable, nothing blocks them (8)
+## Genuine gaps — buildable, nothing blocks them (6)
 
 | Command | What it does | Weight |
 | --- | --- | --- |
 | `switch-client` | Move the attached client to another session; scripts use `-t` constantly. | high |
-| `respawn-pane` / `respawn-window` | Restart the dead command in place (`remain-on-exit` workflow). | medium |
 | `link-window` / `unlink-window` | One window shared into several sessions; zz has no linked-window model. | low |
 | `resize-window` | Manual window sizing decoupled from clients. | low |
 | `clear-prompt-history` / `show-prompt-history` | Prompt history management. | low |
@@ -85,6 +84,11 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | `copy-mode` | `-k -H -S -s` rejected (`-e`/`-q`/`-M` — the stock-binding trio — are implemented). | loud |
 | `source-file` | No `-` stdin (refused loudly), no `-F`/`-n`/`-v`. Globbing works. | loud |
 | `show-options` on unimplemented names | Catalogued scalar options without zz storage have no invented value and print nothing, including under `-A`. Bare and indexed array spellings use the same empty-success path. Implemented scalars and every stored `@` user option retain normal scope and inheritance readback. | **silent**, honest omission |
+| `mouse` / `escape-time` | Both options have typed storage, pin defaults, inheritance, unset, and readback. The desktop GUI does not consume either value; their input semantics belong to the phase-8 TUI attach surface. | **silent**, deliberate |
+| `automatic-rename` / `automatic-rename-format` | `automatic-rename` gates the desktop's active-pane-derived tab label, and explicit `rename-window`, `new-window -n`, or the first-window name pins a window-local `off`. zz does not mutate `Window.name` every 500 ms, so `#{window_name}` remains the explicit model name, and the stored format string is not evaluated by the presentation-only renamer. | **silent**, bounded |
+| `default-terminal` when unset | Readback matches the pin default `screen`. An explicit value is exported as `TERM` to new terminal panes, with a per-spawn `TERM` environment entry winning. Until the user sets the option, zz keeps exporting `xterm-256color` so installed terminfo and existing product behavior do not regress. | **silent**, deliberate |
+| `display-time` | Status-message toasts consume the configured milliseconds. zz also uses it as the omitted `display-panes -d` duration; the pin uses the separate `display-panes-time` option. A zero toast remains until manual dismissal, while tmux dismisses its zero-duration status message on a key. | **silent**, deliberate |
+| `respawn-pane` / `respawn-window` | Dead panes revive with stable pane identity; `respawn-window` keeps its first pane and removes the rest. `-k`, `-c`, repeated `-e NAME=VALUE`, and stored command/cwd reuse are implemented. The pin's `-E` empty-environment flag is cataloged but rejected. | loud for `-E` |
 | Array options | zz parses tmux's `name[index]` grammar but stores and renders none of the pin's 76 array options. Bare and indexed set/show requests succeed with no output. Indexed `@` or table scalars follow tmux: set returns `not an array`, while show reads the scalar through the indexed spelling. | **silent**, honest omission |
 | `history-limit` default | zz keeps 10,000 lines for its product default; the pin keeps 2,000. `show-options -g history-limit` prints the effective 10,000 value. | **silent**, deliberate |
 | Plain option listings | No-argument listings contain tmux table names and `@` user names. The six zz-native settings stay available through explicit-name queries and never appear as unknown words in tmux-parsing scripts. | **silent**, zz extension hidden from tmux listings |
@@ -144,9 +148,8 @@ inside a generic “unsupported formats” claim.
 | `mouse_status_range` | Command formats do not receive tmux's mouse-event status range. | **silent** |
 | `mouse_word` | Command formats do not receive tmux's mouse-event word text. | **silent** |
 | `pane_bg` | The terminal cell background at the cursor is not mirrored into mux facts. | **silent** |
-| `pane_dead_signal` | Exited panes are removed; zz has no retained remain-on-exit signal fact. | **silent** |
-| `pane_dead_status` | Exited panes are removed; zz has no retained remain-on-exit status fact. | **silent** |
-| `pane_dead_time` | Exited panes are removed; zz has no retained remain-on-exit timestamp. | **silent** |
+| `pane_dead_signal` | Retained dead panes do not publish the terminating signal as a format fact. | **silent** |
+| `pane_dead_time` | Retained dead panes do not publish their exit timestamp. | **silent** |
 | `pane_fg` | The terminal cell foreground at the cursor is not mirrored into mux facts. | **silent** |
 | `pane_key_mode` | Native copy/view mode is not projected as tmux's pane key mode. | **silent** |
 | `pane_mode` | Native pane mode is not projected as tmux's mode name. | **silent** |
@@ -166,13 +169,15 @@ inside a generic “unsupported formats” claim.
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
 | `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
-# Options: 16 of 180
+# Options: 24 of 180
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin.
 Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-panes`,
 `word-separators`, `buffer-limit`, `message-limit`, `set-clipboard`, `copy-command`, `status`,
 `status-interval`, `status-left`, `status-right`, `base-index`, `pane-base-index`, and
-`renumber-windows`. The index trio follows tmux's session/window inheritance, allocation,
+`renumber-windows`, plus `mouse`, `escape-time`, `automatic-rename`,
+`automatic-rename-format`, `remain-on-exit`, `default-terminal`, `display-time`, and
+`repeat-time`. The index trio follows tmux's session/window inheritance, allocation,
 targeting, format, and close-triggered renumbering behavior. (`set-option` also accepts six
 zz-native names — the agent/editor/history-trickle keys — which don't count toward tmux
 coverage.) `show-options` and `show-window-options` expose implemented values with tmux's exact
@@ -186,13 +191,14 @@ including hidden and child-unset entries. The daemon seeds the global map from i
 environment, and `new-session` copies the fixed `update-environment` names or writes unset markers.
 Everything else is reported-and-skipped by the
 [conf parser](/tmux/conf-parser.md).
-The ones real dotfiles set most, roughly by frequency: `escape-time`, `mouse`,
-`default-terminal`, `terminal-overrides`, `set-titles`, `automatic-rename`,
-`aggressive-resize`, `remain-on-exit`, `monitor-activity`, `display-time`, `repeat-time`, and
-the whole `*-style` family (styles are on the never-list).
-The behavior-bearing options `mouse`, `escape-time`, `automatic-rename`, `aggressive-resize`,
-`remain-on-exit`, and `set-titles` remain outside this wave and are tracked for wave 4f;
-readback/storage does not pretend those behaviors exist.
+`automatic-rename` gates the desktop's active-pane label and explicit window names install the
+pin's window-local `off`; its format string is storage-only. `remain-on-exit` retains a frozen dead
+pane with live `pane_dead` and normal-exit `pane_dead_status` facts, and the respawn commands revive
+that stable pane slot. `default-terminal`, `display-time`, and `repeat-time` feed new PTYs, client
+message/overlay timers, and each attached session's repeat-key window. `mouse` and `escape-time`
+remain storage-only until the TUI attach surface consumes them. `aggressive-resize`, lazy daemon
+session creation, `set-titles`, `terminal-overrides`, monitor options, and styles remain later work;
+phase 4f-1 does not claim them.
 
 # Protocol and process level
 

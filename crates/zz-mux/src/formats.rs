@@ -37,6 +37,8 @@ pub struct StatusContext {
     pub pane_bottom: Option<u16>,
     pub pane_current_command: String,
     pub pane_current_path: String,
+    pub pane_dead: Option<bool>,
+    pub pane_dead_status: Option<u32>,
     pub pane_path: String,
     pub pane_flags: String,
     pub pane_height: Option<u16>,
@@ -172,6 +174,8 @@ enum FormatBacking {
     PaneBottom,
     PaneCurrentCommand,
     PaneCurrentPath,
+    PaneDead,
+    PaneDeadStatus,
     PanePath,
     PaneFlags,
     PaneFormat,
@@ -348,9 +352,9 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_bottom", Pane, PaneBottom),
     variable!("pane_current_command", Pane, PaneCurrentCommand),
     variable!("pane_current_path", Pane, PaneCurrentPath),
-    variable!("pane_dead", Pane, Zero),
+    variable!("pane_dead", Pane, PaneDead),
     variable!("pane_dead_signal", Pane, Empty),
-    variable!("pane_dead_status", Pane, Empty),
+    variable!("pane_dead_status", Pane, PaneDeadStatus),
     variable!("pane_dead_time", Pane, Time, Empty),
     variable!("pane_fg", Pane, Empty),
     variable!("pane_flags", Pane, PaneFlags),
@@ -537,6 +541,8 @@ impl StatusContext {
             FormatBacking::PaneBottom => optional_display(self.pane_bottom),
             FormatBacking::PaneCurrentCommand => Cow::Borrowed(self.pane_current_command.as_str()),
             FormatBacking::PaneCurrentPath => Cow::Borrowed(self.pane_current_path.as_str()),
+            FormatBacking::PaneDead => optional_bool(self.pane_dead),
+            FormatBacking::PaneDeadStatus => optional_display(self.pane_dead_status),
             FormatBacking::PanePath => Cow::Borrowed(self.pane_path.as_str()),
             FormatBacking::PaneFlags => Cow::Borrowed(self.pane_flags.as_str()),
             FormatBacking::PaneFormat => {
@@ -860,6 +866,8 @@ impl MuxEngine {
         };
         context.history_limit = self.history_limit_for_pane(pane.id).ok();
         context.pane_active = Some(window.active_pane == pane.id);
+        context.pane_dead = Some(pane.dead);
+        context.pane_dead_status = pane.dead_status;
         context.pane_id = pane.id.to_string();
         context.pane_index = self.pane_index(window.id, pane.id).unwrap_or_default();
         context.pane_last = Some(window.last_pane() == Some(pane.id));

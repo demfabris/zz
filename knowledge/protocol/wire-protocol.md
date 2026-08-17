@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v58)
+title: zz wire protocol (v59)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 58`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 59`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (58) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (59) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -150,7 +150,8 @@ clears.
 `TerminalUiCommand { pane, command }`, `CommandPrompt { state }`, `CommandOutput { pane, viewport }`,
 `ChooseTree { state }`, `ChooseTreeUpdate { search, selected }`, `ChooseBuffer { state }`,
 `ChooseBufferUpdate { search, selected }`, `DisplayPanes { state }`,
-`ClientMessage { pane, kind: ClientMessageKind, text }`, `PaneRemoved(PaneId)`, `ServerStopping`,
+`ClientMessage { pane, kind: ClientMessageKind, text }`,
+`PaneRemoved(PaneId)`, `ServerStopping`,
 `OpenUri { pane, uri }`, `FocusSidebar`, `PrefixArmed { armed }`, `Bell { pane }`,
 `KeyTablesChanged { tables }`,
 `Detached { session: SessionId, by: Option<String> }`, `HistoryChunk { pane, start: u32, total: u32,
@@ -179,9 +180,12 @@ overflowed and was cleared, which the client answers with `AgentReplay` rather t
 `MAX_AGENT_RESULT_BYTES` (1 MiB) and sent only to the client that made the request. A session
 listing uses request ID zero; the daemon carries its requester out of band.
 
+v59 appends `TimedClientMessage { pane, kind: ClientMessageKind, text, duration_ms: u32 }` after
+the agent payloads so every previously shipped enum tag keeps its wire value.
+
 The three payloads `TerminalViewport`, `TerminalPatch`, and `CommandOutput { viewport: Some(..) }` are
 diverted to the [Terminal lane](/protocol/terminal-lanes.md) by `encode_protocol_message`; all other
-payloads ride the Control lane. `OpenUri`, `TerminalUiCommand`, `ClientMessage`,
+payloads ride the Control lane. `OpenUri`, `TerminalUiCommand`, `ClientMessage`, `TimedClientMessage`,
 `CommandPrompt`, `FocusSidebar`, and the choose-tree/buffer state updates deliberately use the
 reliable Control lane. `HistoryChunk` does too: scrollback rows are `postcard`-encoded `PackedCell`
 rows rather than a packed terminal frame, and a lost chunk would leave a hole in the client's ring.
@@ -326,9 +330,12 @@ unbounded `#()` script off the wire.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 58`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 59`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v59 appends `TimedClientMessage` and adds automatic-rename plus retained-dead metadata to mux
+  snapshots. Older clients cannot decode either shape, so the normal exact-version restart path is
+  required.
 - **Any change that affects an already shipped encoding** (new enum variants, reordered fields,
   changed integer widths) **requires bumping the version**. The envelope's `VersionMismatch` guard
   then forces the peers to agree. A rejected first frame gets a best-effort mismatch response before
@@ -374,20 +381,20 @@ unbounded `#()` script off the wire.
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 56, client_instance_id: ClientInstanceId(1), kind: Interactive,
+`ClientHello { protocol_version: 59, client_instance_id: ClientInstanceId(1), kind: Interactive,
 device_name: None, capabilities: [], color_scheme: Some(Dark), origin: None }` is 17 bytes on the
 wire: an 8-byte envelope over a 9-byte postcard payload.
 
 ```text
 byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15 16
-      0d 00 00 00  00     00      38 00         00 38 01 00 00 00 01 01 00
+      0d 00 00 00  00     00      3b 00         00 3b 01 00 00 00 01 01 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 13  Control        (= 56)
+      length = 13  Control        (= 59)
 ```
 
 - **length `13`** = `ENVELOPE_BYTES` (4) + payload (9); it counts the four envelope bytes, not itself.
-- **payload** `00 38 01 00 00 00 01 01 00`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x38` (= 56), `client_instance_id` as varint `01`, `kind`
+- **payload** `00 3b 01 00 00 00 01 01 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x3b` (= 59), `client_instance_id` as varint `01`, `kind`
   variant `0` (`Interactive`), `device_name` as the `Option::None` tag `00`, `capabilities` as the
   sequence length `00`, `Option::Some` tag `01`, `TerminalColorScheme` variant `1` (`Dark`), then
   `origin` as `Option::None` (`00`). Postcard
@@ -419,9 +426,9 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 56, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
+client → ClientHello { protocol_version: 59, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
                        capabilities: [], color_scheme: Some(Dark), origin: None }
-server → ServerHello { protocol_version: 56, server_id, client_id: c11, client_instance_id: i1,
+server → ServerHello { protocol_version: 59, server_id, client_id: c11, client_instance_id: i1,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],

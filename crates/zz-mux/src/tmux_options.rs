@@ -330,21 +330,30 @@ pub(crate) fn tmux_options() -> impl Iterator<Item = TmuxOption> {
 
 fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
     Some(match name {
+        "default-terminal" => TmuxOptionDefault::String("tmux-256color"),
+        "escape-time" => TmuxOptionDefault::Scalar("10"),
         "base-index" | "pane-base-index" => TmuxOptionDefault::Scalar("0"),
         "buffer-limit" => TmuxOptionDefault::Scalar("50"),
         "copy-command" => TmuxOptionDefault::String(""),
         "history-limit" => TmuxOptionDefault::Scalar("2000"),
+        "display-time" => TmuxOptionDefault::Scalar("750"),
         "message-limit" => TmuxOptionDefault::Scalar("1000"),
         "mode-keys" => TmuxOptionDefault::Scalar("emacs"),
+        "renumber-windows" | "synchronize-panes" | "remain-on-exit" => {
+            TmuxOptionDefault::Scalar("off")
+        }
         "prefix" => TmuxOptionDefault::Scalar("C-b"),
-        "renumber-windows" | "synchronize-panes" => TmuxOptionDefault::Scalar("off"),
+        "repeat-time" => TmuxOptionDefault::Scalar("500"),
         "set-clipboard" => TmuxOptionDefault::Scalar("external"),
-        "status" => TmuxOptionDefault::Scalar("on"),
+        "status" | "automatic-rename" | "mouse" => TmuxOptionDefault::Scalar("on"),
         "status-interval" => TmuxOptionDefault::Scalar("15"),
         "status-left" => TmuxOptionDefault::String(STATUS_LEFT_DEFAULT),
         "status-right" => TmuxOptionDefault::String(STATUS_RIGHT_DEFAULT),
         "update-environment" => TmuxOptionDefault::Array(UPDATE_ENVIRONMENT_DEFAULT),
         "word-separators" => TmuxOptionDefault::String("!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"),
+        "automatic-rename-format" => TmuxOptionDefault::String(
+            "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}",
+        ),
         _ => return None,
     })
 }
@@ -528,12 +537,20 @@ mod tests {
             vec![
                 ("buffer-limit", TmuxOptionDefault::Scalar("50")),
                 ("copy-command", TmuxOptionDefault::String("")),
+                (
+                    "default-terminal",
+                    TmuxOptionDefault::String("tmux-256color")
+                ),
+                ("escape-time", TmuxOptionDefault::Scalar("10")),
                 ("message-limit", TmuxOptionDefault::Scalar("1000")),
                 ("set-clipboard", TmuxOptionDefault::Scalar("external")),
                 ("base-index", TmuxOptionDefault::Scalar("0")),
+                ("display-time", TmuxOptionDefault::Scalar("750")),
                 ("history-limit", TmuxOptionDefault::Scalar("2000")),
+                ("mouse", TmuxOptionDefault::Scalar("on")),
                 ("prefix", TmuxOptionDefault::Scalar("C-b")),
                 ("renumber-windows", TmuxOptionDefault::Scalar("off")),
+                ("repeat-time", TmuxOptionDefault::Scalar("500")),
                 ("status", TmuxOptionDefault::Scalar("on")),
                 ("status-interval", TmuxOptionDefault::Scalar("15")),
                 (
@@ -552,8 +569,16 @@ mod tests {
                     "word-separators",
                     TmuxOptionDefault::String("!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"),
                 ),
+                ("automatic-rename", TmuxOptionDefault::Scalar("on")),
+                (
+                    "automatic-rename-format",
+                    TmuxOptionDefault::String(
+                        "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}"
+                    ),
+                ),
                 ("mode-keys", TmuxOptionDefault::Scalar("emacs")),
                 ("pane-base-index", TmuxOptionDefault::Scalar("0")),
+                ("remain-on-exit", TmuxOptionDefault::Scalar("off")),
                 ("synchronize-panes", TmuxOptionDefault::Scalar("off")),
             ]
         );

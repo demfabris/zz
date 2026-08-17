@@ -13,6 +13,7 @@ use crate::layout::{CellLayout, LayoutError, SplitSize};
 
 pub(crate) const DEFAULT_WINDOW_EXTENT: (u16, u16) = (80, 24);
 const SYNCHRONIZE_PANES: u8 = 1 << 0;
+const AUTOMATIC_RENAME: u8 = 1 << 1;
 const LAYOUT_COORDINATE_MAX: u32 = 1_000_000;
 const MAX_AGENT_SESSION_ID_BYTES: usize = 16 * 1024;
 const MAX_WINDOW_INDEX: u32 = i32::MAX.cast_unsigned();
@@ -108,6 +109,28 @@ impl InputOptions {
             self.overrides &= !SYNCHRONIZE_PANES;
         }
     }
+
+    const fn automatic_rename(self) -> Option<bool> {
+        if self.overrides & AUTOMATIC_RENAME == 0 {
+            None
+        } else {
+            Some(self.values & AUTOMATIC_RENAME != 0)
+        }
+    }
+
+    fn set_automatic_rename(&mut self, value: Option<bool>) {
+        if let Some(value) = value {
+            self.overrides |= AUTOMATIC_RENAME;
+            if value {
+                self.values |= AUTOMATIC_RENAME;
+            } else {
+                self.values &= !AUTOMATIC_RENAME;
+            }
+        } else {
+            self.values &= !AUTOMATIC_RENAME;
+            self.overrides &= !AUTOMATIC_RENAME;
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -161,6 +184,8 @@ pub struct Pane {
     pub kind: PaneKind,
     /// A BEL rang here and nobody has been back since.
     pub bell: bool,
+    pub dead: bool,
+    pub dead_status: Option<u32>,
     input_options: InputOptions,
 }
 
@@ -320,6 +345,8 @@ impl MuxState {
             title: "terminal".to_owned(),
             kind: PaneKind::Terminal,
             bell: false,
+            dead: false,
+            dead_status: None,
             input_options: InputOptions::default(),
         };
         let window = Window {
@@ -425,6 +452,8 @@ impl MuxState {
             title: pane_title(&kind),
             kind,
             bell: false,
+            dead: false,
+            dead_status: None,
             input_options: InputOptions::default(),
         };
         let window = Window {
@@ -919,6 +948,8 @@ impl MuxState {
                 title: pane_title(&kind),
                 kind,
                 bell: false,
+                dead: false,
+                dead_status: None,
                 input_options: InputOptions::default(),
             },
         );
@@ -1633,6 +1664,55 @@ impl MuxState {
         self.input_options.synchronize_panes().unwrap_or(false)
     }
 
+    #[must_use]
+    pub fn global_automatic_rename(&self) -> bool {
+        self.input_options.automatic_rename().unwrap_or(true)
+    }
+
+    pub fn set_global_automatic_rename(&mut self, value: Option<bool>) {
+        if self.input_options.automatic_rename() != value {
+            self.input_options.set_automatic_rename(value);
+            self.bump_generation();
+        }
+    }
+
+    pub fn window_automatic_rename(&self, window: WindowId) -> Result<bool, ServerError> {
+        let window = self
+            .windows
+            .get(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+        Ok(window
+            .input_options
+            .automatic_rename()
+            .unwrap_or_else(|| self.global_automatic_rename()))
+    }
+
+    pub fn window_automatic_rename_override(
+        &self,
+        window: WindowId,
+    ) -> Result<Option<bool>, ServerError> {
+        self.windows
+            .get(&window)
+            .map(|window| window.input_options.automatic_rename())
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))
+    }
+
+    pub fn set_window_automatic_rename(
+        &mut self,
+        window: WindowId,
+        value: Option<bool>,
+    ) -> Result<(), ServerError> {
+        let window = self
+            .windows
+            .get_mut(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+        if window.input_options.automatic_rename() != value {
+            window.input_options.set_automatic_rename(value);
+            self.bump_generation();
+        }
+        Ok(())
+    }
+
     pub fn set_global_synchronize_panes(&mut self, value: bool) {
         if self.global_synchronize_panes() != value {
             self.input_options.set_synchronize_panes(Some(value));
@@ -2284,6 +2364,36 @@ impl MuxState {
             .find_map(|window| window.panes.get_mut(&pane))
     }
 
+    pub fn mark_pane_dead(
+        &mut self,
+        pane: PaneId,
+        status: Option<u32>,
+    ) -> Result<bool, ServerError> {
+        let pane = self
+            .pane_mut(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        if pane.dead && pane.dead_status == status {
+            return Ok(false);
+        }
+        pane.dead = true;
+        pane.dead_status = status;
+        self.bump_generation();
+        Ok(true)
+    }
+
+    pub fn revive_pane(&mut self, pane: PaneId) -> Result<bool, ServerError> {
+        let pane = self
+            .pane_mut(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        if !pane.dead && pane.dead_status.is_none() {
+            return Ok(false);
+        }
+        pane.dead = false;
+        pane.dead_status = None;
+        self.bump_generation();
+        Ok(true)
+    }
+
     #[must_use]
     pub fn window_for_pane(&self, pane: PaneId) -> Option<WindowId> {
         self.windows
@@ -2903,6 +3013,10 @@ impl MuxState {
             id: window.id,
             index: window.index,
             name: window.name.clone(),
+            automatic_rename: window
+                .input_options
+                .automatic_rename()
+                .unwrap_or_else(|| self.global_automatic_rename()),
             active_pane: window.active_pane,
             zoomed_pane: window.zoomed_pane,
             layout: window.layout.project(),
@@ -2921,6 +3035,8 @@ impl MuxState {
                                 .synchronize_panes()
                                 .unwrap_or(synchronized),
                             bell: pane.bell,
+                            dead: pane.dead,
+                            dead_status: pane.dead_status,
                         },
                     )
                 })

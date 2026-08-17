@@ -41,11 +41,14 @@ Only a deliberately supported subset is implemented; **supported commands must n
 partial semantics**, and unsupported input is reported and skipped rather than approximated or run as
 shell code. Concretely:
 
-- **Emulated:** sessions/windows/panes/splits, target resolution, 58 tmux commands and their aliases
+- **Emulated:** sessions/windows/panes/splits, target resolution, 59 cataloged tmux commands and
+  their aliases plus the daemon-side buffer family
   ([commands](/tmux/commands.md)), root/prefix/`copy-mode`/`copy-mode-vi` key tables with repeat
   bindings and `send-keys -X` ([key tables](/tmux/key-tables.md)), the seven named layouts, lossless
   zoom, swap/rotate/break/join, `synchronize-panes`/`history-limit`/`word-separators`/`mode-keys`
-  options, native [copy mode](/tmux/copy-mode.md), [choose-tree/choose-buffer](/tmux/choose-tree.md),
+  options, the eight phase-4f behavior options, retained dead panes with in-place
+  `respawn-pane`/`respawn-window`, native [copy mode](/tmux/copy-mode.md),
+  [choose-tree/choose-buffer](/tmux/choose-tree.md),
   command prompt, pane-number overlay, the `status`/`status-interval`/`status-left`/`status-right`
   options with a documented [FORMATS subset](/tmux/status-line.md) (including `#()` command
   substitution), exact option readback, free-form `@` storage at every scope, global/session

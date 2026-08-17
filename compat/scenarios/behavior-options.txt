@@ -1,0 +1,12 @@
+source-file compat/scenarios/behavior-options.conf
+out: show-options -gv mouse
+out: show-options -sv escape-time
+out: show-options -wv -t w:0 automatic-rename
+out: show-window-options -gv automatic-rename-format
+out: show-window-options -gv remain-on-exit
+out: show-options -sv default-terminal
+out: show-options -gv display-time
+out: show-options -gv repeat-time
+out: display-message -p -t w:0.1 #{pane_dead}:#{pane_dead_status}
+respawn-pane -t w:0.1 'sleep 60'
+out: display-message -p -t w:0.1 #{pane_dead}:#{pane_dead_status}

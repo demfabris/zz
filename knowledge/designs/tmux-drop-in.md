@@ -149,8 +149,9 @@ same loop as phases 0–3: settled plan → codex → full gates → adversarial
 | Full formats engine | the 198-name registry, every scalar modifier + `S`/`W`/`P` loops + `e` math + `C` search, the daemon runtime-facts feed (proc cwd, pid, tty; OSC 7 → `pane_path`), `-c` as a format consumer with spawn.c's chdir chain, the `fmt:` differential channel | **shipped 2026-08-17** (wave 4c, four review rounds) |
 | Options readback | `show-options`/`show-window-options` with the pin's quoting, `@user` options as pure storage (TPM), `set-`/`show-environment` + PTY env injection, the `out:` differential channel. The review round added: MRU session activity aligned to the pin (create/attach/key-input only — detached CLI traffic never bumps it), the `VISUAL`/`EDITOR` → `mode-keys` boot sniff, indexed `name[idx]` spellings, global-environ seeding + `update-environment` markers, name-sorted `list-sessions` (the `#{S:}` loop deliberately stays creation-ordered like the pin's), and harness env scrubbing (`TMUX_PANE`/`EDITOR` leak both poisoned local probes) | **shipped 2026-08-17** (wave 4d, one review round, CONFIRMED-CLOSED) |
 | The gap commands | `move-window`/`swap-window` full flag surface, `find-window`, `list-clients`/`list-commands` (honest subset, usage strings show zz's accepted flags), `show-messages` (newest-first log, live `message-limit`, failing commands log both `command:` and `message:` lines), `start-server`, `refresh-client`, `list-windows -a` / `list-panes -a`/`-s` name-ordered (resurrect's save path). The range also carried the strftime-parity fix: display-message runs the pin's whole-string-per-level libc strftime (the workspace's only `unsafe` block), `%` accepted as modulo — root cause of the Linux-only CI divergence | **shipped 2026-08-17** (wave 4e, two review rounds, CONFIRMED-CLOSED) |
-| Behavior options | **all greenlit 2026-08-17 (fabrico)**: `automatic-rename` (tabs track the running program, explicit names win), `remain-on-exit` shipping TOGETHER with `respawn-pane`/`respawn-window`, `aggressive-resize` (per-window multi-client sizing through the measurement write-back), and the mechanical trio `default-terminal`/`display-time`/`repeat-time`. `mouse` + `escape-time`: accepted and stored, semantics scoped to the TUI attach client (phase 8); the GUI ignores them | wave 4f |
-| Daemon boot parity | **decided 2026-08-17 (fabrico)**: lazy-create the auto-session — CLI-spawned daemons boot empty like tmux; session `0` materializes only when a GUI client attaches with no session. Un-shifts `$N`/`@N`/`%N` for scripts; revisit the harness prologue's `kill-session -t 0` and the layout-diff id-stripping after | with 4f |
+| Behavior options, semantics half | `mouse`, `escape-time`, `automatic-rename`, `automatic-rename-format`, `remain-on-exit`, `default-terminal`, `display-time`, and `repeat-time` typed storage/readback; active-pane tab-label gating and explicit-name pinning; retained dead facts plus stable-id `respawn-pane`/`respawn-window`; TERM, message/overlay timeout, and repeat-window consumers. `mouse` and `escape-time` stay storage-only for phase 8 | **shipped 2026-08-17** (wave 4f-1) |
+| Behavior options, sizing/boot half | `aggressive-resize` through the existing multi-client measurement write-back, plus lazy-create auto-session parity. The convergence guards are a fixed constraint, not a refactor target | wave 4f-2 |
+| Daemon boot parity | **decided 2026-08-17 (fabrico)**: lazy-create the auto-session — CLI-spawned daemons boot empty like tmux; session `0` materializes only when a GUI client attaches with no session. Un-shifts `$N`/`@N`/`%N` for scripts; revisit the harness prologue's `kill-session -t 0` and the layout-diff id-stripping after | with 4f-2 |
 | Styles (`#[…]`, `*-style`) | meaningful on the TUI surface; GUI maps to theme | later |
 | `source-file -F`/`-n`/`-v` | format-expanded paths, parse-only, verbose printing — deferred from phase 1 | later |
 
@@ -289,9 +290,9 @@ this list is the campaign-level index of it plus the items that never got a matr
 
 **Deferred mechanics (owner in parentheses):**
 
-- Behavior options wave: `automatic-rename`, `remain-on-exit` + `respawn-pane`/`-window`,
-  `aggressive-resize`, `default-terminal`/`display-time`/`repeat-time`, `mouse` +
-  `escape-time` stored TUI-scoped, lazy-create auto-session (4f — the last phase-4 wave).
+- `aggressive-resize` and lazy-create auto-session remain in 4f-2. The eight 4f-1 options,
+  retained exits/respawn, TERM export, display timeout, and repeat-window behavior are shipped;
+  `mouse` and `escape-time` input semantics remain phase-8 TUI work.
 - Array options as a category (`status-format[N]`, `command-alias`, `terminal-features`):
   indexed spellings parse and answer silently; storage/rendering unimplemented (styles
   wave / TUI phases).

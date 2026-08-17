@@ -2,6 +2,7 @@ use std::{
     collections::BTreeMap,
     fmt::{self, Write as _},
     ops::Deref,
+    time::{Duration, Instant},
 };
 
 use smallvec::SmallVec;
@@ -535,6 +536,7 @@ pub struct KeyEngine {
     table: Option<String>,
     pending: Option<Vec<CommandInvocation>>,
     repeat_count: Option<u16>,
+    repeat_deadline: Option<Instant>,
 }
 
 impl KeyEngine {
@@ -589,7 +591,21 @@ impl KeyEngine {
     }
 
     pub fn handle(&mut self, tables: &KeyTables, key: &str) -> KeyDecision {
+        self.handle_with_repeat_time(tables, key, Instant::now(), Duration::from_millis(500))
+    }
+
+    pub fn handle_with_repeat_time(
+        &mut self,
+        tables: &KeyTables,
+        key: &str,
+        now: Instant,
+        repeat_time: Duration,
+    ) -> KeyDecision {
         let key = canonical_key(key);
+        if self.repeat_deadline.is_some_and(|deadline| now >= deadline) {
+            self.table = None;
+            self.repeat_deadline = None;
+        }
         if let Some(decision) = self.take_pending_jump_target(&key) {
             return decision;
         }
@@ -613,14 +629,28 @@ impl KeyEngine {
         }
         if self.table.is_none() && key == tables.prefix {
             self.table = Some("prefix".to_owned());
+            self.repeat_deadline = None;
             return KeyDecision::Prefix;
         }
-        let table = self.table.as_deref().unwrap_or("root");
-        let binding = tables.get(table, &key).or_else(|| tables.get(table, "Any"));
+        let mut table = self.table.clone().unwrap_or_else(|| "root".to_owned());
+        let mut binding = tables
+            .get(&table, &key)
+            .or_else(|| tables.get(&table, "Any"));
+        if self.repeat_deadline.is_some() && binding.is_none_or(|binding| !binding.repeat) {
+            self.table = None;
+            self.repeat_deadline = None;
+            if key == tables.prefix {
+                self.table = Some("prefix".to_owned());
+                return KeyDecision::Prefix;
+            }
+            "root".clone_into(&mut table);
+            binding = tables
+                .get("root", &key)
+                .or_else(|| tables.get("root", "Any"));
+        }
         let Some(binding) = binding else {
             self.repeat_count = None;
             if table == "prefix" {
-                // tmux discards an unbound key after the prefix rather than typing it.
                 self.table = None;
                 return KeyDecision::Ignore;
             }
@@ -630,8 +660,12 @@ impl KeyEngine {
                 KeyDecision::Pass
             };
         };
-        if table == "prefix" && !binding.repeat {
+        if table == "prefix" && binding.repeat && !repeat_time.is_zero() {
+            self.table = Some(table.clone());
+            self.repeat_deadline = Some(now + repeat_time);
+        } else if table == "prefix" {
             self.table = None;
+            self.repeat_deadline = None;
         }
         let commands = binding.commands.clone();
         self.decide(commands)
@@ -641,6 +675,7 @@ impl KeyEngine {
         self.table = table;
         self.pending = None;
         self.repeat_count = None;
+        self.repeat_deadline = None;
     }
 }
 
@@ -1218,6 +1253,80 @@ mod tests {
     }
 
     #[test]
+    fn repeatable_bindings_refresh_expire_disable_and_retry_root() {
+        let mut tables = KeyTables::default();
+        tables.bind(
+            "root",
+            "c",
+            Binding {
+                commands: vec![CommandInvocation::new("display-message", ["root"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        let start = Instant::now();
+        let repeat_time = Duration::from_millis(100);
+        let mut engine = KeyEngine::default();
+
+        assert_eq!(
+            engine.handle_with_repeat_time(&tables, "C-b", start, repeat_time),
+            KeyDecision::Prefix
+        );
+        assert!(matches!(
+            engine.handle_with_repeat_time(&tables, "Left", start, repeat_time),
+            KeyDecision::Commands(_)
+        ));
+        assert!(matches!(
+            engine.handle_with_repeat_time(
+                &tables,
+                "Right",
+                start + Duration::from_millis(99),
+                repeat_time,
+            ),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(engine.active_table(), Some("prefix"));
+        assert_eq!(
+            engine.handle_with_repeat_time(
+                &tables,
+                "Right",
+                start + Duration::from_millis(200),
+                repeat_time,
+            ),
+            KeyDecision::Pass
+        );
+        assert_eq!(engine.active_table(), None);
+
+        assert_eq!(
+            engine.handle_with_repeat_time(&tables, "C-b", start, repeat_time),
+            KeyDecision::Prefix
+        );
+        assert!(matches!(
+            engine.handle_with_repeat_time(&tables, "Left", start, repeat_time),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(
+            engine.handle_with_repeat_time(&tables, "c", start, repeat_time),
+            KeyDecision::Commands(vec![CommandInvocation::new("display-message", ["root"])])
+        );
+        assert_eq!(engine.active_table(), None);
+
+        assert_eq!(
+            engine.handle_with_repeat_time(&tables, "C-b", start, Duration::ZERO),
+            KeyDecision::Prefix
+        );
+        assert!(matches!(
+            engine.handle_with_repeat_time(&tables, "Left", start, Duration::ZERO),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(engine.active_table(), None);
+        assert_eq!(
+            engine.handle_with_repeat_time(&tables, "Right", start, Duration::ZERO),
+            KeyDecision::Pass
+        );
+    }
+
+    #[test]
     fn root_and_custom_bindings_work() {
         let mut tables = KeyTables::default();
         tables.bind(
@@ -1382,6 +1491,7 @@ mod tests {
                 KeyDecision::Commands(vec![CommandInvocation::new("send-keys", ["-X", action]),])
             );
         }
+        assert_eq!(engine.active_table(), Some("copy-mode-vi"));
     }
 
     #[test]

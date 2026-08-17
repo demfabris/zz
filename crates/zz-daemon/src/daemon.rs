@@ -173,6 +173,15 @@ fn daemon_environment() -> Vec<(String, String)> {
     environment.into_iter().collect()
 }
 
+fn terminal_environment_for_session(
+    engine: &MuxEngine,
+    session: SessionId,
+) -> Result<Vec<(String, Option<String>)>, ServerError> {
+    let mut environment = engine.environment_for_session(session)?;
+    environment.retain(|(name, _)| name != "TERM");
+    Ok(environment)
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
     let process_id = terminal.foreground_process_id().filter(|pid| *pid != 0)?;
@@ -2503,7 +2512,8 @@ impl Shared {
                             .window_for_pane(*pane)
                             .map(|window| inner.engine.state.windows[&window].session)
                             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-                        let mut env = inner.engine.environment_for_session(pane_session)?;
+                        let mut env =
+                            terminal_environment_for_session(&inner.engine, pane_session)?;
                         env.extend([
                             ("ZZ_PANE".to_owned(), Some(pane.to_string())),
                             (
@@ -2512,14 +2522,19 @@ impl Shared {
                             ),
                             ("ZZ_SESSION".to_owned(), Some(pane_session.to_string())),
                         ]);
+                        let spawn = TerminalSpawn {
+                            working_directory: working_directory.clone(),
+                            command: command.clone(),
+                            terminal_type: inner
+                                .engine
+                                .default_terminal_for_spawn()
+                                .map(str::to_owned),
+                            env,
+                        };
                         let session = Arc::new(TerminalSession::spawn(
                             history_limit,
                             appearance,
-                            TerminalSpawn {
-                                working_directory: working_directory.clone(),
-                                command: command.clone(),
-                                env,
-                            },
+                            spawn.clone(),
                         ));
                         let current_path = terminal_working_directory(&session)
                             .map(|path| path.to_string_lossy().into_owned())
@@ -2531,6 +2546,7 @@ impl Shared {
                             },
                         );
                         inner.terminals.insert(*pane, Arc::clone(&session));
+                        inner.terminal_spawns.insert(*pane, spawn);
                         inner.engine.set_pane_runtime_facts(
                             *pane,
                             PaneRuntimeFacts {
@@ -2551,6 +2567,117 @@ impl Shared {
                             deferred_terminal_commands.push(DeferredTerminalCommand::AttachView {
                                 terminal: Arc::clone(&session),
                                 view: TerminalViewId(client.0),
+                            });
+                        }
+                        terminals_to_watch.push((*pane, session));
+                    }
+                    MuxEffect::PaneRespawned {
+                        pane,
+                        cwd,
+                        command,
+                        environment,
+                    } => {
+                        let previous = inner.terminal_spawns.get(pane).cloned().unwrap_or_default();
+                        let history_limit = inner.engine.history_limit_for_pane(*pane)?;
+                        let word_separators =
+                            WordSeparators::new(inner.engine.word_separators_for_pane(*pane)?);
+                        let working_directory = match cwd.as_deref().map(PathBuf::from) {
+                            Some(path) => {
+                                let path = if path.is_absolute() {
+                                    path
+                                } else if let Some(base) = &previous.working_directory {
+                                    base.join(&path)
+                                } else {
+                                    path
+                                };
+                                if path.is_dir() {
+                                    Some(path)
+                                } else {
+                                    std::env::var_os("HOME")
+                                        .map(PathBuf::from)
+                                        .filter(|path| path.is_dir())
+                                        .or_else(|| Some(PathBuf::from("/")))
+                                }
+                            }
+                            None => previous
+                                .working_directory
+                                .clone()
+                                .or_else(|| std::env::current_dir().ok()),
+                        };
+                        let start_path = working_directory
+                            .as_deref()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        let appearance = Arc::clone(&inner.appearance);
+                        let pane_session = inner
+                            .engine
+                            .state
+                            .window_for_pane(*pane)
+                            .map(|window| inner.engine.state.windows[&window].session)
+                            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+                        let mut env =
+                            terminal_environment_for_session(&inner.engine, pane_session)?;
+                        env.extend([
+                            ("ZZ_PANE".to_owned(), Some(pane.to_string())),
+                            (
+                                "ZZ_SOCKET".to_owned(),
+                                Some(self.socket_path.display().to_string()),
+                            ),
+                            ("ZZ_SESSION".to_owned(), Some(pane_session.to_string())),
+                        ]);
+                        env.extend(
+                            environment
+                                .iter()
+                                .map(|(name, value)| (name.clone(), Some(value.clone()))),
+                        );
+                        let spawn = TerminalSpawn {
+                            working_directory: working_directory.clone(),
+                            command: command.clone().or(previous.command),
+                            terminal_type: inner
+                                .engine
+                                .default_terminal_for_spawn()
+                                .map(str::to_owned),
+                            env,
+                        };
+                        let session = Arc::new(TerminalSession::spawn(
+                            history_limit,
+                            appearance,
+                            spawn.clone(),
+                        ));
+                        let current_path = terminal_working_directory(&session)
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        deferred_terminal_commands.push(
+                            DeferredTerminalCommand::SetWordSeparators {
+                                terminal: Arc::clone(&session),
+                                separators: word_separators,
+                            },
+                        );
+                        inner.terminals.insert(*pane, Arc::clone(&session));
+                        inner.terminal_spawns.insert(*pane, spawn);
+                        inner.engine.set_pane_runtime_facts(
+                            *pane,
+                            PaneRuntimeFacts {
+                                current_path,
+                                start_path,
+                                ..PaneRuntimeFacts::default()
+                            },
+                        );
+                        let attached_clients = inner
+                            .attached
+                            .get(&pane_session)
+                            .cloned()
+                            .unwrap_or_default();
+                        for client in attached_clients {
+                            deferred_terminal_commands.push(DeferredTerminalCommand::AttachView {
+                                terminal: Arc::clone(&session),
+                                view: TerminalViewId(client.0),
+                            });
+                        }
+                        if let Some((_, geometry)) = terminal_resize_for_pane(&inner, *pane) {
+                            deferred_terminal_commands.push(DeferredTerminalCommand::Resize {
+                                terminal: Arc::clone(&session),
+                                geometry,
                             });
                         }
                         terminals_to_watch.push((*pane, session));
@@ -2634,6 +2761,7 @@ impl Shared {
                         }
                         for pane in panes {
                             inner.terminals.remove(pane);
+                            inner.terminal_spawns.remove(pane);
                             inner.terminal_geometries.remove(pane);
                             inner.paste_uploads.retain(|_, upload| upload.pane != *pane);
                             removed_panes.push(*pane);
@@ -2924,12 +3052,17 @@ impl Shared {
                         }
                         direct_events.push(EventPayload::DisplayPanes { state: Some(state) });
                     }
-                    MuxEffect::DisplayMessage { pane, text } => {
+                    MuxEffect::DisplayMessage {
+                        pane,
+                        text,
+                        duration_ms,
+                    } => {
                         push_server_message(&mut inner, text.clone());
-                        direct_events.push(EventPayload::ClientMessage {
+                        direct_events.push(EventPayload::TimedClientMessage {
                             pane: *pane,
                             kind: ClientMessageKind::Info,
                             text: text.clone(),
+                            duration_ms: *duration_ms,
                         });
                     }
                     MuxEffect::BufferLimitChanged(limit) => {
@@ -4602,6 +4735,18 @@ impl Shared {
         if self.input_command_prompt_key(client, kind, context, &input, text_follows) {
             return Ok(());
         }
+        if input.action != zz_terminal::KeyAction::Release
+            && self.inner.lock().engine.dead_pane_dismisses_on_key(pane)
+        {
+            let target = pane.to_string();
+            self.execute(
+                client,
+                kind,
+                context,
+                &CommandInvocation::new("kill-pane", ["-t", target.as_str()]),
+            )?;
+            return Ok(());
+        }
         let key = input_key_name(&input);
         let decision = self.key_decision(
             client,
@@ -5759,7 +5904,14 @@ impl Shared {
         }
         let mut key_engine = inner.key_engines.remove(&client).unwrap_or_default();
         let table = key_engine.active_table().map(str::to_owned);
-        let decision = key_engine.handle(&inner.engine.keys, key);
+        let repeat_time_ms = client_attached_session(&inner, client)
+            .map_or(500, |session| inner.engine.repeat_time_for_session(session));
+        let decision = key_engine.handle_with_repeat_time(
+            &inner.engine.keys,
+            key,
+            Instant::now(),
+            Duration::from_millis(u64::from(repeat_time_ms)),
+        );
         inner.key_engines.insert(client, key_engine);
         if decision != KeyDecision::Pass {
             inner
@@ -5970,14 +6122,7 @@ impl Shared {
                 visible_terminal_panes(&inner, client, session)
                     .into_iter()
                     .filter_map(|pane| {
-                        inner
-                            .terminals
-                            .get(&pane)
-                            .and_then(|terminal| {
-                                terminal
-                                    .latest_viewport_for(view)
-                                    .map(|viewport| (Arc::clone(terminal), viewport))
-                            })
+                        terminal_viewport_for_pane(&inner, pane, view)
                             .map(|(terminal, viewport)| (pane, terminal, (*viewport).clone()))
                     })
                     .collect()
@@ -6051,11 +6196,7 @@ impl Shared {
                 return;
             }
             let view = TerminalViewId(client.0);
-            inner.terminals.get(&pane).and_then(|terminal| {
-                terminal
-                    .latest_viewport_for(view)
-                    .map(|viewport| (Arc::clone(terminal), viewport))
-            })
+            terminal_viewport_for_pane(&inner, pane, view)
         };
         if let Some((terminal, viewport)) = viewport {
             self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport);
@@ -6568,8 +6709,17 @@ impl Shared {
     }
 
     fn close_exited_terminal(self: &Arc<Self>, pane: PaneId, terminal: &Arc<TerminalSession>) {
-        let Some(mut context) = ({
-            let inner = self.inner.lock();
+        let status = terminal.latest_viewport().status.clone();
+        let (failed, dead_status) = match status {
+            zz_terminal::SessionStatus::Exited(status) => (
+                status.code != 0 || status.signal.is_some(),
+                status.signal.is_none().then_some(status.code),
+            ),
+            zz_terminal::SessionStatus::Failed(_) => (true, None),
+            zz_terminal::SessionStatus::Starting | zz_terminal::SessionStatus::Running => return,
+        };
+        let Some((mut context, retained, changed)) = ({
+            let mut inner = self.inner.lock();
             if !inner
                 .terminals
                 .get(&pane)
@@ -6577,10 +6727,37 @@ impl Shared {
             {
                 return;
             }
-            ExecutionContext::for_pane(&inner.engine.state, pane)
+            let Some(context) = ExecutionContext::for_pane(&inner.engine.state, pane) else {
+                return;
+            };
+            let retained = inner
+                .engine
+                .retain_exited_pane(pane, failed)
+                .unwrap_or(false);
+            let changed = if retained {
+                inner
+                    .engine
+                    .state
+                    .mark_pane_dead(pane, dead_status)
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            Some((context, retained, changed))
         }) else {
             return;
         };
+
+        if retained {
+            log::debug!(
+                target: "zz_daemon::diagnostics::terminal",
+                "terminal worker finished pane={pane}; retaining dead pane"
+            );
+            if changed {
+                self.publish_snapshot();
+            }
+            return;
+        }
 
         log::debug!(
             target: "zz_daemon::diagnostics::terminal",
@@ -6869,14 +7046,7 @@ impl Shared {
                 let newly_visible = next
                     .difference(&previous)
                     .filter_map(|pane| {
-                        inner
-                            .terminals
-                            .get(pane)
-                            .and_then(|terminal| {
-                                terminal
-                                    .latest_viewport_for(view)
-                                    .map(|viewport| (Arc::clone(terminal), viewport))
-                            })
+                        terminal_viewport_for_pane(&inner, *pane, view)
                             .map(|(terminal, viewport)| (*pane, terminal, (*viewport).clone()))
                     })
                     .collect::<Vec<_>>();
@@ -8449,6 +8619,7 @@ struct ServerState {
     client_names: BTreeMap<ClientId, String>,
     client_instances: BTreeMap<ClientId, ClientInstanceId>,
     terminals: BTreeMap<PaneId, Arc<TerminalSession>>,
+    terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,
     command_outputs: BTreeMap<ClientId, CommandOutputSession>,
     subscribers: BTreeMap<ClientId, Arc<OutboundMailbox>>,
     attached: BTreeMap<SessionId, BTreeSet<ClientId>>,
@@ -10251,6 +10422,10 @@ enum DeferredTerminalCommand {
         terminal: Arc<TerminalSession>,
         view: TerminalViewId,
     },
+    Resize {
+        terminal: Arc<TerminalSession>,
+        geometry: TerminalGeometry,
+    },
     ViewAction {
         terminal: Arc<TerminalSession>,
         view: TerminalViewId,
@@ -10270,6 +10445,12 @@ impl DeferredTerminalCommand {
                 separators,
             } => terminal.set_word_separators(separators),
             Self::AttachView { terminal, view } => terminal.attach_view(view),
+            Self::Resize { terminal, geometry } => terminal.resize(
+                geometry.columns,
+                geometry.rows,
+                geometry.cell_width_px,
+                geometry.cell_height_px,
+            ),
             Self::ViewAction {
                 terminal,
                 view,
@@ -10319,6 +10500,23 @@ fn session_terminals(inner: &ServerState, session: SessionId) -> Vec<Arc<Termina
         .flat_map(|window| window.panes.keys())
         .filter_map(|pane| inner.terminals.get(pane).cloned())
         .collect()
+}
+
+fn terminal_viewport_for_pane(
+    inner: &ServerState,
+    pane: PaneId,
+    view: TerminalViewId,
+) -> Option<(Arc<TerminalSession>, Arc<TerminalViewport>)> {
+    let terminal = inner.terminals.get(&pane)?;
+    let viewport = terminal.latest_viewport_for(view).or_else(|| {
+        inner
+            .engine
+            .state
+            .pane(pane)
+            .is_some_and(|pane| pane.dead)
+            .then(|| terminal.latest_viewport())
+    })?;
+    Some((Arc::clone(terminal), viewport))
 }
 
 fn visible_terminal_panes(
@@ -12075,6 +12273,132 @@ mod tests {
     }
 
     #[test]
+    fn remain_on_exit_retains_and_respawns_the_same_terminal_pane() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["-g", "remain-on-exit", "on"]),
+            )
+            .expect("enable retained exits");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-s", "dead-fixture", "printf 'ZZ_DEAD_FRAME\\n'; exit 7"],
+                ),
+            )
+            .expect("create exiting terminal pane");
+        let session = context.session.expect("terminal session");
+        let pane = context.pane.expect("terminal pane");
+        let window = context.window.expect("terminal window");
+        let layout = shared.inner.lock().engine.state.windows[&window]
+            .layout
+            .project();
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let inner = shared.inner.lock();
+            if inner
+                .engine
+                .state
+                .pane(pane)
+                .is_some_and(|pane| pane.dead && pane.dead_status == Some(7))
+            {
+                assert!(inner.terminals.contains_key(&pane));
+                break;
+            }
+            drop(inner);
+            assert!(
+                Instant::now() < deadline,
+                "exited terminal did not become retained-dead"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let output = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-p",
+                        "-t",
+                        &pane.to_string(),
+                        "#{pane_id}:#{pane_dead}:#{pane_dead_status}",
+                    ],
+                ),
+            )
+            .expect("read dead facts")
+            .output;
+        assert_eq!(output, format!("{pane}:1:7"));
+
+        let mailbox = OutboundMailbox::new();
+        let (late_client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(late_client, session)
+            .expect("attach after terminal exit");
+        shared.send_resync(late_client, &mailbox);
+        let frozen = {
+            let state = mailbox.state.lock();
+            state
+                .terminals
+                .get(&pane)
+                .map(|pending| pending.encoded.clone())
+                .expect("retained frame queued for late client")
+        };
+        let ProtocolMessage::Event(Event {
+            payload:
+                EventPayload::TerminalViewport {
+                    pane: delivered,
+                    viewport,
+                },
+            ..
+        }) = decode_protocol_frame(&frozen).expect("decode retained frame")
+        else {
+            panic!("late client did not receive a full terminal viewport");
+        };
+        assert_eq!(delivered, pane);
+        assert_eq!(viewport.status, SessionStatus::exited(7, None));
+        assert!(viewport_text(&viewport).contains("ZZ_DEAD_FRAME"));
+
+        let previous = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("respawn-pane", ["-t", &pane.to_string(), "sleep 30"]),
+            )
+            .expect("respawn dead pane");
+        {
+            let inner = shared.inner.lock();
+            let replacement = &inner.terminals[&pane];
+            assert!(!Arc::ptr_eq(&previous, replacement));
+            assert!(!inner.engine.state.pane(pane).unwrap().dead);
+            assert_eq!(inner.engine.state.windows[&window].layout.project(), layout);
+        }
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-pane", ["-t", &pane.to_string()]),
+            )
+            .expect("clean up respawned pane");
+    }
+
+    #[test]
     fn custom_appearance_reaches_hello_and_both_terminal_actor_kinds() {
         let appearance = TerminalAppearance {
             font_families: vec!["Review Fixture Mono".to_owned()],
@@ -12974,10 +13298,11 @@ mod tests {
                 .any(|message| matches!(
                     message,
                     ProtocolMessage::Event(Event {
-                        payload: EventPayload::ClientMessage {
+                        payload: EventPayload::TimedClientMessage {
                             pane: None,
                             kind: ClientMessageKind::Info,
                             text,
+                            duration_ms: 750,
                         },
                         ..
                     }) if text == "hello client"
@@ -12989,7 +13314,7 @@ mod tests {
                 .all(|message| !matches!(
                     message,
                     ProtocolMessage::Event(Event {
-                        payload: EventPayload::ClientMessage { .. },
+                        payload: EventPayload::TimedClientMessage { .. },
                         ..
                     })
                 ))
@@ -13785,12 +14110,20 @@ mod tests {
     #[test]
     fn seeded_global_environment_and_session_markers_reach_terminal_spawn() {
         let shared = Arc::new(Shared::new(1));
-        shared
-            .inner
-            .lock()
-            .engine
-            .seed_global_environment([("PHASE4D_SEEDED", "daemon"), ("HIDDENPROBE", "daemonval")]);
+        shared.inner.lock().engine.seed_global_environment([
+            ("PHASE4D_SEEDED", "daemon"),
+            ("HIDDENPROBE", "daemonval"),
+            ("TERM", "inherited-term"),
+        ]);
         let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-s", "default-terminal", "zz-term"]),
+            )
+            .expect("default terminal");
         shared
             .execute(
                 ClientId(7),
@@ -13819,7 +14152,7 @@ mod tests {
                 &CommandInvocation::new(
                     "set-buffer",
                     [
-                        "printf 'PHASE4D_SEEDED=[%s] DISPLAY=[%s] HP=[%s]\\n' \"$PHASE4D_SEEDED\" \"${DISPLAY-unset}\" \"${HIDDENPROBE-}\"\n",
+                        "printf 'PHASE4D_SEEDED=[%s] DISPLAY=[%s] HP=[%s] TERM=[%s]\\n' \"$PHASE4D_SEEDED\" \"${DISPLAY-unset}\" \"${HIDDENPROBE-}\" \"$TERM\"\n",
                     ],
                 ),
             )
@@ -13844,7 +14177,7 @@ mod tests {
                 )
                 .expect("capture terminal")
                 .output;
-            if captured.contains("PHASE4D_SEEDED=[daemon] DISPLAY=[unset] HP=[]") {
+            if captured.contains("PHASE4D_SEEDED=[daemon] DISPLAY=[unset] HP=[] TERM=[zz-term]") {
                 break;
             }
             assert!(
@@ -21118,9 +21451,9 @@ bind - split-window -v -c "#{pane_current_path}"
                     text_follows: false,
                 },
             )
-            .expect("unbound key after the prefix is discarded");
+            .expect("unbound key after the repeat window retries root");
         let messages = take_reliable_messages(&mailbox);
-        assert!(!messages.iter().any(browser_key));
+        assert!(messages.iter().any(browser_key));
         assert!(messages.iter().any(|message| prefix_armed(message, false)));
 
         shared

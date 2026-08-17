@@ -1,7 +1,7 @@
 ---
 type: Protocol
 title: Mux snapshots (snapshot.rs)
-description: The MuxSnapshot state tree (sessions, windows, recursive split layouts, pane descriptors, per-client focus, and viewer presence) that clients reconcile on attach and after a resync.
+description: The MuxSnapshot state tree (sessions, windows, recursive split layouts, pane descriptors, behavior flags, per-client focus, and viewer presence) that clients reconcile on attach and after a resync.
 resource: crates/zz-protocol/src/snapshot.rs
 tags: [protocol, snapshot, layout, state, presence]
 timestamp: 2026-08-13T00:00:00Z
@@ -42,16 +42,19 @@ deserializer so hostile nesting is rejected before it can exhaust the receiving 
 | `MuxSnapshot` | `generation: u64`, `sessions: Vec<SessionSnapshot>`, `focused_window: Option<WindowId>` |
 | `SessionSnapshot` | `id: SessionId`, `name: String`, `active_window: WindowId`, `windows: Vec<WindowSnapshot>`, `viewers: Vec<SessionViewer>` |
 | `SessionViewer` | `name: String`, `window: WindowId`, `is_self: bool` |
-| `WindowSnapshot` | `id: WindowId`, `index: u32`, `name: String`, `active_pane: PaneId`, `zoomed_pane: Option<PaneId>`, `layout: LayoutNode`, `panes: BTreeMap<PaneId, PaneSnapshot>` |
-| `PaneSnapshot` | `id: PaneId`, `title: String`, `kind: PaneKindSnapshot`, `synchronized_input: bool`, `bell: bool` |
+| `WindowSnapshot` | `id: WindowId`, `index: u32`, `name: String`, `automatic_rename: bool`, `active_pane: PaneId`, `zoomed_pane: Option<PaneId>`, `layout: LayoutNode`, `panes: BTreeMap<PaneId, PaneSnapshot>` |
+| `PaneSnapshot` | `id: PaneId`, `title: String`, `kind: PaneKindSnapshot`, `synchronized_input: bool`, `bell: bool`, `dead: bool`, `dead_status: Option<u32>` |
 | `PaneKindSnapshot` | `Picker` \| `Terminal` \| `Browser(BrowserDescriptor)` \| `Agent(AgentDescriptor)` \| `Editor(EditorDescriptor)` |
 | `BrowserDescriptor` | `tabs: Vec<String>`, `active_tab: usize`, `profile: String` |
 | `AgentDescriptor` | `provider: AgentProvider`, `cwd: Option<PathBuf>`, `session_id: Option<String>` |
 | `EditorDescriptor` | `path: Option<String>`, `cwd: String` |
 
 `generation` is the version stamp for the whole tree; `WindowSnapshot.index` is the tmux-style window
-number; `zoomed_pane` records a temporarily maximized pane; `synchronized_input` marks panes receiving
-mirrored keystrokes; `bell` is latched until the pane is read after a BEL. `BrowserDescriptor.tabs`
+number; `automatic_rename` tells presentation surfaces whether the active pane may supply the tab
+label; `zoomed_pane` records a temporarily maximized pane; `synchronized_input` marks panes receiving
+mirrored keystrokes; `bell` is latched until the pane is read after a BEL. A retained terminal exit
+sets `dead`; `dead_status` contains only a normal exit code and is empty for signals and worker
+failures. Respawn clears both without changing the pane id or layout leaf. `BrowserDescriptor.tabs`
 is the strip in order (never empty in the type's contract; `url()` returns the active tab or
 `about:blank`). `WindowSnapshot.name` is the user's stable, explicit window name;
 `PaneSnapshot.title` is live presentation metadata. Terminal OSC title changes are synchronized by
@@ -142,6 +145,7 @@ let snapshot = MuxSnapshot {
         active_window: WindowId(7),
         windows: vec![WindowSnapshot {
             id: WindowId(7), index: 0, name: "edit".into(),
+            automatic_rename: false,
             active_pane: PaneId(3), zoomed_pane: None,
             layout,
             panes: /* BTreeMap<PaneId, PaneSnapshot> */ Default::default(),

@@ -1167,10 +1167,14 @@ impl EventEmitter<SidebarModeChanged> for WorkspaceSidebar {}
 impl EventEmitter<SidebarRouteChanged> for WorkspaceSidebar {}
 
 fn strip_window_label(window: &WindowSnapshot) -> String {
-    let name = window
-        .panes
-        .get(&window.active_pane)
-        .map_or_else(|| window.name.clone(), pane_label);
+    let name = if window.automatic_rename {
+        window
+            .panes
+            .get(&window.active_pane)
+            .map_or_else(|| window.name.clone(), pane_label)
+    } else {
+        window.name.clone()
+    };
     format!("{}:{name}", window.index)
 }
 
@@ -2222,6 +2226,8 @@ mod tests {
             kind: PaneKindSnapshot::Terminal,
             synchronized_input: false,
             bell: false,
+            dead: false,
+            dead_status: None,
         }
     }
 
@@ -2235,6 +2241,8 @@ mod tests {
             )),
             synchronized_input: false,
             bell: false,
+            dead: false,
+            dead_status: None,
         }
     }
 
@@ -2244,6 +2252,7 @@ mod tests {
             id: WindowId(id),
             index,
             name: name.to_owned(),
+            automatic_rename: true,
             active_pane: pane.id,
             zoomed_pane: None,
             layout: LayoutNode::Pane(pane.id),
@@ -2258,6 +2267,7 @@ mod tests {
             id: WindowId(11),
             index: 2,
             name: "work".to_owned(),
+            automatic_rename: true,
             active_pane: browser.id,
             zoomed_pane: None,
             layout: LayoutNode::Split {
@@ -2414,6 +2424,9 @@ mod tests {
         let snapshot = snapshot_with_two_panes();
         let window = &snapshot.sessions[0].windows[0];
         assert_eq!(strip_window_label(window), "2:https://zed.dev");
+        let mut pinned = window.clone();
+        pinned.automatic_rename = false;
+        assert_eq!(strip_window_label(&pinned), "2:work");
         assert_eq!(
             strip_window_label(&mux_window(4, 1, "agents", 9)),
             "1:agents"
@@ -3266,6 +3279,8 @@ mod tests {
             kind: PaneKindSnapshot::Picker,
             synchronized_input: false,
             bell: false,
+            dead: false,
+            dead_status: None,
         };
 
         let projected = MuxTreePane::from_snapshot(&pane);
@@ -3281,6 +3296,8 @@ mod tests {
             kind: PaneKindSnapshot::Agent(zz_protocol::AgentDescriptor::default()),
             synchronized_input: false,
             bell: false,
+            dead: false,
+            dead_status: None,
         };
 
         let projected = MuxTreePane::from_snapshot(&pane);

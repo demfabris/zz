@@ -650,6 +650,7 @@ pub(crate) struct CommandOutputModel {
 pub(crate) struct ClientNotification {
     pub(crate) kind: ClientMessageKind,
     pub(crate) text: String,
+    pub(crate) duration_ms: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2252,6 +2253,7 @@ impl MuxClient {
         cx.emit(ClientNotification {
             kind,
             text: text.into(),
+            duration_ms: None,
         });
     }
 
@@ -3419,7 +3421,16 @@ impl MuxClient {
             CoreEvent::CommandResponse(response) => {
                 self.handle_command_response(host, response, cx);
             }
-            CoreEvent::ClientMessage { kind, text, .. } => Self::emit_notification(kind, text, cx),
+            CoreEvent::ClientMessage {
+                kind,
+                text,
+                duration_ms,
+                ..
+            } => cx.emit(ClientNotification {
+                kind,
+                text,
+                duration_ms,
+            }),
             CoreEvent::Clipboard { target, text, .. } => {
                 if !text.is_empty() {
                     let item = ClipboardItem::new_string(text);
@@ -7411,6 +7422,8 @@ mod tests {
             },
             synchronized_input: false,
             bell: false,
+            dead: false,
+            dead_status: None,
         }
     }
 
@@ -7424,6 +7437,7 @@ mod tests {
             id: WindowId(id),
             index: u32::try_from(id).expect("small fixture window id"),
             name: format!("window-{id}"),
+            automatic_rename: true,
             active_pane: panes.keys().next().copied().expect("fixture pane"),
             zoomed_pane: None,
             layout,

@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 58;
+pub const PROTOCOL_VERSION: u16 = 59;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
@@ -1553,6 +1553,12 @@ pub enum EventPayload {
         #[serde(deserialize_with = "deserialize_agent_result")]
         result: String,
     },
+    TimedClientMessage {
+        pane: Option<PaneId>,
+        kind: ClientMessageKind,
+        text: String,
+        duration_ms: u32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1856,6 +1862,15 @@ mod tests {
         {
             assert_eq!(u8::try_from(30 + index).expect("tag"), payload_tag(payload));
         }
+        assert_eq!(
+            payload_tag(super::EventPayload::TimedClientMessage {
+                pane: None,
+                kind: super::ClientMessageKind::Info,
+                text: String::new(),
+                duration_ms: 0,
+            }),
+            34
+        );
     }
 
     #[test]

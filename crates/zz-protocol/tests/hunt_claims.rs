@@ -10,8 +10,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_fifty_eight() {
-    assert_eq!(PROTOCOL_VERSION, 58);
+fn protocol_version_on_this_commit_is_fifty_nine() {
+    assert_eq!(PROTOCOL_VERSION, 59);
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3a, 0x00, 0x00, 0x3a, 0x00, 0x00, 0x00, 0x00,
+            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3b, 0x00, 0x00, 0x3b, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00,
         ]
     );
@@ -116,6 +116,8 @@ fn pane_snapshot_carries_bell() {
         kind: PaneKindSnapshot::Terminal,
         synchronized_input: false,
         bell: true,
+        dead: false,
+        dead_status: None,
     };
     assert!(snapshot.bell);
 }

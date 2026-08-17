@@ -38,7 +38,6 @@ use crate::{
 const MAX_COPY_COMMAND_BYTES: usize = 8 * 1024;
 const MAX_COMMAND_PROMPT_LABEL_BYTES: usize = 1024;
 const MAX_COMMAND_PROMPT_TEMPLATE_BYTES: usize = 8 * 1024;
-const DEFAULT_DISPLAY_PANES_DURATION_MS: u32 = 1_000;
 const DEFAULT_DISPLAY_MESSAGE: &str =
     "[#{session_name}] #{window_index}:#{window_name}, current pane #{pane_index}";
 const DEFAULT_LIST_COMMANDS_FORMAT: &str =
@@ -55,6 +54,14 @@ const DEFAULT_PANE_BASE_INDEX: u32 = 0;
 const MAX_PANE_BASE_INDEX: u32 = u16::MAX as u32;
 const DEFAULT_RENUMBER_WINDOWS: bool = false;
 const DEFAULT_PREFIX: &str = "C-b";
+const DEFAULT_MOUSE: bool = true;
+const DEFAULT_ESCAPE_TIME_MS: u32 = 10;
+const DEFAULT_AUTOMATIC_RENAME_FORMAT: &str =
+    "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}";
+const DEFAULT_TERMINAL: &str = "tmux-256color";
+const DEFAULT_DISPLAY_TIME_MS: u32 = 750;
+const DEFAULT_REPEAT_TIME_MS: u32 = 500;
+const MAX_REPEAT_TIME_MS: u32 = 2_000_000;
 pub const MAX_WORD_SEPARATORS_BYTES: usize = 8 * 1024;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -94,6 +101,12 @@ pub enum MuxEffect {
         inherit_cwd_from: Option<PaneId>,
         cwd: Option<String>,
         command: Option<String>,
+    },
+    PaneRespawned {
+        pane: PaneId,
+        cwd: Option<String>,
+        command: Option<String>,
+        environment: Vec<(String, String)>,
     },
     PanesRemoved(Vec<PaneId>),
     PaneRelocated {
@@ -139,6 +152,7 @@ pub enum MuxEffect {
     DisplayMessage {
         pane: Option<PaneId>,
         text: String,
+        duration_ms: u32,
     },
     BufferLimitChanged(usize),
     /// `None` updates every session that inherits the global value.
@@ -313,6 +327,26 @@ struct EnvironmentEntry {
 
 type Environment = BTreeMap<String, EnvironmentEntry>;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum RemainOnExit {
+    #[default]
+    Off,
+    On,
+    Failed,
+    Key,
+}
+
+impl RemainOnExit {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::On => "on",
+            Self::Failed => "failed",
+            Self::Key => "key",
+        }
+    }
+}
+
 static EMPTY_ENVIRONMENT: Environment = Environment::new();
 
 const NATIVE_OPTIONS: &[&str] = &[
@@ -345,6 +379,19 @@ pub struct MuxEngine {
     window_pane_base_indices: BTreeMap<WindowId, u32>,
     global_word_separators: String,
     session_word_separators: BTreeMap<SessionId, String>,
+    global_mouse: bool,
+    session_mouse: BTreeMap<SessionId, bool>,
+    escape_time_ms: u32,
+    global_automatic_rename_format: String,
+    window_automatic_rename_formats: BTreeMap<WindowId, String>,
+    global_remain_on_exit: RemainOnExit,
+    window_remain_on_exit: BTreeMap<WindowId, RemainOnExit>,
+    pane_remain_on_exit: BTreeMap<PaneId, RemainOnExit>,
+    default_terminal: Option<String>,
+    global_display_time_ms: u32,
+    session_display_time_ms: BTreeMap<SessionId, u32>,
+    global_repeat_time_ms: u32,
+    session_repeat_time_ms: BTreeMap<SessionId, u32>,
     server_user_options: UserOptions,
     global_session_user_options: UserOptions,
     session_user_options: BTreeMap<SessionId, UserOptions>,
@@ -418,6 +465,19 @@ impl Default for MuxEngine {
             window_pane_base_indices: BTreeMap::new(),
             global_word_separators: DEFAULT_WORD_SEPARATORS.to_owned(),
             session_word_separators: BTreeMap::new(),
+            global_mouse: DEFAULT_MOUSE,
+            session_mouse: BTreeMap::new(),
+            escape_time_ms: DEFAULT_ESCAPE_TIME_MS,
+            global_automatic_rename_format: DEFAULT_AUTOMATIC_RENAME_FORMAT.to_owned(),
+            window_automatic_rename_formats: BTreeMap::new(),
+            global_remain_on_exit: RemainOnExit::default(),
+            window_remain_on_exit: BTreeMap::new(),
+            pane_remain_on_exit: BTreeMap::new(),
+            default_terminal: None,
+            global_display_time_ms: DEFAULT_DISPLAY_TIME_MS,
+            session_display_time_ms: BTreeMap::new(),
+            global_repeat_time_ms: DEFAULT_REPEAT_TIME_MS,
+            session_repeat_time_ms: BTreeMap::new(),
             server_user_options: UserOptions::new(),
             global_session_user_options: UserOptions::new(),
             session_user_options: BTreeMap::new(),
@@ -731,6 +791,83 @@ impl MuxEngine {
             .map_or(self.global_word_separators.as_str(), String::as_str)
     }
 
+    #[must_use]
+    pub fn default_terminal_for_spawn(&self) -> Option<&str> {
+        self.default_terminal.as_deref()
+    }
+
+    #[must_use]
+    pub fn repeat_time_for_session(&self, session: SessionId) -> u32 {
+        self.session_repeat_time_ms
+            .get(&session)
+            .copied()
+            .unwrap_or(self.global_repeat_time_ms)
+    }
+
+    pub fn display_time_for_pane(&self, pane: PaneId) -> Result<u32, ServerError> {
+        let window = self
+            .state
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let session = self.state.windows[&window].session;
+        Ok(self.display_time_for_session(session))
+    }
+
+    pub fn retain_exited_pane(&self, pane: PaneId, failed: bool) -> Result<bool, ServerError> {
+        Ok(match self.remain_on_exit_for_pane(pane)? {
+            RemainOnExit::Off => false,
+            RemainOnExit::On | RemainOnExit::Key => true,
+            RemainOnExit::Failed => failed,
+        })
+    }
+
+    #[must_use]
+    pub fn dead_pane_dismisses_on_key(&self, pane: PaneId) -> bool {
+        self.state.pane(pane).is_some_and(|pane| pane.dead)
+            && self
+                .remain_on_exit_for_pane(pane)
+                .is_ok_and(|value| value == RemainOnExit::Key)
+    }
+
+    fn display_time_for_session(&self, session: SessionId) -> u32 {
+        self.session_display_time_ms
+            .get(&session)
+            .copied()
+            .unwrap_or(self.global_display_time_ms)
+    }
+
+    fn mouse_for_session(&self, session: SessionId) -> bool {
+        self.session_mouse
+            .get(&session)
+            .copied()
+            .unwrap_or(self.global_mouse)
+    }
+
+    fn automatic_rename_format_for_window(&self, window: WindowId) -> &str {
+        self.window_automatic_rename_formats
+            .get(&window)
+            .map_or(self.global_automatic_rename_format.as_str(), String::as_str)
+    }
+
+    fn remain_on_exit_for_window(&self, window: WindowId) -> RemainOnExit {
+        self.window_remain_on_exit
+            .get(&window)
+            .copied()
+            .unwrap_or(self.global_remain_on_exit)
+    }
+
+    fn remain_on_exit_for_pane(&self, pane: PaneId) -> Result<RemainOnExit, ServerError> {
+        let window = self
+            .state
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        Ok(self
+            .pane_remain_on_exit
+            .get(&pane)
+            .copied()
+            .unwrap_or_else(|| self.remain_on_exit_for_window(window)))
+    }
+
     pub fn environment_for_session(
         &self,
         session: SessionId,
@@ -856,6 +993,8 @@ impl MuxEngine {
             }
             "rotate-window" => self.rotate_window(context, &command.args)?,
             "kill-pane" => self.kill_pane(context, &command.args)?,
+            "respawn-pane" => self.respawn_pane(context, &command.args, hooks)?,
+            "respawn-window" => self.respawn_window(context, &command.args, hooks)?,
             "send-keys" => self.send_keys(context, &command.args)?,
             "send-prefix" => self.send_prefix(context, &command.args)?,
             "copy-mode" => self.copy_mode(context, &command.args)?,
@@ -911,6 +1050,12 @@ impl MuxEngine {
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_word_separators
             .retain(|session, _| self.state.sessions.contains_key(session));
+        self.session_mouse
+            .retain(|session, _| self.state.sessions.contains_key(session));
+        self.session_display_time_ms
+            .retain(|session, _| self.state.sessions.contains_key(session));
+        self.session_repeat_time_ms
+            .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_user_options
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.window_user_options
@@ -921,9 +1066,15 @@ impl MuxEngine {
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.window_mode_keys
             .retain(|window, _| self.state.windows.contains_key(window));
+        self.window_automatic_rename_formats
+            .retain(|window, _| self.state.windows.contains_key(window));
+        self.window_remain_on_exit
+            .retain(|window, _| self.state.windows.contains_key(window));
         self.window_pane_base_indices
             .retain(|window, _| self.state.windows.contains_key(window));
         self.pane_runtime_facts
+            .retain(|pane, _| self.state.pane(*pane).is_some());
+        self.pane_remain_on_exit
             .retain(|pane, _| self.state.pane(*pane).is_some());
         self.repair_context(context);
         Ok(execution)
@@ -984,6 +1135,8 @@ impl MuxEngine {
                     .expect("new window exists")
                     .name,
             );
+            self.state
+                .set_window_automatic_rename(window, Some(false))?;
         }
         *context = ExecutionContext {
             session: Some(session),
@@ -1261,6 +1414,10 @@ impl MuxEngine {
             selects,
             base_index,
         )?;
+        if name.is_some() {
+            self.state
+                .set_window_automatic_rename(window, Some(false))?;
+        }
         if let Some(replaced) = replaced {
             effects.push(MuxEffect::PanesRemoved(self.state.kill_window(replaced)?));
             self.state
@@ -1365,6 +1522,8 @@ impl MuxEngine {
         let name = exactly_one_argument("rename-window", &positional)?;
         let window = self.resolve_window(options.value("-t"), context.session, context.window)?;
         self.state.rename_window(window, name)?;
+        self.state
+            .set_window_automatic_rename(window, Some(false))?;
         Ok(Execution::default())
     }
 
@@ -2769,6 +2928,125 @@ impl MuxEngine {
         Ok(Execution::effect(MuxEffect::PanesRemoved(panes)))
     }
 
+    fn respawn_pane(
+        &mut self,
+        context: &ExecutionContext,
+        args: &[String],
+        hooks: &mut impl StatusHooks,
+    ) -> Result<Execution, ServerError> {
+        let (options, positional) = parse_command_options("respawn-pane", args)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane_state = self
+            .state
+            .pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        if !matches!(&pane_state.kind, PaneKind::Terminal) {
+            return Err(ServerError::InvalidCommand(format!(
+                "respawn pane failed: pane {pane} is not a terminal"
+            )));
+        }
+        if !pane_state.dead && !options.has("-k") {
+            return Err(ServerError::InvalidCommand(format!(
+                "respawn pane failed: pane {} still active",
+                self.pane_target_description(pane)?
+            )));
+        }
+        let (_, cwd) = spawn_cwd_source(self, &options, Some(pane), &PaneKind::Terminal, hooks);
+        let environment = respawn_environment(&options);
+        let command = shell_command_positional(&positional);
+        self.state.revive_pane(pane)?;
+        Ok(Execution::effect(MuxEffect::PaneRespawned {
+            pane,
+            cwd,
+            command,
+            environment,
+        }))
+    }
+
+    fn respawn_window(
+        &mut self,
+        context: &ExecutionContext,
+        args: &[String],
+        hooks: &mut impl StatusHooks,
+    ) -> Result<Execution, ServerError> {
+        let (options, positional) = parse_command_options("respawn-window", args)?;
+        let window = self.resolve_window(options.value("-t"), context.session, context.window)?;
+        let window_state = self
+            .state
+            .windows
+            .get(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+        if !options.has("-k") && window_state.panes.values().any(|pane| !pane.dead) {
+            return Err(ServerError::InvalidCommand(format!(
+                "respawn window failed: window {} still active",
+                self.window_target_description(window)?
+            )));
+        }
+        let pane = *window_state
+            .pane_order()
+            .first()
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+        if !matches!(&window_state.panes[&pane].kind, PaneKind::Terminal) {
+            return Err(ServerError::InvalidCommand(format!(
+                "respawn window failed: pane {pane} is not a terminal"
+            )));
+        }
+        let other_panes = window_state
+            .pane_order()
+            .iter()
+            .copied()
+            .filter(|candidate| *candidate != pane)
+            .collect::<Vec<_>>();
+        let (_, cwd) = spawn_cwd_source(self, &options, Some(pane), &PaneKind::Terminal, hooks);
+        let environment = respawn_environment(&options);
+        let command = shell_command_positional(&positional);
+        let mut removed = Vec::new();
+        for other in other_panes {
+            removed.extend(self.state.kill_pane(other)?);
+        }
+        self.state.revive_pane(pane)?;
+        let mut effects = Vec::with_capacity(2);
+        if !removed.is_empty() {
+            effects.push(MuxEffect::PanesRemoved(removed));
+        }
+        effects.push(MuxEffect::PaneRespawned {
+            pane,
+            cwd,
+            command,
+            environment,
+        });
+        Ok(Execution {
+            output: String::new(),
+            effects,
+        })
+    }
+
+    fn pane_target_description(&self, pane: PaneId) -> Result<String, ServerError> {
+        let window = self
+            .state
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let window_state = &self.state.windows[&window];
+        let session = &self.state.sessions[&window_state.session];
+        let pane_index = self
+            .pane_index(window, pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        Ok(format!(
+            "{}:{}.{}",
+            session.name, window_state.index, pane_index
+        ))
+    }
+
+    fn window_target_description(&self, window: WindowId) -> Result<String, ServerError> {
+        let window_state = self
+            .state
+            .windows
+            .get(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+        let session = &self.state.sessions[&window_state.session];
+        Ok(format!("{}:{}", session.name, window_state.index))
+    }
+
     fn send_keys(
         &self,
         context: &ExecutionContext,
@@ -3078,7 +3356,15 @@ impl MuxEngine {
         if options.has("-p") {
             Ok(Execution::output(text))
         } else {
-            Ok(Execution::effect(MuxEffect::DisplayMessage { pane, text }))
+            let duration_ms = pane.map_or(self.global_display_time_ms, |pane| {
+                self.display_time_for_pane(pane)
+                    .expect("display-message pane was resolved")
+            });
+            Ok(Execution::effect(MuxEffect::DisplayMessage {
+                pane,
+                text,
+                duration_ms,
+            }))
         }
     }
 
@@ -3093,17 +3379,17 @@ impl MuxEngine {
                 "display-panes command templates are not supported yet".to_owned(),
             ));
         }
-        let duration_ms =
-            options
-                .value("-d")
-                .map_or(Ok(DEFAULT_DISPLAY_PANES_DURATION_MS), |value| {
-                    value.parse::<u32>().map_err(|_| {
-                        ServerError::InvalidCommand(format!(
-                            "display-panes duration must be an unsigned millisecond value: {value}"
-                        ))
-                    })
-                })?;
         let pane = self.resolve_pane(None, context.window, context.pane)?;
+        let duration_ms = options.value("-d").map_or_else(
+            || self.display_time_for_pane(pane),
+            |value| {
+                value.parse::<u32>().map_err(|_| {
+                    ServerError::InvalidCommand(format!(
+                        "display-panes duration must be an unsigned millisecond value: {value}"
+                    ))
+                })
+            },
+        )?;
         Ok(Execution::effect(MuxEffect::DisplayPanes {
             pane,
             duration_ms,
@@ -3308,6 +3594,15 @@ impl MuxEngine {
         }
         match table_option.name {
             "synchronize-panes" => self.set_synchronize_panes(value, &options, target),
+            "mouse" => self.set_mouse(value, &options, target),
+            "escape-time" => self.set_escape_time(value, &options),
+            "automatic-rename" => self.set_automatic_rename(value, &options, target),
+            "automatic-rename-format" => self.set_automatic_rename_format(value, &options, target),
+            "remain-on-exit" => self.set_remain_on_exit(value, &options, target),
+            "default-terminal" => self.set_default_terminal(value, &options),
+            "display-time" | "repeat-time" => {
+                self.set_behavior_time(table_option.name, value, &options, target)
+            }
             "buffer-limit" => self.set_buffer_limit(value, &options),
             "message-limit" => self.set_message_limit(value, &options),
             "history-limit" => self.set_history_limit(value, &options, target),
@@ -3736,6 +4031,21 @@ impl MuxEngine {
                 .or_else(|| option.default.map(|default| default.value().to_owned()))
                 .map(|value| (value, false)),
             TmuxOptionTarget::Session(session) => match option.name {
+                "mouse" => self
+                    .session_mouse
+                    .get(&session)
+                    .map(|value| (tmux_flag(*value).to_owned(), false))
+                    .or_else(inherited),
+                "display-time" => self
+                    .session_display_time_ms
+                    .get(&session)
+                    .map(|value| (value.to_string(), false))
+                    .or_else(inherited),
+                "repeat-time" => self
+                    .session_repeat_time_ms
+                    .get(&session)
+                    .map(|value| (value.to_string(), false))
+                    .or_else(inherited),
                 "history-limit" => self
                     .session_history_limits
                     .get(&session)
@@ -3759,6 +4069,21 @@ impl MuxEngine {
                 _ => inherited(),
             },
             TmuxOptionTarget::Window(window) => match option.name {
+                "automatic-rename" => self
+                    .state
+                    .window_automatic_rename_override(window)?
+                    .map(|value| (tmux_flag(value).to_owned(), false))
+                    .or_else(inherited),
+                "automatic-rename-format" => self
+                    .window_automatic_rename_formats
+                    .get(&window)
+                    .map(|value| (value.clone(), false))
+                    .or_else(inherited),
+                "remain-on-exit" => self
+                    .window_remain_on_exit
+                    .get(&window)
+                    .map(|value| (value.as_str().to_owned(), false))
+                    .or_else(inherited),
                 "mode-keys" => self
                     .window_mode_keys
                     .get(&window)
@@ -3777,6 +4102,22 @@ impl MuxEngine {
                 _ => inherited(),
             },
             TmuxOptionTarget::Pane(pane) => match option.name {
+                "remain-on-exit" => self
+                    .pane_remain_on_exit
+                    .get(&pane)
+                    .map(|value| (value.as_str().to_owned(), false))
+                    .or_else(|| {
+                        include_inherited.then(|| {
+                            let window = self
+                                .state
+                                .window_for_pane(pane)
+                                .expect("pane target was resolved");
+                            (
+                                self.remain_on_exit_for_window(window).as_str().to_owned(),
+                                true,
+                            )
+                        })
+                    }),
                 "synchronize-panes" => self
                     .state
                     .pane_synchronize_override(pane)?
@@ -3802,15 +4143,23 @@ impl MuxEngine {
 
     fn global_tmux_option_value(&self, name: &str) -> Option<String> {
         Some(match name {
+            "default-terminal" => self
+                .default_terminal
+                .clone()
+                .unwrap_or_else(|| DEFAULT_TERMINAL.to_owned()),
+            "escape-time" => self.escape_time_ms.to_string(),
             "base-index" => self.global_base_index.to_string(),
             "buffer-limit" => self.buffer_limit.to_string(),
             "copy-command" => self.copy_command.clone(),
             "history-limit" => self.global_history_limit.to_string(),
+            "display-time" => self.global_display_time_ms.to_string(),
             "message-limit" => self.message_limit.to_string(),
             "mode-keys" => self.global_mode_keys.as_str().to_owned(),
+            "mouse" => tmux_flag(self.global_mouse).to_owned(),
             "pane-base-index" => self.global_pane_base_index.to_string(),
             "prefix" => self.mux_option_value(MuxOptionKey::Prefix),
             "renumber-windows" => tmux_flag(self.global_renumber_windows).to_owned(),
+            "repeat-time" => self.global_repeat_time_ms.to_string(),
             "set-clipboard" => self.set_clipboard.as_str().to_owned(),
             "status" => tmux_flag(self.status.enabled).to_owned(),
             "status-interval" => self.status.interval.as_secs().to_string(),
@@ -3819,6 +4168,9 @@ impl MuxEngine {
             "synchronize-panes" => tmux_flag(self.state.global_synchronize_panes()).to_owned(),
             "update-environment" => UPDATE_ENVIRONMENT_DEFAULT.to_owned(),
             "word-separators" => self.global_word_separators.clone(),
+            "automatic-rename" => tmux_flag(self.state.global_automatic_rename()).to_owned(),
+            "automatic-rename-format" => self.global_automatic_rename_format.clone(),
+            "remain-on-exit" => self.global_remain_on_exit.as_str().to_owned(),
             _ => return None,
         })
     }
@@ -4611,6 +4963,340 @@ impl MuxEngine {
         }
     }
 
+    fn set_mouse(
+        &mut self,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            let already = match target {
+                TmuxOptionTarget::GlobalSession => true,
+                TmuxOptionTarget::Session(session) => self.session_mouse.contains_key(&session),
+                _ => unreachable!("mouse has session scope"),
+            };
+            if already {
+                return already_set_or_quiet(options, "mouse");
+            }
+        }
+        match target {
+            TmuxOptionTarget::GlobalSession => {
+                self.global_mouse = if unset {
+                    DEFAULT_MOUSE
+                } else {
+                    parse_tmux_flag_value(value, self.global_mouse)?
+                };
+            }
+            TmuxOptionTarget::Session(session) => {
+                if unset {
+                    self.session_mouse.remove(&session);
+                } else {
+                    let next = parse_tmux_flag_value(value, self.mouse_for_session(session))?;
+                    self.session_mouse.insert(session, next);
+                }
+            }
+            _ => unreachable!("mouse has session scope"),
+        }
+        Ok(Execution::default())
+    }
+
+    fn set_escape_time(
+        &mut self,
+        value: Option<&str>,
+        options: &Options,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            return already_set_or_quiet(options, "escape-time");
+        }
+        self.escape_time_ms = if unset {
+            DEFAULT_ESCAPE_TIME_MS
+        } else {
+            parse_index_option(
+                value.ok_or_else(|| {
+                    ServerError::InvalidCommand("set-option escape-time needs a value".to_owned())
+                })?,
+                i32::MAX.cast_unsigned(),
+            )?
+        };
+        Ok(Execution::default())
+    }
+
+    fn set_automatic_rename(
+        &mut self,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            let already = match target {
+                TmuxOptionTarget::GlobalWindow => true,
+                TmuxOptionTarget::Window(window) => self
+                    .state
+                    .window_automatic_rename_override(window)?
+                    .is_some(),
+                _ => unreachable!("automatic-rename has window scope"),
+            };
+            if already {
+                return already_set_or_quiet(options, "automatic-rename");
+            }
+        }
+        match target {
+            TmuxOptionTarget::GlobalWindow => {
+                let next = if unset {
+                    None
+                } else {
+                    Some(parse_tmux_flag_value(
+                        value,
+                        self.state.global_automatic_rename(),
+                    )?)
+                };
+                self.state.set_global_automatic_rename(next);
+            }
+            TmuxOptionTarget::Window(window) => {
+                let next = if unset {
+                    None
+                } else {
+                    Some(parse_tmux_flag_value(
+                        value,
+                        self.state.window_automatic_rename(window)?,
+                    )?)
+                };
+                self.state.set_window_automatic_rename(window, next)?;
+            }
+            _ => unreachable!("automatic-rename has window scope"),
+        }
+        Ok(Execution::default())
+    }
+
+    fn set_automatic_rename_format(
+        &mut self,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            let already = match target {
+                TmuxOptionTarget::GlobalWindow => true,
+                TmuxOptionTarget::Window(window) => {
+                    self.window_automatic_rename_formats.contains_key(&window)
+                }
+                _ => unreachable!("automatic-rename-format has window scope"),
+            };
+            if already {
+                return already_set_or_quiet(options, "automatic-rename-format");
+            }
+        }
+        match target {
+            TmuxOptionTarget::GlobalWindow => {
+                self.global_automatic_rename_format = if unset {
+                    DEFAULT_AUTOMATIC_RENAME_FORMAT.to_owned()
+                } else {
+                    let value = value.ok_or_else(|| {
+                        ServerError::InvalidCommand(
+                            "set-option automatic-rename-format needs a value".to_owned(),
+                        )
+                    })?;
+                    if options.has("-a") {
+                        format!("{}{value}", self.global_automatic_rename_format)
+                    } else {
+                        value.to_owned()
+                    }
+                };
+            }
+            TmuxOptionTarget::Window(window) => {
+                if unset {
+                    self.window_automatic_rename_formats.remove(&window);
+                } else {
+                    let value = value.ok_or_else(|| {
+                        ServerError::InvalidCommand(
+                            "set-option automatic-rename-format needs a value".to_owned(),
+                        )
+                    })?;
+                    let next = if options.has("-a") {
+                        format!("{}{value}", self.automatic_rename_format_for_window(window))
+                    } else {
+                        value.to_owned()
+                    };
+                    self.window_automatic_rename_formats.insert(window, next);
+                }
+            }
+            _ => unreachable!("automatic-rename-format has window scope"),
+        }
+        Ok(Execution::default())
+    }
+
+    fn set_remain_on_exit(
+        &mut self,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            let already = match target {
+                TmuxOptionTarget::GlobalWindow => true,
+                TmuxOptionTarget::Window(window) => {
+                    self.window_remain_on_exit.contains_key(&window)
+                }
+                TmuxOptionTarget::Pane(pane) => self.pane_remain_on_exit.contains_key(&pane),
+                _ => unreachable!("remain-on-exit has window or pane scope"),
+            };
+            if already {
+                return already_set_or_quiet(options, "remain-on-exit");
+            }
+        }
+        match target {
+            TmuxOptionTarget::GlobalWindow => {
+                self.global_remain_on_exit = if unset {
+                    RemainOnExit::Off
+                } else {
+                    parse_remain_on_exit(value.ok_or_else(|| {
+                        ServerError::InvalidCommand(
+                            "set-option remain-on-exit needs a value".to_owned(),
+                        )
+                    })?)?
+                };
+            }
+            TmuxOptionTarget::Window(window) => {
+                if options.has("-U") {
+                    let panes = self
+                        .state
+                        .windows
+                        .get(&window)
+                        .map(|window| window.pane_order().to_vec())
+                        .unwrap_or_default();
+                    for pane in panes {
+                        self.pane_remain_on_exit.remove(&pane);
+                    }
+                    self.window_remain_on_exit.remove(&window);
+                } else if unset {
+                    self.window_remain_on_exit.remove(&window);
+                } else {
+                    let next = parse_remain_on_exit(value.ok_or_else(|| {
+                        ServerError::InvalidCommand(
+                            "set-option remain-on-exit needs a value".to_owned(),
+                        )
+                    })?)?;
+                    self.window_remain_on_exit.insert(window, next);
+                }
+            }
+            TmuxOptionTarget::Pane(pane) => {
+                if unset {
+                    self.pane_remain_on_exit.remove(&pane);
+                } else {
+                    let next = parse_remain_on_exit(value.ok_or_else(|| {
+                        ServerError::InvalidCommand(
+                            "set-option remain-on-exit needs a value".to_owned(),
+                        )
+                    })?)?;
+                    self.pane_remain_on_exit.insert(pane, next);
+                }
+            }
+            _ => unreachable!("remain-on-exit has window or pane scope"),
+        }
+        Ok(Execution::default())
+    }
+
+    fn set_default_terminal(
+        &mut self,
+        value: Option<&str>,
+        options: &Options,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            return already_set_or_quiet(options, "default-terminal");
+        }
+        self.default_terminal = if unset {
+            None
+        } else {
+            let value = value.ok_or_else(|| {
+                ServerError::InvalidCommand("set-option default-terminal needs a value".to_owned())
+            })?;
+            Some(if options.has("-a") {
+                format!(
+                    "{}{value}",
+                    self.default_terminal.as_deref().unwrap_or(DEFAULT_TERMINAL)
+                )
+            } else {
+                value.to_owned()
+            })
+        };
+        Ok(Execution::default())
+    }
+
+    fn set_behavior_time(
+        &mut self,
+        option: &str,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            let already = match (option, target) {
+                ("display-time" | "repeat-time", TmuxOptionTarget::GlobalSession) => true,
+                ("display-time", TmuxOptionTarget::Session(session)) => {
+                    self.session_display_time_ms.contains_key(&session)
+                }
+                ("repeat-time", TmuxOptionTarget::Session(session)) => {
+                    self.session_repeat_time_ms.contains_key(&session)
+                }
+                _ => unreachable!("behavior time has session scope"),
+            };
+            if already {
+                return already_set_or_quiet(options, option);
+            }
+        }
+        let maximum = if option == "repeat-time" {
+            MAX_REPEAT_TIME_MS
+        } else {
+            i32::MAX.cast_unsigned()
+        };
+        let default = if option == "repeat-time" {
+            DEFAULT_REPEAT_TIME_MS
+        } else {
+            DEFAULT_DISPLAY_TIME_MS
+        };
+        let parsed = if unset {
+            default
+        } else {
+            parse_index_option(
+                value.ok_or_else(|| {
+                    ServerError::InvalidCommand(format!("set-option {option} needs a value"))
+                })?,
+                maximum,
+            )?
+        };
+        match (option, target) {
+            ("display-time", TmuxOptionTarget::GlobalSession) => {
+                self.global_display_time_ms = parsed;
+            }
+            ("display-time", TmuxOptionTarget::Session(session)) => {
+                if unset {
+                    self.session_display_time_ms.remove(&session);
+                } else {
+                    self.session_display_time_ms.insert(session, parsed);
+                }
+            }
+            ("repeat-time", TmuxOptionTarget::GlobalSession) => {
+                self.global_repeat_time_ms = parsed;
+            }
+            ("repeat-time", TmuxOptionTarget::Session(session)) => {
+                if unset {
+                    self.session_repeat_time_ms.remove(&session);
+                } else {
+                    self.session_repeat_time_ms.insert(session, parsed);
+                }
+            }
+            _ => unreachable!("behavior time has session scope"),
+        }
+        Ok(Execution::default())
+    }
+
     fn source_file(args: &[String]) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("source-file", args)?;
         if positional.is_empty() {
@@ -4857,6 +5543,18 @@ fn parse_tmux_flag_value(value: Option<&str>, current: bool) -> Result<bool, Ser
     Err(ServerError::InvalidCommand(format!("bad value: {value}")))
 }
 
+fn parse_remain_on_exit(value: &str) -> Result<RemainOnExit, ServerError> {
+    match value {
+        "off" => Ok(RemainOnExit::Off),
+        "on" => Ok(RemainOnExit::On),
+        "failed" => Ok(RemainOnExit::Failed),
+        "key" => Ok(RemainOnExit::Key),
+        _ => Err(ServerError::InvalidCommand(format!(
+            "unknown value: {value}"
+        ))),
+    }
+}
+
 fn parse_flag_value(value: Option<&str>, current: bool) -> Result<bool, ServerError> {
     let Some(value) = value else {
         return Ok(!current);
@@ -5045,6 +5743,21 @@ impl Options {
             .rev()
             .find_map(|(name, value)| (name == option).then_some(value.as_str()))
     }
+
+    fn values<'a>(&'a self, option: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+        self.values
+            .iter()
+            .filter_map(move |(name, value)| (name == option).then_some(value.as_str()))
+    }
+}
+
+fn respawn_environment(options: &Options) -> Vec<(String, String)> {
+    options
+        .values("-e")
+        .filter_map(|value| value.split_once('='))
+        .filter(|(name, _)| !name.is_empty())
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .collect()
 }
 
 fn key_table(options: &Options) -> &str {
@@ -7331,6 +8044,7 @@ mod tests {
             [MuxEffect::DisplayMessage {
                 pane: Some(first),
                 text: format!("hello {first} 0"),
+                duration_ms: 750,
             }]
         );
 
@@ -7346,6 +8060,7 @@ mod tests {
             [MuxEffect::DisplayMessage {
                 pane: None,
                 text: "[] :, current pane ".to_owned(),
+                duration_ms: 750,
             }]
         );
     }
@@ -9198,8 +9913,432 @@ mod tests {
                 )
                 .unwrap()
                 .output,
-            ""
+            "escape-time 10"
         );
+    }
+
+    #[test]
+    fn behavior_option_defaults_match_pin_readback() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+
+        for (command_name, args, expected) in [
+            ("show-options", vec!["-gv", "mouse"], "on"),
+            ("show-options", vec!["-sv", "escape-time"], "10"),
+            ("show-window-options", vec!["-gv", "automatic-rename"], "on"),
+            (
+                "show-window-options",
+                vec!["-gv", "automatic-rename-format"],
+                DEFAULT_AUTOMATIC_RENAME_FORMAT,
+            ),
+            ("show-window-options", vec!["-gv", "remain-on-exit"], "off"),
+            (
+                "show-options",
+                vec!["-sv", "default-terminal"],
+                "tmux-256color",
+            ),
+            ("show-options", vec!["-gv", "display-time"], "750"),
+            ("show-options", vec!["-gv", "repeat-time"], "500"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command(command_name, &args))
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-window-options", &["-g", "automatic-rename-format"],),
+                )
+                .unwrap()
+                .output,
+            format!("automatic-rename-format \"{DEFAULT_AUTOMATIC_RENAME_FORMAT}\"")
+        );
+        assert_eq!(engine.default_terminal_for_spawn(), None);
+    }
+
+    #[test]
+    fn behavior_options_store_inherit_unset_and_validate_typed_values() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+
+        for args in [
+            &["mouse", "on"] as &[&str],
+            &["display-time", "1200"],
+            &["repeat-time", "650"],
+        ] {
+            engine
+                .execute(&mut context, &command("set-option", args))
+                .unwrap();
+        }
+        for (name, expected) in [
+            ("mouse", "on"),
+            ("display-time", "1200"),
+            ("repeat-time", "650"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", &["-v", name]),)
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
+        assert_eq!(engine.repeat_time_for_session(session), 650);
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["automatic-rename", "off"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-window-option",
+                    &["automatic-rename-format", "#{pane_title}"],
+                ),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["remain-on-exit", "on"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-p", "remain-on-exit", "failed"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-pv", "remain-on-exit"]),
+                )
+                .unwrap()
+                .output,
+            "failed"
+        );
+        let pane = context.pane.unwrap();
+        assert!(!engine.retain_exited_pane(pane, false).unwrap());
+        assert!(engine.retain_exited_pane(pane, true).unwrap());
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-pu", "remain-on-exit"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-pA", "remain-on-exit"]),
+                )
+                .unwrap()
+                .output,
+            "remain-on-exit* on"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-p", "remain-on-exit", "key"]),
+            )
+            .unwrap();
+        engine.state.mark_pane_dead(pane, Some(0)).unwrap();
+        assert!(engine.dead_pane_dismisses_on_key(pane));
+        engine.state.revive_pane(pane).unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-pu", "remain-on-exit"]),
+            )
+            .unwrap();
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "default-terminal", "zz-term"]),
+            )
+            .unwrap();
+        assert_eq!(engine.default_terminal_for_spawn(), Some("zz-term"));
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-su", "default-terminal"]),
+            )
+            .unwrap();
+        assert_eq!(engine.default_terminal_for_spawn(), None);
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "default-terminal"]),
+                )
+                .unwrap()
+                .output,
+            "tmux-256color"
+        );
+
+        for (args, expected) in [
+            (vec!["-g", "mouse", "maybe"], "bad value: maybe"),
+            (
+                vec!["-gw", "remain-on-exit", "maybe"],
+                "unknown value: maybe",
+            ),
+            (vec!["-s", "escape-time", "-1"], "value is too small: -1"),
+            (
+                vec!["-g", "repeat-time", "2000001"],
+                "value is too large: 2000001",
+            ),
+        ] {
+            assert!(matches!(
+                engine.execute(&mut context, &command("set-option", &args)),
+                Err(ServerError::InvalidCommand(message)) if message == expected
+            ));
+        }
+
+        for name in ["mouse", "display-time", "repeat-time"] {
+            engine
+                .execute(&mut context, &command("set-option", &["-u", name]))
+                .unwrap();
+        }
+        assert!(engine.mouse_for_session(session));
+        assert_eq!(engine.display_time_for_session(session), 750);
+        assert_eq!(engine.repeat_time_for_session(session), 500);
+    }
+
+    #[test]
+    fn explicit_window_names_pin_automatic_rename_off() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let first = context.window.unwrap();
+        assert!(engine.state.window_automatic_rename(first).unwrap());
+
+        engine
+            .execute(&mut context, &command("rename-window", &["manual"]))
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "show-options",
+                        &["-wv", "-t", &first.to_string(), "automatic-rename"],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "off"
+        );
+        assert!(!engine.state.snapshot().sessions[0].windows[0].automatic_rename);
+
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "explicit"]))
+            .unwrap();
+        let named = context.window.unwrap();
+        assert!(!engine.state.window_automatic_rename(named).unwrap());
+
+        engine
+            .execute(&mut context, &command("new-window", &[]))
+            .unwrap();
+        let automatic = context.window.unwrap();
+        assert!(engine.state.window_automatic_rename(automatic).unwrap());
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "named", "-n", "first-window"]),
+            )
+            .unwrap();
+        let first_named = context.window.unwrap();
+        assert!(!engine.state.window_automatic_rename(first_named).unwrap());
+    }
+
+    #[test]
+    fn retained_dead_facts_and_respawn_keep_pane_identity_and_layout() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let pane = context.pane.unwrap();
+        let window = context.window.unwrap();
+        let layout = engine.state.windows[&window].layout.project();
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-g", "remain-on-exit", "on"]),
+            )
+            .unwrap();
+        engine.state.mark_pane_dead(pane, Some(7)).unwrap();
+        assert!(engine.retain_exited_pane(pane, false).unwrap());
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &[
+                            "-p",
+                            "-t",
+                            &pane.to_string(),
+                            "#{pane_id}:#{pane_dead}:#{pane_dead_status}"
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            format!("{pane}:1:7")
+        );
+        assert!(matches!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("send-keys", &["-t", &pane.to_string(), "x"]),
+                )
+                .unwrap()
+                .effects
+                .as_slice(),
+            [MuxEffect::SendKeys { pane: target, .. }] if *target == pane
+        ));
+
+        let respawn = engine
+            .execute(
+                &mut context,
+                &command(
+                    "respawn-pane",
+                    &[
+                        "-t",
+                        &pane.to_string(),
+                        "-c",
+                        "/tmp",
+                        "-e",
+                        "ONE=1",
+                        "-e",
+                        "TWO=2",
+                        "printf ready",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert!(matches!(
+            respawn.effects.as_slice(),
+            [
+                MuxEffect::PaneRespawned {
+                    pane: actual,
+                    cwd: Some(cwd),
+                    command: Some(command),
+                    environment,
+                },
+                MuxEffect::SnapshotChanged,
+            ] if *actual == pane
+                && cwd == "/tmp"
+                && command == "printf ready"
+                && environment == &vec![("ONE".to_owned(), "1".to_owned()), ("TWO".to_owned(), "2".to_owned())]
+        ));
+        assert_eq!(engine.state.windows[&window].layout.project(), layout);
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &[
+                            "-p",
+                            "-t",
+                            &pane.to_string(),
+                            "#{pane_id}:#{pane_dead}:#{pane_dead_status}"
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            format!("{pane}:0:")
+        );
+
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("respawn-pane", &["-t", &pane.to_string()]),
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "respawn pane failed: pane work:0.1 still active"
+        ));
+        assert!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("respawn-pane", &["-k", "-t", &pane.to_string()]),
+                )
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn respawn_window_keeps_the_first_pane_and_collapses_the_layout() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-v"]))
+            .unwrap();
+        let window = context.window.unwrap();
+        let panes = engine.state.windows[&window].pane_order().to_vec();
+        let retained = panes[0];
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("respawn-window", &["-t", &window.to_string()]),
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "respawn window failed: window work:0 still active"
+        ));
+        for pane in &panes {
+            engine.state.mark_pane_dead(*pane, Some(0)).unwrap();
+        }
+
+        let execution = engine
+            .execute(
+                &mut context,
+                &command("respawn-window", &["-t", &window.to_string()]),
+            )
+            .unwrap();
+        assert!(matches!(
+            execution.effects.as_slice(),
+            [MuxEffect::PanesRemoved(removed), MuxEffect::PaneRespawned { pane, .. }, MuxEffect::SnapshotChanged]
+                if removed == &panes[1..] && *pane == retained
+        ));
+        let window_state = &engine.state.windows[&window];
+        assert_eq!(window_state.pane_order(), &[retained]);
+        assert_eq!(
+            window_state.layout.project(),
+            zz_protocol::LayoutNode::Pane(retained)
+        );
+        assert!(!window_state.panes[&retained].dead);
     }
 
     #[test]
@@ -9367,7 +10506,7 @@ mod tests {
                 )
                 .unwrap()
                 .output,
-            ""
+            "escape-time[0] 10"
         );
         assert!(matches!(
             engine.execute(
@@ -9930,13 +11069,19 @@ mod tests {
             error,
             ServerError::InvalidCommand(message) if message == "ambiguous option: status-l"
         ));
-        let error = engine
-            .execute(&mut context, &command("set", &["-g", "escape-t", "10"]))
-            .unwrap_err();
-        assert!(matches!(
-            error,
-            ServerError::UnsupportedCommand(message) if message == "set-option escape-time"
-        ));
+        engine
+            .execute(&mut context, &command("set", &["-g", "escape-t", "17"]))
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "escape-time"])
+                )
+                .unwrap()
+                .output,
+            "17"
+        );
         let error = engine
             .execute(&mut context, &command("set", &["-g", "not-an-option", "1"]))
             .unwrap_err();
@@ -10552,7 +11697,7 @@ mod tests {
         let pane = context.pane.unwrap();
 
         for (name, args, duration_ms) in [
-            ("display-panes", Vec::new(), 1_000),
+            ("display-panes", Vec::new(), 750),
             ("displayp", vec!["-b", "-d2500"], 2_500),
             ("display-panes", vec!["-d", "0"], 0),
         ] {
@@ -10562,6 +11707,30 @@ mod tests {
                 vec![MuxEffect::DisplayPanes { pane, duration_ms }]
             );
         }
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["display-time", "1200"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("display-panes", &[]))
+                .unwrap()
+                .effects,
+            vec![MuxEffect::DisplayPanes {
+                pane,
+                duration_ms: 1200,
+            }]
+        );
+        assert!(matches!(
+            engine
+                .execute(&mut context, &command("display-message", &["hello"]))
+                .unwrap()
+                .effects
+                .as_slice(),
+            [MuxEffect::DisplayMessage { text, duration_ms: 1200, .. }] if text == "hello"
+        ));
 
         assert!(matches!(
             engine.execute(&mut context, &command("display-panes", &["-N"])),

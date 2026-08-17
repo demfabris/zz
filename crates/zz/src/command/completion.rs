@@ -425,13 +425,7 @@ fn values_for_kind(
             .collect(),
         CommandValueKind::SetOption => SET_OPTIONS
             .iter()
-            .filter(|option| {
-                spec.name != "set-window-option"
-                    || matches!(
-                        **option,
-                        "mode-keys" | "pane-base-index" | "synchronize-panes"
-                    )
-            })
+            .filter(|option| spec.name != "set-window-option" || **option != "history-trickle")
             .map(|option| {
                 (
                     (*option).to_owned(),
@@ -807,7 +801,7 @@ mod tests {
     }
 
     #[test]
-    fn index_option_completions_follow_session_and_window_scope() {
+    fn index_option_completions_follow_table_declared_scope() {
         let set = complete_command(
             "set-option ",
             "set-option ".len(),
@@ -826,9 +820,10 @@ mod tests {
             &snapshot(),
             PaneKindAvailability::default(),
         );
-        assert!(setw.iter().any(|item| item.label == "pane-base-index"));
-        assert!(!setw.iter().any(|item| item.label == "base-index"));
-        assert!(!setw.iter().any(|item| item.label == "renumber-windows"));
+        for option in ["base-index", "pane-base-index", "renumber-windows"] {
+            assert!(setw.iter().any(|item| item.label == option));
+        }
+        assert!(!setw.iter().any(|item| item.label == "history-trickle"));
 
         let values = complete_command(
             "set-option -g renumber-windows ",

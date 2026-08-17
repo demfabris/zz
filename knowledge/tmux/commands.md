@@ -103,11 +103,18 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 Options handled by `set-option`/`set-window-option`: `synchronize-panes` (global→window→pane scope,
 `-g/-w/-p/-u/-U/-o`), `buffer-limit` (global, default 50), `history-limit` (session, default 10000,
 0–1,000,000), `word-separators` (session, `-a` append), `mode-keys` (`vi`→`copy-mode-vi`,
-`emacs`→`copy-mode`), `prefix`, `set-clipboard` (`on`/`external`/`off`), and `copy-command`.
-`-o` (set only if unset) holds everywhere: a global option always counts as set, so `set -o` on one
-errors with `option is already set: NAME` unless `-q` silences it; per-window/per-pane scopes check
-their override slot. Each option validates the flags it accepts and rejects the rest, so a flag that
-does not apply to that option is never quietly dropped.
+`emacs`→`copy-mode`), `prefix`, `set-clipboard` (`on`/`external`/`off`), `copy-command`, `status`,
+`status-interval`, `status-left`, `status-right`, `base-index`, `pane-base-index`, and
+`renumber-windows`. The matcher checks exact names and unique prefixes against all 180 tmux option names plus
+68 hook entries. The matched table entry chooses server, session, window, or pane scope. `set` versus
+`setw` and the `-s`/`-w`/`-p` spelling cannot change that declared scope. A table entry declared as
+both window and pane lets `-p` select pane scope. `-q` silences unknown or ambiguous names; config
+import reports a known unimplemented name as a skip.
+
+For the index trio, `-u` and `-U` restore inheritance and ignore a trailing value, `-o` checks the
+target override slot and yields to either unset flag, and the handler accepts `-a`. tmux flag values accept
+`on`/`off`, `yes`/`no`, and `1`/`0`; `true` and `false` remain valid for zz-native boolean settings.
+The six zz-native agent, editor, and history-trickle options keep their command and flag checks.
 Buffer commands (`capture-pane`, `*-buffer`, `paste-buffer`) are handled by
 [the server](/crates/zz-daemon.md), **not** here.
 

@@ -22,6 +22,7 @@ use crate::{
     SplitSize as LayoutSplitSize, StatusFormats, StatusOption, canonical_command, command_spec,
     model::DEFAULT_WINDOW_EXTENT,
     status::{FormatContext, expand_format},
+    tmux_options::{TmuxOptionScope, match_tmux_option},
 };
 
 const MAX_COPY_COMMAND_BYTES: usize = 8 * 1024;
@@ -39,6 +40,7 @@ const MAX_BASE_INDEX: u32 = i32::MAX.cast_unsigned();
 const DEFAULT_PANE_BASE_INDEX: u32 = 0;
 const MAX_PANE_BASE_INDEX: u32 = u16::MAX as u32;
 const DEFAULT_RENUMBER_WINDOWS: bool = false;
+const DEFAULT_PREFIX: &str = "C-b";
 pub const MAX_WORD_SEPARATORS_BYTES: usize = 8 * 1024;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -232,6 +234,16 @@ impl SetClipboard {
             Self::Off => "off",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TmuxOptionTarget {
+    Server,
+    GlobalSession,
+    Session(SessionId),
+    GlobalWindow,
+    Window(WindowId),
+    Pane(PaneId),
 }
 
 #[derive(Debug)]
@@ -2568,71 +2580,69 @@ impl MuxEngine {
                 "set-option accepts at most one value".to_owned(),
             ));
         }
-        if option == "synchronize-panes" {
-            return self.set_synchronize_panes(
-                context,
-                positional.get(1).map(String::as_str),
-                &options,
-            );
+        let value = positional.get(1).map(String::as_str);
+        if is_native_option(option) {
+            return self.set_native_option(option, value, &options, force_window);
         }
-        if option == "buffer-limit" {
-            return self.set_buffer_limit(
-                positional.get(1).map(String::as_str),
-                &options,
-                force_window,
-            );
+        let table_option = match match_tmux_option(option) {
+            Ok(Some(option)) => option,
+            Ok(None) | Err(()) if options.has("-q") => return Ok(Execution::default()),
+            Ok(None) => {
+                return Err(ServerError::InvalidCommand(format!(
+                    "invalid option: {option}"
+                )));
+            }
+            Err(()) => {
+                return Err(ServerError::InvalidCommand(format!(
+                    "ambiguous option: {option}"
+                )));
+            }
+        };
+        if !is_implemented_tmux_option(table_option.name) {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "set-option {}",
+                table_option.name
+            )));
         }
+        let target = match self.resolve_tmux_option_target(
+            context,
+            &options,
+            force_window,
+            table_option.scope,
+        ) {
+            Ok(target) => target,
+            Err(_) if options.has("-q") => return Ok(Execution::default()),
+            Err(error) => return Err(error),
+        };
+        match table_option.name {
+            "synchronize-panes" => self.set_synchronize_panes(value, &options, target),
+            "buffer-limit" => self.set_buffer_limit(value, &options),
+            "history-limit" => self.set_history_limit(value, &options, target),
+            "base-index" => self.set_base_index(value, &options, target),
+            "renumber-windows" => self.set_renumber_windows(value, &options, target),
+            "pane-base-index" => self.set_pane_base_index(value, &options, target),
+            "word-separators" => self.set_word_separators(value, &options, target),
+            "mode-keys" => self.set_mode_keys(value, &options, target),
+            "prefix" | "set-clipboard" | "copy-command" => {
+                self.set_scalar_tmux_option(table_option.name, value, &options)
+            }
+            option => self.set_status_option(
+                StatusOption::from_name(option).expect("implemented status option"),
+                value,
+                &options,
+            ),
+        }
+    }
+
+    fn set_native_option(
+        &mut self,
+        option: &str,
+        value: Option<&str>,
+        options: &Options,
+        force_window: bool,
+    ) -> Result<Execution, ServerError> {
         if option == "history-trickle" {
-            return self.set_history_trickle(
-                positional.get(1).map(String::as_str),
-                &options,
-                force_window,
-            );
-        }
-        if option == "history-limit" {
-            return self.set_history_limit(
-                context,
-                positional.get(1).map(String::as_str),
-                &options,
-                force_window,
-            );
-        }
-        if option == "base-index" {
-            return self.set_base_index(
-                context,
-                positional.get(1).map(String::as_str),
-                &options,
-                force_window,
-            );
-        }
-        if option == "renumber-windows" {
-            return self.set_renumber_windows(
-                context,
-                positional.get(1).map(String::as_str),
-                &options,
-                force_window,
-            );
-        }
-        if option == "pane-base-index" {
-            return self.set_pane_base_index(
-                context,
-                positional.get(1).map(String::as_str),
-                &options,
-            );
-        }
-        if option == "word-separators" {
-            return self.set_word_separators(
-                context,
-                positional.get(1).map(String::as_str),
-                &options,
-                force_window,
-            );
-        }
-        if option == "mode-keys" {
-            return self.set_mode_keys(context, positional.get(1).map(String::as_str), &options);
-        }
-        if let Some(status) = StatusOption::from_name(option) {
-            return self.set_status_option(status, positional.get(1).map(String::as_str), &options);
+            return self.set_history_trickle(value, options, force_window);
         }
         if let Some(flag) = options
             .flags
@@ -2644,46 +2654,20 @@ impl MuxEngine {
             )));
         }
         if options.has("-o") {
-            return already_set_or_quiet(&options, option);
+            return already_set_or_quiet(options, option);
         }
-        let value = positional.get(1).ok_or_else(|| {
+        let value = value.ok_or_else(|| {
             ServerError::InvalidCommand(format!("set-option {option} needs a value"))
         })?;
-        let changed = match option.as_str() {
-            "prefix" => {
-                self.keys.set_prefix(value.as_str());
-                MuxOptionKey::Prefix
-            }
-            "set-clipboard" => {
-                self.set_clipboard = match value.as_str() {
-                    "on" => SetClipboard::On,
-                    "external" => SetClipboard::External,
-                    "off" => SetClipboard::Off,
-                    value => {
-                        return Err(ServerError::InvalidCommand(format!(
-                            "invalid set-clipboard value: {value}"
-                        )));
-                    }
-                };
-                MuxOptionKey::SetClipboard
-            }
-            "copy-command" => {
-                if value.len() > MAX_COPY_COMMAND_BYTES {
-                    return Err(ServerError::InvalidCommand(format!(
-                        "copy-command exceeds {MAX_COPY_COMMAND_BYTES} bytes"
-                    )));
-                }
-                self.copy_command.clone_from(value);
-                MuxOptionKey::CopyCommand
-            }
+        let changed = match option {
             "experimental-agent-pane" => {
                 self.experimental_agent_pane =
-                    parse_flag_value(Some(value.as_str()), self.experimental_agent_pane)?;
+                    parse_flag_value(Some(value), self.experimental_agent_pane)?;
                 MuxOptionKey::ExperimentalAgentPane
             }
             "experimental-editor-pane" => {
                 self.experimental_editor_pane =
-                    parse_flag_value(Some(value.as_str()), self.experimental_editor_pane)?;
+                    parse_flag_value(Some(value), self.experimental_editor_pane)?;
                 MuxOptionKey::ExperimentalEditorPane
             }
             "agent-command" | "agent-claude-code-command" => {
@@ -2698,55 +2682,151 @@ impl MuxEngine {
                     )));
                 }
                 if option == "agent-command" {
-                    self.agent.command.clone_from(value);
+                    value.clone_into(&mut self.agent.command);
                     MuxOptionKey::AgentCommand
                 } else {
-                    self.agent.claude_code_command.clone_from(value);
+                    value.clone_into(&mut self.agent.claude_code_command);
                     MuxOptionKey::AgentClaudeCodeCommand
                 }
             }
             "agent-auto-approve" => {
-                self.agent.auto_approve =
-                    parse_flag_value(Some(value.as_str()), self.agent.auto_approve)?;
+                self.agent.auto_approve = parse_flag_value(Some(value), self.agent.auto_approve)?;
                 MuxOptionKey::AgentAutoApprove
             }
-            _ => {
-                return Err(ServerError::UnsupportedCommand(format!(
-                    "set-option {option}"
-                )));
-            }
+            _ => unreachable!("native option is catalogued"),
         };
         Ok(Execution::effect(MuxEffect::MuxOptionChanged {
             option: changed,
         }))
     }
 
+    fn set_scalar_tmux_option(
+        &mut self,
+        option: &str,
+        value: Option<&str>,
+        options: &Options,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            return already_set_or_quiet(options, option);
+        }
+        let changed = match option {
+            "prefix" => {
+                let value = if unset {
+                    DEFAULT_PREFIX
+                } else {
+                    value.ok_or_else(|| {
+                        ServerError::InvalidCommand("set-option prefix needs a value".to_owned())
+                    })?
+                };
+                self.keys.set_prefix(value);
+                MuxOptionKey::Prefix
+            }
+            "set-clipboard" => {
+                self.set_clipboard = if unset {
+                    SetClipboard::default()
+                } else {
+                    match value.ok_or_else(|| {
+                        ServerError::InvalidCommand(
+                            "set-option set-clipboard needs a value".to_owned(),
+                        )
+                    })? {
+                        "on" => SetClipboard::On,
+                        "external" => SetClipboard::External,
+                        "off" => SetClipboard::Off,
+                        value => {
+                            return Err(ServerError::InvalidCommand(format!(
+                                "invalid set-clipboard value: {value}"
+                            )));
+                        }
+                    }
+                };
+                MuxOptionKey::SetClipboard
+            }
+            "copy-command" => {
+                let next = if unset {
+                    String::new()
+                } else {
+                    let value = value.ok_or_else(|| {
+                        ServerError::InvalidCommand(
+                            "set-option copy-command needs a value".to_owned(),
+                        )
+                    })?;
+                    if options.has("-a") {
+                        format!("{}{value}", self.copy_command)
+                    } else {
+                        value.to_owned()
+                    }
+                };
+                if next.len() > MAX_COPY_COMMAND_BYTES {
+                    return Err(ServerError::InvalidCommand(format!(
+                        "copy-command exceeds {MAX_COPY_COMMAND_BYTES} bytes"
+                    )));
+                }
+                self.copy_command = next;
+                MuxOptionKey::CopyCommand
+            }
+            _ => unreachable!("scalar tmux option is catalogued"),
+        };
+        Ok(Execution::effect(MuxEffect::MuxOptionChanged {
+            option: changed,
+        }))
+    }
+
+    fn resolve_tmux_option_target(
+        &self,
+        context: &ExecutionContext,
+        options: &Options,
+        force_window: bool,
+        scope: TmuxOptionScope,
+    ) -> Result<TmuxOptionTarget, ServerError> {
+        match scope {
+            TmuxOptionScope::Server => Ok(TmuxOptionTarget::Server),
+            TmuxOptionScope::Session if options.has("-g") => Ok(TmuxOptionTarget::GlobalSession),
+            TmuxOptionScope::Session => {
+                let window = self.resolve_option_window(context, options, force_window)?;
+                Ok(TmuxOptionTarget::Session(
+                    self.state.windows[&window].session,
+                ))
+            }
+            TmuxOptionScope::WindowPane if options.has("-p") => self
+                .resolve_pane(options.value("-t"), context.window, context.pane)
+                .map(TmuxOptionTarget::Pane),
+            TmuxOptionScope::Window | TmuxOptionScope::WindowPane if options.has("-g") => {
+                Ok(TmuxOptionTarget::GlobalWindow)
+            }
+            TmuxOptionScope::Window | TmuxOptionScope::WindowPane => self
+                .resolve_option_window(context, options, force_window)
+                .map(TmuxOptionTarget::Window),
+        }
+    }
+
+    fn resolve_option_window(
+        &self,
+        context: &ExecutionContext,
+        options: &Options,
+        force_window: bool,
+    ) -> Result<WindowId, ServerError> {
+        if force_window {
+            self.resolve_window(options.value("-t"), context.session, context.window)
+        } else {
+            let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+            self.state
+                .window_for_pane(pane)
+                .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))
+        }
+    }
+
     fn set_buffer_limit(
         &mut self,
         value: Option<&str>,
         options: &Options,
-        force_window: bool,
     ) -> Result<Execution, ServerError> {
-        if force_window {
-            return Err(ServerError::InvalidCommand(
-                "buffer-limit is a global server option".to_owned(),
-            ));
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            return already_set_or_quiet(options, "buffer-limit");
         }
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-g" | "-q" | "-u"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "set-option {flag} buffer-limit"
-            )));
-        }
-        let limit = if options.has("-u") {
-            if value.is_some() {
-                return Err(ServerError::InvalidCommand(
-                    "unsetting buffer-limit does not accept a value".to_owned(),
-                ));
-            }
+        let limit = if unset {
             DEFAULT_BUFFER_LIMIT
         } else {
             let value = value.ok_or_else(|| {
@@ -2831,69 +2911,71 @@ impl MuxEngine {
 
     fn set_history_limit(
         &mut self,
-        context: &ExecutionContext,
         value: Option<&str>,
         options: &Options,
-        force_window: bool,
+        target: TmuxOptionTarget,
     ) -> Result<Execution, ServerError> {
-        if force_window {
-            return Err(ServerError::InvalidCommand(
-                "history-limit is a session option".to_owned(),
-            ));
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            match target {
+                TmuxOptionTarget::GlobalSession => {
+                    return already_set_or_quiet(options, "history-limit");
+                }
+                TmuxOptionTarget::Session(session)
+                    if self.session_history_limits.contains_key(&session) =>
+                {
+                    return already_set_or_quiet(options, "history-limit");
+                }
+                _ => {}
+            }
         }
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-g" | "-q" | "-u"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "set-option {flag} history-limit"
-            )));
-        }
-        if options.has("-g") && options.value("-t").is_some() {
-            return Err(ServerError::InvalidCommand(
-                "global history-limit does not accept a target".to_owned(),
-            ));
-        }
-        if options.has("-u") && value.is_some() {
-            return Err(ServerError::InvalidCommand(
-                "unsetting history-limit does not accept a value".to_owned(),
-            ));
-        }
-
-        let limit = if options.has("-u") {
+        let limit = if unset {
             DEFAULT_HISTORY_LIMIT
         } else {
             parse_history_limit(value.ok_or_else(|| {
                 ServerError::InvalidCommand("set-option history-limit needs a value".to_owned())
             })?)?
         };
-        if options.has("-g") {
-            self.global_history_limit = limit;
-            return Ok(Execution::effect(MuxEffect::MuxOptionChanged {
-                option: MuxOptionKey::HistoryLimit,
-            }));
+        match target {
+            TmuxOptionTarget::GlobalSession => {
+                self.global_history_limit = limit;
+                Ok(Execution::effect(MuxEffect::MuxOptionChanged {
+                    option: MuxOptionKey::HistoryLimit,
+                }))
+            }
+            TmuxOptionTarget::Session(session) => {
+                if unset {
+                    self.session_history_limits.remove(&session);
+                } else {
+                    self.session_history_limits.insert(session, limit);
+                }
+                Ok(Execution::default())
+            }
+            _ => unreachable!("history-limit has session scope"),
         }
-        let session = self
-            .state
-            .resolve_session(options.value("-t"), context.session)?;
-        if options.has("-u") {
-            self.session_history_limits.remove(&session);
-        } else {
-            self.session_history_limits.insert(session, limit);
-        }
-        Ok(Execution::default())
     }
 
     fn set_base_index(
         &mut self,
-        context: &ExecutionContext,
         value: Option<&str>,
         options: &Options,
-        force_window: bool,
+        target: TmuxOptionTarget,
     ) -> Result<Execution, ServerError> {
-        validate_session_option("base-index", value, options, force_window)?;
-        let index = if options.has("-u") {
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            match target {
+                TmuxOptionTarget::GlobalSession => {
+                    return already_set_or_quiet(options, "base-index");
+                }
+                TmuxOptionTarget::Session(session)
+                    if self.session_base_indices.contains_key(&session) =>
+                {
+                    return already_set_or_quiet(options, "base-index");
+                }
+                _ => {}
+            }
+        }
+        let index = if unset {
             DEFAULT_BASE_INDEX
         } else {
             parse_index_option(
@@ -2904,85 +2986,87 @@ impl MuxEngine {
                 MAX_BASE_INDEX,
             )?
         };
-        if options.has("-g") {
-            self.global_base_index = index;
-        } else {
-            let session = self
-                .state
-                .resolve_session(options.value("-t"), context.session)?;
-            if options.has("-u") {
-                self.session_base_indices.remove(&session);
-            } else {
-                self.session_base_indices.insert(session, index);
+        match target {
+            TmuxOptionTarget::GlobalSession => self.global_base_index = index,
+            TmuxOptionTarget::Session(session) => {
+                if unset {
+                    self.session_base_indices.remove(&session);
+                } else {
+                    self.session_base_indices.insert(session, index);
+                }
             }
+            _ => unreachable!("base-index has session scope"),
         }
         Ok(Execution::default())
     }
 
     fn set_renumber_windows(
         &mut self,
-        context: &ExecutionContext,
         value: Option<&str>,
         options: &Options,
-        force_window: bool,
+        target: TmuxOptionTarget,
     ) -> Result<Execution, ServerError> {
-        validate_session_option("renumber-windows", value, options, force_window)?;
-        if options.has("-g") {
-            self.global_renumber_windows = if options.has("-u") {
-                DEFAULT_RENUMBER_WINDOWS
-            } else {
-                parse_flag_value(value, self.global_renumber_windows)?
-            };
-        } else {
-            let session = self
-                .state
-                .resolve_session(options.value("-t"), context.session)?;
-            if options.has("-u") {
-                self.session_renumber_windows.remove(&session);
-            } else {
-                let next = parse_flag_value(value, self.renumber_windows_for_session(session))?;
-                self.session_renumber_windows.insert(session, next);
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            match target {
+                TmuxOptionTarget::GlobalSession => {
+                    return already_set_or_quiet(options, "renumber-windows");
+                }
+                TmuxOptionTarget::Session(session)
+                    if self.session_renumber_windows.contains_key(&session) =>
+                {
+                    return already_set_or_quiet(options, "renumber-windows");
+                }
+                _ => {}
             }
+        }
+        match target {
+            TmuxOptionTarget::GlobalSession => {
+                self.global_renumber_windows = if unset {
+                    DEFAULT_RENUMBER_WINDOWS
+                } else {
+                    parse_tmux_flag_value(value, self.global_renumber_windows)?
+                };
+            }
+            TmuxOptionTarget::Session(session) => {
+                if unset {
+                    self.session_renumber_windows.remove(&session);
+                } else {
+                    let next =
+                        parse_tmux_flag_value(value, self.renumber_windows_for_session(session))?;
+                    self.session_renumber_windows.insert(session, next);
+                }
+            }
+            _ => unreachable!("renumber-windows has session scope"),
         }
         Ok(Execution::default())
     }
 
     fn set_pane_base_index(
         &mut self,
-        context: &ExecutionContext,
         value: Option<&str>,
         options: &Options,
+        target: TmuxOptionTarget,
     ) -> Result<Execution, ServerError> {
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-g" | "-o" | "-q" | "-u" | "-w"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "set-option {flag} pane-base-index"
-            )));
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            match target {
+                TmuxOptionTarget::GlobalWindow => {
+                    return already_set_or_quiet(options, "pane-base-index");
+                }
+                TmuxOptionTarget::Window(window)
+                    if self.window_pane_base_indices.contains_key(&window) =>
+                {
+                    return already_set_or_quiet(options, "pane-base-index");
+                }
+                _ => {}
+            }
         }
-        if options.has("-g") && options.value("-t").is_some() {
-            return Err(ServerError::InvalidCommand(
-                "global pane-base-index does not accept a target".to_owned(),
-            ));
-        }
-        if options.has("-o") && options.has("-u") {
-            return Err(ServerError::InvalidCommand(
-                "pane-base-index cannot combine set-once and unset".to_owned(),
-            ));
-        }
-        if options.has("-u") && value.is_some() {
-            return Err(ServerError::InvalidCommand(
-                "unsetting pane-base-index does not accept a value".to_owned(),
-            ));
-        }
-
-        if options.has("-g") {
-            if options.has("-o") {
+        if target == TmuxOptionTarget::GlobalWindow {
+            if options.has("-o") && !unset {
                 return already_set_or_quiet(options, "pane-base-index");
             }
-            let next = if options.has("-u") {
+            let next = if unset {
                 DEFAULT_PANE_BASE_INDEX
             } else {
                 parse_index_option(
@@ -3002,12 +3086,11 @@ impl MuxEngine {
             return Ok(Execution::default());
         }
 
-        let window = self.resolve_window(options.value("-t"), context.session, context.window)?;
-        if options.has("-o") && self.window_pane_base_indices.contains_key(&window) {
-            return already_set_or_quiet(options, "pane-base-index");
-        }
+        let TmuxOptionTarget::Window(window) = target else {
+            unreachable!("pane-base-index has window scope")
+        };
         let previous = self.pane_base_index_for_window(window);
-        if options.has("-u") {
+        if unset {
             self.window_pane_base_indices.remove(&window);
         } else {
             let next = parse_index_option(
@@ -3034,31 +3117,15 @@ impl MuxEngine {
         value: Option<&str>,
         options: &Options,
     ) -> Result<Execution, ServerError> {
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-a" | "-g" | "-q" | "-u"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "set-option {flag} {}",
-                option.as_str()
-            )));
-        }
-        if options.has("-u") && (value.is_some() || options.has("-a")) {
-            return Err(ServerError::InvalidCommand(format!(
-                "unsetting {} does not accept a value or -a",
-                option.as_str()
-            )));
-        }
-        let appended = options
-            .has("-a")
+        let unset = option_is_unset(options);
+        let appended = (!unset && options.has("-a"))
             .then(|| self.status.format(option))
             .flatten()
             .zip(value)
             .map(|(current, value)| format!("{current}{value}"));
-        let value = match (&appended, options.has("-u")) {
-            (Some(appended), _) => Some(appended.as_str()),
-            (None, true) => None,
+        let value = match (&appended, unset) {
+            (_, true) => None,
+            (Some(appended), false) => Some(appended.as_str()),
             (None, false) => Some(value.ok_or_else(|| {
                 ServerError::InvalidCommand(format!("set-option {} needs a value", option.as_str()))
             })?),
@@ -3077,38 +3144,27 @@ impl MuxEngine {
 
     fn set_word_separators(
         &mut self,
-        context: &ExecutionContext,
         value: Option<&str>,
         options: &Options,
-        force_window: bool,
+        target: TmuxOptionTarget,
     ) -> Result<Execution, ServerError> {
-        if force_window {
-            return Err(ServerError::InvalidCommand(
-                "word-separators is a session option".to_owned(),
-            ));
-        }
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-a" | "-g" | "-q" | "-u"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "set-option {flag} word-separators"
-            )));
-        }
-        if options.has("-g") && options.value("-t").is_some() {
-            return Err(ServerError::InvalidCommand(
-                "global word-separators does not accept a target".to_owned(),
-            ));
-        }
-        if options.has("-u") && (value.is_some() || options.has("-a")) {
-            return Err(ServerError::InvalidCommand(
-                "unsetting word-separators does not accept a value or -a".to_owned(),
-            ));
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            match target {
+                TmuxOptionTarget::GlobalSession => {
+                    return already_set_or_quiet(options, "word-separators");
+                }
+                TmuxOptionTarget::Session(session)
+                    if self.session_word_separators.contains_key(&session) =>
+                {
+                    return already_set_or_quiet(options, "word-separators");
+                }
+                _ => {}
+            }
         }
 
-        if options.has("-g") {
-            let next = if options.has("-u") {
+        if target == TmuxOptionTarget::GlobalSession {
+            let next = if unset {
                 DEFAULT_WORD_SEPARATORS.to_owned()
             } else {
                 let value = value.ok_or_else(|| {
@@ -3137,10 +3193,10 @@ impl MuxEngine {
             });
         }
 
-        let session = self
-            .state
-            .resolve_session(options.value("-t"), context.session)?;
-        if options.has("-u") {
+        let TmuxOptionTarget::Session(session) = target else {
+            unreachable!("word-separators has session scope")
+        };
+        if unset {
             self.session_word_separators.remove(&session);
         } else {
             let value = value.ok_or_else(|| {
@@ -3163,35 +3219,24 @@ impl MuxEngine {
 
     fn set_mode_keys(
         &mut self,
-        context: &ExecutionContext,
         value: Option<&str>,
         options: &Options,
+        target: TmuxOptionTarget,
     ) -> Result<Execution, ServerError> {
-        if let Some(flag) = options
-            .flags
-            .iter()
-            .find(|flag| !matches!(flag.as_str(), "-g" | "-o" | "-q" | "-u" | "-w"))
-        {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "set-option {flag} mode-keys"
-            )));
-        }
-        if options.has("-o") && options.has("-u") {
-            return Err(ServerError::InvalidCommand(
-                "mode-keys cannot combine set-once and unset".to_owned(),
-            ));
-        }
-        if options.has("-u") && value.is_some() {
-            return Err(ServerError::InvalidCommand(
-                "unsetting mode-keys does not accept a value".to_owned(),
-            ));
-        }
-
-        if options.has("-g") {
-            if options.has("-o") {
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            if target == TmuxOptionTarget::GlobalWindow {
                 return already_set_or_quiet(options, "mode-keys");
             }
-            let next = if options.has("-u") {
+            if let TmuxOptionTarget::Window(window) = target
+                && self.window_mode_keys.contains_key(&window)
+            {
+                return already_set_or_quiet(options, "mode-keys");
+            }
+        }
+
+        if target == TmuxOptionTarget::GlobalWindow {
+            let next = if unset {
                 ModeKeys::default()
             } else {
                 parse_mode_keys(value, self.global_mode_keys)?
@@ -3208,11 +3253,10 @@ impl MuxEngine {
             });
         }
 
-        let window = self.resolve_window(options.value("-t"), context.session, context.window)?;
-        if options.has("-o") && self.window_mode_keys.contains_key(&window) {
-            return already_set_or_quiet(options, "mode-keys");
-        }
-        if options.has("-u") {
+        let TmuxOptionTarget::Window(window) = target else {
+            unreachable!("mode-keys has window scope")
+        };
+        if unset {
             self.window_mode_keys.remove(&window);
         } else {
             let next = parse_mode_keys(value, self.mode_keys_for_window(window))?;
@@ -3225,105 +3269,69 @@ impl MuxEngine {
 
     fn set_synchronize_panes(
         &mut self,
-        context: &ExecutionContext,
         value: Option<&str>,
         options: &Options,
+        target: TmuxOptionTarget,
     ) -> Result<Execution, ServerError> {
-        for flag in &options.flags {
-            if !matches!(
-                flag.as_str(),
-                "-g" | "-w" | "-p" | "-u" | "-U" | "-o" | "-q"
-            ) {
-                return Err(ServerError::UnsupportedCommand(format!(
-                    "set-option {flag} synchronize-panes"
-                )));
-            }
-        }
-        let scope_flags = usize::from(options.has("-g"))
-            + usize::from(options.has("-w"))
-            + usize::from(options.has("-p"));
-        if scope_flags > 1 {
-            return Err(ServerError::InvalidCommand(
-                "synchronize-panes has conflicting scopes".to_owned(),
-            ));
-        }
-        if (options.has("-u") || options.has("-U")) && value.is_some() {
-            return Err(ServerError::InvalidCommand(
-                "unsetting synchronize-panes does not accept a value".to_owned(),
-            ));
-        }
-        if options.has("-u") && options.has("-U") {
-            return Err(ServerError::InvalidCommand(
-                "synchronize-panes cannot combine -u and -U".to_owned(),
-            ));
-        }
-        if options.has("-o") && (options.has("-u") || options.has("-U")) {
-            return Err(ServerError::InvalidCommand(
-                "synchronize-panes cannot combine set-once and unset".to_owned(),
-            ));
-        }
-        if options.has("-U") && options.has("-p") {
-            return Err(ServerError::InvalidCommand(
-                "synchronize-panes -U requires window scope".to_owned(),
-            ));
-        }
-
-        if options.has("-g") {
-            if options.value("-t").is_some() || options.has("-U") {
-                return Err(ServerError::InvalidCommand(
-                    "global synchronize-panes does not accept -t or -U".to_owned(),
-                ));
-            }
-            if options.has("-o") {
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            let already = match target {
+                TmuxOptionTarget::GlobalWindow => true,
+                TmuxOptionTarget::Window(window) => {
+                    self.state.window_synchronize_override(window)?.is_some()
+                }
+                TmuxOptionTarget::Pane(pane) => {
+                    self.state.pane_synchronize_override(pane)?.is_some()
+                }
+                _ => unreachable!("synchronize-panes has window or pane scope"),
+            };
+            if already {
                 return already_set_or_quiet(options, "synchronize-panes");
             }
-            let next = if options.has("-u") {
-                false
-            } else {
-                parse_flag_value(value, self.state.global_synchronize_panes())?
-            };
-            self.state.set_global_synchronize_panes(next);
-            return Ok(Execution::effect(MuxEffect::MuxOptionChanged {
-                option: MuxOptionKey::SynchronizePanes,
-            }));
         }
-
-        if options.has("-p") {
-            let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
-            if options.has("-o") && self.state.pane_synchronize_override(pane)?.is_some() {
-                return already_set_or_quiet(options, "synchronize-panes");
+        match target {
+            TmuxOptionTarget::GlobalWindow => {
+                let next = if unset {
+                    false
+                } else {
+                    parse_tmux_flag_value(value, self.state.global_synchronize_panes())?
+                };
+                self.state.set_global_synchronize_panes(next);
+                Ok(Execution::effect(MuxEffect::MuxOptionChanged {
+                    option: MuxOptionKey::SynchronizePanes,
+                }))
             }
-            let next = if options.has("-u") {
-                None
-            } else {
-                Some(parse_flag_value(
-                    value,
-                    self.state.pane_synchronize_panes(pane)?,
-                )?)
-            };
-            self.state.set_pane_synchronize_panes(pane, next)?;
-            return Ok(Execution::default());
+            TmuxOptionTarget::Pane(pane) => {
+                let next = if unset {
+                    None
+                } else {
+                    Some(parse_tmux_flag_value(
+                        value,
+                        self.state.pane_synchronize_panes(pane)?,
+                    )?)
+                };
+                self.state.set_pane_synchronize_panes(pane, next)?;
+                Ok(Execution::default())
+            }
+            TmuxOptionTarget::Window(window) => {
+                if options.has("-U") {
+                    self.state.clear_pane_synchronize_overrides(window)?;
+                    self.state.set_window_synchronize_panes(window, None)?;
+                } else {
+                    let next = if unset {
+                        None
+                    } else {
+                        Some(parse_tmux_flag_value(
+                            value,
+                            self.state.window_synchronize_panes(window)?,
+                        )?)
+                    };
+                    self.state.set_window_synchronize_panes(window, next)?;
+                }
+                Ok(Execution::default())
+            }
+            _ => unreachable!("synchronize-panes has window or pane scope"),
         }
-
-        let window = self.resolve_window(options.value("-t"), context.session, context.window)?;
-        if options.has("-o") && self.state.window_synchronize_override(window)?.is_some() {
-            return already_set_or_quiet(options, "synchronize-panes");
-        }
-        if options.has("-U") {
-            self.state.clear_pane_synchronize_overrides(window)?;
-            self.state.set_window_synchronize_panes(window, None)?;
-        } else {
-            let next = if options.has("-u") {
-                None
-            } else {
-                Some(parse_flag_value(
-                    value,
-                    self.state.window_synchronize_panes(window)?,
-                )?)
-            };
-            self.state.set_window_synchronize_panes(window, next)?;
-        }
-        Ok(Execution::default())
     }
 
     fn source_file(args: &[String]) -> Result<Execution, ServerError> {
@@ -3363,10 +3371,68 @@ impl MuxEngine {
     }
 }
 
+fn is_native_option(option: &str) -> bool {
+    matches!(
+        option,
+        "history-trickle"
+            | "experimental-agent-pane"
+            | "experimental-editor-pane"
+            | "agent-command"
+            | "agent-claude-code-command"
+            | "agent-auto-approve"
+    )
+}
+
+fn is_implemented_tmux_option(option: &str) -> bool {
+    matches!(
+        option,
+        "base-index"
+            | "buffer-limit"
+            | "copy-command"
+            | "history-limit"
+            | "mode-keys"
+            | "pane-base-index"
+            | "prefix"
+            | "renumber-windows"
+            | "set-clipboard"
+            | "status"
+            | "status-interval"
+            | "status-left"
+            | "status-right"
+            | "synchronize-panes"
+            | "word-separators"
+    )
+}
+
+fn option_is_unset(options: &Options) -> bool {
+    options.has("-u") || options.has("-U")
+}
+
+fn parse_tmux_flag_value(value: Option<&str>, current: bool) -> Result<bool, ServerError> {
+    let Some(value) = value else {
+        return Ok(!current);
+    };
+    if value.is_empty() {
+        return Ok(!current);
+    }
+    if value == "1"
+        || ["on", "yes"]
+            .iter()
+            .any(|spelling| value.eq_ignore_ascii_case(spelling))
+    {
+        return Ok(true);
+    }
+    if value == "0"
+        || ["off", "no"]
+            .iter()
+            .any(|spelling| value.eq_ignore_ascii_case(spelling))
+    {
+        return Ok(false);
+    }
+    Err(ServerError::InvalidCommand(format!("bad value: {value}")))
+}
+
 fn parse_flag_value(value: Option<&str>, current: bool) -> Result<bool, ServerError> {
-    // tmux: `1` is exact, `on`/`yes` (and their negatives) compare with
-    // strcasecmp, and a missing or empty value toggles. `true`/`false` is the
-    // zz/config spelling, forwarded verbatim as a value.
     let Some(value) = value else {
         return Ok(!current);
     };
@@ -3425,39 +3491,6 @@ fn parse_index_option(option: &str, value: &str, maximum: u32) -> Result<u32, Se
         )));
     }
     Ok(index)
-}
-
-fn validate_session_option(
-    option: &str,
-    value: Option<&str>,
-    options: &Options,
-    force_window: bool,
-) -> Result<(), ServerError> {
-    if force_window || options.has("-w") || options.has("-p") {
-        return Err(ServerError::InvalidCommand(format!(
-            "{option} is a session option"
-        )));
-    }
-    if let Some(flag) = options
-        .flags
-        .iter()
-        .find(|flag| !matches!(flag.as_str(), "-g" | "-q" | "-u"))
-    {
-        return Err(ServerError::UnsupportedCommand(format!(
-            "set-option {flag} {option}"
-        )));
-    }
-    if options.has("-g") && options.value("-t").is_some() {
-        return Err(ServerError::InvalidCommand(format!(
-            "global {option} does not accept a target"
-        )));
-    }
-    if options.has("-u") && value.is_some() {
-        return Err(ServerError::InvalidCommand(format!(
-            "unsetting {option} does not accept a value"
-        )));
-    }
-    Ok(())
 }
 
 fn validate_word_separators(value: &str) -> Result<(), ServerError> {
@@ -7095,13 +7128,24 @@ mod tests {
         );
         assert_eq!(engine.buffer_limit(), DEFAULT_BUFFER_LIMIT);
 
-        for command in [
-            command("set-option", &["buffer-limit", "0"]),
-            command("set-option", &["-p", "buffer-limit", "2"]),
-            command("set-window-option", &["buffer-limit", "2"]),
-        ] {
-            assert!(engine.execute(&mut context, &command).is_err());
-        }
+        assert!(
+            engine
+                .execute(&mut context, &command("set-option", &["buffer-limit", "0"]),)
+                .is_err()
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-p", "buffer-limit", "2"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["buffer-limit", "3"]),
+            )
+            .unwrap();
+        assert_eq!(engine.buffer_limit(), 3);
     }
 
     #[test]
@@ -7218,16 +7262,11 @@ mod tests {
             .expect("restore session inheritance");
         assert_eq!(engine.history_limit_for_session(first_session), 9);
 
-        for command in [
-            command(
-                "set-option",
-                &["-g", "history-limit", &(MAX_HISTORY_LIMIT + 1).to_string()],
-            ),
-            command("set-option", &["-w", "history-limit", "2"]),
-            command("set-window-option", &["history-limit", "2"]),
-        ] {
-            assert!(engine.execute(&mut context, &command).is_err());
-        }
+        let invalid = command(
+            "set-option",
+            &["-g", "history-limit", &(MAX_HISTORY_LIMIT + 1).to_string()],
+        );
+        assert!(engine.execute(&mut context, &invalid).is_err());
     }
 
     #[test]
@@ -7270,13 +7309,6 @@ mod tests {
                 "set-option",
                 &["-g", "base-index", &(MAX_BASE_INDEX + 1).to_string()],
             ),
-            command("set-option", &["-w", "base-index", "1"]),
-            command("set-window-option", &["base-index", "1"]),
-            command(
-                "set-option",
-                &["-g", "-t", &session.to_string(), "base-index", "1"],
-            ),
-            command("set-option", &["-u", "base-index", "1"]),
             command("set-window-option", &["-g", "pane-base-index"]),
             command("set-window-option", &["-g", "pane-base-index", "-1"]),
             command("set-window-option", &["-g", "pane-base-index", "nope"]),
@@ -7288,16 +7320,7 @@ mod tests {
                     &(MAX_PANE_BASE_INDEX + 1).to_string(),
                 ],
             ),
-            command("set-option", &["-p", "pane-base-index", "1"]),
-            command(
-                "set-window-option",
-                &["-g", "-t", &window.to_string(), "pane-base-index", "1"],
-            ),
-            command("set-window-option", &["-u", "pane-base-index", "1"]),
             command("set-option", &["-g", "renumber-windows", "maybe"]),
-            command("set-option", &["-w", "renumber-windows", "on"]),
-            command("set-window-option", &["renumber-windows", "on"]),
-            command("set-option", &["-u", "renumber-windows", "off"]),
         ] {
             assert!(
                 engine.execute(&mut context, &invalid).is_err(),
@@ -7354,6 +7377,268 @@ mod tests {
             )
             .expect("restore renumber default");
         assert!(!engine.renumber_windows_for_session(session));
+    }
+
+    #[test]
+    fn table_option_scope_ignores_command_spelling_and_unrelated_scope_flags() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "first"]))
+            .unwrap();
+        let first_session = context.session.unwrap();
+        let first_window = context.window.unwrap();
+        let first_pane = context.pane.unwrap();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "second"]))
+            .unwrap();
+        let second_session = context.session.unwrap();
+        let second_window = context.window.unwrap();
+        let second_pane = context.pane.unwrap();
+
+        engine
+            .execute(&mut context, &command("setw", &["-g", "base-index", "1"]))
+            .unwrap();
+        assert_eq!(engine.base_index_for_session(first_session), 1);
+        assert_eq!(engine.base_index_for_session(second_session), 1);
+        for (flag, value) in [("-w", "2"), ("-s", "3"), ("-p", "4")] {
+            engine
+                .execute(&mut context, &command("set", &[flag, "base-index", value]))
+                .unwrap();
+        }
+        engine
+            .execute(&mut context, &command("setw", &["base-index", "5"]))
+            .unwrap();
+        assert_eq!(engine.base_index_for_session(first_session), 1);
+        assert_eq!(engine.base_index_for_session(second_session), 5);
+
+        for (flag, value) in [("-w", "2"), ("-s", "3"), ("-p", "4")] {
+            engine
+                .execute(
+                    &mut context,
+                    &command("set", &[flag, "pane-base-index", value]),
+                )
+                .unwrap();
+        }
+        engine
+            .execute(&mut context, &command("setw", &["pane-base-index", "5"]))
+            .unwrap();
+        assert_eq!(engine.pane_index(second_window, second_pane), Some(5));
+
+        engine
+            .execute(
+                &mut context,
+                &command("set", &["-t", &first_pane.to_string(), "base-index", "7"]),
+            )
+            .unwrap();
+        assert_eq!(engine.base_index_for_session(first_session), 7);
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set",
+                    &["-s", "-t", &first_window.to_string(), "base-index", "8"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(engine.base_index_for_session(first_session), 8);
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set",
+                    &["-p", "-t", &first_pane.to_string(), "pane-base-index", "6"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(engine.pane_index(first_window, first_pane), Some(6));
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "setw",
+                    &["-t", &first_window.to_string(), "pane-base-index", "7"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(engine.pane_index(first_window, first_pane), Some(7));
+    }
+
+    #[test]
+    fn set_option_matches_full_table_prefixes_and_quiets_unknown_names() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+
+        engine
+            .execute(&mut context, &command("set", &["-g", "base-ind", "6"]))
+            .unwrap();
+        assert_eq!(engine.base_index_for_session(session), 6);
+
+        let error = engine
+            .execute(&mut context, &command("set", &["-g", "status-l", "value"]))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ServerError::InvalidCommand(message) if message == "ambiguous option: status-l"
+        ));
+        let error = engine
+            .execute(&mut context, &command("set", &["-g", "escape-t", "10"]))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ServerError::UnsupportedCommand(message) if message == "set-option escape-time"
+        ));
+        let error = engine
+            .execute(&mut context, &command("set", &["-g", "not-an-option", "1"]))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ServerError::InvalidCommand(message) if message == "invalid option: not-an-option"
+        ));
+        for args in [
+            &["-gq", "not-an-option", "1"][..],
+            &["-gq", "status-l", "value"][..],
+        ] {
+            assert_eq!(
+                engine.execute(&mut context, &command("set", args)).unwrap(),
+                Execution::default()
+            );
+        }
+    }
+
+    #[test]
+    fn index_options_accept_tmux_operation_flag_combinations() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+        let window = context.window.unwrap();
+        let pane = context.pane.unwrap();
+
+        engine
+            .execute(&mut context, &command("set", &["-a", "base-index", "2"]))
+            .unwrap();
+        assert_eq!(engine.base_index_for_session(session), 2);
+        engine
+            .execute(
+                &mut context,
+                &command("set", &["-u", "base-index", "not-a-number"]),
+            )
+            .unwrap();
+        assert_eq!(engine.base_index_for_session(session), DEFAULT_BASE_INDEX);
+        engine
+            .execute(
+                &mut context,
+                &command("set", &["-ou", "base-index", "not-a-number"]),
+            )
+            .unwrap();
+        engine
+            .execute(&mut context, &command("set", &["-o", "base-index", "3"]))
+            .unwrap();
+        assert_eq!(engine.base_index_for_session(session), 3);
+        assert!(
+            engine
+                .execute(&mut context, &command("set", &["-o", "base-index", "4"]))
+                .is_err()
+        );
+        engine
+            .execute(&mut context, &command("set", &["-oq", "base-index", "4"]))
+            .unwrap();
+        assert_eq!(engine.base_index_for_session(session), 3);
+        engine
+            .execute(
+                &mut context,
+                &command("set", &["-U", "base-index", "not-a-number"]),
+            )
+            .unwrap();
+        assert_eq!(engine.base_index_for_session(session), DEFAULT_BASE_INDEX);
+
+        engine
+            .execute(
+                &mut context,
+                &command("set", &["-a", "pane-base-index", "2"]),
+            )
+            .unwrap();
+        assert_eq!(engine.pane_index(window, pane), Some(2));
+        engine
+            .execute(
+                &mut context,
+                &command("set", &["-ou", "pane-base-index", "not-a-number"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set", &["-o", "pane-base-index", "3"]),
+            )
+            .unwrap();
+        assert_eq!(engine.pane_index(window, pane), Some(3));
+        engine
+            .execute(
+                &mut context,
+                &command("set", &["-U", "pane-base-index", "not-a-number"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.pane_index(window, pane),
+            Some(DEFAULT_PANE_BASE_INDEX)
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set", &["-a", "renumber-windows", "on"]),
+            )
+            .unwrap();
+        assert!(engine.renumber_windows_for_session(session));
+        engine
+            .execute(
+                &mut context,
+                &command("set", &["-u", "renumber-windows", "true"]),
+            )
+            .unwrap();
+        assert!(!engine.renumber_windows_for_session(session));
+        engine
+            .execute(
+                &mut context,
+                &command("set", &["-o", "renumber-windows", "on"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set", &["-ou", "renumber-windows", "false"]),
+            )
+            .unwrap();
+        assert!(!engine.renumber_windows_for_session(session));
+    }
+
+    #[test]
+    fn tmux_boolean_options_reject_true_and_false() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+
+        for option in ["renumber-windows", "synchronize-panes"] {
+            for value in ["true", "false"] {
+                let error = engine
+                    .execute(&mut context, &command("set", &[option, value]))
+                    .unwrap_err();
+                assert!(matches!(
+                    error,
+                    ServerError::InvalidCommand(message)
+                        if message == format!("bad value: {value}")
+                ));
+            }
+        }
     }
 
     #[test]
@@ -7438,13 +7723,14 @@ mod tests {
         assert_eq!(engine.word_separators_for_session(first_session), "|");
 
         let oversized = "x".repeat(MAX_WORD_SEPARATORS_BYTES + 1);
-        for invalid in [
-            command("set-option", &["-g", "word-separators", &oversized]),
-            command("set-option", &["-w", "word-separators", "."]),
-            command("set-window-option", &["word-separators", "."]),
-        ] {
-            assert!(engine.execute(&mut context, &invalid).is_err());
-        }
+        assert!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-option", &["-g", "word-separators", &oversized]),
+                )
+                .is_err()
+        );
         assert_eq!(engine.word_separators_for_session(first_session), "|");
     }
 
@@ -7572,10 +7858,8 @@ mod tests {
         );
 
         for invalid in [
-            command("set-option", &["-p", "mode-keys", "vi"]),
             command("set-window-option", &["-w", "mode-keys", "vi"]),
             command("set-option", &["mode-keys", "unknown"]),
-            command("set-option", &["-u", "mode-keys", "vi"]),
         ] {
             assert!(engine.execute(&mut context, &invalid).is_err());
         }

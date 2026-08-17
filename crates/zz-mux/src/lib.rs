@@ -9,6 +9,7 @@ mod layout_pin_tests;
 mod model;
 mod parser;
 mod status;
+mod tmux_options;
 
 pub use command::{
     AgentOptions, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,

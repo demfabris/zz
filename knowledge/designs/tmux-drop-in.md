@@ -139,15 +139,20 @@ See [split-pane layout](/concepts/split-pane-layout.md) for the shipped architec
 
 ## Phase 4 — the grind (~2–3 months, parallelizable)
 
-| Work | Scope | Estimate |
+Running wave-by-wave on [PR #6](https://github.com/demfabris/zz/pull/6) (`feat/tmux-grind`),
+same loop as phases 0–3: settled plan → codex → full gates → adversarial pin review → close.
+
+| Work | Scope | Status |
 | --- | --- | --- |
-| `base-index` / `pane-base-index` / `renumber-windows` | index arithmetic everywhere — first; shipped 2026-08-17 | shipped |
-| Remaining options | tmux has **180** named options at the pin (zz: 15 tmux names). Most are table rows; `mouse`, `escape-time`, `default-terminal`, `aggressive-resize`, `automatic-rename`, `remain-on-exit` are behavior. `remain-on-exit` lands before `respawn-*` (which is a no-op without it) | 4–5 weeks |
-| Full formats engine | tmux's **198** `format.c` variables + ~29 modifier chars (zz: 16 variables, `?`/`=`, `#S`-style aliases) | 2–3 weeks |
-| Styles (`#[…]`, `*-style`) | meaningful on the TUI surface; GUI maps to theme | 2 weeks |
-| The gap commands | the 16 buildable ones (18 in the matrix minus `link-`/`unlink-window`, decision 3), plus `start-server` as a no-op (TPM's bootstrap runs `tmux start-server\; show-environment`; config sourcing already skips it, the CLI errors today) and basic `refresh-client` | 3 weeks |
-| Target grammar | session `-t` fnmatch (`work*`), `=name` exact-match, empty `-t` = current; empty `{}` and trailing `\;` acceptance | 1 week |
-| `source-file -F`/`-n`/`-v` | format-expanded paths, parse-only, verbose printing — deferred from phase 1 | days |
+| `base-index` / `pane-base-index` / `renumber-windows` | index arithmetic everywhere, plus the pin's full 248-entry option table routing every tmux name by declared scope (`setw -g base-index 1` works) | **shipped 2026-08-17** (wave 4a) |
+| Target grammar | the full cmd-find pass order (fnmatch, `=`-exact, unique prefix, `{start}`/`{end}`/`{last}`/`^`/`$`/`!`/`+`/`-`), empty targets, tmux's exact `can't find …` error strings, cross-window `select-pane` focus semantics | **shipped 2026-08-17** (wave 4b) |
+| Full formats engine | the 198-name registry, every scalar modifier + `S`/`W`/`P` loops + `e` math + `C` search, the daemon runtime-facts feed (proc cwd, pid, tty; OSC 7 → `pane_path`), `-c` as a format consumer with spawn.c's chdir chain, the `fmt:` differential channel | **shipped 2026-08-17** (wave 4c, four review rounds) |
+| Options readback | `show-options`/`show-window-options` with the pin's quoting, `@user` options as pure storage (TPM), `set-`/`show-environment` + PTY env injection, the `out:` differential channel | in flight (wave 4d) |
+| The gap commands | the buildable missing commands minus `respawn-*` (held for the behavior wave) and minus `link-`/`unlink-window` (decision 3): `move-window`/`swap-window`, `find-window`, `list-clients`/`list-commands`, `show-messages`, `start-server` as a no-op (TPM's bootstrap), basic `refresh-client` | next (wave 4e) |
+| Behavior options | **all greenlit 2026-08-17 (fabrico)**: `automatic-rename` (tabs track the running program, explicit names win), `remain-on-exit` shipping TOGETHER with `respawn-pane`/`respawn-window`, `aggressive-resize` (per-window multi-client sizing through the measurement write-back), and the mechanical trio `default-terminal`/`display-time`/`repeat-time`. `mouse` + `escape-time`: accepted and stored, semantics scoped to the TUI attach client (phase 8); the GUI ignores them | wave 4f |
+| Daemon boot parity | **decided 2026-08-17 (fabrico)**: lazy-create the auto-session — CLI-spawned daemons boot empty like tmux; session `0` materializes only when a GUI client attaches with no session. Un-shifts `$N`/`@N`/`%N` for scripts; revisit the harness prologue's `kill-session -t 0` and the layout-diff id-stripping after | with 4f |
+| Styles (`#[…]`, `*-style`) | meaningful on the TUI surface; GUI maps to theme | later |
+| `source-file -F`/`-n`/`-v` | format-expanded paths, parse-only, verbose printing — deferred from phase 1 | later |
 
 `switch-client` is **not** mechanical: a pane script's `switch-client` must retarget some
 *other* Interactive client's attachment, and the only pane→client seam today is

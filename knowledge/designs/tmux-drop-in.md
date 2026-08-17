@@ -310,6 +310,24 @@ this list is the campaign-level index of it plus the items that never got a matr
   control mode is phase 6; `tmux -V`/`$TMUX` shape is phase 7.
 - Exec family, hooks bus, popups/menus (phase 5) — see that section's tiering.
 
+- Spawn argv semantics: the pin execs multi-word command argv directly
+  (spawn.c:481-499 — argc>1 → execvp, argc==1 → /bin/sh -c); zz always joins into
+  `sh -c`, so metachars/`$VAR`/globs get shell interpretation tmux never gives them
+  (phase 5 — the exec family owns spawn semantics). Reviewer verdict: fix before
+  any full-compat claim.
+- Build-define-derived option defaults: the pin build's Makefile overrides source
+  fallbacks (`-DTMUX_MOUSE=1`, `-DTMUX_TERM=tmux-256color` — both now matched), and
+  three unimplemented options carry the same hazard when they land: `editor`
+  (platform `_PATH_VI`), `default-shell` (runtime-resolved to the invoking user's
+  shell, NOT the compile-time default), `lock-command` (`TMUX_LOCK_CMD`). Defaults
+  must be probed from the pin binary or resolved at runtime, never transcribed from
+  tmux.h.
+- The default-path hazard (named by the 4f-1 review): aligning a default *constant*
+  is not wiring the default *path* — any option whose effect flows through an
+  `Option<T>` that is `None` at default can read back correctly while behaving
+  divergently. When implementing an option, test the effect AT the default, not
+  only after an explicit set.
+
 **Open questions (investigate before declaring 100%):**
 
 - The zz-client simulator hang: one 93-minute wedge in `Simulation::boot` (blocking socket

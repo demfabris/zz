@@ -2,6 +2,8 @@
 
 mod command;
 mod layout;
+#[cfg(test)]
+mod layout_pin_tests;
 mod model;
 mod parser;
 mod status;

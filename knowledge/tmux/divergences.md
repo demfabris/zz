@@ -90,6 +90,7 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | `source-file` | No `-` stdin (refused loudly), no `-F`/`-n`/`-v`. Globbing works. | loud |
 | Alerts | Bell-only: `monitor-activity`/`monitor-silence` don't exist. Matches tmux defaults, ignores those configs. | **silent** |
 | `resize-pane` (nested) | The ratio tree rescales sibling panes; tmux moves exactly one boundary and preserves other panes' cells. | **silent** drift |
+| `select-layout main-*` with 2 panes | The pin never sizes the lone "other" pane (layout-set.c:264-269, :458-463), leaving stale geometry that fails tmux's own `layout_check`; zz sizes it (80x24 → main 80x22 + other 80x1). Deliberate: zz refuses to reproduce an upstream bug. | **silent**, zz more correct |
 | Zoom vs resize/split | tmux unzooms before any non-`-Z` `resize-pane` and pops zoom on `split-window` (cmd-resize-pane.c:94, cmd-split-window.c:239); zz keeps the zoom and mutates the hidden layout. | **silent** |
 | `#{window_flags}` | Only `!` bell, `*` current, `Z` zoomed are emitted (in tmux's order); `#` activity, `~` silence, `-` last, `M` marked never appear — zz doesn't model those states. | **silent** |
 | Pane sizes | Splits and percentages clamp to 10–90%; tmux allows down to `PANE_MINIMUM` (1 cell). | loud on `%`, silent clamp |

@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
-use std::{collections::BTreeSet, fmt::Write as _};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Write as _,
+};
 
 use zz_protocol::{Axis, LayoutNode, PaneId, SplitId};
 
@@ -43,7 +46,9 @@ pub(crate) struct CellLayout {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) enum LayoutError {
+    LastPane,
     NoSpace,
+    UnknownDivider,
     UnknownPane,
 }
 
@@ -94,6 +99,8 @@ impl CellNode {
 
 impl CellLayout {
     pub(crate) fn new(pane: PaneId, sx: u16, sy: u16) -> Self {
+        let sx = sx.clamp(PANE_MINIMUM, PANE_MAXIMUM);
+        let sy = sy.clamp(PANE_MINIMUM, PANE_MAXIMUM);
         let layout = Self {
             root: CellNode::Leaf {
                 pane,
@@ -155,6 +162,7 @@ impl CellLayout {
             SplitSize::Default => None,
             SplitSize::Cells(cells) => Some(cells),
             SplitSize::Percent(percent) => {
+                let percent = percent.min(100);
                 Some(((u32::from(span) * u32::from(percent)) / 100) as u16)
             }
         };
@@ -179,12 +187,12 @@ impl CellLayout {
                 Some(CellNode::Node { axis: parent_axis, .. }) if *parent_axis == axis
             );
             if same_axis {
-                let divider = ids();
                 let parent = node_at_path_mut(&mut self.root, parent_path)
                     .ok_or(LayoutError::UnknownPane)?;
                 let CellNode::Node { children, .. } = parent else {
                     return Err(LayoutError::UnknownPane);
                 };
+                let divider = ids();
                 let target_geometry = children[index].node.geometry();
                 if before {
                     resize_node_to(&mut children[index].node, axis, second);
@@ -264,8 +272,8 @@ impl CellLayout {
             return Ok(());
         }
 
-        let divider = ids();
         let cell = node_at_path_mut(&mut self.root, split_path).ok_or(LayoutError::UnknownPane)?;
+        let divider = ids();
         let geometry = cell.geometry();
         let placeholder = CellNode::Leaf {
             pane: new_pane,
@@ -320,7 +328,7 @@ impl CellLayout {
     pub(crate) fn remove(&mut self, pane: PaneId) -> Result<(), LayoutError> {
         let path = pane_path(&self.root, pane).ok_or(LayoutError::UnknownPane)?;
         if path.is_empty() {
-            return Err(LayoutError::UnknownPane);
+            return Err(LayoutError::LastPane);
         }
         let parent_path = &path[..path.len() - 1];
         let index = path[path.len() - 1];
@@ -331,9 +339,12 @@ impl CellLayout {
         };
         let gift = children[index].node.extent(*axis) + 1;
         let neighbour = if index + 1 < children.len() {
-            index + 1
+            Some(index + 1)
         } else {
-            index - 1
+            index.checked_sub(1)
+        };
+        let Some(neighbour) = neighbour else {
+            return Ok(());
         };
         resize_adjust(&mut children[neighbour].node, *axis, i32::from(gift));
         children.remove(index);
@@ -349,6 +360,8 @@ impl CellLayout {
     }
 
     pub(crate) fn resize(&mut self, sx: u16, sy: u16) {
+        let sx = sx.clamp(PANE_MINIMUM, PANE_MAXIMUM);
+        let sy = sy.clamp(PANE_MINIMUM, PANE_MAXIMUM);
         resize_root_axis(&mut self.root, Axis::Horizontal, sx);
         resize_root_axis(&mut self.root, Axis::Vertical, sy);
         fix_offsets(&mut self.root);
@@ -372,7 +385,10 @@ impl CellLayout {
             return Err(LayoutError::UnknownPane);
         };
         if index + 1 == children.len() {
-            index -= 1;
+            let Some(previous) = index.checked_sub(1) else {
+                return Ok(());
+            };
+            index = previous;
         }
         resize_siblings(children, index, axis, delta);
         fix_offsets(&mut self.root);
@@ -404,6 +420,18 @@ impl CellLayout {
         self.resize_pane(pane, axis, change)
     }
 
+    pub(crate) fn set_divider_ratio(
+        &mut self,
+        divider: SplitId,
+        ratio: f32,
+    ) -> Result<bool, LayoutError> {
+        let changed =
+            resize_divider(&mut self.root, divider, ratio).ok_or(LayoutError::UnknownDivider)?;
+        fix_offsets(&mut self.root);
+        self.debug_validate();
+        Ok(changed)
+    }
+
     pub(crate) fn spread(&mut self, pane: PaneId) -> Result<bool, LayoutError> {
         let path = pane_path(&self.root, pane).ok_or(LayoutError::UnknownPane)?;
         for depth in (0..path.len()).rev() {
@@ -420,6 +448,7 @@ impl CellLayout {
         Ok(false)
     }
 
+    /// Unlike the pinned tmux bug for two panes, main presets always size the other pane.
     pub(crate) fn apply_preset(
         &mut self,
         preset: LayoutPreset,
@@ -465,6 +494,31 @@ impl CellLayout {
         let changed = replace_pane(&mut self.root, old, new);
         self.debug_validate();
         changed
+    }
+
+    pub(crate) fn remap(&mut self, mapping: &BTreeMap<PaneId, PaneId>) {
+        remap_panes(&mut self.root, mapping);
+        self.debug_validate();
+    }
+
+    pub(crate) fn pane_count(&self) -> usize {
+        count_panes(&self.root)
+    }
+
+    pub(crate) fn replace_panes_in_order(&mut self, panes: &[PaneId]) -> bool {
+        if panes.len() != self.pane_count() {
+            return false;
+        }
+        let mut panes = panes.iter().copied();
+        replace_panes_in_order(&mut self.root, &mut panes);
+        debug_assert!(panes.next().is_none());
+        self.debug_validate();
+        true
+    }
+
+    pub(crate) fn refresh_divider_ids(&mut self, ids: &mut dyn FnMut() -> SplitId) {
+        refresh_divider_ids(&mut self.root, ids);
+        self.debug_validate();
     }
 
     pub(crate) fn project(&self) -> LayoutNode {
@@ -514,6 +568,15 @@ fn collect_panes(node: &CellNode, panes: &mut Vec<PaneId>) {
             for child in children {
                 collect_panes(&child.node, panes);
             }
+        }
+    }
+}
+
+fn count_panes(node: &CellNode) -> usize {
+    match node {
+        CellNode::Leaf { .. } => 1,
+        CellNode::Node { children, .. } => {
+            children.iter().map(|child| count_panes(&child.node)).sum()
         }
     }
 }
@@ -814,6 +877,41 @@ fn resize_siblings(children: &mut [CellChild], index: usize, axis: Axis, delta: 
     }
 }
 
+fn resize_divider(node: &mut CellNode, divider: SplitId, ratio: f32) -> Option<bool> {
+    let CellNode::Node { axis, children, .. } = node else {
+        return None;
+    };
+    if let Some(index) = children
+        .iter()
+        .position(|child| child.divider == Some(divider))
+    {
+        let previous = index.checked_sub(1)?;
+        let remaining_borders = children.len().saturating_sub(index + 1);
+        let span = children[index..].iter().fold(
+            u32::try_from(remaining_borders).unwrap_or(u32::MAX),
+            |total, child| total.saturating_add(u32::from(child.node.extent(*axis))),
+        );
+        let span = span.saturating_add(u32::from(children[previous].node.extent(*axis)));
+        let current = children[previous].node.extent(*axis);
+        let extents = children
+            .iter()
+            .map(|child| child.node.extent(*axis))
+            .collect::<Vec<_>>();
+        let target = (ratio.clamp(0.0, 1.0) * span as f32).round() as i32;
+        let delta = target - i32::from(current);
+        resize_siblings(children, previous, *axis, delta);
+        return Some(
+            children
+                .iter()
+                .zip(extents)
+                .any(|(child, extent)| child.node.extent(*axis) != extent),
+        );
+    }
+    children
+        .iter_mut()
+        .find_map(|child| resize_divider(&mut child.node, divider, ratio))
+}
+
 fn collapse_single_child(root: &mut CellNode, parent_path: &[usize]) {
     if parent_path.is_empty() {
         let replacement = match root {
@@ -827,12 +925,7 @@ fn collapse_single_child(root: &mut CellNode, parent_path: &[usize]) {
     }
     let grandparent_path = &parent_path[..parent_path.len() - 1];
     let index = parent_path[parent_path.len() - 1];
-    let Some(CellNode::Node {
-        axis: grandparent_axis,
-        children,
-        ..
-    }) = node_at_path_mut(root, grandparent_path)
-    else {
+    let Some(CellNode::Node { children, .. }) = node_at_path_mut(root, grandparent_path) else {
         return;
     };
     let parent = children.remove(index);
@@ -868,24 +961,13 @@ fn collapse_single_child(root: &mut CellNode, parent_path: &[usize]) {
         );
         return;
     }
-    let promoted = parent_children.remove(0).node;
-    match promoted {
-        CellNode::Node {
-            axis,
-            geometry: _,
-            children: mut promoted_children,
-        } if axis == *grandparent_axis => {
-            promoted_children[0].divider = slot_divider;
-            children.splice(index..index, promoted_children);
-        }
-        node => children.insert(
-            index,
-            CellChild {
-                divider: slot_divider,
-                node,
-            },
-        ),
-    }
+    children.insert(
+        index,
+        CellChild {
+            divider: slot_divider,
+            node: parent_children.remove(0).node,
+        },
+    );
 }
 
 fn spread_node(node: &mut CellNode) -> bool {
@@ -1261,6 +1343,53 @@ fn replace_pane(node: &mut CellNode, old: PaneId, new: PaneId) -> bool {
     }
 }
 
+fn remap_panes(node: &mut CellNode, mapping: &BTreeMap<PaneId, PaneId>) {
+    match node {
+        CellNode::Leaf { pane, .. } => {
+            if let Some(mapped) = mapping.get(pane) {
+                *pane = *mapped;
+            }
+        }
+        CellNode::Node { children, .. } => {
+            for child in children {
+                remap_panes(&mut child.node, mapping);
+            }
+        }
+    }
+}
+
+fn replace_panes_in_order(node: &mut CellNode, panes: &mut impl Iterator<Item = PaneId>) {
+    match node {
+        CellNode::Leaf { pane, .. } => *pane = panes.next().expect("pane count was checked"),
+        CellNode::Node { children, .. } => {
+            for child in children {
+                replace_panes_in_order(&mut child.node, panes);
+            }
+        }
+    }
+}
+
+fn refresh_divider_ids(node: &mut CellNode, ids: &mut dyn FnMut() -> SplitId) {
+    let CellNode::Node { children, .. } = node else {
+        return;
+    };
+    refresh_child_divider_ids(children, 0, ids);
+}
+
+fn refresh_child_divider_ids(
+    children: &mut [CellChild],
+    index: usize,
+    ids: &mut dyn FnMut() -> SplitId,
+) {
+    if index + 1 == children.len() {
+        refresh_divider_ids(&mut children[index].node, ids);
+        return;
+    }
+    children[index + 1].divider = Some(ids());
+    refresh_divider_ids(&mut children[index].node, ids);
+    refresh_child_divider_ids(children, index + 1, ids);
+}
+
 fn project_node(node: &CellNode) -> LayoutNode {
     match node {
         CellNode::Leaf { pane, .. } => LayoutNode::Pane(*pane),
@@ -1330,13 +1459,18 @@ fn dump_node(node: &CellNode, output: &mut String) {
 }
 
 fn validate_node(node: &CellNode, dividers: &mut BTreeSet<SplitId>) -> Result<(), String> {
-    let CellNode::Node {
-        axis,
-        geometry,
-        children,
-    } = node
-    else {
-        return Ok(());
+    let (axis, geometry, children) = match node {
+        CellNode::Leaf { geometry, .. } => {
+            if geometry.sx < PANE_MINIMUM || geometry.sy < PANE_MINIMUM {
+                return Err("leaf extent is below the pane minimum".to_owned());
+            }
+            return Ok(());
+        }
+        CellNode::Node {
+            axis,
+            geometry,
+            children,
+        } => (axis, geometry, children),
     };
     if children.len() < 2 {
         return Err("node has fewer than two children".to_owned());
@@ -1377,12 +1511,6 @@ fn validate_node(node: &CellNode, dividers: &mut BTreeSet<SplitId>) -> Result<()
                     return Err("vertical child offset is inconsistent".to_owned());
                 }
             }
-        }
-        if matches!(
-            &child.node,
-            CellNode::Node { axis: child_axis, .. } if child_axis == axis
-        ) {
-            return Err("child node has the same axis as its parent".to_owned());
         }
         validate_node(&child.node, dividers)?;
         let child_extent = child.node.extent(*axis);
@@ -1635,10 +1763,47 @@ mod tests {
             ),
             Err(LayoutError::NoSpace)
         );
+
+        let mut ids = allocator(1);
+        let mut over_percent = CellLayout::new(PaneId(0), 80, 24);
+        over_percent
+            .split(
+                PaneId(0),
+                Axis::Horizontal,
+                SplitSize::Percent(200),
+                false,
+                false,
+                PaneId(1),
+                &mut ids,
+            )
+            .unwrap();
+        assert_eq!(
+            sizes(&over_percent, &[PaneId(0), PaneId(1)]),
+            [(1, 24), (78, 24)]
+        );
+
+        let mut allocated = 0;
+        let result = {
+            let mut ids = || {
+                allocated += 1;
+                SplitId(allocated)
+            };
+            default.split(
+                PaneId(99),
+                Axis::Horizontal,
+                SplitSize::Default,
+                false,
+                false,
+                PaneId(2),
+                &mut ids,
+            )
+        };
+        assert_eq!(result, Err(LayoutError::UnknownPane));
+        assert_eq!(allocated, 0);
     }
 
     #[test]
-    fn remove_gifts_after_and_merges_promoted_same_axis_nodes() {
+    fn remove_gifts_after_and_preserves_promoted_same_axis_nodes() {
         let mut ids = allocator(1);
         let mut layout = CellLayout::new(PaneId(0), 80, 24);
         layout
@@ -1667,8 +1832,8 @@ mod tests {
         assert_eq!(sizes(&layout, &[PaneId(1), PaneId(2)]), [(80, 18), (80, 5)]);
 
         let mut ids = allocator(1);
-        let mut merged = CellLayout::new(PaneId(0), 80, 24);
-        merged
+        let mut nested = CellLayout::new(PaneId(0), 80, 24);
+        nested
             .split(
                 PaneId(0),
                 Axis::Horizontal,
@@ -1679,7 +1844,7 @@ mod tests {
                 &mut ids,
             )
             .unwrap();
-        merged
+        nested
             .split(
                 PaneId(1),
                 Axis::Vertical,
@@ -1690,7 +1855,7 @@ mod tests {
                 &mut ids,
             )
             .unwrap();
-        merged
+        nested
             .split(
                 PaneId(1),
                 Axis::Horizontal,
@@ -1701,14 +1866,52 @@ mod tests {
                 &mut ids,
             )
             .unwrap();
-        merged.remove(PaneId(2)).unwrap();
-        assert_eq!(merged.panes_in_order(), [PaneId(0), PaneId(1), PaneId(3)]);
-        let CellNode::Node { axis, children, .. } = &merged.root else {
-            panic!("expected merged root node");
+        nested.remove(PaneId(2)).unwrap();
+        assert_eq!(nested.panes_in_order(), [PaneId(0), PaneId(1), PaneId(3)]);
+        let CellNode::Node { axis, children, .. } = &nested.root else {
+            panic!("expected root node");
         };
         assert_eq!(*axis, Axis::Horizontal);
-        assert_eq!(children.len(), 3);
-        assert!(merged.validate().is_ok());
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[1].divider, Some(SplitId(1)));
+        let CellNode::Node {
+            axis: promoted_axis,
+            children: promoted_children,
+            ..
+        } = &children[1].node
+        else {
+            panic!("expected promoted subtree");
+        };
+        assert_eq!(*promoted_axis, Axis::Horizontal);
+        assert_eq!(promoted_children.len(), 2);
+        assert!(nested.validate().is_ok());
+    }
+
+    #[test]
+    fn remove_reports_last_pane_and_guards_single_child_nodes() {
+        let mut root_leaf = CellLayout::new(PaneId(0), 80, 24);
+        assert_eq!(root_leaf.remove(PaneId(0)), Err(LayoutError::LastPane));
+
+        let mut malformed = CellLayout {
+            root: CellNode::Node {
+                axis: Axis::Horizontal,
+                geometry: CellGeometry {
+                    sx: 80,
+                    sy: 24,
+                    xoff: 0,
+                    yoff: 0,
+                },
+                children: vec![CellChild {
+                    divider: None,
+                    node: leaf(PaneId(0), 80, 24),
+                }],
+            },
+        };
+        assert_eq!(malformed.remove(PaneId(0)), Ok(()));
+        assert_eq!(
+            malformed.resize_pane(PaneId(0), Axis::Horizontal, 1),
+            Ok(())
+        );
     }
 
     #[test]
@@ -1799,6 +2002,31 @@ mod tests {
     }
 
     #[test]
+    fn divider_ratio_resizes_the_matching_boundary() {
+        let mut layout = three_horizontal();
+        assert!(layout.set_divider_ratio(SplitId(2), 0.75).unwrap());
+        assert_eq!(
+            sizes(&layout, &[PaneId(0), PaneId(1), PaneId(2)]),
+            [(40, 24), (29, 24), (9, 24)]
+        );
+        assert!(!layout.set_divider_ratio(SplitId(2), 0.75).unwrap());
+        assert_eq!(
+            layout.set_divider_ratio(SplitId(99), 0.5),
+            Err(LayoutError::UnknownDivider)
+        );
+
+        let mut walked = three_horizontal();
+        walked
+            .resize_pane(PaneId(1), Axis::Horizontal, -18)
+            .unwrap();
+        assert!(walked.set_divider_ratio(SplitId(2), 0.0).unwrap());
+        assert_eq!(
+            sizes(&walked, &[PaneId(0), PaneId(1), PaneId(2)]),
+            [(39, 24), (1, 24), (38, 24)]
+        );
+    }
+
+    #[test]
     fn spread_biases_remainders_to_first_children() {
         let mut layout = three_horizontal();
         layout.resize(81, 24);
@@ -1853,6 +2081,40 @@ mod tests {
         }
     }
 
+    #[test]
+    fn two_pane_main_presets_size_the_other_pane() {
+        let panes = [PaneId(0), PaneId(1)];
+        let cases = [
+            (
+                LayoutPreset::MainHorizontal,
+                [(80, 22), (80, 1)],
+                [PaneId(0), PaneId(1)],
+            ),
+            (
+                LayoutPreset::MainHorizontalMirrored,
+                [(80, 22), (80, 1)],
+                [PaneId(1), PaneId(0)],
+            ),
+            (
+                LayoutPreset::MainVertical,
+                [(78, 24), (1, 24)],
+                [PaneId(0), PaneId(1)],
+            ),
+            (
+                LayoutPreset::MainVerticalMirrored,
+                [(78, 24), (1, 24)],
+                [PaneId(1), PaneId(0)],
+            ),
+        ];
+        for (preset, expected_sizes, expected_order) in cases {
+            let mut layout = CellLayout::new(PaneId(0), 80, 24);
+            let mut ids = allocator(1);
+            layout.apply_preset(preset, &panes, &mut ids);
+            assert_eq!(sizes(&layout, &panes), expected_sizes, "{}", preset.name());
+            assert_eq!(layout.panes_in_order(), expected_order, "{}", preset.name());
+        }
+    }
+
     fn projected_panes(node: &LayoutNode, panes: &mut Vec<PaneId>) {
         match node {
             LayoutNode::Pane(pane) => panes.push(*pane),
@@ -1897,10 +2159,87 @@ mod tests {
     }
 
     #[test]
+    fn unrelated_split_keeps_the_existing_divider_id() {
+        let mut layout = CellLayout::new(PaneId(0), 80, 24);
+        let mut ids = allocator(1);
+        layout
+            .split(
+                PaneId(0),
+                Axis::Horizontal,
+                SplitSize::Default,
+                false,
+                false,
+                PaneId(1),
+                &mut ids,
+            )
+            .unwrap();
+        layout
+            .split(
+                PaneId(0),
+                Axis::Horizontal,
+                SplitSize::Default,
+                false,
+                false,
+                PaneId(2),
+                &mut ids,
+            )
+            .unwrap();
+        let LayoutNode::Split { id, second, .. } = layout.project() else {
+            panic!("expected projected split");
+        };
+        assert_eq!(id, SplitId(2));
+        let LayoutNode::Split { id, .. } = second.as_ref() else {
+            panic!("expected nested projected split");
+        };
+        assert_eq!(*id, SplitId(1));
+    }
+
+    #[test]
+    fn remap_is_simultaneous() {
+        let mut layout = three_horizontal();
+        let mapping = BTreeMap::from([
+            (PaneId(0), PaneId(1)),
+            (PaneId(1), PaneId(2)),
+            (PaneId(2), PaneId(0)),
+        ]);
+        layout.remap(&mapping);
+        assert_eq!(layout.panes_in_order(), [PaneId(1), PaneId(2), PaneId(0)]);
+    }
+
+    #[test]
+    fn pane_count_counts_every_leaf() {
+        assert_eq!(CellLayout::new(PaneId(0), 80, 24).pane_count(), 1);
+        assert_eq!(three_horizontal().pane_count(), 3);
+    }
+
+    #[test]
+    fn replace_panes_in_order_is_atomic_on_count_mismatch() {
+        let mut layout = three_horizontal();
+        assert!(!layout.replace_panes_in_order(&[PaneId(7), PaneId(8)]));
+        assert_eq!(layout.panes_in_order(), [PaneId(0), PaneId(1), PaneId(2)]);
+        assert!(layout.replace_panes_in_order(&[PaneId(7), PaneId(8), PaneId(9)]));
+        assert_eq!(layout.panes_in_order(), [PaneId(7), PaneId(8), PaneId(9)]);
+    }
+
+    #[test]
+    fn refresh_divider_ids_replaces_every_projected_id() {
+        let mut layout = three_horizontal();
+        let mut ids = allocator(10);
+        layout.refresh_divider_ids(&mut ids);
+        let LayoutNode::Split { id, second, .. } = layout.project() else {
+            panic!("expected projected split");
+        };
+        assert_eq!(id, SplitId(10));
+        let LayoutNode::Split { id, .. } = second.as_ref() else {
+            panic!("expected nested projected split");
+        };
+        assert_eq!(*id, SplitId(11));
+    }
+
+    #[test]
     fn dump_checksum_and_identity_mutations_work() {
         let mut layout = CellLayout::new(PaneId(0), 80, 24);
         assert_eq!(layout.dump(), "b25d,80x24,0,0,0");
-        assert_eq!(PANE_MAXIMUM, 10_000);
         let mut ids = allocator(1);
         layout
             .split(
@@ -1918,6 +2257,12 @@ mod tests {
         assert!(layout.replace(PaneId(1), PaneId(7)));
         assert_eq!(layout.panes_in_order(), [PaneId(7), PaneId(0)]);
         assert!(!layout.replace(PaneId(99), PaneId(8)));
+
+        let mut maximum = CellLayout::new(PaneId(0), u16::MAX, u16::MAX);
+        assert_eq!(maximum.extent(), (PANE_MAXIMUM, PANE_MAXIMUM));
+        maximum.resize(u16::MAX, u16::MAX);
+        assert_eq!(maximum.extent(), (PANE_MAXIMUM, PANE_MAXIMUM));
+        assert_eq!(CellLayout::new(PaneId(0), 0, 0).extent(), (1, 1));
     }
 
     #[test]
@@ -1946,6 +2291,13 @@ mod tests {
         assert_eq!(
             layout.validate(),
             Err("non-first child is missing a divider".to_owned())
+        );
+        let zero_leaf = CellLayout {
+            root: leaf(PaneId(0), 0, 1),
+        };
+        assert_eq!(
+            zero_leaf.validate(),
+            Err("leaf extent is below the pane minimum".to_owned())
         );
         assert_eq!(geometry(&CellLayout::new(PaneId(5), 1, 1), 5).sx, 1);
     }

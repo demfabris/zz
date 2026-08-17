@@ -1,12 +1,7 @@
-mod model {
-    pub(crate) use zz_mux::LayoutPreset;
-}
-
-#[path = "../src/layout.rs"]
-mod layout;
-
-use layout::{CellLayout, SplitSize};
-use model::LayoutPreset;
+use crate::{
+    layout::{CellLayout, LayoutError, SplitSize},
+    model::LayoutPreset,
+};
 use zz_protocol::{Axis, PaneId, SplitId};
 
 struct Fixture<'a> {
@@ -69,16 +64,22 @@ impl Replay {
         let before = has_flag(words, "-b");
         let full = has_flag(words, "-f");
         let new_pane = self.next_pane_id;
-        self.next_pane_id += 1;
-        let next_split_id = &mut self.next_split_id;
-        let mut ids = || {
-            let id = SplitId(*next_split_id);
-            *next_split_id += 1;
-            id
+        let result = {
+            let next_split_id = &mut self.next_split_id;
+            let mut ids = || {
+                let id = SplitId(*next_split_id);
+                *next_split_id += 1;
+                id
+            };
+            self.layout
+                .split(target, axis, size, before, full, PaneId(new_pane), &mut ids)
         };
-        self.layout
-            .split(target, axis, size, before, full, PaneId(new_pane), &mut ids)
-            .unwrap();
+        match result {
+            Ok(()) => {}
+            Err(LayoutError::NoSpace) => return,
+            Err(error) => panic!("split-window fixture failed: {error:?}"),
+        }
+        self.next_pane_id += 1;
         let insertion = if full {
             if before { 0 } else { self.panes.len() }
         } else if before {
@@ -106,16 +107,12 @@ impl Replay {
         let pane = PaneId(self.panes[index]);
         if let Some(value) = flag_value(words, "-x") {
             let size = absolute_size(value, self.layout.extent().0);
-            self.layout
-                .resize_pane_to(pane, Axis::Horizontal, size)
-                .unwrap();
+            let _ = self.layout.resize_pane_to(pane, Axis::Horizontal, size);
             return;
         }
         if let Some(value) = flag_value(words, "-y") {
             let size = absolute_size(value, self.layout.extent().1);
-            self.layout
-                .resize_pane_to(pane, Axis::Vertical, size)
-                .unwrap();
+            let _ = self.layout.resize_pane_to(pane, Axis::Vertical, size);
             return;
         }
         for (flag, axis, sign) in [
@@ -126,7 +123,7 @@ impl Replay {
         ] {
             if let Some(value) = flag_value(words, flag) {
                 let amount = value.parse::<i32>().unwrap();
-                self.layout.resize_pane(pane, axis, sign * amount).unwrap();
+                let _ = self.layout.resize_pane(pane, axis, sign * amount);
                 return;
             }
         }
@@ -185,14 +182,14 @@ impl Replay {
         } else {
             Axis::Vertical
         };
-        let next_split_id = &mut self.next_split_id;
-        let mut ids = || {
-            let id = SplitId(*next_split_id);
-            *next_split_id += 1;
-            id
-        };
-        self.layout
-            .split(
+        let result = {
+            let next_split_id = &mut self.next_split_id;
+            let mut ids = || {
+                let id = SplitId(*next_split_id);
+                *next_split_id += 1;
+                id
+            };
+            self.layout.split(
                 target,
                 axis,
                 SplitSize::Default,
@@ -201,7 +198,15 @@ impl Replay {
                 PaneId(pane),
                 &mut ids,
             )
-            .unwrap();
+        };
+        match result {
+            Ok(()) => {}
+            Err(LayoutError::NoSpace) => {
+                self.broken = Some(pane);
+                return;
+            }
+            Err(error) => panic!("join-pane fixture failed: {error:?}"),
+        }
         self.panes.insert(index + 1, pane);
         self.active = pane;
     }
@@ -241,7 +246,7 @@ fn absolute_size(value: &str, extent: u16) -> u16 {
 }
 
 fn fixtures() -> Vec<Fixture<'static>> {
-    include_str!("fixtures/layout-pin.txt")
+    include_str!("../tests/fixtures/layout-pin.txt")
         .split("\n\n")
         .filter(|block| !block.trim().is_empty())
         .map(|block| {
@@ -281,7 +286,7 @@ fn fixtures() -> Vec<Fixture<'static>> {
 #[test]
 fn pinned_tmux_layout_fixtures_replay_exactly() {
     let fixtures = fixtures();
-    assert_eq!(fixtures.len(), 35);
+    assert_eq!(fixtures.len(), 46);
     for fixture in fixtures {
         let mut replay = Replay::new();
         for step in fixture.steps {

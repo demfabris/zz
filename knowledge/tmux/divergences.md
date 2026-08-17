@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: tmux divergence matrix
-description: "Every known divergence from tmux at the pinned reference commit: the 38 missing commands and why, behavioral gaps on the implemented surface, the 12-of-180 options coverage, and the protocol-level differences — the drop-in-replacement gap, enumerated."
+description: "Every known divergence from tmux at the pinned reference commit: the 38 missing commands and why, behavioral gaps on the implemented surface, the 15-of-180 options coverage, and the protocol-level differences — the drop-in-replacement gap, enumerated."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-17T00:00:00-03:00
@@ -17,7 +17,8 @@ complements the [compatibility philosophy](/tmux/tmux-compat.md) (the contract) 
 
 **State anchor:** the "implemented surface" section reflects
 [PR #4](https://github.com/demfabris/zz/pull/4) (`fix/tmux-compat-hunt-v2`, merged 2026-08-16
-as `53b523e`) plus the phase 3d layout-string source dated 2026-08-17. PR #4 corrected the
+as `53b523e`) plus the phase 3d layout-string and phase 4a index-option source dated
+2026-08-17. PR #4 corrected the
 hunt-claim regressions, including two implemented backwards
 (`new-window -t` bare-target order, positional targets on the kill commands) plus the
 `kill-session -C`, `new-session -A`, `resize-pane` attached-adjustment, `send-keys -H`/`-l`,
@@ -25,7 +26,7 @@ hunt-claim regressions, including two implemented backwards
 
 The one-line read: everything marked **silent** below is a bug by zz's own doctrine (tmux syntax
 must mean what tmux means, or error loudly); everything loud is a choice; the "genuine gaps"
-command block plus `base-index` is the actual drop-in backlog.
+command block plus the remaining options grind is the actual drop-in backlog.
 
 # Missing commands (38 of ~92)
 
@@ -112,18 +113,20 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | Error strings | Several differ (zz `index in use: 2` vs tmux `create window failed: index 2 in use`). | cosmetic |
 | Daemon boot | The zz daemon creates a default session `0` at spawn (the GUI's empty workspace expects one); a tmux server boots empty until its first `new-session`. `tmux ls` scripts see one extra session, and every `$N`/`@N`/`%N` id is shifted by the auto-session's objects — which is why the harness diffs layout-string structure with pane numbers stripped. | **silent** |
 
-# Options: 12 of 180
+# Options: 15 of 180
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin.
 Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-panes`,
 `word-separators`, `buffer-limit`, `set-clipboard`, `copy-command`, `status`,
-`status-interval`, `status-left`, `status-right`. (`set-option` also accepts six zz-native
-names — the agent/editor/history-trickle keys — which don't count toward tmux coverage.)
-Everything else is reported-and-skipped by the [conf parser](/tmux/conf-parser.md).
-The ones real dotfiles set most, roughly by frequency: `base-index`, `pane-base-index`,
-`renumber-windows`, `escape-time`, `mouse`, `default-terminal`, `terminal-overrides`,
-`set-titles`, `automatic-rename`, `aggressive-resize`, `remain-on-exit`, `monitor-activity`,
-`display-time`, `repeat-time`, and the whole `*-style` family (styles are on the never-list).
+`status-interval`, `status-left`, `status-right`, `base-index`, `pane-base-index`, and
+`renumber-windows`. The index trio follows tmux's session/window inheritance, allocation,
+targeting, format, and close-triggered renumbering behavior. (`set-option` also accepts six
+zz-native names — the agent/editor/history-trickle keys — which don't count toward tmux
+coverage.) Everything else is reported-and-skipped by the [conf parser](/tmux/conf-parser.md).
+The ones real dotfiles set most, roughly by frequency: `escape-time`, `mouse`,
+`default-terminal`, `terminal-overrides`, `set-titles`, `automatic-rename`,
+`aggressive-resize`, `remain-on-exit`, `monitor-activity`, `display-time`, `repeat-time`, and
+the whole `*-style` family (styles are on the never-list).
 
 # Protocol and process level
 

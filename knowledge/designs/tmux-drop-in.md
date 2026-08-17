@@ -141,8 +141,8 @@ See [split-pane layout](/concepts/split-pane-layout.md) for the shipped architec
 
 | Work | Scope | Estimate |
 | --- | --- | --- |
-| `base-index` / `pane-base-index` / `renumber-windows` | index arithmetic everywhere — first | with options below |
-| Remaining options | tmux has **180** named options at the pin (zz: 12 tmux names). Most are table rows; `mouse`, `escape-time`, `default-terminal`, `aggressive-resize`, `automatic-rename`, `remain-on-exit` are behavior. `remain-on-exit` lands before `respawn-*` (which is a no-op without it) | 4–5 weeks |
+| `base-index` / `pane-base-index` / `renumber-windows` | index arithmetic everywhere — first; shipped 2026-08-17 | shipped |
+| Remaining options | tmux has **180** named options at the pin (zz: 15 tmux names). Most are table rows; `mouse`, `escape-time`, `default-terminal`, `aggressive-resize`, `automatic-rename`, `remain-on-exit` are behavior. `remain-on-exit` lands before `respawn-*` (which is a no-op without it) | 4–5 weeks |
 | Full formats engine | tmux's **198** `format.c` variables + ~29 modifier chars (zz: 16 variables, `?`/`=`, `#S`-style aliases) | 2–3 weeks |
 | Styles (`#[…]`, `*-style`) | meaningful on the TUI surface; GUI maps to theme | 2 weeks |
 | The gap commands | the 16 buildable ones (18 in the matrix minus `link-`/`unlink-window`, decision 3), plus `start-server` as a no-op (TPM's bootstrap runs `tmux start-server\; show-environment`; config sourcing already skips it, the CLI errors today) and basic `refresh-client` | 3 weeks |

@@ -1,6 +1,7 @@
 # Update Log
 
 ## 2026-08-17
+* **Update**: Shipped phase 4a of the tmux drop-in grind: `base-index`, `pane-base-index`, and `renumber-windows` now follow the pinned tmux scope, inheritance, bounds, unset, allocation, target, format, and close-triggered compaction semantics. Default window allocation begins at the effective session base while explicit lower indices remain legal; pane numbers use the effective global/window base across targets, formats, status, and display overlays; automatic renumbering covers window kills, last-pane removal, and source-draining joins while preserving window identity, active/last history, and `new-window -k` replacement behavior. A shared differential scenario exercises all three options without changing the default-base corpus.
 * **Update**: Added checksummed tmux layout-string parsing and select-layout application, bottom-right cell reconciliation, fresh divider assignment, window extent adoption, and the window_layout format variable.
 
 ## 2026-08-16

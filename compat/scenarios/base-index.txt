@@ -1,0 +1,10 @@
+# Window and pane bases steer default allocation, targets, display, and renumbering.
+set-option -g base-index 1
+set-option -g pane-base-index 1
+new-window -d -t w -n one
+split-window -h -d -t w:1.1
+list-panes -t w:1.1 -F '#{window_index}:#{pane_index}'
+new-window -d -t w -n two
+set-option -g renumber-windows on
+kill-window -t w:1
+list-panes -t w:1.1 -F '#{window_index}:#{pane_index}'

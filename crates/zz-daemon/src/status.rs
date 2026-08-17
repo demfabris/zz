@@ -115,16 +115,7 @@ pub(crate) fn status_context(
     context.window_bell = window.panes.values().any(|pane| pane.bell);
 
     context.pane_index = engine
-        .state
-        .windows
-        .get(&window.id)
-        .and_then(|window| {
-            window
-                .pane_order()
-                .iter()
-                .position(|pane| *pane == window.active_pane)
-        })
-        .and_then(|index| u32::try_from(index).ok())
+        .pane_index(window.id, window.active_pane)
         .unwrap_or_default();
     if let Some(pane) = window.panes.get(&window.active_pane) {
         context.pane_id = pane.id.to_string();
@@ -344,7 +335,7 @@ mod tests {
     }
 
     #[test]
-    fn status_pane_index_uses_pane_order_when_layout_order_differs() {
+    fn status_pane_index_uses_effective_pane_base_and_pane_order() {
         let mut engine = MuxEngine::default();
         let (session, window, target) = engine.state.create_session("work").unwrap();
         let source = engine
@@ -363,6 +354,15 @@ mod tests {
                 false,
             )
             .unwrap();
+        engine
+            .execute(
+                &mut zz_mux::ExecutionContext::default(),
+                &zz_protocol::CommandInvocation::new(
+                    "set-window-option",
+                    ["-g", "pane-base-index", "1"],
+                ),
+            )
+            .unwrap();
         let snapshot = engine.state.snapshot();
         let mut layout_order = Vec::new();
         snapshot.sessions[0].windows[0]
@@ -372,7 +372,7 @@ mod tests {
         assert_eq!(layout_order, [source, target]);
         assert_eq!(engine.state.windows[&window].pane_order(), [target, source]);
         let context = status_context(&snapshot, &engine, Some(session), Some(window));
-        assert_eq!(context.pane_index, 1);
+        assert_eq!(context.pane_index, 2);
         assert_eq!(
             context.window_layout,
             engine.state.windows[&window].layout.dump()

@@ -2654,7 +2654,7 @@ impl Shared {
                             .into());
                         }
                         let (source_session, source_window, state) =
-                            build_display_panes_state(&inner.engine.state, *pane, *duration_ms)?;
+                            build_display_panes_state(&inner.engine, *pane, *duration_ms)?;
                         if client_attached_session(&inner, client) != Some(source_session) {
                             return Err(ServerError::PaneNotAttached(*pane).into());
                         }
@@ -3005,7 +3005,7 @@ impl Shared {
         let parsed = parse_capture_pane_args(args)?;
         let (pane, terminal) = {
             let inner = self.inner.lock();
-            let pane = inner.engine.state.resolve_pane(
+            let pane = inner.engine.resolve_pane(
                 parsed.target.as_deref(),
                 context.window,
                 context.pane,
@@ -3070,7 +3070,6 @@ impl Shared {
             let pane =
                 inner
                     .engine
-                    .state
                     .resolve_pane(target.as_deref(), context.window, context.pane)?;
             if !matches!(
                 inner.engine.state.pane(pane).map(|pane| &pane.kind),
@@ -3153,7 +3152,7 @@ impl Shared {
             .to_owned();
         let pane = {
             let inner = self.inner.lock();
-            let pane = inner.engine.state.resolve_pane(
+            let pane = inner.engine.resolve_pane(
                 parsed.target.as_deref(),
                 context.window,
                 context.pane,
@@ -3186,7 +3185,6 @@ impl Shared {
         let inner = self.inner.lock();
         let pane = inner
             .engine
-            .state
             .resolve_pane(target, context.window, context.pane)?;
         match inner.engine.state.pane(pane).map(|pane| &pane.kind) {
             Some(PaneKind::Agent(_)) => Ok(pane),
@@ -3375,7 +3373,7 @@ impl Shared {
                 let parsed =
                     parse_buffer_command_args(name, args, &['b', 's', 't'], &['d', 'p', 'r', 'S'])?;
                 require_no_positionals(name, &parsed)?;
-                let pane = self.inner.lock().engine.state.resolve_pane(
+                let pane = self.inner.lock().engine.resolve_pane(
                     parsed.value('t'),
                     context.window,
                     context.pane,
@@ -6333,7 +6331,7 @@ impl Shared {
                 let attached_session = client_attached_session(&inner, client);
                 let active_window = client_focused_window_for_attachment(&inner, client);
                 let rebuilt = build_display_panes_state(
-                    &inner.engine.state,
+                    &inner.engine,
                     overlay.source_pane,
                     overlay.state.duration_ms,
                 );
@@ -8116,10 +8114,11 @@ fn take_display_panes(inner: &mut ServerState, client: ClientId) -> Option<Displ
 }
 
 fn build_display_panes_state(
-    state: &MuxState,
+    engine: &MuxEngine,
     source_pane: PaneId,
     duration_ms: u32,
 ) -> Result<(SessionId, WindowId, DisplayPanesState), ServerError> {
+    let state = &engine.state;
     let window_id = state
         .window_for_pane(source_pane)
         .ok_or_else(|| ServerError::MissingTarget(source_pane.to_string()))?;
@@ -8135,10 +8134,11 @@ fn build_display_panes_state(
     }
     let indicators = panes
         .into_iter()
-        .enumerate()
-        .filter(|(_, pane)| window.zoomed_pane.is_none_or(|zoomed| *pane == zoomed))
-        .map(|(index, pane)| {
-            let index = u32::try_from(index).expect("pane indicator count is bounded");
+        .filter(|pane| window.zoomed_pane.is_none_or(|zoomed| *pane == zoomed))
+        .map(|pane| {
+            let index = engine
+                .pane_index(window_id, pane)
+                .expect("window pane has an effective index");
             let select_key = match index {
                 0..=9 => b'0' + u8::try_from(index).expect("digit pane index"),
                 10..=35 => b'a' + u8::try_from(index - 10).expect("letter pane index"),
@@ -16475,10 +16475,11 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[test]
     fn display_panes_model_uses_pane_order_and_tmux_selection_keys() {
-        let mut state = MuxState::default();
-        let (_, window, source) = state.create_session("work").expect("session");
+        let mut engine = MuxEngine::default();
+        let (_, window, source) = engine.state.create_session("work").expect("session");
         for _ in 1..=36 {
-            state
+            engine
+                .state
                 .split_pane_with(
                     source,
                     zz_protocol::Axis::Horizontal,
@@ -16490,11 +16491,11 @@ bind - split-window -v -c "#{pane_current_path}"
                 )
                 .expect("split pane");
         }
-        let active = state.windows[&window].pane_order()[36];
-        state.select_pane(active).expect("select last pane");
+        let active = engine.state.windows[&window].pane_order()[36];
+        engine.state.select_pane(active).expect("select last pane");
 
         let (_, actual_window, overlay) =
-            build_display_panes_state(&state, active, 1_000).expect("pane indicators");
+            build_display_panes_state(&engine, active, 1_000).expect("pane indicators");
         assert_eq!(actual_window, window);
         assert_eq!(overlay.indicators.len(), 37);
         assert_eq!(overlay.indicators[0].select_key, b'0');
@@ -16503,6 +16504,23 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(overlay.indicators[35].select_key, b'z');
         assert_eq!(overlay.indicators[36].select_key, 0);
         assert!(overlay.indicators[36].active());
+
+        engine
+            .execute(
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-window-option", ["-g", "pane-base-index", "1"]),
+            )
+            .expect("one-based pane indicators");
+        let (_, _, overlay) =
+            build_display_panes_state(&engine, active, 1_000).expect("one-based indicators");
+        assert_eq!(overlay.indicators[0].index, 1);
+        assert_eq!(overlay.indicators[0].select_key, b'1');
+        assert_eq!(overlay.indicators[8].index, 9);
+        assert_eq!(overlay.indicators[8].select_key, b'9');
+        assert_eq!(overlay.indicators[9].index, 10);
+        assert_eq!(overlay.indicators[9].select_key, b'a');
+        assert_eq!(overlay.indicators[35].index, 36);
+        assert_eq!(overlay.indicators[35].select_key, 0);
     }
 
     #[test]
@@ -18960,7 +18978,7 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(shared.inner.lock().visible_terminals[&client].is_empty());
 
         let (_, _, display) =
-            build_display_panes_state(&shared.inner.lock().engine.state, browser, 1_000)
+            build_display_panes_state(&shared.inner.lock().engine, browser, 1_000)
                 .expect("zoomed display panes");
         assert_eq!(display.indicators.len(), 1);
         assert_eq!(display.indicators[0].pane, browser);

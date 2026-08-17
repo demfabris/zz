@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, path::PathBuf, str::FromStr as _};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+    str::FromStr as _,
+};
 
 use zz_protocol::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind, CommandInvocation,
@@ -30,6 +34,11 @@ pub const DEFAULT_BUFFER_LIMIT: usize = 50;
 const MAX_BUFFER_LIMIT: usize = i32::MAX.cast_unsigned() as usize;
 const DEFAULT_HISTORY_TRICKLE: usize = 2_000;
 const MAX_HISTORY_TRICKLE: usize = 10_000;
+const DEFAULT_BASE_INDEX: u32 = 0;
+const MAX_BASE_INDEX: u32 = i32::MAX.cast_unsigned();
+const DEFAULT_PANE_BASE_INDEX: u32 = 0;
+const MAX_PANE_BASE_INDEX: u32 = u16::MAX as u32;
+const DEFAULT_RENUMBER_WINDOWS: bool = false;
 pub const MAX_WORD_SEPARATORS_BYTES: usize = 8 * 1024;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -237,6 +246,12 @@ pub struct MuxEngine {
     history_trickle: usize,
     global_history_limit: usize,
     session_history_limits: BTreeMap<SessionId, usize>,
+    global_base_index: u32,
+    session_base_indices: BTreeMap<SessionId, u32>,
+    global_renumber_windows: bool,
+    session_renumber_windows: BTreeMap<SessionId, bool>,
+    global_pane_base_index: u32,
+    window_pane_base_indices: BTreeMap<WindowId, u32>,
     global_word_separators: String,
     session_word_separators: BTreeMap<SessionId, String>,
     status: StatusFormats,
@@ -276,6 +291,12 @@ impl Default for MuxEngine {
             history_trickle: DEFAULT_HISTORY_TRICKLE,
             global_history_limit: DEFAULT_HISTORY_LIMIT,
             session_history_limits: BTreeMap::new(),
+            global_base_index: DEFAULT_BASE_INDEX,
+            session_base_indices: BTreeMap::new(),
+            global_renumber_windows: DEFAULT_RENUMBER_WINDOWS,
+            session_renumber_windows: BTreeMap::new(),
+            global_pane_base_index: DEFAULT_PANE_BASE_INDEX,
+            window_pane_base_indices: BTreeMap::new(),
             global_word_separators: DEFAULT_WORD_SEPARATORS.to_owned(),
             session_word_separators: BTreeMap::new(),
             status: StatusFormats::default(),
@@ -372,6 +393,80 @@ impl MuxEngine {
             .get(&session)
             .copied()
             .unwrap_or(self.global_history_limit)
+    }
+
+    #[must_use]
+    pub fn base_index_for_session(&self, session: SessionId) -> u32 {
+        self.session_base_indices
+            .get(&session)
+            .copied()
+            .unwrap_or(self.global_base_index)
+    }
+
+    #[must_use]
+    pub fn renumber_windows_for_session(&self, session: SessionId) -> bool {
+        self.session_renumber_windows
+            .get(&session)
+            .copied()
+            .unwrap_or(self.global_renumber_windows)
+    }
+
+    fn pane_base_index_for_window(&self, window: WindowId) -> u32 {
+        self.window_pane_base_indices
+            .get(&window)
+            .copied()
+            .unwrap_or(self.global_pane_base_index)
+    }
+
+    #[must_use]
+    pub fn pane_index(&self, window: WindowId, pane: PaneId) -> Option<u32> {
+        let offset = self
+            .state
+            .windows
+            .get(&window)?
+            .pane_order()
+            .iter()
+            .position(|candidate| *candidate == pane)?;
+        self.pane_base_index_for_window(window)
+            .checked_add(u32::try_from(offset).ok()?)
+    }
+
+    fn pane_at_index(&self, window: WindowId, index: u32) -> Option<PaneId> {
+        let offset = index.checked_sub(self.pane_base_index_for_window(window))?;
+        self.state
+            .windows
+            .get(&window)?
+            .pane_order()
+            .get(usize::try_from(offset).ok()?)
+            .copied()
+    }
+
+    pub fn resolve_window(
+        &self,
+        target: Option<&str>,
+        current_session: Option<SessionId>,
+        current_window: Option<WindowId>,
+    ) -> Result<WindowId, ServerError> {
+        self.state.resolve_window_with_pane_index(
+            target,
+            current_session,
+            current_window,
+            &|window, index| self.pane_at_index(window, index),
+        )
+    }
+
+    pub fn resolve_pane(
+        &self,
+        target: Option<&str>,
+        current_window: Option<WindowId>,
+        current_pane: Option<PaneId>,
+    ) -> Result<PaneId, ServerError> {
+        self.state.resolve_pane_with_index(
+            target,
+            current_window,
+            current_pane,
+            &|window, index| self.pane_at_index(window, index),
+        )
     }
 
     /// The effective word-separator string for a pane's session.
@@ -503,9 +598,15 @@ impl MuxEngine {
         }
         self.session_history_limits
             .retain(|session, _| self.state.sessions.contains_key(session));
+        self.session_base_indices
+            .retain(|session, _| self.state.sessions.contains_key(session));
+        self.session_renumber_windows
+            .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_word_separators
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.window_mode_keys
+            .retain(|window, _| self.state.windows.contains_key(window));
+        self.window_pane_base_indices
             .retain(|window, _| self.state.windows.contains_key(window));
         self.repair_context(context);
         Ok(execution)
@@ -549,7 +650,10 @@ impl MuxEngine {
             .value("-s")
             .map_or_else(|| next_session_name(&self.state), str::to_owned);
         let extent = initial_window_extent(&options)?;
-        let (session, window, pane) = self.state.create_session_with_extent(name, extent)?;
+        let base_index = self.global_base_index;
+        let (session, window, pane) = self
+            .state
+            .create_session_with_extent_at(name, extent, base_index)?;
         if let Some(window_name) = options.value("-n") {
             window_name.clone_into(
                 &mut self
@@ -594,7 +698,7 @@ impl MuxEngine {
                 .map(|session| {
                     expand_format(
                         format,
-                        &self.state,
+                        self,
                         FormatContext {
                             session: Some(session.id),
                             window: None,
@@ -792,12 +896,14 @@ impl MuxEngine {
         let window_name = name
             .map(str::to_owned)
             .or_else(|| index.map(|index| index.to_string()));
-        let (window, pane) = self.state.create_window_at(
+        let base_index = self.base_index_for_session(session);
+        let (window, pane) = self.state.create_window_at_with_base_index(
             session,
             index.filter(|_| replaced.is_none()),
             window_name,
             kind,
             selects,
+            base_index,
         )?;
         if let Some(replaced) = replaced {
             effects.push(MuxEffect::PanesRemoved(self.state.kill_window(replaced)?));
@@ -846,7 +952,7 @@ impl MuxEngine {
                 .map(|window| {
                     expand_format(
                         format,
-                        &self.state,
+                        self,
                         FormatContext {
                             session: Some(session_id),
                             window: Some(window.id),
@@ -889,9 +995,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("rename-window", args)?;
         let name = exactly_one_argument("rename-window", &positional)?;
-        let window =
-            self.state
-                .resolve_window(options.value("-t"), context.session, context.window)?;
+        let window = self.resolve_window(options.value("-t"), context.session, context.window)?;
         self.state.rename_window(window, name)?;
         Ok(Execution::default())
     }
@@ -913,9 +1017,7 @@ impl MuxEngine {
             let session = self.session_of_window_target(target, context)?;
             return self.activate_last_window(context, session);
         }
-        let window = self
-            .state
-            .resolve_window(target, context.session, context.window)?;
+        let window = self.resolve_window(target, context.session, context.window)?;
         let session = self
             .state
             .windows
@@ -940,9 +1042,7 @@ impl MuxEngine {
         let Some(target) = target else {
             return self.state.resolve_session(None, context.session);
         };
-        let window = self
-            .state
-            .resolve_window(Some(target), context.session, context.window)?;
+        let window = self.resolve_window(Some(target), context.session, context.window)?;
         self.state
             .windows
             .get(&window)
@@ -1057,6 +1157,16 @@ impl MuxEngine {
             .is_some_and(|window| window.panes.values().any(|pane| pane.bell))
     }
 
+    fn renumber_session_if_enabled(&mut self, session: SessionId) -> Result<(), ServerError> {
+        if !self.state.sessions.contains_key(&session)
+            || !self.renumber_windows_for_session(session)
+        {
+            return Ok(());
+        }
+        let base_index = self.base_index_for_session(session);
+        self.state.renumber_windows(session, base_index)
+    }
+
     fn kill_window(
         &mut self,
         context: &ExecutionContext,
@@ -1064,9 +1174,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-window", args)?;
         reject_positionals("kill-window", &positional)?;
-        let window =
-            self.state
-                .resolve_window(options.value("-t"), context.session, context.window)?;
+        let window = self.resolve_window(options.value("-t"), context.session, context.window)?;
         let targets = if options.has("-a") {
             let session = self
                 .state
@@ -1086,9 +1194,16 @@ impl MuxEngine {
         } else {
             vec![window]
         };
+        let sessions = targets
+            .iter()
+            .filter_map(|target| self.state.windows.get(target).map(|window| window.session))
+            .collect::<BTreeSet<_>>();
         let mut panes = Vec::new();
         for target in targets {
             panes.extend(self.state.kill_window(target)?);
+        }
+        for session in sessions {
+            self.renumber_session_if_enabled(session)?;
         }
         Ok(Execution::effect(MuxEffect::PanesRemoved(panes)))
     }
@@ -1121,9 +1236,7 @@ impl MuxEngine {
                 "split-picker does not accept positional arguments".to_owned(),
             ));
         }
-        let target = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let inherit_cwd_from = spawn_cwd_source(
             "split-picker",
             &self.state,
@@ -1162,9 +1275,7 @@ impl MuxEngine {
                     .to_owned(),
             ));
         };
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let agent_cwd = options.value("-c").map(PathBuf::from);
         if agent_cwd.as_ref().is_some_and(|cwd| {
             !cwd.is_absolute() || cwd.as_os_str().as_encoded_bytes().len() > MAX_GUI_TEXT_BYTES
@@ -1238,9 +1349,7 @@ impl MuxEngine {
                 "break-pane does not accept positional arguments".to_owned(),
             ));
         }
-        let source = self
-            .state
-            .resolve_pane(options.value("-s"), context.window, context.pane)?;
+        let source = self.resolve_pane(options.value("-s"), context.window, context.pane)?;
         let source_window = self
             .state
             .window_for_pane(source)
@@ -1256,12 +1365,14 @@ impl MuxEngine {
         let destination_session = destination.session;
         let detached = options.has("-d");
         let original_context = context.clone();
-        let window = self.state.break_pane(
+        let base_index = self.base_index_for_session(destination_session);
+        let window = self.state.break_pane_with_base_index(
             source,
             destination_session,
             destination.index,
             options.value("-n").map(str::to_owned),
             detached,
+            base_index,
         )?;
         if detached {
             if original_context.window == Some(source_window)
@@ -1311,12 +1422,8 @@ impl MuxEngine {
                 "{command} does not accept positional arguments"
             )));
         }
-        let source = self
-            .state
-            .resolve_pane(options.value("-s"), context.window, context.pane)?;
-        let target = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let source = self.resolve_pane(options.value("-s"), context.window, context.pane)?;
+        let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let source_window = self
             .state
             .window_for_pane(source)
@@ -1346,6 +1453,9 @@ impl MuxEngine {
             options.has("-f"),
             detached,
         )?;
+        if !self.state.windows.contains_key(&source_window) {
+            self.renumber_session_if_enabled(source_session)?;
+        }
 
         if detached {
             if original_context.window == Some(source_window)
@@ -1381,9 +1491,7 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-browser-url", args)?;
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let url = positional
             .first()
             .ok_or_else(|| ServerError::InvalidCommand("set-browser-url needs a URL".to_owned()))?;
@@ -1397,9 +1505,7 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-browser-tabs", args)?;
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let active_tab = options
             .value("-a")
             .map_or(Ok(0), str::parse)
@@ -1420,9 +1526,7 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-browser-profile", args)?;
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         if positional.len() != 1 {
             return Err(ServerError::InvalidCommand(
                 "set-browser-profile needs exactly one profile name".to_owned(),
@@ -1438,9 +1542,7 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-agent-session", args)?;
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let [session_id] = positional.as_slice() else {
             return Err(ServerError::InvalidCommand(
                 "set-agent-session needs exactly one ACP session ID".to_owned(),
@@ -1458,9 +1560,7 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-agent-provider", args)?;
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let [provider] = positional.as_slice() else {
             return Err(ServerError::InvalidCommand(
                 "set-agent-provider needs exactly one provider".to_owned(),
@@ -1485,9 +1585,7 @@ impl MuxEngine {
                 "restart-agent-pane does not accept positional arguments".to_owned(),
             ));
         }
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         if !matches!(
             self.state.pane(pane).map(|pane| &pane.kind),
             Some(PaneKind::Agent(_))
@@ -1505,9 +1603,7 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-editor-path", args)?;
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let path = match positional.as_slice() {
             [] => None,
             [path] => Some(path.clone()),
@@ -1529,9 +1625,7 @@ impl MuxEngine {
         command: Option<String>,
         size: Option<SplitSize<'_>>,
     ) -> Result<Execution, ServerError> {
-        let target = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let axis = if options.has("-h") {
             Axis::Horizontal
         } else {
@@ -1600,20 +1694,14 @@ impl MuxEngine {
             .or_else(|| positional.first().map(String::as_str));
         let start = match target {
             Some(":.+" | ".+" | ":+") => {
-                let current = self
-                    .state
-                    .resolve_pane(None, context.window, context.pane)?;
+                let current = self.resolve_pane(None, context.window, context.pane)?;
                 self.state.next_pane(current)?
             }
             Some(":.-" | ".-" | ":-") => {
-                let current = self
-                    .state
-                    .resolve_pane(None, context.window, context.pane)?;
+                let current = self.resolve_pane(None, context.window, context.pane)?;
                 self.state.previous_pane(current)?
             }
-            _ => self
-                .state
-                .resolve_pane(target, context.window, context.pane)?,
+            _ => self.resolve_pane(target, context.window, context.pane)?,
         };
         let direction = if options.has("-L") {
             Some(PaneDirection::Left)
@@ -1664,9 +1752,7 @@ impl MuxEngine {
                 "last-pane supports only -t and -Z".to_owned(),
             ));
         }
-        let window =
-            self.state
-                .resolve_window(options.value("-t"), context.session, context.window)?;
+        let window = self.resolve_window(options.value("-t"), context.session, context.window)?;
         let pane = self.state.last_pane(window)?;
         self.state.select_pane_with_zoom(pane, options.has("-Z"))?;
         *context = ExecutionContext::for_pane(&self.state, pane).expect("selected pane exists");
@@ -1684,9 +1770,7 @@ impl MuxEngine {
                 "swap-pane supports -d, -D, -U, -Z, -s, and -t".to_owned(),
             ));
         }
-        let target = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let source = if options.has("-D") {
             self.state.next_pane(target)?
         } else if options.has("-U") {
@@ -1697,8 +1781,7 @@ impl MuxEngine {
                     "swap-pane needs -s when neither -U nor -D is used".to_owned(),
                 )
             })?;
-            self.state
-                .resolve_pane(Some(source), context.window, context.pane)?
+            self.resolve_pane(Some(source), context.window, context.pane)?
         };
 
         let source_window = self
@@ -1743,8 +1826,7 @@ impl MuxEngine {
         let (options, positional) = parse_command_options("list-panes", args)?;
         reject_positionals("list-panes", &positional)?;
         let window_id =
-            self.state
-                .resolve_window(options.value("-t"), context.session, context.window)?;
+            self.resolve_window(options.value("-t"), context.session, context.window)?;
         let window = self
             .state
             .windows
@@ -1758,7 +1840,7 @@ impl MuxEngine {
                 .map(|pane| {
                     expand_format(
                         format,
-                        &self.state,
+                        self,
                         FormatContext {
                             session: Some(window.session),
                             window: Some(window_id),
@@ -1800,9 +1882,7 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("resize-pane", args)?;
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         if positional.len() > 1 {
             return Err(ServerError::InvalidCommand(
                 "resize-pane accepts at most one adjustment".to_owned(),
@@ -1967,18 +2047,14 @@ impl MuxEngine {
         let target = options.value("-t");
         let (window, pane) =
             if target.is_some_and(|target| target.starts_with('%') || target.contains('.')) {
-                let pane = self
-                    .state
-                    .resolve_pane(target, context.window, context.pane)?;
+                let pane = self.resolve_pane(target, context.window, context.pane)?;
                 let window = self
                     .state
                     .window_for_pane(pane)
                     .expect("resolved pane has a window");
                 (window, pane)
             } else {
-                let window = self
-                    .state
-                    .resolve_window(target, context.session, context.window)?;
+                let window = self.resolve_window(target, context.session, context.window)?;
                 (window, window_active_pane(&self.state, window)?)
             };
 
@@ -2030,9 +2106,7 @@ impl MuxEngine {
                 "rotate-window does not accept positional arguments".to_owned(),
             ));
         }
-        let window =
-            self.state
-                .resolve_window(options.value("-t"), context.session, context.window)?;
+        let window = self.resolve_window(options.value("-t"), context.session, context.window)?;
         let pane = self
             .state
             .rotate_window(window, options.has("-D"), options.has("-Z"))?;
@@ -2048,14 +2122,13 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("kill-pane", args)?;
         reject_positionals("kill-pane", &positional)?;
-        let pane = self
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let window = self
             .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let session = self.state.windows[&window].session;
         let targets = if options.has("-a") {
-            let window = self
-                .state
-                .window_for_pane(pane)
-                .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
             self.state.windows[&window]
                 .pane_order()
                 .iter()
@@ -2069,6 +2142,9 @@ impl MuxEngine {
         for target in targets {
             panes.extend(self.state.kill_pane(target)?);
         }
+        if !self.state.windows.contains_key(&window) {
+            self.renumber_session_if_enabled(session)?;
+        }
         Ok(Execution::effect(MuxEffect::PanesRemoved(panes)))
     }
 
@@ -2079,9 +2155,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("send-keys", args)?;
         let repeat = repeat_count("send-keys", &options)?;
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         if options.value("-N").is_some() && positional.is_empty() && !options.has("-X") {
             return Ok(Execution::effect(MuxEffect::CopyModeRepeat {
                 pane,
@@ -2137,9 +2211,7 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, _) = parse_command_options("send-prefix", args)?;
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         Ok(Execution::effect(MuxEffect::SendKeys {
             pane,
             keys: vec![KeyToken::Named(self.keys.prefix().to_owned())],
@@ -2153,9 +2225,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("copy-mode", args)?;
         reject_positionals("copy-mode", &positional)?;
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         if options.has("-q") {
             return Ok(Execution::effect(MuxEffect::TerminalView {
                 pane,
@@ -2201,9 +2271,7 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, _) = parse_command_options("copy-mode-search-prompt", args)?;
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         Ok(Execution::effect(MuxEffect::TerminalUi {
             pane,
             command: TerminalUiCommand::BeginSearch {
@@ -2275,9 +2343,7 @@ impl MuxEngine {
             None
         };
         let window_name = if input.contains("#W") {
-            let window = self
-                .state
-                .resolve_window(None, context.session, context.window)?;
+            let window = self.resolve_window(None, context.session, context.window)?;
             Some(
                 self.state
                     .windows
@@ -2298,9 +2364,7 @@ impl MuxEngine {
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, _) = parse_command_options("clear-history", args)?;
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         Ok(Execution::effect(MuxEffect::TerminalView {
             pane,
             action: TerminalViewAction::ClearHistory,
@@ -2323,9 +2387,7 @@ impl MuxEngine {
                 "choose-tree command templates are not supported yet".to_owned(),
             ));
         }
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         if options.has("-s") || options.has("-w") {
             return Ok(Execution::effect(MuxEffect::FocusSidebar { pane }));
         }
@@ -2346,9 +2408,7 @@ impl MuxEngine {
                 "focus-sidebar does not take positional arguments".to_owned(),
             ));
         }
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         Ok(Execution::effect(MuxEffect::FocusSidebar { pane }))
     }
 
@@ -2363,9 +2423,7 @@ impl MuxEngine {
                 "choose-buffer command templates are not supported yet".to_owned(),
             ));
         }
-        let pane = self
-            .state
-            .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         Ok(Execution::effect(MuxEffect::ChooseBuffer { pane }))
     }
 
@@ -2376,16 +2434,9 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("display-message", args)?;
         let pane = match options.value("-t") {
-            Some(target) => Some(self.state.resolve_pane(
-                Some(target),
-                context.window,
-                context.pane,
-            )?),
+            Some(target) => Some(self.resolve_pane(Some(target), context.window, context.pane)?),
             None if self.state.sessions.is_empty() => None,
-            None => Some(
-                self.state
-                    .resolve_pane(None, context.window, context.pane)?,
-            ),
+            None => Some(self.resolve_pane(None, context.window, context.pane)?),
         };
         let format_context = pane
             .and_then(|pane| ExecutionContext::for_pane(&self.state, pane))
@@ -2399,7 +2450,7 @@ impl MuxEngine {
         } else {
             positional.join(" ")
         };
-        let text = expand_format(&format, &self.state, format_context);
+        let text = expand_format(&format, self, format_context);
         if options.has("-p") {
             Ok(Execution::output(text))
         } else {
@@ -2428,9 +2479,7 @@ impl MuxEngine {
                         ))
                     })
                 })?;
-        let pane = self
-            .state
-            .resolve_pane(None, context.window, context.pane)?;
+        let pane = self.resolve_pane(None, context.window, context.pane)?;
         Ok(Execution::effect(MuxEffect::DisplayPanes {
             pane,
             duration_ms,
@@ -2546,6 +2595,29 @@ impl MuxEngine {
                 positional.get(1).map(String::as_str),
                 &options,
                 force_window,
+            );
+        }
+        if option == "base-index" {
+            return self.set_base_index(
+                context,
+                positional.get(1).map(String::as_str),
+                &options,
+                force_window,
+            );
+        }
+        if option == "renumber-windows" {
+            return self.set_renumber_windows(
+                context,
+                positional.get(1).map(String::as_str),
+                &options,
+                force_window,
+            );
+        }
+        if option == "pane-base-index" {
+            return self.set_pane_base_index(
+                context,
+                positional.get(1).map(String::as_str),
+                &options,
             );
         }
         if option == "word-separators" {
@@ -2813,6 +2885,148 @@ impl MuxEngine {
         Ok(Execution::default())
     }
 
+    fn set_base_index(
+        &mut self,
+        context: &ExecutionContext,
+        value: Option<&str>,
+        options: &Options,
+        force_window: bool,
+    ) -> Result<Execution, ServerError> {
+        validate_session_option("base-index", value, options, force_window)?;
+        let index = if options.has("-u") {
+            DEFAULT_BASE_INDEX
+        } else {
+            parse_index_option(
+                "base-index",
+                value.ok_or_else(|| {
+                    ServerError::InvalidCommand("set-option base-index needs a value".to_owned())
+                })?,
+                MAX_BASE_INDEX,
+            )?
+        };
+        if options.has("-g") {
+            self.global_base_index = index;
+        } else {
+            let session = self
+                .state
+                .resolve_session(options.value("-t"), context.session)?;
+            if options.has("-u") {
+                self.session_base_indices.remove(&session);
+            } else {
+                self.session_base_indices.insert(session, index);
+            }
+        }
+        Ok(Execution::default())
+    }
+
+    fn set_renumber_windows(
+        &mut self,
+        context: &ExecutionContext,
+        value: Option<&str>,
+        options: &Options,
+        force_window: bool,
+    ) -> Result<Execution, ServerError> {
+        validate_session_option("renumber-windows", value, options, force_window)?;
+        if options.has("-g") {
+            self.global_renumber_windows = if options.has("-u") {
+                DEFAULT_RENUMBER_WINDOWS
+            } else {
+                parse_flag_value(value, self.global_renumber_windows)?
+            };
+        } else {
+            let session = self
+                .state
+                .resolve_session(options.value("-t"), context.session)?;
+            if options.has("-u") {
+                self.session_renumber_windows.remove(&session);
+            } else {
+                let next = parse_flag_value(value, self.renumber_windows_for_session(session))?;
+                self.session_renumber_windows.insert(session, next);
+            }
+        }
+        Ok(Execution::default())
+    }
+
+    fn set_pane_base_index(
+        &mut self,
+        context: &ExecutionContext,
+        value: Option<&str>,
+        options: &Options,
+    ) -> Result<Execution, ServerError> {
+        if let Some(flag) = options
+            .flags
+            .iter()
+            .find(|flag| !matches!(flag.as_str(), "-g" | "-o" | "-q" | "-u" | "-w"))
+        {
+            return Err(ServerError::UnsupportedCommand(format!(
+                "set-option {flag} pane-base-index"
+            )));
+        }
+        if options.has("-g") && options.value("-t").is_some() {
+            return Err(ServerError::InvalidCommand(
+                "global pane-base-index does not accept a target".to_owned(),
+            ));
+        }
+        if options.has("-o") && options.has("-u") {
+            return Err(ServerError::InvalidCommand(
+                "pane-base-index cannot combine set-once and unset".to_owned(),
+            ));
+        }
+        if options.has("-u") && value.is_some() {
+            return Err(ServerError::InvalidCommand(
+                "unsetting pane-base-index does not accept a value".to_owned(),
+            ));
+        }
+
+        if options.has("-g") {
+            if options.has("-o") {
+                return already_set_or_quiet(options, "pane-base-index");
+            }
+            let next = if options.has("-u") {
+                DEFAULT_PANE_BASE_INDEX
+            } else {
+                parse_index_option(
+                    "pane-base-index",
+                    value.ok_or_else(|| {
+                        ServerError::InvalidCommand(
+                            "set-option pane-base-index needs a value".to_owned(),
+                        )
+                    })?,
+                    MAX_PANE_BASE_INDEX,
+                )?
+            };
+            if self.global_pane_base_index != next {
+                self.global_pane_base_index = next;
+                self.state.bump_generation();
+            }
+            return Ok(Execution::default());
+        }
+
+        let window = self.resolve_window(options.value("-t"), context.session, context.window)?;
+        if options.has("-o") && self.window_pane_base_indices.contains_key(&window) {
+            return already_set_or_quiet(options, "pane-base-index");
+        }
+        let previous = self.pane_base_index_for_window(window);
+        if options.has("-u") {
+            self.window_pane_base_indices.remove(&window);
+        } else {
+            let next = parse_index_option(
+                "pane-base-index",
+                value.ok_or_else(|| {
+                    ServerError::InvalidCommand(
+                        "set-option pane-base-index needs a value".to_owned(),
+                    )
+                })?,
+                MAX_PANE_BASE_INDEX,
+            )?;
+            self.window_pane_base_indices.insert(window, next);
+        }
+        if self.pane_base_index_for_window(window) != previous {
+            self.state.bump_generation();
+        }
+        Ok(Execution::default())
+    }
+
     /// Only the global scope exists: zz renders one status section per window.
     fn set_status_option(
         &mut self,
@@ -2994,9 +3208,7 @@ impl MuxEngine {
             });
         }
 
-        let window =
-            self.state
-                .resolve_window(options.value("-t"), context.session, context.window)?;
+        let window = self.resolve_window(options.value("-t"), context.session, context.window)?;
         if options.has("-o") && self.window_mode_keys.contains_key(&window) {
             return already_set_or_quiet(options, "mode-keys");
         }
@@ -3077,9 +3289,7 @@ impl MuxEngine {
         }
 
         if options.has("-p") {
-            let pane =
-                self.state
-                    .resolve_pane(options.value("-t"), context.window, context.pane)?;
+            let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
             if options.has("-o") && self.state.pane_synchronize_override(pane)?.is_some() {
                 return already_set_or_quiet(options, "synchronize-panes");
             }
@@ -3095,9 +3305,7 @@ impl MuxEngine {
             return Ok(Execution::default());
         }
 
-        let window =
-            self.state
-                .resolve_window(options.value("-t"), context.session, context.window)?;
+        let window = self.resolve_window(options.value("-t"), context.session, context.window)?;
         if options.has("-o") && self.state.window_synchronize_override(window)?.is_some() {
             return already_set_or_quiet(options, "synchronize-panes");
         }
@@ -3205,6 +3413,51 @@ fn parse_history_limit(value: &str) -> Result<usize, ServerError> {
         )));
     }
     Ok(limit)
+}
+
+fn parse_index_option(option: &str, value: &str, maximum: u32) -> Result<u32, ServerError> {
+    let index = value
+        .parse::<u32>()
+        .map_err(|_| ServerError::InvalidCommand(format!("invalid {option} value: {value}")))?;
+    if index > maximum {
+        return Err(ServerError::InvalidCommand(format!(
+            "{option} must be between 0 and {maximum}"
+        )));
+    }
+    Ok(index)
+}
+
+fn validate_session_option(
+    option: &str,
+    value: Option<&str>,
+    options: &Options,
+    force_window: bool,
+) -> Result<(), ServerError> {
+    if force_window || options.has("-w") || options.has("-p") {
+        return Err(ServerError::InvalidCommand(format!(
+            "{option} is a session option"
+        )));
+    }
+    if let Some(flag) = options
+        .flags
+        .iter()
+        .find(|flag| !matches!(flag.as_str(), "-g" | "-q" | "-u"))
+    {
+        return Err(ServerError::UnsupportedCommand(format!(
+            "set-option {flag} {option}"
+        )));
+    }
+    if options.has("-g") && options.value("-t").is_some() {
+        return Err(ServerError::InvalidCommand(format!(
+            "global {option} does not accept a target"
+        )));
+    }
+    if options.has("-u") && value.is_some() {
+        return Err(ServerError::InvalidCommand(format!(
+            "unsetting {option} does not accept a value"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_word_separators(value: &str) -> Result<(), ServerError> {
@@ -4056,6 +4309,17 @@ mod tests {
             .collect()
     }
 
+    fn window_index_named(engine: &MuxEngine, session: SessionId, name: &str) -> u32 {
+        engine.state.sessions[&session]
+            .windows
+            .iter()
+            .find_map(|window| {
+                let window = &engine.state.windows[window];
+                (window.name == name).then_some(window.index)
+            })
+            .expect("named window")
+    }
+
     fn absolute_test_path(name: &str) -> PathBuf {
         std::env::current_dir()
             .expect("current test directory")
@@ -4528,6 +4792,130 @@ mod tests {
     }
 
     #[test]
+    fn base_index_drives_default_allocation_but_not_explicit_targets() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "base-index", "1"]),
+            )
+            .expect("global base index");
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session at the global base");
+        let session = context.session.expect("session id");
+        let first_window = context.window.expect("first window");
+        assert_eq!(engine.state.windows[&first_window].index, 1);
+        assert_eq!(engine.state.windows[&first_window].name, "1");
+
+        engine
+            .execute(
+                &mut context,
+                &command("split-window", &["-h", "-t", "work:1.0"]),
+            )
+            .expect("split first window");
+        let moving = context.pane.expect("split pane");
+        engine
+            .execute(
+                &mut context,
+                &command("break-pane", &["-d", "-s", &moving.to_string()]),
+            )
+            .expect("default break destination");
+        let broken_window = engine.state.window_for_pane(moving).expect("broken window");
+        assert_eq!(engine.state.windows[&broken_window].index, 2);
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "work:0", "-n", "low"]),
+            )
+            .expect("explicit index below the base");
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "work", "-n", "next"]),
+            )
+            .expect("next default index");
+        assert_eq!(window_index_named(&engine, session, "low"), 0);
+        assert_eq!(window_index_named(&engine, session, "next"), 3);
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-t", &session.to_string(), "base-index", "5"],
+                ),
+            )
+            .expect("session base override");
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "work", "-n", "override"]),
+            )
+            .expect("session default index");
+        assert_eq!(window_index_named(&engine, session, "override"), 5);
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-u", "-t", &session.to_string(), "base-index"],
+                ),
+            )
+            .expect("restore session inheritance");
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "work", "-n", "inherited"]),
+            )
+            .expect("inherited default index");
+        assert_eq!(window_index_named(&engine, session, "inherited"), 4);
+
+        engine
+            .execute(&mut context, &command("set-option", &["-gu", "base-index"]))
+            .expect("restore global default");
+        engine
+            .execute(&mut context, &command("new-session", &["-d", "-s", "zero"]))
+            .expect("default-base session");
+        let zero_window = context.window.expect("zero-base window");
+        assert_eq!(engine.state.windows[&zero_window].index, 0);
+        assert!(engine.state.validate().is_ok());
+
+        let mut edge = MuxEngine::default();
+        let mut edge_context = ExecutionContext::default();
+        edge.execute(
+            &mut edge_context,
+            &command(
+                "set-option",
+                &["-g", "base-index", &MAX_BASE_INDEX.to_string()],
+            ),
+        )
+        .expect("maximum base index");
+        edge.execute(&mut edge_context, &command("new-session", &["-s", "edge"]))
+            .expect("maximum-base session");
+        assert_eq!(
+            edge.state.windows[&edge_context.window.expect("edge window")].index,
+            MAX_BASE_INDEX
+        );
+        edge.execute(
+            &mut edge_context,
+            &command("new-window", &["-d", "-t", "edge", "-n", "wrapped"]),
+        )
+        .expect("wrapped allocation");
+        assert_eq!(
+            window_index_named(
+                &edge,
+                edge_context.session.expect("edge session"),
+                "wrapped"
+            ),
+            0
+        );
+    }
+
+    #[test]
     fn attach_session_preserves_detach_others_flag_in_effect() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -4635,6 +5023,119 @@ mod tests {
                 .execute(&mut context, &command("list-sessions", &["-x"]))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn pane_base_index_drives_targets_formats_and_window_inheritance() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        let window = context.window.expect("window");
+        let first = context.pane.expect("first pane");
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .expect("second pane");
+        let second = context.pane.expect("second pane");
+
+        let changed = engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-g", "pane-base-index", "1"]),
+            )
+            .expect("global pane base");
+        assert_eq!(changed.effects, [MuxEffect::SnapshotChanged]);
+        assert_eq!(engine.pane_index(window, first), Some(1));
+        assert_eq!(engine.pane_index(window, second), Some(2));
+        assert_eq!(
+            engine
+                .resolve_pane(Some("work:0.1"), Some(window), Some(second))
+                .unwrap(),
+            first
+        );
+        assert!(matches!(
+            engine.resolve_pane(Some("work:0.0"), Some(window), Some(second)),
+            Err(ServerError::MissingTarget(target)) if target == "work:0.0"
+        ));
+        assert_eq!(
+            engine
+                .resolve_pane(Some(&second.to_string()), Some(window), Some(first))
+                .unwrap(),
+            second
+        );
+
+        engine
+            .execute(&mut context, &command("select-pane", &["-t", "work:0.1"]))
+            .expect("one-based pane target");
+        assert_eq!(context.pane, Some(first));
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-panes",
+                        &["-t", "work:0.1", "-F", "#{pane_index}:#P:#{window_index}"],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "1:1:0\n2:2:0"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &["-p", "-t", "work:0.2", "#{pane_index}:#P:#{window_index}",],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "2:2:0"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-window-option",
+                    &["-o", "-t", &window.to_string(), "pane-base-index", "3"],
+                ),
+            )
+            .expect("window pane base");
+        assert_eq!(engine.pane_index(window, first), Some(3));
+        let quiet = engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-oq", "-t", &window.to_string(), "pane-base-index", "4"],
+                ),
+            )
+            .expect("quiet duplicate override");
+        assert!(quiet.effects.is_empty());
+        assert_eq!(engine.pane_index(window, first), Some(3));
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-window-option",
+                    &["-u", "-t", &window.to_string(), "pane-base-index"],
+                ),
+            )
+            .expect("restore window inheritance");
+        assert_eq!(engine.pane_index(window, first), Some(1));
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-gu", "pane-base-index"]),
+            )
+            .expect("restore global pane base");
+        assert_eq!(engine.pane_index(window, first), Some(0));
+        assert_eq!(engine.pane_index(window, second), Some(1));
     }
 
     #[test]
@@ -6730,6 +7231,132 @@ mod tests {
     }
 
     #[test]
+    fn index_options_validate_pin_bounds_scopes_and_unset_values() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        let session = context.session.expect("session");
+        let window = context.window.expect("window");
+        let pane = context.pane.expect("pane");
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-g", "base-index", &MAX_BASE_INDEX.to_string()],
+                ),
+            )
+            .expect("maximum base index");
+        assert_eq!(engine.base_index_for_session(session), MAX_BASE_INDEX);
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-window-option",
+                    &["-g", "pane-base-index", &MAX_PANE_BASE_INDEX.to_string()],
+                ),
+            )
+            .expect("maximum pane base index");
+        assert_eq!(engine.pane_index(window, pane), Some(MAX_PANE_BASE_INDEX));
+
+        for invalid in [
+            command("set-option", &["-g", "base-index"]),
+            command("set-option", &["-g", "base-index", "-1"]),
+            command("set-option", &["-g", "base-index", "nope"]),
+            command(
+                "set-option",
+                &["-g", "base-index", &(MAX_BASE_INDEX + 1).to_string()],
+            ),
+            command("set-option", &["-w", "base-index", "1"]),
+            command("set-window-option", &["base-index", "1"]),
+            command(
+                "set-option",
+                &["-g", "-t", &session.to_string(), "base-index", "1"],
+            ),
+            command("set-option", &["-u", "base-index", "1"]),
+            command("set-window-option", &["-g", "pane-base-index"]),
+            command("set-window-option", &["-g", "pane-base-index", "-1"]),
+            command("set-window-option", &["-g", "pane-base-index", "nope"]),
+            command(
+                "set-window-option",
+                &[
+                    "-g",
+                    "pane-base-index",
+                    &(MAX_PANE_BASE_INDEX + 1).to_string(),
+                ],
+            ),
+            command("set-option", &["-p", "pane-base-index", "1"]),
+            command(
+                "set-window-option",
+                &["-g", "-t", &window.to_string(), "pane-base-index", "1"],
+            ),
+            command("set-window-option", &["-u", "pane-base-index", "1"]),
+            command("set-option", &["-g", "renumber-windows", "maybe"]),
+            command("set-option", &["-w", "renumber-windows", "on"]),
+            command("set-window-option", &["renumber-windows", "on"]),
+            command("set-option", &["-u", "renumber-windows", "off"]),
+        ] {
+            assert!(
+                engine.execute(&mut context, &invalid).is_err(),
+                "{invalid:?}"
+            );
+        }
+
+        engine
+            .execute(&mut context, &command("set-option", &["-gu", "base-index"]))
+            .expect("restore base default");
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-gu", "pane-base-index"]),
+            )
+            .expect("restore pane base default");
+        assert_eq!(engine.base_index_for_session(session), DEFAULT_BASE_INDEX);
+        assert_eq!(
+            engine.pane_index(window, pane),
+            Some(DEFAULT_PANE_BASE_INDEX)
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "renumber-windows"]),
+            )
+            .expect("toggle global renumbering on");
+        assert!(engine.renumber_windows_for_session(session));
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-t", &session.to_string(), "renumber-windows", "off"],
+                ),
+            )
+            .expect("session renumber override");
+        assert!(!engine.renumber_windows_for_session(session));
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-u", "-t", &session.to_string(), "renumber-windows"],
+                ),
+            )
+            .expect("restore renumber inheritance");
+        assert!(engine.renumber_windows_for_session(session));
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-gu", "renumber-windows"]),
+            )
+            .expect("restore renumber default");
+        assert!(!engine.renumber_windows_for_session(session));
+    }
+
+    #[test]
     fn word_separators_are_live_inherited_session_options() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -7421,6 +8048,125 @@ mod tests {
             engine.execute(&mut context, &command("last-window", &[])),
             Err(ServerError::InvalidCommand(_))
         ));
+    }
+
+    #[test]
+    fn renumber_windows_compacts_close_paths_and_preserves_window_identity() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "base-index", "1"]),
+            )
+            .expect("global base index");
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "renumber-windows", "on"]),
+            )
+            .expect("global renumbering");
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("first window");
+        let session = context.session.expect("session");
+        let first = context.window.expect("first window");
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "second"]))
+            .expect("second window");
+        let second = context.window.expect("second window");
+        let second_pane = context.pane.expect("second pane");
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "third"]))
+            .expect("third window");
+        let third = context.window.expect("third window");
+        let third_pane = context.pane.expect("third pane");
+        assert_eq!(engine.state.sessions[&session].active_window, third);
+        assert_eq!(engine.state.sessions[&session].last_window(), Some(second));
+
+        let generation = engine.state.generation();
+        let killed = engine
+            .execute(&mut context, &command("kill-window", &["-t", "work:1"]))
+            .expect("kill first window");
+        assert!(killed.effects.contains(&MuxEffect::SnapshotChanged));
+        assert!(engine.state.generation() > generation);
+        assert!(!engine.state.windows.contains_key(&first));
+        assert_eq!(engine.state.windows[&second].index, 1);
+        assert_eq!(engine.state.windows[&third].index, 2);
+        assert_eq!(engine.state.sessions[&session].active_window, third);
+        assert_eq!(engine.state.sessions[&session].last_window(), Some(second));
+        let snapshot = engine.state.snapshot();
+        assert_eq!(
+            snapshot.sessions[0]
+                .windows
+                .iter()
+                .map(|window| (window.id, window.index))
+                .collect::<Vec<_>>(),
+            [(second, 1), (third, 2)]
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("kill-pane", &["-t", &second_pane.to_string()]),
+            )
+            .expect("last pane closes its window");
+        assert!(!engine.state.windows.contains_key(&second));
+        assert_eq!(engine.state.windows[&third].index, 1);
+
+        let source = engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-n", "source"]),
+            )
+            .expect("join source")
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+            .expect("source pane");
+        let source_window = engine.state.window_for_pane(source).expect("source window");
+        let survivor = engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-n", "survivor"]),
+            )
+            .expect("surviving window")
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+            .expect("survivor pane");
+        let survivor_window = engine
+            .state
+            .window_for_pane(survivor)
+            .expect("survivor window");
+        assert_eq!(engine.state.windows[&source_window].index, 2);
+        assert_eq!(engine.state.windows[&survivor_window].index, 3);
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "join-pane",
+                    &[
+                        "-d",
+                        "-s",
+                        &source.to_string(),
+                        "-t",
+                        &third_pane.to_string(),
+                    ],
+                ),
+            )
+            .expect("join closes source window");
+        assert!(!engine.state.windows.contains_key(&source_window));
+        assert_eq!(engine.state.windows[&third].index, 1);
+        assert_eq!(engine.state.windows[&survivor_window].index, 2);
+        assert!(engine.state.validate().is_ok());
     }
 
     #[test]

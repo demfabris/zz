@@ -15,6 +15,7 @@ pub(crate) const DEFAULT_WINDOW_EXTENT: (u16, u16) = (80, 24);
 const SYNCHRONIZE_PANES: u8 = 1 << 0;
 const LAYOUT_COORDINATE_MAX: u32 = 1_000_000;
 const MAX_AGENT_SESSION_ID_BYTES: usize = 16 * 1024;
+const MAX_WINDOW_INDEX: u32 = i32::MAX.cast_unsigned();
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -273,6 +274,15 @@ impl MuxState {
         name: impl Into<String>,
         extent: (u16, u16),
     ) -> Result<(SessionId, WindowId, PaneId), ServerError> {
+        self.create_session_with_extent_at(name, extent, 0)
+    }
+
+    pub(crate) fn create_session_with_extent_at(
+        &mut self,
+        name: impl Into<String>,
+        extent: (u16, u16),
+        index: u32,
+    ) -> Result<(SessionId, WindowId, PaneId), ServerError> {
         let name = name.into();
         if self.sessions.values().any(|session| session.name == name) {
             return Err(ServerError::InvalidCommand(format!(
@@ -292,8 +302,8 @@ impl MuxState {
         let window = Window {
             id: window_id,
             session: session_id,
-            index: 0,
-            name: "0".to_owned(),
+            index,
+            name: index.to_string(),
             active_pane: pane_id,
             zoomed_pane: None,
             layout: CellLayout::new(pane_id, extent.0, extent.1),
@@ -367,10 +377,22 @@ impl MuxState {
         kind: PaneKind,
         activate: bool,
     ) -> Result<(WindowId, PaneId), ServerError> {
+        self.create_window_at_with_base_index(session, index, name, kind, activate, 0)
+    }
+
+    pub(crate) fn create_window_at_with_base_index(
+        &mut self,
+        session: SessionId,
+        index: Option<u32>,
+        name: Option<String>,
+        kind: PaneKind,
+        activate: bool,
+        base_index: u32,
+    ) -> Result<(WindowId, PaneId), ServerError> {
         let extent = self
             .session_active_window_extent(session)
             .unwrap_or(DEFAULT_WINDOW_EXTENT);
-        let index = self.claim_window_index(session, index)?;
+        let index = self.claim_window_index(session, index, base_index)?;
         let window_id = self.allocate_window_id();
         let pane_id = self.allocate_pane_id();
         let pane = Pane {
@@ -421,9 +443,10 @@ impl MuxState {
         &self,
         session: SessionId,
         index: Option<u32>,
+        base_index: u32,
     ) -> Result<u32, ServerError> {
         let Some(index) = index else {
-            return self.next_window_index(session);
+            return self.next_window_index(session, base_index);
         };
         if self.window_at_index(session, index).is_some() {
             return Err(ServerError::InvalidCommand(format!(
@@ -522,6 +545,57 @@ impl MuxState {
             .index = index;
         self.sort_session_windows(session);
         self.bump_generation();
+        Ok(())
+    }
+
+    pub fn renumber_windows(
+        &mut self,
+        session: SessionId,
+        base_index: u32,
+    ) -> Result<(), ServerError> {
+        if base_index > MAX_WINDOW_INDEX {
+            return Err(ServerError::InvalidCommand(
+                "no free window index".to_owned(),
+            ));
+        }
+        let mut windows = self
+            .sessions
+            .get(&session)
+            .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?
+            .windows
+            .clone();
+        windows.sort_by_key(|window| self.windows.get(window).map(|window| window.index));
+
+        let mut assignments = Vec::with_capacity(windows.len());
+        let mut index = base_index;
+        for (position, window) in windows.iter().copied().enumerate() {
+            assignments.push((window, index));
+            if position + 1 < windows.len() {
+                index = index
+                    .checked_add(1)
+                    .filter(|index| *index <= MAX_WINDOW_INDEX)
+                    .ok_or_else(|| {
+                        ServerError::InvalidCommand("no free window index".to_owned())
+                    })?;
+            }
+        }
+
+        let changed = assignments
+            .iter()
+            .any(|(window, index)| self.windows[window].index != *index);
+        for (window, index) in assignments {
+            self.windows
+                .get_mut(&window)
+                .expect("renumbered window exists")
+                .index = index;
+        }
+        self.sessions
+            .get_mut(&session)
+            .expect("renumbered session exists")
+            .windows = windows;
+        if changed {
+            self.bump_generation();
+        }
         Ok(())
     }
 
@@ -1480,10 +1554,29 @@ impl MuxState {
         current_session: Option<SessionId>,
         current_window: Option<WindowId>,
     ) -> Result<WindowId, ServerError> {
+        self.resolve_window_with_pane_index(
+            target,
+            current_session,
+            current_window,
+            &|window, index| {
+                let index = usize::try_from(index).ok()?;
+                self.windows.get(&window)?.pane_order().get(index).copied()
+            },
+        )
+    }
+
+    pub(crate) fn resolve_window_with_pane_index(
+        &self,
+        target: Option<&str>,
+        current_session: Option<SessionId>,
+        current_window: Option<WindowId>,
+        pane_at_index: &impl Fn(WindowId, u32) -> Option<PaneId>,
+    ) -> Result<WindowId, ServerError> {
         if let Some(target) = target
             && target.starts_with('%')
         {
-            let pane = self.resolve_pane(Some(target), current_window, None)?;
+            let pane =
+                self.resolve_pane_with_index(Some(target), current_window, None, pane_at_index)?;
             return self
                 .window_for_pane(pane)
                 .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
@@ -1498,7 +1591,9 @@ impl MuxState {
                 if !window_target.contains('.') {
                     return Err(error);
                 }
-                let Ok(pane) = self.resolve_pane(Some(target), current_window, None) else {
+                let Ok(pane) =
+                    self.resolve_pane_with_index(Some(target), current_window, None, pane_at_index)
+                else {
                     return Err(error);
                 };
                 self.window_for_pane(pane).ok_or(error)
@@ -1620,6 +1715,19 @@ impl MuxState {
         current_window: Option<WindowId>,
         current_pane: Option<PaneId>,
     ) -> Result<PaneId, ServerError> {
+        self.resolve_pane_with_index(target, current_window, current_pane, &|window, index| {
+            let index = usize::try_from(index).ok()?;
+            self.windows.get(&window)?.pane_order().get(index).copied()
+        })
+    }
+
+    pub(crate) fn resolve_pane_with_index(
+        &self,
+        target: Option<&str>,
+        current_window: Option<WindowId>,
+        current_pane: Option<PaneId>,
+        pane_at_index: &impl Fn(WindowId, u32) -> Option<PaneId>,
+    ) -> Result<PaneId, ServerError> {
         let Some(target) = target else {
             if let Some(pane) = current_pane
                 && self.window_for_pane(pane).is_some()
@@ -1652,7 +1760,7 @@ impl MuxState {
             .and_then(|window| self.windows.get(&window).map(|window| window.session));
         let pane_error = if let Ok(index) = target.parse::<u32>() {
             let window = self.resolve_window_core(None, current_session, current_window)?;
-            match self.resolve_pane_index(target, window, index) {
+            match Self::resolve_pane_index(target, window, index, pane_at_index) {
                 Ok(pane) => return Ok(pane),
                 Err(error) => error,
             }
@@ -1683,22 +1791,16 @@ impl MuxState {
         } else {
             self.resolve_window_core(Some(window_target), current_session, current_window)?
         };
-        self.resolve_pane_index(target, window, index)
+        Self::resolve_pane_index(target, window, index, pane_at_index)
     }
 
     fn resolve_pane_index(
-        &self,
         target: &str,
         window: WindowId,
         index: u32,
+        pane_at_index: &impl Fn(WindowId, u32) -> Option<PaneId>,
     ) -> Result<PaneId, ServerError> {
-        let index =
-            usize::try_from(index).map_err(|_| ServerError::MissingTarget(target.to_owned()))?;
-        self.windows
-            .get(&window)
-            .and_then(|window| window.pane_order().get(index))
-            .copied()
-            .ok_or_else(|| ServerError::MissingTarget(target.to_owned()))
+        pane_at_index(window, index).ok_or_else(|| ServerError::MissingTarget(target.to_owned()))
     }
 
     #[must_use]
@@ -1983,6 +2085,25 @@ impl MuxState {
         name: Option<String>,
         detached: bool,
     ) -> Result<WindowId, ServerError> {
+        self.break_pane_with_base_index(
+            pane,
+            destination_session,
+            destination_index,
+            name,
+            detached,
+            0,
+        )
+    }
+
+    pub(crate) fn break_pane_with_base_index(
+        &mut self,
+        pane: PaneId,
+        destination_session: SessionId,
+        destination_index: Option<u32>,
+        name: Option<String>,
+        detached: bool,
+        base_index: u32,
+    ) -> Result<WindowId, ServerError> {
         let source_window = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
@@ -1990,7 +2111,7 @@ impl MuxState {
             return Err(ServerError::MissingTarget(destination_session.to_string()));
         }
         let source_session = self.windows[&source_window].session;
-        let index = self.claim_window_index(destination_session, destination_index)?;
+        let index = self.claim_window_index(destination_session, destination_index, base_index)?;
         if self.windows[&source_window].panes.len() == 1 {
             if source_session == destination_session {
                 let window = self
@@ -2402,7 +2523,12 @@ impl MuxState {
         Ok(())
     }
 
-    fn next_window_index(&self, session: SessionId) -> Result<u32, ServerError> {
+    fn next_window_index(&self, session: SessionId, base_index: u32) -> Result<u32, ServerError> {
+        if base_index > MAX_WINDOW_INDEX {
+            return Err(ServerError::InvalidCommand(
+                "no free window index".to_owned(),
+            ));
+        }
         let session = self
             .sessions
             .get(&session)
@@ -2412,9 +2538,10 @@ impl MuxState {
             .iter()
             .map(|window| self.windows[window].index)
             .collect::<BTreeSet<_>>();
-        Ok((0..=u32::MAX)
+        (base_index..=MAX_WINDOW_INDEX)
+            .chain(0..base_index)
             .find(|index| !used.contains(index))
-            .unwrap_or(u32::MAX))
+            .ok_or_else(|| ServerError::InvalidCommand("no free window index".to_owned()))
     }
 
     fn allocate_session_id(&mut self) -> SessionId {

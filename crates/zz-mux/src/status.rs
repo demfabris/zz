@@ -20,7 +20,7 @@ use std::{borrow::Cow, time::Duration};
 
 use zz_protocol::{MAX_STATUS_TEXT_BYTES, PaneId, SessionId, WindowId};
 
-use crate::model::MuxState;
+use crate::MuxEngine;
 
 /// Empty, where tmux ships `[#S] `: the sidebar and titlebar already name the
 /// session and pane. An empty format drops the status section entirely.
@@ -269,7 +269,8 @@ struct ResolvedFormatContext {
 }
 
 impl FormatContext {
-    fn resolve(self, state: &MuxState) -> ResolvedFormatContext {
+    fn resolve(self, engine: &MuxEngine) -> ResolvedFormatContext {
+        let state = &engine.state;
         let pane = self
             .pane
             .filter(|pane| state.window_for_pane(*pane).is_some());
@@ -320,12 +321,7 @@ impl FormatContext {
             context.window_bell = window.panes.values().any(|pane| pane.bell);
 
             if let Some(pane) = pane.and_then(|pane| window.panes.get(&pane)) {
-                context.pane_index = window
-                    .pane_order()
-                    .iter()
-                    .position(|candidate| *candidate == pane.id)
-                    .and_then(|index| u32::try_from(index).ok())
-                    .unwrap_or_default();
+                context.pane_index = engine.pane_index(window.id, pane.id).unwrap_or_default();
                 context.pane_id = pane.id.to_string();
                 context.pane_title.clone_from(&pane.title);
                 let geometry = window.displayed_pane_geometry(pane.id);
@@ -393,7 +389,7 @@ impl FormatVariables for ResolvedFormatContext {
     }
 }
 
-pub(crate) fn expand_format(format: &str, state: &MuxState, context: FormatContext) -> String {
+pub(crate) fn expand_format(format: &str, engine: &MuxEngine, context: FormatContext) -> String {
     struct CommandHooks;
 
     impl StatusHooks for CommandHooks {
@@ -406,7 +402,7 @@ pub(crate) fn expand_format(format: &str, state: &MuxState, context: FormatConte
         }
     }
 
-    expand_with_context(format, &context.resolve(state), &mut CommandHooks)
+    expand_with_context(format, &context.resolve(engine), &mut CommandHooks)
 }
 
 fn optional_number(value: Option<u16>) -> Cow<'static, str> {
@@ -854,17 +850,19 @@ mod tests {
 
     #[test]
     fn explicit_context_expands_session_window_and_pane_rows() {
-        let mut state = MuxState::default();
-        let (session, first_window, first_pane) = state.create_session("work").unwrap();
-        state.rename_window(first_window, "shell").unwrap();
-        let (second_window, second_pane) = state
+        let mut engine = MuxEngine::default();
+        let (session, first_window, first_pane) = engine.state.create_session("work").unwrap();
+        engine.state.rename_window(first_window, "shell").unwrap();
+        let (second_window, second_pane) = engine
+            .state
             .create_window(
                 session,
                 Some("editor".to_owned()),
                 crate::PaneKind::Terminal,
             )
             .unwrap();
-        let third_pane = state
+        let third_pane = engine
+            .state
             .split_pane(
                 second_pane,
                 zz_protocol::Axis::Horizontal,
@@ -874,7 +872,7 @@ mod tests {
         assert_eq!(
             expand_format(
                 "#{session_id}:#S #{session_windows}[#F]|#{window_index}|#{pane_index}",
-                &state,
+                &engine,
                 FormatContext {
                     session: Some(session),
                     window: None,
@@ -886,7 +884,7 @@ mod tests {
         assert_eq!(
             expand_format(
                 "#{window_id} #I:#W[#F]",
-                &state,
+                &engine,
                 FormatContext {
                     session: Some(session),
                     window: Some(first_window),
@@ -898,7 +896,7 @@ mod tests {
         assert_eq!(
             expand_format(
                 "#{window_id} #I:#W[#F]",
-                &state,
+                &engine,
                 FormatContext {
                     session: Some(session),
                     window: Some(second_window),
@@ -910,7 +908,7 @@ mod tests {
         assert_eq!(
             expand_format(
                 "#{pane_id}:#P:#T:#(ignored)",
-                &state,
+                &engine,
                 FormatContext {
                     session: Some(session),
                     window: Some(second_window),
@@ -922,7 +920,7 @@ mod tests {
         assert_eq!(
             expand_format(
                 "#{pane_id}",
-                &state,
+                &engine,
                 FormatContext {
                     session: Some(session),
                     window: Some(first_window),

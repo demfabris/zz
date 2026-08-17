@@ -21,12 +21,15 @@ const BROWSER_COMMANDS: &[&str] = &[
     "set-browser-profile",
 ];
 const SET_OPTIONS: &[&str] = &[
+    "base-index",
     "buffer-limit",
     "copy-command",
     "history-limit",
     "history-trickle",
     "mode-keys",
+    "pane-base-index",
     "prefix",
+    "renumber-windows",
     "set-clipboard",
     "synchronize-panes",
     "word-separators",
@@ -424,7 +427,10 @@ fn values_for_kind(
             .iter()
             .filter(|option| {
                 spec.name != "set-window-option"
-                    || matches!(**option, "mode-keys" | "synchronize-panes")
+                    || matches!(
+                        **option,
+                        "mode-keys" | "pane-base-index" | "synchronize-panes"
+                    )
             })
             .map(|option| {
                 (
@@ -445,8 +451,8 @@ fn set_option_values(previous: &[Token]) -> Vec<(String, String, String)> {
         .map(|token| token.value.as_str());
     let values: &[&str] = match option {
         Some("mode-keys") => &["vi", "emacs"],
+        Some("renumber-windows" | "synchronize-panes") => &["on", "off"],
         Some("set-clipboard") => &["on", "external", "off"],
-        Some("synchronize-panes") => &["on", "off"],
         _ => &[],
     };
     values
@@ -798,6 +804,41 @@ mod tests {
             PaneKindAvailability::default(),
         );
         assert!(panes.iter().any(|item| item.label == "%3"));
+    }
+
+    #[test]
+    fn index_option_completions_follow_session_and_window_scope() {
+        let set = complete_command(
+            "set-option ",
+            "set-option ".len(),
+            &[],
+            &snapshot(),
+            PaneKindAvailability::default(),
+        );
+        for option in ["base-index", "pane-base-index", "renumber-windows"] {
+            assert!(set.iter().any(|item| item.label == option));
+        }
+
+        let setw = complete_command(
+            "set-window-option ",
+            "set-window-option ".len(),
+            &[],
+            &snapshot(),
+            PaneKindAvailability::default(),
+        );
+        assert!(setw.iter().any(|item| item.label == "pane-base-index"));
+        assert!(!setw.iter().any(|item| item.label == "base-index"));
+        assert!(!setw.iter().any(|item| item.label == "renumber-windows"));
+
+        let values = complete_command(
+            "set-option -g renumber-windows ",
+            "set-option -g renumber-windows ".len(),
+            &[],
+            &snapshot(),
+            PaneKindAvailability::default(),
+        );
+        assert!(values.iter().any(|item| item.label == "on"));
+        assert!(values.iter().any(|item| item.label == "off"));
     }
 
     #[test]

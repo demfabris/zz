@@ -2015,6 +2015,18 @@ mod tests {
             Err(LayoutError::UnknownDivider)
         );
 
+        let mut inner = three_horizontal();
+        assert!(!inner.set_divider_ratio(SplitId(1), 0.5).unwrap());
+        assert_eq!(
+            sizes(&inner, &[PaneId(0), PaneId(1), PaneId(2)]),
+            [(40, 24), (19, 24), (19, 24)]
+        );
+        assert!(inner.set_divider_ratio(SplitId(1), 0.25).unwrap());
+        assert_eq!(
+            sizes(&inner, &[PaneId(0), PaneId(1), PaneId(2)]),
+            [(20, 24), (39, 24), (19, 24)]
+        );
+
         let mut walked = three_horizontal();
         walked
             .resize_pane(PaneId(1), Axis::Horizontal, -18)
@@ -2234,6 +2246,41 @@ mod tests {
             panic!("expected nested projected split");
         };
         assert_eq!(*id, SplitId(11));
+
+        let mut nested = CellLayout::new(PaneId(0), 80, 24);
+        let mut build = allocator(1);
+        nested
+            .split(
+                PaneId(0),
+                Axis::Horizontal,
+                SplitSize::Default,
+                false,
+                false,
+                PaneId(1),
+                &mut build,
+            )
+            .unwrap();
+        nested
+            .split(
+                PaneId(1),
+                Axis::Vertical,
+                SplitSize::Default,
+                false,
+                false,
+                PaneId(2),
+                &mut build,
+            )
+            .unwrap();
+        let mut fresh = allocator(20);
+        nested.refresh_divider_ids(&mut fresh);
+        let LayoutNode::Split { id, second, .. } = nested.project() else {
+            panic!("expected projected split");
+        };
+        assert_eq!(id, SplitId(20));
+        let LayoutNode::Split { id, .. } = second.as_ref() else {
+            panic!("expected nested projected split");
+        };
+        assert_eq!(*id, SplitId(21));
     }
 
     #[test]

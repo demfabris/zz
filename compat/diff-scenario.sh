@@ -66,18 +66,21 @@ die() {
   exit 2
 }
 
-# Both CLIs infer a "current pane" from the invoking environment (tmux via
-# TMUX_PANE in cmd_find_inside_pane, zz via ZZ_PANE). Running the harness from
-# inside a real multiplexer would leak that context into the scratch servers
-# and silently change target resolution, so both sides run scrubbed.
+# Both CLIs infer state from the invoking environment: a "current pane" (tmux
+# via TMUX_PANE in cmd_find_inside_pane, zz via ZZ_PANE) and, for tmux, the
+# mode-keys/status-keys defaults (tmux.c sniffs vi out of VISUAL/EDITOR).
+# Running the harness from a shell that carries any of those would leak the
+# developer's context into the scratch servers, so both sides run scrubbed.
 zz_command() {
   env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+    -u EDITOR -u VISUAL \
     HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
     "$ZZ_BIN" --socket "$ZZ_SOCKET" "$@"
 }
 
 tmux_command() {
   env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+    -u EDITOR -u VISUAL \
     "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" "$@"
 }
 

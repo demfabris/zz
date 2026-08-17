@@ -216,13 +216,13 @@ pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
 /// Implemented tmux commands the daemon dispatches outside the engine
 /// (capture-pane and the buffer family). They never route through spec
 /// parsing, so these rows exist only so `list-commands` tells the truth
-/// about them; usage strings are copied verbatim from the pin.
+/// about them.
 pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "capture-pane",
         aliases: &["capturep"],
         description: "Capture the contents of a pane",
-        usage: "[-aCeFHJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]",
+        usage: "[-aeJMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]",
         options: &[],
         positionals: &[],
         variadic: None,
@@ -240,7 +240,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "list-buffers",
         aliases: &["lsb"],
         description: "List paste buffers",
-        usage: "[-F format] [-f filter] [-O order]",
+        usage: "[-F format]",
         options: &[],
         positionals: &[],
         variadic: None,
@@ -249,7 +249,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "load-buffer",
         aliases: &["loadb"],
         description: "Load a file into a paste buffer",
-        usage: "[-b buffer-name] [-t target-client] path",
+        usage: "[-b buffer-name] path",
         options: &[],
         positionals: &[],
         variadic: None,
@@ -276,7 +276,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "set-buffer",
         aliases: &["setb"],
         description: "Set the contents of a paste buffer",
-        usage: "[-aw] [-b buffer-name] [-n new-buffer-name] [-t target-client] [data]",
+        usage: "[-a] [-b buffer-name] [data]",
         options: &[],
         positionals: &[],
         variadic: None,
@@ -292,13 +292,25 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
     },
 ];
 
+#[cfg(test)]
+const DAEMON_COMMAND_ACCEPTED_OPTIONS: &[(&str, &str, &str)] = &[
+    ("capture-pane", "aeJMNpqT", "bESt"),
+    ("delete-buffer", "", "b"),
+    ("list-buffers", "", "F"),
+    ("load-buffer", "", "b"),
+    ("paste-buffer", "dprS", "sbt"),
+    ("save-buffer", "a", "b"),
+    ("set-buffer", "a", "b"),
+    ("show-buffer", "", "b"),
+];
+
 /// Every tmux-compatible command currently executable by the mux engine.
 pub static COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "new-session",
         aliases: &["new"],
         description: "Create a new session",
-        usage: "[-AdDEPX] [-c start-directory] [-e environment] [-F format] [-f flags] [-n window-name] [-s session-name] [-t target-session] [-x width] [-y height] [shell-command [argument ...]]",
+        usage: "[-AdD] [-c start-directory] [-n window-name] [-s session-name] [-x width] [-y height] [shell-command [argument ...]]",
         options: &[
             CommandOptionSpec::flag("-d", "do not attach"),
             CommandOptionSpec::flag("-A", "attach to the named session when it exists"),
@@ -323,7 +335,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "list-sessions",
         aliases: &["ls"],
         description: "List sessions",
-        usage: "[-r] [-F format] [-f filter] [-O order]",
+        usage: "[-F format]",
         options: &[
             CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::unsupported_value("-f"),
@@ -346,7 +358,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "kill-session",
         aliases: &[],
         description: "Destroy a session",
-        usage: "[-aCg] [-f filter] [-t target-session]",
+        usage: "[-aC] [-t target-session]",
         options: &[
             CommandOptionSpec::value("-t", Session, "target session"),
             CommandOptionSpec::flag("-a", "kill every other session"),
@@ -361,7 +373,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "attach-session",
         aliases: &["attach"],
         description: "Attach to a session",
-        usage: "[-dErx] [-c working-directory] [-f flags] [-t target-session]",
+        usage: "[-d] [-t target-session]",
         options: &[
             CommandOptionSpec::flag("-d", "detach other clients"),
             CommandOptionSpec::value("-t", Session, "target session"),
@@ -387,7 +399,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "detach-client",
         aliases: &["detach"],
         description: "Detach the current client",
-        usage: "[-aP] [-E shell-command] [-s target-session] [-t target-client]",
+        usage: "[-a] [-s target-session]",
         options: &[
             CommandOptionSpec::flag("-a", "detach every other client"),
             CommandOptionSpec::value("-s", Session, "detach every client on the session"),
@@ -402,7 +414,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "list-clients",
         aliases: &["lsc"],
         description: "List attached clients",
-        usage: "[-F format] [-f filter] [-O order][-t target-session]",
+        usage: "[-F format] [-t target-session]",
         options: &[
             CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::value("-t", Session, "target session"),
@@ -417,7 +429,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "refresh-client",
         aliases: &["refresh"],
         description: "Refresh the current client",
-        usage: "[-cDlLRSU] [-A pane:state] [-B name:what:format] [-C XxY] [-f flags] [-r pane:report] [-t target-client] [adjustment]",
+        usage: "[-cDlLRSU] [-A pane:state] [-B name:what:format] [-C XxY] [-F flags] [-f flags] [-r pane:report] [-t target-client] [adjustment]",
         options: &[
             CommandOptionSpec::flag("-c", "return to the previous client size"),
             CommandOptionSpec::flag("-D", "disable client size updates"),
@@ -441,7 +453,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "new-window",
         aliases: &["neww"],
         description: "Create a terminal window",
-        usage: "[-abdEkPS] [-c start-directory] [-e environment] [-F format] [-n window-name] [-t target-window] [shell-command [argument ...]]",
+        usage: "[-adkS] [-c start-directory] [-n window-name] [-t target-window] [shell-command [argument ...]]",
         options: &[
             CommandOptionSpec::value("-t", Window, "destination session or window index"),
             CommandOptionSpec::value("-n", FreeForm, "window name"),
@@ -463,7 +475,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "new-browser",
         aliases: &[],
         description: "Create a browser window",
-        usage: "",
+        usage: "[-adkS] [-n window-name] [-p profile] [-t target-window] [url]",
         options: &[
             CommandOptionSpec::value("-t", Window, "destination session or window index"),
             CommandOptionSpec::value("-n", FreeForm, "window name"),
@@ -480,7 +492,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "list-windows",
         aliases: &["lsw"],
         description: "List windows",
-        usage: "[-ar] [-F format] [-f filter] [-O order][-t target-session]",
+        usage: "[-a] [-F format] [-t target-session]",
         options: &[
             CommandOptionSpec::value("-t", Session, "target session"),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
@@ -553,7 +565,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "kill-window",
         aliases: &["killw"],
         description: "Destroy a window",
-        usage: "[-a] [-f filter] [-t target-window]",
+        usage: "[-a] [-t target-window]",
         options: &[
             CommandOptionSpec::value("-t", Window, "target window"),
             CommandOptionSpec::flag("-a", "kill every other window in the session"),
@@ -613,7 +625,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "split-picker",
         aliases: &[],
         description: "Split a pane and choose what it becomes",
-        usage: "",
+        usage: "[-bdfhv] [-c start-directory] [-l size] [-p percentage] [-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-l", FreeForm, "new pane size in cells or percent"),
@@ -651,7 +663,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "split-window",
         aliases: &["splitw"],
         description: "Split a pane with a terminal",
-        usage: "[-bdefhIklPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
+        usage: "[-bdfhv] [-c start-directory] [-l size] [-p percentage] [-t target-pane] [shell-command [argument ...]]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-l", FreeForm, "new pane size in cells or percent"),
@@ -683,7 +695,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "split-browser",
         aliases: &[],
         description: "Split a pane with a browser",
-        usage: "",
+        usage: "[-bdfhv] [-p profile] [-t target-pane] [url]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-p", FreeForm, "browser profile"),
@@ -700,7 +712,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "select-pane-kind",
         aliases: &[],
         description: "Materialize a pending pane as a terminal, browser, agent, or editor",
-        usage: "",
+        usage: "[-c start-directory] [-t target-pane] pane-kind",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-c", FreeForm, "agent working directory"),
@@ -712,7 +724,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "break-pane",
         aliases: &["breakp"],
         description: "Move a pane into a new window",
-        usage: "[-abdPW] [-F format] [-n window-name] [-s src-pane] [-t dst-window] [-x width] [-y height] [-X x-position] [-Y y-position]",
+        usage: "[-d] [-n window-name] [-s src-pane] [-t dst-window]",
         options: &[
             CommandOptionSpec::value("-n", FreeForm, "new window name"),
             CommandOptionSpec::value("-s", Pane, "source pane"),
@@ -735,7 +747,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "join-pane",
         aliases: &["joinp"],
         description: "Join a pane into another window",
-        usage: "[-bdfhv] [-l size] [-s src-pane] [-t dst-pane]",
+        usage: "[-bdfhv] [-p percentage] [-s src-pane] [-t dst-pane]",
         options: &[
             CommandOptionSpec::value("-p", FreeForm, "split percentage"),
             CommandOptionSpec::value("-s", Pane, "source pane"),
@@ -754,7 +766,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "move-pane",
         aliases: &["movep"],
         description: "Move a pane into another window",
-        usage: "[-bdfhMv] [-D lines] [-l size] [-L columns] [-P position] [-R columns] [-s src-pane] [-t dst-pane] [-U lines] [-X x-position] [-Y y-position] [-z z-index]",
+        usage: "[-bdfhv] [-p percentage] [-s src-pane] [-t dst-pane]",
         options: &[
             CommandOptionSpec::value("-p", FreeForm, "split percentage"),
             CommandOptionSpec::value("-s", Pane, "source pane"),
@@ -782,7 +794,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "set-browser-url",
         aliases: &[],
         description: "Navigate a browser pane",
-        usage: "",
+        usage: "[-t target-pane] url",
         options: &[CommandOptionSpec::value("-t", Pane, "target browser pane")],
         positionals: &[FreeForm],
         variadic: None,
@@ -791,7 +803,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "set-browser-tabs",
         aliases: &[],
         description: "Replace a browser pane's tab list",
-        usage: "",
+        usage: "[-a active-tab-index] [-t target-pane] url ...",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target browser pane"),
             CommandOptionSpec::value("-a", FreeForm, "active tab index"),
@@ -803,7 +815,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "set-browser-profile",
         aliases: &[],
         description: "Switch a browser pane to another profile",
-        usage: "",
+        usage: "[-t target-pane] profile",
         options: &[CommandOptionSpec::value("-t", Pane, "target browser pane")],
         positionals: &[FreeForm],
         variadic: None,
@@ -812,7 +824,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "set-agent-session",
         aliases: &[],
         description: "Persist the opaque ACP session ID for an agent pane",
-        usage: "",
+        usage: "[-c start-directory] [-t target-pane] session-id",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target agent pane"),
             CommandOptionSpec::value(
@@ -828,7 +840,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "set-agent-provider",
         aliases: &[],
         description: "Select the ACP provider for an agent pane",
-        usage: "",
+        usage: "[-t target-pane] provider",
         options: &[CommandOptionSpec::value("-t", Pane, "target agent pane")],
         positionals: &[FreeForm],
         variadic: None,
@@ -837,7 +849,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "restart-agent-pane",
         aliases: &[],
         description: "Restart an agent pane's ACP adapter",
-        usage: "",
+        usage: "[-t target-pane]",
         options: &[CommandOptionSpec::value("-t", Pane, "target agent pane")],
         positionals: &[],
         variadic: None,
@@ -846,7 +858,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "set-editor-path",
         aliases: &[],
         description: "Persist or clear the absolute file path for an editor pane",
-        usage: "",
+        usage: "[-t target-pane] [path]",
         options: &[CommandOptionSpec::value("-t", Pane, "target editor pane")],
         positionals: &[FreeForm],
         variadic: None,
@@ -855,7 +867,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "select-pane",
         aliases: &["selectp"],
         description: "Select a pane",
-        usage: "[-DdeLlMmRUZ] [-T title] [-t target-pane]",
+        usage: "[-DLlRUZ] [-T title] [-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-T", FreeForm, "pane title"),
@@ -879,7 +891,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "last-pane",
         aliases: &["lastp"],
         description: "Select the last pane",
-        usage: "[-deZ] [-t target-window]",
+        usage: "[-Z] [-t target-window]",
         options: &[
             CommandOptionSpec::value("-t", Window, "target window"),
             CommandOptionSpec::flag("-Z", "preserve zoom"),
@@ -909,7 +921,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "list-panes",
         aliases: &["lsp"],
         description: "List panes",
-        usage: "[-asr] [-F format] [-f filter] [-O order][-t target-window]",
+        usage: "[-as] [-F format] [-t target-window]",
         options: &[
             CommandOptionSpec::value("-t", Window, "target window"),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
@@ -926,7 +938,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "resize-pane",
         aliases: &["resizep"],
         description: "Resize or zoom a pane",
-        usage: "[-MTZ] [-D lines] [-L columns] [-R columns] [-U lines] [-x width] [-y height] [-t target-pane]",
+        usage: "[-Z] [-D lines] [-L columns] [-R columns] [-U lines] [-x width] [-y height] [-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-x", FreeForm, "width in cells or percent"),
@@ -993,7 +1005,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "kill-pane",
         aliases: &["killp"],
         description: "Destroy a pane",
-        usage: "[-a] [-f filter] [-t target-pane]",
+        usage: "[-a] [-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-a", "kill every other pane in the window"),
@@ -1006,7 +1018,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "send-keys",
         aliases: &["send"],
         description: "Send keys or a copy-mode command",
-        usage: "[-FHKlMRX] [-c target-client] [-N repeat-count] [-t target-pane] [key ...]",
+        usage: "[-CHPloX] [-N repeat-count] [-t target-pane] [key ...]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-N", FreeForm, "repeat count"),
@@ -1029,7 +1041,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "send-prefix",
         aliases: &[],
         description: "Send the prefix key to a pane",
-        usage: "[-2] [-t target-pane]",
+        usage: "[-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::unsupported_flag("-2"),
@@ -1041,7 +1053,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "copy-mode",
         aliases: &[],
         description: "Enter copy mode",
-        usage: "[-dekHMqSu] [-s src-pane] [-t target-pane]",
+        usage: "[-deMqu] [-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-d", "scroll one page down"),
@@ -1061,7 +1073,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "copy-mode-search-prompt",
         aliases: &[],
         description: "Open the copy-mode search prompt",
-        usage: "",
+        usage: "[-b] [-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-b", "search backward"),
@@ -1073,7 +1085,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "command-prompt",
         aliases: &[],
         description: "Open a command prompt",
-        usage: "[-1CbeFiklNP] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]",
+        usage: "[-b] [-I inputs] [-p prompts] [template]",
         options: &[
             CommandOptionSpec::value("-I", FreeForm, "initial input"),
             CommandOptionSpec::value("-p", FreeForm, "prompt label"),
@@ -1097,7 +1109,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "choose-tree",
         aliases: &[],
         description: "Choose a pane, or focus the session sidebar",
-        usage: "[-GhkNrswZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
+        usage: "[-swZ] [-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-s", "focus the session sidebar"),
@@ -1121,7 +1133,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "focus-sidebar",
         aliases: &[],
         description: "Focus the workspace sidebar",
-        usage: "",
+        usage: "[-t target-pane]",
         options: &[CommandOptionSpec::value("-t", Pane, "target pane")],
         positionals: &[],
         variadic: None,
@@ -1130,7 +1142,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "choose-buffer",
         aliases: &[],
         description: "Choose a paste buffer",
-        usage: "[-kNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
+        usage: "[-Z] [-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-Z", "zoom the chooser, always full window in zz"),
@@ -1150,7 +1162,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "display-message",
         aliases: &["display"],
         description: "Display or print a formatted message",
-        usage: "[-aCIlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
+        usage: "[-p] [-t target-pane] [message]",
         options: &[
             CommandOptionSpec::flag("-p", "print the message"),
             CommandOptionSpec::value("-t", Pane, "target pane"),
@@ -1171,7 +1183,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "show-messages",
         aliases: &["showmsgs"],
         description: "Show the daemon message log",
-        usage: "[-JT] [-t target-client]",
+        usage: "",
         options: &[
             CommandOptionSpec::unsupported_flag("-J"),
             CommandOptionSpec::unsupported_flag("-T"),
@@ -1184,7 +1196,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "display-panes",
         aliases: &["displayp"],
         description: "Display pane numbers",
-        usage: "[-bN] [-d duration] [-t target-client] [template]",
+        usage: "[-b] [-d duration]",
         options: &[
             CommandOptionSpec::value("-d", FreeForm, "duration in milliseconds"),
             CommandOptionSpec::flag("-b", "do not block other commands, always on in zz"),
@@ -1198,7 +1210,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "clear-history",
         aliases: &["clearhist"],
         description: "Clear terminal history",
-        usage: "[-H] [-t target-pane]",
+        usage: "[-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::unsupported_flag("-H"),
@@ -1224,7 +1236,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "unbind-key",
         aliases: &["unbind"],
         description: "Remove a key binding",
-        usage: "[-anq] [-T key-table] key",
+        usage: "[-n] [-T key-table] key",
         options: &[
             CommandOptionSpec::value("-T", KeyTable, "key table"),
             CommandOptionSpec::unsupported_flag("-a"),
@@ -1238,7 +1250,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "list-keys",
         aliases: &["lsk"],
         description: "List key bindings",
-        usage: "[-1aNr] [-F format] [-O order] [-P prefix-string][-T key-table] [key]",
+        usage: "[-T key-table]",
         options: &[
             CommandOptionSpec::value("-T", KeyTable, "key table"),
             CommandOptionSpec::unsupported_flag("-1"),
@@ -1265,7 +1277,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "set-option",
         aliases: &["set"],
         description: "Set a server, session, window, or pane option",
-        usage: "[-aFgopqsuUw] [-t target-pane] option [value]",
+        usage: "[-agopqsuUw] [-t target-pane] option [value]",
         options: &[
             CommandOptionSpec::value("-t", FreeForm, "target"),
             CommandOptionSpec::flag("-a", "append"),
@@ -1286,7 +1298,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "set-window-option",
         aliases: &["setw"],
         description: "Set a window option",
-        usage: "[-aFgoqu] [-t target-window] option [value]",
+        usage: "[-agoqu] [-t target-window] option [value]",
         options: &[
             CommandOptionSpec::value("-t", Window, "target window"),
             CommandOptionSpec::flag("-a", "append"),
@@ -1365,7 +1377,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "source-file",
         aliases: &["source"],
         description: "Load a tmux configuration file",
-        usage: "[-Fnqv] [-t target-pane] path ...",
+        usage: "[-q] path ...",
         options: &[
             CommandOptionSpec::flag("-q", "do not report a missing file"),
             CommandOptionSpec::unsupported_value("-t"),
@@ -1421,9 +1433,56 @@ pub fn canonical_command(command: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
     use super::*;
+
+    fn usage_options(usage: &str) -> BTreeMap<char, bool> {
+        let mut options = BTreeMap::new();
+        for usage_option in usage.split("[-").skip(1) {
+            let (body, _) = usage_option
+                .split_once(']')
+                .expect("usage option has a closing bracket");
+            let mut tokens = body.split_ascii_whitespace();
+            let flags = tokens.next().expect("usage option has a flag");
+            let takes_value = tokens.next().is_some();
+            assert!(tokens.next().is_none(), "usage option has one value label");
+            if takes_value {
+                assert_eq!(flags.len(), 1, "valued usage option is not grouped");
+            }
+            for flag in flags.chars() {
+                assert!(
+                    options.insert(flag, takes_value).is_none(),
+                    "duplicate usage option -{flag}"
+                );
+            }
+        }
+        options
+    }
+
+    fn accepted_options(spec: &CommandSpec) -> BTreeMap<char, bool> {
+        spec.options
+            .iter()
+            .filter(|option| !option.unsupported)
+            .map(|option| {
+                let bytes = option.name.as_bytes();
+                assert_eq!(bytes.len(), 2, "{} has a non-short option", spec.name);
+                assert_eq!(bytes[0], b'-', "{} has an invalid option", spec.name);
+                (
+                    char::from(bytes[1]),
+                    option.value.is_some() || option.attached_value,
+                )
+            })
+            .collect()
+    }
+
+    fn encoded_daemon_options(flags: &str, values: &str) -> BTreeMap<char, bool> {
+        flags
+            .chars()
+            .map(|flag| (flag, false))
+            .chain(values.chars().map(|flag| (flag, true)))
+            .collect()
+    }
 
     #[test]
     fn catalog_names_aliases_and_options_are_unique() {
@@ -1447,6 +1506,35 @@ mod tests {
                 assert_eq!(canonical_command(alias), spec.name);
             }
             assert_eq!(canonical_command(spec.name), spec.name);
+        }
+    }
+
+    #[test]
+    fn every_usage_string_matches_its_accepted_options() {
+        for spec in COMMAND_SPECS {
+            assert_eq!(
+                usage_options(spec.usage),
+                accepted_options(spec),
+                "usage drift for {}",
+                spec.name
+            );
+        }
+
+        assert_eq!(
+            DAEMON_COMMAND_ACCEPTED_OPTIONS.len(),
+            DAEMON_COMMAND_SPECS.len()
+        );
+        for spec in DAEMON_COMMAND_SPECS {
+            let (_, flags, values) = DAEMON_COMMAND_ACCEPTED_OPTIONS
+                .iter()
+                .find(|(name, _, _)| *name == spec.name)
+                .unwrap_or_else(|| panic!("missing daemon option set for {}", spec.name));
+            assert_eq!(
+                usage_options(spec.usage),
+                encoded_daemon_options(flags, values),
+                "usage drift for {}",
+                spec.name
+            );
         }
     }
 

@@ -334,6 +334,7 @@ fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
         "buffer-limit" => TmuxOptionDefault::Scalar("50"),
         "copy-command" => TmuxOptionDefault::String(""),
         "history-limit" => TmuxOptionDefault::Scalar("2000"),
+        "message-limit" => TmuxOptionDefault::Scalar("1000"),
         "mode-keys" => TmuxOptionDefault::Scalar("emacs"),
         "prefix" => TmuxOptionDefault::Scalar("C-b"),
         "renumber-windows" | "synchronize-panes" => TmuxOptionDefault::Scalar("off"),
@@ -527,6 +528,7 @@ mod tests {
             vec![
                 ("buffer-limit", TmuxOptionDefault::Scalar("50")),
                 ("copy-command", TmuxOptionDefault::String("")),
+                ("message-limit", TmuxOptionDefault::Scalar("1000")),
                 ("set-clipboard", TmuxOptionDefault::Scalar("external")),
                 ("base-index", TmuxOptionDefault::Scalar("0")),
                 ("history-limit", TmuxOptionDefault::Scalar("2000")),

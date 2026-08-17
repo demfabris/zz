@@ -242,7 +242,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         let Ok(format) = std::ffi::CString::new(literal) else {
             return literal.to_owned();
         };
-        let time = self.now.timestamp() as libc::time_t;
+        let time: libc::time_t = TryInto::try_into(self.now.timestamp()).unwrap_or(0);
         let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
         if unsafe { libc::localtime_r(&raw const time, &raw mut tm) }.is_null() {
             return literal.to_owned();

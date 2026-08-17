@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: tmux divergence matrix
-description: "Every known divergence from tmux at the pinned reference commit: the 26 missing commands and why, behavioral gaps on the implemented surface, the 15-of-180 options coverage, and the protocol-level differences."
+description: "Every known divergence from tmux at the pinned reference commit: the 26 missing commands and why, behavioral gaps on the implemented surface, the 16-of-180 options coverage, and the protocol-level differences."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-17T00:00:00-03:00
@@ -80,7 +80,7 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | Where | Divergence | Loud or silent? |
 | --- | --- | --- |
 | `find-window` | Detached CLI calls validate the target and return success with no output, including for zero matches. zz does not open tmux's attached-client window-tree chooser. | **silent**, bounded |
-| `list-commands` | zz lists the 71 `COMMAND_SPECS` rows in tmux's line format with pin usage strings. It omits unimplemented tmux commands so feature probes can take their fallback path. | **silent**, deliberate |
+| `list-commands` | zz lists implemented commands in tmux's line format. Each usage string reports zz's accepted flags, so affected rows differ from the pin. Unimplemented commands stay absent so feature probes can take their fallback path. | **silent**, deliberate |
 | `refresh-client` | Detached command clients receive tmux's exact `no current client` error. zz does not implement attached-client redraws or control-mode subscriptions. | loud |
 | `copy-mode` | `-k -H -S -s` rejected (`-e`/`-q`/`-M` — the stock-binding trio — are implemented). | loud |
 | `source-file` | No `-` stdin (refused loudly), no `-F`/`-n`/`-v`. Globbing works. | loud |
@@ -166,11 +166,11 @@ inside a generic “unsupported formats” claim.
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
 | `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
-# Options: 15 of 180
+# Options: 16 of 180
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin.
 Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-panes`,
-`word-separators`, `buffer-limit`, `set-clipboard`, `copy-command`, `status`,
+`word-separators`, `buffer-limit`, `message-limit`, `set-clipboard`, `copy-command`, `status`,
 `status-interval`, `status-left`, `status-right`, `base-index`, `pane-base-index`, and
 `renumber-windows`. The index trio follows tmux's session/window inheritance, allocation,
 targeting, format, and close-triggered renumbering behavior. (`set-option` also accepts six

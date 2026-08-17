@@ -103,7 +103,6 @@ const MAX_COMMAND_PROMPT_HISTORY: usize = 100;
 const MAX_COMMAND_PROMPT_HISTORY_SNAPSHOT_ITEMS: usize = 20;
 const MAX_COMMAND_PROMPT_HISTORY_SNAPSHOT_BYTES: usize = 32 * 1024;
 const MAX_COMMAND_PROMPT_OUTPUT_BYTES: usize = 1024 * 1024;
-const MESSAGE_LIMIT: usize = 1_000;
 const COMMAND_PROMPT_OUTPUT_TRUNCATED: &str = "… output truncated";
 const MAX_CHOOSE_TREE_ITEMS: usize = 4_096;
 const MAX_CHOOSE_TREE_ITEM_BYTES: usize = 512;
@@ -229,7 +228,7 @@ fn command_log_line(command: &CommandInvocation) -> String {
     line
 }
 
-fn push_server_message(inner: &mut ServerState, text: String) {
+fn push_server_message(inner: &mut ServerState, text: String) -> u64 {
     let number = inner.next_message_number;
     inner.next_message_number = inner.next_message_number.wrapping_add(1);
     inner.message_log.push_back(ServerMessage {
@@ -237,9 +236,11 @@ fn push_server_message(inner: &mut ServerState, text: String) {
         time: SystemTime::now(),
         text,
     });
-    while inner.message_log.len() > MESSAGE_LIMIT {
+    let limit = inner.engine.message_limit();
+    while inner.message_log.len() > limit {
         inner.message_log.pop_front();
     }
+    number
 }
 
 fn daemon_uid() -> String {
@@ -2207,7 +2208,7 @@ impl Shared {
         request_id: u64,
         command: &CommandInvocation,
     ) -> CommandResponse {
-        {
+        let client_name = {
             let mut inner = self.inner.lock();
             let client_name = inner
                 .client_names
@@ -2216,7 +2217,8 @@ impl Shared {
                 .unwrap_or_else(|| format!("client-{}", client.0));
             let command = command_log_line(command);
             push_server_message(&mut inner, format!("{client_name} command: {command}"));
-        }
+            client_name
+        };
         match self.execute(client, kind, context, command) {
             Ok(execution) => {
                 if kind == ClientKind::Interactive
@@ -2242,10 +2244,12 @@ impl Shared {
                     output: execution.output,
                 }
             }
-            Err(error) => CommandResponse::Error {
-                request_id,
-                error: daemon_server_error(error),
-            },
+            Err(error) => {
+                let error = daemon_server_error(error);
+                let mut inner = self.inner.lock();
+                push_server_message(&mut inner, format!("{client_name} message: {error}"));
+                CommandResponse::Error { request_id, error }
+            }
         }
     }
 
@@ -19830,19 +19834,116 @@ bind - split-window -v -c "#{pane_current_path}"
         let mut inner = shared.inner.lock();
         inner.message_log.clear();
         inner.next_message_number = 0;
-        for number in 0..=MESSAGE_LIMIT {
+        drop(inner);
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-s", "message-limit", "3"]),
+            )
+            .unwrap();
+        let mut inner = shared.inner.lock();
+        for number in 0..5 {
             push_server_message(&mut inner, format!("message-{number}"));
         }
-        assert_eq!(inner.message_log.len(), MESSAGE_LIMIT);
-        assert_eq!(inner.message_log.front().unwrap().number, 1);
-        assert_eq!(inner.message_log.front().unwrap().text, "message-1");
         assert_eq!(
-            inner.message_log.back().unwrap().number,
-            MESSAGE_LIMIT as u64
+            inner
+                .message_log
+                .iter()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            ["message-2", "message-3", "message-4"]
         );
         assert_eq!(
-            inner.message_log.back().unwrap().text,
-            format!("message-{MESSAGE_LIMIT}")
+            inner
+                .message_log
+                .iter()
+                .rev()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            ["message-4", "message-3", "message-2"]
+        );
+        inner.message_log.clear();
+        inner.next_message_number = 0;
+        drop(inner);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-su", "message-limit"]),
+            )
+            .unwrap();
+        let mut inner = shared.inner.lock();
+        for number in 0..5 {
+            push_server_message(&mut inner, format!("message-{number}"));
+        }
+        drop(inner);
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-s", "message-limit", "3"]),
+            )
+            .unwrap();
+        let mut inner = shared.inner.lock();
+        assert_eq!(inner.message_log.len(), 5);
+        push_server_message(&mut inner, "message-5".to_owned());
+        assert_eq!(
+            inner
+                .message_log
+                .iter()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            ["message-3", "message-4", "message-5"]
+        );
+    }
+
+    #[test]
+    fn failing_command_logs_its_line_and_then_the_error_message() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "work"]),
+            )
+            .unwrap();
+
+        let response = shared.execute_command_request(
+            client,
+            ClientKind::Command,
+            &mut context,
+            1,
+            &CommandInvocation::new("select-window", ["-t", "99"]),
+        );
+        assert!(matches!(
+            response,
+            CommandResponse::Error {
+                request_id: 1,
+                error: ServerError::WindowNotFound(window),
+            } if window == "99"
+        ));
+
+        let inner = shared.inner.lock();
+        assert_eq!(inner.message_log.len(), 2);
+        assert_eq!(inner.next_message_number, 2);
+        assert_eq!(
+            inner
+                .message_log
+                .iter()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "client-7 command: select-window -t 99",
+                "client-7 message: can't find window: 99",
+            ]
         );
     }
 

@@ -45,6 +45,8 @@ const DEFAULT_LIST_COMMANDS_FORMAT: &str =
     "#{command_list_name}#{?command_list_alias, (#{command_list_alias}),} #{command_list_usage}";
 pub const DEFAULT_BUFFER_LIMIT: usize = 50;
 const MAX_BUFFER_LIMIT: usize = i32::MAX.cast_unsigned() as usize;
+const DEFAULT_MESSAGE_LIMIT: usize = 1_000;
+const MAX_MESSAGE_LIMIT: usize = i32::MAX.cast_unsigned() as usize;
 const DEFAULT_HISTORY_TRICKLE: usize = 2_000;
 const MAX_HISTORY_TRICKLE: usize = 10_000;
 const DEFAULT_BASE_INDEX: u32 = 0;
@@ -331,6 +333,7 @@ pub struct MuxEngine {
     set_clipboard: SetClipboard,
     copy_command: String,
     buffer_limit: usize,
+    message_limit: usize,
     history_trickle: usize,
     global_history_limit: usize,
     session_history_limits: BTreeMap<SessionId, usize>,
@@ -403,6 +406,7 @@ impl Default for MuxEngine {
             set_clipboard: SetClipboard::default(),
             copy_command: String::new(),
             buffer_limit: DEFAULT_BUFFER_LIMIT,
+            message_limit: DEFAULT_MESSAGE_LIMIT,
             history_trickle: DEFAULT_HISTORY_TRICKLE,
             global_history_limit: DEFAULT_HISTORY_LIMIT,
             session_history_limits: BTreeMap::new(),
@@ -443,6 +447,11 @@ impl MuxEngine {
     #[must_use]
     pub const fn buffer_limit(&self) -> usize {
         self.buffer_limit
+    }
+
+    #[must_use]
+    pub const fn message_limit(&self) -> usize {
+        self.message_limit
     }
 
     #[must_use]
@@ -3300,6 +3309,7 @@ impl MuxEngine {
         match table_option.name {
             "synchronize-panes" => self.set_synchronize_panes(value, &options, target),
             "buffer-limit" => self.set_buffer_limit(value, &options),
+            "message-limit" => self.set_message_limit(value, &options),
             "history-limit" => self.set_history_limit(value, &options, target),
             "base-index" => self.set_base_index(value, &options, target),
             "renumber-windows" => self.set_renumber_windows(value, &options, target),
@@ -3796,6 +3806,7 @@ impl MuxEngine {
             "buffer-limit" => self.buffer_limit.to_string(),
             "copy-command" => self.copy_command.clone(),
             "history-limit" => self.global_history_limit.to_string(),
+            "message-limit" => self.message_limit.to_string(),
             "mode-keys" => self.global_mode_keys.as_str().to_owned(),
             "pane-base-index" => self.global_pane_base_index.to_string(),
             "prefix" => self.mux_option_value(MuxOptionKey::Prefix),
@@ -4092,6 +4103,35 @@ impl MuxEngine {
                 },
             ],
         })
+    }
+
+    fn set_message_limit(
+        &mut self,
+        value: Option<&str>,
+        options: &Options,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            return already_set_or_quiet(options, "message-limit");
+        }
+        let limit = if unset {
+            DEFAULT_MESSAGE_LIMIT
+        } else {
+            let value = value.ok_or_else(|| {
+                ServerError::InvalidCommand("set-option message-limit needs a value".to_owned())
+            })?;
+            let limit = value.parse::<usize>().map_err(|_| {
+                ServerError::InvalidCommand(format!("invalid message-limit value: {value}"))
+            })?;
+            if limit > MAX_MESSAGE_LIMIT {
+                return Err(ServerError::InvalidCommand(format!(
+                    "message-limit must be between 0 and {MAX_MESSAGE_LIMIT}"
+                )));
+            }
+            limit
+        };
+        self.message_limit = limit;
+        Ok(Execution::default())
     }
 
     fn set_history_trickle(
@@ -8900,6 +8940,45 @@ mod tests {
     }
 
     #[test]
+    fn message_limit_is_a_live_server_option() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+
+        assert_eq!(engine.message_limit(), DEFAULT_MESSAGE_LIMIT);
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-option", &["-s", "message-limit", "3"]),
+                )
+                .unwrap(),
+            Execution::default()
+        );
+        assert_eq!(engine.message_limit(), 3);
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "message-limit"]),
+                )
+                .unwrap()
+                .output,
+            "3"
+        );
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-option", &["-su", "message-limit"]),
+                )
+                .unwrap(),
+            Execution::default()
+        );
+        assert_eq!(engine.message_limit(), DEFAULT_MESSAGE_LIMIT);
+    }
+
+    #[test]
     fn history_trickle_is_a_validated_global_server_option() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -11784,10 +11863,7 @@ mod tests {
             )
             .unwrap();
         engine
-            .execute(
-                &mut context,
-                &command("move-window", &["-r", "-s", "missing", "-t", "work"]),
-            )
+            .execute(&mut context, &command("move-window", &["-r", "-t", "work"]))
             .unwrap();
         assert_eq!(window_layout(&engine, work), ["1:1", "2:three", "3:nine"]);
 
@@ -12003,7 +12079,7 @@ mod tests {
         assert!(rows.contains(&"list-commands (lscm) [-F format] [command]"));
         assert!(rows.contains(&"start-server (start) "));
         assert!(rows.contains(
-            &"capture-pane (capturep) [-aCeFHJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
+            &"capture-pane (capturep) [-aeJMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
         ));
         assert!(rows.contains(
             &"paste-buffer (pasteb) [-dprS] [-s separator] [-b buffer-name] [-t target-pane]"
@@ -12013,7 +12089,7 @@ mod tests {
                 .execute(&mut context, &command("list-commands", &["capturep"]))
                 .unwrap()
                 .output,
-            "capture-pane (capturep) [-aCeFHJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
+            "capture-pane (capturep) [-aeJMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
         );
         assert_eq!(
             engine

@@ -13,7 +13,7 @@ timestamp: 2026-08-17T00:00:00-03:00
 [`CommandInvocation`](/crates/zz-protocol.md) into mutations on [`MuxState`](/crates/zz-mux.md) plus a list
 of [`MuxEffect`](#effects) side effects the daemon acts on. `MuxEngine` owns the `MuxState`, the
 [`KeyTables`](/tmux/key-tables.md), and the tmux options that are not per-window layout: `mode-keys`
-(global + per-window), `set-clipboard`, `copy-command`, `buffer-limit`, `history-limit`
+(global + per-window), `set-clipboard`, `copy-command`, `buffer-limit`, `message-limit`, `history-limit`
 (global + per-session), and `word-separators` (global + per-session). It also owns free-form `@`
 option maps at every tmux scope and global/per-session process-environment overlays. `execute` canonicalizes the
 command name, dispatches to a handler, and, if the state `generation` advanced, appends a
@@ -27,7 +27,7 @@ mutations before later failures; `select-layout`, for example, unzooms its resol
 parses a custom layout. The daemon publishes any generation change at the command boundary even
 when the handler returns an error.
 `catalog.rs` is the shared renderer-free source for canonical names, aliases, descriptions,
-pin usage strings, accepted flags/options, and completion value kinds; `canonical_command` and the native
+accepted usage strings, flags/options, and completion value kinds; `canonical_command` and the native
 [command palette](/concepts/command-palette.md) both consume it.
 
 # Argument parsing and `-t` targets
@@ -98,12 +98,12 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `focus-sidebar` | . | *zz-native:* show and focus the workspace sidebar (`-t`). |
 | `choose-tree` | . | Open the pane chooser; `-s`/`-w` route to the sidebar (`-s`,`-w`,`-Z`,`-t`). `-Z` is accepted and already true: zz's chooser is a full-window overlay, so there is nothing left to zoom. |
 | `choose-buffer` | . | Open the paste-buffer chooser (`-Z`,`-t`); `-Z` is accepted and already true, as for `choose-tree`. |
-| `show-messages` | `showmsgs` | Print the daemon's 1,000-entry message ring newest first with tmux's pretty timestamps. The daemon records command-client invocations before execution and `display-message` events without `-p`. |
+| `show-messages` | `showmsgs` | Print the daemon's message ring newest first with tmux's timestamps. The server-scoped `message-limit` bounds retention at insertion time and defaults to 1,000. Successful command-client invocations produce `command:` entries; failures produce one `message:` entry with the error. `display-message` without `-p` also adds an entry. |
 | `display-panes` | `displayp` | Pane-number overlay (`-d` duration). `-b` is accepted and already true: the effect returns immediately, so nothing was ever blocked. |
 | `clear-history` | `clearhist` | Clear a pane's scrollback (`-H` unsupported). |
 | `bind-key` / `unbind-key` | `bind` / `unbind` | Add/remove key bindings (`-n`,`-r`,`-T`,`-N`). Empty `{}` installs an empty command list, and a single trailing escaped separator is ignored. Payloads validate at bind time (names + flags — tmux validates the full template): unknown names error `unknown command: X`, cataloged commands get their flags checked, daemon-side verbs are accepted unvalidated, and a real-but-unimplemented tmux command errors as unsupported so config import counts it. |
 | `list-keys` | `lsk` | Print bindings as `bind-key` lines; `-T` limits the table. tmux's other selectors are rejected, not ignored: `-n` is not a tmux `list-keys` flag at all, and `-1`/`-N`/`-a`/`-O`/`-P`/`-r` plus the `[key]` positional have no zz form. |
-| `list-commands` | `lscm` | Print `COMMAND_SPECS` in canonical-name order with tmux's `name (alias) usage` line shape and literal pin usage strings. `-F` formats rows and an optional command limits the result. The list excludes commands zz does not implement. |
+| `list-commands` | `lscm` | Print `COMMAND_SPECS` in canonical-name order with tmux's `name (alias) usage` line shape. Each usage string lists the flags zz accepts, including daemon-parsed commands. `-F` formats rows and an optional command limits the result. The list excludes commands zz does not implement. |
 | `set-option` / `set-window-option` | `set` / `setw` | Set typed options (see below) or exact free-form `@name` strings. User options support set, append, and unset at server, global-session, session, global-window, window, and pane scope. Indexed scalars return tmux's `not an array`; table-known arrays parse and take the documented empty-success omission path. |
 | `show-options` | `show` | List options stored at the resolved scope or print one named option. `-v` prints only its raw value, `-A` includes an inherited named/table value with `*` after the name, `-q` suppresses unknown-name and target errors, and `-s`/`-g`/`-w`/`-p` select scope for `@` names. Implemented scalar and stored `@` values also read through valid `name[index]` spellings. Implemented string values use the pin's `args_escape` byte shape; `-H` adds no rows because zz has no hooks. A table-known unimplemented name or array prints nothing. Plain listings expose tmux and `@` names only; explicit-name queries still reach zz-native settings. |
 | `show-window-options` | `showw` | Window-scoped spelling of `show-options` with the pin's `-g`, `-t`, and `-v` surface. A table-known option still routes by its declared scope, so spelling this command cannot turn a session option into a window option. |
@@ -115,8 +115,8 @@ winning string; noncanonical lookalikes such as `00` do not reserve `0`.
 | `kill-server` | . | Stop the daemon (`KillServer` effect). |
 
 Options handled by `set-option`/`set-window-option`: `synchronize-panes` (global→window→pane scope,
-`-g/-w/-p/-u/-U/-o`), `buffer-limit` (global, default 50), `history-limit` (session, default 10000,
-0–1,000,000), `word-separators` (session, `-a` append), `mode-keys` (`vi`→`copy-mode-vi`,
+`-g/-w/-p/-u/-U/-o`), `buffer-limit` (global, default 50), `message-limit` (server, default 1000),
+`history-limit` (session, default 10000, 0–1,000,000), `word-separators` (session, `-a` append), `mode-keys` (`vi`→`copy-mode-vi`,
 `emacs`→`copy-mode`), `prefix`, `set-clipboard` (`on`/`external`/`off`), `copy-command`, `status`,
 `status-interval`, `status-left`, `status-right`, `base-index`, `pane-base-index`, and
 `renumber-windows`. The matcher checks exact names and unique prefixes against all 180 tmux option names plus

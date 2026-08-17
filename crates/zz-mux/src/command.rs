@@ -1022,7 +1022,13 @@ impl MuxEngine {
             }
             return Ok(Execution::default());
         }
-        let origin = match context.pane {
+        let context_pane_in_session = context.pane.filter(|pane| {
+            self.state
+                .window_for_pane(*pane)
+                .and_then(|window| self.state.windows.get(&window))
+                .is_some_and(|window| window.session == session)
+        });
+        let origin = match context_pane_in_session {
             Some(pane) => Some(pane),
             None => Some(window_active_pane(
                 &self.state,
@@ -6200,6 +6206,46 @@ mod tests {
             .execute(&mut context, &command("select-pane", &["-U"]))
             .expect("directional select from a healed context");
         assert_eq!(context.pane, Some(second));
+    }
+
+    #[test]
+    fn new_window_cwd_origin_is_the_target_session_not_the_context_pane() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "target"]))
+            .expect("target session");
+        let target_pane = context.pane.expect("target pane");
+        assert!(engine.set_pane_runtime_facts(
+            target_pane,
+            PaneRuntimeFacts {
+                current_path: "/private/tmp".to_owned(),
+                ..PaneRuntimeFacts::default()
+            },
+        ));
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "other"]))
+            .expect("other session");
+        let other_pane = context.pane.expect("other pane");
+        assert_ne!(other_pane, target_pane);
+
+        let window = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-window",
+                    &["-d", "-t", "target", "-c", "#{pane_current_path}"],
+                ),
+            )
+            .expect("cross-session new-window");
+        assert!(matches!(
+            window.effects.first(),
+            Some(MuxEffect::PaneCreated {
+                inherit_cwd_from: Some(source),
+                cwd: Some(cwd),
+                ..
+            }) if *source == target_pane && cwd == "/private/tmp"
+        ));
     }
 
     #[test]

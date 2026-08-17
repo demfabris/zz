@@ -2350,16 +2350,17 @@ impl Shared {
                         let history_limit = inner.engine.history_limit_for_pane(*pane)?;
                         let word_separators =
                             WordSeparators::new(inner.engine.word_separators_for_pane(*pane)?);
-                        let working_directory = cwd
-                            .as_deref()
-                            .map(PathBuf::from)
-                            .filter(|path| path.is_dir())
-                            .or_else(|| {
-                                inherit_cwd_from
-                                    .and_then(|source| inner.terminals.get(&source))
-                                    .and_then(|terminal| terminal_working_directory(terminal))
-                            })
-                            .or_else(|| std::env::current_dir().ok());
+                        let working_directory = match cwd.as_deref().map(PathBuf::from) {
+                            Some(path) if path.is_dir() => Some(path),
+                            Some(_) => std::env::var_os("HOME")
+                                .map(PathBuf::from)
+                                .filter(|path| path.is_dir())
+                                .or_else(|| Some(PathBuf::from("/"))),
+                            None => inherit_cwd_from
+                                .and_then(|source| inner.terminals.get(&source))
+                                .and_then(|terminal| terminal_working_directory(terminal))
+                                .or_else(|| std::env::current_dir().ok()),
+                        };
                         let start_path = working_directory
                             .as_deref()
                             .map(|path| path.to_string_lossy().into_owned())
@@ -14026,7 +14027,7 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[cfg(unix)]
     #[test]
-    fn terminal_cwd_flag_prefers_a_valid_literal_and_falls_back_to_the_donor() {
+    fn terminal_cwd_flag_prefers_a_valid_literal_and_bogus_paths_land_in_home() {
         let donor_directory = tempfile::tempdir().expect("donor working directory");
         let donor_path = donor_directory
             .path()
@@ -14098,7 +14099,12 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("split with bogus literal cwd");
         let fallback = context.pane.expect("fallback cwd pane");
         let fallback_terminal = Arc::clone(&shared.inner.lock().terminals[&fallback]);
-        wait_for_cwd(&fallback_terminal, &literal_path);
+        let home_path = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .expect("HOME is set")
+            .canonicalize()
+            .expect("canonical home directory");
+        wait_for_cwd(&fallback_terminal, &home_path);
     }
 
     #[cfg(unix)]

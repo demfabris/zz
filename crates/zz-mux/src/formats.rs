@@ -3355,6 +3355,11 @@ mod tests {
         assert_eq!(expand("##S #z"), "#S #z");
         assert_eq!(expand("#[fg=green,bold]%H:%M#[default]"), "09:41");
         assert_eq!(expand("up #(uptime)"), "up <uptime>");
+        assert_eq!(expand("#(date %H:%M)"), "<date 09:41>");
+        assert_eq!(
+            expand_format_values("#(date %H:%M)", &context(), &mut Stub),
+            "<date %H:%M>"
+        );
     }
 
     #[test]

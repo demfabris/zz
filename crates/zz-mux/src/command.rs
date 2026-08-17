@@ -1593,6 +1593,9 @@ impl MuxEngine {
         let (options, positional) = parse_command_options("move-window", args)?;
         reject_positionals("move-window", &positional)?;
         if options.has("-r") {
+            if options.value("-s").is_some() {
+                self.resolve_window(options.value("-s"), context.session, context.window)?;
+            }
             let session = self
                 .state
                 .resolve_session(options.value("-t"), context.session)?;
@@ -11681,6 +11684,40 @@ mod tests {
         assert_eq!(engine.state.sessions[&alpha].active_window, moving);
         assert_eq!(engine.state.windows[&main].session, alpha);
         assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
+    fn move_window_r_still_resolves_a_bogus_source_and_mutates_nothing() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-d", "-s", "rn3"]))
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "rn3:3", "-n", "a3"]),
+            )
+            .unwrap();
+
+        let error = engine
+            .execute(
+                &mut context,
+                &command("move-window", &["-r", "-s", "rn3:99", "-t", "rn3"]),
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            ServerError::WindowNotFound("99".to_owned()).to_string()
+        );
+        let indexes = engine
+            .execute(
+                &mut context,
+                &command("list-windows", &["-t", "rn3", "-F", "#{window_index}"]),
+            )
+            .unwrap()
+            .output;
+        assert_eq!(indexes, "0\n3");
     }
 
     #[test]

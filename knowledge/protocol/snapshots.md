@@ -101,7 +101,11 @@ presence.
 
 ## Layout . the recursive `LayoutNode`
 
-Each window's geometry is a binary tree that keeps stable `^split` IDs and ratios across resizes:
+Each window's wire geometry is a binary tree that keeps stable `^split` IDs across resizes. Since
+the cell-authoritative layout landed, this tree is a **derived projection**: the engine's truth is
+an n-ary cell tree in `zz-mux/src/layout.rs`, and `ratio` is computed from cell extents at
+snapshot time (`first / (first + rest + inner borders)`), so the wire shape and decode rules below
+are unchanged:
 
 | Variant | Fields |
 |---------|--------|

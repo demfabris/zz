@@ -85,8 +85,10 @@ focuses, that window's active pane): `session_name`, `session_windows`, `window_
 `pane_height`, `pane_active`, `pane_synchronized`, `host`, `host_short`. On the status line the
 focused window plays tmux's "current window" role, so `window_active` and `pane_active` read `1`
 and `#F` keeps its `*` there — the per-row values appear in `list-*`/`display-message` output.
-The four geometry variables expand to nothing until a client has drawn the pane and reported its
-size; a headless session has no measured geometry.
+The four geometry variables always answer from the cell-authoritative layout tree: a headless
+window is born at tmux's `default-size` 80x24 and reports its exact allocations, a drawn window
+tracks the measuring client, and a zoomed pane reports the full window extent (tmux swaps in a
+one-leaf layout during zoom; zz mirrors the observable).
 
 Two decisions:
 

@@ -59,9 +59,11 @@ title without selecting the pane.
 
 The model stays UI-agnostic by three disciplines:
 
-- **No rendering, no coordinates persisted.** Layout is a binary tree of ratios; geometric pane rects
-  are computed on demand into a bounded `1_000_000`-unit logical space only when needed (directional
-  navigation), never stored.
+- **No rendering; cells are the coordinates.** Layout is an n-ary cell tree (`src/layout.rs`,
+  a faithful port of the pinned tmux `layout.c` algorithms): every node carries `sx/sy/xoff/yoff`
+  in terminal cells, the root extent IS the window size (born at `default-size` 80x24 headless),
+  and the wire `LayoutNode` ratio tree is a derived projection with stable divider `SplitId`s.
+  Nothing pixel-shaped is ever stored.
 - **Stable IDs over pointers.** Splits, panes, windows carry monotonic `u64` IDs so a divider drag or
   swap resizes exactly the grabbed `^split`, and surfaces (PTYs/browsers) survive relocation.
 - **Structural invariants are checked.** `MuxState::validate()` asserts that every

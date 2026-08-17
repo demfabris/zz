@@ -40,11 +40,11 @@ pub(crate) struct CellChild {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub(crate) struct CellLayout {
+pub struct CellLayout {
     root: CellNode,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum LayoutError {
     LastPane,
     NoSpace,
@@ -53,7 +53,7 @@ pub(crate) enum LayoutError {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum SplitSize {
+pub enum SplitSize {
     Default,
     Cells(u16),
     Percent(u8),
@@ -521,7 +521,7 @@ impl CellLayout {
         self.debug_validate();
     }
 
-    pub(crate) fn project(&self) -> LayoutNode {
+    pub fn project(&self) -> LayoutNode {
         project_node(&self.root)
     }
 

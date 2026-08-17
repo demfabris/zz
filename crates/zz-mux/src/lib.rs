@@ -12,6 +12,7 @@ pub use command::{
     AgentOptions, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
     MAX_WORD_SEPARATORS_BYTES, MuxEffect, MuxEngine,
 };
+pub use layout::{CellLayout, SplitSize};
 pub use model::{
     LayoutPreset, MuxState, Pane, PaneDirection, PaneKind, Session, SplitPlacement, Window,
     joined_layout, swapped_layout,

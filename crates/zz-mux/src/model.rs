@@ -9,8 +9,9 @@ use zz_protocol::{
     SessionId, SessionSnapshot, SplitId, WindowId, WindowSnapshot, normalize_browser_profile_name,
 };
 
-const MIN_SPLIT_RATIO: f32 = 0.1;
-const MAX_SPLIT_RATIO: f32 = 0.9;
+use crate::layout::{CellLayout, LayoutError, SplitSize};
+
+pub(crate) const DEFAULT_WINDOW_EXTENT: (u16, u16) = (80, 24);
 const SYNCHRONIZE_PANES: u8 = 1 << 0;
 const LAYOUT_COORDINATE_MAX: u32 = 1_000_000;
 const MAX_AGENT_SESSION_ID_BYTES: usize = 16 * 1024;
@@ -129,13 +130,13 @@ impl PaneKind {
     }
 }
 
-/// Where a split drops the pane it creates: `ratio` is the new pane's share of
-/// the box it lands in, `before` puts it left of or above the target,
+/// Where a split drops the pane it creates: `size` is the requested size of
+/// the new pane, `before` puts it left of or above the target,
 /// `full_size` spans the whole window instead of the target's box, and
 /// `detached` leaves focus where it was.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SplitPlacement {
-    pub ratio: f32,
+    pub size: SplitSize,
     pub before: bool,
     pub full_size: bool,
     pub detached: bool,
@@ -144,7 +145,7 @@ pub struct SplitPlacement {
 impl Default for SplitPlacement {
     fn default() -> Self {
         Self {
-            ratio: 0.5,
+            size: SplitSize::Default,
             before: false,
             full_size: false,
             detached: false,
@@ -170,12 +171,12 @@ pub struct Window {
     pub name: String,
     pub active_pane: PaneId,
     pub zoomed_pane: Option<PaneId>,
-    pub layout: LayoutNode,
+    pub layout: CellLayout,
     pub panes: BTreeMap<PaneId, Pane>,
     pane_order: Vec<PaneId>,
     last_panes: Vec<PaneId>,
     last_layout: Option<LayoutPreset>,
-    previous_layout: Option<Box<LayoutNode>>,
+    previous_layout: Option<Box<CellLayout>>,
     input_options: InputOptions,
 }
 
@@ -223,6 +224,18 @@ impl Session {
 }
 
 impl Window {
+    /// The cell size a pane presents to formats and status lines: the full
+    /// window extent while the pane is zoomed (tmux swaps in a one-leaf
+    /// layout during zoom), otherwise its tree allocation.
+    #[must_use]
+    pub fn displayed_pane_geometry(&self, pane: PaneId) -> Option<(u16, u16)> {
+        if self.zoomed_pane == Some(pane) {
+            return Some(self.layout.extent());
+        }
+        let geometry = self.layout.pane_geometry(pane)?;
+        Some((geometry.sx, geometry.sy))
+    }
+
     #[must_use]
     pub fn pane_order(&self) -> &[PaneId] {
         &self.pane_order
@@ -274,7 +287,7 @@ impl MuxState {
             name: "0".to_owned(),
             active_pane: pane_id,
             zoomed_pane: None,
-            layout: LayoutNode::Pane(pane_id),
+            layout: CellLayout::new(pane_id, DEFAULT_WINDOW_EXTENT.0, DEFAULT_WINDOW_EXTENT.1),
             panes: BTreeMap::from([(pane_id, pane)]),
             pane_order: vec![pane_id],
             last_panes: Vec::new(),
@@ -361,7 +374,7 @@ impl MuxState {
             name: name.unwrap_or_else(|| index.to_string()),
             active_pane: pane_id,
             zoomed_pane: None,
-            layout: LayoutNode::Pane(pane_id),
+            layout: CellLayout::new(pane_id, DEFAULT_WINDOW_EXTENT.0, DEFAULT_WINDOW_EXTENT.1),
             panes: BTreeMap::from([(pane_id, pane)]),
             pane_order: vec![pane_id],
             last_panes: Vec::new(),
@@ -538,31 +551,29 @@ impl MuxState {
         kind: PaneKind,
         placement: SplitPlacement,
     ) -> Result<PaneId, ServerError> {
-        if !placement.ratio.is_finite()
-            || !(MIN_SPLIT_RATIO..=MAX_SPLIT_RATIO).contains(&placement.ratio)
-        {
-            return Err(ServerError::InvalidCommand(format!(
-                "new pane ratio must be between {MIN_SPLIT_RATIO} and {MAX_SPLIT_RATIO}"
-            )));
-        }
         let window_id = self
             .window_for_pane(target)
             .ok_or_else(|| ServerError::MissingTarget(target.to_string()))?;
         let pane_id = self.allocate_pane_id();
-        let split_id = self.allocate_split_id();
+        let next_split_id = &mut self.next_split_id;
+        let mut ids = || {
+            let id = SplitId(*next_split_id);
+            *next_split_id = (*next_split_id).saturating_add(1);
+            id
+        };
         let window = self.windows.get_mut(&window_id).expect("window exists");
-        if !insert_existing_pane(
-            &mut window.layout,
-            target,
-            pane_id,
-            split_id,
-            axis,
-            placement.ratio,
-            placement.before,
-            placement.full_size,
-        ) {
-            return Err(ServerError::MissingTarget(target.to_string()));
-        }
+        window
+            .layout
+            .split(
+                target,
+                axis,
+                placement.size,
+                placement.before,
+                placement.full_size,
+                pane_id,
+                &mut ids,
+            )
+            .map_err(|error| split_layout_error(error, target))?;
         window.panes.insert(
             pane_id,
             Pane {
@@ -585,13 +596,18 @@ impl MuxState {
         let window_id = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-        if self.windows[&window_id].panes.len() == 1 {
-            return self.kill_window(window_id);
+        let removed = self
+            .windows
+            .get_mut(&window_id)
+            .expect("window exists")
+            .layout
+            .remove(pane);
+        match removed {
+            Ok(()) => {}
+            Err(LayoutError::LastPane) => return self.kill_window(window_id),
+            Err(error) => return Err(pane_layout_error(error, pane)),
         }
         let window = self.windows.get_mut(&window_id).expect("window exists");
-        if !remove_leaf(&mut window.layout, pane) {
-            return Err(ServerError::MissingTarget(pane.to_string()));
-        }
         window.panes.remove(&pane);
         repair_window_after_pane_removal(window, pane);
         self.bump_generation();
@@ -712,81 +728,45 @@ impl MuxState {
         Ok(())
     }
 
-    /// Move `pane`'s resize boundary by `cells` terminal cells, positive toward
-    /// the right or bottom. `window_extent` is the window's cell count along
-    /// `axis`; without one, a unit falls back to 5% of the adjusted split.
+    /// Move `pane`'s resize boundary by terminal cells, positive toward the
+    /// right or bottom.
     pub fn resize_pane(
         &mut self,
         pane: PaneId,
         axis: Axis,
-        cells: f32,
-        window_extent: Option<f32>,
+        delta_cells: i32,
     ) -> Result<(), ServerError> {
-        if !cells.is_finite() {
-            return Err(ServerError::InvalidCommand(
-                "pane resize adjustment must be finite".to_owned(),
-            ));
-        }
-        let (window_id, boundary) = self.resize_boundary_for(pane, axis)?;
-        let delta = match window_extent {
-            Some(extent) if extent >= 1.0 => cells / extent / boundary.container.max(f32::EPSILON),
-            _ => cells * 0.05,
-        };
-        self.apply_resize(window_id, boundary.split, boundary.ratio + delta);
+        let window_id = self
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let window = self.windows.get_mut(&window_id).expect("window exists");
+        window
+            .layout
+            .resize_pane(pane, axis, delta_cells)
+            .map_err(|error| pane_layout_error(error, pane))?;
+        window.zoomed_pane = None;
+        self.bump_generation();
         Ok(())
     }
 
-    /// Give `pane` `fraction` of the window along `axis`, the way
-    /// `resize-pane -x` and `-y` do. The tree keeps proportions, so callers
-    /// convert cells to a fraction with the geometry they were handed.
+    /// Give `pane` an absolute cell size along `axis`.
     pub fn resize_pane_to(
         &mut self,
         pane: PaneId,
         axis: Axis,
-        fraction: f32,
+        cells: u16,
     ) -> Result<(), ServerError> {
-        if !fraction.is_finite() || fraction <= 0.0 || fraction > 1.0 {
-            return Err(ServerError::InvalidCommand(
-                "pane size must be a positive share of the window".to_owned(),
-            ));
-        }
-        let (window_id, boundary) = self.resize_boundary_for(pane, axis)?;
-        let layout = &self.windows[&window_id].layout;
-        let current = pane_axis_fraction(layout, pane, axis)
-            .filter(|current| *current > 0.0)
-            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-        let scale = fraction / current;
-        let ratio = if boundary.target_first {
-            boundary.ratio * scale
-        } else {
-            1.0 - (1.0 - boundary.ratio) * scale
-        };
-        self.apply_resize(window_id, boundary.split, ratio);
-        Ok(())
-    }
-
-    fn resize_boundary_for(
-        &self,
-        pane: PaneId,
-        axis: Axis,
-    ) -> Result<(WindowId, ResizeBoundary), ServerError> {
         let window_id = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-        let boundary = resize_boundary(&self.windows[&window_id].layout, pane, axis, 1.0)
-            .ok_or_else(|| {
-                ServerError::InvalidCommand(format!(
-                    "pane {pane} has no resizable split on the requested axis"
-                ))
-            })?;
-        Ok((window_id, boundary))
-    }
-
-    fn apply_resize(&mut self, window_id: WindowId, split: SplitId, ratio: f32) {
         let window = self.windows.get_mut(&window_id).expect("window exists");
-        set_split_ratio(&mut window.layout, split, ratio).expect("located split still exists");
+        window
+            .layout
+            .resize_pane_to(pane, axis, cells)
+            .map_err(|error| pane_layout_error(error, pane))?;
         window.zoomed_pane = None;
         self.bump_generation();
+        Ok(())
     }
 
     /// Sets one exact split ratio and returns whether the layout changed.
@@ -805,8 +785,10 @@ impl MuxState {
             .windows
             .get_mut(&window)
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
-        let changed = set_split_ratio(&mut window.layout, split, ratio)
-            .ok_or_else(|| ServerError::MissingTarget(split.to_string()))?;
+        let changed = window
+            .layout
+            .set_divider_ratio(split, ratio)
+            .map_err(|error| divider_layout_error(error, split))?;
         if changed {
             window.zoomed_pane = None;
             self.bump_generation();
@@ -826,19 +808,19 @@ impl MuxState {
             .pane_order
             .clone();
         debug_assert!(!panes.is_empty(), "validated windows are never empty");
-        let split_count = panes.len().saturating_sub(1);
-        let split_ids = (0..split_count)
+        let split_ids = (0..panes.len().saturating_sub(1))
             .map(|_| self.allocate_split_id())
             .collect::<Vec<_>>();
         let mut split_ids = split_ids.into_iter();
-        let layout = build_preset_layout(&panes, preset, &mut split_ids);
+        let mut ids = || split_ids.next().expect("preset has one split ID per edge");
+
+        let window = self.windows.get_mut(&window).expect("window was resolved");
+        let previous = window.layout.clone();
+        window.layout.apply_preset(preset, &panes, &mut ids);
         debug_assert!(
             split_ids.next().is_none(),
             "preset consumes one split ID per edge"
         );
-
-        let window = self.windows.get_mut(&window).expect("window was resolved");
-        let previous = std::mem::replace(&mut window.layout, layout);
         window.previous_layout = Some(Box::new(previous));
         window.last_layout = Some(preset);
         window.zoomed_pane = None;
@@ -874,9 +856,7 @@ impl MuxState {
             let previous = window_state.previous_layout.as_deref().ok_or_else(|| {
                 ServerError::InvalidCommand(format!("window {window} has no previous layout"))
             })?;
-            if layout_pane_count(previous) != window_state.pane_order.len()
-                || !valid_split_ratios(previous)
-            {
+            if previous.pane_count() != window_state.pane_order.len() {
                 return Err(ServerError::InvalidCommand(format!(
                     "window {window} previous layout no longer matches its panes"
                 )));
@@ -895,14 +875,14 @@ impl MuxState {
             .previous_layout
             .take()
             .expect("previous layout was validated");
-        let mut panes = pane_order.into_iter();
-        replace_layout_panes_in_order(&mut restored, &mut panes);
-        debug_assert!(
-            panes.next().is_none(),
-            "restored layout consumes every ordered pane"
-        );
+        debug_assert!(restored.replace_panes_in_order(&pane_order));
         let mut split_ids = split_ids.into_iter();
-        replace_split_ids(&mut restored, &mut split_ids);
+        let mut ids = || {
+            split_ids
+                .next()
+                .expect("restored layout has one ID per edge")
+        };
+        restored.refresh_divider_ids(&mut ids);
         debug_assert!(
             split_ids.next().is_none(),
             "restored layout consumes one fresh ID per split"
@@ -923,7 +903,10 @@ impl MuxState {
             .get_mut(&window_id)
             .expect("pane window exists");
         let previous = window.layout.clone();
-        spread_first_uneven_ancestor(&mut window.layout, pane);
+        window
+            .layout
+            .spread(pane)
+            .map_err(|error| pane_layout_error(error, pane))?;
         window.previous_layout = Some(Box::new(previous));
         window.zoomed_pane = None;
         self.bump_generation();
@@ -1646,8 +1629,9 @@ impl MuxState {
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
         let window = &self.windows[&window_id];
         let mut rects = Vec::with_capacity(window.panes.len());
+        let layout = window.layout.project();
         collect_pane_rects(
-            &window.layout,
+            &layout,
             PaneRect {
                 left: 0,
                 top: 0,
@@ -1724,7 +1708,7 @@ impl MuxState {
             .into_iter()
             .zip(next_order.iter().copied())
             .collect::<BTreeMap<_, _>>();
-        remap_layout_panes(&mut window.layout, &replacements);
+        window.layout.remap(&replacements);
         window.pane_order = next_order;
         let next_active = replacements[&active];
         activate_window_pane(window, next_active, false);
@@ -1759,7 +1743,7 @@ impl MuxState {
         if source_window == target_window {
             let window = self.windows.get_mut(&source_window).expect("window exists");
             let was_zoomed = window.zoomed_pane.is_some();
-            swap_layout_panes(&mut window.layout, source, target);
+            debug_assert!(window.layout.swap(source, target));
             swap_pane_order(&mut window.pane_order, source, target);
             let next_active = if detached {
                 if window.active_pane == source {
@@ -1791,8 +1775,8 @@ impl MuxState {
             .windows
             .get_mut(&target_window)
             .expect("target window exists");
-        replace_layout_pane(&mut source_state.layout, source, target);
-        replace_layout_pane(&mut target_state.layout, target, source);
+        debug_assert!(source_state.layout.replace(source, target));
+        debug_assert!(target_state.layout.replace(target, source));
         let source_pane = source_state
             .panes
             .remove(&source)
@@ -1841,25 +1825,35 @@ impl MuxState {
         if !self.sessions.contains_key(&destination_session) {
             return Err(ServerError::MissingTarget(destination_session.to_string()));
         }
-        if self.windows[&source_window].panes.len() == 1 {
-            return Err(ServerError::InvalidCommand(
-                "cannot break the only pane in a window".to_owned(),
-            ));
-        }
+        let source_session = self.windows[&source_window].session;
         let index = self.claim_window_index(destination_session, destination_index)?;
         let window_id = self.allocate_window_id();
-        let source = self
+        let mut source = self
             .windows
-            .get_mut(&source_window)
+            .remove(&source_window)
             .expect("source window exists");
-        if !remove_leaf(&mut source.layout, pane) {
-            return Err(ServerError::MissingTarget(pane.to_string()));
-        }
+        let source_will_close = match source.layout.remove(pane) {
+            Ok(()) => false,
+            Err(LayoutError::LastPane) => true,
+            Err(error) => {
+                self.windows.insert(source_window, source);
+                return Err(pane_layout_error(error, pane));
+            }
+        };
         let pane_state = source
             .panes
             .remove(&pane)
             .expect("source window contains pane");
-        repair_window_after_pane_removal(source, pane);
+        let activated = if source_will_close {
+            self.sessions
+                .get_mut(&source_session)
+                .expect("source session exists")
+                .forget_window(source_window)
+        } else {
+            repair_window_after_pane_removal(&mut source, pane);
+            self.windows.insert(source_window, source);
+            None
+        };
         let window_name = name.unwrap_or_else(|| pane_state.title.clone());
         self.windows.insert(
             window_id,
@@ -1870,7 +1864,7 @@ impl MuxState {
                 name: window_name,
                 active_pane: pane,
                 zoomed_pane: None,
-                layout: LayoutNode::Pane(pane),
+                layout: CellLayout::new(pane, DEFAULT_WINDOW_EXTENT.0, DEFAULT_WINDOW_EXTENT.1),
                 panes: BTreeMap::from([(pane, pane_state)]),
                 pane_order: vec![pane],
                 last_panes: Vec::new(),
@@ -1879,13 +1873,29 @@ impl MuxState {
                 input_options: InputOptions::default(),
             },
         );
-        self.sessions
-            .get_mut(&destination_session)
-            .expect("destination session exists")
-            .windows
-            .push(window_id);
-        if !detached {
+        let destination_was_empty = {
+            let destination = self
+                .sessions
+                .get_mut(&destination_session)
+                .expect("destination session exists");
+            let was_empty = destination.windows.is_empty();
+            destination.windows.push(window_id);
+            if was_empty {
+                destination.active_window = window_id;
+                destination.last_window = None;
+            }
+            was_empty
+        };
+        if !destination_was_empty && !detached {
             self.activate_window(destination_session, window_id);
+        }
+        if let Some(window) = activated {
+            self.clear_window_bells(window);
+        }
+        if source_session != destination_session
+            && self.sessions[&source_session].windows.is_empty()
+        {
+            self.sessions.remove(&source_session);
         }
         self.sort_session_windows(destination_session);
         self.bump_generation();
@@ -1897,7 +1907,7 @@ impl MuxState {
         source: PaneId,
         target: PaneId,
         axis: Axis,
-        pane_ratio: f32,
+        size: SplitSize,
         before: bool,
         full_size: bool,
         detached: bool,
@@ -1906,11 +1916,6 @@ impl MuxState {
             return Err(ServerError::InvalidCommand(
                 "source and target panes must be different".to_owned(),
             ));
-        }
-        if !pane_ratio.is_finite() || !(MIN_SPLIT_RATIO..=MAX_SPLIT_RATIO).contains(&pane_ratio) {
-            return Err(ServerError::InvalidCommand(format!(
-                "joined pane ratio must be between {MIN_SPLIT_RATIO} and {MAX_SPLIT_RATIO}"
-            )));
         }
         let source_window = self
             .window_for_pane(source)
@@ -1929,24 +1934,26 @@ impl MuxState {
                 "cannot move the last window out of a session".to_owned(),
             ));
         }
-        let split = self.allocate_split_id();
-
         if source_window == target_window {
+            let next_split_id = &mut self.next_split_id;
+            let mut ids = || {
+                let id = SplitId(*next_split_id);
+                *next_split_id = (*next_split_id).saturating_add(1);
+                id
+            };
             let window = self.windows.get_mut(&source_window).expect("window exists");
-            if !remove_leaf(&mut window.layout, source) {
-                return Err(ServerError::MissingTarget(source.to_string()));
+            let original_layout = window.layout.clone();
+            window
+                .layout
+                .remove(source)
+                .map_err(|error| pane_layout_error(error, source))?;
+            if let Err(error) = window
+                .layout
+                .split(target, axis, size, before, full_size, source, &mut ids)
+            {
+                window.layout = original_layout;
+                return Err(split_layout_error(error, target));
             }
-            let inserted = insert_existing_pane(
-                &mut window.layout,
-                target,
-                source,
-                split,
-                axis,
-                pane_ratio,
-                before,
-                full_size,
-            );
-            debug_assert!(inserted, "target remains after removing a distinct source");
             window.pane_order.retain(|pane| *pane != source);
             insert_pane_order(&mut window.pane_order, source, target, before);
             window.zoomed_pane = None;
@@ -1962,11 +1969,15 @@ impl MuxState {
             .windows
             .remove(&source_window)
             .expect("source window exists");
-        let source_will_close = source_state.panes.len() == 1;
-        if !source_will_close {
-            let removed = remove_leaf(&mut source_state.layout, source);
-            debug_assert!(removed, "source layout contains source pane");
-        }
+        let source_backup = source_state.clone();
+        let source_will_close = match source_state.layout.remove(source) {
+            Ok(()) => false,
+            Err(LayoutError::LastPane) => true,
+            Err(error) => {
+                self.windows.insert(source_window, source_state);
+                return Err(pane_layout_error(error, source));
+            }
+        };
         let pane_state = source_state
             .panes
             .remove(&source)
@@ -1975,21 +1986,26 @@ impl MuxState {
             repair_window_after_pane_removal(&mut source_state, source);
         }
 
+        let next_split_id = &mut self.next_split_id;
+        let mut ids = || {
+            let id = SplitId(*next_split_id);
+            *next_split_id = (*next_split_id).saturating_add(1);
+            id
+        };
+        let split_result = self
+            .windows
+            .get_mut(&target_window)
+            .expect("target window exists")
+            .layout
+            .split(target, axis, size, before, full_size, source, &mut ids);
+        if let Err(error) = split_result {
+            self.windows.insert(source_window, source_backup);
+            return Err(split_layout_error(error, target));
+        }
         let target_state = self
             .windows
             .get_mut(&target_window)
             .expect("target window exists");
-        let inserted = insert_existing_pane(
-            &mut target_state.layout,
-            target,
-            source,
-            split,
-            axis,
-            pane_ratio,
-            before,
-            full_size,
-        );
-        debug_assert!(inserted, "target window contains target pane");
         target_state.panes.insert(source, pane_state);
         insert_pane_order(&mut target_state.pane_order, source, target, before);
         target_state.zoomed_pane = None;
@@ -2083,7 +2099,7 @@ impl MuxState {
             name: window.name.clone(),
             active_pane: window.active_pane,
             zoomed_pane: window.zoomed_pane,
-            layout: window.layout.clone(),
+            layout: window.layout.project(),
             panes: window
                 .panes
                 .iter()
@@ -2117,8 +2133,10 @@ impl MuxState {
             if !session.windows.contains(window_id) {
                 return Err(format!("session does not contain window {window_id}"));
             }
-            let mut layout_panes = Vec::new();
-            window.layout.panes(&mut layout_panes);
+            if let Err(error) = window.layout.validate() {
+                return Err(format!("window {window_id} has an invalid layout: {error}"));
+            }
+            let layout_panes = window.layout.panes_in_order();
             let layout_set = layout_panes.iter().copied().collect::<BTreeSet<_>>();
             let pane_set = window.panes.keys().copied().collect::<BTreeSet<_>>();
             if layout_set != pane_set || layout_panes.len() != layout_set.len() {
@@ -2130,11 +2148,8 @@ impl MuxState {
                     "window {window_id} pane order does not match panes"
                 ));
             }
-            if !valid_split_ratios(&window.layout) {
-                return Err(format!("window {window_id} has an invalid split ratio"));
-            }
             let mut layout_splits = Vec::new();
-            window.layout.splits(&mut layout_splits);
+            window.layout.project().splits(&mut layout_splits);
             for split in layout_splits {
                 if !all_splits.insert(split) {
                     return Err(format!("split {split} occurs more than once"));
@@ -2225,6 +2240,36 @@ fn pane_title(kind: &PaneKind) -> String {
     }
 }
 
+fn split_layout_error(error: LayoutError, target: PaneId) -> ServerError {
+    match error {
+        LayoutError::NoSpace => {
+            ServerError::InvalidCommand("create pane failed: pane too small".to_owned())
+        }
+        LayoutError::UnknownPane => ServerError::MissingTarget(target.to_string()),
+        LayoutError::LastPane | LayoutError::UnknownDivider => {
+            ServerError::Internal(format!("unexpected split layout error: {error:?}"))
+        }
+    }
+}
+
+fn pane_layout_error(error: LayoutError, pane: PaneId) -> ServerError {
+    match error {
+        LayoutError::UnknownPane => ServerError::MissingTarget(pane.to_string()),
+        LayoutError::LastPane | LayoutError::NoSpace | LayoutError::UnknownDivider => {
+            ServerError::Internal(format!("unexpected pane layout error: {error:?}"))
+        }
+    }
+}
+
+fn divider_layout_error(error: LayoutError, split: SplitId) -> ServerError {
+    match error {
+        LayoutError::UnknownDivider => ServerError::MissingTarget(split.to_string()),
+        LayoutError::LastPane | LayoutError::NoSpace | LayoutError::UnknownPane => {
+            ServerError::Internal(format!("unexpected divider layout error: {error:?}"))
+        }
+    }
+}
+
 fn unique_match<T: Copy>(
     target: &str,
     candidates: impl IntoIterator<Item = T>,
@@ -2240,197 +2285,18 @@ fn unique_match<T: Copy>(
     }
 }
 
-fn build_preset_layout(
-    panes: &[PaneId],
-    preset: LayoutPreset,
-    split_ids: &mut impl Iterator<Item = SplitId>,
-) -> LayoutNode {
-    debug_assert!(!panes.is_empty());
-    if panes.len() == 1 {
-        return LayoutNode::Pane(panes[0]);
-    }
-    match preset {
-        LayoutPreset::EvenHorizontal => combine_equal_nodes(
-            panes.iter().copied().map(LayoutNode::Pane).collect(),
-            Axis::Horizontal,
-            split_ids,
-        ),
-        LayoutPreset::EvenVertical => combine_equal_nodes(
-            panes.iter().copied().map(LayoutNode::Pane).collect(),
-            Axis::Vertical,
-            split_ids,
-        ),
-        LayoutPreset::MainHorizontal => {
-            build_main_layout(panes, Axis::Vertical, Axis::Horizontal, false, split_ids)
-        }
-        LayoutPreset::MainHorizontalMirrored => {
-            build_main_layout(panes, Axis::Vertical, Axis::Horizontal, true, split_ids)
-        }
-        LayoutPreset::MainVertical => {
-            build_main_layout(panes, Axis::Horizontal, Axis::Vertical, false, split_ids)
-        }
-        LayoutPreset::MainVerticalMirrored => {
-            build_main_layout(panes, Axis::Horizontal, Axis::Vertical, true, split_ids)
-        }
-        LayoutPreset::Tiled => build_tiled_layout(panes, split_ids),
-    }
-}
-
-fn build_main_layout(
-    panes: &[PaneId],
-    root_axis: Axis,
-    secondary_axis: Axis,
-    mirrored: bool,
-    split_ids: &mut impl Iterator<Item = SplitId>,
-) -> LayoutNode {
-    let split = split_ids.next().expect("multi-pane preset has a split ID");
-    let main = LayoutNode::Pane(panes[0]);
-    let secondary = combine_equal_nodes(
-        panes[1..].iter().copied().map(LayoutNode::Pane).collect(),
-        secondary_axis,
-        split_ids,
-    );
-    let (first, second) = if mirrored {
-        (secondary, main)
-    } else {
-        (main, secondary)
-    };
-    LayoutNode::Split {
-        id: split,
-        axis: root_axis,
-        ratio: 0.5,
-        first: Box::new(first),
-        second: Box::new(second),
-    }
-}
-
-fn build_tiled_layout(
-    panes: &[PaneId],
-    split_ids: &mut impl Iterator<Item = SplitId>,
-) -> LayoutNode {
-    let mut rows = 1_usize;
-    let mut columns = 1_usize;
-    while rows.saturating_mul(columns) < panes.len() {
-        rows = rows.saturating_add(1);
-        if rows.saturating_mul(columns) < panes.len() {
-            columns = columns.saturating_add(1);
-        }
-    }
-    let rows = panes
-        .chunks(columns)
-        .map(|row| {
-            combine_equal_nodes(
-                row.iter().copied().map(LayoutNode::Pane).collect(),
-                Axis::Horizontal,
-                split_ids,
-            )
-        })
-        .collect();
-    combine_equal_nodes(rows, Axis::Vertical, split_ids)
-}
-
-#[allow(
-    clippy::cast_precision_loss,
-    reason = "pane counts become bounded normalized f32 split ratios; the balanced tree keeps usable precision at realistic process limits"
-)]
-fn combine_equal_nodes(
-    mut nodes: Vec<LayoutNode>,
-    axis: Axis,
-    split_ids: &mut impl Iterator<Item = SplitId>,
-) -> LayoutNode {
-    debug_assert!(!nodes.is_empty());
-    if nodes.len() == 1 {
-        return nodes.pop().expect("one layout node");
-    }
-    let count = nodes.len();
-    let midpoint = count / 2;
-    let second = nodes.split_off(midpoint);
-    let split = split_ids.next().expect("multi-node layout has a split ID");
-    let first = combine_equal_nodes(nodes, axis, split_ids);
-    let second = combine_equal_nodes(second, axis, split_ids);
-    LayoutNode::Split {
-        id: split,
-        axis,
-        ratio: midpoint as f32 / count as f32,
-        first: Box::new(first),
-        second: Box::new(second),
-    }
-}
-
-fn layout_pane_count(layout: &LayoutNode) -> usize {
-    match layout {
-        LayoutNode::Pane(_) => 1,
-        LayoutNode::Split { first, second, .. } => {
-            layout_pane_count(first).saturating_add(layout_pane_count(second))
-        }
-    }
-}
-
-fn replace_layout_panes_in_order(
-    layout: &mut LayoutNode,
-    panes: &mut impl Iterator<Item = PaneId>,
-) {
-    match layout {
-        LayoutNode::Pane(pane) => {
-            *pane = panes.next().expect("layout leaf has an ordered pane");
-        }
-        LayoutNode::Split { first, second, .. } => {
-            replace_layout_panes_in_order(first, panes);
-            replace_layout_panes_in_order(second, panes);
-        }
-    }
-}
-
-fn spread_first_uneven_ancestor(node: &mut LayoutNode, pane: PaneId) -> bool {
-    let LayoutNode::Split {
-        ratio,
-        first,
-        second,
-        ..
-    } = node
-    else {
-        return false;
-    };
-    let branch = if first.contains(pane) {
-        first
-    } else if second.contains(pane) {
-        second
-    } else {
-        return false;
-    };
-    if spread_first_uneven_ancestor(branch, pane) {
-        return true;
-    }
-    if (*ratio - 0.5).abs() <= f32::EPSILON {
-        false
-    } else {
-        *ratio = 0.5;
-        true
-    }
-}
-
-fn replace_split_ids(node: &mut LayoutNode, split_ids: &mut impl Iterator<Item = SplitId>) {
-    if let LayoutNode::Split {
-        id, first, second, ..
-    } = node
-    {
-        *id = split_ids.next().expect("layout split has a replacement ID");
-        replace_split_ids(first, split_ids);
-        replace_split_ids(second, split_ids);
-    }
-}
-
-/// The layout `swap-pane -s source -t target` produces, without touching state.
+/// Pure client-side predictor for `swap-pane` on a wire [`LayoutNode`].
 /// A client renders a drop optimistically through this same transform.
 #[must_use]
 pub fn swapped_layout(layout: &LayoutNode, source: PaneId, target: PaneId) -> LayoutNode {
     let mut layout = layout.clone();
-    swap_layout_panes(&mut layout, source, target);
+    predict_swap_layout_panes(&mut layout, source, target);
     layout
 }
 
-/// The layout `join-pane` produces, without touching state. `None` when the
-/// panes are the same or either leaf is missing.
+/// Pure client-side predictor for `join-pane` on a wire [`LayoutNode`].
+/// Its ratio-tree surgery approximates the engine's cell-derived result.
+/// Returns `None` when the panes are the same or either leaf is missing.
 #[must_use]
 pub fn joined_layout(
     layout: &LayoutNode,
@@ -2445,10 +2311,10 @@ pub fn joined_layout(
         return None;
     }
     let mut layout = layout.clone();
-    if !remove_leaf(&mut layout, source) {
+    if !predict_remove_layout_leaf(&mut layout, source) {
         return None;
     }
-    insert_existing_pane(
+    predict_insert_layout_pane(
         &mut layout,
         target,
         source,
@@ -2461,7 +2327,7 @@ pub fn joined_layout(
     .then_some(layout)
 }
 
-fn insert_existing_pane(
+fn predict_insert_layout_pane(
     node: &mut LayoutNode,
     target: PaneId,
     pane: PaneId,
@@ -2525,15 +2391,15 @@ fn insert_existing_pane(
         }
         LayoutNode::Pane(_) => false,
         LayoutNode::Split { first, second, .. } => {
-            insert_existing_pane(first, target, pane, split, axis, pane_ratio, before, false)
-                || insert_existing_pane(
+            predict_insert_layout_pane(first, target, pane, split, axis, pane_ratio, before, false)
+                || predict_insert_layout_pane(
                     second, target, pane, split, axis, pane_ratio, before, false,
                 )
         }
     }
 }
 
-fn remove_leaf(node: &mut LayoutNode, target: PaneId) -> bool {
+fn predict_remove_layout_leaf(node: &mut LayoutNode, target: PaneId) -> bool {
     let promote_second = match node {
         LayoutNode::Pane(_) => return false,
         LayoutNode::Split { first, .. } if matches!(first.as_ref(), LayoutNode::Pane(pane) if *pane == target) => {
@@ -2557,7 +2423,7 @@ fn remove_leaf(node: &mut LayoutNode, target: PaneId) -> bool {
     let LayoutNode::Split { first, second, .. } = node else {
         unreachable!("pane nodes return before recursive removal")
     };
-    remove_leaf(first, target) || remove_leaf(second, target)
+    predict_remove_layout_leaf(first, target) || predict_remove_layout_leaf(second, target)
 }
 
 fn activate_window_pane(window: &mut Window, pane: PaneId, preserve_zoom: bool) -> bool {
@@ -2588,7 +2454,7 @@ fn repair_window_after_pane_removal(window: &mut Window, pane: PaneId) {
             .last_panes
             .first()
             .copied()
-            .unwrap_or_else(|| first_pane(&window.layout));
+            .unwrap_or_else(|| window.layout.panes_in_order()[0]);
         window.active_pane = next;
     }
     normalize_window_history(window);
@@ -2647,40 +2513,14 @@ fn activate_relocated_window_pane(window: &mut Window, pane: PaneId, outgoing: P
     window.active_pane = pane;
 }
 
-fn swap_layout_panes(node: &mut LayoutNode, source: PaneId, target: PaneId) {
+fn predict_swap_layout_panes(node: &mut LayoutNode, source: PaneId, target: PaneId) {
     match node {
         LayoutNode::Pane(pane) if *pane == source => *pane = target,
         LayoutNode::Pane(pane) if *pane == target => *pane = source,
         LayoutNode::Pane(_) => {}
         LayoutNode::Split { first, second, .. } => {
-            swap_layout_panes(first, source, target);
-            swap_layout_panes(second, source, target);
-        }
-    }
-}
-
-fn remap_layout_panes(node: &mut LayoutNode, replacements: &BTreeMap<PaneId, PaneId>) {
-    match node {
-        LayoutNode::Pane(pane) => {
-            *pane = replacements[pane];
-        }
-        LayoutNode::Split { first, second, .. } => {
-            remap_layout_panes(first, replacements);
-            remap_layout_panes(second, replacements);
-        }
-    }
-}
-
-fn replace_layout_pane(node: &mut LayoutNode, source: PaneId, target: PaneId) -> bool {
-    match node {
-        LayoutNode::Pane(pane) if *pane == source => {
-            *pane = target;
-            true
-        }
-        LayoutNode::Pane(_) => false,
-        LayoutNode::Split { first, second, .. } => {
-            replace_layout_pane(first, source, target)
-                || replace_layout_pane(second, source, target)
+            predict_swap_layout_panes(first, source, target);
+            predict_swap_layout_panes(second, source, target);
         }
     }
 }
@@ -2810,213 +2650,100 @@ fn ranges_overlap(first_start: u32, first_end: u32, second_start: u32, second_en
     first_start.max(second_start) < first_end.min(second_end)
 }
 
-fn first_pane(node: &LayoutNode) -> PaneId {
-    match node {
-        LayoutNode::Pane(pane) => *pane,
-        LayoutNode::Split { first, .. } => first_pane(first),
-    }
-}
-
-fn valid_split_ratios(node: &LayoutNode) -> bool {
-    match node {
-        LayoutNode::Pane(_) => true,
-        LayoutNode::Split {
-            ratio,
-            first,
-            second,
-            ..
-        } => {
-            ratio.is_finite()
-                && (MIN_SPLIT_RATIO..=MAX_SPLIT_RATIO).contains(ratio)
-                && valid_split_ratios(first)
-                && valid_split_ratios(second)
-        }
-    }
-}
-
-/// The split a resize moves for one pane: tmux moves the boundary on the far
-/// side of the pane (right or bottom), and only falls back to the near boundary
-/// when the pane already ends at the window edge.
-#[derive(Clone, Copy)]
-struct ResizeBoundary {
-    split: SplitId,
-    ratio: f32,
-    /// The window fraction the split's box covers along the resize axis.
-    container: f32,
-    /// The target sits in the split's first child, so the boundary is the one
-    /// on its far side and a positive delta grows it.
-    target_first: bool,
-}
-
-pub(crate) fn pane_axis_fraction(node: &LayoutNode, target: PaneId, axis: Axis) -> Option<f32> {
-    match node {
-        LayoutNode::Pane(pane) => (*pane == target).then_some(1.0),
-        LayoutNode::Split {
-            axis: split_axis,
-            ratio,
-            first,
-            second,
-            ..
-        } => {
-            let on_axis = *split_axis == axis;
-            if let Some(fraction) = pane_axis_fraction(first, target, axis) {
-                Some(if on_axis { fraction * *ratio } else { fraction })
-            } else {
-                pane_axis_fraction(second, target, axis).map(|fraction| {
-                    if on_axis {
-                        fraction * (1.0 - *ratio)
-                    } else {
-                        fraction
-                    }
-                })
-            }
-        }
-    }
-}
-
-pub(crate) fn window_cell_extent(
-    state: &MuxState,
-    pane_cells: &BTreeMap<PaneId, (u16, u16)>,
-    window: WindowId,
-    axis: Axis,
-) -> Option<f32> {
-    let window = state.windows.get(&window)?;
-    window.pane_order().iter().find_map(|candidate| {
-        let (columns, rows) = *pane_cells.get(candidate)?;
-        let cells = f32::from(match axis {
-            Axis::Horizontal => columns,
-            Axis::Vertical => rows,
-        });
-        let fraction = if window.zoomed_pane == Some(*candidate) {
-            1.0
-        } else {
-            pane_axis_fraction(&window.layout, *candidate, axis)?
-        };
-        (cells >= 1.0 && fraction > 0.0).then(|| cells / fraction)
-    })
-}
-
-fn resize_boundary(
-    node: &LayoutNode,
-    target: PaneId,
-    axis: Axis,
-    container: f32,
-) -> Option<ResizeBoundary> {
-    let LayoutNode::Split {
-        id,
-        axis: split_axis,
-        ratio,
-        first,
-        second,
-    } = node
-    else {
-        return None;
-    };
-    let on_axis = *split_axis == axis;
-    let (child, target_first) = if first.contains(target) {
-        (first, true)
-    } else if second.contains(target) {
-        (second, false)
-    } else {
-        return None;
-    };
-    let share = if target_first { *ratio } else { 1.0 - *ratio };
-    let child_container = if on_axis {
-        container * share
-    } else {
-        container
-    };
-    let deeper = resize_boundary(child, target, axis, child_container.max(f32::EPSILON));
-    let here = on_axis.then_some(ResizeBoundary {
-        split: *id,
-        ratio: *ratio,
-        container,
-        target_first,
-    });
-    match (deeper, here) {
-        (Some(deeper), Some(here)) => Some(if here.target_first && !deeper.target_first {
-            here
-        } else {
-            deeper
-        }),
-        (Some(deeper), None) => Some(deeper),
-        (None, here) => here,
-    }
-}
-
-fn set_split_ratio(node: &mut LayoutNode, target: SplitId, requested: f32) -> Option<bool> {
-    let LayoutNode::Split {
-        id,
-        ratio,
-        first,
-        second,
-        ..
-    } = node
-    else {
-        return None;
-    };
-    if *id == target {
-        let requested = requested.clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO);
-        let changed = ratio.to_bits() != requested.to_bits();
-        *ratio = requested;
-        return Some(changed);
-    }
-    set_split_ratio(first, target, requested).or_else(|| set_split_ratio(second, target, requested))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn split_ratio(node: &LayoutNode, split: SplitId) -> Option<f32> {
-        let LayoutNode::Split {
-            id,
-            ratio,
-            first,
-            second,
-            ..
-        } = node
-        else {
-            return None;
-        };
-        (*id == split)
-            .then_some(*ratio)
-            .or_else(|| split_ratio(first, split))
-            .or_else(|| split_ratio(second, split))
+    fn split_ratio(layout: &CellLayout, split: SplitId) -> Option<f32> {
+        fn find(node: &LayoutNode, split: SplitId) -> Option<f32> {
+            let LayoutNode::Split {
+                id,
+                ratio,
+                first,
+                second,
+                ..
+            } = node
+            else {
+                return None;
+            };
+            (*id == split)
+                .then_some(*ratio)
+                .or_else(|| find(first, split))
+                .or_else(|| find(second, split))
+        }
+
+        find(&layout.project(), split)
     }
 
-    fn layout_panes(node: &LayoutNode) -> Vec<PaneId> {
+    fn wire_layout_panes(node: &LayoutNode) -> Vec<PaneId> {
         let mut panes = Vec::new();
         node.panes(&mut panes);
         panes
     }
 
-    fn same_layout_geometry(left: &LayoutNode, right: &LayoutNode) -> bool {
-        match (left, right) {
-            (LayoutNode::Pane(left), LayoutNode::Pane(right)) => left == right,
-            (
-                LayoutNode::Split {
-                    axis: left_axis,
-                    ratio: left_ratio,
-                    first: left_first,
-                    second: left_second,
-                    ..
-                },
-                LayoutNode::Split {
-                    axis: right_axis,
-                    ratio: right_ratio,
-                    first: right_first,
-                    second: right_second,
-                    ..
-                },
-            ) => {
-                left_axis == right_axis
-                    && left_ratio.to_bits() == right_ratio.to_bits()
-                    && same_layout_geometry(left_first, right_first)
-                    && same_layout_geometry(left_second, right_second)
-            }
-            _ => false,
+    fn layout_splits(layout: &CellLayout) -> Vec<SplitId> {
+        let mut splits = Vec::new();
+        layout.project().splits(&mut splits);
+        splits
+    }
+
+    fn layout_panes(layout: &CellLayout) -> Vec<PaneId> {
+        layout.panes_in_order()
+    }
+
+    fn pane_size(layout: &CellLayout, pane: PaneId) -> (u16, u16) {
+        let geometry = layout.pane_geometry(pane).expect("layout contains pane");
+        (geometry.sx, geometry.sy)
+    }
+
+    fn same_layout_geometry(left: &CellLayout, right: &CellLayout) -> bool {
+        left.dump() == right.dump()
+    }
+
+    fn same_projected_geometry(left: &CellLayout, right: &LayoutNode) -> bool {
+        fn axes(node: &LayoutNode, output: &mut Vec<Axis>) {
+            let LayoutNode::Split {
+                axis,
+                first,
+                second,
+                ..
+            } = node
+            else {
+                return;
+            };
+            output.push(*axis);
+            axes(first, output);
+            axes(second, output);
         }
+
+        let projected = left.project();
+        let mut projected_axes = Vec::new();
+        let mut predicted_axes = Vec::new();
+        axes(&projected, &mut projected_axes);
+        axes(right, &mut predicted_axes);
+        let bounds = PaneRect {
+            left: 0,
+            top: 0,
+            right: LAYOUT_COORDINATE_MAX,
+            bottom: LAYOUT_COORDINATE_MAX,
+        };
+        let mut projected_rects = Vec::new();
+        let mut predicted_rects = Vec::new();
+        collect_pane_rects(&projected, bounds, &mut projected_rects);
+        collect_pane_rects(right, bounds, &mut predicted_rects);
+        let tolerance = LAYOUT_COORDINATE_MAX * 3 / 100;
+        wire_layout_panes(&projected) == wire_layout_panes(right)
+            && projected_axes == predicted_axes
+            && projected_rects.len() == predicted_rects.len()
+            && projected_rects.iter().all(|(pane, projected)| {
+                predicted_rects.iter().any(|(candidate, predicted)| {
+                    pane == candidate
+                        && projected.left.abs_diff(predicted.left) <= tolerance
+                        && projected.top.abs_diff(predicted.top) <= tolerance
+                        && projected.right.abs_diff(predicted.right) <= tolerance
+                        && projected.bottom.abs_diff(predicted.bottom) <= tolerance
+                })
+            })
     }
 
     #[test]
@@ -3200,49 +2927,68 @@ mod tests {
     }
 
     #[test]
-    fn remove_leaf_moves_the_promoted_subtree_without_reallocating_descendants() {
-        let target = PaneId(0);
-        for target_first in [true, false] {
-            let survivor = LayoutNode::Split {
-                id: SplitId(7),
-                axis: Axis::Vertical,
-                ratio: 0.375,
-                first: Box::new(LayoutNode::Pane(PaneId(1))),
-                second: Box::new(LayoutNode::Pane(PaneId(2))),
-            };
-            let preserved_first = match &survivor {
-                LayoutNode::Split { first, .. } => std::ptr::from_ref(first.as_ref()),
-                LayoutNode::Pane(_) => unreachable!("fixture is a split"),
-            };
-            let (first, second) = if target_first {
-                (Box::new(LayoutNode::Pane(target)), Box::new(survivor))
-            } else {
-                (Box::new(survivor), Box::new(LayoutNode::Pane(target)))
-            };
-            let mut layout = LayoutNode::Split {
-                id: SplitId(8),
-                axis: Axis::Horizontal,
-                ratio: 0.5,
+    fn failed_split_keeps_the_cell_tree_and_divider_allocator_unchanged() {
+        let mut state = MuxState::default();
+        let (_, window, first) = state.create_session("main").unwrap();
+        let narrow = state
+            .split_pane_with(
                 first,
-                second,
-            };
+                Axis::Vertical,
+                PaneKind::Terminal,
+                SplitPlacement {
+                    size: SplitSize::Cells(1),
+                    ..SplitPlacement::default()
+                },
+            )
+            .unwrap();
+        let layout = state.windows[&window].layout.clone();
+        let next_split_id = state.next_split_id;
+        let generation = state.generation();
 
-            assert!(remove_leaf(&mut layout, target));
-            let LayoutNode::Split {
-                id,
-                axis,
-                ratio,
-                first,
-                ..
-            } = &layout
-            else {
-                panic!("surviving split was not promoted")
+        assert_eq!(
+            state.split_pane(narrow, Axis::Vertical, PaneKind::Terminal),
+            Err(ServerError::InvalidCommand(
+                "create pane failed: pane too small".to_owned()
+            ))
+        );
+        assert_eq!(state.windows[&window].layout, layout);
+        assert_eq!(state.windows[&window].panes.len(), 2);
+        assert_eq!(state.next_split_id, next_split_id);
+        assert_eq!(state.generation(), generation);
+        assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn remove_promotes_the_surviving_cell_subtree_without_reallocating_descendants() {
+        for target_first in [true, false] {
+            let mut state = MuxState::default();
+            let (_, window, first) = state.create_session("work").unwrap();
+            let second = state
+                .split_pane(first, Axis::Horizontal, PaneKind::Terminal)
+                .unwrap();
+            let (target, survivor, nested) = if target_first {
+                let nested = state
+                    .split_pane(second, Axis::Vertical, PaneKind::Terminal)
+                    .unwrap();
+                (first, second, nested)
+            } else {
+                let nested = state
+                    .split_pane(first, Axis::Vertical, PaneKind::Terminal)
+                    .unwrap();
+                (second, first, nested)
             };
             assert_eq!(
-                (*id, *axis, ratio.to_bits()),
-                (SplitId(7), Axis::Vertical, 0.375_f32.to_bits())
+                layout_splits(&state.windows[&window].layout),
+                [SplitId(0), SplitId(1)]
             );
-            assert!(std::ptr::eq(preserved_first, first.as_ref()));
+
+            state.kill_pane(target).unwrap();
+
+            let layout = &state.windows[&window].layout;
+            assert_eq!(layout_splits(layout), [SplitId(1)]);
+            assert_eq!(pane_size(layout, survivor), (80, 12));
+            assert_eq!(pane_size(layout, nested), (80, 11));
+            assert!(state.validate().is_ok());
         }
     }
 
@@ -3405,38 +3151,64 @@ mod tests {
             .unwrap();
 
         let layout = &state.windows[&window].layout;
-        assert_eq!(split_ratio(layout, SplitId(0)), Some(0.5));
+        assert_eq!(
+            [
+                pane_size(layout, first),
+                pane_size(layout, second),
+                pane_size(layout, third)
+            ],
+            [(40, 24), (19, 24), (19, 24)]
+        );
+        assert!((split_ratio(layout, SplitId(0)).unwrap() - 40.0 / 79.0).abs() < 1e-6);
         assert_eq!(split_ratio(layout, SplitId(1)), Some(0.5));
-        assert_eq!(state.snapshot().sessions[0].windows[0].layout, *layout);
+        assert_eq!(
+            state.snapshot().sessions[0].windows[0].layout,
+            layout.project()
+        );
 
-        state
-            .resize_pane(second, Axis::Horizontal, 1.0, None)
-            .unwrap();
+        state.resize_pane(second, Axis::Horizontal, 1).unwrap();
         let layout = &state.windows[&window].layout;
-        assert_eq!(split_ratio(layout, SplitId(0)), Some(0.5));
-        assert_eq!(split_ratio(layout, SplitId(1)), Some(0.55));
+        assert_eq!(
+            [
+                pane_size(layout, first),
+                pane_size(layout, second),
+                pane_size(layout, third)
+            ],
+            [(40, 24), (20, 24), (18, 24)]
+        );
+        assert!((split_ratio(layout, SplitId(0)).unwrap() - 40.0 / 79.0).abs() < 1e-6);
+        assert!((split_ratio(layout, SplitId(1)).unwrap() - 20.0 / 38.0).abs() < 1e-6);
 
         assert!(state.resize_split(window, SplitId(0), 0.72).unwrap());
         assert!(!state.resize_split(window, SplitId(0), 0.72).unwrap());
         let layout = &state.windows[&window].layout;
-        assert_eq!(split_ratio(layout, SplitId(0)), Some(0.72));
-        assert_eq!(split_ratio(layout, SplitId(1)), Some(0.55));
+        assert_eq!(
+            [
+                pane_size(layout, first),
+                pane_size(layout, second),
+                pane_size(layout, third)
+            ],
+            [(57, 24), (3, 24), (18, 24)]
+        );
+        assert!((split_ratio(layout, SplitId(0)).unwrap() - 57.0 / 79.0).abs() < 1e-6);
+        assert!((split_ratio(layout, SplitId(1)).unwrap() - 3.0 / 21.0).abs() < 1e-6);
+        assert!(matches!(
+            state.resize_split(window, SplitId(0), f32::NAN),
+            Err(ServerError::InvalidCommand(message)) if message.contains("finite")
+        ));
 
         state.kill_pane(third).unwrap();
         state
             .split_pane(first, Axis::Vertical, PaneKind::Terminal)
             .unwrap();
-        assert!(state.windows[&window].layout.contains_split(SplitId(2)));
-        assert!(!state.windows[&window].layout.contains_split(SplitId(1)));
-        assert!(matches!(
-            state.resize_pane(first, Axis::Horizontal, f32::NAN, None),
-            Err(ServerError::InvalidCommand(message)) if message.contains("finite")
-        ));
+        let splits = layout_splits(&state.windows[&window].layout);
+        assert!(splits.contains(&SplitId(2)));
+        assert!(!splits.contains(&SplitId(1)));
         assert!(state.validate().is_ok());
     }
 
     #[test]
-    fn named_layouts_rebuild_only_the_tree_and_keep_equal_geometry_balanced() {
+    fn named_layouts_rebuild_only_the_cells_with_tmux_geometry() {
         let mut state = MuxState::default();
         let (_, window, first) = state.create_session("work").unwrap();
         let mut target = first;
@@ -3457,83 +3229,78 @@ mod tests {
                 .unwrap();
         }
         let panes = state.windows[&window].panes.clone();
-        let mut retired_splits = Vec::new();
-        state.windows[&window].layout.splits(&mut retired_splits);
+        let pane_order = state.windows[&window].pane_order.clone();
+        let mut retired_splits = layout_splits(&state.windows[&window].layout);
         state.toggle_zoom(target).unwrap();
 
-        state
-            .select_layout(window, LayoutPreset::EvenHorizontal)
-            .unwrap();
-        let arranged = &state.windows[&window];
-        assert_eq!(arranged.panes, panes);
-        assert_eq!(arranged.zoomed_pane, None);
-        assert_eq!(arranged.last_layout, Some(LayoutPreset::EvenHorizontal));
-        let mut new_splits = Vec::new();
-        arranged.layout.splits(&mut new_splits);
-        assert_eq!(new_splits.len(), panes.len() - 1);
-        assert!(
-            new_splits
-                .iter()
-                .all(|split| !retired_splits.contains(split))
-        );
-        let mut rects = Vec::new();
-        collect_pane_rects(
-            &arranged.layout,
-            PaneRect {
-                left: 0,
-                top: 0,
-                right: LAYOUT_COORDINATE_MAX,
-                bottom: LAYOUT_COORDINATE_MAX,
-            },
-            &mut rects,
-        );
-        let widths = rects
-            .iter()
-            .map(|(_, rect)| rect.right - rect.left)
-            .collect::<Vec<_>>();
-        assert!(
-            widths.iter().max().unwrap() - widths.iter().min().unwrap() <= 1,
-            "balanced binary splits must still give every pane equal width"
-        );
-        assert!(
-            rects
-                .iter()
-                .all(|(_, rect)| rect.top == 0 && rect.bottom == LAYOUT_COORDINATE_MAX)
-        );
+        for (preset, expected) in [
+            (
+                LayoutPreset::EvenHorizontal,
+                [(16, 24), (15, 24), (15, 24), (15, 24), (15, 24)],
+            ),
+            (
+                LayoutPreset::EvenVertical,
+                [(80, 4), (80, 4), (80, 4), (80, 4), (80, 4)],
+            ),
+            (
+                LayoutPreset::MainHorizontal,
+                [(80, 22), (20, 1), (19, 1), (19, 1), (19, 1)],
+            ),
+            (
+                LayoutPreset::MainHorizontalMirrored,
+                [(80, 22), (20, 1), (19, 1), (19, 1), (19, 1)],
+            ),
+            (
+                LayoutPreset::MainVertical,
+                [(78, 24), (1, 6), (1, 5), (1, 5), (1, 5)],
+            ),
+            (
+                LayoutPreset::MainVerticalMirrored,
+                [(78, 24), (1, 6), (1, 5), (1, 5), (1, 5)],
+            ),
+            (
+                LayoutPreset::Tiled,
+                [(39, 7), (40, 7), (39, 7), (40, 7), (80, 8)],
+            ),
+        ] {
+            state.select_layout(window, preset).unwrap();
+            let arranged = &state.windows[&window];
+            assert_eq!(arranged.panes, panes);
+            assert_eq!(arranged.zoomed_pane, None);
+            assert_eq!(arranged.last_layout, Some(preset));
+            assert_eq!(
+                pane_order
+                    .iter()
+                    .map(|pane| pane_size(&arranged.layout, *pane))
+                    .collect::<Vec<_>>(),
+                expected.to_vec(),
+                "{}",
+                preset.name()
+            );
+            let new_splits = layout_splits(&arranged.layout);
+            assert_eq!(new_splits.len(), panes.len() - 1);
+            assert!(
+                new_splits
+                    .iter()
+                    .all(|split| !retired_splits.contains(split))
+            );
+            retired_splits.extend(new_splits);
+        }
 
         state
             .select_layout(window, LayoutPreset::MainHorizontal)
             .unwrap();
-        assert!(matches!(
-            &state.windows[&window].layout,
-            LayoutNode::Split {
-                axis: Axis::Vertical,
-                ratio,
-                first: main,
-                ..
-            } if (*ratio - 0.5).abs() < f32::EPSILON
-                && matches!(main.as_ref(), LayoutNode::Pane(pane) if *pane == first)
-        ));
         state
             .select_layout(window, LayoutPreset::MainVerticalMirrored)
             .unwrap();
-        assert!(matches!(
-            &state.windows[&window].layout,
-            LayoutNode::Split {
-                axis: Axis::Horizontal,
-                ratio,
-                second: main,
-                ..
-            } if (*ratio - 0.5).abs() < f32::EPSILON
-                && matches!(main.as_ref(), LayoutNode::Pane(pane) if *pane == first)
-        ));
 
         state.swap_panes(first, target, true, false).unwrap();
         let reordered = state.windows[&window].pane_order.clone();
         state.restore_previous_layout(window).unwrap();
         assert_eq!(layout_panes(&state.windows[&window].layout), reordered);
+        let projected = state.windows[&window].layout.project();
         assert!(matches!(
-            &state.windows[&window].layout,
+            &projected,
             LayoutNode::Split {
                 axis: Axis::Vertical,
                 first: main,
@@ -3541,27 +3308,14 @@ mod tests {
             } if matches!(main.as_ref(), LayoutNode::Pane(pane) if *pane == target)
         ));
 
+        let tiled_order = state.windows[&window].pane_order.clone();
         state.select_layout(window, LayoutPreset::Tiled).unwrap();
-        let mut tiled = Vec::new();
-        collect_pane_rects(
-            &state.windows[&window].layout,
-            PaneRect {
-                left: 0,
-                top: 0,
-                right: LAYOUT_COORDINATE_MAX,
-                bottom: LAYOUT_COORDINATE_MAX,
-            },
-            &mut tiled,
-        );
-        assert_eq!(tiled.len(), 5);
-        assert_eq!(tiled[4].1.right - tiled[4].1.left, LAYOUT_COORDINATE_MAX);
         assert_eq!(
-            tiled
+            tiled_order
                 .iter()
-                .map(|(_, rect)| rect.top)
-                .collect::<BTreeSet<_>>()
-                .len(),
-            3
+                .map(|pane| pane_size(&state.windows[&window].layout, *pane))
+                .collect::<Vec<_>>(),
+            [(39, 7), (40, 7), (39, 7), (40, 7), (80, 8)].to_vec()
         );
         assert!(state.validate().is_ok());
     }
@@ -3577,23 +3331,21 @@ mod tests {
             .split_pane(second, Axis::Vertical, PaneKind::Terminal)
             .unwrap();
         let original = state.windows[&window].layout.clone();
-        let mut retired_splits = Vec::new();
-        original.splits(&mut retired_splits);
+        let mut retired_splits = layout_splits(&original);
 
         assert_eq!(
             state.cycle_layout(window, 1).unwrap(),
             LayoutPreset::EvenHorizontal
         );
         let even = state.windows[&window].layout.clone();
-        even.splits(&mut retired_splits);
+        retired_splits.extend(layout_splits(&even));
         assert_ne!(even, original);
         state.restore_previous_layout(window).unwrap();
         assert!(same_layout_geometry(
             &state.windows[&window].layout,
             &original
         ));
-        let mut restored_splits = Vec::new();
-        state.windows[&window].layout.splits(&mut restored_splits);
+        let restored_splits = layout_splits(&state.windows[&window].layout);
         assert!(
             restored_splits
                 .iter()
@@ -3602,30 +3354,24 @@ mod tests {
         retired_splits.extend(restored_splits);
         state.restore_previous_layout(window).unwrap();
         assert!(same_layout_geometry(&state.windows[&window].layout, &even));
-        let mut restored_splits = Vec::new();
-        state.windows[&window].layout.splits(&mut restored_splits);
+        let restored_splits = layout_splits(&state.windows[&window].layout);
         assert!(
             restored_splits
                 .iter()
                 .all(|split| !retired_splits.contains(split))
         );
 
-        state
-            .resize_pane(first, Axis::Horizontal, -4.0, None)
-            .unwrap();
+        state.resize_pane(first, Axis::Horizontal, -4).unwrap();
         state.spread_layout(first).unwrap();
-        let mut rects = Vec::new();
-        collect_pane_rects(
-            &state.windows[&window].layout,
-            PaneRect {
-                left: 0,
-                top: 0,
-                right: LAYOUT_COORDINATE_MAX,
-                bottom: LAYOUT_COORDINATE_MAX,
-            },
-            &mut rects,
+        let spread = &state.windows[&window];
+        assert_eq!(
+            spread
+                .pane_order
+                .iter()
+                .map(|pane| pane_size(&spread.layout, *pane))
+                .collect::<Vec<_>>(),
+            [(26, 24), (26, 24), (26, 24)]
         );
-        assert_eq!(rects[0].1.right, LAYOUT_COORDINATE_MAX / 2);
 
         state.select_layout(window, LayoutPreset::Tiled).unwrap();
         assert_eq!(
@@ -3716,8 +3462,7 @@ mod tests {
         let third = state
             .split_pane(second, Axis::Vertical, PaneKind::Terminal)
             .unwrap();
-        let mut split_ids = Vec::new();
-        state.windows[&window].layout.splits(&mut split_ids);
+        let split_ids = layout_splits(&state.windows[&window].layout);
 
         assert_eq!(state.previous_pane(first).unwrap(), third);
         assert_eq!(state.next_pane(third).unwrap(), first);
@@ -3730,8 +3475,7 @@ mod tests {
         assert_eq!(state.windows[&window].pane_order, [first, third, second]);
         assert_eq!(state.windows[&window].active_pane, third);
         assert_eq!(state.windows[&window].zoomed_pane, Some(third));
-        let mut current_split_ids = Vec::new();
-        state.windows[&window].layout.splits(&mut current_split_ids);
+        let current_split_ids = layout_splits(&state.windows[&window].layout);
         assert_eq!(current_split_ids, split_ids, "split IDs remain stable");
 
         state.swap_panes(third, second, true, false).unwrap();
@@ -3756,7 +3500,10 @@ mod tests {
         assert_eq!(state.windows[&window].active_pane, other);
         assert_eq!(state.windows[&other_window].active_pane, third);
         assert_eq!(layout_panes(&state.windows[&window].layout)[2], other);
-        assert_eq!(state.windows[&other_window].layout, LayoutNode::Pane(third));
+        assert_eq!(
+            state.windows[&other_window].layout.project(),
+            LayoutNode::Pane(third)
+        );
         assert_eq!(state.windows[&window].pane_order, [first, second, other]);
         assert_eq!(state.windows[&other_window].pane_order, [third]);
         assert!(state.validate().is_ok());
@@ -3793,8 +3540,7 @@ mod tests {
         assert_eq!(order, [first, fourth, second, third]);
         let layout = state.windows[&window].layout.clone();
         let layout_order = layout_panes(&layout);
-        let mut split_ids = Vec::new();
-        layout.splits(&mut split_ids);
+        let split_ids = layout_splits(&layout);
 
         let rotated = state.rotate_window(window, false, true).unwrap();
         assert_eq!(rotated, first);
@@ -3817,8 +3563,7 @@ mod tests {
                 .map(|pane| replacements[pane])
                 .collect::<Vec<_>>()
         );
-        let mut rotated_split_ids = Vec::new();
-        state.windows[&window].layout.splits(&mut rotated_split_ids);
+        let rotated_split_ids = layout_splits(&state.windows[&window].layout);
         assert_eq!(rotated_split_ids, split_ids);
         assert_eq!(state.windows[&window].panes, panes);
 
@@ -3857,7 +3602,7 @@ mod tests {
             .break_pane(browser, session, None, Some("web".to_owned()), false)
             .unwrap();
         assert_eq!(
-            state.windows[&broken_window].layout,
+            state.windows[&broken_window].layout.project(),
             LayoutNode::Pane(browser)
         );
         assert_eq!(state.windows[&broken_window].name, "web");
@@ -3874,7 +3619,15 @@ mod tests {
         assert_eq!(state.windows[&broken_window].pane_order, [browser]);
 
         state
-            .join_pane(browser, first, Axis::Horizontal, 0.3, true, false, false)
+            .join_pane(
+                browser,
+                first,
+                Axis::Horizontal,
+                SplitSize::Percent(30),
+                true,
+                false,
+                false,
+            )
             .unwrap();
         assert!(!state.windows.contains_key(&broken_window));
         assert_eq!(
@@ -3885,39 +3638,115 @@ mod tests {
             state.windows[&original_window].pane_order,
             [browser, first, third]
         );
-        let LayoutNode::Split { first: left, .. } = &state.windows[&original_window].layout else {
-            panic!("original root remains a split");
-        };
-        assert!(matches!(
-            left.as_ref(),
-            LayoutNode::Split { id, ratio, .. }
-                if *id == next_split && (*ratio - 0.3).abs() < f32::EPSILON
-        ));
+        assert_eq!(
+            [browser, first, third]
+                .map(|pane| { pane_size(&state.windows[&original_window].layout, pane) }),
+            [(12, 24), (27, 24), (39, 24)]
+        );
+        assert!(layout_splits(&state.windows[&original_window].layout).contains(&next_split));
         assert_eq!(state.windows[&original_window].active_pane, browser);
 
         let second_break = state
             .break_pane(browser, session, None, None, true)
             .unwrap();
         state
-            .join_pane(browser, third, Axis::Vertical, 0.25, false, true, true)
+            .join_pane(
+                browser,
+                third,
+                Axis::Vertical,
+                SplitSize::Percent(25),
+                false,
+                true,
+                true,
+            )
             .unwrap();
         assert!(!state.windows.contains_key(&second_break));
-        let LayoutNode::Split {
-            axis,
-            ratio,
-            second,
-            ..
-        } = &state.windows[&original_window].layout
-        else {
-            panic!("full-size join wraps the destination layout");
-        };
-        assert_eq!(*axis, Axis::Vertical);
-        assert!((*ratio - 0.75).abs() < f32::EPSILON);
-        assert_eq!(second.as_ref(), &LayoutNode::Pane(browser));
+        assert_eq!(
+            [first, third, browser]
+                .map(|pane| { pane_size(&state.windows[&original_window].layout, pane) }),
+            [(40, 17), (39, 17), (80, 6)]
+        );
+        assert!(matches!(
+            state.windows[&original_window].layout.project(),
+            LayoutNode::Split {
+                axis: Axis::Vertical,
+                second,
+                ..
+            } if second.as_ref() == &LayoutNode::Pane(browser)
+        ));
         assert_eq!(
             state.windows[&original_window].pane_order,
             [first, third, browser]
         );
+        assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn breaking_a_last_pane_retires_its_source_window_and_session() {
+        let mut state = MuxState::default();
+        let (source_session, source_window, source) = state.create_session("source").unwrap();
+        let (destination_session, destination_window, destination) =
+            state.create_session("destination").unwrap();
+
+        let broken = state
+            .break_pane(source, destination_session, None, None, true)
+            .unwrap();
+
+        assert!(!state.windows.contains_key(&source_window));
+        assert!(!state.sessions.contains_key(&source_session));
+        assert_eq!(state.window_for_pane(source), Some(broken));
+        assert_eq!(state.window_for_pane(destination), Some(destination_window));
+        assert_eq!(state.windows[&broken].layout.extent(), (80, 24));
+        assert_eq!(
+            state.windows[&broken].layout.project(),
+            LayoutNode::Pane(source)
+        );
+        assert!(
+            state.sessions[&destination_session]
+                .windows
+                .contains(&broken)
+        );
+        assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn failed_cross_window_join_restores_the_source_and_target_layouts() {
+        let mut state = MuxState::default();
+        let (session, target_window, target) = state.create_session("work").unwrap();
+        let (source_window, source) = state
+            .create_window(session, Some("source".to_owned()), PaneKind::Terminal)
+            .unwrap();
+        state
+            .windows
+            .get_mut(&target_window)
+            .unwrap()
+            .layout
+            .resize(80, 1);
+        let target_layout = state.windows[&target_window].layout.clone();
+        let source_layout = state.windows[&source_window].layout.clone();
+        let next_split_id = state.next_split_id;
+        let generation = state.generation();
+
+        assert_eq!(
+            state.join_pane(
+                source,
+                target,
+                Axis::Vertical,
+                SplitSize::Default,
+                false,
+                false,
+                false,
+            ),
+            Err(ServerError::InvalidCommand(
+                "create pane failed: pane too small".to_owned()
+            ))
+        );
+        assert_eq!(state.windows[&target_window].layout, target_layout);
+        assert_eq!(state.windows[&source_window].layout, source_layout);
+        assert!(state.windows[&source_window].panes.contains_key(&source));
+        assert!(!state.windows[&target_window].panes.contains_key(&source));
+        assert_eq!(state.next_split_id, next_split_id);
+        assert_eq!(state.generation(), generation);
         assert!(state.validate().is_ok());
     }
 
@@ -3934,7 +3763,15 @@ mod tests {
         let (target_session, target_window, target) = state.create_session("target").unwrap();
 
         state
-            .join_pane(moving, target, Axis::Vertical, 0.5, false, false, false)
+            .join_pane(
+                moving,
+                target,
+                Axis::Vertical,
+                SplitSize::Default,
+                false,
+                false,
+                false,
+            )
             .unwrap();
         assert!(!state.windows.contains_key(&moving_window));
         assert!(state.sessions.contains_key(&source_session));
@@ -3945,7 +3782,7 @@ mod tests {
             .select_layout(target_window, LayoutPreset::MainHorizontal)
             .unwrap();
         assert!(matches!(
-            &state.windows[&target_window].layout,
+            state.windows[&target_window].layout.project(),
             LayoutNode::Split {
                 first,
                 ..
@@ -3958,7 +3795,7 @@ mod tests {
                 last_pane,
                 target,
                 Axis::Horizontal,
-                0.5,
+                SplitSize::Default,
                 false,
                 false,
                 false,
@@ -3990,7 +3827,7 @@ mod tests {
             state.select_pane(second).unwrap();
 
             let predicted = joined_layout(
-                &state.windows[&window].layout,
+                &state.windows[&window].layout.project(),
                 third,
                 first,
                 SplitId(u64::MAX),
@@ -4000,12 +3837,12 @@ mod tests {
             )
             .expect("both leaves are in the window");
             state
-                .join_pane(third, first, axis, 0.5, before, false, true)
+                .join_pane(third, first, axis, SplitSize::Default, before, false, true)
                 .unwrap();
 
             let layout = &state.windows[&window].layout;
             assert_eq!(layout_panes(layout), expected);
-            assert!(same_layout_geometry(layout, &predicted));
+            assert!(same_projected_geometry(layout, &predicted));
             assert_eq!(state.windows[&window].pane_order, expected);
             assert_eq!(state.windows[&window].active_pane, second);
             assert!(state.validate().is_ok());
@@ -4021,7 +3858,7 @@ mod tests {
             .unwrap();
 
         let predicted = joined_layout(
-            &state.windows[&window].layout,
+            &state.windows[&window].layout.project(),
             second,
             first,
             SplitId(u64::MAX),
@@ -4031,20 +3868,28 @@ mod tests {
         )
         .expect("both leaves are in the window");
         state
-            .join_pane(second, first, Axis::Vertical, 0.5, true, false, true)
+            .join_pane(
+                second,
+                first,
+                Axis::Vertical,
+                SplitSize::Default,
+                true,
+                false,
+                true,
+            )
             .unwrap();
 
         let layout = &state.windows[&window].layout;
         assert!(matches!(
-            layout,
+            layout.project(),
             LayoutNode::Split { axis: Axis::Vertical, first: top, second: bottom, .. }
                 if top.as_ref() == &LayoutNode::Pane(second)
                     && bottom.as_ref() == &LayoutNode::Pane(first)
         ));
-        assert!(same_layout_geometry(layout, &predicted));
+        assert!(same_projected_geometry(layout, &predicted));
         assert_eq!(
             joined_layout(
-                layout,
+                &layout.project(),
                 first,
                 first,
                 SplitId(u64::MAX),
@@ -4068,10 +3913,10 @@ mod tests {
             .split_pane(second, Axis::Vertical, PaneKind::Terminal)
             .unwrap();
 
-        let predicted = swapped_layout(&state.windows[&window].layout, first, third);
+        let predicted = swapped_layout(&state.windows[&window].layout.project(), first, third);
         state.swap_panes(first, third, true, false).unwrap();
 
-        assert_eq!(state.windows[&window].layout, predicted);
+        assert_eq!(state.windows[&window].layout.project(), predicted);
         assert_eq!(
             layout_panes(&state.windows[&window].layout),
             [third, second, first]
@@ -4099,9 +3944,7 @@ mod tests {
         state.select_pane_with_zoom(first, true).unwrap();
         assert_eq!(state.windows[&window].zoomed_pane, Some(first));
 
-        state
-            .resize_pane(first, Axis::Horizontal, 1.0, None)
-            .unwrap();
+        state.resize_pane(first, Axis::Horizontal, 1).unwrap();
         assert_eq!(state.windows[&window].zoomed_pane, None);
         state.toggle_zoom(first).unwrap();
         state

@@ -16,11 +16,11 @@
 //! | `#(uptime)` | shell command output, first line only |
 //! | `#[fg=green,bold]` | style directives, dropped |
 
-use std::{borrow::Cow, collections::BTreeMap, time::Duration};
+use std::{borrow::Cow, time::Duration};
 
-use zz_protocol::{Axis, MAX_STATUS_TEXT_BYTES, PaneId, SessionId, WindowId};
+use zz_protocol::{MAX_STATUS_TEXT_BYTES, PaneId, SessionId, WindowId};
 
-use crate::model::{MuxState, window_cell_extent};
+use crate::model::MuxState;
 
 /// Empty, where tmux ships `[#S] `: the sidebar and titlebar already name the
 /// session and pane. An empty format drops the status section entirely.
@@ -267,11 +267,7 @@ struct ResolvedFormatContext {
 }
 
 impl FormatContext {
-    fn resolve(
-        self,
-        state: &MuxState,
-        pane_cells: &BTreeMap<PaneId, (u16, u16)>,
-    ) -> ResolvedFormatContext {
+    fn resolve(self, state: &MuxState) -> ResolvedFormatContext {
         let pane = self
             .pane
             .filter(|pane| state.window_for_pane(*pane).is_some());
@@ -310,12 +306,9 @@ impl FormatContext {
             context.window_index = window.index;
             context.window_name.clone_from(&window.name);
             context.window_panes = window.panes.len();
-            context.window_width =
-                window_cell_extent(state, pane_cells, window.id, Axis::Horizontal)
-                    .map(|extent| extent.round() as u16);
-            context.window_height =
-                window_cell_extent(state, pane_cells, window.id, Axis::Vertical)
-                    .map(|extent| extent.round() as u16);
+            let (width, height) = window.layout.extent();
+            context.window_width = Some(width);
+            context.window_height = Some(height);
             context.window_active = state
                 .sessions
                 .get(&window.session)
@@ -332,9 +325,9 @@ impl FormatContext {
                     .unwrap_or_default();
                 context.pane_id = pane.id.to_string();
                 context.pane_title.clone_from(&pane.title);
-                let geometry = pane_cells.get(&pane.id).copied();
-                context.pane_width = geometry.map(|(columns, _)| columns);
-                context.pane_height = geometry.map(|(_, rows)| rows);
+                let geometry = window.displayed_pane_geometry(pane.id);
+                context.pane_width = geometry.map(|geometry| geometry.0);
+                context.pane_height = geometry.map(|geometry| geometry.1);
                 context.pane_active = Some(window.active_pane == pane.id);
                 context.pane_synchronized =
                     state.pane_synchronize_panes(pane.id).unwrap_or_default();
@@ -396,12 +389,7 @@ impl FormatVariables for ResolvedFormatContext {
     }
 }
 
-pub(crate) fn expand_format(
-    format: &str,
-    state: &MuxState,
-    context: FormatContext,
-    pane_cells: &BTreeMap<PaneId, (u16, u16)>,
-) -> String {
+pub(crate) fn expand_format(format: &str, state: &MuxState, context: FormatContext) -> String {
     struct CommandHooks;
 
     impl StatusHooks for CommandHooks {
@@ -414,11 +402,7 @@ pub(crate) fn expand_format(
         }
     }
 
-    expand_with_context(
-        format,
-        &context.resolve(state, pane_cells),
-        &mut CommandHooks,
-    )
+    expand_with_context(format, &context.resolve(state), &mut CommandHooks)
 }
 
 fn optional_number(value: Option<u16>) -> Cow<'static, str> {
@@ -881,8 +865,6 @@ mod tests {
                 crate::PaneKind::Terminal,
             )
             .unwrap();
-        let pane_cells = BTreeMap::new();
-
         assert_eq!(
             expand_format(
                 "#{session_id}:#S #{session_windows}[#F]|#{window_index}|#{pane_index}",
@@ -892,7 +874,6 @@ mod tests {
                     window: None,
                     pane: None,
                 },
-                &pane_cells,
             ),
             format!("{session}:work 2[*]|1|1")
         );
@@ -905,7 +886,6 @@ mod tests {
                     window: Some(first_window),
                     pane: None,
                 },
-                &pane_cells,
             ),
             format!("{first_window} 0:shell[]")
         );
@@ -918,7 +898,6 @@ mod tests {
                     window: Some(second_window),
                     pane: None,
                 },
-                &pane_cells,
             ),
             format!("{second_window} 1:editor[*]")
         );
@@ -931,7 +910,6 @@ mod tests {
                     window: Some(second_window),
                     pane: Some(third_pane),
                 },
-                &pane_cells,
             ),
             format!("{third_pane}:1:terminal:")
         );
@@ -944,7 +922,6 @@ mod tests {
                     window: Some(first_window),
                     pane: Some(first_pane),
                 },
-                &pane_cells,
             ),
             first_pane.to_string()
         );

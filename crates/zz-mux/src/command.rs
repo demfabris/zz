@@ -15,7 +15,7 @@ use zz_terminal::{
 
 use crate::{
     Binding, KeyTables, LayoutPreset, MuxState, PaneDirection, PaneKind, SplitPlacement,
-    StatusFormats, StatusOption, canonical_command, command_spec,
+    SplitSize as LayoutSplitSize, StatusFormats, StatusOption, canonical_command, command_spec,
     status::{FormatContext, expand_format},
 };
 
@@ -242,7 +242,6 @@ pub struct MuxEngine {
     experimental_agent_pane: bool,
     experimental_editor_pane: bool,
     agent: AgentOptions,
-    pane_cells: BTreeMap<PaneId, (u16, u16)>,
 }
 
 /// What an agent pane's daemon-owned adapter is started with.
@@ -282,7 +281,6 @@ impl Default for MuxEngine {
             experimental_agent_pane: false,
             experimental_editor_pane: false,
             agent: AgentOptions::default(),
-            pane_cells: BTreeMap::new(),
         }
     }
 }
@@ -509,9 +507,6 @@ impl MuxEngine {
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.window_mode_keys
             .retain(|window, _| self.state.windows.contains_key(window));
-        let state = &self.state;
-        self.pane_cells
-            .retain(|pane, _| state.window_for_pane(*pane).is_some());
         self.repair_context(context);
         Ok(execution)
     }
@@ -604,7 +599,6 @@ impl MuxEngine {
                             window: None,
                             pane: None,
                         },
-                        &self.pane_cells,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -857,7 +851,6 @@ impl MuxEngine {
                             window: Some(window.id),
                             pane: None,
                         },
-                        &self.pane_cells,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -1273,9 +1266,16 @@ impl MuxEngine {
             if original_context.window == Some(source_window)
                 && original_context.pane == Some(source)
             {
-                let pane = self.state.windows[&source_window].active_pane;
+                let context_window = if self.state.windows.contains_key(&source_window) {
+                    source_window
+                } else if self.state.sessions.contains_key(&source_session) {
+                    session_active_window(&self.state, source_session)?
+                } else {
+                    window
+                };
+                let pane = self.state.windows[&context_window].active_pane;
                 *context = ExecutionContext::for_pane(&self.state, pane)
-                    .expect("source window retains an active pane");
+                    .expect("break-pane retains a valid command context");
             }
         } else {
             *context = ExecutionContext::for_pane(&self.state, source)
@@ -1335,7 +1335,7 @@ impl MuxEngine {
                 .value("-p")
                 .map(parse_pane_percentage)
                 .transpose()?
-                .unwrap_or(0.5),
+                .map_or(LayoutSplitSize::Default, LayoutSplitSize::Percent),
             options.has("-b"),
             options.has("-f"),
             detached,
@@ -1531,7 +1531,7 @@ impl MuxEngine {
         } else {
             Axis::Vertical
         };
-        let placement = self.split_placement(options, size, target, axis)?;
+        let placement = self.split_placement(options, size)?;
         let snapshot_kind = pane_kind_snapshot(&kind);
         let inherit_cwd_from =
             spawn_cwd_source("split-window", &self.state, options, Some(target), &kind)?;
@@ -1552,55 +1552,30 @@ impl MuxEngine {
         &self,
         options: &Options,
         size: Option<SplitSize<'_>>,
-        target: PaneId,
-        axis: Axis,
     ) -> Result<SplitPlacement, ServerError> {
         let full_size = options.has("-f");
-        let ratio = match size {
-            None => SplitPlacement::default().ratio,
-            Some(SplitSize::Percentage(value)) => parse_pane_percentage(value)?,
+        let size = match size {
+            None => LayoutSplitSize::Default,
+            Some(SplitSize::Percentage(value)) => {
+                LayoutSplitSize::Percent(parse_pane_percentage(value)?)
+            }
             Some(SplitSize::Cells(value)) => {
                 if let Some(percentage) = value.strip_suffix('%') {
-                    parse_pane_percentage(percentage)?
+                    LayoutSplitSize::Percent(parse_pane_percentage(percentage)?)
                 } else {
-                    let cells = value.parse::<f32>().map_err(|_| {
+                    let cells = value.parse::<u16>().map_err(|_| {
                         ServerError::InvalidCommand(format!("invalid pane size: {value}"))
                     })?;
-                    cells / self.split_cell_extent(target, axis, full_size)?
+                    LayoutSplitSize::Cells(cells)
                 }
             }
         };
         Ok(SplitPlacement {
-            ratio,
+            size,
             before: options.has("-b"),
             full_size,
             detached: options.has("-d"),
         })
-    }
-
-    /// Cells along `axis` in the box a new pane divides: the whole window under
-    /// `-f`, otherwise the pane being split.
-    fn split_cell_extent(
-        &self,
-        target: PaneId,
-        axis: Axis,
-        full_size: bool,
-    ) -> Result<f32, ServerError> {
-        let extent = self
-            .window_cell_extent(target, axis)
-            .ok_or_else(|| geometry_unavailable("a split size"))?;
-        if full_size {
-            return Ok(extent);
-        }
-        let window = self
-            .state
-            .window_for_pane(target)
-            .ok_or_else(|| ServerError::MissingTarget(target.to_string()))?;
-        let layout = &self.state.windows[&window].layout;
-        crate::model::pane_axis_fraction(layout, target, axis)
-            .filter(|fraction| *fraction > 0.0)
-            .map(|fraction| extent * fraction)
-            .ok_or_else(|| geometry_unavailable("a split size"))
     }
 
     fn select_pane(
@@ -1783,7 +1758,6 @@ impl MuxEngine {
                             window: Some(window_id),
                             pane: Some(pane.id),
                         },
-                        &self.pane_cells,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -1846,28 +1820,33 @@ impl MuxEngine {
             let Some(value) = options.value(option) else {
                 continue;
             };
-            let fraction = if let Some(percentage) = value.strip_suffix('%') {
-                parse_pane_percentage(percentage)?
+            let cells = if let Some(percentage) = value.strip_suffix('%') {
+                let percentage = parse_pane_percentage(percentage)?;
+                let window = self
+                    .state
+                    .window_for_pane(pane)
+                    .expect("resolved pane has a window");
+                let extent = self
+                    .window_extent(window, axis)
+                    .expect("resolved window has a cell extent");
+                u16::try_from(u32::from(extent) * u32::from(percentage) / 100)
+                    .expect("percentage of a u16 extent fits u16")
             } else {
-                let cells = value.parse::<f32>().map_err(|_| {
+                value.parse::<u16>().map_err(|_| {
                     ServerError::InvalidCommand(format!("invalid pane size: {value}"))
-                })?;
-                cells
-                    / self
-                        .window_cell_extent(pane, axis)
-                        .ok_or_else(|| geometry_unavailable(&format!("resize-pane {option}")))?
+                })?
             };
-            self.state.resize_pane_to(pane, axis, fraction)?;
+            self.state.resize_pane_to(pane, axis, cells)?;
         }
         let shared = positional
             .first()
             .map(|value| parse_resize_adjustment(value))
             .transpose()?;
         for (option, axis, sign) in [
-            ("-L", Axis::Horizontal, -1.0),
-            ("-R", Axis::Horizontal, 1.0),
-            ("-U", Axis::Vertical, -1.0),
-            ("-D", Axis::Vertical, 1.0),
+            ("-L", Axis::Horizontal, -1),
+            ("-R", Axis::Horizontal, 1),
+            ("-U", Axis::Vertical, -1),
+            ("-D", Axis::Vertical, 1),
         ] {
             let attached = options
                 .value(option)
@@ -1877,31 +1856,54 @@ impl MuxEngine {
                 continue;
             }
             let cells = attached.or(shared).unwrap_or(1);
-            let extent = self.window_cell_extent(pane, axis);
             self.state
-                .resize_pane(pane, axis, sign * cells as f32, extent)?;
+                .resize_pane(pane, axis, cells.saturating_mul(sign))?;
         }
         Ok(Execution::default())
     }
 
     pub fn set_pane_geometry(&mut self, pane: PaneId, columns: u16, rows: u16) {
-        self.pane_cells.insert(pane, (columns, rows));
+        let Some(window_id) = self.state.window_for_pane(pane) else {
+            return;
+        };
+        let window = self
+            .state
+            .windows
+            .get_mut(&window_id)
+            .expect("pane window exists");
+        let Some(pane_geometry) = window.layout.pane_geometry(pane) else {
+            return;
+        };
+        let current = window.layout.extent();
+        let implied = if window.zoomed_pane == Some(pane) {
+            (columns, rows)
+        } else {
+            (
+                implied_window_extent(columns, current.0, pane_geometry.sx),
+                implied_window_extent(rows, current.1, pane_geometry.sy),
+            )
+        };
+        if implied != current {
+            window.layout.resize(implied.0, implied.1);
+        }
     }
 
     #[must_use]
     pub fn pane_geometry(&self, pane: PaneId) -> Option<(u16, u16)> {
-        self.pane_cells.get(&pane).copied()
+        let window = self.state.window_for_pane(pane)?;
+        self.state
+            .windows
+            .get(&window)?
+            .displayed_pane_geometry(pane)
     }
 
     #[must_use]
     pub fn window_extent(&self, window: WindowId, axis: Axis) -> Option<u16> {
-        crate::model::window_cell_extent(&self.state, &self.pane_cells, window, axis)
-            .map(|extent| extent.round() as u16)
-    }
-
-    fn window_cell_extent(&self, pane: PaneId, axis: Axis) -> Option<f32> {
-        let window = self.state.window_for_pane(pane)?;
-        crate::model::window_cell_extent(&self.state, &self.pane_cells, window, axis)
+        let extent = self.state.windows.get(&window)?.layout.extent();
+        Some(match axis {
+            Axis::Horizontal => extent.0,
+            Axis::Vertical => extent.1,
+        })
     }
 
     fn select_layout(
@@ -2337,7 +2339,7 @@ impl MuxEngine {
         } else {
             positional.join(" ")
         };
-        let text = expand_format(&format, &self.state, format_context, &self.pane_cells);
+        let text = expand_format(&format, &self.state, format_context);
         if options.has("-p") {
             Ok(Execution::output(text))
         } else {
@@ -3169,25 +3171,27 @@ fn split_size(options: &Options) -> Option<SplitSize<'_>> {
     )
 }
 
-fn geometry_unavailable(what: &str) -> ServerError {
-    ServerError::InvalidCommand(format!(
-        "{what} in cells needs pane geometry, which arrives once a client draws the window; use a percentage instead"
-    ))
+fn implied_window_extent(measured: u16, window: u16, pane: u16) -> u16 {
+    if pane == 0 {
+        return window;
+    }
+    let numerator = u64::from(measured) * u64::from(window);
+    let rounded = (numerator + u64::from(pane) / 2) / u64::from(pane);
+    u16::try_from(rounded).unwrap_or(u16::MAX)
 }
 
-fn parse_pane_percentage(value: &str) -> Result<f32, ServerError> {
+fn parse_pane_percentage(value: &str) -> Result<u8, ServerError> {
     let percentage = value
         .strip_suffix('%')
         .unwrap_or(value)
-        .parse::<f32>()
+        .parse::<u8>()
         .map_err(|_| ServerError::InvalidCommand(format!("invalid pane percentage: {value}")))?;
-    let ratio = percentage / 100.0;
-    if !ratio.is_finite() || !(0.1..=0.9).contains(&ratio) {
+    if percentage > 100 {
         return Err(ServerError::InvalidCommand(
-            "pane percentage must be between 10 and 90".to_owned(),
+            "pane percentage must be between 0 and 100".to_owned(),
         ));
     }
-    Ok(ratio)
+    Ok(percentage)
 }
 
 fn parse_layout_preset(value: &str) -> Result<LayoutPreset, ServerError> {
@@ -4434,7 +4438,7 @@ mod tests {
     }
 
     #[test]
-    fn format_geometry_uses_measured_panes_and_derived_window_extents() {
+    fn format_geometry_reads_tree_allocations_and_tracks_measurements() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -4445,7 +4449,6 @@ mod tests {
             .execute(&mut context, &command("split-window", &["-h"]))
             .unwrap();
         let second = context.pane.unwrap();
-        engine.set_pane_geometry(first, 40, 24);
 
         assert_eq!(
             engine
@@ -4458,7 +4461,7 @@ mod tests {
                 )
                 .unwrap()
                 .output,
-            format!("{first}:40x24\n{second}:x")
+            format!("{first}:40x24\n{second}:39x24")
         );
         assert_eq!(
             engine
@@ -4470,10 +4473,35 @@ mod tests {
                 .output,
             "80x24"
         );
+
+        engine.set_pane_geometry(first, 80, 24);
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-panes",
+                        &["-F", "#{pane_id}:#{pane_width}x#{pane_height}"],
+                    ),
+                )
+                .unwrap()
+                .output,
+            format!("{first}:80x24\n{second}:79x24")
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("list-windows", &["-F", "#{window_width}x#{window_height}"],),
+                )
+                .unwrap()
+                .output,
+            "160x24"
+        );
     }
 
     #[test]
-    fn format_geometry_is_empty_until_a_pane_is_measured() {
+    fn format_geometry_reports_headless_defaults() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -4494,7 +4522,7 @@ mod tests {
                 )
                 .unwrap()
                 .output,
-            ":::"
+            "80:24:80:24"
         );
     }
 
@@ -4653,6 +4681,45 @@ mod tests {
             .unwrap();
         engine.set_pane_geometry(first, 80, 24);
         assert_eq!(extent(&mut engine, &mut context), "160x24");
+    }
+
+    #[test]
+    fn zoomed_pane_reports_the_full_window_extent_like_tmux() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let second = context.pane.unwrap();
+        let sizes = |engine: &mut MuxEngine, context: &mut ExecutionContext| {
+            engine
+                .execute(
+                    context,
+                    &command("list-panes", &["-F", "#{pane_width}x#{pane_height}"]),
+                )
+                .unwrap()
+                .output
+        };
+
+        assert_eq!(sizes(&mut engine, &mut context), "40x24\n39x24");
+        engine
+            .execute(
+                &mut context,
+                &command("resize-pane", &["-Z", "-t", &second.to_string()]),
+            )
+            .unwrap();
+        assert_eq!(sizes(&mut engine, &mut context), "40x24\n80x24");
+        assert_eq!(engine.pane_geometry(second), Some((80, 24)));
+        engine
+            .execute(
+                &mut context,
+                &command("resize-pane", &["-Z", "-t", &second.to_string()]),
+            )
+            .unwrap();
+        assert_eq!(sizes(&mut engine, &mut context), "40x24\n39x24");
     }
 
     #[test]
@@ -6928,17 +6995,17 @@ mod tests {
         engine
             .execute(&mut context, &command("split-window", &["-h"]))
             .unwrap();
+        let second = context.pane.unwrap();
         let window = context.window.unwrap();
 
         engine.set_pane_geometry(first, 100, 50);
         engine
             .execute(&mut context, &command("resize-pane", &["-R", "10"]))
             .unwrap();
-        let zz_protocol::LayoutNode::Split { ratio, .. } = engine.state.windows[&window].layout
-        else {
-            panic!("split window has a split layout");
-        };
-        assert!((ratio - 0.55).abs() < 1e-4, "ratio {ratio}");
+        assert_eq!(engine.pane_geometry(first), Some((110, 50)));
+        assert_eq!(engine.pane_geometry(second), Some((89, 50)));
+        assert_eq!(engine.window_extent(window, Axis::Horizontal), Some(200));
+        assert_eq!(engine.window_extent(window, Axis::Vertical), Some(50));
     }
 
     #[test]
@@ -6998,16 +7065,14 @@ mod tests {
         engine
             .execute(&mut context, &command("swapp", &["-U"]))
             .unwrap();
-        let mut panes = Vec::new();
-        engine.state.windows[&first_window].layout.panes(&mut panes);
+        let mut panes = engine.state.windows[&first_window].layout.panes_in_order();
         assert_eq!(panes, [left, right, middle]);
         assert_eq!(context.pane, Some(right));
 
         engine
             .execute(&mut context, &command("swap-pane", &["-d", "-D"]))
             .unwrap();
-        panes.clear();
-        engine.state.windows[&first_window].layout.panes(&mut panes);
+        panes = engine.state.windows[&first_window].layout.panes_in_order();
         assert_eq!(panes, [left, middle, right]);
         assert_eq!(context.pane, Some(middle));
 
@@ -7089,7 +7154,7 @@ mod tests {
         assert_ne!(broken_window, original_window);
         assert_eq!(engine.state.windows[&broken_window].name, "docs");
         assert_eq!(
-            engine.state.windows[&broken_window].layout,
+            engine.state.windows[&broken_window].layout.project(),
             zz_protocol::LayoutNode::Pane(browser)
         );
 
@@ -7113,10 +7178,9 @@ mod tests {
             .unwrap();
         assert!(!engine.state.windows.contains_key(&broken_window));
         assert_eq!(context.pane, Some(browser));
-        let mut panes = Vec::new();
-        engine.state.windows[&original_window]
+        let panes = engine.state.windows[&original_window]
             .layout
-            .panes(&mut panes);
+            .panes_in_order();
         assert_eq!(panes, [browser, terminal]);
 
         engine
@@ -7220,7 +7284,7 @@ mod tests {
         assert!(selected.effects.contains(&MuxEffect::SnapshotChanged));
         assert_eq!(engine.state.windows[&window].panes, panes);
         assert!(matches!(
-            engine.state.windows[&window].layout,
+            engine.state.windows[&window].layout.project(),
             zz_protocol::LayoutNode::Split {
                 axis: Axis::Horizontal,
                 ..
@@ -7235,7 +7299,7 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(
-            engine.state.windows[&window].layout,
+            engine.state.windows[&window].layout.project(),
             zz_protocol::LayoutNode::Split {
                 axis: Axis::Vertical,
                 ..
@@ -7248,7 +7312,7 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(
-            engine.state.windows[&window].layout,
+            engine.state.windows[&window].layout.project(),
             zz_protocol::LayoutNode::Split {
                 axis: Axis::Horizontal,
                 ..
@@ -7269,7 +7333,7 @@ mod tests {
             .unwrap();
         assert_ne!(engine.state.windows[&window].layout, horizontal);
         assert!(matches!(
-            engine.state.windows[&window].layout,
+            engine.state.windows[&window].layout.project(),
             zz_protocol::LayoutNode::Split {
                 axis: Axis::Horizontal,
                 ..

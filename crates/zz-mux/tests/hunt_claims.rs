@@ -1,5 +1,5 @@
 use zz_mux::{COMMAND_SPECS, DetachScope, ExecutionContext, MuxEffect, MuxEngine, parse_config};
-use zz_protocol::{Axis, CommandInvocation, KeyToken, LayoutNode, ServerError};
+use zz_protocol::{CommandInvocation, KeyToken, PaneId, ServerError};
 use zz_terminal::{CopyModeAction, TerminalViewAction};
 
 fn command(name: &str, args: &[&str]) -> CommandInvocation {
@@ -41,12 +41,8 @@ fn window_indexes(engine: &MuxEngine, session_name: &str) -> Vec<u32> {
         .collect()
 }
 
-fn split_ratio(engine: &MuxEngine) -> f32 {
-    let window = engine.state.windows.values().next().expect("window");
-    match &window.layout {
-        LayoutNode::Split { ratio, .. } => *ratio,
-        LayoutNode::Pane(_) => panic!("expected a split"),
-    }
+fn pane_size(engine: &MuxEngine, pane: PaneId) -> (u16, u16) {
+    engine.pane_geometry(pane).expect("pane geometry")
 }
 
 #[test]
@@ -466,7 +462,7 @@ fn split_window_dash_l_sizes_the_new_pane_in_cells() {
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
-    engine.set_pane_geometry(context.pane.unwrap(), 80, 24);
+    let target = context.pane.unwrap();
     let created = engine
         .execute(&mut context, &command("split-window", &["-h", "-l", "20"]))
         .unwrap();
@@ -474,33 +470,38 @@ fn split_window_dash_l_sizes_the_new_pane_in_cells() {
         created.effects.first(),
         Some(MuxEffect::PaneCreated { command: None, .. })
     ));
-    assert!((split_ratio(&engine) - 0.75).abs() < 1e-5);
+    let created = context.pane.unwrap();
+    assert_eq!(pane_size(&engine, target), (59, 24));
+    assert_eq!(pane_size(&engine, created), (20, 24));
 }
 
 #[test]
-fn split_window_dash_l_takes_a_percentage_and_names_the_missing_geometry() {
+fn split_window_dash_l_takes_a_percentage_and_headless_cell_count() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
+    let target = context.pane.unwrap();
     engine
         .execute(&mut context, &command("split-window", &["-h", "-l", "25%"]))
         .unwrap();
-    assert!((split_ratio(&engine) - 0.75).abs() < 1e-5);
+    let created = context.pane.unwrap();
+    assert_eq!(pane_size(&engine, target), (59, 24));
+    assert_eq!(pane_size(&engine, created), (20, 24));
 
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
-    let error = engine
-        .execute(&mut context, &command("split-window", &["-h", "-l", "20"]))
-        .unwrap_err();
-    assert!(
-        matches!(error, ServerError::InvalidCommand(message) if message.contains("pane geometry"))
-    );
-    assert_eq!(engine.state.windows.values().next().unwrap().panes.len(), 1);
+    let target = context.pane.unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-h", "-l", "10"]))
+        .unwrap();
+    let created = context.pane.unwrap();
+    assert_eq!(pane_size(&engine, target), (69, 24));
+    assert_eq!(pane_size(&engine, created), (10, 24));
 }
 
 #[test]
@@ -510,6 +511,7 @@ fn split_window_dash_p_gives_the_new_pane_that_share() {
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
+    let target = context.pane.unwrap();
     let created = engine
         .execute(&mut context, &command("split-window", &["-p", "25"]))
         .unwrap();
@@ -517,7 +519,51 @@ fn split_window_dash_p_gives_the_new_pane_that_share() {
         created.effects.first(),
         Some(MuxEffect::PaneCreated { command: None, .. })
     ));
-    assert!((split_ratio(&engine) - 0.75).abs() < 1e-5);
+    let created = context.pane.unwrap();
+    assert_eq!(pane_size(&engine, target), (80, 17));
+    assert_eq!(pane_size(&engine, created), (80, 6));
+}
+
+#[test]
+fn split_window_accepts_extreme_percentages_and_reports_no_space_exactly() {
+    for (percentage, expected) in [("0", [(78, 24), (1, 24)]), ("100", [(1, 24), (78, 24)])] {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let target = context.pane.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("split-window", &["-h", "-p", percentage]),
+            )
+            .unwrap();
+        let created = context.pane.unwrap();
+        assert_eq!(
+            [pane_size(&engine, target), pane_size(&engine, created)],
+            expected
+        );
+    }
+
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-l", "1"]))
+        .unwrap();
+    let narrow = context.pane.unwrap();
+    let error = engine
+        .execute(&mut context, &command("split-window", &[]))
+        .unwrap_err();
+    assert_eq!(
+        error,
+        ServerError::InvalidCommand("create pane failed: pane too small".to_owned())
+    );
+    assert_eq!(pane_size(&engine, narrow), (80, 1));
+    assert_eq!(engine.state.windows.values().next().unwrap().panes.len(), 2);
 }
 
 #[test]
@@ -527,10 +573,13 @@ fn split_picker_dash_p_gives_the_new_pane_that_share() {
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
+    let target = context.pane.unwrap();
     engine
         .execute(&mut context, &command("split-picker", &["-h", "-p", "25"]))
         .unwrap();
-    assert!((split_ratio(&engine) - 0.75).abs() < 1e-5);
+    let created = context.pane.unwrap();
+    assert_eq!(pane_size(&engine, target), (59, 24));
+    assert_eq!(pane_size(&engine, created), (20, 24));
 }
 
 #[test]
@@ -548,13 +597,9 @@ fn split_window_dash_b_lands_the_new_pane_first() {
         )
         .unwrap();
     let created = context.pane.unwrap();
-    assert!((split_ratio(&engine) - 0.25).abs() < 1e-5);
     let window = engine.state.windows.values().next().expect("window");
-    let LayoutNode::Split { first, second, .. } = &window.layout else {
-        panic!("expected a split");
-    };
-    assert_eq!(**first, LayoutNode::Pane(created));
-    assert_eq!(**second, LayoutNode::Pane(target));
+    assert_eq!(pane_size(&engine, created), (20, 24));
+    assert_eq!(pane_size(&engine, target), (59, 24));
     assert_eq!(window.pane_order(), [created, target]);
 }
 
@@ -593,9 +638,11 @@ fn split_window_dash_f_spans_the_whole_window() {
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
+    let first = context.pane.unwrap();
     engine
         .execute(&mut context, &command("split-window", &["-h"]))
         .unwrap();
+    let second = context.pane.unwrap();
     engine
         .execute(
             &mut context,
@@ -603,19 +650,9 @@ fn split_window_dash_f_spans_the_whole_window() {
         )
         .unwrap();
     let created = context.pane.unwrap();
-    let window = engine.state.windows.values().next().expect("window");
-    let LayoutNode::Split {
-        axis,
-        ratio,
-        second,
-        ..
-    } = &window.layout
-    else {
-        panic!("expected a split");
-    };
-    assert_eq!(*axis, Axis::Vertical);
-    assert!((*ratio - 0.75).abs() < 1e-5);
-    assert_eq!(**second, LayoutNode::Pane(created));
+    assert_eq!(pane_size(&engine, first), (40, 17));
+    assert_eq!(pane_size(&engine, second), (39, 17));
+    assert_eq!(pane_size(&engine, created), (80, 6));
 }
 
 #[test]
@@ -745,15 +782,13 @@ fn resize_pane_dash_r_on_the_right_pane_grows_the_left_share() {
     engine
         .execute(&mut context, &command("split-window", &["-h"]))
         .unwrap();
+    let right = context.pane.unwrap();
     engine.set_pane_geometry(left, 100, 50);
     engine
         .execute(&mut context, &command("resize-pane", &["-R", "10"]))
         .unwrap();
-    let ratio = split_ratio(&engine);
-    assert!(
-        (ratio - 0.55).abs() < 1e-5,
-        "tmux moves the boundary right, and the right pane has no boundary of its own: {ratio}"
-    );
+    assert_eq!(pane_size(&engine, left), (110, 50));
+    assert_eq!(pane_size(&engine, right), (89, 50));
 }
 
 #[test]
@@ -767,31 +802,21 @@ fn resize_pane_dash_r_grows_a_nested_pane_toward_its_right_neighbor() {
     engine
         .execute(&mut context, &command("split-window", &["-h"]))
         .unwrap();
+    let right = context.pane.unwrap();
     engine
         .execute(&mut context, &command("select-pane", &["-L"]))
         .unwrap();
     engine
         .execute(&mut context, &command("split-window", &["-h"]))
         .unwrap();
+    let middle = context.pane.unwrap();
     engine.set_pane_geometry(left, 25, 50);
     engine
         .execute(&mut context, &command("resize-pane", &["-R", "10"]))
         .unwrap();
-    let window = engine.state.windows.values().next().expect("window");
-    let LayoutNode::Split { ratio, first, .. } = &window.layout else {
-        panic!("expected a split");
-    };
-    assert!(
-        (*ratio - 0.6).abs() < 1e-5,
-        "the boundary right of the nested pane moved: {ratio}"
-    );
-    let LayoutNode::Split { ratio, .. } = &**first else {
-        panic!("expected a nested split");
-    };
-    assert!(
-        (*ratio - 0.5).abs() < f32::EPSILON,
-        "the boundary left of the nested pane stayed put: {ratio}"
-    );
+    assert_eq!(pane_size(&engine, left), (27, 50));
+    assert_eq!(pane_size(&engine, middle), (36, 50));
+    assert_eq!(pane_size(&engine, right), (35, 50));
 }
 
 #[test]
@@ -805,11 +830,13 @@ fn resize_pane_dash_x_sets_an_absolute_width_from_either_side() {
     engine
         .execute(&mut context, &command("split-window", &["-h"]))
         .unwrap();
+    let right = context.pane.unwrap();
     engine.set_pane_geometry(left, 50, 50);
     engine
         .execute(&mut context, &command("resize-pane", &["-x", "25"]))
         .unwrap();
-    assert!((split_ratio(&engine) - 0.75).abs() < 1e-5);
+    assert_eq!(pane_size(&engine, left), (74, 50));
+    assert_eq!(pane_size(&engine, right), (25, 50));
 
     engine.set_pane_geometry(left, 75, 50);
     engine
@@ -818,31 +845,33 @@ fn resize_pane_dash_x_sets_an_absolute_width_from_either_side() {
     engine
         .execute(&mut context, &command("resize-pane", &["-x", "25"]))
         .unwrap();
-    assert!((split_ratio(&engine) - 0.25).abs() < 1e-5);
+    assert_eq!(pane_size(&engine, left), (25, 50));
+    assert_eq!(pane_size(&engine, right), (75, 50));
 }
 
 #[test]
-fn resize_pane_dash_x_takes_a_percentage_and_names_the_missing_geometry() {
+fn resize_pane_dash_x_uses_headless_cells_and_percentages() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
+    let left = context.pane.unwrap();
     engine
         .execute(&mut context, &command("split-window", &["-h"]))
         .unwrap();
-    let error = engine
-        .execute(&mut context, &command("resize-pane", &["-x", "25"]))
-        .unwrap_err();
-    assert!(
-        matches!(error, ServerError::InvalidCommand(message) if message.contains("pane geometry"))
-    );
-    assert!((split_ratio(&engine) - 0.5).abs() < f32::EPSILON);
+    let right = context.pane.unwrap();
+    engine
+        .execute(&mut context, &command("resize-pane", &["-x", "30"]))
+        .unwrap();
+    assert_eq!(pane_size(&engine, left), (49, 24));
+    assert_eq!(pane_size(&engine, right), (30, 24));
 
     engine
         .execute(&mut context, &command("resize-pane", &["-x", "25%"]))
         .unwrap();
-    assert!((split_ratio(&engine) - 0.75).abs() < 1e-5);
+    assert_eq!(pane_size(&engine, left), (59, 24));
+    assert_eq!(pane_size(&engine, right), (20, 24));
 }
 
 #[test]
@@ -861,7 +890,10 @@ fn resize_pane_rejects_an_unparseable_adjustment() {
     assert!(
         matches!(error, ServerError::InvalidCommand(message) if message == "invalid resize adjustment: wide")
     );
-    assert!((split_ratio(&engine) - 0.5).abs() < f32::EPSILON);
+    let window = engine.state.windows.values().next().expect("window");
+    let panes = window.pane_order();
+    assert_eq!(pane_size(&engine, panes[0]), (40, 24));
+    assert_eq!(pane_size(&engine, panes[1]), (39, 24));
 }
 
 fn window_names(engine: &MuxEngine, session_name: &str) -> Vec<String> {
@@ -1461,25 +1493,28 @@ fn resize_pane_takes_attached_adjustments_and_rejects_unknown_flags() {
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
+    let left = context.pane.unwrap();
     engine
         .execute(&mut context, &command("split-window", &["-h"]))
         .unwrap();
+    let right = context.pane.unwrap();
 
-    let before = split_ratio(&engine);
     engine
         .execute(&mut context, &command("resize-pane", &["-L20"]))
         .unwrap();
-    assert!(split_ratio(&engine) < before);
+    assert_eq!(pane_size(&engine, left), (20, 24));
+    assert_eq!(pane_size(&engine, right), (59, 24));
 
-    let held = split_ratio(&engine);
     engine
         .execute(&mut context, &command("resize-pane", &[]))
         .unwrap();
-    assert_eq!(split_ratio(&engine), held);
+    assert_eq!(pane_size(&engine, left), (20, 24));
+    assert_eq!(pane_size(&engine, right), (59, 24));
     engine
         .execute(&mut context, &command("resize-pane", &["7"]))
         .unwrap();
-    assert_eq!(split_ratio(&engine), held);
+    assert_eq!(pane_size(&engine, left), (20, 24));
+    assert_eq!(pane_size(&engine, right), (59, 24));
 
     let error = engine
         .execute(&mut context, &command("resize-pane", &["-M"]))

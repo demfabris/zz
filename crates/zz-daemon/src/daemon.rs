@@ -3984,7 +3984,7 @@ impl Shared {
                 )
                 .into());
             }
-            if !target.layout.contains_split(split) {
+            if !target.layout.project().contains_split(split) {
                 return Err(ServerError::MissingTarget(split.to_string()).into());
             }
             inner.engine.state.resize_split(
@@ -8096,8 +8096,7 @@ fn build_display_panes_state(
         .windows
         .get(&window_id)
         .ok_or_else(|| ServerError::MissingTarget(window_id.to_string()))?;
-    let mut panes = Vec::new();
-    window.layout.panes(&mut panes);
+    let panes = window.pane_order().to_vec();
     if panes.len() > MAX_DISPLAY_PANE_INDICATORS {
         return Err(ServerError::Internal(format!(
             "window {window_id} exceeds the pane indicator limit"
@@ -8615,9 +8614,7 @@ impl ChooseTreeSession {
                     continue;
                 }
 
-                let mut pane_ids = Vec::with_capacity(window.panes.len());
-                window.layout.panes(&mut pane_ids);
-                for pane_id in pane_ids {
+                for pane_id in window.pane_order().iter().copied() {
                     let Some(pane) = window.panes.get(&pane_id) else {
                         continue;
                     };
@@ -13608,7 +13605,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 Some(PaneKind::Terminal)
             ));
             assert!(matches!(
-                inner.engine.state.windows[&window].layout,
+                inner.engine.state.windows[&window].layout.project(),
                 LayoutNode::Split {
                     axis: zz_protocol::Axis::Horizontal,
                     ..
@@ -13714,7 +13711,7 @@ bind - split-window -v -c "#{pane_current_path}"
             Some(PaneKind::Picker { .. })
         ));
         assert!(matches!(
-            inner.engine.state.windows[&window].layout,
+            inner.engine.state.windows[&window].layout.project(),
             LayoutNode::Split {
                 axis: zz_protocol::Axis::Horizontal,
                 ..
@@ -16449,12 +16446,21 @@ bind - split-window -v -c "#{pane_current_path}"
     fn display_panes_model_uses_layout_order_and_tmux_selection_keys() {
         let mut state = MuxState::default();
         let (_, window, source) = state.create_session("work").expect("session");
-        let mut active = source;
         for _ in 1..=36 {
-            active = state
-                .split_pane(active, zz_protocol::Axis::Horizontal, PaneKind::Terminal)
+            state
+                .split_pane_with(
+                    source,
+                    zz_protocol::Axis::Horizontal,
+                    PaneKind::Terminal,
+                    zz_mux::SplitPlacement {
+                        size: zz_mux::SplitSize::Cells(1),
+                        ..zz_mux::SplitPlacement::default()
+                    },
+                )
                 .expect("split pane");
         }
+        let active = state.windows[&window].pane_order()[36];
+        state.select_pane(active).expect("select last pane");
 
         let (_, actual_window, overlay) =
             build_display_panes_state(&state, active, 1_000).expect("pane indicators");
@@ -16498,6 +16504,7 @@ bind - split-window -v -c "#{pane_current_path}"
             let mut splits = Vec::new();
             inner.engine.state.windows[&window]
                 .layout
+                .project()
                 .splits(&mut splits);
             splits[0]
         };
@@ -16518,10 +16525,12 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("resize split");
         {
             let inner = shared.inner.lock();
-            let LayoutNode::Split { ratio, .. } = inner.engine.state.windows[&window].layout else {
+            let LayoutNode::Split { ratio, .. } =
+                inner.engine.state.windows[&window].layout.project()
+            else {
                 panic!("window should remain split");
             };
-            assert!((ratio - 0.675).abs() < f32::EPSILON);
+            assert!((ratio - 53.0 / 79.0).abs() < f32::EPSILON);
         }
         assert!(take_reliable_messages(&mailbox).iter().any(|message| {
             matches!(
@@ -16531,7 +16540,8 @@ bind - split-window -v -c "#{pane_current_path}"
                     ..
                 }) if matches!(
                     snapshot.sessions[0].windows[0].layout,
-                    LayoutNode::Split { ratio, .. } if (ratio - 0.675).abs() < f32::EPSILON
+                    LayoutNode::Split { ratio, .. }
+                        if (ratio - 53.0 / 79.0).abs() < f32::EPSILON
                 )
             )
         }));

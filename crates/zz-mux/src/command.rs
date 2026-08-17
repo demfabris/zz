@@ -1804,6 +1804,11 @@ impl MuxEngine {
         let pane = self
             .state
             .resolve_pane(options.value("-t"), context.window, context.pane)?;
+        if positional.len() > 1 {
+            return Err(ServerError::InvalidCommand(
+                "resize-pane accepts at most one adjustment".to_owned(),
+            ));
+        }
         if options.has("-Z") {
             self.state.toggle_zoom(pane)?;
             let window = self
@@ -1818,11 +1823,7 @@ impl MuxEngine {
             }
             return Ok(Execution::default());
         }
-        if positional.len() > 1 {
-            return Err(ServerError::InvalidCommand(
-                "resize-pane accepts at most one adjustment".to_owned(),
-            ));
-        }
+        let mut absolute = Vec::new();
         for (option, axis) in [("-x", Axis::Horizontal), ("-y", Axis::Vertical)] {
             let Some(value) = options.value(option) else {
                 continue;
@@ -1843,12 +1844,9 @@ impl MuxEngine {
                     ServerError::InvalidCommand(format!("invalid pane size: {value}"))
                 })?
             };
-            self.state.resize_pane_to(pane, axis, cells)?;
+            absolute.push((axis, cells));
         }
-        let shared = positional
-            .first()
-            .map(|value| parse_resize_adjustment(value))
-            .transpose()?;
+        let mut relative = Vec::new();
         for (option, axis, sign) in [
             ("-L", Axis::Horizontal, -1),
             ("-R", Axis::Horizontal, 1),
@@ -1862,9 +1860,21 @@ impl MuxEngine {
             if attached.is_none() && !options.has(option) {
                 continue;
             }
-            let cells = attached.or(shared).unwrap_or(1);
-            self.state
-                .resize_pane(pane, axis, cells.saturating_mul(sign))?;
+            let cells = match attached {
+                Some(cells) => cells,
+                None => positional
+                    .first()
+                    .map(|value| parse_resize_adjustment(value))
+                    .transpose()?
+                    .unwrap_or(1),
+            };
+            relative.push((axis, cells.saturating_mul(sign)));
+        }
+        for (axis, cells) in absolute {
+            self.state.resize_pane_to(pane, axis, cells)?;
+        }
+        for (axis, cells) in relative {
+            self.state.resize_pane(pane, axis, cells)?;
         }
         Ok(Execution::default())
     }
@@ -1956,31 +1966,22 @@ impl MuxEngine {
         }
 
         let target = options.value("-t");
-        let (window, pane) = if target
-            .is_some_and(|target| target.starts_with('%') || target.contains('.'))
-        {
-            let pane = self
-                .state
-                .resolve_pane(target, context.window, context.pane)?;
-            let window = self
-                .state
-                .window_for_pane(pane)
-                .expect("resolved pane has a window");
-            (window, pane)
-        } else {
-            let window = match self
-                .state
-                .resolve_window(target, context.session, context.window)
-            {
-                Ok(window) => window,
-                Err(ServerError::MissingTarget(_)) => {
-                    let session = self.state.resolve_session(target, context.session)?;
-                    session_active_window(&self.state, session)?
-                }
-                Err(error) => return Err(error),
+        let (window, pane) =
+            if target.is_some_and(|target| target.starts_with('%') || target.contains('.')) {
+                let pane = self
+                    .state
+                    .resolve_pane(target, context.window, context.pane)?;
+                let window = self
+                    .state
+                    .window_for_pane(pane)
+                    .expect("resolved pane has a window");
+                (window, pane)
+            } else {
+                let window = self
+                    .state
+                    .resolve_window(target, context.session, context.window)?;
+                (window, window_active_pane(&self.state, window)?)
             };
-            (window, window_active_pane(&self.state, window)?)
-        };
 
         if command == "next-layout" || options.has("-n") {
             self.state.cycle_layout(window, 1)?;
@@ -7778,7 +7779,7 @@ mod tests {
     }
 
     #[test]
-    fn select_layout_resolves_a_session_to_its_active_window() {
+    fn select_layout_resolves_window_typed_session_targets() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -7796,20 +7797,25 @@ mod tests {
             }
         ));
 
-        engine
-            .execute(
-                &mut context,
-                &command("select-layout", &["-t", "work", "even-horizontal"]),
-            )
-            .unwrap();
-
-        assert!(matches!(
-            engine.state.windows[&window].layout.project(),
-            zz_protocol::LayoutNode::Split {
-                axis: Axis::Horizontal,
-                ..
-            }
-        ));
+        for (target, layout, axis) in [
+            ("work", "even-horizontal", Axis::Horizontal),
+            ("work:", "even-vertical", Axis::Vertical),
+            ("", "even-horizontal", Axis::Horizontal),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &command("select-layout", &["-t", target, layout]),
+                )
+                .unwrap();
+            assert!(matches!(
+                engine.state.windows[&window].layout.project(),
+                zz_protocol::LayoutNode::Split {
+                    axis: actual,
+                    ..
+                } if actual == axis
+            ));
+        }
     }
 
     #[test]

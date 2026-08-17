@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashSet,
     fmt::Write as _,
     ops::Range,
@@ -495,6 +495,7 @@ pub(crate) struct TerminalView {
     search_prompt_behavior: SearchPromptBehavior,
     swallowed_overlay_key: Option<KeyCode>,
     forwarded_keys: HashSet<String>,
+    terminal_resize_suppressed: Rc<Cell<bool>>,
     last_grid_size: Option<GridSize>,
     hit_grid: Option<HitGrid>,
     pointer_position: Option<Point<Pixels>>,
@@ -618,10 +619,11 @@ impl TerminalView {
     pub(crate) fn new(
         pane: PaneId,
         mux: Entity<MuxClient>,
+        terminal_resize_suppressed: Rc<Cell<bool>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::new_surface(pane, false, mux, window, cx)
+        Self::new_surface(pane, false, mux, terminal_resize_suppressed, window, cx)
     }
 
     /// Command output is a read-only overlay backed by the same surface.
@@ -631,13 +633,14 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::new_surface(pane, true, mux, window, cx)
+        Self::new_surface(pane, true, mux, Rc::new(Cell::new(false)), window, cx)
     }
 
     fn new_surface(
         pane: PaneId,
         command_output: bool,
         mux: Entity<MuxClient>,
+        terminal_resize_suppressed: Rc<Cell<bool>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -880,6 +883,7 @@ impl TerminalView {
             search_prompt_behavior: SearchPromptBehavior::default(),
             swallowed_overlay_key: None,
             forwarded_keys: HashSet::new(),
+            terminal_resize_suppressed,
             last_grid_size: None,
             hit_grid: None,
             pointer_position: None,
@@ -1138,7 +1142,9 @@ impl TerminalView {
     ) {
         let started = diagnostics::timer(DIAGNOSTIC_TARGET);
         let previous = self.last_grid_size;
-        if self.last_grid_size != Some(grid_size) {
+        if self.last_grid_size != Some(grid_size)
+            && (self.command_output || !self.terminal_resize_suppressed.get())
+        {
             self.mux.read(cx).send_input(if self.command_output {
                 InputMessage::ResizeCommandOutput {
                     columns: grid_size.columns,

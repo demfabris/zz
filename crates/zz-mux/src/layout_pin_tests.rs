@@ -132,7 +132,14 @@ impl Replay {
 
     fn select_layout(&mut self, words: &[&str]) {
         if has_flag(words, "-E") {
-            self.layout.spread(PaneId(self.active)).unwrap();
+            let pane = flag_value(words, "-t")
+                .and_then(|target| {
+                    target
+                        .rsplit_once('.')
+                        .map(|(_, index)| index.parse::<usize>().unwrap())
+                })
+                .map_or(self.active, |index| self.panes[index]);
+            self.layout.spread(PaneId(pane)).unwrap();
             return;
         }
         let preset = match words[words.len() - 1] {

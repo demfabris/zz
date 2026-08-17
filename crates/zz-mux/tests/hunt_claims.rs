@@ -973,6 +973,51 @@ fn resize_pane_rejects_an_unparseable_adjustment() {
     assert_eq!(pane_size(&engine, panes[1]), (39, 24));
 }
 
+#[test]
+fn resize_pane_validates_every_used_argument_before_mutating() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let left = context.pane.unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-h"]))
+        .unwrap();
+    let right = context.pane.unwrap();
+    let window = context.window.unwrap();
+
+    let generation = engine.state.generation();
+    let resized = engine
+        .execute(
+            &mut context,
+            &command("resize-pane", &["-t", "work:0.0", "-x", "20", "bogus"]),
+        )
+        .unwrap();
+    assert_eq!(pane_size(&engine, left), (20, 24));
+    assert_eq!(pane_size(&engine, right), (59, 24));
+    assert!(engine.state.generation() > generation);
+    assert!(resized.effects.contains(&MuxEffect::SnapshotChanged));
+
+    let layout = engine.state.windows[&window].layout.clone();
+    let generation = engine.state.generation();
+    let error = engine
+        .execute(
+            &mut context,
+            &command(
+                "resize-pane",
+                &["-t", "work:0.0", "-x", "30", "-R", "bogus"],
+            ),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        ServerError::InvalidCommand(message) if message == "invalid resize adjustment: bogus"
+    ));
+    assert_eq!(engine.state.windows[&window].layout, layout);
+    assert_eq!(engine.state.generation(), generation);
+}
+
 fn window_names(engine: &MuxEngine, session_name: &str) -> Vec<String> {
     let session = engine
         .state

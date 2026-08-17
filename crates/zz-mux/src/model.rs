@@ -1435,17 +1435,53 @@ impl MuxState {
         current_session: Option<SessionId>,
         current_window: Option<WindowId>,
     ) -> Result<WindowId, ServerError> {
-        let Some(target) = target else {
-            if let Some(window) = current_window.filter(|window| self.windows.contains_key(window))
-            {
-                return Ok(window);
-            }
-            let session = self.resolve_session(None, current_session)?;
+        if let Some(target) = target
+            && target.starts_with('%')
+        {
+            let pane = self.resolve_pane(Some(target), current_window, None)?;
             return self
-                .sessions
-                .get(&session)
-                .map(|session| session.active_window)
-                .ok_or_else(|| ServerError::MissingTarget(session.to_string()));
+                .window_for_pane(pane)
+                .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
+        }
+        match self.resolve_window_core(target, current_session, current_window) {
+            Ok(window) => Ok(window),
+            Err(error) => {
+                let Some(target) = target else {
+                    return Err(error);
+                };
+                let window_target = target.split_once(':').map_or(target, |(_, window)| window);
+                if !window_target.contains('.') {
+                    return Err(error);
+                }
+                let Ok(pane) = self.resolve_pane(Some(target), current_window, None) else {
+                    return Err(error);
+                };
+                self.window_for_pane(pane).ok_or(error)
+            }
+        }
+    }
+
+    fn resolve_window_core(
+        &self,
+        target: Option<&str>,
+        current_session: Option<SessionId>,
+        current_window: Option<WindowId>,
+    ) -> Result<WindowId, ServerError> {
+        let target = match target {
+            Some("") | None => {
+                if let Some(window) =
+                    current_window.filter(|window| self.windows.contains_key(window))
+                {
+                    return Ok(window);
+                }
+                let session = self.resolve_session(None, current_session)?;
+                return self
+                    .sessions
+                    .get(&session)
+                    .map(|session| session.active_window)
+                    .ok_or_else(|| ServerError::MissingTarget(session.to_string()));
+            }
+            Some(target) => target,
         };
         if target.starts_with('@') {
             let id = target
@@ -1455,12 +1491,6 @@ impl MuxState {
                 .windows
                 .contains_key(&id)
                 .then_some(id)
-                .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
-        }
-        if target.starts_with('%') {
-            let pane = self.resolve_pane(Some(target), current_window, None)?;
-            return self
-                .window_for_pane(pane)
                 .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
         }
         let (session_target, window_target) = target
@@ -1476,17 +1506,25 @@ impl MuxState {
             Some("") | None => self.resolve_session(None, current_session)?,
             Some(session) => self.resolve_session(Some(session), current_session)?,
         };
-        match self.resolve_window_in_session(window_target, session, target) {
-            Ok(window) => Ok(window),
-            Err(error) => {
-                if !window_target.contains('.') {
-                    return Err(error);
-                }
-                let Ok(pane) = self.resolve_pane(Some(target), current_window, None) else {
-                    return Err(error);
-                };
-                self.window_for_pane(pane).ok_or(error)
-            }
+        if window_target.is_empty() {
+            return self
+                .sessions
+                .get(&session)
+                .map(|session| session.active_window)
+                .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
+        }
+        let window = self.resolve_window_in_session(window_target, session, target);
+        if session_target.is_some() || window.is_ok() {
+            return window;
+        }
+        match self.resolve_session(Some(target), current_session) {
+            Ok(session) => self
+                .sessions
+                .get(&session)
+                .map(|session| session.active_window)
+                .ok_or_else(|| ServerError::MissingTarget(target.to_owned())),
+            Err(ServerError::MissingTarget(_)) => window,
+            Err(error) => Err(error),
         }
     }
 
@@ -1568,7 +1606,7 @@ impl MuxState {
         let current_session = current_window
             .and_then(|window| self.windows.get(&window).map(|window| window.session));
         let pane_error = if let Ok(index) = target.parse::<u32>() {
-            let window = self.resolve_window(None, current_session, current_window)?;
+            let window = self.resolve_window_core(None, current_session, current_window)?;
             match self.resolve_pane_index(target, window, index) {
                 Ok(pane) => return Ok(pane),
                 Err(error) => error,
@@ -1578,21 +1616,14 @@ impl MuxState {
         };
 
         let Some((window_target, pane_index)) = target.rsplit_once('.') else {
-            let window = match self.resolve_window(Some(target), current_session, current_window) {
-                Ok(window) => window,
-                Err(ServerError::MissingTarget(_)) if !target.contains(':') => {
-                    let session = match self.resolve_session(Some(target), current_session) {
-                        Ok(session) => session,
-                        Err(ServerError::MissingTarget(_)) => return Err(pane_error),
-                        Err(error) => return Err(error),
-                    };
-                    self.sessions
-                        .get(&session)
-                        .map(|session| session.active_window)
-                        .ok_or_else(|| ServerError::MissingTarget(target.to_owned()))?
-                }
-                Err(error) => return Err(error),
-            };
+            let window =
+                match self.resolve_window_core(Some(target), current_session, current_window) {
+                    Ok(window) => window,
+                    Err(ServerError::MissingTarget(_)) if !target.contains(':') => {
+                        return Err(pane_error);
+                    }
+                    Err(error) => return Err(error),
+                };
             return self
                 .windows
                 .get(&window)
@@ -1603,9 +1634,9 @@ impl MuxState {
             .parse::<u32>()
             .map_err(|_| ServerError::InvalidTarget(target.to_owned()))?;
         let window = if window_target.is_empty() {
-            self.resolve_window(None, current_session, current_window)?
+            self.resolve_window_core(None, current_session, current_window)?
         } else {
-            self.resolve_window(Some(window_target), current_session, current_window)?
+            self.resolve_window_core(Some(window_target), current_session, current_window)?
         };
         self.resolve_pane_index(target, window, index)
     }
@@ -3344,6 +3375,22 @@ mod tests {
         assert!(matches!(
             state.resolve_window(Some("a:shell.9"), Some(session), Some(first_window)),
             Err(ServerError::MissingTarget(_))
+        ));
+    }
+
+    #[test]
+    fn deeply_segmented_targets_do_not_recurse_between_resolvers() {
+        let mut state = MuxState::default();
+        let (session, window, pane) = state.create_session("work").unwrap();
+        let target = format!("{}1", "1.".repeat(700));
+
+        assert!(matches!(
+            state.resolve_window(Some(&target), Some(session), Some(window)),
+            Err(ServerError::MissingTarget(_) | ServerError::InvalidTarget(_))
+        ));
+        assert!(matches!(
+            state.resolve_pane(Some(&target), Some(window), Some(pane)),
+            Err(ServerError::MissingTarget(_) | ServerError::InvalidTarget(_))
         ));
     }
 

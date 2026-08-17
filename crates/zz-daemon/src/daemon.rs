@@ -3704,6 +3704,8 @@ impl Shared {
             target: "zz_daemon::diagnostics::input",
             "dispatch begin client={client} kind={kind:?} context={context:#?} input={input:#?}"
         );
+        let generation = self.inner.lock().engine.state.generation();
+        let resize_split = matches!(&input, InputMessage::ResizeSplit { .. });
         let result = (|| -> Result<(), DaemonError> {
             match input {
                 InputMessage::Text { pane, text } => {
@@ -3748,7 +3750,7 @@ impl Shared {
                     cell_width_px,
                     cell_height_px,
                 } => {
-                    let (resize, layout_changed) = {
+                    let resize = {
                         let mut inner = self.inner.lock();
                         if !inner.terminals.contains_key(&pane) {
                             return Err(ServerError::PaneExited(pane).into());
@@ -3766,15 +3768,12 @@ impl Shared {
                             },
                         );
                         let resize = terminal_resize_for_pane(&inner, pane);
-                        let mut layout_changed = false;
                         if let Some((_, geometry)) = &resize {
-                            layout_changed = inner.engine.set_pane_geometry(
-                                pane,
-                                geometry.columns,
-                                geometry.rows,
-                            );
+                            inner
+                                .engine
+                                .set_pane_geometry(pane, geometry.columns, geometry.rows);
                         }
-                        (resize, layout_changed)
+                        resize
                     };
                     if let Some((terminal, geometry)) = resize {
                         terminal.resize(
@@ -3783,9 +3782,6 @@ impl Shared {
                             geometry.cell_width_px,
                             geometry.cell_height_px,
                         );
-                    }
-                    if layout_changed {
-                        self.publish_snapshot();
                     }
                 }
                 InputMessage::TerminalView {
@@ -3886,6 +3882,15 @@ impl Shared {
             }
             Ok(())
         })();
+        let publish_snapshot = {
+            let inner = self.inner.lock();
+            let current = inner.engine.state.generation();
+            resize_split && result.is_ok()
+                || current != generation && inner.last_published_mux_generation != current
+        };
+        if publish_snapshot {
+            self.publish_snapshot();
+        }
         log::trace!(
             target: "zz_daemon::diagnostics::input",
             "dispatch end client={client} success={} elapsed_us={} context={context:#?}",
@@ -3999,7 +4004,6 @@ impl Shared {
                 f32::from(ratio_basis_points) / f32::from(SPLIT_RATIO_BASIS),
             )?;
         }
-        self.publish_snapshot();
         Ok(())
     }
 
@@ -6194,8 +6198,9 @@ impl Shared {
     fn publish_snapshot(&self) {
         self.detach_removed_sessions();
         let snapshots = {
-            let inner = self.inner.lock();
+            let mut inner = self.inner.lock();
             let snapshot = inner.engine.state.snapshot();
+            inner.last_published_mux_generation = snapshot.generation;
             let presence = snapshot_presence(&inner);
             inner
                 .subscribers
@@ -7932,6 +7937,7 @@ impl ConfigLoadReport {
 #[derive(Default)]
 struct ServerState {
     engine: MuxEngine,
+    last_published_mux_generation: u64,
     appearance: Arc<TerminalAppearance>,
     appearance_provenance: AppearanceProvenance,
     appearance_config_overrides: Vec<ConfigOverrideEntry>,

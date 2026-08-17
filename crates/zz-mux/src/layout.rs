@@ -511,7 +511,8 @@ impl CellLayout {
         }
         let mut panes = panes.iter().copied();
         replace_panes_in_order(&mut self.root, &mut panes);
-        debug_assert!(panes.next().is_none());
+        let panes_exhausted = panes.next().is_none();
+        debug_assert!(panes_exhausted);
         self.debug_validate();
         true
     }
@@ -1975,6 +1976,27 @@ mod tests {
             sizes(&clamped, &[PaneId(0), PaneId(1)]),
             [(78, 24), (1, 24)]
         );
+    }
+
+    #[test]
+    fn pane_resize_without_a_matching_ancestor_is_a_silent_noop() {
+        let mut layout = CellLayout::new(PaneId(0), 80, 24);
+        let mut ids = allocator(1);
+        layout
+            .split(
+                PaneId(0),
+                Axis::Vertical,
+                SplitSize::Default,
+                false,
+                false,
+                PaneId(1),
+                &mut ids,
+            )
+            .unwrap();
+        let before = layout.dump();
+
+        assert_eq!(layout.resize_pane(PaneId(0), Axis::Horizontal, 10), Ok(()));
+        assert_eq!(layout.dump(), before);
     }
 
     #[test]

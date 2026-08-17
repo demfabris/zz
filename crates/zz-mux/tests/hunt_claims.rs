@@ -1,5 +1,5 @@
 use zz_mux::{COMMAND_SPECS, DetachScope, ExecutionContext, MuxEffect, MuxEngine, parse_config};
-use zz_protocol::{CommandInvocation, KeyToken, PaneId, ServerError};
+use zz_protocol::{Axis, CommandInvocation, KeyToken, LayoutNode, PaneId, ServerError};
 use zz_terminal::{CopyModeAction, TerminalViewAction};
 
 fn command(name: &str, args: &[&str]) -> CommandInvocation {
@@ -560,7 +560,7 @@ fn split_window_accepts_extreme_percentages_and_reports_no_space_exactly() {
         .unwrap_err();
     assert_eq!(
         error,
-        ServerError::InvalidCommand("create pane failed: pane too small".to_owned())
+        ServerError::InvalidCommand("no space for a new pane".to_owned())
     );
     assert_eq!(pane_size(&engine, narrow), (80, 1));
     assert_eq!(engine.state.windows.values().next().unwrap().panes.len(), 2);
@@ -653,6 +653,48 @@ fn split_window_dash_f_spans_the_whole_window() {
     assert_eq!(pane_size(&engine, first), (40, 17));
     assert_eq!(pane_size(&engine, second), (39, 17));
     assert_eq!(pane_size(&engine, created), (80, 6));
+    let window = engine.state.windows.values().next().unwrap();
+    assert_eq!(window.pane_order(), [first, second, created]);
+    assert_eq!(
+        window.pane_order().iter().position(|pane| *pane == created),
+        Some(2)
+    );
+    assert!(matches!(
+        window.layout.project(),
+        LayoutNode::Split {
+            axis: Axis::Vertical,
+            first: top,
+            second: bottom,
+            ..
+        } if top.contains(first)
+            && top.contains(second)
+            && bottom.as_ref() == &LayoutNode::Pane(created)
+    ));
+}
+
+#[test]
+fn split_window_dash_b_f_puts_the_new_pane_at_index_zero() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let first = context.pane.unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-h"]))
+        .unwrap();
+    let second = context.pane.unwrap();
+    engine
+        .execute(&mut context, &command("split-window", &["-b", "-f", "-v"]))
+        .unwrap();
+    let created = context.pane.unwrap();
+    let window = engine.state.windows.values().next().unwrap();
+
+    assert_eq!(window.pane_order(), [created, first, second]);
+    assert_eq!(
+        window.pane_order().iter().position(|pane| *pane == created),
+        Some(0)
+    );
 }
 
 #[test]
@@ -783,7 +825,19 @@ fn resize_pane_dash_r_on_the_right_pane_grows_the_left_share() {
         .execute(&mut context, &command("split-window", &["-h"]))
         .unwrap();
     let right = context.pane.unwrap();
+    engine
+        .execute(
+            &mut context,
+            &command("select-pane", &["-t", &left.to_string()]),
+        )
+        .unwrap();
     engine.set_pane_geometry(left, 100, 50);
+    engine
+        .execute(
+            &mut context,
+            &command("select-pane", &["-t", &right.to_string()]),
+        )
+        .unwrap();
     engine
         .execute(&mut context, &command("resize-pane", &["-R", "10"]))
         .unwrap();
@@ -810,7 +864,19 @@ fn resize_pane_dash_r_grows_a_nested_pane_toward_its_right_neighbor() {
         .execute(&mut context, &command("split-window", &["-h"]))
         .unwrap();
     let middle = context.pane.unwrap();
+    engine
+        .execute(
+            &mut context,
+            &command("select-pane", &["-t", &left.to_string()]),
+        )
+        .unwrap();
     engine.set_pane_geometry(left, 25, 50);
+    engine
+        .execute(
+            &mut context,
+            &command("select-pane", &["-t", &middle.to_string()]),
+        )
+        .unwrap();
     engine
         .execute(&mut context, &command("resize-pane", &["-R", "10"]))
         .unwrap();
@@ -831,14 +897,25 @@ fn resize_pane_dash_x_sets_an_absolute_width_from_either_side() {
         .execute(&mut context, &command("split-window", &["-h"]))
         .unwrap();
     let right = context.pane.unwrap();
+    engine
+        .execute(
+            &mut context,
+            &command("select-pane", &["-t", &left.to_string()]),
+        )
+        .unwrap();
     engine.set_pane_geometry(left, 50, 50);
+    engine
+        .execute(
+            &mut context,
+            &command("select-pane", &["-t", &right.to_string()]),
+        )
+        .unwrap();
     engine
         .execute(&mut context, &command("resize-pane", &["-x", "25"]))
         .unwrap();
     assert_eq!(pane_size(&engine, left), (74, 50));
     assert_eq!(pane_size(&engine, right), (25, 50));
 
-    engine.set_pane_geometry(left, 75, 50);
     engine
         .execute(&mut context, &command("select-pane", &["-L"]))
         .unwrap();
@@ -846,7 +923,7 @@ fn resize_pane_dash_x_sets_an_absolute_width_from_either_side() {
         .execute(&mut context, &command("resize-pane", &["-x", "25"]))
         .unwrap();
     assert_eq!(pane_size(&engine, left), (25, 50));
-    assert_eq!(pane_size(&engine, right), (75, 50));
+    assert_eq!(pane_size(&engine, right), (74, 50));
 }
 
 #[test]
@@ -1633,7 +1710,6 @@ fn creation_commands_refuse_the_valued_options_they_cannot_honor() {
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
     for (name, args) in [
-        ("new-session", &["-x", "80"]),
         ("new-session", &["-e", "FOO=bar"]),
         ("new-window", &["-e", "FOO=bar"]),
         ("new-window", &["-F", "#{window_id}"]),

@@ -16,6 +16,7 @@ use zz_terminal::{
 use crate::{
     Binding, KeyTables, LayoutPreset, MuxState, PaneDirection, PaneKind, SplitPlacement,
     SplitSize as LayoutSplitSize, StatusFormats, StatusOption, canonical_command, command_spec,
+    model::DEFAULT_WINDOW_EXTENT,
     status::{FormatContext, expand_format},
 };
 
@@ -548,7 +549,8 @@ impl MuxEngine {
         let name = options
             .value("-s")
             .map_or_else(|| next_session_name(&self.state), str::to_owned);
-        let (session, window, pane) = self.state.create_session(name)?;
+        let extent = initial_window_extent(&options)?;
+        let (session, window, pane) = self.state.create_session_with_extent(name, extent)?;
         if let Some(window_name) = options.value("-n") {
             window_name.clone_into(
                 &mut self
@@ -1266,7 +1268,12 @@ impl MuxEngine {
             if original_context.window == Some(source_window)
                 && original_context.pane == Some(source)
             {
-                let context_window = if self.state.windows.contains_key(&source_window) {
+                let context_window = if self
+                    .state
+                    .windows
+                    .get(&source_window)
+                    .is_some_and(|window| window.session == source_session)
+                {
                     source_window
                 } else if self.state.sessions.contains_key(&source_session) {
                     session_active_window(&self.state, source_session)?
@@ -1871,20 +1878,39 @@ impl MuxEngine {
             .windows
             .get_mut(&window_id)
             .expect("pane window exists");
+        let probe = (pane, columns, rows);
+        if let Some(zoomed_pane) = window.zoomed_pane {
+            if zoomed_pane != pane || window.last_extent_probe == Some(probe) {
+                return;
+            }
+            let measured = (columns, rows);
+            if measured != window.layout.extent() {
+                window.layout.resize(measured.0, measured.1);
+                window.last_extent_probe = Some(probe);
+            }
+            return;
+        }
+        if window.active_pane != pane {
+            return;
+        }
         let Some(pane_geometry) = window.layout.pane_geometry(pane) else {
+            debug_assert!(false, "window pane is missing from its layout");
             return;
         };
+        if pane_geometry.sx.abs_diff(columns) <= 1 && pane_geometry.sy.abs_diff(rows) <= 1 {
+            return;
+        }
+        if window.last_extent_probe == Some(probe) {
+            return;
+        }
         let current = window.layout.extent();
-        let implied = if window.zoomed_pane == Some(pane) {
-            (columns, rows)
-        } else {
-            (
-                implied_window_extent(columns, current.0, pane_geometry.sx),
-                implied_window_extent(rows, current.1, pane_geometry.sy),
-            )
-        };
+        let implied = (
+            implied_window_extent(columns, current.0, pane_geometry.sx),
+            implied_window_extent(rows, current.1, pane_geometry.sy),
+        );
         if implied != current {
             window.layout.resize(implied.0, implied.1);
+            window.last_extent_probe = Some(probe);
         }
     }
 
@@ -1931,9 +1957,17 @@ impl MuxEngine {
                 .expect("resolved pane has a window");
             (window, pane)
         } else {
-            let window = self
+            let window = match self
                 .state
-                .resolve_window(target, context.session, context.window)?;
+                .resolve_window(target, context.session, context.window)
+            {
+                Ok(window) => window,
+                Err(ServerError::MissingTarget(_)) => {
+                    let session = self.state.resolve_session(target, context.session)?;
+                    session_active_window(&self.state, session)?
+                }
+                Err(error) => return Err(error),
+            };
             (window, window_active_pane(&self.state, window)?)
         };
 
@@ -3171,6 +3205,25 @@ fn split_size(options: &Options) -> Option<SplitSize<'_>> {
     )
 }
 
+fn initial_window_extent(options: &Options) -> Result<(u16, u16), ServerError> {
+    Ok((
+        initial_window_dimension(options, "-x", DEFAULT_WINDOW_EXTENT.0)?,
+        initial_window_dimension(options, "-y", DEFAULT_WINDOW_EXTENT.1)?,
+    ))
+}
+
+fn initial_window_dimension(
+    options: &Options,
+    option: &str,
+    default: u16,
+) -> Result<u16, ServerError> {
+    options.value(option).map_or(Ok(default), |value| {
+        value
+            .parse::<u16>()
+            .map_err(|_| ServerError::InvalidCommand(format!("invalid window size: {value}")))
+    })
+}
+
 fn implied_window_extent(measured: u16, window: u16, pane: u16) -> u16 {
     if pane == 0 {
         return window;
@@ -4075,6 +4128,90 @@ mod tests {
     }
 
     #[test]
+    fn first_window_uses_the_default_extent() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+
+        let window = context.window.unwrap();
+        assert_eq!(engine.state.windows[&window].layout.extent(), (80, 24));
+    }
+
+    #[test]
+    fn new_session_honors_explicit_window_extent() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-s", "work", "-x", "200", "-y", "50"],
+                ),
+            )
+            .unwrap();
+
+        let window = context.window.unwrap();
+        assert_eq!(engine.state.windows[&window].layout.extent(), (200, 50));
+    }
+
+    #[test]
+    fn new_window_inherits_the_active_window_extent() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+        let first_window = context.window.unwrap();
+        let first_pane = context.pane.unwrap();
+        engine.set_pane_geometry(first_pane, 200, 50);
+
+        engine
+            .execute(&mut context, &command("new-window", &["-d"]))
+            .unwrap();
+
+        let inherited = engine.state.sessions[&session]
+            .windows
+            .iter()
+            .copied()
+            .find(|window| *window != first_window)
+            .unwrap();
+        assert_eq!(engine.state.windows[&inherited].layout.extent(), (200, 50));
+    }
+
+    #[test]
+    fn break_pane_destination_inherits_the_active_window_extent() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let original_window = context.window.unwrap();
+        let first = context.pane.unwrap();
+        engine.set_pane_geometry(first, 200, 50);
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let moving = context.pane.unwrap();
+
+        engine
+            .execute(
+                &mut context,
+                &command("break-pane", &["-d", "-s", &moving.to_string()]),
+            )
+            .unwrap();
+
+        let inherited = engine.state.window_for_pane(moving).unwrap();
+        assert_ne!(inherited, original_window);
+        assert_eq!(engine.state.windows[&inherited].layout.extent(), (200, 50));
+    }
+
+    #[test]
     fn new_session_dash_a_attaches_to_the_named_session_instead_of_failing() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -4328,6 +4465,34 @@ mod tests {
     }
 
     #[test]
+    fn break_pane_moves_a_single_pane_window_without_replacing_it() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        engine
+            .execute(&mut context, &command("rename-window", &["kept"]))
+            .unwrap();
+        let session = context.session.unwrap();
+        let window = context.window.unwrap();
+        let pane = context.pane.unwrap();
+        let layout = engine.state.windows[&window].layout.clone();
+
+        engine
+            .execute(&mut context, &command("break-pane", &["-d", "-t", "1"]))
+            .unwrap();
+
+        assert_eq!(engine.state.window_for_pane(pane), Some(window));
+        assert_eq!(engine.state.windows[&window].name, "kept");
+        assert_eq!(engine.state.windows[&window].index, 1);
+        assert_eq!(engine.state.windows[&window].layout, layout);
+        assert_eq!(engine.state.sessions[&session].windows, [window]);
+        assert_eq!(engine.state.sessions[&session].active_window, window);
+        assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
     fn attach_session_preserves_detach_others_flag_in_effect() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -4474,6 +4639,12 @@ mod tests {
             "80x24"
         );
 
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-t", &first.to_string()]),
+            )
+            .unwrap();
         engine.set_pane_geometry(first, 80, 24);
         assert_eq!(
             engine
@@ -4653,6 +4824,12 @@ mod tests {
         engine
             .execute(&mut context, &command("split-window", &["-h"]))
             .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-t", &first.to_string()]),
+            )
+            .unwrap();
         engine.set_pane_geometry(first, 80, 24);
         let extent = |engine: &mut MuxEngine, context: &mut ExecutionContext| {
             engine
@@ -4681,6 +4858,114 @@ mod tests {
             .unwrap();
         engine.set_pane_geometry(first, 80, 24);
         assert_eq!(extent(&mut engine, &mut context), "160x24");
+    }
+
+    #[test]
+    fn alternating_three_pane_measurements_reach_a_fixed_extent() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let first = context.pane.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let second = context.pane.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let third = context.pane.unwrap();
+        let window = context.window.unwrap();
+
+        for (pane, columns) in [(first, 80), (second, 38), (third, 38)] {
+            engine.set_pane_geometry(pane, columns, 24);
+        }
+        let stable = engine.state.windows[&window].layout.extent();
+        assert_eq!(stable, (160, 24));
+
+        for _ in 0..8 {
+            for (pane, columns) in [(first, 80), (second, 38), (third, 38)] {
+                engine.set_pane_geometry(pane, columns, 24);
+            }
+            assert_eq!(engine.state.windows[&window].layout.extent(), stable);
+        }
+    }
+
+    #[test]
+    fn hidden_pane_measurement_is_ignored_while_zoomed() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let hidden = context.pane.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let zoomed = context.pane.unwrap();
+        let window = context.window.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("resize-pane", &["-Z", "-t", &zoomed.to_string()]),
+            )
+            .unwrap();
+
+        engine.set_pane_geometry(hidden, 200, 50);
+
+        assert_eq!(engine.state.windows[&window].layout.extent(), (80, 24));
+    }
+
+    #[test]
+    fn zoomed_pane_measurement_sets_the_window_extent_directly() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let zoomed = context.pane.unwrap();
+        let window = context.window.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("resize-pane", &["-Z", "-t", &zoomed.to_string()]),
+            )
+            .unwrap();
+
+        engine.set_pane_geometry(zoomed, 200, 50);
+
+        assert_eq!(engine.state.windows[&window].layout.extent(), (200, 50));
+    }
+
+    #[test]
+    fn extent_probe_memo_accepts_a_different_measurement() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let pane = context.pane.unwrap();
+        let window = context.window.unwrap();
+
+        engine.set_pane_geometry(pane, 160, 48);
+        assert_eq!(engine.state.windows[&window].layout.extent(), (160, 48));
+        assert_eq!(
+            engine.state.windows[&window].last_extent_probe,
+            Some((pane, 160, 48))
+        );
+        engine.set_pane_geometry(pane, 160, 48);
+        assert_eq!(engine.state.windows[&window].layout.extent(), (160, 48));
+
+        engine.set_pane_geometry(pane, 200, 50);
+        assert_eq!(engine.state.windows[&window].layout.extent(), (200, 50));
+        assert_eq!(
+            engine.state.windows[&window].last_extent_probe,
+            Some((pane, 200, 50))
+        );
     }
 
     #[test]
@@ -4730,13 +5015,10 @@ mod tests {
             .execute(&mut context, &command("new-session", &["-s", "work"]))
             .unwrap();
         let first_window = context.window.unwrap();
-        let first_pane = context.pane.unwrap();
         engine
             .execute(&mut context, &command("split-window", &["-h"]))
             .unwrap();
         let second_pane = context.pane.unwrap();
-        engine.set_pane_geometry(first_pane, 40, 24);
-        engine.set_pane_geometry(second_pane, 40, 24);
         engine
             .execute(&mut context, &command("new-window", &["-n", "second"]))
             .unwrap();
@@ -4774,7 +5056,7 @@ mod tests {
                 )
                 .unwrap()
                 .output,
-            "40x24|1|0"
+            "39x24|1|0"
         );
     }
 
@@ -6998,6 +7280,12 @@ mod tests {
         let second = context.pane.unwrap();
         let window = context.window.unwrap();
 
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-t", &first.to_string()]),
+            )
+            .unwrap();
         engine.set_pane_geometry(first, 100, 50);
         engine
             .execute(&mut context, &command("resize-pane", &["-R", "10"]))
@@ -7182,6 +7470,10 @@ mod tests {
             .layout
             .panes_in_order();
         assert_eq!(panes, [browser, terminal]);
+        assert_eq!(
+            engine.state.windows[&original_window].pane_order(),
+            [terminal, browser]
+        );
 
         engine
             .execute(
@@ -7257,6 +7549,47 @@ mod tests {
             Err(ServerError::UnsupportedCommand(message))
                 if message == "break-pane -W"
         ));
+    }
+
+    #[test]
+    fn join_pane_before_keeps_tmux_list_order_after_the_target() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let target = context.pane.unwrap();
+        let target_window = context.window.unwrap();
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "source"]))
+            .unwrap();
+        let source = context.pane.unwrap();
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "join-pane",
+                    &[
+                        "-b",
+                        "-v",
+                        "-s",
+                        &source.to_string(),
+                        "-t",
+                        &target.to_string(),
+                    ],
+                ),
+            )
+            .unwrap();
+
+        let window = &engine.state.windows[&target_window];
+        assert_eq!(window.layout.panes_in_order(), [source, target]);
+        assert_eq!(window.pane_order(), [target, source]);
+        assert_eq!(window.layout.pane_geometry(source).unwrap().yoff, 0);
+        assert_eq!(window.layout.pane_geometry(source).unwrap().sy, 12);
+        assert_eq!(window.layout.pane_geometry(target).unwrap().yoff, 13);
+        assert_eq!(window.layout.pane_geometry(target).unwrap().sy, 11);
+        assert!(engine.state.validate().is_ok());
     }
 
     #[test]
@@ -7357,6 +7690,41 @@ mod tests {
             engine.execute(&mut context, &command("next-layout", &["-n"])),
             Err(ServerError::InvalidCommand(message))
                 if message == "next-layout does not support -n"
+        ));
+    }
+
+    #[test]
+    fn select_layout_resolves_a_session_to_its_active_window() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let window = context.window.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-v"]))
+            .unwrap();
+        assert!(matches!(
+            engine.state.windows[&window].layout.project(),
+            zz_protocol::LayoutNode::Split {
+                axis: Axis::Vertical,
+                ..
+            }
+        ));
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-layout", &["-t", "work", "even-horizontal"]),
+            )
+            .unwrap();
+
+        assert!(matches!(
+            engine.state.windows[&window].layout.project(),
+            zz_protocol::LayoutNode::Split {
+                axis: Axis::Horizontal,
+                ..
+            }
         ));
     }
 

@@ -16443,7 +16443,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn display_panes_model_uses_layout_order_and_tmux_selection_keys() {
+    fn display_panes_model_uses_pane_order_and_tmux_selection_keys() {
         let mut state = MuxState::default();
         let (_, window, source) = state.create_session("work").expect("session");
         for _ in 1..=36 {

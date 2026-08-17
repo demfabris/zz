@@ -177,6 +177,7 @@ pub struct Window {
     last_panes: Vec<PaneId>,
     last_layout: Option<LayoutPreset>,
     previous_layout: Option<Box<CellLayout>>,
+    pub(crate) last_extent_probe: Option<(PaneId, u16, u16)>,
     input_options: InputOptions,
 }
 
@@ -264,6 +265,14 @@ impl MuxState {
         &mut self,
         name: impl Into<String>,
     ) -> Result<(SessionId, WindowId, PaneId), ServerError> {
+        self.create_session_with_extent(name, DEFAULT_WINDOW_EXTENT)
+    }
+
+    pub(crate) fn create_session_with_extent(
+        &mut self,
+        name: impl Into<String>,
+        extent: (u16, u16),
+    ) -> Result<(SessionId, WindowId, PaneId), ServerError> {
         let name = name.into();
         if self.sessions.values().any(|session| session.name == name) {
             return Err(ServerError::InvalidCommand(format!(
@@ -287,12 +296,13 @@ impl MuxState {
             name: "0".to_owned(),
             active_pane: pane_id,
             zoomed_pane: None,
-            layout: CellLayout::new(pane_id, DEFAULT_WINDOW_EXTENT.0, DEFAULT_WINDOW_EXTENT.1),
+            layout: CellLayout::new(pane_id, extent.0, extent.1),
             panes: BTreeMap::from([(pane_id, pane)]),
             pane_order: vec![pane_id],
             last_panes: Vec::new(),
             last_layout: None,
             previous_layout: None,
+            last_extent_probe: None,
             input_options: InputOptions::default(),
         };
         self.windows.insert(window_id, window);
@@ -357,6 +367,9 @@ impl MuxState {
         kind: PaneKind,
         activate: bool,
     ) -> Result<(WindowId, PaneId), ServerError> {
+        let extent = self
+            .session_active_window_extent(session)
+            .unwrap_or(DEFAULT_WINDOW_EXTENT);
         let index = self.claim_window_index(session, index)?;
         let window_id = self.allocate_window_id();
         let pane_id = self.allocate_pane_id();
@@ -374,12 +387,13 @@ impl MuxState {
             name: name.unwrap_or_else(|| index.to_string()),
             active_pane: pane_id,
             zoomed_pane: None,
-            layout: CellLayout::new(pane_id, DEFAULT_WINDOW_EXTENT.0, DEFAULT_WINDOW_EXTENT.1),
+            layout: CellLayout::new(pane_id, extent.0, extent.1),
             panes: BTreeMap::from([(pane_id, pane)]),
             pane_order: vec![pane_id],
             last_panes: Vec::new(),
             last_layout: None,
             previous_layout: None,
+            last_extent_probe: None,
             input_options: InputOptions::default(),
         };
         self.windows.insert(window_id, window);
@@ -394,6 +408,11 @@ impl MuxState {
         self.sort_session_windows(session);
         self.bump_generation();
         Ok((window_id, pane_id))
+    }
+
+    fn session_active_window_extent(&self, session: SessionId) -> Option<(u16, u16)> {
+        let window = self.sessions.get(&session)?.active_window;
+        Some(self.windows.get(&window)?.layout.extent())
     }
 
     /// The index a new window takes in `session`: the requested one when it is
@@ -584,7 +603,13 @@ impl MuxState {
                 input_options: InputOptions::default(),
             },
         );
-        insert_pane_order(&mut window.pane_order, pane_id, target, placement.before);
+        insert_pane_order(
+            &mut window.pane_order,
+            pane_id,
+            target,
+            placement.before,
+            placement.full_size,
+        );
         if !placement.detached {
             activate_window_pane(window, pane_id, false);
         }
@@ -817,10 +842,8 @@ impl MuxState {
         let window = self.windows.get_mut(&window).expect("window was resolved");
         let previous = window.layout.clone();
         window.layout.apply_preset(preset, &panes, &mut ids);
-        debug_assert!(
-            split_ids.next().is_none(),
-            "preset consumes one split ID per edge"
-        );
+        let split_ids_exhausted = split_ids.next().is_none();
+        debug_assert!(split_ids_exhausted, "preset consumes one split ID per edge");
         window.previous_layout = Some(Box::new(previous));
         window.last_layout = Some(preset);
         window.zoomed_pane = None;
@@ -875,7 +898,8 @@ impl MuxState {
             .previous_layout
             .take()
             .expect("previous layout was validated");
-        debug_assert!(restored.replace_panes_in_order(&pane_order));
+        let replaced = restored.replace_panes_in_order(&pane_order);
+        debug_assert!(replaced);
         let mut split_ids = split_ids.into_iter();
         let mut ids = || {
             split_ids
@@ -883,8 +907,9 @@ impl MuxState {
                 .expect("restored layout has one ID per edge")
         };
         restored.refresh_divider_ids(&mut ids);
+        let split_ids_exhausted = split_ids.next().is_none();
         debug_assert!(
-            split_ids.next().is_none(),
+            split_ids_exhausted,
             "restored layout consumes one fresh ID per split"
         );
         let current = std::mem::replace(&mut window.layout, restored);
@@ -1628,18 +1653,37 @@ impl MuxState {
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
         let window = &self.windows[&window_id];
-        let mut rects = Vec::with_capacity(window.panes.len());
-        let layout = window.layout.project();
-        collect_pane_rects(
-            &layout,
-            PaneRect {
-                left: 0,
-                top: 0,
-                right: LAYOUT_COORDINATE_MAX,
-                bottom: LAYOUT_COORDINATE_MAX,
-            },
-            &mut rects,
-        );
+        let (window_columns, window_rows) = window.layout.extent();
+        let rects = window
+            .layout
+            .panes_in_order()
+            .into_iter()
+            .map(|pane| {
+                let geometry = window
+                    .layout
+                    .pane_geometry(pane)
+                    .expect("layout order contains a pane geometry");
+                let right = geometry
+                    .xoff
+                    .saturating_add(geometry.sx)
+                    .saturating_add(1)
+                    .min(window_columns);
+                let bottom = geometry
+                    .yoff
+                    .saturating_add(geometry.sy)
+                    .saturating_add(1)
+                    .min(window_rows);
+                (
+                    pane,
+                    PaneRect {
+                        left: normalize_cell_coordinate(geometry.xoff, window_columns),
+                        top: normalize_cell_coordinate(geometry.yoff, window_rows),
+                        right: normalize_cell_coordinate(right, window_columns),
+                        bottom: normalize_cell_coordinate(bottom, window_rows),
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
         let current = rects
             .iter()
             .find_map(|(candidate, rect)| (*candidate == pane).then_some(*rect))
@@ -1743,7 +1787,8 @@ impl MuxState {
         if source_window == target_window {
             let window = self.windows.get_mut(&source_window).expect("window exists");
             let was_zoomed = window.zoomed_pane.is_some();
-            debug_assert!(window.layout.swap(source, target));
+            let swapped = window.layout.swap(source, target);
+            debug_assert!(swapped);
             swap_pane_order(&mut window.pane_order, source, target);
             let next_active = if detached {
                 if window.active_pane == source {
@@ -1775,8 +1820,10 @@ impl MuxState {
             .windows
             .get_mut(&target_window)
             .expect("target window exists");
-        debug_assert!(source_state.layout.replace(source, target));
-        debug_assert!(target_state.layout.replace(target, source));
+        let source_replaced = source_state.layout.replace(source, target);
+        debug_assert!(source_replaced);
+        let target_replaced = target_state.layout.replace(target, source);
+        debug_assert!(target_replaced);
         let source_pane = source_state
             .panes
             .remove(&source)
@@ -1827,6 +1874,57 @@ impl MuxState {
         }
         let source_session = self.windows[&source_window].session;
         let index = self.claim_window_index(destination_session, destination_index)?;
+        if self.windows[&source_window].panes.len() == 1 {
+            if source_session == destination_session {
+                let window = self
+                    .windows
+                    .get_mut(&source_window)
+                    .expect("source window exists");
+                window.index = index;
+                if let Some(name) = name.as_ref() {
+                    name.clone_into(&mut window.name);
+                }
+                if !detached {
+                    self.activate_window(destination_session, source_window);
+                }
+                self.sort_session_windows(destination_session);
+            } else {
+                let activated = self
+                    .sessions
+                    .get_mut(&source_session)
+                    .expect("source session exists")
+                    .forget_window(source_window);
+                let window = self
+                    .windows
+                    .get_mut(&source_window)
+                    .expect("source window exists");
+                window.session = destination_session;
+                window.index = index;
+                if let Some(name) = name.as_ref() {
+                    name.clone_into(&mut window.name);
+                }
+                self.sessions
+                    .get_mut(&destination_session)
+                    .expect("destination session exists")
+                    .windows
+                    .push(source_window);
+                if let Some(window) = activated {
+                    self.clear_window_bells(window);
+                }
+                if !detached {
+                    self.activate_window(destination_session, source_window);
+                }
+                if self.sessions[&source_session].windows.is_empty() {
+                    self.sessions.remove(&source_session);
+                }
+                self.sort_session_windows(destination_session);
+            }
+            self.bump_generation();
+            return Ok(source_window);
+        }
+        let inherited_extent = self
+            .session_active_window_extent(destination_session)
+            .unwrap_or(DEFAULT_WINDOW_EXTENT);
         let window_id = self.allocate_window_id();
         let mut source = self
             .windows
@@ -1864,12 +1962,13 @@ impl MuxState {
                 name: window_name,
                 active_pane: pane,
                 zoomed_pane: None,
-                layout: CellLayout::new(pane, DEFAULT_WINDOW_EXTENT.0, DEFAULT_WINDOW_EXTENT.1),
+                layout: CellLayout::new(pane, inherited_extent.0, inherited_extent.1),
                 panes: BTreeMap::from([(pane, pane_state)]),
                 pane_order: vec![pane],
                 last_panes: Vec::new(),
                 last_layout: None,
                 previous_layout: None,
+                last_extent_probe: None,
                 input_options: InputOptions::default(),
             },
         );
@@ -1902,6 +2001,7 @@ impl MuxState {
         Ok(window_id)
     }
 
+    /// `before` changes layout placement, while pane order stays after the target to match tmux's by-value flag bug.
     pub fn join_pane(
         &mut self,
         source: PaneId,
@@ -1955,7 +2055,7 @@ impl MuxState {
                 return Err(split_layout_error(error, target));
             }
             window.pane_order.retain(|pane| *pane != source);
-            insert_pane_order(&mut window.pane_order, source, target, before);
+            insert_pane_order(&mut window.pane_order, source, target, false, false);
             window.zoomed_pane = None;
             if !detached {
                 activate_window_pane(window, source, false);
@@ -2007,7 +2107,7 @@ impl MuxState {
             .get_mut(&target_window)
             .expect("target window exists");
         target_state.panes.insert(source, pane_state);
-        insert_pane_order(&mut target_state.pane_order, source, target, before);
+        insert_pane_order(&mut target_state.pane_order, source, target, false, false);
         target_state.zoomed_pane = None;
         if !detached {
             activate_window_pane(target_state, source, false);
@@ -2242,9 +2342,7 @@ fn pane_title(kind: &PaneKind) -> String {
 
 fn split_layout_error(error: LayoutError, target: PaneId) -> ServerError {
     match error {
-        LayoutError::NoSpace => {
-            ServerError::InvalidCommand("create pane failed: pane too small".to_owned())
-        }
+        LayoutError::NoSpace => ServerError::InvalidCommand("no space for a new pane".to_owned()),
         LayoutError::UnknownPane => ServerError::MissingTarget(target.to_string()),
         LayoutError::LastPane | LayoutError::UnknownDivider => {
             ServerError::Internal(format!("unexpected split layout error: {error:?}"))
@@ -2471,8 +2569,22 @@ fn normalize_window_history(window: &mut Window) {
         .truncate(window.panes.len().saturating_sub(1));
 }
 
-fn insert_pane_order(order: &mut Vec<PaneId>, pane: PaneId, target: PaneId, before: bool) {
+fn insert_pane_order(
+    order: &mut Vec<PaneId>,
+    pane: PaneId,
+    target: PaneId,
+    before: bool,
+    full_size: bool,
+) {
     debug_assert!(!order.contains(&pane));
+    if full_size {
+        if before {
+            order.insert(0, pane);
+        } else {
+            order.push(pane);
+        }
+        return;
+    }
     let target = order
         .iter()
         .position(|candidate| *candidate == target)
@@ -2525,6 +2637,7 @@ fn predict_swap_layout_panes(node: &mut LayoutNode, source: PaneId, target: Pane
     }
 }
 
+#[cfg(test)]
 fn collect_pane_rects(node: &LayoutNode, bounds: PaneRect, output: &mut Vec<(PaneId, PaneRect)>) {
     match node {
         LayoutNode::Pane(pane) => output.push((*pane, bounds)),
@@ -2582,6 +2695,7 @@ fn collect_pane_rects(node: &LayoutNode, bounds: PaneRect, output: &mut Vec<(Pan
     clippy::cast_sign_loss,
     reason = "validated split ratios map a bounded one-million-unit logical extent to u32"
 )]
+#[cfg(test)]
 fn split_coordinate(start: u32, end: u32, ratio: f32) -> u32 {
     let extent = end.saturating_sub(start);
     if extent <= 1 {
@@ -2589,6 +2703,15 @@ fn split_coordinate(start: u32, end: u32, ratio: f32) -> u32 {
     }
     let offset = (f64::from(extent) * f64::from(ratio)).round() as u32;
     start + offset.clamp(1, extent - 1)
+}
+
+fn normalize_cell_coordinate(coordinate: u16, extent: u16) -> u32 {
+    if extent == 0 {
+        return 0;
+    }
+    let numerator = u64::from(coordinate) * u64::from(LAYOUT_COORDINATE_MAX);
+    let rounded = (numerator + u64::from(extent) / 2) / u64::from(extent);
+    u32::try_from(rounded).unwrap_or(LAYOUT_COORDINATE_MAX)
 }
 
 fn directional_candidates(
@@ -2948,7 +3071,7 @@ mod tests {
         assert_eq!(
             state.split_pane(narrow, Axis::Vertical, PaneKind::Terminal),
             Err(ServerError::InvalidCommand(
-                "create pane failed: pane too small".to_owned()
+                "no space for a new pane".to_owned()
             ))
         );
         assert_eq!(state.windows[&window].layout, layout);
@@ -3636,7 +3759,7 @@ mod tests {
         );
         assert_eq!(
             state.windows[&original_window].pane_order,
-            [browser, first, third]
+            [first, browser, third]
         );
         assert_eq!(
             [browser, first, third]
@@ -3682,29 +3805,35 @@ mod tests {
     }
 
     #[test]
-    fn breaking_a_last_pane_retires_its_source_window_and_session() {
+    fn breaking_a_last_pane_moves_its_window_and_retires_the_source_session() {
         let mut state = MuxState::default();
         let (source_session, source_window, source) = state.create_session("source").unwrap();
         let (destination_session, destination_window, destination) =
             state.create_session("destination").unwrap();
+        state
+            .rename_window(source_window, "kept")
+            .expect("rename source window");
+        let source_layout = state.windows[&source_window].layout.clone();
 
         let broken = state
             .break_pane(source, destination_session, None, None, true)
             .unwrap();
 
-        assert!(!state.windows.contains_key(&source_window));
+        assert_eq!(broken, source_window);
         assert!(!state.sessions.contains_key(&source_session));
-        assert_eq!(state.window_for_pane(source), Some(broken));
+        assert_eq!(state.window_for_pane(source), Some(source_window));
         assert_eq!(state.window_for_pane(destination), Some(destination_window));
-        assert_eq!(state.windows[&broken].layout.extent(), (80, 24));
+        assert_eq!(state.windows[&source_window].name, "kept");
+        assert_eq!(state.windows[&source_window].layout, source_layout);
+        assert_eq!(state.windows[&source_window].session, destination_session);
         assert_eq!(
-            state.windows[&broken].layout.project(),
-            LayoutNode::Pane(source)
+            state.sessions[&destination_session].active_window,
+            destination_window
         );
         assert!(
             state.sessions[&destination_session]
                 .windows
-                .contains(&broken)
+                .contains(&source_window)
         );
         assert!(state.validate().is_ok());
     }
@@ -3738,7 +3867,7 @@ mod tests {
                 false,
             ),
             Err(ServerError::InvalidCommand(
-                "create pane failed: pane too small".to_owned()
+                "no space for a new pane".to_owned()
             ))
         );
         assert_eq!(state.windows[&target_window].layout, target_layout);
@@ -3808,11 +3937,11 @@ mod tests {
 
     #[test]
     fn same_window_join_reparents_a_pane_beside_the_target() {
-        for (axis, before, expected) in [
-            (Axis::Horizontal, true, [3, 1, 2]),
-            (Axis::Horizontal, false, [1, 3, 2]),
-            (Axis::Vertical, true, [3, 1, 2]),
-            (Axis::Vertical, false, [1, 3, 2]),
+        for (axis, before, expected_layout, expected_order) in [
+            (Axis::Horizontal, true, [3, 1, 2], [1, 3, 2]),
+            (Axis::Horizontal, false, [1, 3, 2], [1, 3, 2]),
+            (Axis::Vertical, true, [3, 1, 2], [1, 3, 2]),
+            (Axis::Vertical, false, [1, 3, 2], [1, 3, 2]),
         ] {
             let mut state = MuxState::default();
             let (_, window, first) = state.create_session("work").unwrap();
@@ -3823,7 +3952,8 @@ mod tests {
                 .split_pane(second, Axis::Vertical, PaneKind::Terminal)
                 .unwrap();
             let panes = [first, second, third];
-            let expected = expected.map(|index| panes[index - 1]);
+            let expected_layout = expected_layout.map(|index| panes[index - 1]);
+            let expected_order = expected_order.map(|index| panes[index - 1]);
             state.select_pane(second).unwrap();
 
             let predicted = joined_layout(
@@ -3841,9 +3971,9 @@ mod tests {
                 .unwrap();
 
             let layout = &state.windows[&window].layout;
-            assert_eq!(layout_panes(layout), expected);
+            assert_eq!(layout_panes(layout), expected_layout);
             assert!(same_projected_geometry(layout, &predicted));
-            assert_eq!(state.windows[&window].pane_order, expected);
+            assert_eq!(state.windows[&window].pane_order, expected_order);
             assert_eq!(state.windows[&window].active_pane, second);
             assert!(state.validate().is_ok());
         }
@@ -3887,6 +4017,7 @@ mod tests {
                     && bottom.as_ref() == &LayoutNode::Pane(first)
         ));
         assert!(same_projected_geometry(layout, &predicted));
+        assert_eq!(state.windows[&window].pane_order, [first, second]);
         assert_eq!(
             joined_layout(
                 &layout.project(),

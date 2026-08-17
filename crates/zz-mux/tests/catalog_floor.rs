@@ -86,12 +86,12 @@ fn catalogued_unsupported_value_keeps_the_unsupported_error_shape() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     let error = engine
-        .execute(&mut context, &command("new-session", &["-x", "80"]))
+        .execute(&mut context, &command("new-session", &["-e", "FOO=bar"]))
         .unwrap_err();
 
     assert_eq!(
         error,
-        ServerError::UnsupportedCommand("new-session -x".to_owned())
+        ServerError::UnsupportedCommand("new-session -e".to_owned())
     );
 }
 

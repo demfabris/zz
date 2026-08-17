@@ -108,11 +108,16 @@ pub(crate) fn status_context(
     context.window_zoomed = window.zoomed_pane.is_some();
     context.window_bell = window.panes.values().any(|pane| pane.bell);
 
-    let mut order = Vec::with_capacity(window.panes.len());
-    window.layout.panes(&mut order);
-    context.pane_index = order
-        .iter()
-        .position(|pane| *pane == window.active_pane)
+    context.pane_index = engine
+        .state
+        .windows
+        .get(&window.id)
+        .and_then(|window| {
+            window
+                .pane_order()
+                .iter()
+                .position(|pane| *pane == window.active_pane)
+        })
         .and_then(|index| u32::try_from(index).ok())
         .unwrap_or_default();
     if let Some(pane) = window.panes.get(&window.active_pane) {
@@ -284,6 +289,7 @@ fn first_line(output: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zz_mux::{PaneKind, SplitSize};
 
     fn request(client: u64, left: &str, right: &str) -> StatusRequest {
         StatusRequest {
@@ -329,6 +335,40 @@ mod tests {
         request.formats.enabled = false;
         let status = renderer.render_initial(&request);
         assert!(status.is_empty());
+    }
+
+    #[test]
+    fn status_pane_index_uses_pane_order_when_layout_order_differs() {
+        let mut engine = MuxEngine::default();
+        let (session, window, target) = engine.state.create_session("work").unwrap();
+        let source = engine
+            .state
+            .split_pane(target, Axis::Horizontal, PaneKind::Terminal)
+            .unwrap();
+        engine
+            .state
+            .join_pane(
+                source,
+                target,
+                Axis::Vertical,
+                SplitSize::Default,
+                true,
+                false,
+                false,
+            )
+            .unwrap();
+        let snapshot = engine.state.snapshot();
+        let mut layout_order = Vec::new();
+        snapshot.sessions[0].windows[0]
+            .layout
+            .panes(&mut layout_order);
+
+        assert_eq!(layout_order, [source, target]);
+        assert_eq!(engine.state.windows[&window].pane_order(), [target, source]);
+        assert_eq!(
+            status_context(&snapshot, &engine, Some(session), Some(window)).pane_index,
+            1
+        );
     }
 
     #[test]

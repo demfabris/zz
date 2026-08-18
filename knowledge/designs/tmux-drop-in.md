@@ -10,7 +10,7 @@ tags:
 - layout
 - control-mode
 - roadmap
-timestamp: 2026-08-16T00:00:00Z
+timestamp: 2026-08-18T00:00:00Z
 ---
 
 # Overview
@@ -160,9 +160,9 @@ same loop as phases 0–3: settled plan → codex → full gates → adversarial
 `ClientHello.origin`, sent by Command clients only. It rides the same client-seam work as
 phase 8.
 
-## Phase 5 — the exec family (in progress; wave 5a shipped 2026-08-18)
+## Phase 5 — the exec family (COMPLETE 2026-08-18)
 
-Shipped so far, each reviewed to CONFIRMED-CLOSED against the pin:
+All waves shipped, each reviewed to CONFIRMED-CLOSED against the pin:
 
 - **Wave 5a-1** (`26c86d0`) — spawn argv parity: argc>=2 execs the argv directly
   (PATH search, no shell), argc==1 runs `default-shell -c`, argc==0 keeps zz's
@@ -257,6 +257,49 @@ Shipped so far, each reviewed to CONFIRMED-CLOSED against the pin:
   (maintainer): blocking retvals, close matrix, input capture above the
   prefix, dead-job modify, -C cross-client, position letters, -e/-d live.
 
+- **Wave 5d-2** (`01096c2` + `30d4daa`, CONFIRMED-CLOSED 2026-08-18; closes
+  phase 5) — `display-menu`/`menu`, `confirm-before`/`confirm`, and the lock
+  trio. Menus and confirm prompts render NATIVE on the 5d-1 FloatingSurface
+  (behavior pin-exact, visuals native — same ledger row). Menu: exec order
+  ported exactly (overlay silent-noop → -C validation → title → item build →
+  empty/too-small silent-noops → -b), triplet grammar with separator
+  slot-consumption/leading-and-double-separator drops/`not enough arguments`,
+  build-time format expansion with empty-name drop, `-`-disabled items,
+  unparsable keys never matchable, shortcut-beats-navigation selection,
+  wrap-on-step but CLAMP-on-page (menu.c's PPage jump-to-0-without-skip wart
+  and NPage clamp-then-walk-backward kept), Enter's chosen-block (no/invalid
+  selection closes unless -O stay-open), cancel set exact, blocking CLI
+  unblocks with cancel rc 0 and NO retval propagation (opposite of popups),
+  chosen command queued on the menu's client with fire-time target
+  re-validation, menu-style/menu-selected-style/menu-border-style/
+  menu-border-lines window options with byte-identical theme-colour defaults
+  — but inline -s/-H/-S styles pass through UNVALIDATED like menu_prepare's
+  silent style_parse fallback (only the options-table path validates).
+  Confirm: parse-up-front (parse error → no prompt), exact
+  `Confirm '<name>'? (<key>/n) ` canonical-name prompt + `-p` one-trailing-
+  space, printable-ASCII -c, blocking rc contract (reject/dismiss rc 1 —
+  opposite convention from menu cancel), -b append-with-fresh-state,
+  prompt-opening clears any overlay. Lock trio: storage + error parity only
+  (lock-command default `lock -np`, lock-after-time 0 stored, readback;
+  clientless shapes exact; after-lock-server fires via the 5c bus; NO lock
+  process spawning over GUI surfaces — ledgered, revisit with the TUI).
+  Protocol v63→v64 append-only (menu/confirm messages; popup tags
+  structurally unchanged). GUI key-claim proven for a prefix-table key
+  (armed `ctrl-a` with a menu focused sends nothing). Bonus fix found by
+  probe: `zz kill-server; zz new-session -d` failed deterministically (the
+  daemon's bound listener + socket file outlived the accept loop by seconds,
+  EOF-ing backlog connects; pin 3/3 ok) — the daemon now drops listener +
+  socket/identity guards immediately after the accept loop, the connect
+  classifier treats same-version handshake-EOF as a dying daemon
+  (ConnectionReset; socket-gone → ENOENT) with fake-daemon shapes untouched
+  (`Socket operation on non-socket` byte-match), and prepare_socket waits
+  out a still-connectable dying socket before AlreadyRunning. Ledgered
+  hardening: SocketGuard's drop unlink is unconditional (no dev/inode
+  ownership check) — window now microseconds, not airtight. Deferred:
+  tmux mouse semantics on menus (GUI-native), MENU_STAYOPEN mouse paths.
+  Hardware smoke pending (maintainer): menu keyboard walk + shortcut fire,
+  confirm prompt accept/reject live, paging clamp feel on a long menu.
+
 Phase 7a (binary surface) shipped in parallel (`a054c38` + `34d9d60`,
 autostart CONFIRMED-CLOSED): tmux argv (-V `tmux 3.8-zz`, -L/-S/-f, -c, -N,
 -l; tmux-shaped usage + `unknown option`/`option requires an argument`
@@ -265,16 +308,26 @@ lines), daemon autostart gated to the pin's five CMD_STARTSERVER commands
 <path> (<errno>)`; distinct stale-socket `no server running on <path>`),
 no intermediate -L label dirs, and $TMUX=<socket>,<pid>,<session> +
 TMUX_PANE=%N in panes plus $TMUX (no TMUX_PANE) in exec-family jobs —
-closing the tpm-breaker ledger row. In flight: the native `zz attach`
-grammar becoming a tmux superset (`attach -t` muscle memory). Deferred to
-phase 8 with the attach contract: no-tty `new-session` divergence (pin:
-`open terminal failed: not a terminal` rc 1; zz: detached create rc 0) and
-the pty-gated nested-session refusal probe. Accepted wart adopted: `-L
+closing the tpm-breaker ledger row. FULLY CLOSED 2026-08-18 with `64fd9a6` +
+`05a5258` + `4184b80` (reviewer rounds 9-11): the native `zz attach` grammar
+is a tmux superset (`attach`/`attach-session -t <session>` both spellings,
+`-d` wired, engine-identical rejections), and attach orders like the pin —
+daemon connect WITH autostart first (attach is CMD_STARTSERVER; `-f` config
+reaches the spawned daemon), session resolution second (`attach -t bogus` →
+`can't find session: bogus` rc 1 headless; untargeted empty server → `no
+sessions`), the TTY interactivity check LAST. Style validator carries the
+full style_parse token set (align/fill/us/list/range/push-default/
+pop-default families; `range=session`/`hyperlink` rejected like the pin);
+`-L <notadir>/x` says `error connecting to` (connect-first ordering). The
+`zz attach: ` stderr prefix is a second wrapper-class shape (rc +
+post-prefix text exact) — phase-7 error-shape scope. Deferred to phase 8
+with the attach contract: no-tty `new-session` divergence (pin: `open
+terminal failed: not a terminal` rc 1; zz: detached create rc 0) and the
+pty-gated nested-session refusal probe. Accepted wart adopted: `-L
 <nested/label> new-session` prints `error creating <path>` and exits 0 like
 the pin.
 
-Still to build (tiering below): display-menu + confirm-before + lock storage
-(wave 5d-2, next on the FloatingSurface foundation). Original tiering:
+Original phase-5 tiering, kept for the record:
 
 - `run-shell`, `if-shell`, `wait-for`, `pipe-pane` — genuinely `sh -c` + effects (~1 week).
   `if-shell` is already parsed and kept (only `%if` is skipped at parse time); the upgrade is
@@ -383,6 +436,9 @@ this list is the campaign-level index of it plus the items that never got a matr
 
 - The CLI error prefix: zz says `zz: mux command failed: …` around tmux's exact message
   text everywhere except `refresh-client`'s bare `no current client`. rc always matches.
+  The native attach path carries a second shape in the same class: `zz attach: …`
+  around the exact engine text (`can't find session: X`, `no sessions`). Both fold
+  into phase 7's error-shape pass.
 - `history-limit` default stays 10000 (pin: 2000) — product choice, fenced by a drift test
   whose allowlist is exactly this one name.
 - `list-commands` is the honest implemented subset, and usage strings show zz's accepted
@@ -451,6 +507,11 @@ this list is the campaign-level index of it plus the items that never got a matr
   `bad value:`/`unknown command:`; usage-text arity errors vs too-few/too-many) —
   the whole class is phase 7's "error-output shapes matched where scripts grep
   them" item; exit-code classes already match everywhere probed.
+- Wave-5d-2 ledger (reviewer-CONFIRMED, non-blocking): `SocketGuard`'s drop
+  unlink is unconditional — it cannot distinguish its own socket from a
+  successor daemon's at the same path. The early guard drop moved the unlink
+  to the correct side of a successor's bind (window is now microseconds), but
+  a dev/inode ownership check captured at bind time would make it airtight.
 - Build-define-derived option defaults: the pin build's Makefile overrides source
   fallbacks (`-DTMUX_MOUSE=1`, `-DTMUX_TERM=tmux-256color` — both now matched), and
   three unimplemented options carry the same hazard when they land: `editor`

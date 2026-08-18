@@ -4,7 +4,7 @@ title: tmux divergence matrix
 description: "Every known divergence from tmux at the pinned reference commit: the 24 missing commands and why, behavioral gaps on the implemented surface, the 25-of-180 options coverage, and the protocol-level differences."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
-timestamp: 2026-08-17T00:00:00-03:00
+timestamp: 2026-08-18T00:00:00-03:00
 ---
 
 # Overview
@@ -55,20 +55,31 @@ like the pin), `@`-user hooks share the option slot. Ledgered: `-B` monitors
 rejected; 11 event names store-only (no zz seam); `window-layout-changed`
 single-fires where the pin double-fires on resize/select-layout.
 
+The lock trio shipped in wave 5d-2 (`01096c2`) as storage + error parity:
+`lock-command` (default `lock -np`) and `lock-after-time` (default 0) store
+and read back, all three commands and aliases parse with pin-exact clientless
+error shapes, and `after-lock-server` fires through the hook bus — but zz
+never spawns a lock program over GUI surfaces (a locked GPUI window running
+`lock -np` is meaningless; revisit with the TUI client), and `lock-after-time`
+drives no timer. **silent**, deliberate.
+
 Still unimplemented and skipped from config:
 
 | Command | What it does in tmux |
 | --- | --- |
-| `lock-client` / `lock-server` / `lock-session` | Lock by spawning an external lock program. |
 | `server-access` | Per-user ACLs for a shared server socket. |
 
-## Superseded by native GUI chrome (7)
+## Superseded by native GUI chrome (4)
+
+`display-popup`, `display-menu`, and `confirm-before` left this table in waves
+5d-1/5d-2: behavior is pin-exact, but the surfaces render as native
+zz-design-language floating panes (FloatingSurface) instead of cell-drawn
+overlays — one deliberate visual divergence, keyboard semantics ported from
+`menu.c`/`popup.c` exactly (menus clamp on paging, wrap on step; tmux mouse
+semantics on menus stay GUI-native).
 
 | Command | What it does in tmux |
 | --- | --- |
-| `display-popup` | Floating popup running a shell command (also an exec vector). |
-| `display-menu` | Text menu drawn on the status line. |
-| `confirm-before` | y/n prompt wrapped around a command. |
 | `customize-mode` | Interactive options browser. |
 | `choose-client` | Chooser listing attached clients. |
 | `clock-mode` | Full-pane clock. |

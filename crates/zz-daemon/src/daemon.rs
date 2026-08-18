@@ -3066,7 +3066,7 @@ impl Shared {
                 .client_names
                 .get(&client)
                 .cloned()
-                .unwrap_or_else(|| format!("client-{}", client.0));
+                .unwrap_or_else(|| format!("device-{}", client.0));
             let command = command_log_line(command);
             push_server_message(&mut inner, format!("{client_name} command: {command}"));
             client_name
@@ -32530,9 +32530,9 @@ bind - split-window -v -c "#{pane_current_path}"
         };
         let lines = output.lines().collect::<Vec<_>>();
         assert_eq!(lines.len(), 3);
-        assert!(lines[0].ends_with(": client-7 command: show-messages"));
+        assert!(lines[0].ends_with(": device-7 command: show-messages"));
         assert!(lines[1].ends_with(": hello"));
-        assert!(lines[2].ends_with(": client-7 command: display-message hello"));
+        assert!(lines[2].ends_with(": device-7 command: display-message hello"));
         assert!(lines.iter().all(|line| {
             let bytes = line.as_bytes();
             bytes.get(2) == Some(&b':') && bytes.get(5) == Some(&b':')
@@ -33935,8 +33935,8 @@ bind - split-window -v -c "#{pane_current_path}"
                 .map(|message| message.text.as_str())
                 .collect::<Vec<_>>(),
             [
-                "client-7 command: select-window -t 99",
-                "client-7 message: can't find window: 99",
+                "device-7 command: select-window -t 99",
+                "device-7 message: can't find window: 99",
             ]
         );
     }

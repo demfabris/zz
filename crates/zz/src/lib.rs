@@ -81,6 +81,14 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 const GPUI_SOURCE: &str = env!("ZZ_GPUI_SOURCE");
 
 #[cfg(not(target_os = "ios"))]
+const TMUX_VERSION_OUTPUT: &str = "tmux 3.8-zz";
+#[cfg(not(target_os = "ios"))]
+const TMUX_USAGE: &str = concat!(
+    "usage: zz [-2CDhlNuVv] [-c shell-command] [-f file] [-L socket-name]\n",
+    "            [-S socket-path] [-T features] [command [flags]]"
+);
+
+#[cfg(not(target_os = "ios"))]
 enum Startup {
     Application(PathBuf),
     Exit(ExitCode),
@@ -89,10 +97,23 @@ enum Startup {
 #[cfg(not(target_os = "ios"))]
 fn run_startup(socket_path: PathBuf) -> Startup {
     diagnostics::init();
+    let socket_path = inherited_socket_path(
+        socket_path,
+        std::env::var_os("ZZ_SOCKET").is_some(),
+        std::env::var_os("TMUX").as_deref(),
+    );
     let arguments = match application_arguments(diagnostics::application_args(), socket_path) {
         Ok(arguments) => arguments,
-        Err(error) => {
+        Err(ApplicationArgumentError::Message(error)) => {
             eprintln!("zz: {error}");
+            return Startup::Exit(ExitCode::FAILURE);
+        }
+        Err(ApplicationArgumentError::Raw(error)) => {
+            eprintln!("{error}");
+            return Startup::Exit(ExitCode::FAILURE);
+        }
+        Err(ApplicationArgumentError::Usage) => {
+            eprintln!("{TMUX_USAGE}");
             return Startup::Exit(ExitCode::FAILURE);
         }
     };
@@ -101,8 +122,26 @@ fn run_startup(socket_path: PathBuf) -> Startup {
         socket_overridden,
         host,
         remaining,
+        mux_config_files,
+        no_start_server,
+        shell_command,
+        login_shell,
+        early_output,
     } = arguments;
-    match run_command_mode(remaining, &socket_path, socket_overridden, host.as_deref()) {
+    if let Some(output) = early_output {
+        println!("{output}");
+        return Startup::Exit(ExitCode::SUCCESS);
+    }
+    match run_command_mode(
+        remaining,
+        &socket_path,
+        socket_overridden,
+        host.as_deref(),
+        &mux_config_files,
+        no_start_server,
+        shell_command.as_deref(),
+        login_shell,
+    ) {
         Some(exit) => Startup::Exit(exit),
         None => Startup::Application(socket_path),
     }
@@ -245,63 +284,308 @@ struct ApplicationArguments {
     socket_overridden: bool,
     host: Option<String>,
     remaining: Vec<String>,
+    mux_config_files: Vec<PathBuf>,
+    no_start_server: bool,
+    shell_command: Option<String>,
+    login_shell: bool,
+    early_output: Option<&'static str>,
+}
+
+#[cfg(not(target_os = "ios"))]
+#[derive(Debug, PartialEq, Eq)]
+enum ApplicationArgumentError {
+    Message(String),
+    Raw(String),
+    Usage,
+}
+
+#[cfg(not(target_os = "ios"))]
+enum SocketSelection {
+    Path(PathBuf),
+    Label(String),
 }
 
 #[cfg(not(target_os = "ios"))]
 fn application_arguments(
     arguments: impl IntoIterator<Item = String>,
     default_path: PathBuf,
-) -> Result<ApplicationArguments, String> {
-    let mut socket_path = default_path;
-    let mut socket_overridden = false;
+) -> Result<ApplicationArguments, ApplicationArgumentError> {
+    let mut socket_selection = None;
     let mut host = None;
     let mut remaining = Vec::new();
-    let mut arguments = arguments.into_iter();
+    let mut mux_config_files = Vec::new();
+    let mut no_start_server = false;
+    let mut shell_command = None;
+    let mut login_shell = false;
+    let mut control_mode = false;
+    let mut foreground_server = false;
+    let mut parsing_tmux_options = true;
+    let mut arguments = arguments.into_iter().collect::<Vec<_>>().into_iter();
     while let Some(argument) = arguments.next() {
         if argument == diagnostics::SOCKET_ARGUMENT {
-            let path = arguments
-                .next()
-                .ok_or_else(|| "--socket requires a path".to_owned())?;
+            let path = arguments.next().ok_or_else(|| {
+                ApplicationArgumentError::Message("--socket requires a path".to_owned())
+            })?;
             if path.is_empty() {
-                return Err("--socket requires a non-empty path".to_owned());
+                return Err(ApplicationArgumentError::Message(
+                    "--socket requires a non-empty path".to_owned(),
+                ));
             }
-            socket_path = PathBuf::from(path);
-            socket_overridden = true;
+            socket_selection = Some(SocketSelection::Path(PathBuf::from(path)));
         } else if let Some(path) = argument
             .strip_prefix(diagnostics::SOCKET_ARGUMENT)
             .and_then(|argument| argument.strip_prefix('='))
         {
             if path.is_empty() {
-                return Err("--socket requires a non-empty path".to_owned());
+                return Err(ApplicationArgumentError::Message(
+                    "--socket requires a non-empty path".to_owned(),
+                ));
             }
-            socket_path = PathBuf::from(path);
-            socket_overridden = true;
+            socket_selection = Some(SocketSelection::Path(PathBuf::from(path)));
         } else if argument == "--host" {
-            let name = arguments
-                .next()
-                .ok_or_else(|| "--host requires a name".to_owned())?;
+            let name = arguments.next().ok_or_else(|| {
+                ApplicationArgumentError::Message("--host requires a name".to_owned())
+            })?;
             if name.is_empty() {
-                return Err("--host requires a non-empty name".to_owned());
+                return Err(ApplicationArgumentError::Message(
+                    "--host requires a non-empty name".to_owned(),
+                ));
             }
             host = Some(name);
         } else if let Some(name) = argument.strip_prefix("--host=") {
             if name.is_empty() {
-                return Err("--host requires a non-empty name".to_owned());
+                return Err(ApplicationArgumentError::Message(
+                    "--host requires a non-empty name".to_owned(),
+                ));
             }
             host = Some(name.to_owned());
+        } else if parsing_tmux_options && argument == "--" {
+            parsing_tmux_options = false;
+        } else if parsing_tmux_options && matches!(argument.as_str(), "--version" | "--kill-server")
+        {
+            parsing_tmux_options = false;
+            remaining.push(argument);
+        } else if parsing_tmux_options && argument.starts_with("--") {
+            return Err(ApplicationArgumentError::Usage);
+        } else if parsing_tmux_options && argument.starts_with('-') && argument != "-" {
+            let options = &argument[1..];
+            for (index, option) in options.char_indices() {
+                let value = |arguments: &mut std::vec::IntoIter<String>| {
+                    let value_index = index + option.len_utf8();
+                    if value_index < options.len() {
+                        Ok(options[value_index..].to_owned())
+                    } else {
+                        arguments.next().ok_or_else(|| {
+                            ApplicationArgumentError::Raw(format!(
+                                "zz: option requires an argument -- {option}\n{TMUX_USAGE}"
+                            ))
+                        })
+                    }
+                };
+                match option {
+                    '2' | 'q' | 'u' | 'v' => {}
+                    'c' => {
+                        shell_command = Some(value(&mut arguments)?);
+                        break;
+                    }
+                    'C' => control_mode = true,
+                    'D' => foreground_server = true,
+                    'f' => {
+                        mux_config_files.push(PathBuf::from(value(&mut arguments)?));
+                        break;
+                    }
+                    'h' => {
+                        return Ok(ApplicationArguments {
+                            socket_path: default_path,
+                            socket_overridden: false,
+                            host: None,
+                            remaining: Vec::new(),
+                            mux_config_files: Vec::new(),
+                            no_start_server: false,
+                            shell_command: None,
+                            login_shell: false,
+                            early_output: Some(TMUX_USAGE),
+                        });
+                    }
+                    'l' => login_shell = true,
+                    'L' => {
+                        socket_selection = Some(SocketSelection::Label(value(&mut arguments)?));
+                        break;
+                    }
+                    'N' => no_start_server = true,
+                    'S' => {
+                        socket_selection =
+                            Some(SocketSelection::Path(PathBuf::from(value(&mut arguments)?)));
+                        break;
+                    }
+                    'T' => {
+                        let _ = value(&mut arguments)?;
+                        break;
+                    }
+                    'V' => {
+                        return Ok(ApplicationArguments {
+                            socket_path: default_path,
+                            socket_overridden: false,
+                            host: None,
+                            remaining: Vec::new(),
+                            mux_config_files: Vec::new(),
+                            no_start_server: false,
+                            shell_command: None,
+                            login_shell: false,
+                            early_output: Some(TMUX_VERSION_OUTPUT),
+                        });
+                    }
+                    _ => {
+                        return Err(ApplicationArgumentError::Raw(format!(
+                            "zz: unknown option -- {option}\n{TMUX_USAGE}"
+                        )));
+                    }
+                }
+            }
         } else {
+            parsing_tmux_options = false;
             remaining.push(argument);
         }
     }
-    if socket_overridden && host.is_some() {
-        return Err("--host cannot be used together with --socket".to_owned());
+    if shell_command.is_some() && !remaining.is_empty() {
+        return Err(ApplicationArgumentError::Usage);
     }
+    if foreground_server && !remaining.is_empty() {
+        return Err(ApplicationArgumentError::Usage);
+    }
+    if control_mode {
+        return Err(ApplicationArgumentError::Message(
+            "-C and -CC control mode are not supported".to_owned(),
+        ));
+    }
+    if foreground_server {
+        return Err(ApplicationArgumentError::Message(
+            "-D foreground server mode is not supported; use `zz daemon`".to_owned(),
+        ));
+    }
+    let socket_overridden = socket_selection.is_some();
+    if socket_overridden && host.is_some() {
+        return Err(ApplicationArgumentError::Message(
+            "--host cannot be used together with a socket selector".to_owned(),
+        ));
+    }
+    let socket_path = match socket_selection {
+        Some(SocketSelection::Path(path)) => path,
+        Some(SocketSelection::Label(label)) => {
+            tmux_label_socket_path(&label, std::env::var_os("TMUX_TMPDIR").as_deref())
+                .map_err(ApplicationArgumentError::Raw)?
+        }
+        None => default_path,
+    };
     Ok(ApplicationArguments {
         socket_path,
         socket_overridden,
         host,
         remaining,
+        mux_config_files,
+        no_start_server,
+        shell_command,
+        login_shell,
+        early_output: None,
     })
+}
+
+#[cfg(not(target_os = "ios"))]
+fn inherited_socket_path(
+    default_path: PathBuf,
+    zz_socket_is_set: bool,
+    tmux: Option<&std::ffi::OsStr>,
+) -> PathBuf {
+    if zz_socket_is_set {
+        return default_path;
+    }
+    tmux_environment_socket_path(tmux).unwrap_or(default_path)
+}
+
+#[cfg(all(not(target_os = "ios"), unix))]
+fn tmux_environment_socket_path(tmux: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
+
+    let value = tmux?.as_bytes();
+    if value.is_empty() || value[0] == b',' {
+        return None;
+    }
+    let end = value
+        .iter()
+        .position(|byte| *byte == b',')
+        .unwrap_or(value.len());
+    Some(PathBuf::from(std::ffi::OsString::from_vec(
+        value[..end].to_vec(),
+    )))
+}
+
+#[cfg(all(not(target_os = "ios"), not(unix)))]
+fn tmux_environment_socket_path(tmux: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    let value = tmux?.to_string_lossy();
+    if value.is_empty() || value.starts_with(',') {
+        return None;
+    }
+    Some(PathBuf::from(value.split(',').next()?))
+}
+
+#[cfg(not(target_os = "ios"))]
+#[cfg(unix)]
+fn tmux_label_socket_path(
+    label: &str,
+    tmux_tmpdir: Option<&std::ffi::OsStr>,
+) -> Result<PathBuf, String> {
+    use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
+
+    let root = tmux_socket_root(tmux_tmpdir).ok_or_else(|| "no suitable socket path".to_owned())?;
+    let uid = rustix::process::getuid().as_raw();
+    let base = root.join(format!("tmux-{uid}"));
+    let mut builder = std::fs::DirBuilder::new();
+    builder.mode(0o700);
+    if let Err(error) = builder.create(&base)
+        && error.kind() != ErrorKind::AlreadyExists
+    {
+        return Err(format!(
+            "couldn't create directory {} ({error})",
+            base.display()
+        ));
+    }
+    let metadata = std::fs::symlink_metadata(&base)
+        .map_err(|error| format!("couldn't read directory {} ({error})", base.display()))?;
+    if !metadata.file_type().is_dir() {
+        return Err(format!("{} is not a directory", base.display()));
+    }
+    if metadata.uid() != uid || metadata.mode() & 0o007 != 0 {
+        return Err(format!(
+            "directory {} has unsafe permissions",
+            base.display()
+        ));
+    }
+    Ok(base.join(label))
+}
+
+#[cfg(not(target_os = "ios"))]
+#[cfg(unix)]
+fn tmux_socket_root(tmux_tmpdir: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    tmux_tmpdir
+        .filter(|path| !path.is_empty())
+        .and_then(|path| std::fs::canonicalize(Path::new(path)).ok())
+        .or_else(|| std::fs::canonicalize("/tmp").ok())
+}
+
+#[cfg(not(target_os = "ios"))]
+#[cfg(not(unix))]
+fn tmux_label_socket_path(
+    label: &str,
+    tmux_tmpdir: Option<&std::ffi::OsStr>,
+) -> Result<PathBuf, String> {
+    let root = tmux_tmpdir
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let base = root.join("tmux-0");
+    std::fs::create_dir_all(&base)
+        .map_err(|error| format!("couldn't create directory {} ({error})", base.display()))?;
+    Ok(base.join(label))
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -310,7 +594,21 @@ fn run_command_mode(
     socket_path: &Path,
     socket_overridden: bool,
     host: Option<&str>,
+    mux_config_files: &[PathBuf],
+    no_start_server: bool,
+    shell_command: Option<&str>,
+    login_shell: bool,
 ) -> Option<ExitCode> {
+    if let Some(shell_command) = shell_command {
+        return Some(run_tmux_shell_command(
+            socket_path,
+            host,
+            mux_config_files,
+            no_start_server,
+            shell_command,
+            login_shell,
+        ));
+    }
     let mut args = arguments.into_iter();
     let Some(command) = args.next() else {
         if host.is_some() {
@@ -344,7 +642,9 @@ fn run_command_mode(
     }
 
     if command == "daemon" {
-        return Some(match Daemon::new(socket_path).run_foreground() {
+        let daemon =
+            Daemon::new(socket_path).with_mux_config_files(mux_config_files.iter().cloned());
+        return Some(match daemon.run_foreground() {
             Ok(()) | Err(DaemonError::AlreadyRunning(_)) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("zz daemon: {error}");
@@ -441,7 +741,10 @@ fn run_command_mode(
     }
 
     let mut client = match host.map_or_else(
-        || connect_command_client(socket_path).map_err(format_local_daemon_error),
+        || {
+            connect_command_client(socket_path, mux_config_files, no_start_server)
+                .map_err(format_local_daemon_error)
+        },
         connect_host_command_client,
     ) {
         Ok(client) => client,
@@ -477,6 +780,72 @@ fn run_command_mode(
 }
 
 #[cfg(not(target_os = "ios"))]
+fn run_tmux_shell_command(
+    socket_path: &Path,
+    host: Option<&str>,
+    mux_config_files: &[PathBuf],
+    no_start_server: bool,
+    shell_command: &str,
+    login_shell: bool,
+) -> ExitCode {
+    let mut client = match host.map_or_else(
+        || {
+            connect_command_client(socket_path, mux_config_files, no_start_server)
+                .map_err(format_local_daemon_error)
+        },
+        connect_host_command_client,
+    ) {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("zz: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let shell = match client.execute(CommandInvocation::new(
+        "show-options",
+        ["-gqv", "default-shell"],
+    )) {
+        Ok(shell) => shell.trim_end_matches('\n').to_owned(),
+        Err(error) => {
+            eprintln!("{}", command_error_message(&error));
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut process = Command::new(&shell);
+    #[cfg(unix)]
+    {
+        use std::{ffi::OsString, os::unix::process::CommandExt as _};
+
+        let name = Path::new(&shell)
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new(&shell));
+        let mut argv0 = OsString::new();
+        if login_shell {
+            argv0.push("-");
+        }
+        argv0.push(name);
+        process.arg0(argv0);
+    }
+    #[cfg(not(unix))]
+    let _ = login_shell;
+    match process
+        .arg("-c")
+        .arg(shell_command)
+        .env("SHELL", &shell)
+        .status()
+    {
+        Ok(status) => status
+            .code()
+            .and_then(|code| u8::try_from(code).ok())
+            .map_or(ExitCode::FAILURE, ExitCode::from),
+        Err(error) => {
+            eprintln!("zz: could not run {shell}: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
 fn read_stdin_payload() -> Result<String, String> {
     use std::io::Read as _;
 
@@ -499,7 +868,7 @@ fn is_kill_server_command(command: &str) -> bool {
 
 #[cfg(not(target_os = "ios"))]
 fn is_version_command(command: &str) -> bool {
-    matches!(command, "--version" | "-V")
+    command == "--version"
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -596,13 +965,18 @@ fn daemon_is_missing(error: &DaemonError) -> bool {
 }
 
 #[cfg(not(target_os = "ios"))]
-fn spawn_daemon(path: &Path, color_scheme: Option<TerminalColorScheme>) -> Result<(), DaemonError> {
+fn spawn_daemon(
+    path: &Path,
+    color_scheme: Option<TerminalColorScheme>,
+    mux_config_files: &[PathBuf],
+) -> Result<(), DaemonError> {
     let executable = std::env::current_exe()?;
     let mut command = Command::new(executable);
-    command
-        .arg(diagnostics::SOCKET_ARGUMENT)
-        .arg(path)
-        .arg("daemon");
+    command.arg(diagnostics::SOCKET_ARGUMENT).arg(path);
+    for config in mux_config_files {
+        command.arg("-f").arg(config);
+    }
+    command.arg("daemon");
     if let Some(color_scheme) = color_scheme {
         command.env("ZZ_COLOR_SCHEME", color_scheme.as_str());
     }
@@ -648,6 +1022,7 @@ fn detach_daemon_session(command: &mut Command) {
 fn connect_or_spawn_daemon<T>(
     path: &Path,
     color_scheme: Option<TerminalColorScheme>,
+    mux_config_files: &[PathBuf],
     connect: impl Fn() -> Result<T, DaemonError>,
     server_hello: impl for<'a> Fn(&'a T) -> &'a ServerHello,
 ) -> Result<T, DaemonError> {
@@ -671,7 +1046,7 @@ fn connect_or_spawn_daemon<T>(
         },
     }
 
-    spawn_daemon(path, color_scheme)?;
+    spawn_daemon(path, color_scheme, mux_config_files)?;
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         match connect() {
@@ -685,10 +1060,18 @@ fn connect_or_spawn_daemon<T>(
 }
 
 #[cfg(not(target_os = "ios"))]
-fn connect_command_client(path: &Path) -> Result<CommandClient, DaemonError> {
+fn connect_command_client(
+    path: &Path,
+    mux_config_files: &[PathBuf],
+    no_start_server: bool,
+) -> Result<CommandClient, DaemonError> {
+    if no_start_server {
+        return CommandClient::connect(path);
+    }
     connect_or_spawn_daemon(
         path,
         None,
+        mux_config_files,
         || CommandClient::connect(path),
         CommandClient::server_hello,
     )
@@ -1064,6 +1447,7 @@ fn connect_interactive_client(
     connect_or_spawn_daemon(
         path,
         Some(color_scheme),
+        &[],
         || InteractiveClient::connect_with_color_scheme(path, color_scheme),
         InteractiveClient::server_hello,
     )
@@ -1143,9 +1527,12 @@ mod tests {
     use zz_terminal::TerminalColorScheme;
 
     use super::{
-        application_arguments, command_error_message, daemon_is_missing, is_kill_server_command,
+        ApplicationArgumentError, TMUX_USAGE, TMUX_VERSION_OUTPUT, application_arguments,
+        command_error_message, daemon_is_missing, inherited_socket_path, is_kill_server_command,
         protocol_version_output, terminal_color_scheme,
     };
+    #[cfg(unix)]
+    use super::{tmux_label_socket_path, tmux_socket_root};
     use zz_daemon::DaemonError;
 
     #[test]
@@ -1248,6 +1635,191 @@ mod tests {
         assert_eq!(parsed.socket_path, PathBuf::from("/tmp/daemon.sock"));
         assert_eq!(parsed.host, None);
         assert_eq!(parsed.remaining, ["daemon"]);
+    }
+
+    #[test]
+    fn tmux_environment_supplies_the_socket_without_a_zz_override() {
+        let default = PathBuf::from("default.sock");
+        let tmux = std::ffi::OsStr::new("tmux.sock,123,4");
+        assert_eq!(
+            inherited_socket_path(default.clone(), false, Some(tmux)),
+            PathBuf::from("tmux.sock")
+        );
+        assert_eq!(
+            inherited_socket_path(default.clone(), true, Some(tmux)),
+            default
+        );
+        assert_eq!(
+            inherited_socket_path(default.clone(), false, Some(std::ffi::OsStr::new(",123,4"))),
+            default
+        );
+        assert_eq!(inherited_socket_path(default.clone(), false, None), default);
+    }
+
+    #[test]
+    fn tmux_version_and_help_are_exact_early_outputs() {
+        let version = application_arguments(
+            ["-2uV".to_owned(), "ignored".to_owned()],
+            PathBuf::from("/tmp/default.sock"),
+        )
+        .unwrap();
+        assert_eq!(version.early_output, Some(TMUX_VERSION_OUTPUT));
+
+        let help = application_arguments(
+            ["-vh".to_owned(), "ignored".to_owned()],
+            PathBuf::from("/tmp/default.sock"),
+        )
+        .unwrap();
+        assert_eq!(help.early_output, Some(TMUX_USAGE));
+    }
+
+    #[test]
+    fn tmux_flags_compose_before_the_command_word() {
+        let parsed = application_arguments(
+            [
+                "-2u".to_owned(),
+                "-lN".to_owned(),
+                "-f".to_owned(),
+                "/tmp/first.conf".to_owned(),
+                "-f/tmp/second.conf".to_owned(),
+                "-S/tmp/tmux.sock".to_owned(),
+                "new-session".to_owned(),
+                "-d".to_owned(),
+                "-f".to_owned(),
+                "pane-command".to_owned(),
+            ],
+            PathBuf::from("/tmp/default.sock"),
+        )
+        .unwrap();
+        assert_eq!(parsed.socket_path, PathBuf::from("/tmp/tmux.sock"));
+        assert!(parsed.socket_overridden);
+        assert!(parsed.no_start_server);
+        assert!(parsed.login_shell);
+        assert_eq!(
+            parsed.mux_config_files,
+            [
+                PathBuf::from("/tmp/first.conf"),
+                PathBuf::from("/tmp/second.conf")
+            ]
+        );
+        assert_eq!(
+            parsed.remaining,
+            ["new-session", "-d", "-f", "pane-command"]
+        );
+    }
+
+    #[test]
+    fn the_last_zz_or_tmux_socket_selector_wins() {
+        let parsed = application_arguments(
+            [
+                "-S".to_owned(),
+                "/tmp/tmux.sock".to_owned(),
+                "--socket=/tmp/zz.sock".to_owned(),
+                "list-sessions".to_owned(),
+            ],
+            PathBuf::from("/tmp/default.sock"),
+        )
+        .unwrap();
+        assert_eq!(parsed.socket_path, PathBuf::from("/tmp/zz.sock"));
+
+        let parsed = application_arguments(
+            [
+                "--socket".to_owned(),
+                "/tmp/zz.sock".to_owned(),
+                "-S/tmp/tmux.sock".to_owned(),
+                "list-sessions".to_owned(),
+            ],
+            PathBuf::from("/tmp/default.sock"),
+        )
+        .unwrap();
+        assert_eq!(parsed.socket_path, PathBuf::from("/tmp/tmux.sock"));
+    }
+
+    #[test]
+    fn tmux_shell_command_is_exclusive_and_preserves_login_mode() {
+        let parsed = application_arguments(
+            ["-lc".to_owned(), "printf ok".to_owned()],
+            PathBuf::from("/tmp/default.sock"),
+        )
+        .unwrap();
+        assert_eq!(parsed.shell_command.as_deref(), Some("printf ok"));
+        assert!(parsed.login_shell);
+        assert!(parsed.remaining.is_empty());
+
+        assert_eq!(
+            application_arguments(
+                ["-cprintf ok".to_owned(), "list-sessions".to_owned()],
+                PathBuf::from("/tmp/default.sock")
+            ),
+            Err(ApplicationArgumentError::Usage)
+        );
+    }
+
+    #[test]
+    fn unsupported_and_unknown_tmux_flags_fail_loudly() {
+        for flag in ["-8", "-d", "-U", "-x"] {
+            let expected = format!("zz: unknown option -- {}\n{TMUX_USAGE}", &flag[1..2]);
+            assert!(
+                matches!(
+                    application_arguments([flag.to_owned()], PathBuf::from("/tmp/default.sock")),
+                    Err(ApplicationArgumentError::Raw(message)) if message == expected
+                ),
+                "{flag}"
+            );
+        }
+        assert_eq!(
+            application_arguments(["--unknown".to_owned()], PathBuf::from("/tmp/default.sock")),
+            Err(ApplicationArgumentError::Usage)
+        );
+        assert!(matches!(
+            application_arguments(["-L".to_owned()], PathBuf::from("/tmp/default.sock")),
+            Err(ApplicationArgumentError::Raw(message))
+                if message == format!("zz: option requires an argument -- L\n{TMUX_USAGE}")
+        ));
+        for flag in ["-C", "-CC"] {
+            assert!(matches!(
+                application_arguments([flag.to_owned()], PathBuf::from("/tmp/default.sock")),
+                Err(ApplicationArgumentError::Message(message))
+                    if message == "-C and -CC control mode are not supported"
+            ));
+        }
+        assert!(matches!(
+            application_arguments(["-D".to_owned()], PathBuf::from("/tmp/default.sock")),
+            Err(ApplicationArgumentError::Message(message))
+                if message == "-D foreground server mode is not supported; use `zz daemon`"
+        ));
+        assert_eq!(
+            application_arguments(
+                ["-D".to_owned(), "list-sessions".to_owned()],
+                PathBuf::from("/tmp/default.sock")
+            ),
+            Err(ApplicationArgumentError::Usage)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tmux_label_uses_tmpdir_then_the_tmp_fallback() {
+        use std::os::unix::fs::MetadataExt as _;
+
+        let directory = tempfile::tempdir().expect("temporary TMUX_TMPDIR");
+        let root = std::fs::canonicalize(directory.path()).expect("canonical TMUX_TMPDIR");
+        assert_eq!(
+            tmux_socket_root(Some(directory.path().as_os_str())),
+            Some(root.clone())
+        );
+        assert_eq!(
+            tmux_socket_root(Some(directory.path().join("missing").as_os_str())),
+            std::fs::canonicalize("/tmp").ok()
+        );
+        assert_eq!(tmux_socket_root(None), std::fs::canonicalize("/tmp").ok());
+
+        let uid = rustix::process::getuid().as_raw();
+        let path = tmux_label_socket_path("work", Some(directory.path().as_os_str())).unwrap();
+        assert_eq!(path, root.join(format!("tmux-{uid}/work")));
+        let metadata = std::fs::symlink_metadata(path.parent().unwrap()).unwrap();
+        assert_eq!(metadata.uid(), uid);
+        assert_eq!(metadata.mode() & 0o007, 0);
     }
 
     #[test]

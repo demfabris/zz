@@ -287,6 +287,11 @@ fn terminal_environment_for_session(
     Ok(environment)
 }
 
+fn tmux_environment(socket_path: &Path, session: Option<SessionId>) -> String {
+    let session = session.map_or_else(|| "-1".to_owned(), |session| session.0.to_string());
+    format!("{},{},{session}", socket_path.display(), std::process::id())
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
     let process_id = terminal.foreground_process_id().filter(|pid| *pid != 0)?;
@@ -450,6 +455,7 @@ fn partition_config_overrides(
 pub struct Daemon {
     socket_path: PathBuf,
     load_user_config: bool,
+    mux_config_files: Option<Vec<PathBuf>>,
 }
 
 impl Daemon {
@@ -458,7 +464,15 @@ impl Daemon {
         Self {
             socket_path: socket_path.into(),
             load_user_config: true,
+            mux_config_files: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_mux_config_files(mut self, files: impl IntoIterator<Item = PathBuf>) -> Self {
+        let files = files.into_iter().collect::<Vec<_>>();
+        self.mux_config_files = (!files.is_empty()).then_some(files);
+        self
     }
 
     /// Skip the user's `zz/mux.conf`, for hermetic embedding and tests.
@@ -503,7 +517,10 @@ impl Daemon {
             paste_upload_directory(&self.socket_path),
             self.socket_path.clone(),
         ));
-        shared.initialize(self.load_user_config)?;
+        shared.initialize_with_mux_config_files(
+            self.load_user_config,
+            self.mux_config_files.as_deref(),
+        )?;
         shared.start_diagnostic_sampler()?;
         shared.start_status_sampler()?;
         shared.log_diagnostic_snapshot("startup");
@@ -2290,15 +2307,26 @@ impl Shared {
         Self::with_appearance(server_id, Arc::new(TerminalAppearance::default()))
     }
 
+    #[cfg(test)]
     fn initialize(self: &Arc<Self>, load_user_config: bool) -> Result<(), DaemonError> {
+        self.initialize_with_mux_config_files(load_user_config, None)
+    }
+
+    fn initialize_with_mux_config_files(
+        self: &Arc<Self>,
+        load_user_config: bool,
+        mux_config_files: Option<&[PathBuf]>,
+    ) -> Result<(), DaemonError> {
         self.start_display_panes_deadline_dispatcher()?;
         let mut context = ExecutionContext::default();
-        if let Some(config) = load_user_config
-            .then(default_mux_config)
-            .flatten()
-            .filter(|path| path.is_file())
-        {
-            self.load_config_file(&config, &mut context, 0)?;
+        if load_user_config {
+            if let Some(configs) = mux_config_files {
+                for config in configs {
+                    self.load_config_file(config, &mut context, 0)?;
+                }
+            } else if let Some(config) = default_mux_config().filter(|path| path.is_file()) {
+                self.load_config_file(&config, &mut context, 0)?;
+            }
         }
         self.apply_stored_mux_config_overrides("startup-mux-replay");
         // Building the runtime is what warms the adapter cache, so a daemon
@@ -3302,6 +3330,11 @@ impl Shared {
                                 Some(self.socket_path.display().to_string()),
                             ),
                             ("ZZ_SESSION".to_owned(), Some(pane_session.to_string())),
+                            (
+                                "TMUX".to_owned(),
+                                Some(tmux_environment(&self.socket_path, Some(pane_session))),
+                            ),
+                            ("TMUX_PANE".to_owned(), Some(pane.to_string())),
                         ]);
                         if let Some(path) = &working_directory {
                             env.push(("PWD".to_owned(), Some(path.to_string_lossy().into_owned())));
@@ -3418,12 +3451,17 @@ impl Shared {
                                 Some(self.socket_path.display().to_string()),
                             ),
                             ("ZZ_SESSION".to_owned(), Some(pane_session.to_string())),
+                            (
+                                "TMUX".to_owned(),
+                                Some(tmux_environment(&self.socket_path, Some(pane_session))),
+                            ),
                         ]);
                         env.extend(
                             environment
                                 .iter()
                                 .map(|(name, value)| (name.clone(), Some(value.clone()))),
                         );
+                        env.push(("TMUX_PANE".to_owned(), Some(pane.to_string())));
                         if let Some(path) = &working_directory {
                             env.push(("PWD".to_owned(), Some(path.to_string_lossy().into_owned())));
                         }
@@ -4680,7 +4718,7 @@ impl Shared {
         args: &[String],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_run_shell_args(args)?;
-        let (target, command_context, command, cwd) = {
+        let (target, command_context, command, cwd, tmux) = {
             let mut inner = self.inner.lock();
             let target = parsed
                 .target
@@ -4746,7 +4784,8 @@ impl Shared {
                 }
             });
             let cwd = job_working_directory(&inner, &command_context, parsed.cwd.as_deref());
-            (target, command_context, command, cwd)
+            let tmux = tmux_environment(&self.socket_path, command_context.session);
+            (target, command_context, command, cwd, tmux)
         };
 
         if matches!(&command, Some(InsertedCommandSource::Block(_))) && !parsed.command_mode {
@@ -4842,6 +4881,7 @@ impl Shared {
                     if let Err(error) = self.spawn_shell_job(
                         command,
                         cwd,
+                        tmux,
                         parsed.show_stderr,
                         delay,
                         move |result| {
@@ -4876,6 +4916,7 @@ impl Shared {
                     self.spawn_shell_job(
                         command.clone(),
                         cwd,
+                        tmux,
                         parsed.show_stderr,
                         delay,
                         move |result| {
@@ -4904,7 +4945,7 @@ impl Shared {
         args: &[String],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_if_shell_args(args)?;
-        let (condition, command_context, cwd) = {
+        let (condition, command_context, cwd, tmux) = {
             let mut inner = self.inner.lock();
             let target = parsed.target.as_deref().and_then(|target| {
                 inner
@@ -4930,7 +4971,8 @@ impl Shared {
             let condition =
                 expand_format_values(&parsed.positional[0], &format_context, &mut hooks);
             let cwd = job_working_directory(&inner, &command_context, None);
-            (condition, command_context, cwd)
+            let tmux = tmux_environment(&self.socket_path, command_context.session);
+            (condition, command_context, cwd, tmux)
         };
 
         if parsed.format {
@@ -4956,7 +4998,7 @@ impl Shared {
             let shared = Arc::clone(self);
             let branches = parsed.positional;
             let condition_for_error = condition.clone();
-            self.spawn_shell_job(condition, cwd, false, Duration::ZERO, move |result| {
+            self.spawn_shell_job(condition, cwd, tmux, false, Duration::ZERO, move |result| {
                 if let Ok(result) = result {
                     let Some(branch) = select_if_shell_branch(&branches, result.status.success())
                     else {
@@ -5009,7 +5051,7 @@ impl Shared {
 
         let (sender, receiver) = mpsc::sync_channel(1);
         let failed_condition = condition.clone();
-        self.spawn_shell_job(condition, cwd, false, Duration::ZERO, move |result| {
+        self.spawn_shell_job(condition, cwd, tmux, false, Duration::ZERO, move |result| {
             let _ = sender.send(result);
         })?;
         let result = receiver
@@ -5221,6 +5263,7 @@ impl Shared {
         self: &Arc<Self>,
         command: String,
         cwd: PathBuf,
+        tmux: String,
         show_stderr: bool,
         delay: Duration,
         callback: impl FnOnce(Result<ShellJobResult, ()>) + Send + 'static,
@@ -5236,6 +5279,7 @@ impl Shared {
                 let result = run_shell_job(
                     &command,
                     &cwd,
+                    &tmux,
                     show_stderr,
                     &permit.process,
                     &permit.shared.stopping,
@@ -10245,6 +10289,8 @@ impl Shared {
                 pane: None,
                 session: None,
                 socket: Some(self.socket_path.display().to_string()),
+                tmux: None,
+                tmux_pane: None,
             },
         }
     }
@@ -10296,7 +10342,7 @@ impl Shared {
             .engine
             .state
             .window_for_pane(pane)
-            .map(|window| inner.engine.state.windows[&window].session.to_string());
+            .map(|window| inner.engine.state.windows[&window].session);
         Some(AgentPaneSpec {
             provider: descriptor.provider,
             cwd: descriptor
@@ -10307,8 +10353,10 @@ impl Shared {
             resume_session: descriptor.session_id.clone(),
             workspace: AgentWorkspaceEnvironment {
                 pane: Some(pane.to_string()),
-                session,
+                session: session.map(|session| session.to_string()),
                 socket: None,
+                tmux: session.map(|session| tmux_environment(&self.socket_path, Some(session))),
+                tmux_pane: Some(pane.to_string()),
             },
         })
     }
@@ -12663,6 +12711,7 @@ struct ShellJobResult {
 fn run_shell_job(
     command: &str,
     cwd: &Path,
+    tmux: &str,
     show_stderr: bool,
     job_process: &Mutex<Option<Child>>,
     stopping: &AtomicBool,
@@ -12682,6 +12731,8 @@ fn run_shell_job(
         .process_group(0)
         .current_dir(&cwd)
         .env("PWD", cwd.as_os_str())
+        .env("TMUX", tmux)
+        .env_remove("TMUX_PANE")
         .stdin(Stdio::from(stdin))
         .stdout(Stdio::from(stdout));
     if show_stderr {
@@ -12710,6 +12761,7 @@ fn run_shell_job(
 fn run_shell_job(
     command: &str,
     cwd: &Path,
+    tmux: &str,
     show_stderr: bool,
     job_process: &Mutex<Option<Child>>,
     stopping: &AtomicBool,
@@ -12719,6 +12771,8 @@ fn run_shell_job(
     process
         .current_dir(&cwd)
         .env("PWD", cwd.as_os_str())
+        .env("TMUX", tmux)
+        .env_remove("TMUX_PANE")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(if show_stderr {
@@ -15102,6 +15156,43 @@ mod tests {
                 .output,
             "PHASE4D_BOOT=seeded"
         );
+    }
+
+    #[test]
+    fn tmux_environment_uses_socket_pid_and_numeric_session() {
+        let socket = Path::new("/tmp/zz-tmux-environment.sock");
+        assert_eq!(
+            tmux_environment(socket, Some(SessionId(42))),
+            format!("/tmp/zz-tmux-environment.sock,{},42", std::process::id())
+        );
+        assert_eq!(
+            tmux_environment(socket, None),
+            format!("/tmp/zz-tmux-environment.sock,{},-1", std::process::id())
+        );
+    }
+
+    #[test]
+    fn explicit_boot_configs_replace_default_discovery_and_load_in_order() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let first = directory.path().join("first.conf");
+        let second = directory.path().join("second.conf");
+        fs::write(&first, "set -g prefix C-a\n").expect("first config");
+        fs::write(&second, "set -g prefix C-x\n").expect("second config");
+        let configs = [first, second];
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .initialize_with_mux_config_files(true, Some(&configs))
+            .expect("initialize explicit configs");
+        let output = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("show-options", ["-gqv", "prefix"]),
+            )
+            .expect("show boot option")
+            .output;
+        assert_eq!(output, "C-x");
     }
 
     #[cfg(unix)]
@@ -18394,6 +18485,81 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn shell_jobs_receive_tmux_without_tmux_pane() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        let socket = shared.socket_path.display().to_string();
+        let pid = std::process::id();
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["printf '%s|%s' \"$TMUX\" \"${TMUX_PANE-unset}\""],
+                ),
+            )
+            .expect("sessionless shell job");
+        assert_eq!(output.output, format!("{socket},{pid},-1|unset"));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "tmux-job-environment", "--", "sleep", "30"],
+                ),
+            )
+            .expect("job target session");
+        let session = context.session.expect("job session");
+        let expected = format!("{socket},{pid},{}", session.0);
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["printf '%s|%s' \"$TMUX\" \"${TMUX_PANE-unset}\""],
+                ),
+            )
+            .expect("session shell job");
+        assert_eq!(output.output, format!("{expected}|unset"));
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "if-shell",
+                    [
+                        format!("test \"$TMUX\" = '{expected}' && test -z \"${{TMUX_PANE+x}}\""),
+                        "display-message -p yes".to_owned(),
+                        "display-message -p no".to_owned(),
+                    ],
+                ),
+            )
+            .expect("if-shell environment");
+        assert_eq!(output.output, "yes");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-session", ["-t", "tmux-job-environment"]),
+            )
+            .expect("remove job session");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn foreground_run_shell_captures_output_status_and_numeric_arguments() {
         let shared = Arc::new(Shared::new(1));
         let client = ClientId(7);
@@ -19696,10 +19862,18 @@ mod tests {
             )
             .expect("session");
         let pane = context.pane.expect("terminal pane");
+        let session = context.session.expect("terminal session");
+        let expected_tmux = tmux_environment(&shared.socket_path, Some(session));
         assert_eq!(
             shared.inner.lock().terminal_spawns[&pane].terminal_type,
             Some("tmux-256color".to_owned())
         );
+        {
+            let inner = shared.inner.lock();
+            let environment = &inner.terminal_spawns[&pane].env;
+            assert!(environment.contains(&("TMUX".to_owned(), Some(expected_tmux.clone()))));
+            assert!(environment.contains(&("TMUX_PANE".to_owned(), Some(pane.to_string()))));
+        }
         shared
             .execute(
                 ClientId(7),
@@ -19708,7 +19882,7 @@ mod tests {
                 &CommandInvocation::new(
                     "set-buffer",
                     [
-                        "printf 'PHASE4D_SEEDED=[%s] DISPLAY=[%s] HP=[%s] TERM=[%s]\\n' \"$PHASE4D_SEEDED\" \"${DISPLAY-unset}\" \"${HIDDENPROBE-}\" \"$TERM\"\n",
+                        "printf 'PHASE4D_SEEDED=[%s] DISPLAY=[%s] HP=[%s] TERM=[%s]\\n' \"$PHASE4D_SEEDED\" \"${DISPLAY-unset}\" \"${HIDDENPROBE-}\" \"$TERM\"; printf 'TMUX=[%s]\\nTMUX_PANE=[%s]\\n' \"$TMUX\" \"$TMUX_PANE\"\n",
                     ],
                 ),
             )
@@ -19735,6 +19909,8 @@ mod tests {
                 .output;
             if captured
                 .contains("PHASE4D_SEEDED=[daemon] DISPLAY=[unset] HP=[] TERM=[tmux-256color]")
+                && captured.contains(&format!("TMUX=[{expected_tmux}]"))
+                && captured.contains(&format!("TMUX_PANE=[{pane}]"))
             {
                 break;
             }
@@ -19744,6 +19920,18 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(10));
         }
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("respawn-pane", ["-k", "-t", &pane.to_string()]),
+            )
+            .expect("respawn terminal pane");
+        let inner = shared.inner.lock();
+        let environment = &inner.terminal_spawns[&pane].env;
+        assert!(environment.contains(&("TMUX".to_owned(), Some(expected_tmux))));
+        assert!(environment.contains(&("TMUX_PANE".to_owned(), Some(pane.to_string()))));
     }
 
     fn paste_upload_fixture(

@@ -79,6 +79,8 @@ pub(crate) struct AgentWorkspaceEnvironment {
     pub(crate) pane: Option<String>,
     pub(crate) session: Option<String>,
     pub(crate) socket: Option<String>,
+    pub(crate) tmux: Option<String>,
+    pub(crate) tmux_pane: Option<String>,
 }
 
 impl AgentWorkspaceEnvironment {
@@ -91,6 +93,12 @@ impl AgentWorkspaceEnvironment {
         if pane.session.is_some() {
             self.session.clone_from(&pane.session);
         }
+        if pane.tmux.is_some() {
+            self.tmux.clone_from(&pane.tmux);
+        }
+        if pane.tmux_pane.is_some() {
+            self.tmux_pane.clone_from(&pane.tmux_pane);
+        }
     }
 
     fn entries(&self) -> impl Iterator<Item = (&'static str, &str)> {
@@ -98,6 +106,8 @@ impl AgentWorkspaceEnvironment {
             ("ZZ_PANE", self.pane.as_deref()),
             ("ZZ_SESSION", self.session.as_deref()),
             ("ZZ_SOCKET", self.socket.as_deref()),
+            ("TMUX", self.tmux.as_deref()),
+            ("TMUX_PANE", self.tmux_pane.as_deref()),
         ]
         .into_iter()
         .filter_map(|(name, value)| value.map(|value| (name, value)))
@@ -588,15 +598,21 @@ mod workspace_tests {
             pane: None,
             session: None,
             socket: Some("/tmp/zz.sock".to_owned()),
+            tmux: None,
+            tmux_pane: None,
         };
         config.adopt_pane_identity(&AgentWorkspaceEnvironment {
             pane: Some("%4".to_owned()),
             session: Some("work".to_owned()),
             socket: None,
+            tmux: Some("/tmp/zz.sock,99,4".to_owned()),
+            tmux_pane: Some("%4".to_owned()),
         });
         assert_eq!(config.pane.as_deref(), Some("%4"));
         assert_eq!(config.session.as_deref(), Some("work"));
         assert_eq!(config.socket.as_deref(), Some("/tmp/zz.sock"));
+        assert_eq!(config.tmux.as_deref(), Some("/tmp/zz.sock,99,4"));
+        assert_eq!(config.tmux_pane.as_deref(), Some("%4"));
 
         config.adopt_pane_identity(&AgentWorkspaceEnvironment::default());
         assert_eq!(config.pane.as_deref(), Some("%4"));
@@ -608,6 +624,8 @@ mod workspace_tests {
             pane: Some("%4".to_owned()),
             session: Some("work".to_owned()),
             socket: Some("/tmp/zz/default.sock".to_owned()),
+            tmux: Some("/tmp/zz/default.sock,99,4".to_owned()),
+            tmux_pane: Some("%4".to_owned()),
         }
     }
 
@@ -628,6 +646,8 @@ mod workspace_tests {
         assert!(environment.contains(&("ZZ_PANE".to_owned(), "%4".to_owned())));
         assert!(environment.contains(&("ZZ_SESSION".to_owned(), "work".to_owned())));
         assert!(environment.contains(&("ZZ_SOCKET".to_owned(), "/tmp/zz/default.sock".to_owned())));
+        assert!(environment.contains(&("TMUX".to_owned(), "/tmp/zz/default.sock,99,4".to_owned())));
+        assert!(environment.contains(&("TMUX_PANE".to_owned(), "%4".to_owned())));
     }
 
     #[test]

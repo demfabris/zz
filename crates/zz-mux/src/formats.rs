@@ -2176,8 +2176,8 @@ fn pad_value(value: &str, width: isize) -> String {
     }
 }
 
-#[derive(Clone, Copy)]
-enum TmuxColour {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TmuxColour {
     Basic(u8),
     Indexed(u8),
     Rgb(u32),
@@ -2200,7 +2200,7 @@ fn format_colour(value: &str, flags: &str) -> String {
         .map_or_else(String::new, |colour| format!("{colour:06x}"))
 }
 
-fn parse_tmux_colour(value: &str) -> Option<TmuxColour> {
+pub fn parse_tmux_colour(value: &str) -> Option<TmuxColour> {
     if value.is_empty() || value.trim() != value || value.chars().any(char::is_whitespace) {
         return None;
     }
@@ -2299,7 +2299,7 @@ fn colour_escape(colour: TmuxColour, background: bool) -> Option<String> {
     })
 }
 
-fn indexed_colour_rgb(index: u8) -> u32 {
+pub fn indexed_colour_rgb(index: u8) -> u32 {
     const BASIC: [u32; 16] = [
         0x00_00_00, 0x80_00_00, 0x00_80_00, 0x80_80_00, 0x00_00_80, 0x80_00_80, 0x00_80_80,
         0xc0_c0_c0, 0x80_80_80, 0xff_00_00, 0x00_ff_00, 0xff_ff_00, 0x00_00_ff, 0xff_00_ff,

@@ -10,7 +10,7 @@ use zz_protocol::{
     CommandInvocation, CommandSpec, DAEMON_COMMAND_SPECS, DEFAULT_AGENT_AUTO_APPROVE,
     DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE,
     EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, PaneId,
-    PaneKindSnapshot, ServerError, SessionId, TerminalUiCommand, WindowId,
+    PaneKindSnapshot, PopupBorderLines, ServerError, SessionId, TerminalUiCommand, WindowId,
     normalize_browser_profile_name,
 };
 use zz_terminal::{
@@ -474,6 +474,12 @@ pub struct MuxEngine {
     global_remain_on_exit: RemainOnExit,
     window_remain_on_exit: BTreeMap<WindowId, RemainOnExit>,
     pane_remain_on_exit: BTreeMap<PaneId, RemainOnExit>,
+    global_popup_style: String,
+    session_popup_styles: BTreeMap<SessionId, String>,
+    global_popup_border_style: String,
+    session_popup_border_styles: BTreeMap<SessionId, String>,
+    global_popup_border_lines: PopupBorderLines,
+    window_popup_border_lines: BTreeMap<WindowId, PopupBorderLines>,
     global_default_command: String,
     session_default_commands: BTreeMap<SessionId, String>,
     global_default_shell: String,
@@ -533,6 +539,23 @@ pub struct AgentOptions {
     pub auto_approve: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PopupOptions {
+    pub style: String,
+    pub border_style: String,
+    pub border_lines: PopupBorderLines,
+}
+
+impl Default for PopupOptions {
+    fn default() -> Self {
+        Self {
+            style: "bg=themedarkgrey,fg=themewhite".to_owned(),
+            border_style: "bg=themedarkgrey,fg=themelightgrey".to_owned(),
+            border_lines: PopupBorderLines::Single,
+        }
+    }
+}
+
 impl Default for AgentOptions {
     fn default() -> Self {
         Self {
@@ -573,6 +596,12 @@ impl Default for MuxEngine {
             global_remain_on_exit: RemainOnExit::default(),
             window_remain_on_exit: BTreeMap::new(),
             pane_remain_on_exit: BTreeMap::new(),
+            global_popup_style: PopupOptions::default().style,
+            session_popup_styles: BTreeMap::new(),
+            global_popup_border_style: PopupOptions::default().border_style,
+            session_popup_border_styles: BTreeMap::new(),
+            global_popup_border_lines: PopupBorderLines::Single,
+            window_popup_border_lines: BTreeMap::new(),
             global_default_command: String::new(),
             session_default_commands: BTreeMap::new(),
             global_default_shell: DEFAULT_SHELL.to_owned(),
@@ -794,6 +823,32 @@ impl MuxEngine {
             .session_default_commands
             .get(&session)
             .map_or(self.global_default_command.as_str(), String::as_str))
+    }
+
+    pub fn popup_options_for_window(&self, window: WindowId) -> Result<PopupOptions, ServerError> {
+        let session = self
+            .state
+            .windows
+            .get(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?
+            .session;
+        Ok(PopupOptions {
+            style: self
+                .session_popup_styles
+                .get(&session)
+                .cloned()
+                .unwrap_or_else(|| self.global_popup_style.clone()),
+            border_style: self
+                .session_popup_border_styles
+                .get(&session)
+                .cloned()
+                .unwrap_or_else(|| self.global_popup_border_style.clone()),
+            border_lines: self
+                .window_popup_border_lines
+                .get(&window)
+                .copied()
+                .unwrap_or(self.global_popup_border_lines),
+        })
     }
 
     pub fn set_pane_start_command(
@@ -1482,6 +1537,10 @@ impl MuxEngine {
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_default_shells
             .retain(|session, _| self.state.sessions.contains_key(session));
+        self.session_popup_styles
+            .retain(|session, _| self.state.sessions.contains_key(session));
+        self.session_popup_border_styles
+            .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_user_options
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_hooks
@@ -1503,6 +1562,8 @@ impl MuxEngine {
         self.window_automatic_rename_formats
             .retain(|window, _| self.state.windows.contains_key(window));
         self.window_remain_on_exit
+            .retain(|window, _| self.state.windows.contains_key(window));
+        self.window_popup_border_lines
             .retain(|window, _| self.state.windows.contains_key(window));
         self.window_pane_base_indices
             .retain(|window, _| self.state.windows.contains_key(window));
@@ -4461,6 +4522,9 @@ impl MuxEngine {
             "pane-base-index" => self.set_pane_base_index(value, &options, target),
             "word-separators" => self.set_word_separators(value, &options, target),
             "mode-keys" => self.set_mode_keys(value, &options, target),
+            "popup-style" | "popup-border-style" | "popup-border-lines" => {
+                self.set_popup_option(table_option.name, value, &options, target)
+            }
             "prefix" | "set-clipboard" | "copy-command" => {
                 self.set_scalar_tmux_option(table_option.name, value, &options)
             }
@@ -4881,6 +4945,16 @@ impl MuxEngine {
                 .or_else(|| option.default.map(|default| default.value().to_owned()))
                 .map(|value| (value, false)),
             TmuxOptionTarget::Session(session) => match option.name {
+                "popup-style" => self
+                    .session_popup_styles
+                    .get(&session)
+                    .map(|value| (value.clone(), false))
+                    .or_else(inherited),
+                "popup-border-style" => self
+                    .session_popup_border_styles
+                    .get(&session)
+                    .map(|value| (value.clone(), false))
+                    .or_else(inherited),
                 "default-command" => self
                     .session_default_commands
                     .get(&session)
@@ -4969,6 +5043,11 @@ impl MuxEngine {
                     .window_synchronize_override(window)?
                     .map(|value| (tmux_flag(value).to_owned(), false))
                     .or_else(inherited),
+                "popup-border-lines" => self
+                    .window_popup_border_lines
+                    .get(&window)
+                    .map(|value| (value.as_str().to_owned(), false))
+                    .or_else(inherited),
                 _ => inherited(),
             },
             TmuxOptionTarget::Pane(pane) => match option.name {
@@ -5045,8 +5124,121 @@ impl MuxEngine {
             "automatic-rename" => tmux_flag(self.state.global_automatic_rename()).to_owned(),
             "automatic-rename-format" => self.global_automatic_rename_format.clone(),
             "remain-on-exit" => self.global_remain_on_exit.as_str().to_owned(),
+            "popup-style" => self.global_popup_style.clone(),
+            "popup-border-style" => self.global_popup_border_style.clone(),
+            "popup-border-lines" => self.global_popup_border_lines.as_str().to_owned(),
             _ => return None,
         })
+    }
+
+    fn set_popup_option(
+        &mut self,
+        option: &str,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        match option {
+            "popup-style" | "popup-border-style" => {
+                let default = PopupOptions::default();
+                let (global, locals, local_key) = if option == "popup-style" {
+                    (
+                        &mut self.global_popup_style,
+                        &mut self.session_popup_styles,
+                        match target {
+                            TmuxOptionTarget::Session(session) => Some(session),
+                            TmuxOptionTarget::GlobalSession => None,
+                            _ => unreachable!("popup style is session scoped"),
+                        },
+                    )
+                } else {
+                    (
+                        &mut self.global_popup_border_style,
+                        &mut self.session_popup_border_styles,
+                        match target {
+                            TmuxOptionTarget::Session(session) => Some(session),
+                            TmuxOptionTarget::GlobalSession => None,
+                            _ => unreachable!("popup style is session scoped"),
+                        },
+                    )
+                };
+                if options.has("-o")
+                    && !unset
+                    && local_key.is_none_or(|key| locals.contains_key(&key))
+                {
+                    return already_set_or_quiet(options, option);
+                }
+                if unset {
+                    if let Some(key) = local_key {
+                        locals.remove(&key);
+                    } else {
+                        *global = if option == "popup-style" {
+                            default.style
+                        } else {
+                            default.border_style
+                        };
+                    }
+                    return Ok(Execution::default());
+                }
+                let next = {
+                    let value = value.ok_or_else(|| {
+                        ServerError::InvalidCommand(format!("set-option {option} needs a value"))
+                    })?;
+                    if options.has("-a") {
+                        let existing = local_key.and_then(|key| locals.get(&key)).unwrap_or(global);
+                        format!("{existing}{value}")
+                    } else {
+                        value.to_owned()
+                    }
+                };
+                if let Some(key) = local_key {
+                    locals.insert(key, next);
+                } else {
+                    *global = next;
+                }
+            }
+            "popup-border-lines" => {
+                let local_key = match target {
+                    TmuxOptionTarget::Window(window) => Some(window),
+                    TmuxOptionTarget::GlobalWindow => None,
+                    _ => unreachable!("popup border lines is window scoped"),
+                };
+                if options.has("-o")
+                    && !unset
+                    && local_key.is_none_or(|key| self.window_popup_border_lines.contains_key(&key))
+                {
+                    return already_set_or_quiet(options, option);
+                }
+                if unset {
+                    if let Some(key) = local_key {
+                        self.window_popup_border_lines.remove(&key);
+                    } else {
+                        self.global_popup_border_lines = PopupBorderLines::Single;
+                    }
+                    return Ok(Execution::default());
+                }
+                let next = {
+                    let value = value.ok_or_else(|| {
+                        ServerError::InvalidCommand(
+                            "set-option popup-border-lines needs a value".to_owned(),
+                        )
+                    })?;
+                    value.parse().map_err(|()| {
+                        ServerError::InvalidCommand(format!(
+                            "popup-border-lines unknown value: {value}"
+                        ))
+                    })?
+                };
+                if let Some(key) = local_key {
+                    self.window_popup_border_lines.insert(key, next);
+                } else {
+                    self.global_popup_border_lines = next;
+                }
+            }
+            _ => unreachable!("popup option is catalogued"),
+        }
+        Ok(Execution::default())
     }
 
     fn seed_session_environment(&mut self, session: SessionId) {
@@ -16208,6 +16400,148 @@ mod tests {
             engine.execute(&mut context, &command("select-pane", &["-m"])),
             Err(ServerError::UnsupportedCommand(message))
                 if message == "select-pane -m"
+        ));
+    }
+
+    #[test]
+    fn popup_options_keep_session_and_window_inheritance_independent() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let window = context.window.unwrap();
+        assert_eq!(
+            engine.popup_options_for_window(window).unwrap(),
+            PopupOptions::default()
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "popup-style", "bg=blue,fg=white"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-o", "popup-style", "bg=red"]),
+            )
+            .unwrap();
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("set-option", &["-o", "popup-style", "bg=green"])
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "option is already set: popup-style"
+        ));
+        assert_eq!(
+            engine.popup_options_for_window(window).unwrap().style,
+            "bg=red"
+        );
+        engine
+            .execute(&mut context, &command("set-option", &["-u", "popup-style"]))
+            .unwrap();
+        assert_eq!(
+            engine.popup_options_for_window(window).unwrap().style,
+            "bg=blue,fg=white"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["popup-border-style", "bg=black,fg=cyan"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-g", "popup-border-lines", "double"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["popup-border-lines", "rounded"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.popup_options_for_window(window).unwrap(),
+            PopupOptions {
+                style: "bg=blue,fg=white".to_owned(),
+                border_style: "bg=black,fg=cyan".to_owned(),
+                border_lines: PopupBorderLines::Rounded,
+            }
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-v", "popup-border-style"]),
+                )
+                .unwrap()
+                .output,
+            "bg=black,fg=cyan"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-window-options", &["-v", "popup-border-lines"]),
+                )
+                .unwrap()
+                .output,
+            "rounded"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-u", "popup-border-lines"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .popup_options_for_window(window)
+                .unwrap()
+                .border_lines,
+            PopupBorderLines::Double
+        );
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("set-window-option", &["popup-border-lines", "zigzag"])
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "popup-border-lines unknown value: zigzag"
+        ));
+    }
+
+    #[test]
+    fn display_popup_catalogue_and_dead_hook_match_the_pin() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let listing = engine
+            .execute(&mut context, &command("list-commands", &["display-popup"]))
+            .unwrap()
+            .output;
+        assert_eq!(
+            listing,
+            "display-popup (popup) [-BCEkN] [-b border-lines] [-c target-client] [-d start-directory] [-e environment] [-h height] [-s style] [-S border-style] [-t target-pane] [-T title] [-w width] [-x position] [-y position] [shell-command [argument ...]]"
+        );
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &["after-display-popup", "display-message nope"]
+                )
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "invalid option: after-display-popup"
         ));
     }
 }

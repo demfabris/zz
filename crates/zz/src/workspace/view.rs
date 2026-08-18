@@ -11,14 +11,15 @@ use std::{
 use gpui::{
     Animation, AnimationExt as _, AnyElement, AnyView, AnyWindowHandle, App, Bounds, Context,
     CursorStyle, DragMoveEvent, Entity, EntityId, FocusHandle, IntoElement, KeyUpEvent, Keystroke,
-    MouseButton, MouseExitEvent, MouseUpEvent, Pixels, Point, Render, Size, StyleRefinement,
+    MouseButton, MouseExitEvent, MouseUpEvent, Pixels, Point, Render, Rgba, Size, StyleRefinement,
     Window, div, ease_out_quint, prelude::*, px,
 };
-use zz_mux::{joined_layout, swapped_layout};
+use zz_mux::{TmuxColour, indexed_colour_rgb, joined_layout, parse_tmux_colour, swapped_layout};
 use zz_protocol::{
     AgentCommand, Axis, ClientMessageKind, CommandInvocation, DisplayPanesAction, GuiResponse,
     InputMessage, LayoutNode, MuxSnapshot, PROTOCOL_VERSION, PaneId, PaneIndicator,
-    PaneKindSnapshot, SPLIT_RATIO_BASIS, SessionId, SplitId, WindowId, WindowSnapshot,
+    PaneKindSnapshot, PopupBorderLines, PopupState, SPLIT_RATIO_BASIS, SessionId, SplitId,
+    WindowId, WindowSnapshot,
 };
 use zz_terminal::KeyAction as TerminalKeyAction;
 use zz_ui::attachment::open_attachment_preview;
@@ -29,10 +30,11 @@ use zz_ui::{
 };
 use zz_ui::{
     pane::{
-        PaneChrome, PaneDragOverlayState, PaneOverlayCorner, PaneSplitAxis, PaneSplitHighlight,
-        PaneSplitSide, pane_drag_chip, pane_drag_overlay, pane_drop_preview, pane_indicator_card,
-        pane_indicator_overlay, pane_overlay_stack, pane_split_hit_target, pane_split_slot,
-        pane_split_surface, pane_surface, pane_sync_badge, pane_unzoom_control, pane_waiting_state,
+        FloatingSurface, PaneChrome, PaneDragOverlayState, PaneOverlayCorner, PaneSplitAxis,
+        PaneSplitHighlight, PaneSplitSide, pane_drag_chip, pane_drag_overlay, pane_drop_preview,
+        pane_indicator_card, pane_indicator_overlay, pane_overlay_stack, pane_split_hit_target,
+        pane_split_slot, pane_split_surface, pane_surface, pane_sync_badge, pane_unzoom_control,
+        pane_waiting_state,
     },
     shell::{app_connection_state, app_workspace_surface},
 };
@@ -456,6 +458,18 @@ struct PaneDragChip {
     grab: Point<Pixels>,
 }
 
+struct PopupPane {
+    state: PopupState,
+    terminal: Entity<TerminalView>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PopupFrame {
+    bounds: Bounds<Pixels>,
+    inset_x: Pixels,
+    inset_y: Pixels,
+}
+
 impl Render for PaneDragChip {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
@@ -477,6 +491,7 @@ struct AppRevision {
     focused_window: Option<WindowId>,
     error: Option<Arc<str>>,
     command_output_pane: Option<PaneId>,
+    popup: u64,
     command_prompt: u64,
     choose_tree: u64,
     choose_buffer: u64,
@@ -499,6 +514,7 @@ impl AppRevision {
             focused_window: attached_focused_window(&snapshot, attached),
             error: mux.error(),
             command_output_pane: mux.command_output().map(|output| output.pane),
+            popup: mux.popup_revision(),
             command_prompt: mux.command_prompt_revision(),
             choose_tree: mux.choose_tree_revision(),
             choose_buffer: mux.choose_buffer_revision(),
@@ -519,6 +535,7 @@ enum OverlayKind {
     ChooseTree,
     DisplayPanes,
     CommandOutput(PaneId),
+    Popup(PaneId),
 }
 
 #[derive(PartialEq)]
@@ -544,6 +561,7 @@ pub struct AppView {
     agents: BTreeMap<PaneId, Entity<AgentView>>,
     editors: BTreeMap<PaneId, Entity<EditorView>>,
     command_output: Option<(PaneId, Entity<TerminalView>)>,
+    popup: Option<PopupPane>,
     choose_tree: Option<Entity<ChooseTreeView>>,
     choose_buffer: Option<Entity<ChooseBufferView>>,
     display_panes: Option<Entity<DisplayPanesView>>,
@@ -730,6 +748,7 @@ impl AppView {
             agents: BTreeMap::new(),
             editors: BTreeMap::new(),
             command_output: None,
+            popup: None,
             choose_tree: None,
             choose_buffer: None,
             display_panes: None,
@@ -770,6 +789,9 @@ impl AppView {
             return;
         }
         if self.reconcile_dialog_prefix(window, cx) {
+            return;
+        }
+        if self.popup.is_some() {
             return;
         }
         if self.sidebar.read(cx).route() == WorkspaceRoute::Settings {
@@ -993,7 +1015,12 @@ impl AppView {
     }
 
     fn visible_overlay(&self, cx: &App) -> Option<(OverlayKind, FocusHandle)> {
-        if let Some(palette) = &self.command_palette {
+        if let Some(popup) = &self.popup {
+            Some((
+                OverlayKind::Popup(popup.state.pane),
+                popup.terminal.read(cx).focus(),
+            ))
+        } else if let Some(palette) = &self.command_palette {
             Some((OverlayKind::CommandPalette, palette.read(cx).focus(cx)))
         } else if let Some(chooser) = &self.choose_buffer {
             Some((OverlayKind::ChooseBuffer, chooser.read(cx).focus().clone()))
@@ -1040,6 +1067,7 @@ impl AppView {
         let attached = mux.attached_session();
         let snapshot = mux.snapshot();
         let command_output = mux.command_output();
+        let popup = mux.popup().cloned();
         let command_prompt = mux.command_prompt().cloned();
         let command_prompt_revision = mux.command_prompt_revision();
         let choose_tree = mux.choose_tree().cloned();
@@ -1209,6 +1237,30 @@ impl AppView {
             }
             None => {
                 if self.command_output.take().is_some() {
+                    self.focused_pane = None;
+                }
+            }
+        }
+
+        match popup {
+            Some(state) => {
+                let current_matches = self
+                    .popup
+                    .as_ref()
+                    .is_some_and(|popup| popup.state.pane == state.pane);
+                if current_matches {
+                    if let Some(popup) = &mut self.popup {
+                        popup.state = state;
+                    }
+                } else {
+                    let mux = self.mux.clone();
+                    let pane = state.pane;
+                    let terminal = cx.new(|cx| TerminalView::new_popup(pane, mux, window, cx));
+                    self.popup = Some(PopupPane { state, terminal });
+                }
+            }
+            None => {
+                if self.popup.take().is_some() {
                     self.focused_pane = None;
                 }
             }
@@ -1408,15 +1460,27 @@ impl AppView {
                 && self.focused_pane.map(|(pane, _)| pane) != Some(active)
         });
         self.audit_pane_focus("pass", window, cx);
-        let overlay = (route == WorkspaceRoute::App)
+        let overlay = (route == WorkspaceRoute::App || self.popup.is_some())
             .then(|| self.visible_overlay(cx))
             .flatten();
+        let previous_overlay = self.focused_overlay;
         let overlay_needs_focus = overlay
             .as_ref()
             .is_some_and(|(kind, _)| self.focused_overlay != Some(*kind));
         self.focused_overlay = overlay.as_ref().map(|(kind, _)| *kind);
-        if route == WorkspaceRoute::Settings {
-            if entering_settings && let Some(settings) = self.sidebar.read(cx).settings_view() {
+        if self.popup.is_some() {
+            if let Some((_, focus)) = overlay
+                && overlay_needs_focus
+            {
+                self.sidebar_focus_owed = persistent_navigator_focused;
+                focus.focus(window, cx);
+            }
+            self.pane_focus_owed = false;
+            self.focused_pane = None;
+        } else if route == WorkspaceRoute::Settings {
+            if (entering_settings || matches!(previous_overlay, Some(OverlayKind::Popup(_))))
+                && let Some(settings) = self.sidebar.read(cx).settings_view()
+            {
                 let entity = settings.entity_id();
                 let focus = settings.read(cx).focus();
                 focus.focus(window, cx);
@@ -2259,6 +2323,52 @@ impl AppView {
         pane_indicator_overlay(card)
     }
 
+    fn popup_overlay(
+        &self,
+        origin: Point<Pixels>,
+        window: &Window,
+        cx: &App,
+    ) -> Option<AnyElement> {
+        let popup = self.popup.as_ref()?;
+        let state = &popup.state;
+        let frame = popup_frame(
+            state,
+            origin,
+            self.pane_canvas_size.get(),
+            window.scale_factor(),
+        );
+        let bordered = state.border_lines != PopupBorderLines::None;
+        let background = popup_style_colour(
+            &state.style,
+            "bg",
+            cx.theme().background.raised(1).opaque(),
+            cx,
+        );
+        let foreground = popup_style_colour(&state.style, "fg", cx.theme().foreground, cx);
+        let border_color = popup_style_colour(&state.border_style, "fg", cx.theme().border, cx);
+        Some(
+            div()
+                .absolute()
+                .left(frame.bounds.origin.x)
+                .top(frame.bounds.origin.y)
+                .w(frame.bounds.size.width)
+                .h(frame.bounds.size.height)
+                .debug_selector(|| "display-popup".to_owned())
+                .child(
+                    FloatingSurface::new(
+                        ("display-popup", state.pane.0),
+                        popup.terminal.clone(),
+                        cx,
+                    )
+                    .title(state.title.clone())
+                    .content_inset(frame.inset_x, frame.inset_y)
+                    .colors(background, foreground, border_color)
+                    .bordered(bordered),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn zoom_control(&self, pane: PaneId) -> impl IntoElement {
         let mux = self.mux.clone();
         div()
@@ -2416,7 +2526,13 @@ impl Render for AppView {
             diagnostics::elapsed_us(started),
         );
 
-        let overlays = if route == WorkspaceRoute::Settings {
+        let pane_margin = config::pane_margin(cx);
+        let canvas_top = if strip_above_panes {
+            px(0.)
+        } else {
+            pane_margin
+        };
+        let mut overlays = if route == WorkspaceRoute::Settings {
             Vec::new()
         } else {
             [
@@ -2435,14 +2551,11 @@ impl Render for AppView {
             .flatten()
             .collect::<Vec<_>>()
         };
+        if let Some(popup) = self.popup_overlay(gpui::point(pane_margin, canvas_top), window, cx) {
+            overlays.push(popup);
+        }
         let measured_canvas_size = self.pane_canvas_size.clone();
         let gap_background = crate::theme::chrome_background(cx);
-        let pane_margin = config::pane_margin(cx);
-        let canvas_top = if strip_above_panes {
-            px(0.)
-        } else {
-            pane_margin
-        };
         let content = div()
             .relative()
             .size_full()
@@ -2484,6 +2597,78 @@ impl Render for AppView {
             frame_content_corner_radius(cx),
         )
     }
+}
+
+fn popup_frame(
+    state: &PopupState,
+    origin: Point<Pixels>,
+    canvas: Size<Pixels>,
+    scale: f32,
+) -> PopupFrame {
+    let cell_width = px(f32::from(u16::try_from(state.cell_width_px).unwrap_or(u16::MAX)) / scale);
+    let cell_height =
+        px(f32::from(u16::try_from(state.cell_height_px).unwrap_or(u16::MAX)) / scale);
+    let grid_width = cell_width * usize::from(state.client_columns);
+    let grid_height = cell_height * usize::from(state.client_rows);
+    let grid_left = ((canvas.width - grid_width) / 2.0).max(Pixels::ZERO);
+    let grid_top = ((canvas.height - grid_height) / 2.0).max(Pixels::ZERO);
+    let bordered = state.border_lines != PopupBorderLines::None;
+    PopupFrame {
+        bounds: Bounds::new(
+            gpui::point(
+                origin.x + grid_left + cell_width * usize::from(state.left),
+                origin.y + grid_top + cell_height * usize::from(state.top),
+            ),
+            gpui::size(
+                cell_width * usize::from(state.width),
+                cell_height * usize::from(state.height),
+            ),
+        ),
+        inset_x: if bordered { cell_width } else { Pixels::ZERO },
+        inset_y: if bordered { cell_height } else { Pixels::ZERO },
+    }
+}
+
+fn popup_style_colour(style: &str, key: &str, fallback: gpui::Hsla, cx: &App) -> gpui::Hsla {
+    let Some(value) = style.split(',').find_map(|part| {
+        let (name, value) = part.split_once('=')?;
+        name.eq_ignore_ascii_case(key).then_some(value)
+    }) else {
+        return fallback;
+    };
+    let Some(colour) = parse_tmux_colour(value) else {
+        return fallback;
+    };
+    match colour {
+        TmuxColour::Basic(index) | TmuxColour::Indexed(index) => {
+            packed_popup_colour(indexed_colour_rgb(index))
+        }
+        TmuxColour::Rgb(colour) => packed_popup_colour(colour),
+        TmuxColour::Default | TmuxColour::Terminal => fallback,
+        TmuxColour::Theme(index) => match index {
+            0 => cx.theme().background,
+            1 | 7..=9 => cx.theme().foreground,
+            2 => cx.theme().border,
+            3 => cx.theme().background.raised(1).opaque(),
+            4 => cx.theme().success,
+            5 => cx.theme().warning,
+            6 => cx.theme().danger,
+            _ => fallback,
+        },
+    }
+}
+
+fn packed_popup_colour(colour: u32) -> gpui::Hsla {
+    let channel = |shift: u32| {
+        f32::from(u8::try_from((colour >> shift) & 0xff_u32).unwrap_or_default()) / 255.0
+    };
+    Rgba {
+        r: channel(16),
+        g: channel(8),
+        b: channel(0),
+        a: 1.0,
+    }
+    .into()
 }
 
 fn pane_select_command(pane: PaneId) -> CommandInvocation {
@@ -2839,6 +3024,7 @@ mod tests {
             focused_window: attached_focused_window(&snapshot, Some(attached)),
             error: None,
             command_output_pane: None,
+            popup: 0,
             command_prompt: 0,
             choose_tree: 0,
             choose_buffer: 0,
@@ -2855,6 +3041,38 @@ mod tests {
                 focused_window: Some(WindowId(1)),
                 ..revision.clone()
             }
+        );
+    }
+
+    #[test]
+    fn popup_frame_uses_the_daemon_cell_rectangle_exactly() {
+        let state = popup_state_for_test(PaneId(u64::MAX - 1));
+        let frame = popup_frame(
+            &state,
+            point(px(10.0), px(20.0)),
+            gpui::size(px(800.0), px(500.0)),
+            2.0,
+        );
+        assert_eq!(
+            frame,
+            PopupFrame {
+                bounds: Bounds::new(point(px(366.0), px(216.0)), gpui::size(px(80.0), px(90.0)),),
+                inset_x: px(4.0),
+                inset_y: px(9.0),
+            }
+        );
+        assert_eq!(
+            popup_frame(
+                &PopupState {
+                    border_lines: PopupBorderLines::None,
+                    ..state
+                },
+                point(px(10.0), px(20.0)),
+                gpui::size(px(800.0), px(500.0)),
+                2.0,
+            )
+            .inset_x,
+            Pixels::ZERO
         );
     }
 
@@ -3208,6 +3426,149 @@ mod tests {
                 viewers: Vec::new(),
             }],
         }
+    }
+
+    fn popup_state_for_test(pane: PaneId) -> PopupState {
+        PopupState {
+            pane,
+            left: 29,
+            top: 6,
+            width: 20,
+            height: 10,
+            client_columns: 80,
+            client_rows: 24,
+            cell_width_px: 8,
+            cell_height_px: 18,
+            title: "popup".to_owned(),
+            style: "default".to_owned(),
+            border_style: "default".to_owned(),
+            border_lines: PopupBorderLines::Single,
+            close_on_exit: false,
+            close_on_exit_zero: false,
+            close_on_any_key: false,
+            dead: false,
+        }
+    }
+
+    #[gpui::test]
+    fn popup_surface_takes_focus_and_bypasses_the_prefix_claim(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let input_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let captured_input = Rc::clone(&input_slot);
+        let (workspace, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+            captured_mux.replace(Some(mux.clone()));
+            captured_input.replace(Some(input));
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux = mux_slot.borrow().clone().expect("captured mux");
+        let input = input_slot.borrow().clone().expect("captured input");
+        let pane = PaneId(u64::MAX - 1);
+        let state = popup_state_for_test(pane);
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(1), cx);
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: zz_protocol::EventPayload::Popup {
+                        state: Some(state.clone()),
+                    },
+                }),
+                cx,
+            );
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 2,
+                    payload: zz_protocol::EventPayload::TerminalViewport {
+                        pane,
+                        viewport: zz_terminal::TerminalViewport::blank(
+                            18,
+                            8,
+                            zz_terminal::SessionStatus::Running,
+                        ),
+                    },
+                }),
+                cx,
+            );
+            mux.set_prefix_armed_for_test(true, cx);
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        let (terminal, terminal_id) = workspace.read_with(cx, |workspace, _| {
+            let popup = workspace.popup.as_ref().expect("popup entity");
+            (popup.terminal.clone(), popup.terminal.entity_id())
+        });
+        assert!(cx.debug_bounds("display-popup").is_some());
+        assert!(cx.update(|window, cx| terminal.read(cx).focus().contains_focused(window, cx)));
+
+        input.borrow_mut().clear();
+        cx.simulate_keystrokes("ctrl-a");
+        assert!(input.borrow().iter().any(|message| matches!(
+            message,
+            InputMessage::Popup {
+                action: zz_protocol::PopupAction::Key { input, .. },
+            } if input.key == zz_terminal::KeyCode::Character('a') && input.modifiers.control()
+        )));
+        assert!(
+            !input
+                .borrow()
+                .iter()
+                .any(|message| matches!(message, InputMessage::Key { .. }))
+        );
+
+        let mut modified = state;
+        modified.title = "modified".to_owned();
+        modified.dead = true;
+        mux.update(cx, |mux, cx| {
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 3,
+                    payload: zz_protocol::EventPayload::Popup {
+                        state: Some(modified),
+                    },
+                }),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, _| {
+            let popup = workspace.popup.as_ref().expect("modified popup entity");
+            assert_eq!(popup.terminal.entity_id(), terminal_id);
+            assert_eq!(popup.state.title, "modified");
+            assert!(popup.state.dead);
+        });
+
+        mux.update(cx, |mux, cx| {
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 4,
+                    payload: zz_protocol::EventPayload::Popup { state: None },
+                }),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        assert!(workspace.read_with(cx, |workspace, _| workspace.popup.is_none()));
+        assert!(mux.read_with(cx, |mux, _| mux.viewport(pane).is_none()));
     }
 
     fn two_pane_snapshot(active: PaneId) -> MuxSnapshot {

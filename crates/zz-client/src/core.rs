@@ -7,7 +7,8 @@ use zz_protocol::{
     AgentCommand, AgentPaneWire, BrowserCommand, ChooseBufferSearchState, ChooseBufferState,
     ChooseTreeSearchState, ChooseTreeState, ClientMessageKind, CommandPromptState, CommandResponse,
     DisplayPanesState, Event, EventPayload, KeyBindingSnapshot, KeyTableSnapshot, MuxOptions,
-    MuxSnapshot, PaneId, ProtocolMessage, ServerHello, SessionId, StatusLine, TerminalUiCommand,
+    MuxSnapshot, PaneId, PopupState, ProtocolMessage, ServerHello, SessionId, StatusLine,
+    TerminalUiCommand,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, PackedCell, TerminalAppearance, TerminalDictionary,
@@ -65,6 +66,7 @@ pub enum CoreEvent {
     ChooseTreeChanged,
     ChooseBufferChanged,
     DisplayPanesChanged,
+    PopupChanged,
     PaneRemoved {
         pane: PaneId,
     },
@@ -187,6 +189,7 @@ pub struct ClientCore {
     choose_tree: Option<ChooseTreeState>,
     choose_buffer: Option<ChooseBufferState>,
     display_panes: Option<DisplayPanesState>,
+    popup: Option<PopupState>,
     outbound: VecDeque<Outbound>,
     events: VecDeque<CoreEvent>,
 }
@@ -209,6 +212,7 @@ impl ClientCore {
                 self.agent_states.clear();
                 self.full_pending.clear();
                 self.command_output = None;
+                self.popup = None;
                 self.events.push_back(CoreEvent::Attached { session });
                 self.events.push_back(CoreEvent::SnapshotChanged);
             }
@@ -333,6 +337,11 @@ impl ClientCore {
         self.display_panes.as_ref()
     }
 
+    #[must_use]
+    pub const fn popup(&self) -> Option<&PopupState> {
+        self.popup.as_ref()
+    }
+
     /// Adopt a handshake's settings — capabilities, appearance, options, key
     /// tables, status — and nothing else. A shell that keeps rendering its
     /// last frame across a reconnect calls this instead of feeding the hello
@@ -377,6 +386,7 @@ impl ClientCore {
         self.choose_tree = None;
         self.choose_buffer = None;
         self.display_panes = None;
+        self.popup = None;
         self.agent_states.clear();
     }
 
@@ -462,6 +472,16 @@ impl ClientCore {
             EventPayload::DisplayPanes { state } => {
                 self.display_panes = state;
                 self.events.push_back(CoreEvent::DisplayPanesChanged);
+            }
+            EventPayload::Popup { state } => {
+                if let Some(previous) = self.popup.as_ref()
+                    && state.as_ref().is_none_or(|next| next.pane != previous.pane)
+                {
+                    self.viewports.remove(&previous.pane);
+                    self.full_pending.remove(&previous.pane);
+                }
+                self.popup = state;
+                self.events.push_back(CoreEvent::PopupChanged);
             }
             EventPayload::PrefixArmed { armed } => {
                 self.prefix_armed = armed;
@@ -667,9 +687,12 @@ impl ClientCore {
             .flat_map(|session| &session.windows)
             .flat_map(|window| window.panes.keys().copied())
             .collect();
-        self.viewports.retain(|pane, _| live.contains(pane));
+        let popup = self.popup.as_ref().map(|popup| popup.pane);
+        self.viewports
+            .retain(|pane, _| live.contains(pane) || popup == Some(*pane));
         self.agent_states.retain(|pane, _| live.contains(pane));
-        self.full_pending.retain(|pane| live.contains(pane));
+        self.full_pending
+            .retain(|pane| live.contains(pane) || popup == Some(*pane));
     }
 
     fn update_choose_tree(&mut self, search: Option<ChooseTreeSearchState>, selected: u32) {
@@ -926,5 +949,48 @@ mod tests {
             snapshot: snapshot_with(&[pane]),
         });
         assert_eq!(core.agent_state(pane), None);
+    }
+
+    #[test]
+    fn popup_descriptor_owns_its_synthetic_viewport_lifetime() {
+        let pane = PaneId(u64::MAX - 1);
+        let state = PopupState {
+            pane,
+            left: 4,
+            top: 3,
+            width: 40,
+            height: 12,
+            client_columns: 80,
+            client_rows: 24,
+            cell_width_px: 8,
+            cell_height_px: 18,
+            title: "popup".to_owned(),
+            style: "bg=default,fg=default".to_owned(),
+            border_style: "fg=default".to_owned(),
+            border_lines: zz_protocol::PopupBorderLines::Single,
+            close_on_exit: false,
+            close_on_exit_zero: false,
+            close_on_any_key: false,
+            dead: false,
+        };
+        let mut core = ClientCore::new();
+
+        core.handle_message(event(EventPayload::Popup {
+            state: Some(state.clone()),
+        }));
+        assert_eq!(drain(&mut core), vec![CoreEvent::PopupChanged]);
+        assert_eq!(core.popup(), Some(&state));
+
+        core.handle_message(event(EventPayload::TerminalViewport {
+            pane,
+            viewport: TerminalViewport::blank(38, 10, zz_terminal::SessionStatus::Running),
+        }));
+        assert!(core.viewport(pane).is_some());
+        drain(&mut core);
+
+        core.handle_message(event(EventPayload::Popup { state: None }));
+        assert_eq!(drain(&mut core), vec![CoreEvent::PopupChanged]);
+        assert_eq!(core.popup(), None);
+        assert_eq!(core.viewport(pane), None);
     }
 }

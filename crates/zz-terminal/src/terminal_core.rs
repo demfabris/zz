@@ -42,7 +42,7 @@ pub use paste::{PastePreparationError, prepare_paste_buffer};
 pub use session::{
     CaptureBoundary, CaptureOptions, KittyImage, KittyImageRequestError, LastCommandCapture,
     MAX_LAST_COMMAND_BYTES, MAX_LAST_COMMAND_LINES, RawOutputTapError, TerminalCaptureError,
-    TerminalCopyReady, TerminalEvent, TerminalEvents, TerminalSession, TerminalSessionDiagnostics,
-    TerminalSpawn,
+    TerminalCopyReady, TerminalEvent, TerminalEvents, TerminalProcessExit, TerminalSession,
+    TerminalSessionDiagnostics, TerminalSize, TerminalSpawn,
 };
 pub use word::{DEFAULT_WORD_SEPARATORS, WordSeparators};

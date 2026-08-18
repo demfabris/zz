@@ -239,6 +239,8 @@ const SESSION_OPTIONS: &[&str] = &[
     "prompt-command-cursor-style",
     "prompt-cursor-colour",
     "prompt-cursor-style",
+    "popup-border-style",
+    "popup-style",
     "renumber-windows",
     "repeat-time",
     "session-closed",
@@ -308,8 +310,6 @@ const WINDOW_OPTIONS: &[&str] = &[
     "pane-status-current-style",
     "pane-status-style",
     "popup-border-lines",
-    "popup-border-style",
-    "popup-style",
     "session-status-current-style",
     "session-status-style",
     "tiled-layout-max-columns",
@@ -410,6 +410,9 @@ fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
         "display-time" => TmuxOptionDefault::Scalar("750"),
         "message-limit" => TmuxOptionDefault::Scalar("1000"),
         "mode-keys" => TmuxOptionDefault::Scalar("emacs"),
+        "popup-border-lines" => TmuxOptionDefault::Scalar("single"),
+        "popup-border-style" => TmuxOptionDefault::String("bg=themedarkgrey,fg=themelightgrey"),
+        "popup-style" => TmuxOptionDefault::String("bg=themedarkgrey,fg=themewhite"),
         "aggressive-resize" | "renumber-windows" | "synchronize-panes" | "remain-on-exit" => {
             TmuxOptionDefault::Scalar("off")
         }
@@ -611,6 +614,14 @@ mod tests {
                 ("initial-repeat-time", TmuxOptionDefault::Scalar("0")),
                 ("mouse", TmuxOptionDefault::Scalar("on")),
                 ("prefix", TmuxOptionDefault::Scalar("C-b")),
+                (
+                    "popup-border-style",
+                    TmuxOptionDefault::String("bg=themedarkgrey,fg=themelightgrey"),
+                ),
+                (
+                    "popup-style",
+                    TmuxOptionDefault::String("bg=themedarkgrey,fg=themewhite"),
+                ),
                 ("renumber-windows", TmuxOptionDefault::Scalar("off")),
                 ("repeat-time", TmuxOptionDefault::Scalar("500")),
                 ("status", TmuxOptionDefault::Scalar("on")),
@@ -641,6 +652,7 @@ mod tests {
                 ),
                 ("mode-keys", TmuxOptionDefault::Scalar("emacs")),
                 ("pane-base-index", TmuxOptionDefault::Scalar("0")),
+                ("popup-border-lines", TmuxOptionDefault::Scalar("single")),
                 ("remain-on-exit", TmuxOptionDefault::Scalar("off")),
                 ("synchronize-panes", TmuxOptionDefault::Scalar("off")),
             ]

@@ -169,6 +169,8 @@ pub static DAEMON_COMMAND_NAMES: &[&str] = &[
     "wait",
     "pipe-pane",
     "pipep",
+    "display-popup",
+    "popup",
 ];
 
 pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
@@ -181,8 +183,6 @@ pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "lock-session",
     "locks",
     "server-access",
-    "display-popup",
-    "popup",
     "display-menu",
     "menu",
     "confirm-before",
@@ -316,6 +316,15 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         positionals: &[FreeForm],
         variadic: None,
     },
+    CommandSpec {
+        name: "display-popup",
+        aliases: &["popup"],
+        description: "Display a popup running a shell command",
+        usage: "[-BCEkN] [-b border-lines] [-c target-client] [-d start-directory] [-e environment] [-h height] [-s style] [-S border-style] [-t target-pane] [-T title] [-w width] [-x position] [-y position] [shell-command [argument ...]]",
+        options: &[],
+        positionals: &[FreeForm],
+        variadic: Some(FreeForm),
+    },
 ];
 
 #[cfg(test)]
@@ -332,6 +341,7 @@ const DAEMON_COMMAND_ACCEPTED_OPTIONS: &[(&str, &str, &str)] = &[
     ("show-buffer", "", "b"),
     ("wait-for", "LSU", ""),
     ("pipe-pane", "IOo", "t"),
+    ("display-popup", "BCEkN", "bcdehsStTwxy"),
 ];
 
 /// Every tmux-compatible command currently executable by the mux engine.

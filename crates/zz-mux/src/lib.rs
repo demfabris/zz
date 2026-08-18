@@ -14,9 +14,10 @@ mod tmux_options;
 
 pub use command::{
     AgentOptions, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
-    MAX_WORD_SEPARATORS_BYTES, MuxEffect, MuxEngine, PaneRuntimeFacts, hook_format_variables,
-    if_shell_truthy,
+    MAX_WORD_SEPARATORS_BYTES, MuxEffect, MuxEngine, PaneRuntimeFacts, PopupOptions,
+    hook_format_variables, if_shell_truthy,
 };
+pub use formats::{TmuxColour, indexed_colour_rgb, parse_tmux_colour};
 pub use layout::{CellLayout, SplitSize};
 pub use model::{
     LayoutPreset, MuxState, Pane, PaneDirection, PaneKind, Session, SplitPlacement, Window,

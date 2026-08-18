@@ -24,7 +24,10 @@ fn unknown_tmux_flag_uses_tmux_usage_shape() {
         .expect("run zz with an unknown tmux flag");
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
-    assert_eq!(output.stderr, TMUX_USAGE.as_bytes());
+    assert_eq!(
+        output.stderr,
+        format!("zz: unknown option -- 8\n{TMUX_USAGE}").as_bytes()
+    );
 }
 
 #[test]

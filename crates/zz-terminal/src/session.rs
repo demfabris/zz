@@ -299,6 +299,7 @@ struct EventQueueState {
     notification_pending: AtomicBool,
     bell_pending: AtomicBool,
     foreground: RwLock<Option<Box<ForegroundSource>>>,
+    completion: AtomicU64,
 }
 
 impl EventQueueState {
@@ -309,6 +310,7 @@ impl EventQueueState {
             notification_pending: AtomicBool::new(false),
             bell_pending: AtomicBool::new(false),
             foreground: RwLock::new(None),
+            completion: AtomicU64::new(0),
         }
     }
 }
@@ -375,12 +377,48 @@ impl PublishedViewports {
 }
 
 /// What a terminal pane runs and the environment it starts with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TerminalSize {
+    pub columns: u16,
+    pub rows: u16,
+    pub cell_width_px: u32,
+    pub cell_height_px: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TerminalProcessExit {
+    pub code: u32,
+    pub signal: Option<u8>,
+}
+
+impl TerminalProcessExit {
+    const PRESENT: u64 = 1 << 63;
+
+    fn encode(self) -> u64 {
+        Self::PRESENT | u64::from(self.code) | (self.signal.map_or(0, u64::from) << u32::BITS)
+    }
+
+    fn decode(value: u64) -> Option<Self> {
+        if value & Self::PRESENT == 0 {
+            return None;
+        }
+        let code = u32::try_from(value & u64::from(u32::MAX)).expect("masked to u32");
+        let signal = u8::try_from((value >> u32::BITS) & u64::from(u8::MAX)).expect("masked to u8");
+        Some(Self {
+            code,
+            signal: (signal != 0).then_some(signal),
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct TerminalSpawn {
     pub working_directory: Option<PathBuf>,
     pub command: Option<Vec<String>>,
     pub shell: Option<String>,
     pub terminal_type: Option<String>,
+    pub initial_size: Option<TerminalSize>,
+    pub non_login_shell: bool,
     /// Extra environment (`ZZ_PANE` etc.) layered over the defaults.
     pub env: Vec<(String, Option<String>)>,
 }
@@ -391,6 +429,7 @@ pub struct TerminalSession {
     latest: Arc<RwLock<PublishedViewports>>,
     max_scrollback: usize,
     word_separators: RwLock<WordSeparators>,
+    terminating: AtomicBool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -486,8 +525,10 @@ impl TerminalSession {
         let (event_tx, events) = terminal_event_channel(&event_state);
         let latest = Arc::new(RwLock::new(PublishedViewports::new(
             TerminalViewport::blank_with_appearance(
-                INITIAL_COLUMNS,
-                INITIAL_ROWS,
+                spawn
+                    .initial_size
+                    .map_or(INITIAL_COLUMNS, |size| size.columns),
+                spawn.initial_size.map_or(INITIAL_ROWS, |size| size.rows),
                 SessionStatus::Starting,
                 &appearance,
             ),
@@ -523,6 +564,7 @@ impl TerminalSession {
             latest,
             max_scrollback,
             word_separators: RwLock::new(WordSeparators::default()),
+            terminating: AtomicBool::new(false),
         }
     }
 
@@ -627,6 +669,7 @@ impl TerminalSession {
             latest,
             max_scrollback,
             word_separators: RwLock::new(WordSeparators::default()),
+            terminating: AtomicBool::new(false),
         }
     }
 
@@ -651,6 +694,17 @@ impl TerminalSession {
             .read()
             .as_ref()?
             .shell_process_id()
+    }
+
+    #[must_use]
+    pub fn completion(&self) -> Option<TerminalProcessExit> {
+        TerminalProcessExit::decode(self.events.state.completion.load(Ordering::Acquire))
+    }
+
+    pub fn terminate(&self) {
+        if !self.terminating.swap(true, Ordering::AcqRel) {
+            self.send_command(Command::Terminate);
+        }
     }
 
     #[must_use]
@@ -1105,7 +1159,9 @@ impl TerminalSession {
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
-        let _ = self.commands.try_send(Command::Shutdown);
+        if !self.terminating.load(Ordering::Acquire) {
+            let _ = self.commands.try_send(Command::Shutdown);
+        }
     }
 }
 
@@ -1129,6 +1185,15 @@ impl Default for Geometry {
 }
 
 impl Geometry {
+    fn from_size(size: TerminalSize) -> Self {
+        Self {
+            columns: size.columns.max(1),
+            rows: size.rows.max(1),
+            cell_width_px: size.cell_width_px.max(1),
+            cell_height_px: size.cell_height_px.max(1),
+        }
+    }
+
     fn pty_size(self) -> PtySize {
         let width = u32::from(self.columns).saturating_mul(self.cell_width_px);
         let height = u32::from(self.rows).saturating_mul(self.cell_height_px);
@@ -1234,6 +1299,7 @@ enum Command {
     UnbindPastedImage {
         number: u32,
     },
+    Terminate,
     Shutdown,
 }
 
@@ -1260,6 +1326,7 @@ impl Command {
             Self::KittyImageGeneration(_) => "kitty-image-generation",
             Self::PendingPasteOpened { .. } => "pending-paste-opened",
             Self::UnbindPastedImage { .. } => "unbind-pasted-image",
+            Self::Terminate => "terminate",
             Self::Shutdown => "shutdown",
         }
     }
@@ -2602,6 +2669,12 @@ impl Publisher {
         *self.state.foreground.write() = source;
     }
 
+    fn set_completion(&self, completion: TerminalProcessExit) {
+        self.state
+            .completion
+            .store(completion.encode(), Ordering::Release);
+    }
+
     fn publish(&self, viewport: TerminalViewport) {
         let viewport = Arc::new(viewport);
         {
@@ -2850,6 +2923,10 @@ fn terminal_worker(
     ) {
         log::error!("terminal worker stopped: {error}");
         if matches!(&error, WorkerError::Spawn(_)) {
+            publisher.set_completion(TerminalProcessExit {
+                code: 1,
+                signal: None,
+            });
             publisher.set_status(&SessionStatus::exited(1, None));
         } else {
             publisher.fail(&error);
@@ -3314,7 +3391,7 @@ fn run_output_view(
                 Ok(Command::DisarmRawOutputTap { reply, .. }) => {
                     let _ = reply.send(());
                 }
-                Ok(Command::Shutdown) | Err(_) => return Ok(()),
+                Ok(Command::Terminate | Command::Shutdown) | Err(_) => return Ok(()),
             },
             recv(search_results) -> result => {
                 let result = result.map_err(|_| {
@@ -3476,6 +3553,9 @@ fn terminal_command(spawn: &TerminalSpawn) -> CommandBuilder {
             command.args(["-c", shell_command]);
             command
         }
+        None if spawn.non_login_shell => {
+            CommandBuilder::new(spawn.shell.as_deref().unwrap_or("/bin/sh"))
+        }
         _ => crate::shell_integration::default_shell_command(spawn.shell.as_deref()),
     }
 }
@@ -3521,6 +3601,32 @@ fn terminal_command_preserves_tmux_argv_shapes() {
     });
     assert!(default.is_default_prog());
     assert_eq!(default.get_shell(), "/bin/sh");
+
+    let plain = terminal_command(&TerminalSpawn {
+        shell: Some("/bin/sh".to_owned()),
+        non_login_shell: true,
+        ..TerminalSpawn::default()
+    });
+    assert!(!plain.is_default_prog());
+    assert_eq!(
+        plain.get_argv().as_slice(),
+        [std::ffi::OsString::from("/bin/sh")]
+    );
+
+    let empty = terminal_command(&TerminalSpawn {
+        command: Some(vec![String::new()]),
+        shell: Some("/bin/sh".to_owned()),
+        non_login_shell: true,
+        ..TerminalSpawn::default()
+    });
+    assert_eq!(
+        empty.get_argv().as_slice(),
+        [
+            std::ffi::OsString::from("/bin/sh"),
+            std::ffi::OsString::from("-c"),
+            std::ffi::OsString::new(),
+        ]
+    );
 }
 
 fn run_terminal(
@@ -3536,7 +3642,10 @@ fn run_terminal(
     install_kitty_png_decoder();
     #[cfg(any(target_os = "linux", not(unix)))]
     let () = wake_rx;
-    let mut geometry = Geometry::default();
+    let mut geometry = spawn
+        .initial_size
+        .map(Geometry::from_size)
+        .unwrap_or_default();
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(geometry.pty_size())
@@ -3703,6 +3812,7 @@ fn run_terminal(
     let mut pasted_image_bindings = PastedImageBindings::default();
     let mut reader_eof = false;
     let mut exit_status = None;
+    let mut terminating = false;
     let no_exit = crossbeam_channel::never();
     #[cfg(any(target_os = "linux", not(unix)))]
     let no_output = crossbeam_channel::never();
@@ -4401,13 +4511,35 @@ fn run_terminal(
                         }
                     }
                 }
+                Command::Terminate => {
+                    terminating = true;
+                    #[cfg(unix)]
+                    if let Some(pid) = master
+                        .lock()
+                        .process_group_leader()
+                        .and_then(|group| u32::try_from(group).ok())
+                        .filter(|process_id| *process_id != 0)
+                        .or(shell_process_id)
+                        .and_then(|pid| i32::try_from(pid).ok())
+                        .and_then(rustix::process::Pid::from_raw)
+                    {
+                        let _ =
+                            rustix::process::kill_process_group(pid, rustix::process::Signal::TERM);
+                    }
+                    #[cfg(not(unix))]
+                    let _ = killer.kill();
+                }
                 Command::Shutdown => {
                     let _ = killer.kill();
                     return Ok(());
                 }
             },
             Wake::CommandsClosed => {
-                let _ = killer.kill();
+                if terminating {
+                    let _ = exit_rx.recv();
+                } else {
+                    let _ = killer.kill();
+                }
                 return Ok(());
             }
             Wake::Input(_) => unreachable!("PTY input is normalized before dispatch"),
@@ -4603,6 +4735,11 @@ fn run_terminal(
                 complete_view_search(&mut terminal, view)?;
             }
             let status = exit_status.take().expect("checked above");
+            let signal = status.signal().and_then(signal_number);
+            publisher.set_completion(TerminalProcessExit {
+                code: status.exit_code(),
+                signal,
+            });
             publish_active_views(
                 &mut terminal,
                 publisher,
@@ -4619,6 +4756,42 @@ fn run_terminal(
             return Ok(());
         }
     }
+}
+
+#[cfg(unix)]
+fn signal_number(description: &str) -> Option<u8> {
+    if let Some(number) = description
+        .strip_prefix("Signal ")
+        .and_then(|number| number.parse().ok())
+        .or_else(|| {
+            description
+                .rsplit_once(':')
+                .and_then(|(_, number)| number.trim().parse().ok())
+        })
+    {
+        return Some(number);
+    }
+    match description {
+        "Hangup" => Some(1),
+        "Interrupt" => Some(2),
+        "Quit" => Some(3),
+        "Illegal instruction" => Some(4),
+        "Trace/breakpoint trap" | "Trace trap" => Some(5),
+        "Aborted" | "Abort trap" => Some(6),
+        "Bus error" => Some(7),
+        "Floating point exception" => Some(8),
+        "Killed" => Some(9),
+        "Segmentation fault" => Some(11),
+        "Broken pipe" => Some(13),
+        "Alarm clock" => Some(14),
+        "Terminated" => Some(15),
+        _ => None,
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_number(_description: &str) -> Option<u8> {
+    None
 }
 
 enum ViewActionResult {

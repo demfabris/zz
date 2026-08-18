@@ -38,9 +38,10 @@ pub use message::{
     MAX_COMMAND_PROMPT_BYTES, MAX_GUI_TEXT_BYTES, MAX_PASTE_UPLOAD_BYTES,
     MAX_PASTE_UPLOAD_CHUNK_BYTES, MAX_PASTE_UPLOAD_EXTENSION_BYTES, MAX_STATUS_TEXT_BYTES,
     MuxOptionKey, MuxOptionSource, MuxOptionValue, MuxOptions, NEW_SESSION_ATTACH_CAPABILITY,
-    PROTOCOL_VERSION, PaneIndicator, PasteUploadPurpose, PastedImageFormat, ProtocolMessage,
-    SPLIT_RATIO_BASIS, ServerError, ServerHello, SourceSpan, StatusLine, TerminalUiCommand,
-    agent_update_batch_bytes, paste_upload_extension_is_valid,
+    PROTOCOL_VERSION, PaneIndicator, PasteUploadPurpose, PastedImageFormat, PopupAction,
+    PopupBorderLines, PopupState, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError, ServerHello,
+    SourceSpan, StatusLine, TerminalUiCommand, agent_update_batch_bytes,
+    paste_upload_extension_is_valid,
 };
 pub use snapshot::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, BrowserProfileNameError,

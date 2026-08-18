@@ -158,6 +158,113 @@ fn floating_surface_shadow(cx: &App) -> Vec<BoxShadow> {
     }]
 }
 
+#[derive(IntoElement)]
+pub struct FloatingSurface {
+    id: ElementId,
+    title: SharedString,
+    content: AnyElement,
+    inset_x: Pixels,
+    inset_y: Pixels,
+    background: Hsla,
+    foreground: Hsla,
+    border_color: Hsla,
+    bordered: bool,
+}
+
+impl FloatingSurface {
+    pub fn new(id: impl Into<ElementId>, content: impl IntoElement, cx: &App) -> Self {
+        Self {
+            id: id.into(),
+            title: SharedString::default(),
+            content: content.into_any_element(),
+            inset_x: Pixels::ZERO,
+            inset_y: Pixels::ZERO,
+            background: cx.theme().background.raised(1).opaque(),
+            foreground: cx.theme().foreground,
+            border_color: cx.theme().border,
+            bordered: true,
+        }
+    }
+
+    #[must_use]
+    pub fn title(mut self, title: impl Into<SharedString>) -> Self {
+        self.title = title.into();
+        self
+    }
+
+    #[must_use]
+    pub const fn content_inset(mut self, x: Pixels, y: Pixels) -> Self {
+        self.inset_x = x;
+        self.inset_y = y;
+        self
+    }
+
+    #[must_use]
+    pub const fn colors(mut self, background: Hsla, foreground: Hsla, border_color: Hsla) -> Self {
+        self.background = background;
+        self.foreground = foreground;
+        self.border_color = border_color;
+        self
+    }
+
+    #[must_use]
+    pub const fn bordered(mut self, bordered: bool) -> Self {
+        self.bordered = bordered;
+        self
+    }
+}
+
+impl RenderOnce for FloatingSurface {
+    fn render(self, _: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
+        let mut shadows = surface_ring(cx);
+        if cx.theme().shadow {
+            shadows.extend(floating_surface_shadow(cx));
+        }
+        div()
+            .id(self.id)
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .occlude()
+            .rounded(cx.theme().radius)
+            .bg(self.background)
+            .text_color(self.foreground)
+            .shadow(shadows)
+            .when(self.bordered, |surface| {
+                surface.border_1().border_color(self.border_color)
+            })
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .absolute()
+                    .left(self.inset_x)
+                    .right(self.inset_x)
+                    .top(self.inset_y)
+                    .bottom(self.inset_y)
+                    .overflow_hidden()
+                    .child(self.content),
+            )
+            .when(self.bordered && !self.title.is_empty(), |surface| {
+                surface.child(
+                    div()
+                        .absolute()
+                        .top(px(1.0))
+                        .left(self.inset_x.max(px(8.0)))
+                        .max_w_full()
+                        .px(px(4.0))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_size(crate::rems_from_px(11.0))
+                        .line_height(self.inset_y.max(px(14.0)))
+                        .bg(self.background)
+                        .child(self.title),
+                )
+            })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaneDragOverlayState {
     /// The prefix is armed: every pane is a handle waiting to be picked up.

@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 62;
+pub const PROTOCOL_VERSION: u16 = 63;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
@@ -950,6 +950,9 @@ pub enum InputMessage {
     CancelPrefix {
         request_id: u64,
     },
+    Popup {
+        action: PopupAction,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1408,6 +1411,79 @@ pub enum DisplayPanesAction {
     Close,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PopupBorderLines {
+    #[default]
+    Single,
+    Double,
+    Heavy,
+    Simple,
+    Rounded,
+    Padded,
+    None,
+}
+
+impl PopupBorderLines {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Single => "single",
+            Self::Double => "double",
+            Self::Heavy => "heavy",
+            Self::Simple => "simple",
+            Self::Rounded => "rounded",
+            Self::Padded => "padded",
+            Self::None => "none",
+        }
+    }
+}
+
+impl std::str::FromStr for PopupBorderLines {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "single" => Ok(Self::Single),
+            "double" => Ok(Self::Double),
+            "heavy" => Ok(Self::Heavy),
+            "simple" => Ok(Self::Simple),
+            "rounded" => Ok(Self::Rounded),
+            "padded" => Ok(Self::Padded),
+            "none" => Ok(Self::None),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PopupState {
+    pub pane: PaneId,
+    pub left: u16,
+    pub top: u16,
+    pub width: u16,
+    pub height: u16,
+    pub client_columns: u16,
+    pub client_rows: u16,
+    pub cell_width_px: u32,
+    pub cell_height_px: u32,
+    pub title: String,
+    pub style: String,
+    pub border_style: String,
+    pub border_lines: PopupBorderLines,
+    pub close_on_exit: bool,
+    pub close_on_exit_zero: bool,
+    pub close_on_any_key: bool,
+    pub dead: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PopupAction {
+    Text(String),
+    Key { input: KeyInput, text_follows: bool },
+    TerminalView(TerminalViewAction),
+    Close,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Event {
     pub sequence: u64,
@@ -1572,6 +1648,9 @@ pub enum EventPayload {
     },
     PrefixCancelled {
         request_id: u64,
+    },
+    Popup {
+        state: Option<PopupState>,
     },
 }
 
@@ -1929,6 +2008,30 @@ mod tests {
                 .expect("agent auto-approve default")
                 .value,
             "on"
+        );
+    }
+
+    #[test]
+    fn popup_variants_hold_the_appended_wire_tails() {
+        let input = super::InputMessage::Popup {
+            action: super::PopupAction::Close,
+        };
+        let input_bytes = postcard::to_stdvec(&input).expect("popup input encodes");
+        assert_eq!(input_bytes[0], 14);
+        assert_eq!(
+            postcard::from_bytes::<super::InputMessage>(&input_bytes).expect("popup input decodes"),
+            input
+        );
+
+        let event = super::Event {
+            sequence: 7,
+            payload: super::EventPayload::Popup { state: None },
+        };
+        let event_bytes = postcard::to_stdvec(&event).expect("popup event encodes");
+        assert_eq!(event_bytes[1], 36);
+        assert_eq!(
+            postcard::from_bytes::<super::Event>(&event_bytes).expect("popup event decodes"),
+            event
         );
     }
 }

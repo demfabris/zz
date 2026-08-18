@@ -224,9 +224,9 @@ remain later work.
 
 | Area | tmux | zz |
 | --- | --- | --- |
-| Env contract | `$TMUX`, `$TMUX_PANE`, plus server-seeded global and client-updated session overlays | Daemon-seeded global and session overlays reach new PTYs, and `ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET` identify the workspace; every `[ -n "$TMUX" ]` script still sees "not in tmux". |
-| Binary argv | `-L -S -f -2 -C -u` | `--socket`, `--host`; none of tmux's binary flags. |
-| Control mode `-CC` | What iTerm2 integration speaks. | Never — zz owns both ends. |
+| Env contract | `$TMUX`, `$TMUX_PANE`, plus server-seeded global and client-updated session overlays | Closed by 7a (2026-08-18): panes get `$TMUX` in tmux's exact `socket,pid,session` shape plus `TMUX_PANE=%N`, exec-family jobs get `$TMUX` without `TMUX_PANE`, and `ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET` ride alongside. |
+| Binary argv | `-L -S -f -2 -C -u -V -N -c -l` | Closed by 7a (2026-08-18): `-V` (`tmux 3.8-zz`), `-L`/`-S`/`-f`/`-c`/`-N`/`-l`/`-2`/`-u`, tmux-shaped usage and unknown-option lines, pin CMD_STARTSERVER autostart. `-C`/`-CC` still rejected (phase 6 front-end). |
+| Control mode `-CC` | What iTerm2 integration speaks. | Phase 6 (in progress): a stdio front-end speaking `%begin`/`%output` with postcard behind, like `zz-tui`. |
 | Session groups | `new-session -t`. | Cataloged, rejected. |
 | Presentation | Status line, prompts, choosers drawn as terminal escapes. | All native GPUI — `#[…]` styles dropped, `status-style`/`-format`/`-justify`/`-position` out of scope. |
 

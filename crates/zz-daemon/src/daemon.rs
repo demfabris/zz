@@ -5757,6 +5757,12 @@ impl Shared {
                 let Some(popup) = inner.popups.get_mut(&target_client) else {
                     return Ok(Execution::default());
                 };
+                if border_lines.is_some_and(|lines| {
+                    lines != PopupBorderLines::None
+                        && (popup.state.width <= 2 || popup.state.height <= 2)
+                }) {
+                    return Ok(Execution::default());
+                }
                 popup.state.title = title;
                 if let Some(style) = &parsed.style {
                     popup.state.style.clone_from(style);
@@ -5777,8 +5783,9 @@ impl Shared {
                 }
                 popup.state.dead |= popup.terminal.completion().is_some();
                 let resize = (previous_lines != popup.state.border_lines && !popup.state.dead)
-                    .then(|| {
-                        let (columns, rows) = popup_content_size(&popup.state);
+                    .then(|| popup_content_size(&popup.state))
+                    .flatten()
+                    .map(|(columns, rows)| {
                         (columns, rows, popup.cell_width_px, popup.cell_height_px)
                     });
                 (Arc::clone(&popup.terminal), popup.state.clone(), resize)
@@ -5820,11 +5827,6 @@ impl Shared {
             } else {
                 defaults.border_lines
             };
-            if border_lines == PopupBorderLines::None && (width == 0 || height == 0)
-                || border_lines != PopupBorderLines::None && (width < 3 || height < 3)
-            {
-                return Ok(Execution::default());
-            }
             let variables = popup_position_variables(
                 &inner.engine,
                 &target,
@@ -5911,7 +5913,9 @@ impl Shared {
                 close_on_any_key,
                 dead: false,
             };
-            let (columns, rows) = popup_content_size(&state);
+            let Some((columns, rows)) = popup_content_size(&state) else {
+                return Ok(Execution::default());
+            };
             let spawn = TerminalSpawn {
                 working_directory: Some(working_directory),
                 command,
@@ -15282,7 +15286,10 @@ fn parse_popup_dimension(
         if cells == 0 {
             return Err(error("too small"));
         }
-        return Ok(u16::try_from(cells.min(u64::from(dimension))).unwrap_or(dimension));
+        if cells > u64::from(dimension) {
+            return Err(error("too large"));
+        }
+        return Ok(u16::try_from(cells).unwrap_or(dimension));
     }
     let cells = parse_popup_number(value, 1, u64::from(dimension)).map_err(error)?;
     Ok(u16::try_from(cells).unwrap_or(dimension))
@@ -15309,14 +15316,11 @@ fn popup_exit_code(terminal: &TerminalSession) -> Option<u8> {
     })
 }
 
-fn popup_content_size(state: &PopupState) -> (u16, u16) {
+fn popup_content_size(state: &PopupState) -> Option<(u16, u16)> {
     if state.border_lines == PopupBorderLines::None {
-        (state.width, state.height)
+        (state.width > 0 && state.height > 0).then_some((state.width, state.height))
     } else {
-        (
-            state.width.saturating_sub(2),
-            state.height.saturating_sub(2),
-        )
+        (state.width > 2 && state.height > 2).then_some((state.width - 2, state.height - 2))
     }
 }
 
@@ -16281,7 +16285,7 @@ mod tests {
         assert_eq!(parse_popup_dimension("width", None, 80).unwrap(), 40);
         assert_eq!(parse_popup_dimension("height", None, 25).unwrap(), 12);
         assert_eq!(
-            parse_popup_dimension("width", Some("150%"), 80).unwrap(),
+            parse_popup_dimension("width", Some("100%"), 80).unwrap(),
             80
         );
         assert_eq!(parse_popup_dimension("width", Some("25%"), 80).unwrap(), 20);
@@ -16292,6 +16296,7 @@ mod tests {
             ("-1", "too small"),
             ("wat", "invalid"),
             ("1%", "too small"),
+            ("200%", "too large"),
         ] {
             assert!(matches!(
                 parse_popup_dimension("width", Some(value), 80),
@@ -27478,6 +27483,57 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("zero-sized borderless default is a silent no-op");
         assert!(!shared.inner.lock().popups.contains_key(&client));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sub_three_by_three_popup_refuses_a_live_border_transition() {
+        let (shared, client, _, mut context) = popup_test_workspace("desktop");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-B", "-w", "2", "-h", "2", "sleep 30"]),
+            )
+            .expect("open live borderless popup");
+        let terminal = Arc::clone(&shared.inner.lock().popups[&client].terminal);
+        assert_eq!(
+            (
+                terminal.latest_viewport().columns,
+                terminal.latest_viewport().rows
+            ),
+            (2, 2)
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-b", "single"]),
+            )
+            .expect("refuse bordered popup modification");
+        assert_eq!(
+            shared.inner.lock().popups[&client].state.border_lines,
+            PopupBorderLines::None
+        );
+        assert_eq!(
+            (
+                terminal.latest_viewport().columns,
+                terminal.latest_viewport().rows
+            ),
+            (2, 2)
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-C"]),
+            )
+            .expect("clear live borderless popup");
     }
 
     #[cfg(unix)]

@@ -25,7 +25,7 @@ use crate::{
     command_spec,
     formats::{
         CommandHooks, FormatContext, FormatType, StatusHooks, expand_format_time_with_hooks,
-        expand_format_with_hooks,
+        expand_format_with_hooks, parse_tmux_colour,
     },
     layout::PANE_MAXIMUM,
     model::DEFAULT_WINDOW_EXTENT,
@@ -5192,6 +5192,11 @@ impl MuxEngine {
                         value.to_owned()
                     }
                 };
+                if !valid_popup_style(&next) {
+                    return Err(ServerError::InvalidCommand(format!(
+                        "invalid style: {next}"
+                    )));
+                }
                 if let Some(key) = local_key {
                     locals.insert(key, next);
                 } else {
@@ -5225,9 +5230,7 @@ impl MuxEngine {
                         )
                     })?;
                     value.parse().map_err(|()| {
-                        ServerError::InvalidCommand(format!(
-                            "popup-border-lines unknown value: {value}"
-                        ))
+                        ServerError::InvalidCommand(format!("unknown value: {value}"))
                     })?
                 };
                 if let Some(key) = local_key {
@@ -6764,6 +6767,47 @@ fn tmux_vis(value: &str, double_quoted: bool) -> String {
 
 fn tmux_flag(value: bool) -> &'static str {
     if value { "on" } else { "off" }
+}
+
+fn valid_popup_style(value: &str) -> bool {
+    value
+        .split([' ', ',', '\n'])
+        .filter(|token| !token.is_empty())
+        .all(|token| {
+            if token.len() > 255 {
+                return false;
+            }
+            let lower = token.to_ascii_lowercase();
+            if matches!(lower.as_str(), "default" | "none") {
+                return true;
+            }
+            if lower.starts_with("fg=") || lower.starts_with("bg=") {
+                return parse_tmux_colour(&token[3..]).is_some();
+            }
+            lower.split('|').all(|attribute| {
+                let attribute = attribute.strip_prefix("no").unwrap_or(attribute);
+                matches!(
+                    attribute,
+                    "acs"
+                        | "bright"
+                        | "bold"
+                        | "dim"
+                        | "underscore"
+                        | "blink"
+                        | "reverse"
+                        | "hidden"
+                        | "italics"
+                        | "strikethrough"
+                        | "double-underscore"
+                        | "curly-underscore"
+                        | "dotted-underscore"
+                        | "dashed-underscore"
+                        | "overline"
+                        | "attr"
+                        | "link"
+                )
+            })
+        })
 }
 
 fn validate_environment_name(name: &str) -> Result<(), ServerError> {
@@ -16510,11 +16554,54 @@ mod tests {
         assert!(matches!(
             engine.execute(
                 &mut context,
-                &command("set-window-option", &["popup-border-lines", "zigzag"])
+                &command("set-option", &["popup-border-lines", "zigzag"])
             ),
             Err(ServerError::InvalidCommand(message))
-                if message == "popup-border-lines unknown value: zigzag"
+                if message == "unknown value: zigzag"
         ));
+    }
+
+    #[test]
+    fn popup_style_options_reject_unknown_tokens_at_global_and_local_scope() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+
+        for (scope, option, value) in [
+            ("-g", "popup-style", "fg=red,bg=#00ff7f,bold,nounderscore"),
+            ("-g", "popup-border-style", "fg=colour255,bg=black,italics"),
+            ("", "popup-style", "default,none,bright|reverse"),
+            ("", "popup-border-style", "fg=cyan,bg=colour0,noitalics"),
+        ] {
+            let args = if scope.is_empty() {
+                vec![option, value]
+            } else {
+                vec![scope, option, value]
+            };
+            engine
+                .execute(&mut context, &command("set-option", &args))
+                .unwrap();
+        }
+
+        for (scope, option, value) in [
+            ("-g", "popup-style", "bogus-not-a-style"),
+            ("-g", "popup-border-style", "fg=not-a-colour"),
+            ("", "popup-style", "bold,unknown"),
+            ("", "popup-border-style", "bg=#12345g"),
+        ] {
+            let args = if scope.is_empty() {
+                vec![option, value]
+            } else {
+                vec![scope, option, value]
+            };
+            assert!(matches!(
+                engine.execute(&mut context, &command("set-option", &args)),
+                Err(ServerError::InvalidCommand(message))
+                    if message == format!("invalid style: {value}")
+            ));
+        }
     }
 
     #[test]

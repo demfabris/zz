@@ -349,6 +349,25 @@ impl InteractiveClient {
         })
     }
 
+    pub fn attach_session(
+        &self,
+        session: impl Into<String>,
+        detach_others: bool,
+    ) -> Result<(), DaemonError> {
+        let session = session.into();
+        if !detach_others {
+            return self.attach(session);
+        }
+        let mut args = vec!["-d".to_owned()];
+        if !session.is_empty() {
+            args.extend(["-t".to_owned(), session]);
+        }
+        self.send(&ProtocolMessage::CommandRequest(CommandRequest {
+            request_id: 0,
+            command: CommandInvocation::new("attach-session", args),
+        }))
+    }
+
     pub fn detach(&self) -> Result<(), DaemonError> {
         self.send(&ProtocolMessage::Detach)
     }

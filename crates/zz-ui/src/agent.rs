@@ -1452,14 +1452,9 @@ fn render_timeline_row(
         TimelineRow::Single(entry) => {
             render_entry(timeline_scroll, store, entry, copyable_assistant, cx)
         }
-        TimelineRow::Group { id, entries, .. } => render_group(
-            timeline_scroll,
-            store,
-            id,
-            &entries,
-            copyable_assistant,
-            cx,
-        ),
+        TimelineRow::Group { id, entries, .. } => {
+            render_group(timeline_scroll, store, id, &entries, copyable_assistant, cx)
+        }
     }
 }
 
@@ -2472,9 +2467,7 @@ fn code_block_language(language: Option<SharedString>) -> SharedString {
 fn standard_markdown_extensions() -> MarkdownExtensions {
     static EXTENSIONS: OnceLock<MarkdownExtensions> = OnceLock::new();
     EXTENSIONS
-        .get_or_init(|| {
-            MarkdownExtensions::default().plugin(MermaidPlugin)
-        })
+        .get_or_init(|| MarkdownExtensions::default().plugin(MermaidPlugin))
         .clone()
 }
 

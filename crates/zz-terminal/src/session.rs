@@ -3105,7 +3105,10 @@ fn run_terminal(
     let pair = pty_system
         .openpty(geometry.pty_size())
         .map_err(|error| WorkerError::Pty(error.to_string()))?;
+    #[cfg(unix)]
     let tty = pair.master.tty_name();
+    #[cfg(not(unix))]
+    let tty = None;
 
     let mut command = match spawn.command.as_deref() {
         Some(shell_command) => {

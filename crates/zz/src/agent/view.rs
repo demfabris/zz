@@ -2775,11 +2775,10 @@ impl AgentView {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .h(px(
-                        COMPOSER_FOOTER_HEIGHT
-                            + COMPOSER_OUTER_PADDING
-                            + COMPOSER_SECTION_GAP,
-                    ) + cx.theme().radius)
+                    .h(
+                        px(COMPOSER_FOOTER_HEIGHT + COMPOSER_OUTER_PADDING + COMPOSER_SECTION_GAP)
+                            + cx.theme().radius,
+                    )
                     .bg(crate::theme::app_pane_background(cx)),
             )
             .child(
@@ -3323,10 +3322,7 @@ fn agent_chrome_button(id: impl Into<ElementId>) -> Button {
 /// so the glyph comes out at 16px: `size` pins the box, so the variant only
 /// picks the icon here.
 fn agent_chrome_icon_button(id: impl Into<ElementId>) -> Button {
-    Button::new(id)
-        .ghost()
-        .size(px(CHROME_BUTTON_HEIGHT))
-        .p_0()
+    Button::new(id).ghost().size(px(CHROME_BUTTON_HEIGHT)).p_0()
 }
 
 fn session_directory_label(cwd: &Path) -> String {

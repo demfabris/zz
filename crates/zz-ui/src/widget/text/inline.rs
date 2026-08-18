@@ -57,7 +57,11 @@ fn code_fill_bounds(
 
     (0..=rows)
         .filter_map(|row| {
-            let left = if row == 0 { start.x } else { text_bounds.left() };
+            let left = if row == 0 {
+                start.x
+            } else {
+                text_bounds.left()
+            };
             let right = if row == rows {
                 end.x
             } else {
@@ -750,7 +754,11 @@ mod tests {
             text_bounds,
         );
 
-        assert_eq!(fills.len(), 2, "a span across a wrap paints one fill a line");
+        assert_eq!(
+            fills.len(),
+            2,
+            "a span across a wrap paints one fill a line"
+        );
         assert_eq!(fills[0].right(), px(400.0 + CODE_FILL_PAD_X));
         assert_eq!(fills[1].left(), px(0.0 - CODE_FILL_PAD_X));
         assert_eq!(fills[1].top() - fills[0].top(), px(21.0));

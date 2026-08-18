@@ -1285,7 +1285,8 @@ impl BlockNode {
                                 .text_color(cx.theme().foreground.on())
                                 .when(checked, |this| {
                                     this.bg(cx.theme().foreground).child(
-                                        Icon::new(IconName::Check).size(px(f32::from(font_size) * 0.65)),
+                                        Icon::new(IconName::Check)
+                                            .size(px(f32::from(font_size) * 0.65)),
                                     )
                                 }),
                         ),

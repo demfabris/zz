@@ -187,6 +187,55 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn native_attach_accepts_the_tmux_target_for_both_spellings() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "named"]);
+        assert_eq!(created.status.code(), Some(0));
+        for command in ["attach", "attach-session"] {
+            let output = fixture.run(&[command, "-t", "named"]);
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stdout.is_empty());
+            assert_eq!(
+                output.stderr,
+                b"zz attach: attach requires an interactive terminal\n"
+            );
+        }
+    }
+
+    #[test]
+    fn native_attach_rejections_match_the_engine() {
+        let fixture = Fixture::new();
+        for args in [
+            &["-r"][..],
+            &["-x"][..],
+            &["-E"][..],
+            &["-c", "/tmp"][..],
+            &["-f", "flags"][..],
+        ] {
+            let invocation =
+                zz_protocol::CommandInvocation::new("attach-session", args.iter().copied());
+            let error = zz_mux::MuxEngine::default()
+                .execute(&mut zz_mux::ExecutionContext::default(), &invocation)
+                .expect_err("engine rejects the unsupported attach option");
+            let expected = format!("zz: mux command failed: {error}\n");
+            for command in ["attach", "attach-session"] {
+                let output = fixture
+                    .command()
+                    .arg(command)
+                    .args(args)
+                    .output()
+                    .expect("run native attach rejection");
+                assert_eq!(output.status.code(), Some(1));
+                assert!(output.stdout.is_empty());
+                assert_eq!(output.stderr, expected.as_bytes());
+            }
+        }
+    }
+
+    #[test]
     fn ls_or_new_session_idiom_starts_one_fresh_daemon() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
@@ -239,18 +288,18 @@ mod daemon_autostart {
         std::fs::write(&config, b"").expect("empty mux config");
         let base = root.join(format!("tmux-{}", rustix::process::getuid().as_raw()));
         let socket = base.join("a/b");
-        let run = |arguments: &[&str]| {
+        let run = |label: &str, arguments: &[&str]| {
             Command::new(env!("CARGO_BIN_EXE_zz"))
                 .env("TMUX_TMPDIR", directory.path())
                 .arg("-f")
                 .arg(&config)
-                .args(["-L", "a/b"])
+                .args(["-L", label])
                 .args(arguments)
                 .output()
                 .expect("run slash-label command")
         };
 
-        let listed = run(&["list-sessions"]);
+        let listed = run("a/b", &["list-sessions"]);
         assert_missing(
             &listed,
             format!(
@@ -262,8 +311,8 @@ mod daemon_autostart {
         assert!(base.is_dir());
         assert!(!base.join("a").exists());
 
-        let created = run(&["new-session", "-d"]);
-        assert_eq!(created.status.code(), Some(1));
+        let created = run("a/b", &["new-session", "-d"]);
+        assert_eq!(created.status.code(), Some(0));
         assert!(created.stdout.is_empty());
         assert_eq!(
             created.stderr,
@@ -276,5 +325,19 @@ mod daemon_autostart {
         assert!(!base.join("a").exists());
         assert!(!socket.exists());
         assert!(!identity_path(&socket).exists());
+
+        let file = base.join("file");
+        std::fs::write(&file, b"").expect("non-directory label parent");
+        let not_a_directory = run("file/socket", &["new-session", "-d"]);
+        assert_eq!(not_a_directory.status.code(), Some(1));
+        assert!(not_a_directory.stdout.is_empty());
+        assert_eq!(
+            not_a_directory.stderr,
+            format!(
+                "error creating {} (Not a directory)\n",
+                file.join("socket").display()
+            )
+            .as_bytes()
+        );
     }
 }

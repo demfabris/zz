@@ -381,6 +381,7 @@ pub(crate) fn run(
     mut endpoint: Endpoint,
     local_endpoint: Endpoint,
     target: Option<&str>,
+    detach_others: bool,
     host_label: String,
     local_host_label: String,
     fleet_hosts: Vec<HostEntry>,
@@ -391,7 +392,7 @@ pub(crate) fn run(
     let mut client = Arc::new(initial);
     let attach_target = target.unwrap_or_default().to_owned();
     client
-        .attach(attach_target)
+        .attach_session(attach_target, detach_others)
         .map_err(|error| error.to_string())?;
 
     let mut terminal = TerminalGuard::enter().map_err(|error| error.to_string())?;

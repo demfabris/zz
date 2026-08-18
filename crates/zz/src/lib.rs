@@ -88,11 +88,35 @@ const TMUX_USAGE: &str = concat!(
     "usage: zz [-2CDhlNuVv] [-c shell-command] [-f file] [-L socket-name]\n",
     "            [-S socket-path] [-T features] [command [flags]]"
 );
+#[cfg(not(target_os = "ios"))]
+const NATIVE_ATTACH_USAGE: &str =
+    "zz: usage: zz [--host <name>] attach [--restart-daemon] [session]";
 
 #[cfg(not(target_os = "ios"))]
 enum Startup {
     Application(PathBuf),
     Exit(ExitCode),
+}
+
+#[cfg(not(target_os = "ios"))]
+#[derive(Debug, PartialEq, Eq)]
+struct NativeAttachArguments {
+    restart_daemon: bool,
+    detach_others: bool,
+    session: Option<String>,
+}
+
+#[cfg(not(target_os = "ios"))]
+#[derive(Debug, PartialEq, Eq)]
+enum NativeAttachArgumentError {
+    Usage,
+    Command(ServerError),
+}
+
+#[cfg(not(target_os = "ios"))]
+struct TmuxLabelCreationError {
+    message: String,
+    kind: ErrorKind,
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -703,30 +727,35 @@ fn run_command_mode(
         return Some(run_kill_server(socket_path, args));
     }
 
-    if command == "attach" {
-        let mut restart_daemon = false;
-        let mut session = None;
-        for argument in args {
-            if argument == "--restart-daemon" && !restart_daemon {
-                restart_daemon = true;
-            } else if session.is_none() && !argument.starts_with('-') {
-                session = Some(argument);
-            } else {
-                eprintln!("zz: usage: zz [--host <name>] attach [--restart-daemon] [session]");
+    if canonical_command(&command) == "attach-session" {
+        let options = match parse_native_attach_arguments(args) {
+            Ok(options) => options,
+            Err(NativeAttachArgumentError::Usage) => {
+                eprintln!("{NATIVE_ATTACH_USAGE}");
                 return Some(ExitCode::FAILURE);
             }
-        }
-        if restart_daemon && host.is_some() {
+            Err(NativeAttachArgumentError::Command(error)) => {
+                eprintln!("{}", command_error_message(&DaemonError::Server(error)));
+                return Some(ExitCode::FAILURE);
+            }
+        };
+        if options.restart_daemon && host.is_some() {
             eprintln!("zz: --restart-daemon is only supported for the local daemon");
             return Some(ExitCode::FAILURE);
         }
         let options = zz_tui::RunOptions {
             socket_path: socket_path.to_path_buf(),
             host: host.map(str::to_owned),
-            session,
-            restart_daemon,
+            session: options.session,
+            restart_daemon: options.restart_daemon,
+            detach_others: options.detach_others,
         };
-        let browser_provider = tui_browser_provider();
+        let browser_provider = {
+            use std::io::IsTerminal as _;
+            (std::io::stdin().is_terminal() && std::io::stdout().is_terminal())
+                .then(tui_browser_provider)
+                .flatten()
+        };
         let reconnect = |path: &Path| connect_interactive_client(path, TerminalColorScheme::Dark);
         let request = options
             .with_browser_provider(browser_provider)
@@ -738,11 +767,6 @@ fn run_command_mode(
                 ExitCode::FAILURE
             }
         });
-    }
-
-    if host.is_some() && matches!(command.as_str(), "attach" | "attach-session") {
-        eprintln!("zz: --host attach is not supported");
-        return Some(ExitCode::FAILURE);
     }
 
     let mut args = args.collect::<Vec<_>>();
@@ -763,8 +787,14 @@ fn run_command_mode(
 
     let start_server = !no_start_server && tmux_command_starts_server(&command);
     if let Some(error) = tmux_label_creation_error(socket_path, socket_source, start_server) {
-        eprintln!("{error}");
-        return Some(ExitCode::FAILURE);
+        eprintln!("{}", error.message);
+        let nested_label_new_session =
+            canonical_command(&command) == "new-session" && error.kind == ErrorKind::NotFound;
+        return Some(if nested_label_new_session {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        });
     }
     let mut client = match host.map_or_else(
         || {
@@ -817,7 +847,7 @@ fn run_tmux_shell_command(
 ) -> ExitCode {
     let start_server = !no_start_server;
     if let Some(error) = tmux_label_creation_error(socket_path, socket_source, start_server) {
-        eprintln!("{error}");
+        eprintln!("{}", error.message);
         return ExitCode::FAILURE;
     }
     let mut client = match host.map_or_else(
@@ -912,26 +942,106 @@ fn tmux_command_starts_server(command: &str) -> bool {
 }
 
 #[cfg(not(target_os = "ios"))]
+fn parse_native_attach_arguments(
+    arguments: impl IntoIterator<Item = String>,
+) -> Result<NativeAttachArguments, NativeAttachArgumentError> {
+    let mut restart_daemon = false;
+    let mut detach_others = false;
+    let mut target = None;
+    let mut positional = None;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        if argument == "--restart-daemon" {
+            if restart_daemon {
+                return Err(NativeAttachArgumentError::Usage);
+            }
+            restart_daemon = true;
+            continue;
+        }
+        if !argument.starts_with('-') {
+            if positional.is_some() {
+                return Err(NativeAttachArgumentError::Usage);
+            }
+            positional = Some(argument);
+            continue;
+        }
+        if argument == "-" || argument.starts_with("--") {
+            return Err(NativeAttachArgumentError::Usage);
+        }
+        let options = &argument[1..];
+        for (index, option) in options.char_indices() {
+            let name = format!("-{option}");
+            match option {
+                'd' => detach_others = true,
+                't' | 'c' | 'f' => {
+                    let value_index = index + option.len_utf8();
+                    let value = if value_index < options.len() {
+                        options[value_index..].to_owned()
+                    } else {
+                        arguments.next().ok_or_else(|| {
+                            NativeAttachArgumentError::Command(ServerError::InvalidCommand(
+                                format!("{name} requires an argument"),
+                            ))
+                        })?
+                    };
+                    if option == 't' {
+                        target = Some(value);
+                    } else {
+                        return Err(NativeAttachArgumentError::Command(
+                            ServerError::UnsupportedCommand(format!("attach-session {name}")),
+                        ));
+                    }
+                    break;
+                }
+                'r' | 'x' | 'E' => {
+                    return Err(NativeAttachArgumentError::Command(
+                        ServerError::UnsupportedCommand(format!("attach-session {name}")),
+                    ));
+                }
+                _ => {
+                    return Err(NativeAttachArgumentError::Command(
+                        ServerError::InvalidCommand(format!(
+                            "attach-session does not support {name}"
+                        )),
+                    ));
+                }
+            }
+        }
+    }
+    if target.is_some() && positional.is_some() {
+        return Err(NativeAttachArgumentError::Usage);
+    }
+    Ok(NativeAttachArguments {
+        restart_daemon,
+        detach_others,
+        session: target.or(positional),
+    })
+}
+
+#[cfg(not(target_os = "ios"))]
 fn tmux_label_creation_error(
     path: &Path,
     socket_source: SocketSelectionSource,
     start_server: bool,
-) -> Option<String> {
+) -> Option<TmuxLabelCreationError> {
     if socket_source != SocketSelectionSource::Label || !start_server {
         return None;
     }
     let parent = path.parent()?;
     match std::fs::metadata(parent) {
         Ok(metadata) if metadata.is_dir() => None,
-        Ok(_) => Some(format!(
-            "error creating {} (Not a directory)",
-            path.display()
-        )),
-        Err(error) => Some(format!(
-            "error creating {} ({})",
-            path.display(),
-            os_error_text(&error)
-        )),
+        Ok(_) => Some(TmuxLabelCreationError {
+            message: format!("error creating {} (Not a directory)", path.display()),
+            kind: ErrorKind::NotADirectory,
+        }),
+        Err(error) => Some(TmuxLabelCreationError {
+            message: format!(
+                "error creating {} ({})",
+                path.display(),
+                os_error_text(&error)
+            ),
+            kind: error.kind(),
+        }),
     }
 }
 
@@ -1619,7 +1729,8 @@ mod tests {
     use super::{
         ApplicationArgumentError, TMUX_USAGE, TMUX_VERSION_OUTPUT, application_arguments,
         command_error_message, daemon_is_missing, inherited_socket_path, is_kill_server_command,
-        protocol_version_output, terminal_color_scheme, tmux_command_starts_server,
+        parse_native_attach_arguments, protocol_version_output, terminal_color_scheme,
+        tmux_command_starts_server,
     };
     #[cfg(unix)]
     use super::{tmux_label_socket_path, tmux_socket_root};
@@ -1661,6 +1772,28 @@ mod tests {
         ] {
             assert!(!tmux_command_starts_server(command), "{command}");
         }
+    }
+
+    #[test]
+    fn native_attach_parser_keeps_the_zz_superset_and_tmux_target() {
+        let target = parse_native_attach_arguments(
+            ["-d", "-t", "work", "--restart-daemon"].map(str::to_owned),
+        )
+        .unwrap();
+        assert!(target.detach_others);
+        assert!(target.restart_daemon);
+        assert_eq!(target.session.as_deref(), Some("work"));
+
+        let positional =
+            parse_native_attach_arguments(["work", "--restart-daemon"].map(str::to_owned)).unwrap();
+        assert!(!positional.detach_others);
+        assert!(positional.restart_daemon);
+        assert_eq!(positional.session.as_deref(), Some("work"));
+
+        assert!(matches!(
+            parse_native_attach_arguments(["-t", "one", "two"].map(str::to_owned)),
+            Err(super::NativeAttachArgumentError::Usage)
+        ));
     }
 
     #[test]

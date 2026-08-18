@@ -41,6 +41,7 @@ pub struct RunOptions {
     pub host: Option<String>,
     pub session: Option<String>,
     pub restart_daemon: bool,
+    pub detach_others: bool,
 }
 
 impl Default for RunOptions {
@@ -50,6 +51,7 @@ impl Default for RunOptions {
             host: None,
             session: None,
             restart_daemon: false,
+            detach_others: false,
         }
     }
 }
@@ -149,6 +151,7 @@ pub fn run<'a>(request: impl Into<RunRequest<'a>>) -> Result<(), Error> {
         endpoint,
         local_endpoint,
         options.session.as_deref(),
+        options.detach_others,
         host_label,
         local_host_label,
         fleet_hosts,
@@ -342,6 +345,7 @@ mod tests {
         assert_eq!(local.session.as_deref(), Some("work"));
         assert!(local.host.is_none());
         assert!(!local.restart_daemon);
+        assert!(!local.detach_others);
 
         let remote =
             parse_arguments(["--host".to_owned(), "box".to_owned(), "attach".to_owned()]).unwrap();

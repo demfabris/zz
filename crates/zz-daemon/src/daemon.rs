@@ -20,9 +20,10 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
-    DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision, KeyEngine,
-    KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts, canonical_command,
-    command_block_body, expand_format_values, hook_format_variables, if_shell_truthy, parse_config,
+    CellLayout, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision,
+    KeyEngine, KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts,
+    canonical_command, command_block_body, expand_format_values, hook_format_variables,
+    if_shell_truthy, parse_config,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -1571,6 +1572,401 @@ struct Shared {
     socket_path: PathBuf,
 }
 
+#[derive(Clone)]
+struct PendingHookEvent {
+    name: &'static str,
+    context: ExecutionContext,
+    variables: BTreeMap<String, String>,
+}
+
+#[derive(Clone)]
+struct HookSessionState {
+    name: String,
+    active_window: WindowId,
+}
+
+#[derive(Clone)]
+struct HookWindowState {
+    session: SessionId,
+    name: String,
+    active_pane: PaneId,
+    zoomed_pane: Option<PaneId>,
+    layout: CellLayout,
+    extent: (u16, u16),
+}
+
+#[derive(Clone)]
+struct HookPaneState {
+    session: SessionId,
+    window: WindowId,
+    title: String,
+}
+
+struct MuxHookSnapshot {
+    sessions: BTreeMap<SessionId, HookSessionState>,
+    windows: BTreeMap<WindowId, HookWindowState>,
+    panes: BTreeMap<PaneId, HookPaneState>,
+    links: BTreeSet<(SessionId, WindowId)>,
+}
+
+impl PendingHookEvent {
+    fn session(
+        name: &'static str,
+        session: SessionId,
+        state: &HookSessionState,
+        snapshot: &MuxHookSnapshot,
+    ) -> Self {
+        let context = snapshot.session_context(session);
+        Self {
+            name,
+            context,
+            variables: BTreeMap::from([
+                ("hook".to_owned(), name.to_owned()),
+                ("hook_session".to_owned(), session.to_string()),
+                ("hook_session_name".to_owned(), state.name.clone()),
+            ]),
+        }
+    }
+
+    fn window(
+        name: &'static str,
+        window: WindowId,
+        state: &HookWindowState,
+        snapshot: &MuxHookSnapshot,
+    ) -> Self {
+        Self {
+            name,
+            context: snapshot.window_context(window),
+            variables: BTreeMap::from([
+                ("hook".to_owned(), name.to_owned()),
+                ("hook_window".to_owned(), window.to_string()),
+                ("hook_window_name".to_owned(), state.name.clone()),
+            ]),
+        }
+    }
+
+    fn winlink(
+        name: &'static str,
+        session: SessionId,
+        session_state: &HookSessionState,
+        window: WindowId,
+        window_state: &HookWindowState,
+        snapshot: &MuxHookSnapshot,
+    ) -> Self {
+        Self {
+            name,
+            context: snapshot.window_context(window),
+            variables: BTreeMap::from([
+                ("hook".to_owned(), name.to_owned()),
+                ("hook_session".to_owned(), session.to_string()),
+                ("hook_session_name".to_owned(), session_state.name.clone()),
+                ("hook_window".to_owned(), window.to_string()),
+                ("hook_window_name".to_owned(), window_state.name.clone()),
+            ]),
+        }
+    }
+
+    fn pane(
+        name: &'static str,
+        pane: PaneId,
+        state: &HookPaneState,
+        snapshot: &MuxHookSnapshot,
+    ) -> Self {
+        let window_name = snapshot
+            .windows
+            .get(&state.window)
+            .map(|window| window.name.clone())
+            .unwrap_or_default();
+        Self {
+            name,
+            context: ExecutionContext::new(Some(state.session), Some(state.window), Some(pane)),
+            variables: BTreeMap::from([
+                ("hook".to_owned(), name.to_owned()),
+                ("hook_window".to_owned(), state.window.to_string()),
+                ("hook_window_name".to_owned(), window_name),
+                ("hook_pane".to_owned(), pane.to_string()),
+            ]),
+        }
+    }
+
+    fn client(name: &'static str, context: ExecutionContext, client_name: Option<&str>) -> Self {
+        let mut variables = BTreeMap::from([("hook".to_owned(), name.to_owned())]);
+        if let Some(client_name) = client_name {
+            variables.insert("hook_client".to_owned(), client_name.to_owned());
+        }
+        Self {
+            name,
+            context,
+            variables,
+        }
+    }
+}
+
+impl MuxHookSnapshot {
+    fn capture(engine: &MuxEngine) -> Self {
+        let sessions = engine
+            .state
+            .sessions
+            .iter()
+            .map(|(session, state)| {
+                (
+                    *session,
+                    HookSessionState {
+                        name: state.name.clone(),
+                        active_window: state.active_window,
+                    },
+                )
+            })
+            .collect();
+        let windows = engine
+            .state
+            .windows
+            .iter()
+            .map(|(window, state)| {
+                (
+                    *window,
+                    HookWindowState {
+                        session: state.session,
+                        name: state.name.clone(),
+                        active_pane: state.active_pane,
+                        zoomed_pane: state.zoomed_pane,
+                        layout: state.layout.clone(),
+                        extent: (
+                            engine
+                                .window_extent(*window, zz_protocol::Axis::Horizontal)
+                                .unwrap_or_default(),
+                            engine
+                                .window_extent(*window, zz_protocol::Axis::Vertical)
+                                .unwrap_or_default(),
+                        ),
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let panes = engine
+            .state
+            .windows
+            .iter()
+            .flat_map(|(window, window_state)| {
+                window_state.panes.iter().map(move |(pane, pane_state)| {
+                    (
+                        *pane,
+                        HookPaneState {
+                            session: window_state.session,
+                            window: *window,
+                            title: pane_state.title.clone(),
+                        },
+                    )
+                })
+            })
+            .collect();
+        let links = engine
+            .state
+            .sessions
+            .iter()
+            .flat_map(|(session, state)| {
+                state.windows.iter().map(move |window| (*session, *window))
+            })
+            .collect();
+        Self {
+            sessions,
+            windows,
+            panes,
+            links,
+        }
+    }
+
+    fn session_context(&self, session: SessionId) -> ExecutionContext {
+        let Some(state) = self.sessions.get(&session) else {
+            return ExecutionContext::new(Some(session), None, None);
+        };
+        let pane = self
+            .windows
+            .get(&state.active_window)
+            .map(|window| window.active_pane);
+        ExecutionContext::new(Some(session), Some(state.active_window), pane)
+    }
+
+    fn window_context(&self, window: WindowId) -> ExecutionContext {
+        self.windows.get(&window).map_or_else(
+            || ExecutionContext::new(None, Some(window), None),
+            |state| {
+                ExecutionContext::new(Some(state.session), Some(window), Some(state.active_pane))
+            },
+        )
+    }
+}
+
+fn mux_hook_events(
+    before: &MuxHookSnapshot,
+    after: &MuxHookSnapshot,
+    command: &str,
+) -> Vec<PendingHookEvent> {
+    let mut events = Vec::new();
+    for (session, window) in after.links.difference(&before.links) {
+        if let (Some(session_state), Some(window_state)) =
+            (after.sessions.get(session), after.windows.get(window))
+        {
+            events.push(PendingHookEvent::winlink(
+                "window-linked",
+                *session,
+                session_state,
+                *window,
+                window_state,
+                after,
+            ));
+        }
+    }
+    if command == "new-session" {
+        for (session, state) in &after.sessions {
+            if !before.sessions.contains_key(session) {
+                events.push(PendingHookEvent::session(
+                    "session-created",
+                    *session,
+                    state,
+                    after,
+                ));
+            }
+        }
+    }
+    if command == "rename-session" {
+        for (session, state) in &after.sessions {
+            if before
+                .sessions
+                .get(session)
+                .is_some_and(|previous| previous.name != state.name)
+            {
+                events.push(PendingHookEvent::session(
+                    "session-renamed",
+                    *session,
+                    state,
+                    after,
+                ));
+            }
+        }
+    }
+    for (session, state) in &after.sessions {
+        if before
+            .sessions
+            .get(session)
+            .is_some_and(|previous| previous.active_window != state.active_window)
+            && let Some(window) = after.windows.get(&state.active_window)
+        {
+            events.push(PendingHookEvent::winlink(
+                "session-window-changed",
+                *session,
+                state,
+                state.active_window,
+                window,
+                after,
+            ));
+        }
+    }
+    for (window, state) in &after.windows {
+        let Some(previous) = before.windows.get(window) else {
+            continue;
+        };
+        if previous.name != state.name {
+            events.push(PendingHookEvent::window(
+                "window-renamed",
+                *window,
+                state,
+                after,
+            ));
+        }
+        if previous.layout != state.layout || previous.zoomed_pane != state.zoomed_pane {
+            events.push(PendingHookEvent::window(
+                "window-layout-changed",
+                *window,
+                state,
+                after,
+            ));
+            if previous.extent != state.extent {
+                events.push(PendingHookEvent::window(
+                    "window-resized",
+                    *window,
+                    state,
+                    after,
+                ));
+            }
+        }
+        if previous.active_pane != state.active_pane {
+            events.push(PendingHookEvent::window(
+                "window-pane-changed",
+                *window,
+                state,
+                after,
+            ));
+        }
+    }
+    for (pane, state) in &after.panes {
+        if before
+            .panes
+            .get(pane)
+            .is_some_and(|previous| previous.title != state.title)
+        {
+            events.push(PendingHookEvent::pane(
+                "pane-title-changed",
+                *pane,
+                state,
+                after,
+            ));
+        }
+    }
+    let removed_links = before
+        .links
+        .difference(&after.links)
+        .filter_map(|(session, window)| {
+            Some(PendingHookEvent::winlink(
+                "window-unlinked",
+                *session,
+                before.sessions.get(session)?,
+                *window,
+                before.windows.get(window)?,
+                before,
+            ))
+        })
+        .collect::<Vec<_>>();
+    let closed_sessions = before
+        .sessions
+        .iter()
+        .filter(|(session, _)| !after.sessions.contains_key(session))
+        .map(|(session, state)| {
+            PendingHookEvent::session("session-closed", *session, state, before)
+        })
+        .collect::<Vec<_>>();
+    if command == "kill-session" {
+        events.extend(closed_sessions);
+        events.extend(removed_links);
+    } else {
+        events.extend(removed_links);
+        events.extend(closed_sessions);
+    }
+    events
+}
+
+fn pane_mode_hook_events(
+    before: &MuxHookSnapshot,
+    after: &MuxHookSnapshot,
+    before_modes: &BTreeSet<PaneId>,
+    after_modes: &BTreeSet<PaneId>,
+) -> Vec<PendingHookEvent> {
+    before_modes
+        .symmetric_difference(after_modes)
+        .filter_map(|pane| {
+            after
+                .panes
+                .get(pane)
+                .map(|state| PendingHookEvent::pane("pane-mode-changed", *pane, state, after))
+                .or_else(|| {
+                    before.panes.get(pane).map(|state| {
+                        PendingHookEvent::pane("pane-mode-changed", *pane, state, before)
+                    })
+                })
+        })
+        .collect()
+}
+
 #[derive(Clone, Copy)]
 struct DisplayPanesDeadline {
     client: ClientId,
@@ -2302,7 +2698,10 @@ impl Shared {
     }
 
     fn unregister(&self, client: ClientId) {
-        self.detach(client);
+        let (detached, _) = self.detach_client_state(client, false);
+        if detached {
+            self.publish_snapshot();
+        }
         self.fail_gui_requests_for(client);
         self.status.lock().forget(client);
         let (terminals, command_output, shutdown) = {
@@ -2608,6 +3007,18 @@ impl Shared {
         commands: Vec<Vec<CommandInvocation>>,
         variables: &BTreeMap<String, String>,
     ) -> String {
+        self.run_hook_commands_with_policy(client, kind, context, commands, variables, false)
+    }
+
+    fn run_hook_commands_with_policy(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        commands: Vec<Vec<CommandInvocation>>,
+        variables: &BTreeMap<String, String>,
+        skip_resolution_errors: bool,
+    ) -> String {
         let mut output = String::new();
         for commands in commands {
             let mut hook_context = context.clone();
@@ -2620,6 +3031,9 @@ impl Shared {
                         append_inserted_output(&mut output, &execution.output);
                     }
                     Err(error) => {
+                        if skip_resolution_errors && hook_resolution_error(&error) {
+                            break;
+                        }
                         if let Some(error_output) = daemon_error_output(&error) {
                             append_inserted_output(&mut output, error_output);
                         }
@@ -2632,6 +3046,29 @@ impl Shared {
         output
     }
 
+    fn run_event_hooks(self: &Arc<Self>, events: Vec<PendingHookEvent>) {
+        for event in events {
+            let (context, commands) = {
+                let inner = self.inner.lock();
+                let mut context = event.context.clone();
+                inner.engine.repair_event_context(&mut context);
+                let commands = inner.engine.event_hook_commands(&context, event.name);
+                (context, commands)
+            };
+            let Some(commands) = commands else {
+                continue;
+            };
+            let _ = self.run_hook_commands_with_policy(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &context,
+                commands,
+                &event.variables,
+                true,
+            );
+        }
+    }
+
     fn execute_with_mux_source_inner(
         self: &Arc<Self>,
         client: ClientId,
@@ -2641,6 +3078,8 @@ impl Shared {
         mux_source: MuxOptionSource,
     ) -> Result<Execution, DaemonError> {
         let format_variables = context.format_variables.clone();
+        let event_hooks_enabled = !context.no_hooks;
+        let command_name = canonical_command(&command.name);
         let mut terminals_to_watch = Vec::new();
         let mut client_events = Vec::new();
         let mut direct_events = Vec::new();
@@ -2668,9 +3107,19 @@ impl Shared {
         let mut status_formats_changed = false;
         let mut shutdown_requested = false;
         let mut immediate_hooks = Vec::new();
+        let mut pending_hook_events = Vec::new();
 
         let (mut execution, mux_options_event) = {
             let mut inner = self.inner.lock();
+            let hook_snapshot_before =
+                event_hooks_enabled.then(|| MuxHookSnapshot::capture(&inner.engine));
+            let copy_modes_before = event_hooks_enabled.then(|| {
+                inner
+                    .copy_sessions
+                    .values()
+                    .map(|session| session.pane)
+                    .collect::<BTreeSet<_>>()
+            });
             let active_windows_before = inner
                 .engine
                 .state
@@ -3546,6 +3995,38 @@ impl Shared {
                     }
                 }
             }
+            if let Some(before) = hook_snapshot_before.as_ref() {
+                let after = MuxHookSnapshot::capture(&inner.engine);
+                pending_hook_events.extend(mux_hook_events(before, &after, command_name));
+                for session in before
+                    .sessions
+                    .keys()
+                    .filter(|session| !after.sessions.contains_key(session))
+                {
+                    if let Some(clients) = inner.attached.get(session) {
+                        for attached_client in clients {
+                            pending_hook_events.push(PendingHookEvent::client(
+                                "client-detached",
+                                before.session_context(*session),
+                                inner.client_names.get(attached_client).map(String::as_str),
+                            ));
+                        }
+                    }
+                }
+                if let Some(copy_modes_before) = copy_modes_before.as_ref() {
+                    let copy_modes_after = inner
+                        .copy_sessions
+                        .values()
+                        .map(|session| session.pane)
+                        .collect::<BTreeSet<_>>();
+                    pending_hook_events.extend(pane_mode_hook_events(
+                        before,
+                        &after,
+                        copy_modes_before,
+                        &copy_modes_after,
+                    ));
+                }
+            }
             let mux_options_event = mux_options_changed.then(|| inner.mux_options.clone());
             (execution, mux_options_event)
         };
@@ -3602,22 +4083,25 @@ impl Shared {
                 if let Some(session) = detached_session {
                     self.publish_to_client(client, EventPayload::Detached { session, by: None });
                 }
-                self.detach(client);
+                self.detach_with_event_hooks(client, event_hooks_enabled);
             }
-            Some(DetachScope::Others) => self.evict_clients(None, client),
+            Some(DetachScope::Others) => {
+                self.evict_clients_with_event_hooks(None, client, event_hooks_enabled);
+            }
             Some(DetachScope::Session(session)) => {
-                self.evict_clients(Some(session), client);
+                self.evict_clients_with_event_hooks(Some(session), client, event_hooks_enabled);
                 if detached_session == Some(session) {
                     self.publish_to_client(client, EventPayload::Detached { session, by: None });
-                    self.detach(client);
+                    self.detach_with_event_hooks(client, event_hooks_enabled);
                 }
             }
         }
         if let Some((session, detach_others)) = attach {
             if kind == ClientKind::Interactive {
-                let mut snapshot = self.attach(client, session)?;
+                let mut snapshot =
+                    self.attach_with_event_hooks(client, session, event_hooks_enabled)?;
                 if detach_others {
-                    self.evict_clients(Some(session), client);
+                    self.evict_clients_with_event_hooks(Some(session), client, event_hooks_enabled);
                     let inner = self.inner.lock();
                     snapshot = inner.engine.state.snapshot();
                     let presence = snapshot_presence(&inner);
@@ -3633,7 +4117,7 @@ impl Shared {
                 }
                 self.publish_snapshot();
             } else if detach_others {
-                self.evict_clients(Some(session), client);
+                self.evict_clients_with_event_hooks(Some(session), client, event_hooks_enabled);
                 self.publish_snapshot();
             }
         }
@@ -3754,6 +4238,7 @@ impl Shared {
             source_file_error = Some(error);
         }
         self.publish_key_tables_if_changed();
+        self.run_event_hooks(pending_hook_events);
         source_file_error.map_or(Ok(execution), Err)
     }
 
@@ -5398,11 +5883,36 @@ impl Shared {
         Ok(())
     }
 
-    fn attach(&self, client: ClientId, session: SessionId) -> Result<MuxSnapshot, ServerError> {
+    fn attach(
+        self: &Arc<Self>,
+        client: ClientId,
+        session: SessionId,
+    ) -> Result<MuxSnapshot, ServerError> {
+        self.attach_with_event_hooks(client, session, true)
+    }
+
+    fn attach_with_event_hooks(
+        self: &Arc<Self>,
+        client: ClientId,
+        session: SessionId,
+        event_hooks_enabled: bool,
+    ) -> Result<MuxSnapshot, ServerError> {
         let mut inner = self.inner.lock();
         if !inner.engine.state.sessions.contains_key(&session) {
             return Err(ServerError::MissingTarget(session.to_string()));
         }
+        let hook_state_before = event_hooks_enabled.then(|| {
+            (
+                MuxHookSnapshot::capture(&inner.engine),
+                inner
+                    .copy_sessions
+                    .values()
+                    .map(|session| session.pane)
+                    .collect::<BTreeSet<_>>(),
+            )
+        });
+        let previous_session = client_attached_session(&inner, client);
+        let client_name = inner.client_names.get(&client).cloned();
         let previous_sessions = inner
             .attached
             .iter()
@@ -5456,6 +5966,41 @@ impl Shared {
         let mut snapshot = inner.engine.state.snapshot();
         let presence = snapshot_presence(&inner);
         stamp_snapshot_for_client(&inner, client, &mut snapshot, &presence);
+        let mut hook_events = Vec::new();
+        if let Some((hook_snapshot_before, copy_modes_before)) = hook_state_before.as_ref() {
+            let hook_snapshot_after = MuxHookSnapshot::capture(&inner.engine);
+            hook_events.extend(mux_hook_events(
+                hook_snapshot_before,
+                &hook_snapshot_after,
+                "",
+            ));
+            let copy_modes_after = inner
+                .copy_sessions
+                .values()
+                .map(|session| session.pane)
+                .collect::<BTreeSet<_>>();
+            hook_events.extend(pane_mode_hook_events(
+                hook_snapshot_before,
+                &hook_snapshot_after,
+                copy_modes_before,
+                &copy_modes_after,
+            ));
+            if previous_session != Some(session) {
+                let context = hook_snapshot_after.session_context(session);
+                hook_events.push(PendingHookEvent::client(
+                    "client-session-changed",
+                    context.clone(),
+                    client_name.as_deref(),
+                ));
+                if previous_session.is_none() {
+                    hook_events.push(PendingHookEvent::client(
+                        "client-attached",
+                        context,
+                        client_name.as_deref(),
+                    ));
+                }
+            }
+        }
         drop(inner);
         if let Some(output) = command_output {
             Self::retire_command_output(client, output);
@@ -5483,6 +6028,7 @@ impl Shared {
             terminal.attach_view(view);
         }
         apply_terminal_resizes(resizes);
+        self.run_event_hooks(hook_events);
         Ok(snapshot)
     }
 
@@ -5547,15 +6093,26 @@ impl Shared {
         Ok((session, snapshot))
     }
 
-    fn detach(&self, client: ClientId) {
-        if self.detach_client_state(client) {
+    fn detach(self: &Arc<Self>, client: ClientId) {
+        self.detach_with_event_hooks(client, true);
+    }
+
+    fn detach_with_event_hooks(self: &Arc<Self>, client: ClientId, event_hooks_enabled: bool) {
+        let (detached, events) = self.detach_client_state(client, event_hooks_enabled);
+        if detached {
             self.publish_snapshot();
         }
+        self.run_event_hooks(events);
     }
 
     /// Detach every attached client but `stealer`, either across the server or
     /// on one session.
-    fn evict_clients(self: &Arc<Self>, session: Option<SessionId>, stealer: ClientId) {
+    fn evict_clients_with_event_hooks(
+        self: &Arc<Self>,
+        session: Option<SessionId>,
+        stealer: ClientId,
+        event_hooks_enabled: bool,
+    ) {
         let (victims, by) = {
             let inner = self.inner.lock();
             let victims = inner
@@ -5583,14 +6140,18 @@ impl Shared {
                     by: Some(by.clone()),
                 },
             );
-            let _ = self.detach_client_state(victim);
+            self.detach_with_event_hooks(victim, event_hooks_enabled);
         }
         if evicted {
             self.publish_snapshot();
         }
     }
 
-    fn detach_client_state(&self, client: ClientId) -> bool {
+    fn detach_client_state(
+        &self,
+        client: ClientId,
+        event_hooks_enabled: bool,
+    ) -> (bool, Vec<PendingHookEvent>) {
         let mut inner = self.inner.lock();
         let sessions = inner
             .attached
@@ -5598,6 +6159,17 @@ impl Shared {
             .filter_map(|(session, clients)| clients.contains(&client).then_some(*session))
             .collect::<Vec<_>>();
         let was_attached = !sessions.is_empty();
+        let hook_state_before = event_hooks_enabled.then(|| {
+            (
+                MuxHookSnapshot::capture(&inner.engine),
+                inner
+                    .copy_sessions
+                    .values()
+                    .map(|session| session.pane)
+                    .collect::<BTreeSet<_>>(),
+            )
+        });
+        let client_name = inner.client_names.get(&client).cloned();
         let terminals = sessions
             .iter()
             .flat_map(|session| session_terminals(&inner, *session))
@@ -5631,6 +6203,33 @@ impl Shared {
         let command_output = take_command_output(&mut inner, client);
         write_back_terminal_geometries(&mut inner, &affected_panes, true);
         let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
+        let mut events = Vec::new();
+        if let Some((hook_snapshot_before, copy_modes_before)) = hook_state_before.as_ref() {
+            let hook_snapshot_after = MuxHookSnapshot::capture(&inner.engine);
+            events.extend(mux_hook_events(
+                hook_snapshot_before,
+                &hook_snapshot_after,
+                "",
+            ));
+            let copy_modes_after = inner
+                .copy_sessions
+                .values()
+                .map(|session| session.pane)
+                .collect::<BTreeSet<_>>();
+            events.extend(pane_mode_hook_events(
+                hook_snapshot_before,
+                &hook_snapshot_after,
+                copy_modes_before,
+                &copy_modes_after,
+            ));
+            if let Some(session) = sessions.first() {
+                events.push(PendingHookEvent::client(
+                    "client-detached",
+                    hook_snapshot_before.session_context(*session),
+                    client_name.as_deref(),
+                ));
+            }
+        }
         drop(inner);
         self.fail_gui_requests_for(client);
         let view = TerminalViewId(client.0);
@@ -5650,7 +6249,7 @@ impl Shared {
         if prefix_was_armed {
             self.publish_to_client(client, EventPayload::PrefixArmed { armed: false });
         }
-        was_attached
+        (was_attached, events)
     }
 
     fn input(
@@ -5667,6 +6266,28 @@ impl Shared {
         );
         let generation = self.inner.lock().engine.state.generation();
         let resize_split = matches!(&input, InputMessage::ResizeSplit { .. });
+        let copy_mode_change = matches!(
+            &input,
+            InputMessage::TerminalView { action, .. }
+                if terminal_view_action_enters_copy_mode(action)
+                    || terminal_view_action_exits_copy_mode(action)
+        );
+        let hook_state_before = (!context.no_hooks
+            && (matches!(
+                &input,
+                InputMessage::ResizeTerminal { .. } | InputMessage::ResizeSplit { .. }
+            ) || copy_mode_change))
+            .then(|| {
+                let inner = self.inner.lock();
+                let copy_modes = copy_mode_change.then(|| {
+                    inner
+                        .copy_sessions
+                        .values()
+                        .map(|session| session.pane)
+                        .collect::<BTreeSet<_>>()
+                });
+                (MuxHookSnapshot::capture(&inner.engine), copy_modes)
+            });
         let result = (|| -> Result<(), DaemonError> {
             match input {
                 InputMessage::Text { pane, text } => {
@@ -5854,6 +6475,33 @@ impl Shared {
         };
         if publish_snapshot {
             self.publish_snapshot();
+        }
+        if result.is_ok()
+            && let Some((before, copy_modes_before)) = hook_state_before.as_ref()
+        {
+            let (after, copy_modes_after) = {
+                let inner = self.inner.lock();
+                let copy_modes = copy_modes_before.as_ref().map(|_| {
+                    inner
+                        .copy_sessions
+                        .values()
+                        .map(|session| session.pane)
+                        .collect::<BTreeSet<_>>()
+                });
+                (MuxHookSnapshot::capture(&inner.engine), copy_modes)
+            };
+            let mut events = mux_hook_events(before, &after, "");
+            if let (Some(copy_modes_before), Some(copy_modes_after)) =
+                (copy_modes_before, copy_modes_after)
+            {
+                events.extend(pane_mode_hook_events(
+                    before,
+                    &after,
+                    copy_modes_before,
+                    &copy_modes_after,
+                ));
+            }
+            self.run_event_hooks(events);
         }
         log::trace!(
             target: "zz_daemon::diagnostics::input",
@@ -8236,7 +8884,7 @@ impl Shared {
         if let Some(pipe) = pipe {
             stop_pane_pipe(pipe);
         }
-        let Some((mut context, retained, changed)) = ({
+        let Some((mut context, retained, changed, mut events, before)) = ({
             let mut inner = self.inner.lock();
             if !inner
                 .terminals
@@ -8248,6 +8896,7 @@ impl Shared {
             let Some(context) = ExecutionContext::for_pane(&inner.engine.state, pane) else {
                 return;
             };
+            let before = MuxHookSnapshot::capture(&inner.engine);
             let retained = inner
                 .engine
                 .retain_exited_pane(pane, failed)
@@ -8267,7 +8916,22 @@ impl Shared {
             } else {
                 false
             };
-            Some((context, retained, changed))
+            let mut events = if retained {
+                let after = MuxHookSnapshot::capture(&inner.engine);
+                let mut events = mux_hook_events(&before, &after, "");
+                if changed && let Some(state) = after.panes.get(&pane) {
+                    events.push(PendingHookEvent::pane("pane-died", pane, state, &after));
+                }
+                events
+            } else {
+                before.panes.get(&pane).map_or_else(Vec::new, |state| {
+                    vec![PendingHookEvent::pane("pane-exited", pane, state, &before)]
+                })
+            };
+            if !changed && retained {
+                events.clear();
+            }
+            Some((context, retained, changed, events, before))
         }) else {
             return;
         };
@@ -8280,6 +8944,7 @@ impl Shared {
             if changed {
                 self.publish_snapshot();
             }
+            self.run_event_hooks(events);
             return;
         }
 
@@ -8289,17 +8954,27 @@ impl Shared {
         );
         let target = pane.to_string();
         let command = CommandInvocation::new("kill-pane", ["-t", target.as_str()]);
-        if let Err(error) = self.execute(
+        context.no_hooks = true;
+        let result = self.execute(
             ClientId(u64::MAX),
             ClientKind::Command,
             &mut context,
             &command,
-        ) && self.is_current_terminal(pane, terminal)
+        );
+        if let Err(error) = &result
+            && self.is_current_terminal(pane, terminal)
         {
             log::error!(
                 target: "zz_daemon::diagnostics::terminal",
                 "failed to close exited terminal pane={pane}: {error}"
             );
+        }
+        if result.is_ok() {
+            let after = MuxHookSnapshot::capture(&self.inner.lock().engine);
+            events.extend(mux_hook_events(&before, &after, ""));
+        }
+        if result.is_ok() || !self.is_current_terminal(pane, terminal) {
+            self.run_event_hooks(events);
         }
     }
 
@@ -8311,8 +8986,13 @@ impl Shared {
             .is_some_and(|current| Arc::ptr_eq(current, terminal))
     }
 
-    fn synchronize_pane_title(&self, pane: PaneId, terminal: &Arc<TerminalSession>, title: &str) {
-        let changed = {
+    fn synchronize_pane_title(
+        self: &Arc<Self>,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        title: &str,
+    ) {
+        let event = {
             let mut inner = self.inner.lock();
             if !inner
                 .terminals
@@ -8321,19 +9001,29 @@ impl Shared {
             {
                 return;
             }
-            inner
+            let changed = inner
                 .engine
                 .state
                 .update_pane_title(pane, title)
-                .unwrap_or(false)
+                .unwrap_or(false);
+            changed.then(|| {
+                let snapshot = MuxHookSnapshot::capture(&inner.engine);
+                PendingHookEvent::pane(
+                    "pane-title-changed",
+                    pane,
+                    &snapshot.panes[&pane],
+                    &snapshot,
+                )
+            })
         };
-        if changed {
+        if let Some(event) = event {
             self.publish_snapshot();
+            self.run_event_hooks(vec![event]);
         }
     }
 
     fn synchronize_pane_runtime(
-        &self,
+        self: &Arc<Self>,
         pane: PaneId,
         terminal: &Arc<TerminalSession>,
         viewport: &TerminalViewport,
@@ -8348,7 +9038,7 @@ impl Shared {
             .tty()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let changed = {
+        let (changed, events) = {
             let mut inner = self.inner.lock();
             if !inner
                 .terminals
@@ -8364,7 +9054,8 @@ impl Shared {
                 .unwrap_or_default();
             let facts = format_hook_facts(&inner);
             let mut hooks = DaemonFormatHooks::command(&facts);
-            inner.engine.set_pane_runtime_facts_with_hooks(
+            let before = MuxHookSnapshot::capture(&inner.engine);
+            let changed = inner.engine.set_pane_runtime_facts_with_hooks(
                 pane,
                 PaneRuntimeFacts {
                     current_command: current_command.to_owned(),
@@ -8376,11 +9067,14 @@ impl Shared {
                     tty,
                 },
                 &mut hooks,
-            )
+            );
+            let after = MuxHookSnapshot::capture(&inner.engine);
+            (changed, mux_hook_events(&before, &after, ""))
         };
         if changed {
             self.publish_snapshot();
         }
+        self.run_event_hooks(events);
     }
 
     fn detach_removed_sessions(&self) {
@@ -8395,7 +9089,7 @@ impl Shared {
         };
         for (session, client) in detached {
             self.publish_to_client(client, EventPayload::Detached { session, by: None });
-            let _ = self.detach_client_state(client);
+            let _ = self.detach_client_state(client, false);
         }
     }
 
@@ -8742,16 +9436,17 @@ impl Shared {
     }
 
     fn publish_terminal_for_pane(
-        &self,
+        self: &Arc<Self>,
         pane: PaneId,
         client: ClientId,
         payload: TerminalFanout,
         current: &TerminalViewport,
         terminal: &TerminalSession,
     ) {
-        let (subscriber, unclaimed) = {
+        let (subscriber, unclaimed, mode_event) = {
             let mut inner = self.inner.lock();
-            let unclaimed = reconcile_copy_session(&mut inner, pane, client, current.mode);
+            let (unclaimed, mode_changed) =
+                reconcile_copy_session(&mut inner, pane, client, current.mode);
             let subscriber = inner
                 .engine
                 .state
@@ -8768,7 +9463,14 @@ impl Shared {
                             .is_some_and(|visible| visible.contains(&pane))
                 })
                 .and_then(|_| inner.subscribers.get(&client).cloned());
-            (subscriber, unclaimed)
+            let mode_event = mode_changed
+                .then(|| MuxHookSnapshot::capture(&inner.engine))
+                .and_then(|snapshot| {
+                    snapshot.panes.get(&pane).map(|state| {
+                        PendingHookEvent::pane("pane-mode-changed", pane, state, &snapshot)
+                    })
+                });
+            (subscriber, unclaimed, mode_event)
         };
         if let Some(terminal) = unclaimed {
             terminal.view_action(
@@ -8776,23 +9478,27 @@ impl Shared {
                 zz_terminal::TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Cancel),
             );
         }
-        let Some(subscriber) = subscriber else {
-            return;
-        };
-        self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, current);
-        let sequence = Self::next_sequence();
-        let result = match payload {
-            TerminalFanout::Full => subscriber.enqueue_terminal_viewport(pane, sequence, current),
-            TerminalFanout::Patch(patch) => {
-                let message = ProtocolMessage::Event(Event {
-                    sequence,
-                    payload: EventPayload::TerminalPatch { pane, patch },
-                });
-                subscriber.enqueue_terminal(pane, &message)
+        if let Some(subscriber) = subscriber {
+            self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, current);
+            let sequence = Self::next_sequence();
+            let result = match payload {
+                TerminalFanout::Full => {
+                    subscriber.enqueue_terminal_viewport(pane, sequence, current)
+                }
+                TerminalFanout::Patch(patch) => {
+                    let message = ProtocolMessage::Event(Event {
+                        sequence,
+                        payload: EventPayload::TerminalPatch { pane, patch },
+                    });
+                    subscriber.enqueue_terminal(pane, &message)
+                }
+            };
+            if result == TerminalEnqueue::NeedsFull {
+                let _ = subscriber.replace_terminal_viewport(pane, Self::next_sequence(), current);
             }
-        };
-        if result == TerminalEnqueue::NeedsFull {
-            let _ = subscriber.replace_terminal_viewport(pane, Self::next_sequence(), current);
+        }
+        if let Some(event) = mode_event {
+            self.run_event_hooks(vec![event]);
         }
     }
 
@@ -8820,11 +9526,19 @@ impl Shared {
         );
     }
 
-    fn raise_pane_bell(&self, pane: PaneId) {
-        let raised = self.inner.lock().engine.state.set_pane_bell(pane, true);
-        if raised {
+    fn raise_pane_bell(self: &Arc<Self>, pane: PaneId) {
+        let event = {
+            let mut inner = self.inner.lock();
+            let raised = inner.engine.state.set_pane_bell(pane, true);
+            raised.then(|| {
+                let snapshot = MuxHookSnapshot::capture(&inner.engine);
+                PendingHookEvent::pane("alert-bell", pane, &snapshot.panes[&pane], &snapshot)
+            })
+        };
+        if let Some(event) = event {
             self.publish_snapshot();
             self.publish(EventPayload::Bell { pane });
+            self.run_event_hooks(vec![event]);
         }
     }
 
@@ -11706,20 +12420,20 @@ fn reconcile_copy_session(
     pane: PaneId,
     client: ClientId,
     mode: TerminalMode,
-) -> Option<Arc<TerminalSession>> {
+) -> (Option<Arc<TerminalSession>>, bool) {
     match (mode, inner.copy_sessions.get_mut(&client)) {
         (TerminalMode::Copy { .. }, Some(session)) if session.pane == pane => {
             session.observed = true;
-            None
+            (None, false)
         }
-        (TerminalMode::Copy { .. }, _) => inner.terminals.get(&pane).cloned(),
+        (TerminalMode::Copy { .. }, _) => (inner.terminals.get(&pane).cloned(), false),
         (TerminalMode::Live, Some(session))
             if session.pane == pane && (session.observed || session.scroll_exit) =>
         {
             exit_copy_session(inner, client);
-            None
+            (None, true)
         }
-        _ => None,
+        _ => (None, false),
     }
 }
 
@@ -13077,6 +13791,21 @@ fn daemon_error_output(error: &DaemonError) -> Option<&str> {
     }
 }
 
+fn hook_resolution_error(error: &DaemonError) -> bool {
+    match error {
+        DaemonError::CommandFailed { error, .. } => hook_resolution_error(error),
+        DaemonError::Server(
+            ServerError::MissingTarget(_)
+            | ServerError::SessionNotFound(_)
+            | ServerError::WindowNotFound(_)
+            | ServerError::PaneNotFound(_)
+            | ServerError::PaneNotAttached(_)
+            | ServerError::PaneExited(_),
+        ) => true,
+        _ => false,
+    }
+}
+
 fn uppercase_first(message: &mut String) {
     let Some(first) = message.chars().next() else {
         return;
@@ -14050,6 +14779,7 @@ fn handle_connection<S: TransportStream>(
         );
     };
 
+    shared.detach(client);
     registration.unregister();
     drop(command_sender);
     if command_worker.is_some_and(|worker| worker.join().is_err()) {
@@ -21285,6 +22015,21 @@ bind - split-window -v -c "#{pane_current_path}"
             );
             let view = TerminalViewId(client.0);
             let target = pane.to_string();
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-hook",
+                        [
+                            "-g",
+                            "pane-mode-changed",
+                            "display-message pane-mode-changed",
+                        ],
+                    ),
+                )
+                .expect("pane mode hook");
             let args = copy_args
                 .iter()
                 .copied()
@@ -21302,6 +22047,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 matches!(mode, TerminalMode::Copy { .. })
             });
             wait_for_observed_copy_session(&shared, client);
+            shared.inner.lock().message_log.clear();
             let generation = terminal
                 .latest_viewport_for(view)
                 .expect("copy viewport")
@@ -21326,6 +22072,20 @@ bind - split-window -v -c "#{pane_current_path}"
                     client,
                     "scroll-exit left the client on a copy table",
                 );
+                let deadline = Instant::now() + Duration::from_secs(5);
+                loop {
+                    if shared
+                        .inner
+                        .lock()
+                        .message_log
+                        .iter()
+                        .any(|message| message.text == "pane-mode-changed")
+                    {
+                        break;
+                    }
+                    assert!(Instant::now() < deadline, "scroll-exit hook did not fire");
+                    thread::sleep(Duration::from_millis(5));
+                }
             } else {
                 wait_for_viewport(
                     &terminal,
@@ -21345,6 +22105,7 @@ bind - split-window -v -c "#{pane_current_path}"
                         .and_then(KeyEngine::active_table),
                     Some("copy-mode")
                 );
+                assert!(inner.message_log.is_empty());
             }
         }
     }
@@ -25546,6 +26307,112 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn user_hook_run_now_uses_shared_option_storage_and_only_hook_format() {
+        let shared = Arc::new(Shared::new(1));
+        let (_, pane, _) = output_view_session_fixture(&shared, "user-hook", "first");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("user hook context");
+        let client = ClientId(7);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "@myhook", "v"]),
+            )
+            .unwrap();
+        let hook_command = "display-message -p 'AT-HOOK-RAN|#{hook}|#{hook_arguments}'";
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-g", "@myhook", hook_command]),
+            )
+            .unwrap();
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-options", ["-g", "-v", "@myhook"]),
+                )
+                .unwrap()
+                .output,
+            hook_command
+        );
+        assert!(
+            !shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-hooks", ["-g"]),
+                )
+                .unwrap()
+                .output
+                .lines()
+                .any(|line| line.starts_with('@'))
+        );
+
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-hook", ["-R", "@myhook"]),
+                )
+                .unwrap()
+                .output,
+            "AT-HOOK-RAN|@myhook|"
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "@myhook", "v"]),
+            )
+            .unwrap();
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-hook", ["-R", "@myhook"]),
+                )
+                .unwrap()
+                .output,
+            ""
+        );
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-g", "-u", "@myhook"]),
+            )
+            .unwrap();
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-options", ["-g", "-q", "-v", "@myhook"]),
+                )
+                .unwrap()
+                .output,
+            ""
+        );
+    }
+
+    #[test]
     fn command_hook_output_joins_the_triggering_client_response_in_pin_order() {
         let shared = Arc::new(Shared::new(1));
         let (session, first_pane, _) = output_view_session_fixture(&shared, "hook-output", "first");
@@ -25712,6 +26579,664 @@ bind - split-window -v -c "#{pane_current_path}"
                 output: "R-FIRED".to_owned(),
                 exit_code: 0,
             }
+        );
+    }
+
+    #[test]
+    fn event_hooks_fire_after_mutation_with_captured_formats() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "session-created",
+                        "set-environment -gF ZZ_TEST_SESSION_CREATED '#{hook}|#{hook_session}|#{hook_session_name}|#{hook_arguments}'",
+                    ],
+                ),
+            )
+            .expect("session-created hook");
+        let created = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "events"]),
+            )
+            .expect("new session");
+        let session = context.session.expect("created session");
+        let window = context.window.expect("created window");
+        assert!(created.output.is_empty());
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-environment", ["-g", "ZZ_TEST_SESSION_CREATED"],),
+                )
+                .unwrap()
+                .output,
+            format!("ZZ_TEST_SESSION_CREATED=session-created|{session}|events|")
+        );
+
+        for (name, value) in [
+            (
+                "window-renamed",
+                "set-environment -gF ZZ_TEST_WINDOW_RENAMED '#{hook}|#{hook_window}|#{hook_window_name}'",
+            ),
+            (
+                "window-layout-changed",
+                "set-environment -gF ZZ_TEST_WINDOW_LAYOUT_CHANGED '#{hook}|#{hook_window}'",
+            ),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-hook", ["-g", name, value]),
+                )
+                .expect("window event hook");
+        }
+        let renamed = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("rename-window", ["-t", &window.to_string(), "named"]),
+            )
+            .expect("rename window");
+        assert!(renamed.output.is_empty());
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-environment", ["-g", "ZZ_TEST_WINDOW_RENAMED"],),
+                )
+                .unwrap()
+                .output,
+            format!("ZZ_TEST_WINDOW_RENAMED=window-renamed|{window}|named")
+        );
+
+        let split = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("split-window", ["-d"]),
+            )
+            .expect("split window");
+        assert!(split.output.is_empty());
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "show-environment",
+                        ["-g", "ZZ_TEST_WINDOW_LAYOUT_CHANGED"],
+                    ),
+                )
+                .unwrap()
+                .output,
+            format!("ZZ_TEST_WINDOW_LAYOUT_CHANGED=window-layout-changed|{window}")
+        );
+    }
+
+    #[test]
+    fn window_event_hooks_fire_only_for_their_window() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, first_pane, _) =
+            output_view_session_fixture(&shared, "window-hooks", "first");
+        let (first_window, second_window) = {
+            let mut inner = shared.inner.lock();
+            let first_window = inner
+                .engine
+                .state
+                .window_for_pane(first_pane)
+                .expect("first window");
+            let (second_window, second_pane) = inner
+                .engine
+                .state
+                .create_window_at(
+                    session,
+                    None,
+                    Some("second".to_owned()),
+                    PaneKind::Terminal,
+                    false,
+                )
+                .expect("second window");
+            inner.terminals.insert(
+                second_pane,
+                Arc::new(TerminalSession::spawn_output_view(
+                    "second fixture".to_owned(),
+                    "second".to_owned(),
+                )),
+            );
+            (first_window, second_window)
+        };
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, first_pane)
+            .expect("window hook context");
+        let client = ClientId(7);
+        let first_target = first_window.to_string();
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "window-renamed",
+                        "set-environment -gF ZZ_TEST_WINDOW_RENAMED 'global=#{hook_window_name}'",
+                    ],
+                ),
+            )
+            .unwrap();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-w",
+                        "-t",
+                        first_target.as_str(),
+                        "window-renamed",
+                        "set-environment -gF ZZ_TEST_WINDOW_RENAMED 'local=#{hook_window_name}'",
+                    ],
+                ),
+            )
+            .unwrap();
+
+        let first_rename = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "rename-window",
+                    ["-t", first_target.as_str(), "first-renamed"],
+                ),
+            )
+            .unwrap();
+        assert!(first_rename.output.is_empty());
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-environment", ["-g", "ZZ_TEST_WINDOW_RENAMED"],),
+                )
+                .unwrap()
+                .output,
+            "ZZ_TEST_WINDOW_RENAMED=local=first-renamed"
+        );
+
+        let second_rename = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "rename-window",
+                    ["-t", second_window.to_string().as_str(), "second-renamed"],
+                ),
+            )
+            .unwrap();
+        assert!(second_rename.output.is_empty());
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-environment", ["-g", "ZZ_TEST_WINDOW_RENAMED"],),
+                )
+                .unwrap()
+                .output,
+            "ZZ_TEST_WINDOW_RENAMED=global=second-renamed"
+        );
+    }
+
+    #[test]
+    fn event_hooks_are_fully_dropped_inside_hooks() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, first_pane, _) = output_view_session_fixture(&shared, "events", "first");
+        let second_window = {
+            let mut inner = shared.inner.lock();
+            inner
+                .engine
+                .state
+                .create_window_at(
+                    session,
+                    None,
+                    Some("second".to_owned()),
+                    PaneKind::Terminal,
+                    false,
+                )
+                .expect("second window")
+                .0
+        };
+        let client = ClientId(7);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, first_pane)
+            .expect("hook context");
+        for (name, value) in [
+            (
+                "window-layout-changed",
+                "display-message event-layout-fired",
+            ),
+            ("after-select-window", "split-window -d"),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-hook", ["-g", name, value]),
+                )
+                .expect("hook setup");
+        }
+        shared.inner.lock().message_log.clear();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("select-window", ["-t", &second_window.to_string()]),
+            )
+            .expect("select window");
+        assert!(
+            shared
+                .inner
+                .lock()
+                .message_log
+                .iter()
+                .all(|message| message.text != "event-layout-fired")
+        );
+    }
+
+    #[test]
+    fn terminal_events_fire_rename_title_and_bell_hooks() {
+        let shared = Arc::new(Shared::new(1));
+        let (_, pane, terminal) = output_view_session_fixture(&shared, "terminal-events", "first");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .expect("window");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("event context");
+        for (name, value) in [
+            (
+                "window-renamed",
+                "display-message 'renamed=#{hook_window_name}'",
+            ),
+            (
+                "pane-title-changed",
+                "display-message 'title=#{hook_pane}:#{hook_window}'",
+            ),
+            ("alert-bell", "display-message 'bell=#{hook_pane}'"),
+        ] {
+            shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-hook", ["-g", name, value]),
+                )
+                .expect("terminal event hook");
+        }
+        shared.inner.lock().message_log.clear();
+
+        let viewport = terminal.latest_viewport();
+        shared.synchronize_pane_runtime(pane, &terminal, &viewport, "fish");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("rename-window", ["-t", &window.to_string(), "manual"]),
+            )
+            .expect("explicit rename");
+        shared.synchronize_pane_title(pane, &terminal, "osc-title");
+        shared.raise_pane_bell(pane);
+        shared.raise_pane_bell(pane);
+
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .message_log
+                .iter()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "renamed=fish",
+                "renamed=manual",
+                &format!("title={pane}:{window}"),
+                &format!("bell={pane}"),
+            ]
+        );
+    }
+
+    #[test]
+    fn session_closed_hook_keeps_payload_after_the_session_is_gone() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "session-closed",
+                        "set-environment -gF ZZ_TEST_SESSION_CLOSED '#{hook_session}|#{hook_session_name}|#{session_name}' ; split-window",
+                    ],
+                ),
+            )
+            .expect("session-closed hook");
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "closing"]),
+            )
+            .expect("session");
+        let session = context.session.expect("session id");
+        let closed = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-session", ["-t", &session.to_string()]),
+            )
+            .expect("kill session");
+        assert!(closed.output.is_empty());
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-environment", ["-g", "ZZ_TEST_SESSION_CLOSED"],),
+                )
+                .unwrap()
+                .output,
+            format!("ZZ_TEST_SESSION_CLOSED={session}|closing|")
+        );
+        assert!(shared.inner.lock().engine.state.sessions.is_empty());
+    }
+
+    #[test]
+    fn terminal_exit_fires_pane_exited_or_pane_died_by_retention() {
+        let shared = Arc::new(Shared::new(1));
+        let (_, anchor, _) = output_view_session_fixture(&shared, "exit-anchor", "anchor");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, anchor)
+            .expect("anchor context");
+        for (name, value) in [
+            ("pane-exited", "display-message 'exited=#{hook_pane}'"),
+            ("pane-died", "display-message 'died=#{hook_pane}'"),
+            (
+                "window-unlinked",
+                "display-message 'unlinked=#{hook_session_name}'",
+            ),
+            (
+                "session-closed",
+                "display-message 'closed=#{hook_session_name}'",
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-hook", ["-g", name, value]),
+                )
+                .expect("pane exit hook");
+        }
+        shared.inner.lock().message_log.clear();
+
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "exit-off", "exit"]),
+            )
+            .expect("non-retained terminal");
+        let exited = context.pane.expect("exited pane");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let inner = shared.inner.lock();
+            if inner.engine.state.pane(exited).is_none() && inner.message_log.len() == 3 {
+                break;
+            }
+            drop(inner);
+            assert!(Instant::now() < deadline, "pane-exited hook timed out");
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .message_log
+                .iter()
+                .map(|message| message.text.clone())
+                .collect::<Vec<_>>(),
+            [
+                format!("exited={exited}"),
+                "unlinked=exit-off".to_owned(),
+                "closed=exit-off".to_owned(),
+            ]
+        );
+        shared.inner.lock().message_log.clear();
+
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "remain-on-exit", "on"]),
+            )
+            .expect("enable retained exits");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "exit-on", "exit 7"]),
+            )
+            .expect("retained terminal");
+        let died = context.pane.expect("dead pane");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let inner = shared.inner.lock();
+            if inner.engine.state.pane(died).is_some_and(|pane| pane.dead)
+                && inner
+                    .message_log
+                    .iter()
+                    .any(|message| message.text == format!("died={died}"))
+            {
+                break;
+            }
+            drop(inner);
+            assert!(Instant::now() < deadline, "pane-died hook timed out");
+            thread::sleep(Duration::from_millis(10));
+        }
+        let messages = shared
+            .inner
+            .lock()
+            .message_log
+            .iter()
+            .map(|message| message.text.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(messages, [format!("died={died}")]);
+    }
+
+    #[test]
+    fn copy_mode_entry_and_exit_fire_pane_mode_changed() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "mode-hook", "mode");
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("mode-client".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(client, session).expect("attach");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("mode context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "pane-mode-changed",
+                        "display-message 'mode=#{hook_pane}'",
+                    ],
+                ),
+            )
+            .expect("mode hook");
+        shared.inner.lock().message_log.clear();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("copy-mode", ["-t", &pane.to_string()]),
+            )
+            .expect("enter copy mode");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("send-keys", ["-t", &pane.to_string(), "-X", "cancel"]),
+            )
+            .expect("exit copy mode");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane,
+                    action: zz_terminal::TerminalViewAction::EnterCopyMode,
+                },
+            )
+            .expect("enter copy mode from the terminal view");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane,
+                    action: zz_terminal::TerminalViewAction::CopyMode(
+                        zz_terminal::CopyModeAction::Cancel,
+                    ),
+                },
+            )
+            .expect("exit copy mode from the terminal view");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .message_log
+                .iter()
+                .map(|message| message.text.clone())
+                .collect::<Vec<_>>(),
+            [
+                format!("mode={pane}"),
+                format!("mode={pane}"),
+                format!("mode={pane}"),
+                format!("mode={pane}"),
+            ]
+        );
+    }
+
+    #[test]
+    fn terminal_resize_fires_layout_then_window_resized() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "resize-hooks", "resize");
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("resize-client".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(client, session).expect("attach");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("resize context");
+        for (name, value) in [
+            (
+                "window-layout-changed",
+                "display-message window-layout-changed",
+            ),
+            ("window-resized", "display-message window-resized"),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("set-hook", ["-g", name, value]),
+                )
+                .expect("resize hook");
+        }
+        shared.inner.lock().message_log.clear();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane,
+                    columns: 120,
+                    rows: 40,
+                    cell_width_px: 8,
+                    cell_height_px: 16,
+                },
+            )
+            .expect("resize terminal");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .message_log
+                .iter()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            ["window-layout-changed", "window-resized"]
         );
     }
 
@@ -28456,6 +29981,111 @@ bind - split-window -v -c "#{pane_current_path}"
             .execute(CommandInvocation::new("kill-server", [] as [&str; 0]))
             .unwrap();
         daemon_thread.join().unwrap().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn interactive_connection_fires_attach_and_detach_event_hooks() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        let mut setup_context = ExecutionContext::default();
+        for (name, value) in [
+            (
+                "client-session-changed",
+                "display-message 'session=#{hook_client}'",
+            ),
+            (
+                "client-attached",
+                "display-message 'attached=#{hook_client}'",
+            ),
+            (
+                "client-detached",
+                "display-message 'detached=#{hook_client}'",
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut setup_context,
+                    &CommandInvocation::new("set-hook", ["-g", name, value]),
+                )
+                .expect("client event hook");
+        }
+        shared.inner.lock().message_log.clear();
+
+        let (mut client_stream, server_stream) =
+            std::os::unix::net::UnixStream::pair().expect("create paired stream");
+        client_stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set read timeout");
+        let connection_shared = Arc::clone(&shared);
+        let connection =
+            thread::spawn(move || handle_connection(server_stream, &connection_shared));
+        zz_protocol::write_protocol_message(
+            &mut client_stream,
+            &ProtocolMessage::ClientHello(ClientHello {
+                protocol_version: PROTOCOL_VERSION,
+                client_instance_id: ClientInstanceId(1),
+                kind: ClientKind::Interactive,
+                device_name: Some("hook-client".to_owned()),
+                capabilities: Vec::new(),
+                color_scheme: None,
+                origin: None,
+            }),
+        )
+        .expect("send hello");
+        assert!(matches!(
+            zz_protocol::read_protocol_message(&mut client_stream).expect("server hello"),
+            ProtocolMessage::ServerHello(_)
+        ));
+        zz_protocol::write_protocol_message(
+            &mut client_stream,
+            &ProtocolMessage::Attach {
+                session: String::new(),
+            },
+        )
+        .expect("attach");
+        loop {
+            if matches!(
+                zz_protocol::read_protocol_message(&mut client_stream).expect("attach response"),
+                ProtocolMessage::Attached { .. }
+            ) {
+                break;
+            }
+        }
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .message_log
+                .iter()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            ["session=hook-client", "attached=hook-client"]
+        );
+
+        zz_protocol::write_protocol_message(&mut client_stream, &ProtocolMessage::Detach)
+            .expect("detach");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if shared
+                .inner
+                .lock()
+                .message_log
+                .back()
+                .is_some_and(|message| message.text == "detached=hook-client")
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "detach hook did not fire");
+            thread::sleep(Duration::from_millis(5));
+        }
+        drop(client_stream);
+        connection
+            .join()
+            .expect("connection thread")
+            .expect("connection");
     }
 
     #[cfg(unix)]

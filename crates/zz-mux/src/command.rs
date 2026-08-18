@@ -397,12 +397,6 @@ impl HookIndex {
 type HookArray = BTreeMap<HookIndex, Vec<CommandInvocation>>;
 type HookTable = BTreeMap<String, HookArray>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum HookTarget {
-    Global,
-    Session(SessionId),
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct EnvironmentEntry {
     value: Option<String>,
@@ -499,6 +493,9 @@ pub struct MuxEngine {
     pane_user_options: BTreeMap<PaneId, UserOptions>,
     global_hooks: HookTable,
     session_hooks: BTreeMap<SessionId, HookTable>,
+    global_window_hooks: HookTable,
+    window_hooks: BTreeMap<WindowId, HookTable>,
+    pane_hooks: BTreeMap<PaneId, HookTable>,
     global_environment: Environment,
     session_environments: BTreeMap<SessionId, Environment>,
     status: StatusFormats,
@@ -593,11 +590,11 @@ impl Default for MuxEngine {
             global_window_user_options: UserOptions::new(),
             window_user_options: BTreeMap::new(),
             pane_user_options: BTreeMap::new(),
-            global_hooks: HOOK_NAMES
-                .iter()
-                .map(|name| ((*name).to_owned(), HookArray::new()))
-                .collect(),
+            global_hooks: global_hook_table(TmuxOptionScope::Session),
             session_hooks: BTreeMap::new(),
+            global_window_hooks: global_hook_table(TmuxOptionScope::Window),
+            window_hooks: BTreeMap::new(),
+            pane_hooks: BTreeMap::new(),
             global_environment: Environment::new(),
             session_environments: BTreeMap::new(),
             status: StatusFormats::default(),
@@ -631,6 +628,68 @@ impl MuxEngine {
         local
             .or_else(|| self.global_hooks.get(name))
             .map(|hooks| hooks.values().cloned().collect())
+    }
+
+    #[must_use]
+    pub fn event_hook_commands(
+        &self,
+        context: &ExecutionContext,
+        name: &str,
+    ) -> Option<Vec<Vec<CommandInvocation>>> {
+        let option = match_tmux_option(name).ok().flatten()?;
+        if !tmux_option_is_hook(option.name) {
+            return None;
+        }
+        if option.scope == TmuxOptionScope::Session {
+            return self.hook_commands(context.session, option.name);
+        }
+        let window = context
+            .pane
+            .and_then(|pane| self.state.window_for_pane(pane))
+            .or(context.window);
+        let pane_hook = if option.scope == TmuxOptionScope::WindowPane {
+            context
+                .pane
+                .and_then(|pane| self.pane_hooks.get(&pane))
+                .and_then(|hooks| hooks.get(option.name))
+        } else {
+            None
+        };
+        pane_hook
+            .or_else(|| {
+                window
+                    .and_then(|window| self.window_hooks.get(&window))
+                    .and_then(|hooks| hooks.get(option.name))
+            })
+            .or_else(|| self.global_window_hooks.get(option.name))
+            .map(|hooks| hooks.values().cloned().collect())
+    }
+
+    fn user_hook_commands(
+        &self,
+        context: &ExecutionContext,
+        name: &str,
+    ) -> Option<Vec<Vec<CommandInvocation>>> {
+        let session = context
+            .session
+            .and_then(|session| {
+                self.user_option_readback(TmuxOptionTarget::Session(session), name, true)
+            })
+            .map(|(value, _)| value);
+        let pane = context
+            .pane
+            .and_then(|pane| self.user_option_readback(TmuxOptionTarget::Pane(pane), name, true))
+            .map(|(value, _)| value);
+        let window = context
+            .pane
+            .and_then(|pane| self.state.window_for_pane(pane))
+            .or(context.window)
+            .and_then(|window| {
+                self.user_option_readback(TmuxOptionTarget::Window(window), name, true)
+            })
+            .map(|(value, _)| value);
+        let commands = parse_hook_commands(session.or(pane).or(window)?).ok()?;
+        Some(vec![commands])
     }
 
     #[must_use]
@@ -1429,7 +1488,11 @@ impl MuxEngine {
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.window_user_options
             .retain(|window, _| self.state.windows.contains_key(window));
+        self.window_hooks
+            .retain(|window, _| self.state.windows.contains_key(window));
         self.pane_user_options
+            .retain(|pane, _| self.state.pane(*pane).is_some());
+        self.pane_hooks
             .retain(|pane, _| self.state.pane(*pane).is_some());
         self.pane_start_commands
             .retain(|pane, _| self.state.pane(*pane).is_some());
@@ -3938,23 +4001,35 @@ impl MuxEngine {
         }
         let (argument, target_context) =
             self.expand_hook_name(context, &options, argument, hooks)?;
-        if options.has("-R") {
-            let Some(commands) = self.hook_commands(target_context.session, &argument) else {
-                return Ok(Execution::default());
-            };
-            if commands.is_empty() {
-                return Ok(Execution::default());
-            }
-            return Ok(Execution::effect(MuxEffect::RunHook {
-                name: argument,
-                commands,
-                context: target_context,
-            }));
-        }
         let parsed = parse_tmux_option(&argument)
             .map_err(|()| ServerError::InvalidCommand(format!("invalid option: {argument}")))?;
+        if parsed.name.starts_with('@') {
+            if options.has("-R") {
+                let Some(commands) = self.user_hook_commands(&target_context, &argument) else {
+                    return Ok(Execution::default());
+                };
+                return Ok(Execution::effect(MuxEffect::RunHook {
+                    name: argument,
+                    commands,
+                    context: target_context,
+                }));
+            }
+            if parsed.index.is_some() {
+                return Err(ServerError::InvalidCommand(format!(
+                    "not an array: {argument}"
+                )));
+            }
+            return self.set_user_option(
+                context,
+                parsed.name,
+                positional.get(1).map(String::as_str),
+                &options,
+                false,
+            );
+        }
         let table_option = match match_tmux_option(parsed.name) {
             Ok(Some(option)) => option,
+            Ok(None) | Err(()) if options.has("-R") => return Ok(Execution::default()),
             Ok(None) => {
                 return Err(ServerError::InvalidCommand(format!(
                     "invalid option: {argument}"
@@ -3966,6 +4041,23 @@ impl MuxEngine {
                 )));
             }
         };
+        if options.has("-R") {
+            if !tmux_option_is_hook(table_option.name) {
+                return Ok(Execution::default());
+            }
+            let Some(commands) = self.event_hook_commands(&target_context, table_option.name)
+            else {
+                return Ok(Execution::default());
+            };
+            if commands.is_empty() {
+                return Ok(Execution::default());
+            }
+            return Ok(Execution::effect(MuxEffect::RunHook {
+                name: table_option.name.to_owned(),
+                commands,
+                context: target_context,
+            }));
+        }
         if !tmux_option_is_hook(table_option.name) {
             let mut forwarded = Vec::new();
             for flag in ["-a", "-g", "-p", "-u", "-w"] {
@@ -3982,36 +4074,23 @@ impl MuxEngine {
             }
             return self.set_option(context, &forwarded, false, hooks, default_shell_is_valid);
         }
-        let target = self.hook_storage_target(context, &options, &target_context)?;
+        let target =
+            self.resolve_tmux_option_target(context, &options, false, table_option.scope)?;
         let index = parsed.index.map(HookIndex::parse);
         if options.has("-u") {
-            match (target, index) {
-                (HookTarget::Global, None) => {
-                    self.global_hooks
-                        .get_mut(table_option.name)
-                        .expect("global hook table is complete")
-                        .clear();
+            if let Some(index) = index {
+                if let Some(hook) = self.hook_array_mut(target, table_option.name) {
+                    hook.remove(&index);
                 }
-                (HookTarget::Session(session), None) => {
-                    if let Some(hooks) = self.session_hooks.get_mut(&session) {
-                        hooks.remove(table_option.name);
-                    }
-                }
-                (HookTarget::Global, Some(index)) => {
-                    self.global_hooks
-                        .get_mut(table_option.name)
-                        .expect("global hook table is complete")
-                        .remove(&index);
-                }
-                (HookTarget::Session(session), Some(index)) => {
-                    if let Some(hook) = self
-                        .session_hooks
-                        .get_mut(&session)
-                        .and_then(|hooks| hooks.get_mut(table_option.name))
-                    {
-                        hook.remove(&index);
-                    }
-                }
+            } else if matches!(
+                target,
+                TmuxOptionTarget::GlobalSession | TmuxOptionTarget::GlobalWindow
+            ) {
+                self.hook_array_mut(target, table_option.name)
+                    .expect("global hook table is complete")
+                    .clear();
+            } else if let Some(hooks) = self.hook_table_mut(target) {
+                hooks.remove(table_option.name);
             }
             return Ok(Execution::default());
         }
@@ -4019,18 +4098,7 @@ impl MuxEngine {
             .get(1)
             .ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
         let commands = parse_hook_commands(value)?;
-        let hook = match target {
-            HookTarget::Global => self
-                .global_hooks
-                .get_mut(table_option.name)
-                .expect("global hook table is complete"),
-            HookTarget::Session(session) => self
-                .session_hooks
-                .entry(session)
-                .or_default()
-                .entry(table_option.name.to_owned())
-                .or_default(),
-        };
+        let hook = self.hook_array_mut_or_insert(target, table_option.name);
         if let Some(index) = index {
             hook.insert(index, commands);
         } else if options.has("-a") {
@@ -4041,6 +4109,121 @@ impl MuxEngine {
             hook.insert(HookIndex::Numeric(0), commands);
         }
         Ok(Execution::default())
+    }
+
+    fn hook_array(&self, target: TmuxOptionTarget, name: &str) -> Option<&HookArray> {
+        self.hook_table(target).and_then(|hooks| hooks.get(name))
+    }
+
+    fn hook_array_mut(&mut self, target: TmuxOptionTarget, name: &str) -> Option<&mut HookArray> {
+        self.hook_table_mut(target)
+            .and_then(|hooks| hooks.get_mut(name))
+    }
+
+    fn hook_array_mut_or_insert(&mut self, target: TmuxOptionTarget, name: &str) -> &mut HookArray {
+        match target {
+            TmuxOptionTarget::GlobalSession => self
+                .global_hooks
+                .get_mut(name)
+                .expect("global session hook table is complete"),
+            TmuxOptionTarget::Session(session) => self
+                .session_hooks
+                .entry(session)
+                .or_default()
+                .entry(name.to_owned())
+                .or_default(),
+            TmuxOptionTarget::GlobalWindow => self
+                .global_window_hooks
+                .get_mut(name)
+                .expect("global window hook table is complete"),
+            TmuxOptionTarget::Window(window) => self
+                .window_hooks
+                .entry(window)
+                .or_default()
+                .entry(name.to_owned())
+                .or_default(),
+            TmuxOptionTarget::Pane(pane) => self
+                .pane_hooks
+                .entry(pane)
+                .or_default()
+                .entry(name.to_owned())
+                .or_default(),
+            TmuxOptionTarget::Server => unreachable!("hooks are not server scoped"),
+        }
+    }
+
+    fn hook_table(&self, target: TmuxOptionTarget) -> Option<&HookTable> {
+        match target {
+            TmuxOptionTarget::GlobalSession => Some(&self.global_hooks),
+            TmuxOptionTarget::Session(session) => self.session_hooks.get(&session),
+            TmuxOptionTarget::GlobalWindow => Some(&self.global_window_hooks),
+            TmuxOptionTarget::Window(window) => self.window_hooks.get(&window),
+            TmuxOptionTarget::Pane(pane) => self.pane_hooks.get(&pane),
+            TmuxOptionTarget::Server => None,
+        }
+    }
+
+    fn hook_table_mut(&mut self, target: TmuxOptionTarget) -> Option<&mut HookTable> {
+        match target {
+            TmuxOptionTarget::GlobalSession => Some(&mut self.global_hooks),
+            TmuxOptionTarget::Session(session) => self.session_hooks.get_mut(&session),
+            TmuxOptionTarget::GlobalWindow => Some(&mut self.global_window_hooks),
+            TmuxOptionTarget::Window(window) => self.window_hooks.get_mut(&window),
+            TmuxOptionTarget::Pane(pane) => self.pane_hooks.get_mut(&pane),
+            TmuxOptionTarget::Server => None,
+        }
+    }
+
+    fn hook_listing_target(
+        &self,
+        context: &ExecutionContext,
+        options: &Options,
+    ) -> Result<TmuxOptionTarget, ServerError> {
+        if options.has("-p") {
+            return self
+                .resolve_pane(options.value("-t"), context.window, context.pane)
+                .map(TmuxOptionTarget::Pane);
+        }
+        if options.has("-w") {
+            if options.has("-g") {
+                return Ok(TmuxOptionTarget::GlobalWindow);
+            }
+            return self
+                .resolve_option_window(context, options, false)
+                .map(TmuxOptionTarget::Window);
+        }
+        if options.has("-g") {
+            return Ok(TmuxOptionTarget::GlobalSession);
+        }
+        let window = self.resolve_option_window(context, options, false)?;
+        Ok(TmuxOptionTarget::Session(
+            self.state.windows[&window].session,
+        ))
+    }
+
+    fn hook_names_for_target(target: TmuxOptionTarget) -> Vec<&'static str> {
+        let mut names = tmux_options()
+            .filter(|option| tmux_option_is_hook(option.name))
+            .filter(|option| match target {
+                TmuxOptionTarget::GlobalSession | TmuxOptionTarget::Session(_) => {
+                    option.scope == TmuxOptionScope::Session
+                }
+                TmuxOptionTarget::GlobalWindow | TmuxOptionTarget::Window(_) => matches!(
+                    option.scope,
+                    TmuxOptionScope::Window | TmuxOptionScope::WindowPane
+                ),
+                TmuxOptionTarget::Pane(_) => option.scope == TmuxOptionScope::WindowPane,
+                TmuxOptionTarget::Server => false,
+            })
+            .map(|option| option.name)
+            .collect::<Vec<_>>();
+        names.sort_unstable_by_key(|name| {
+            HOOK_NAMES
+                .iter()
+                .position(|hook| hook == name)
+                .expect("hook table entry")
+        });
+        names
     }
 
     fn show_hooks(
@@ -4057,42 +4240,38 @@ impl MuxEngine {
             return Err(ServerError::InvalidCommand("too many arguments".to_owned()));
         }
         let Some(argument) = positional.first() else {
-            let target = if options.has("-g") {
-                HookTarget::Global
-            } else {
-                let target_context = self.hook_target_context(context, &options)?;
-                self.hook_storage_target(context, &options, &target_context)?
-            };
+            let target = self.hook_listing_target(context, &options)?;
             let mut lines = Vec::new();
-            match target {
-                HookTarget::Global => {
-                    for name in HOOK_NAMES {
-                        push_shown_hook(
-                            &mut lines,
-                            name,
-                            self.global_hooks
-                                .get(*name)
-                                .expect("global hook table is complete"),
-                            None,
-                        );
-                    }
-                }
-                HookTarget::Session(session) => {
-                    if let Some(stored) = self.session_hooks.get(&session) {
-                        for name in HOOK_NAMES {
-                            if let Some(hook) = stored.get(*name) {
-                                push_shown_hook(&mut lines, name, hook, None);
-                            }
-                        }
+            if let Some(stored) = self.hook_table(target) {
+                for name in Self::hook_names_for_target(target) {
+                    if let Some(hook) = stored.get(name) {
+                        push_shown_hook(&mut lines, name, hook, None);
                     }
                 }
             }
             return Ok(Execution::output(lines.join("\n")));
         };
-        let (argument, target_context) =
-            self.expand_hook_name(context, &options, argument, hooks)?;
+        let (argument, _) = self.expand_hook_name(context, &options, argument, hooks)?;
         let parsed = parse_tmux_option(&argument)
             .map_err(|()| ServerError::InvalidCommand(format!("invalid option: {argument}")))?;
+        if parsed.name.starts_with('@') {
+            if parsed.index.is_some() {
+                return Err(ServerError::InvalidCommand(format!(
+                    "not an array: {argument}"
+                )));
+            }
+            let mut forwarded = Vec::new();
+            for flag in ["-g", "-p", "-w"] {
+                if options.has(flag) {
+                    forwarded.push(flag.to_owned());
+                }
+            }
+            if let Some(target) = options.value("-t") {
+                forwarded.extend(["-t".to_owned(), target.to_owned()]);
+            }
+            forwarded.extend(["--".to_owned(), argument]);
+            return self.show_options(context, &forwarded, false);
+        }
         let table_option = match match_tmux_option(parsed.name) {
             Ok(Some(option)) => option,
             Ok(None) => {
@@ -4119,14 +4298,9 @@ impl MuxEngine {
             forwarded.extend(["--".to_owned(), argument]);
             return self.show_options(context, &forwarded, false);
         }
-        let target = self.hook_storage_target(context, &options, &target_context)?;
-        let hook = match target {
-            HookTarget::Global => self.global_hooks.get(table_option.name),
-            HookTarget::Session(session) => self
-                .session_hooks
-                .get(&session)
-                .and_then(|hooks| hooks.get(table_option.name)),
-        };
+        let target =
+            self.resolve_tmux_option_target(context, &options, false, table_option.scope)?;
+        let hook = self.hook_array(target, table_option.name);
         let Some(hook) = hook else {
             return Ok(Execution::default());
         };
@@ -4174,22 +4348,6 @@ impl MuxEngine {
         Ok(pane
             .and_then(|pane| ExecutionContext::for_pane(&self.state, pane))
             .unwrap_or_else(|| context.clone()))
-    }
-
-    fn hook_storage_target(
-        &self,
-        context: &ExecutionContext,
-        options: &Options,
-        target: &ExecutionContext,
-    ) -> Result<HookTarget, ServerError> {
-        if options.has("-g") {
-            return Ok(HookTarget::Global);
-        }
-        target
-            .session
-            .or_else(|| self.state.resolve_session(None, context.session).ok())
-            .map(HookTarget::Session)
-            .ok_or_else(|| ServerError::SessionNotFound(String::new()))
     }
 
     fn set_option(
@@ -6246,6 +6404,37 @@ impl MuxEngine {
             context.pane = None;
         }
     }
+
+    pub fn repair_event_context(&self, context: &mut ExecutionContext) {
+        if let Some(pane) = context.pane
+            && let Some(valid) = ExecutionContext::for_pane(&self.state, pane)
+        {
+            context.retarget(&valid);
+            return;
+        }
+        if let Some(window) = context.window
+            && let Some(window_state) = self.state.windows.get(&window)
+        {
+            context.retarget(&ExecutionContext::new(
+                Some(window_state.session),
+                Some(window),
+                Some(window_state.active_pane),
+            ));
+            return;
+        }
+        if let Some(session) = context.session
+            && let Some(session_state) = self.state.sessions.get(&session)
+            && let Some(window_state) = self.state.windows.get(&session_state.active_window)
+        {
+            context.retarget(&ExecutionContext::new(
+                Some(session),
+                Some(session_state.active_window),
+                Some(window_state.active_pane),
+            ));
+            return;
+        }
+        self.repair_context(context);
+    }
 }
 
 fn is_native_option(option: &str) -> bool {
@@ -7580,6 +7769,21 @@ fn first_free_hook_index(hook: &HookArray) -> Result<u32, ServerError> {
             .ok_or_else(|| ServerError::InvalidCommand("no free hook index".to_owned()))?;
     }
     Ok(index)
+}
+
+fn global_hook_table(scope: TmuxOptionScope) -> HookTable {
+    tmux_options()
+        .filter(|option| tmux_option_is_hook(option.name))
+        .filter(|option| match scope {
+            TmuxOptionScope::Session => option.scope == TmuxOptionScope::Session,
+            TmuxOptionScope::Window => matches!(
+                option.scope,
+                TmuxOptionScope::Window | TmuxOptionScope::WindowPane
+            ),
+            TmuxOptionScope::Server | TmuxOptionScope::WindowPane => false,
+        })
+        .map(|option| (option.name.to_owned(), HookArray::new()))
+        .collect()
 }
 
 fn push_shown_hook(
@@ -10856,12 +11060,44 @@ mod tests {
             .execute(&mut context, &command("new-session", &["-s", "work"]))
             .unwrap();
         let session = context.session.expect("session");
+        let window = context.window.expect("window");
+        let pane = context.pane.expect("pane");
 
         let global = engine
             .execute(&mut context, &command("show-hooks", &["-g"]))
             .unwrap()
             .output;
-        assert_eq!(global.lines().collect::<Vec<_>>(), HOOK_NAMES);
+        assert_eq!(
+            global.lines().collect::<Vec<_>>(),
+            MuxEngine::hook_names_for_target(TmuxOptionTarget::GlobalSession)
+        );
+        assert_eq!(global.lines().count(), 57);
+        assert_eq!(
+            global
+                .lines()
+                .filter(|name| name.starts_with("client-"))
+                .collect::<Vec<_>>(),
+            [
+                "client-active",
+                "client-attached",
+                "client-detached",
+                "client-focus-in",
+                "client-focus-out",
+                "client-resized",
+                "client-session-changed",
+                "client-light-theme",
+                "client-dark-theme",
+            ]
+        );
+        let global_window = engine
+            .execute(&mut context, &command("show-hooks", &["-g", "-w"]))
+            .unwrap()
+            .output;
+        assert_eq!(
+            global_window.lines().collect::<Vec<_>>(),
+            MuxEngine::hook_names_for_target(TmuxOptionTarget::GlobalWindow)
+        );
+        assert_eq!(global_window.lines().count(), 11);
         assert_eq!(
             engine
                 .execute(&mut context, &command("show-hooks", &[]))
@@ -10990,6 +11226,57 @@ mod tests {
         engine
             .execute(
                 &mut context,
+                &command("set-hook", &["-w", "pane-died", "display-message window"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-hook", &["-p", "pane-died", "display-message pane"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &["-w", "window-renamed", "display-message renamed"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-hooks", &["-w"]))
+                .unwrap()
+                .output,
+            "pane-died[0] display-message window\n\
+             window-renamed[0] display-message renamed"
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-hooks", &["-p"]))
+                .unwrap()
+                .output,
+            "pane-died[0] display-message pane"
+        );
+        assert_eq!(
+            engine
+                .hook_array(TmuxOptionTarget::Window(window), "pane-died")
+                .expect("window hook")
+                .len(),
+            1
+        );
+        assert_eq!(
+            engine
+                .hook_array(TmuxOptionTarget::Pane(pane), "pane-died")
+                .expect("pane hook")
+                .len(),
+            1
+        );
+
+        engine
+            .execute(
+                &mut context,
                 &command("set-hook", &["-g", "alert-b", "display-message alert"]),
             )
             .unwrap();
@@ -11029,6 +11316,215 @@ mod tests {
                 .output,
             "alert-bell"
         );
+    }
+
+    #[test]
+    fn global_hook_listings_filter_and_route_by_declared_scope() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &["-g", "pane-died", "display-message global-window"],
+                ),
+            )
+            .unwrap();
+
+        let session_hooks = engine
+            .execute(&mut context, &command("show-hooks", &["-g"]))
+            .unwrap()
+            .output;
+        assert_eq!(session_hooks.lines().count(), 57);
+        assert!(
+            !session_hooks
+                .lines()
+                .any(|line| line.starts_with("pane-died"))
+        );
+
+        let window_hooks = engine
+            .execute(&mut context, &command("show-hooks", &["-g", "-w"]))
+            .unwrap()
+            .output;
+        assert_eq!(window_hooks.lines().count(), 11);
+        assert!(
+            window_hooks
+                .lines()
+                .any(|line| line == "pane-died[0] display-message global-window")
+        );
+        assert!(!engine.global_hooks.contains_key("pane-died"));
+        assert_eq!(
+            engine
+                .global_window_hooks
+                .get("pane-died")
+                .expect("global window hook")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn user_hooks_share_user_option_storage_and_stay_unlisted() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "@myhook", "v"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "-v", "@myhook"]),
+                )
+                .unwrap()
+                .output,
+            "v"
+        );
+
+        let hook_command = "display-message -p AT-HOOK-RAN";
+        engine
+            .execute(
+                &mut context,
+                &command("set-hook", &["-g", "@myhook", hook_command]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "-v", "@myhook"]),
+                )
+                .unwrap()
+                .output,
+            hook_command
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-hooks", &["-g", "@myhook"]),)
+                .unwrap()
+                .output,
+            engine
+                .execute(&mut context, &command("show-options", &["-g", "@myhook"]),)
+                .unwrap()
+                .output
+        );
+        assert!(
+            !engine
+                .execute(&mut context, &command("show-hooks", &["-g"]))
+                .unwrap()
+                .output
+                .lines()
+                .any(|line| line.starts_with('@'))
+        );
+
+        let fired = engine
+            .execute(&mut context, &command("set-hook", &["-R", "@myhook"]))
+            .unwrap();
+        assert!(matches!(
+            fired.effects.as_slice(),
+            [MuxEffect::RunHook {
+                name,
+                commands,
+                context: target,
+            }] if name == "@myhook"
+                && target == &context
+                && commands == &vec![parse_hook_commands(hook_command).unwrap()]
+        ));
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "@myhook", "v"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("set-hook", &["-R", "@myhook"]),)
+                .unwrap(),
+            Execution::default()
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-hook", &["-g", "@myhook", hook_command]),
+            )
+            .unwrap();
+        engine
+            .execute(&mut context, &command("set-hook", &["-g", "-u", "@myhook"]))
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "-q", "-v", "@myhook"]),
+                )
+                .unwrap(),
+            Execution::default()
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-hook", &["-g", "@myhook", hook_command]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "-u", "@myhook"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("set-hook", &["-R", "@myhook"]),)
+                .unwrap(),
+            Execution::default()
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-hook", &["-w", "@scoped", "display-message window"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-hook", &["-g", "@scoped", "display-message session"]),
+            )
+            .unwrap();
+        let session_scoped = engine
+            .execute(&mut context, &command("set-hook", &["-R", "@scoped"]))
+            .unwrap();
+        assert!(matches!(
+            session_scoped.effects.as_slice(),
+            [MuxEffect::RunHook { commands, .. }]
+                if commands == &vec![parse_hook_commands("display-message session").unwrap()]
+        ));
+        engine
+            .execute(&mut context, &command("set-hook", &["-g", "-u", "@scoped"]))
+            .unwrap();
+        let window_scoped = engine
+            .execute(&mut context, &command("set-hook", &["-R", "@scoped"]))
+            .unwrap();
+        assert!(matches!(
+            window_scoped.effects.as_slice(),
+            [MuxEffect::RunHook { commands, .. }]
+                if commands == &vec![parse_hook_commands("display-message window").unwrap()]
+        ));
     }
 
     #[test]
@@ -11123,6 +11619,144 @@ mod tests {
                 "set-hook",
                 ["after-select-window", "display-message bound"],
             )]
+        );
+    }
+
+    #[test]
+    fn event_hooks_follow_declared_scope_and_isolate_windows() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let first_window = context.window.expect("first window");
+        let first_pane = context.pane.expect("first pane");
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "second"]))
+            .unwrap();
+        let second_window = context.window.expect("second window");
+        let second_pane = context.pane.expect("second pane");
+        let first_window_target = first_window.to_string();
+        let second_window_target = second_window.to_string();
+        let first_pane_target = first_pane.to_string();
+
+        for args in [
+            &["-g", "pane-died", "display-message global-window"] as &[&str],
+            &[
+                "-w",
+                "-t",
+                first_window_target.as_str(),
+                "pane-died",
+                "display-message first-window",
+            ],
+        ] {
+            engine
+                .execute(&mut context, &command("set-hook", args))
+                .unwrap();
+        }
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "show-hooks",
+                        &["-w", "-t", first_window_target.as_str(), "pane-died",],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "pane-died[0] display-message first-window"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "show-hooks",
+                        &["-w", "-t", second_window_target.as_str(), "pane-died",],
+                    ),
+                )
+                .unwrap()
+                .output,
+            ""
+        );
+
+        let first_context =
+            ExecutionContext::for_pane(&engine.state, first_pane).expect("first context");
+        let second_context =
+            ExecutionContext::for_pane(&engine.state, second_pane).expect("second context");
+        assert_eq!(
+            engine
+                .event_hook_commands(&first_context, "pane-died")
+                .expect("first window hook"),
+            [parse_hook_commands("display-message first-window").unwrap()]
+        );
+        assert_eq!(
+            engine
+                .event_hook_commands(&second_context, "pane-died")
+                .expect("second window fallback"),
+            [parse_hook_commands("display-message global-window").unwrap()]
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &[
+                        "-p",
+                        "-t",
+                        first_pane_target.as_str(),
+                        "pane-died",
+                        "display-message first-pane",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .event_hook_commands(&first_context, "pane-died")
+                .expect("first pane hook"),
+            [parse_hook_commands("display-message first-pane").unwrap()]
+        );
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &["-p", "-u", "-t", first_pane_target.as_str(), "pane-died"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .event_hook_commands(&first_context, "pane-died")
+                .expect("first window hook after pane unset"),
+            [parse_hook_commands("display-message first-window").unwrap()]
+        );
+
+        for args in [
+            &["-g", "alert-bell", "display-message global-session"] as &[&str],
+            &["alert-bell", "display-message local-session"],
+        ] {
+            engine
+                .execute(&mut context, &command("set-hook", args))
+                .unwrap();
+        }
+        assert_eq!(
+            engine
+                .event_hook_commands(&second_context, "alert-bell")
+                .expect("local session hook"),
+            [parse_hook_commands("display-message local-session").unwrap()]
+        );
+        engine
+            .execute(&mut context, &command("set-hook", &["-u", "alert-bell"]))
+            .unwrap();
+        assert_eq!(
+            engine
+                .event_hook_commands(&second_context, "alert-bell")
+                .expect("global session fallback"),
+            [parse_hook_commands("display-message global-session").unwrap()]
         );
     }
 

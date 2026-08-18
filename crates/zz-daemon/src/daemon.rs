@@ -11715,9 +11715,6 @@ fn wait_shell_job_process(process: &Mutex<Option<Child>>) -> Result<ExitStatus, 
 
 fn shell_job_output(command: &str, result: &ShellJobResult) -> (String, u8) {
     let mut output = String::from_utf8_lossy(&result.output).into_owned();
-    if output.ends_with('\n') {
-        output.pop();
-    }
     let (exit_code, message) = shell_exit(result.status).map_or_else(
         || {
             let exit_code = result
@@ -17088,7 +17085,7 @@ mod tests {
                 &CommandInvocation::new("run-shell", ["-c", "/tmp", "pwd"]),
             )
             .expect("literal working directory");
-        assert_eq!(output.output, "/tmp");
+        assert_eq!(output.output, "/tmp\n");
 
         let fallback = fallback_job_working_directory();
         let output = shared
@@ -17102,7 +17099,7 @@ mod tests {
                 ),
             )
             .expect("invalid working directory falls back");
-        assert_eq!(output.output, fallback.to_string_lossy().as_ref());
+        assert_eq!(output.output, format!("{}\n", fallback.to_string_lossy()));
 
         shared
             .execute(

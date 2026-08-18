@@ -456,14 +456,23 @@ fn run_command_mode(
         command
     };
     match client.execute(CommandInvocation::new(command, args)) {
-        Ok(output) => {
+        Ok(mut output) => {
             if !output.is_empty() {
+                if output.ends_with('\n') {
+                    output.pop();
+                }
                 println!("{output}");
             }
             Some(ExitCode::SUCCESS)
         }
-        Err(DaemonError::CommandExit { output, exit_code }) => {
+        Err(DaemonError::CommandExit {
+            mut output,
+            exit_code,
+        }) => {
             if !output.is_empty() {
+                if output.ends_with('\n') {
+                    output.pop();
+                }
                 println!("{output}");
             }
             Some(ExitCode::from(exit_code))

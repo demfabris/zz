@@ -1,0 +1,33 @@
+# Exec family parity: run-shell / if-shell effects, wait-for signals, pipe-pane
+# lifecycle. Job output goes to the client, not the scenario channels, so parity
+# here is exit classes plus option side effects read back through out: rows.
+new-session -d -s w -n main -x 80 -y 24
+run-shell 'true'
+run-shell 'exit 3'
+run-shell
+out: run-shell echo
+if-shell 'true' 'set -g @exec-then 1' 'set -g @exec-else 1'
+out: show-options -gv @exec-then
+if-shell 'false' 'set -g @exec-then2 1' 'set -g @exec-else2 1'
+out: show-options -gv @exec-else2
+if-shell -F '' 'set -g @f-true 1' 'set -g @f-false 1'
+out: show-options -gv @f-false
+if-shell -F '0abc' 'set -g @fz-true 1' 'set -g @fz-false 1'
+out: show-options -gv @fz-false
+if-shell -F ' 0' 'set -g @fs-true 1' 'set -g @fs-false 1'
+out: show-options -gv @fs-true
+run-shell -C 'set -g @via-c 1'
+out: show-options -gv @via-c
+wait-for -S exec-ready
+wait-for -U exec-missing
+new-window -d -t w -n piped -- sleep 300
+pipe-pane -t w:piped 'cat'
+out: list-panes -t w:piped -F pipe=#{pane_pipe}
+pipe-pane -t w:piped
+out: list-panes -t w:piped -F pipe=#{pane_pipe}
+pipe-pane -o -t w:piped 'cat'
+out: list-panes -t w:piped -F pipe=#{pane_pipe}
+pipe-pane -o -t w:piped 'cat'
+out: list-panes -t w:piped -F pipe=#{pane_pipe}
+pipe-pane -t w:piped ''
+out: list-panes -t w:piped -F pipe=#{pane_pipe}

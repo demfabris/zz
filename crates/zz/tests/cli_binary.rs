@@ -153,6 +153,28 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn new_session_immediately_after_kill_server_starts_a_fresh_daemon() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let first = fixture.run(&["new-session", "-d", "-s", "a"]);
+        assert_eq!(first.status.code(), Some(0));
+        let killed = fixture.run(&["kill-server"]);
+        assert_eq!(killed.status.code(), Some(0));
+        let second = fixture.run(&["new-session", "-d", "-s", "b"]);
+        assert_eq!(
+            second.status.code(),
+            Some(0),
+            "stderr: {}",
+            String::from_utf8_lossy(&second.stderr)
+        );
+        let sessions = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(sessions.status.code(), Some(0));
+        assert_eq!(sessions.stdout, b"b\n");
+    }
+
+    #[test]
     fn non_start_server_commands_do_not_spawn_a_daemon() {
         let fixture = Fixture::new();
         for command in [

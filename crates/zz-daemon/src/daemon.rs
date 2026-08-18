@@ -23,7 +23,7 @@ use zz_mux::{
     CellLayout, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision,
     KeyEngine, KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts,
     canonical_command, command_block_body, display_width, expand_format_values,
-    hook_format_variables, if_shell_truthy, parse_config, valid_style,
+    hook_format_variables, if_shell_truthy, parse_config,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -495,15 +495,20 @@ impl Daemon {
         })?;
         restrict_socket_permissions(&self.socket_path)?;
         listener.set_nonblocking(true)?;
-        let _socket_guard = SocketGuard::new(self.socket_path.clone());
-        let _identity_guard = DaemonIdentityGuard::install(&self.socket_path)?;
+        let socket_guard = SocketGuard::new(self.socket_path.clone());
+        let identity_guard = DaemonIdentityGuard::install(&self.socket_path)?;
 
-        self.run_foreground_listener::<LocalTransport>(&listener, self.socket_path.display())
+        self.run_foreground_listener::<LocalTransport>(
+            listener,
+            (socket_guard, identity_guard),
+            self.socket_path.display(),
+        )
     }
 
     fn run_foreground_listener<T: Transport>(
         &self,
-        listener: &T::Listener,
+        listener: T::Listener,
+        socket_guards: (SocketGuard, DaemonIdentityGuard),
         endpoint: impl std::fmt::Display,
     ) -> Result<(), DaemonError> {
         let color_scheme = daemon_color_scheme();
@@ -529,7 +534,12 @@ impl Daemon {
         let _signal_guard = DaemonSignalGuard::install(&shared)?;
         log::info!("zz daemon listening at {endpoint}");
 
-        let accept_result = accept_connections::<T>(listener, &shared);
+        let accept_result = accept_connections::<T>(&listener, &shared);
+        // The endpoint must go before the slow teardown below: a bound
+        // listener keeps accepting connects into the kernel backlog it will
+        // never serve, wedging any `kill-server; new-session` sequence.
+        drop(listener);
+        drop(socket_guards);
         if accept_result.is_err() {
             shared.request_shutdown();
         }
@@ -6109,6 +6119,7 @@ impl Shared {
         if any_overlay_present(&self.inner.lock(), target_client) {
             return Ok(Execution::default());
         }
+        let starting_choice = menu_starting_number(parsed.starting_choice.as_deref())?;
         let (state, commands) = {
             let inner = self.inner.lock();
             let geometry = popup_client_geometry(&inner, target_client)?;
@@ -6178,7 +6189,7 @@ impl Shared {
             if width > geometry.columns || height > geometry.rows {
                 return Ok(Execution::default());
             }
-            let selected = menu_starting_choice(parsed.starting_choice.as_deref(), &items)?;
+            let selected = menu_starting_selection(&starting_choice, &items);
             let border_lines = if let Some(value) = parsed.border_lines.as_deref() {
                 value.parse().map_err(|()| {
                     ServerError::InvalidCommand(format!("menu-border-lines unknown value: {value}"))
@@ -6192,13 +6203,6 @@ impl Shared {
                 .clone()
                 .unwrap_or(defaults.selected_style);
             let border_style = parsed.border_style.clone().unwrap_or(defaults.border_style);
-            for style in [&style, &selected_style, &border_style] {
-                if !valid_style(style) {
-                    return Err(
-                        ServerError::InvalidCommand(format!("invalid style: {style}")).into(),
-                    );
-                }
-            }
             let variables = popup_position_variables(
                 &inner.engine,
                 &target,
@@ -16247,24 +16251,40 @@ fn menu_shortcut(value: &str) -> Option<String> {
     (named || function || character).then_some(key)
 }
 
-fn menu_starting_choice(
-    value: Option<&str>,
-    items: &[Option<MenuItem>],
-) -> Result<Option<u32>, ServerError> {
+enum MenuStartingChoice {
+    Default,
+    Unselected,
+    At(u64),
+}
+
+fn menu_starting_number(value: Option<&str>) -> Result<MenuStartingChoice, ServerError> {
     let Some(value) = value else {
-        return Ok(menu_selectable_from(items, 0, false));
+        return Ok(MenuStartingChoice::Default);
     };
     if value == "-" {
-        return Ok(None);
+        return Ok(MenuStartingChoice::Unselected);
     }
-    let start = parse_popup_number(value, 0, u64::from(u32::MAX))
-        .map_err(|cause| ServerError::InvalidCommand(format!("starting choice {cause}")))?;
-    let start = usize::try_from(start).unwrap_or(usize::MAX);
-    Ok(if start >= items.len() {
-        menu_selectable_from(items, items.len().saturating_sub(1), true)
-    } else {
-        menu_selectable_from(items, start, false)
-    })
+    parse_popup_number(value, 0, u64::from(u32::MAX))
+        .map(MenuStartingChoice::At)
+        .map_err(|cause| ServerError::InvalidCommand(format!("starting choice {cause}")))
+}
+
+fn menu_starting_selection(
+    starting_choice: &MenuStartingChoice,
+    items: &[Option<MenuItem>],
+) -> Option<u32> {
+    match starting_choice {
+        MenuStartingChoice::Default => menu_selectable_from(items, 0, false),
+        MenuStartingChoice::Unselected => None,
+        MenuStartingChoice::At(start) => {
+            let start = usize::try_from(*start).unwrap_or(usize::MAX);
+            if start >= items.len() {
+                menu_selectable_from(items, items.len().saturating_sub(1), true)
+            } else {
+                menu_selectable_from(items, start, false)
+            }
+        }
+    }
 }
 
 fn menu_selectable_from(items: &[Option<MenuItem>], start: usize, reverse: bool) -> Option<u32> {
@@ -17003,10 +17023,25 @@ fn prepare_socket(path: &Path) -> Result<(), DaemonError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    if path.exists() {
+    // A stopping daemon releases its endpoint within one accept tick; wait
+    // that out so a spawn racing a kill-server binds instead of dying to a
+    // socket that only looks alive. The deadline is generous because loaded
+    // schedulers stretch the tick.
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while path.exists() {
         match LocalTransport::connect(path) {
-            Ok(_) => return Err(DaemonError::AlreadyRunning(path.to_owned())),
-            Err(_) => fs::remove_file(path)?,
+            Ok(_) if Instant::now() >= deadline => {
+                return Err(DaemonError::AlreadyRunning(path.to_owned()));
+            }
+            Ok(_) => thread::sleep(Duration::from_millis(20)),
+            Err(_) => {
+                match fs::remove_file(path) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
+                break;
+            }
         }
     }
     Ok(())
@@ -28425,8 +28460,46 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("display-menu", ["Incomplete"]),
             )
             .expect("existing overlay wins before item validation");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-menu",
+                    ["-C", "junk", "Item", "i", "display-message nope"],
+                ),
+            )
+            .expect("existing overlay wins before starting-choice validation");
         assert!(!shared.inner.lock().menus.contains_key(&client));
         shared.inner.lock().command_prompts.remove(&client);
+
+        assert!(matches!(
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-menu", ["-C", "junk", "Incomplete"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "starting choice invalid"
+        ));
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-menu",
+                    ["-s", "bogus", "Styled", "s", "display-message nope"],
+                ),
+            )
+            .expect("invalid inline styles fall back silently");
+        assert_eq!(
+            shared.inner.lock().menus[&client].state.style,
+            "bogus".to_owned()
+        );
+        shared.input_menu(client, &context, MenuAction::Cancel);
 
         let pane = context.pane.expect("menu pane");
         shared

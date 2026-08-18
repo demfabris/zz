@@ -132,7 +132,7 @@ pub fn classify_local_connect_error(socket_path: &Path, error: DaemonError) -> D
 
     let eof_during_handshake = matches!(
         &error,
-        DaemonError::Protocol(ProtocolError::Io(error))
+        DaemonError::Protocol(ProtocolError::Io(error)) | DaemonError::Io(error)
             if matches!(
                 error.kind(),
                 io::ErrorKind::UnexpectedEof
@@ -155,10 +155,36 @@ pub fn classify_local_connect_error(socket_path: &Path, error: DaemonError) -> D
                     client: zz_protocol::PROTOCOL_VERSION,
                 };
             }
-            _ => {}
+            Some(Some(_)) => {
+                return DaemonError::Io(connect_errno(
+                    io::ErrorKind::ConnectionReset,
+                    "daemon closed the connection during the handshake",
+                ));
+            }
+            None if !socket_path.exists() => {
+                return DaemonError::Io(connect_errno(
+                    io::ErrorKind::NotFound,
+                    "daemon released the socket during the handshake",
+                ));
+            }
+            None => {}
         }
     }
     error
+}
+
+#[cfg(unix)]
+fn connect_errno(kind: io::ErrorKind, _reason: &'static str) -> io::Error {
+    let errno = match kind {
+        io::ErrorKind::NotFound => libc::ENOENT,
+        _ => libc::ECONNRESET,
+    };
+    io::Error::from_raw_os_error(errno)
+}
+
+#[cfg(not(unix))]
+fn connect_errno(kind: io::ErrorKind, reason: &'static str) -> io::Error {
+    io::Error::new(kind, reason)
 }
 
 fn diagnostic_timer() -> Option<Instant> {
@@ -216,7 +242,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn eof_classifier_uses_identity_without_overriding_a_matching_v2() {
+    fn eof_classifier_uses_identity_and_treats_a_matching_v2_as_dying() {
         use std::{fs, os::unix::fs::PermissionsExt as _};
 
         let directory = tempfile::tempdir().unwrap();
@@ -267,7 +293,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             classify_local_connect_error(&socket, eof()),
-            DaemonError::Protocol(ProtocolError::Io(_))
+            DaemonError::Io(error) if error.kind() == io::ErrorKind::ConnectionReset
         ));
     }
 }

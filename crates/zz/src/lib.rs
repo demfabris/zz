@@ -1253,7 +1253,7 @@ fn connect_or_spawn_daemon<T>(
     }
 
     spawn_daemon(path, color_scheme, mux_config_files)?;
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(6);
     loop {
         match connect() {
             Ok(client) => return Ok(client),

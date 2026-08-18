@@ -164,15 +164,22 @@ fn menu_key_result(
     }
     match key.as_str() {
         "Escape" | "C-[" | "C-c" | "C-g" | "q" => MenuKeyResult::Action(MenuAction::Cancel),
-        "Enter" => selected.map_or(MenuKeyResult::Ignore, |index| {
-            MenuKeyResult::Action(MenuAction::Choose(u32::try_from(index).unwrap_or(u32::MAX)))
-        }),
-        "Up" | "k" | "BTab" => MenuKeyResult::Select(menu_step(&state.items, selected, -1, 1)),
-        "Down" | "j" => MenuKeyResult::Select(menu_step(&state.items, selected, 1, 1)),
+        "Enter" => match selected {
+            None => MenuKeyResult::Action(MenuAction::Cancel),
+            Some(index) => match state.items.get(index) {
+                Some(Some(item)) if item.enabled => MenuKeyResult::Action(MenuAction::Choose(
+                    u32::try_from(index).unwrap_or(u32::MAX),
+                )),
+                _ if state.stay_open => MenuKeyResult::Ignore,
+                _ => MenuKeyResult::Action(MenuAction::Cancel),
+            },
+        },
+        "Up" | "k" | "BTab" => MenuKeyResult::Select(menu_step(&state.items, selected, -1)),
+        "Down" | "j" => MenuKeyResult::Select(menu_step(&state.items, selected, 1)),
         "Home" | "g" => MenuKeyResult::Select(menu_edge(&state.items, false)),
         "End" | "G" => MenuKeyResult::Select(menu_edge(&state.items, true)),
-        "PPage" | "C-b" => MenuKeyResult::Select(menu_step(&state.items, selected, -1, 5)),
-        "NPage" => MenuKeyResult::Select(menu_step(&state.items, selected, 1, 5)),
+        "PPage" | "C-b" => MenuKeyResult::Select(menu_page_up(&state.items, selected)),
+        "NPage" => MenuKeyResult::Select(menu_page_down(&state.items, selected)),
         _ => MenuKeyResult::Ignore,
     }
 }
@@ -193,29 +200,83 @@ fn menu_step(
     items: &[Option<zz_protocol::MenuItem>],
     selected: Option<usize>,
     direction: isize,
-    count: usize,
 ) -> Option<usize> {
     if items.is_empty() {
         return None;
     }
-    let Some(mut selected) = selected else {
+    let Some(selected) = selected else {
         return menu_edge(items, direction < 0);
     };
-    for _ in 0..count {
-        let mut next = selected;
-        loop {
-            next = if direction < 0 {
-                next.checked_sub(1).unwrap_or(items.len().saturating_sub(1))
-            } else {
-                next.saturating_add(1) % items.len()
-            };
-            if items[next].as_ref().is_some_and(|item| item.enabled) || next == selected {
+    let mut next = selected;
+    loop {
+        next = if direction < 0 {
+            next.checked_sub(1).unwrap_or(items.len().saturating_sub(1))
+        } else {
+            next.saturating_add(1) % items.len()
+        };
+        if items[next].as_ref().is_some_and(|item| item.enabled) || next == selected {
+            break;
+        }
+    }
+    Some(next)
+}
+
+fn menu_page_up(items: &[Option<zz_protocol::MenuItem>], selected: Option<usize>) -> Option<usize> {
+    if items.is_empty() {
+        return None;
+    }
+    let choice = selected.map_or(-1_isize, |selected| {
+        isize::try_from(selected).unwrap_or(isize::MAX)
+    });
+    if choice < 6 {
+        return Some(0);
+    }
+    let mut choice = usize::try_from(choice).unwrap_or_default();
+    let mut remaining = 5;
+    while remaining > 0 {
+        choice = choice.saturating_sub(1);
+        let selectable = items[choice].as_ref().is_some_and(|item| item.enabled);
+        if choice != 0 && selectable {
+            remaining -= 1;
+        } else if choice == 0 {
+            break;
+        }
+    }
+    Some(choice)
+}
+
+fn menu_page_down(
+    items: &[Option<zz_protocol::MenuItem>],
+    selected: Option<usize>,
+) -> Option<usize> {
+    if items.is_empty() {
+        return None;
+    }
+    let count = isize::try_from(items.len()).unwrap_or(isize::MAX);
+    let mut choice = selected.map_or(-1_isize, |selected| {
+        isize::try_from(selected).unwrap_or(isize::MAX)
+    });
+    if choice > count - 6 {
+        choice = count - 1;
+    } else {
+        let mut remaining = 5;
+        while remaining > 0 {
+            choice += 1;
+            let selectable = items[usize::try_from(choice).unwrap_or_default()]
+                .as_ref()
+                .is_some_and(|item| item.enabled);
+            if choice != count - 1 && selectable {
+                remaining -= 1;
+            } else if choice == count - 1 {
                 break;
             }
         }
-        selected = next;
     }
-    Some(selected)
+    let mut choice = usize::try_from(choice).unwrap_or_default();
+    while !items[choice].as_ref().is_some_and(|item| item.enabled) && choice != 0 {
+        choice -= 1;
+    }
+    Some(choice)
 }
 
 #[cfg(test)]
@@ -285,11 +346,11 @@ mod tests {
             menu_key_result(&state(), Some(0), &key("down", None, Modifiers::default())),
             MenuKeyResult::Select(Some(3))
         ));
-        assert_eq!(menu_step(&state().items, Some(3), 1, 1), Some(0));
+        assert_eq!(menu_step(&state().items, Some(3), 1), Some(0));
     }
 
     #[test]
-    fn shift_tab_is_backtab_and_page_steps_selectable_rows() {
+    fn shift_tab_is_backtab_and_paging_clamps_at_the_edges() {
         let shift = Modifiers {
             shift: true,
             ..Modifiers::default()
@@ -298,6 +359,50 @@ mod tests {
             menu_key_result(&state(), Some(3), &key("tab", None, shift)),
             MenuKeyResult::Select(Some(0))
         ));
-        assert_eq!(menu_step(&state().items, Some(0), 1, 5), Some(3));
+        assert_eq!(menu_page_down(&state().items, Some(0)), Some(3));
+        assert_eq!(menu_page_down(&state().items, Some(3)), Some(3));
+        assert_eq!(menu_page_up(&state().items, Some(3)), Some(0));
+        assert_eq!(menu_page_up(&state().items, Some(0)), Some(0));
+        let long = MenuState {
+            items: (0..12)
+                .map(|index| {
+                    Some(MenuItem {
+                        name: format!("item {index}"),
+                        key: None,
+                        enabled: true,
+                    })
+                })
+                .collect(),
+            ..state()
+        };
+        assert_eq!(menu_page_down(&long.items, Some(0)), Some(5));
+        assert_eq!(menu_page_down(&long.items, Some(8)), Some(11));
+        assert_eq!(menu_page_up(&long.items, Some(11)), Some(6));
+        assert_eq!(menu_page_up(&long.items, Some(3)), Some(0));
+    }
+
+    #[test]
+    fn enter_without_a_usable_selection_closes_unless_stay_open() {
+        let enter = key("enter", None, Modifiers::default());
+        assert!(matches!(
+            menu_key_result(&state(), None, &enter),
+            MenuKeyResult::Action(MenuAction::Cancel)
+        ));
+        assert!(matches!(
+            menu_key_result(&state(), Some(2), &enter),
+            MenuKeyResult::Action(MenuAction::Cancel)
+        ));
+        let stay_open = MenuState {
+            stay_open: true,
+            ..state()
+        };
+        assert!(matches!(
+            menu_key_result(&stay_open, Some(2), &enter),
+            MenuKeyResult::Ignore
+        ));
+        assert!(matches!(
+            menu_key_result(&state(), Some(3), &enter),
+            MenuKeyResult::Action(MenuAction::Choose(3))
+        ));
     }
 }

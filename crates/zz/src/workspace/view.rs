@@ -3800,6 +3800,10 @@ mod tests {
                 .iter()
                 .any(|message| matches!(message, InputMessage::Key { .. }))
         );
+        input.borrow_mut().clear();
+        cx.simulate_keystrokes("ctrl-a");
+        assert!(input.borrow().is_empty());
+        assert!(cx.update(|window, cx| menu.read(cx).focus().contains_focused(window, cx)));
 
         mux.update(cx, |mux, cx| {
             mux.handle_message_for_test(

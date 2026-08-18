@@ -1178,6 +1178,8 @@ fn handle_core_event(
         | CoreEvent::ViewportChanged { .. }
         | CoreEvent::MuxOptionsChanged
         | CoreEvent::PopupChanged
+        | CoreEvent::MenuChanged
+        | CoreEvent::ConfirmChanged
         | CoreEvent::KeyTablesChanged
         | CoreEvent::PrefixCancelled { .. }
         | CoreEvent::Bell { .. }

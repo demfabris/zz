@@ -11,13 +11,13 @@ use std::{
 use gpui::{
     Animation, AnimationExt as _, AnyElement, AnyView, AnyWindowHandle, App, Bounds, Context,
     CursorStyle, DragMoveEvent, Entity, EntityId, FocusHandle, IntoElement, KeyUpEvent, Keystroke,
-    MouseButton, MouseExitEvent, MouseUpEvent, Pixels, Point, Render, Rgba, Size, StyleRefinement,
+    MouseButton, MouseExitEvent, MouseUpEvent, Pixels, Point, Render, Size, StyleRefinement,
     Window, div, ease_out_quint, prelude::*, px,
 };
-use zz_mux::{TmuxColour, indexed_colour_rgb, joined_layout, parse_tmux_colour, swapped_layout};
+use zz_mux::{display_width, joined_layout, swapped_layout};
 use zz_protocol::{
     AgentCommand, Axis, ClientMessageKind, CommandInvocation, DisplayPanesAction, GuiResponse,
-    InputMessage, LayoutNode, MuxSnapshot, PROTOCOL_VERSION, PaneId, PaneIndicator,
+    InputMessage, LayoutNode, MenuState, MuxSnapshot, PROTOCOL_VERSION, PaneId, PaneIndicator,
     PaneKindSnapshot, PopupBorderLines, PopupState, SPLIT_RATIO_BASIS, SessionId, SplitId,
     WindowId, WindowSnapshot,
 };
@@ -53,7 +53,7 @@ use crate::{
     browser::view::BrowserView,
     chooser::buffer::ChooseBufferView,
     chooser::tree::ChooseTreeView,
-    command::palette::CommandPaletteView,
+    command::{confirm::ConfirmView, menu::MenuView, palette::CommandPaletteView},
     config::{self, AgentConfig, frame_content_corner_radius},
     diagnostics,
     editor::EditorView,
@@ -492,6 +492,8 @@ struct AppRevision {
     error: Option<Arc<str>>,
     command_output_pane: Option<PaneId>,
     popup: u64,
+    menu: u64,
+    confirm: u64,
     command_prompt: u64,
     choose_tree: u64,
     choose_buffer: u64,
@@ -515,6 +517,8 @@ impl AppRevision {
             error: mux.error(),
             command_output_pane: mux.command_output().map(|output| output.pane),
             popup: mux.popup_revision(),
+            menu: mux.menu_revision(),
+            confirm: mux.confirm_revision(),
             command_prompt: mux.command_prompt_revision(),
             choose_tree: mux.choose_tree_revision(),
             choose_buffer: mux.choose_buffer_revision(),
@@ -536,6 +540,8 @@ enum OverlayKind {
     DisplayPanes,
     CommandOutput(PaneId),
     Popup(PaneId),
+    Menu,
+    Confirm,
 }
 
 #[derive(PartialEq)]
@@ -562,6 +568,8 @@ pub struct AppView {
     editors: BTreeMap<PaneId, Entity<EditorView>>,
     command_output: Option<(PaneId, Entity<TerminalView>)>,
     popup: Option<PopupPane>,
+    menu: Option<Entity<MenuView>>,
+    confirm: Option<Entity<ConfirmView>>,
     choose_tree: Option<Entity<ChooseTreeView>>,
     choose_buffer: Option<Entity<ChooseBufferView>>,
     display_panes: Option<Entity<DisplayPanesView>>,
@@ -749,6 +757,8 @@ impl AppView {
             editors: BTreeMap::new(),
             command_output: None,
             popup: None,
+            menu: None,
+            confirm: None,
             choose_tree: None,
             choose_buffer: None,
             display_panes: None,
@@ -791,7 +801,7 @@ impl AppView {
         if self.reconcile_dialog_prefix(window, cx) {
             return;
         }
-        if self.popup.is_some() {
+        if self.popup.is_some() || self.menu.is_some() || self.confirm.is_some() {
             return;
         }
         if self.sidebar.read(cx).route() == WorkspaceRoute::Settings {
@@ -1015,7 +1025,11 @@ impl AppView {
     }
 
     fn visible_overlay(&self, cx: &App) -> Option<(OverlayKind, FocusHandle)> {
-        if let Some(popup) = &self.popup {
+        if let Some(menu) = &self.menu {
+            Some((OverlayKind::Menu, menu.read(cx).focus().clone()))
+        } else if let Some(confirm) = &self.confirm {
+            Some((OverlayKind::Confirm, confirm.read(cx).focus().clone()))
+        } else if let Some(popup) = &self.popup {
             Some((
                 OverlayKind::Popup(popup.state.pane),
                 popup.terminal.read(cx).focus(),
@@ -1068,6 +1082,8 @@ impl AppView {
         let snapshot = mux.snapshot();
         let command_output = mux.command_output();
         let popup = mux.popup().cloned();
+        let menu = mux.menu().cloned();
+        let confirm = mux.confirm().cloned();
         let command_prompt = mux.command_prompt().cloned();
         let command_prompt_revision = mux.command_prompt_revision();
         let choose_tree = mux.choose_tree().cloned();
@@ -1261,6 +1277,38 @@ impl AppView {
             }
             None => {
                 if self.popup.take().is_some() {
+                    self.focused_pane = None;
+                }
+            }
+        }
+
+        match menu {
+            Some(state) => {
+                if let Some(menu) = &self.menu {
+                    menu.update(cx, |menu, cx| menu.synchronize(state, cx));
+                } else {
+                    let mux = self.mux.clone();
+                    self.menu = Some(cx.new(|cx| MenuView::new(mux, state, cx)));
+                }
+            }
+            None => {
+                if self.menu.take().is_some() {
+                    self.focused_pane = None;
+                }
+            }
+        }
+
+        match confirm {
+            Some(state) => {
+                if let Some(confirm) = &self.confirm {
+                    confirm.update(cx, |confirm, cx| confirm.synchronize(state, cx));
+                } else {
+                    let mux = self.mux.clone();
+                    self.confirm = Some(cx.new(|cx| ConfirmView::new(mux, state, cx)));
+                }
+            }
+            None => {
+                if self.confirm.take().is_some() {
                     self.focused_pane = None;
                 }
             }
@@ -1460,7 +1508,8 @@ impl AppView {
                 && self.focused_pane.map(|(pane, _)| pane) != Some(active)
         });
         self.audit_pane_focus("pass", window, cx);
-        let overlay = (route == WorkspaceRoute::App || self.popup.is_some())
+        let floating_input = self.popup.is_some() || self.menu.is_some() || self.confirm.is_some();
+        let overlay = (route == WorkspaceRoute::App || floating_input)
             .then(|| self.visible_overlay(cx))
             .flatten();
         let previous_overlay = self.focused_overlay;
@@ -1468,7 +1517,7 @@ impl AppView {
             .as_ref()
             .is_some_and(|(kind, _)| self.focused_overlay != Some(*kind));
         self.focused_overlay = overlay.as_ref().map(|(kind, _)| *kind);
-        if self.popup.is_some() {
+        if floating_input {
             if let Some((_, focus)) = overlay
                 && overlay_needs_focus
             {
@@ -1478,7 +1527,11 @@ impl AppView {
             self.pane_focus_owed = false;
             self.focused_pane = None;
         } else if route == WorkspaceRoute::Settings {
-            if (entering_settings || matches!(previous_overlay, Some(OverlayKind::Popup(_))))
+            if (entering_settings
+                || matches!(
+                    previous_overlay,
+                    Some(OverlayKind::Popup(_) | OverlayKind::Menu | OverlayKind::Confirm)
+                ))
                 && let Some(settings) = self.sidebar.read(cx).settings_view()
             {
                 let entity = settings.entity_id();
@@ -2338,14 +2391,16 @@ impl AppView {
             window.scale_factor(),
         );
         let bordered = state.border_lines != PopupBorderLines::None;
-        let background = popup_style_colour(
+        let background = crate::theme::tmux_style_colour(
             &state.style,
             "bg",
             cx.theme().background.raised(1).opaque(),
             cx,
         );
-        let foreground = popup_style_colour(&state.style, "fg", cx.theme().foreground, cx);
-        let border_color = popup_style_colour(&state.border_style, "fg", cx.theme().border, cx);
+        let foreground =
+            crate::theme::tmux_style_colour(&state.style, "fg", cx.theme().foreground, cx);
+        let border_color =
+            crate::theme::tmux_style_colour(&state.border_style, "fg", cx.theme().border, cx);
         Some(
             div()
                 .absolute()
@@ -2365,6 +2420,72 @@ impl AppView {
                     .colors(background, foreground, border_color)
                     .bordered(bordered),
                 )
+                .into_any_element(),
+        )
+    }
+
+    fn menu_overlay(&self, origin: Point<Pixels>, window: &Window, cx: &App) -> Option<AnyElement> {
+        let menu = self.menu.as_ref()?;
+        let state = menu.read(cx).state();
+        let frame = menu_frame(
+            state,
+            origin,
+            self.pane_canvas_size.get(),
+            window.scale_factor(),
+        );
+        let bordered = state.border_lines != PopupBorderLines::None;
+        let background = crate::theme::tmux_style_colour(
+            &state.style,
+            "bg",
+            cx.theme().background.raised(1).opaque(),
+            cx,
+        );
+        let foreground =
+            crate::theme::tmux_style_colour(&state.style, "fg", cx.theme().foreground, cx);
+        let border_color =
+            crate::theme::tmux_style_colour(&state.border_style, "fg", cx.theme().border, cx);
+        Some(
+            div()
+                .absolute()
+                .left(frame.bounds.origin.x)
+                .top(frame.bounds.origin.y)
+                .w(frame.bounds.size.width)
+                .h(frame.bounds.size.height)
+                .debug_selector(|| "display-menu".to_owned())
+                .child(
+                    FloatingSurface::new("display-menu-surface", menu.clone(), cx)
+                        .title(state.title.clone())
+                        .content_inset(frame.inset_x, frame.inset_y)
+                        .colors(background, foreground, border_color)
+                        .bordered(bordered),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn confirm_overlay(&self, origin: Point<Pixels>, cx: &App) -> Option<AnyElement> {
+        let confirm = self.confirm.as_ref()?;
+        let canvas = self.pane_canvas_size.get();
+        let prompt = &confirm.read(cx).state().prompt;
+        let width = px((display_width(prompt).saturating_mul(8).saturating_add(32)) as f32)
+            .max(px(180.0))
+            .min((canvas.width - px(24.0)).max(px(180.0)));
+        let height = px(48.0);
+        let left = origin.x + ((canvas.width - width) / 2.0).max(Pixels::ZERO);
+        let top = origin.y + ((canvas.height - height) / 2.0).max(Pixels::ZERO);
+        Some(
+            div()
+                .absolute()
+                .left(left)
+                .top(top)
+                .w(width)
+                .h(height)
+                .debug_selector(|| "confirm-before".to_owned())
+                .child(FloatingSurface::new(
+                    "confirm-before-surface",
+                    confirm.clone(),
+                    cx,
+                ))
                 .into_any_element(),
         )
     }
@@ -2554,6 +2675,12 @@ impl Render for AppView {
         if let Some(popup) = self.popup_overlay(gpui::point(pane_margin, canvas_top), window, cx) {
             overlays.push(popup);
         }
+        if let Some(menu) = self.menu_overlay(gpui::point(pane_margin, canvas_top), window, cx) {
+            overlays.push(menu);
+        }
+        if let Some(confirm) = self.confirm_overlay(gpui::point(pane_margin, canvas_top), cx) {
+            overlays.push(confirm);
+        }
         let measured_canvas_size = self.pane_canvas_size.clone();
         let gap_background = crate::theme::chrome_background(cx);
         let content = div()
@@ -2605,70 +2732,79 @@ fn popup_frame(
     canvas: Size<Pixels>,
     scale: f32,
 ) -> PopupFrame {
-    let cell_width = px(f32::from(u16::try_from(state.cell_width_px).unwrap_or(u16::MAX)) / scale);
-    let cell_height =
-        px(f32::from(u16::try_from(state.cell_height_px).unwrap_or(u16::MAX)) / scale);
-    let grid_width = cell_width * usize::from(state.client_columns);
-    let grid_height = cell_height * usize::from(state.client_rows);
+    floating_frame(
+        state.left,
+        state.top,
+        state.width,
+        state.height,
+        state.client_columns,
+        state.client_rows,
+        state.cell_width_px,
+        state.cell_height_px,
+        state.border_lines != PopupBorderLines::None,
+        origin,
+        canvas,
+        scale,
+    )
+}
+
+fn menu_frame(
+    state: &MenuState,
+    origin: Point<Pixels>,
+    canvas: Size<Pixels>,
+    scale: f32,
+) -> PopupFrame {
+    floating_frame(
+        state.left,
+        state.top,
+        state.width,
+        state.height,
+        state.client_columns,
+        state.client_rows,
+        state.cell_width_px,
+        state.cell_height_px,
+        state.border_lines != PopupBorderLines::None,
+        origin,
+        canvas,
+        scale,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn floating_frame(
+    left: u16,
+    top: u16,
+    width: u16,
+    height: u16,
+    client_columns: u16,
+    client_rows: u16,
+    cell_width_px: u32,
+    cell_height_px: u32,
+    bordered: bool,
+    origin: Point<Pixels>,
+    canvas: Size<Pixels>,
+    scale: f32,
+) -> PopupFrame {
+    let cell_width = px(f32::from(u16::try_from(cell_width_px).unwrap_or(u16::MAX)) / scale);
+    let cell_height = px(f32::from(u16::try_from(cell_height_px).unwrap_or(u16::MAX)) / scale);
+    let grid_width = cell_width * usize::from(client_columns);
+    let grid_height = cell_height * usize::from(client_rows);
     let grid_left = ((canvas.width - grid_width) / 2.0).max(Pixels::ZERO);
     let grid_top = ((canvas.height - grid_height) / 2.0).max(Pixels::ZERO);
-    let bordered = state.border_lines != PopupBorderLines::None;
     PopupFrame {
         bounds: Bounds::new(
             gpui::point(
-                origin.x + grid_left + cell_width * usize::from(state.left),
-                origin.y + grid_top + cell_height * usize::from(state.top),
+                origin.x + grid_left + cell_width * usize::from(left),
+                origin.y + grid_top + cell_height * usize::from(top),
             ),
             gpui::size(
-                cell_width * usize::from(state.width),
-                cell_height * usize::from(state.height),
+                cell_width * usize::from(width),
+                cell_height * usize::from(height),
             ),
         ),
         inset_x: if bordered { cell_width } else { Pixels::ZERO },
         inset_y: if bordered { cell_height } else { Pixels::ZERO },
     }
-}
-
-fn popup_style_colour(style: &str, key: &str, fallback: gpui::Hsla, cx: &App) -> gpui::Hsla {
-    let Some(value) = style.split(',').find_map(|part| {
-        let (name, value) = part.split_once('=')?;
-        name.eq_ignore_ascii_case(key).then_some(value)
-    }) else {
-        return fallback;
-    };
-    let Some(colour) = parse_tmux_colour(value) else {
-        return fallback;
-    };
-    match colour {
-        TmuxColour::Basic(index) | TmuxColour::Indexed(index) => {
-            packed_popup_colour(indexed_colour_rgb(index))
-        }
-        TmuxColour::Rgb(colour) => packed_popup_colour(colour),
-        TmuxColour::Default | TmuxColour::Terminal => fallback,
-        TmuxColour::Theme(index) => match index {
-            0 => cx.theme().background,
-            1 | 7..=9 => cx.theme().foreground,
-            2 => cx.theme().border,
-            3 => cx.theme().background.raised(1).opaque(),
-            4 => cx.theme().success,
-            5 => cx.theme().warning,
-            6 => cx.theme().danger,
-            _ => fallback,
-        },
-    }
-}
-
-fn packed_popup_colour(colour: u32) -> gpui::Hsla {
-    let channel = |shift: u32| {
-        f32::from(u8::try_from((colour >> shift) & 0xff_u32).unwrap_or_default()) / 255.0
-    };
-    Rgba {
-        r: channel(16),
-        g: channel(8),
-        b: channel(0),
-        a: 1.0,
-    }
-    .into()
 }
 
 fn pane_select_command(pane: PaneId) -> CommandInvocation {
@@ -3025,6 +3161,8 @@ mod tests {
             error: None,
             command_output_pane: None,
             popup: 0,
+            menu: 0,
+            confirm: 0,
             command_prompt: 0,
             choose_tree: 0,
             choose_buffer: 0,
@@ -3450,6 +3588,31 @@ mod tests {
         }
     }
 
+    fn menu_state_for_test() -> MenuState {
+        MenuState {
+            left: 29,
+            top: 6,
+            width: 20,
+            height: 4,
+            client_columns: 80,
+            client_rows: 24,
+            cell_width_px: 8,
+            cell_height_px: 18,
+            title: "menu".to_owned(),
+            style: "bg=themedarkgrey,fg=themewhite".to_owned(),
+            selected_style: "bg=themeyellow,fg=themeblack".to_owned(),
+            border_style: "bg=themedarkgrey,fg=themelightgrey".to_owned(),
+            border_lines: PopupBorderLines::Single,
+            items: vec![Some(zz_protocol::MenuItem {
+                name: "Quit item".to_owned(),
+                key: Some("q".to_owned()),
+                enabled: true,
+            })],
+            selected: Some(0),
+            stay_open: false,
+        }
+    }
+
     #[gpui::test]
     fn popup_surface_takes_focus_and_bypasses_the_prefix_claim(cx: &mut TestAppContext) {
         cx.update(zz_ui::init);
@@ -3569,6 +3732,120 @@ mod tests {
         cx.run_until_parked();
         assert!(workspace.read_with(cx, |workspace, _| workspace.popup.is_none()));
         assert!(mux.read_with(cx, |mux, _| mux.viewport(pane).is_none()));
+    }
+
+    #[gpui::test]
+    fn menu_and_confirm_surfaces_take_focus_and_bypass_the_prefix_claim(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let input_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let captured_input = Rc::clone(&input_slot);
+        let (workspace, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+            captured_mux.replace(Some(mux.clone()));
+            captured_input.replace(Some(input));
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux = mux_slot.borrow().clone().expect("captured mux");
+        let input = input_slot.borrow().clone().expect("captured input");
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(1), cx);
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: zz_protocol::EventPayload::Menu {
+                        state: Some(menu_state_for_test()),
+                    },
+                }),
+                cx,
+            );
+            mux.set_prefix_armed_for_test(true, cx);
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        let menu = workspace.read_with(cx, |workspace, _| {
+            workspace.menu.clone().expect("menu entity")
+        });
+        assert!(cx.debug_bounds("display-menu").is_some());
+        assert!(cx.update(|window, cx| menu.read(cx).focus().contains_focused(window, cx)));
+        input.borrow_mut().clear();
+        cx.simulate_keystrokes("q");
+        assert!(input.borrow().iter().any(|message| matches!(
+            message,
+            InputMessage::Menu {
+                action: zz_protocol::MenuAction::Choose(0)
+            }
+        )));
+        assert!(
+            !input
+                .borrow()
+                .iter()
+                .any(|message| matches!(message, InputMessage::Key { .. }))
+        );
+
+        mux.update(cx, |mux, cx| {
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 2,
+                    payload: zz_protocol::EventPayload::Menu { state: None },
+                }),
+                cx,
+            );
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 3,
+                    payload: zz_protocol::EventPayload::Confirm {
+                        state: Some(zz_protocol::ConfirmState {
+                            prompt: "Confirm? (y/n) ".to_owned(),
+                            confirm_key: b'y',
+                            default_yes: false,
+                        }),
+                    },
+                }),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        let confirm = workspace.read_with(cx, |workspace, _| {
+            workspace.confirm.clone().expect("confirm entity")
+        });
+        assert!(cx.debug_bounds("confirm-before").is_some());
+        assert!(cx.update(|window, cx| confirm.read(cx).focus().contains_focused(window, cx)));
+        input.borrow_mut().clear();
+        cx.simulate_keystrokes("y");
+        assert!(input.borrow().iter().any(|message| matches!(
+            message,
+            InputMessage::Confirm {
+                action: zz_protocol::ConfirmAction::Reply(true)
+            }
+        )));
+        assert!(
+            !input
+                .borrow()
+                .iter()
+                .any(|message| matches!(message, InputMessage::Key { .. }))
+        );
     }
 
     fn two_pane_snapshot(active: PaneId) -> MuxSnapshot {

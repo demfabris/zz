@@ -402,7 +402,9 @@ fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
     Some(match name {
         "default-terminal" => TmuxOptionDefault::String("tmux-256color"),
         "escape-time" => TmuxOptionDefault::Scalar("10"),
-        "base-index" | "initial-repeat-time" | "pane-base-index" => TmuxOptionDefault::Scalar("0"),
+        "base-index" | "initial-repeat-time" | "lock-after-time" | "pane-base-index" => {
+            TmuxOptionDefault::Scalar("0")
+        }
         "buffer-limit" => TmuxOptionDefault::Scalar("50"),
         "copy-command" | "default-command" => TmuxOptionDefault::String(""),
         "default-shell" => TmuxOptionDefault::String("/bin/sh"),
@@ -410,9 +412,13 @@ fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
         "display-time" => TmuxOptionDefault::Scalar("750"),
         "message-limit" => TmuxOptionDefault::Scalar("1000"),
         "mode-keys" => TmuxOptionDefault::Scalar("emacs"),
-        "popup-border-lines" => TmuxOptionDefault::Scalar("single"),
-        "popup-border-style" => TmuxOptionDefault::String("bg=themedarkgrey,fg=themelightgrey"),
-        "popup-style" => TmuxOptionDefault::String("bg=themedarkgrey,fg=themewhite"),
+        "lock-command" => TmuxOptionDefault::String("lock -np"),
+        "menu-border-lines" | "popup-border-lines" => TmuxOptionDefault::Scalar("single"),
+        "menu-border-style" | "popup-border-style" => {
+            TmuxOptionDefault::String("bg=themedarkgrey,fg=themelightgrey")
+        }
+        "menu-selected-style" => TmuxOptionDefault::String("bg=themeyellow,fg=themeblack"),
+        "menu-style" | "popup-style" => TmuxOptionDefault::String("bg=themedarkgrey,fg=themewhite"),
         "aggressive-resize" | "renumber-windows" | "synchronize-panes" | "remain-on-exit" => {
             TmuxOptionDefault::Scalar("off")
         }
@@ -612,6 +618,8 @@ mod tests {
                 ("display-time", TmuxOptionDefault::Scalar("750")),
                 ("history-limit", TmuxOptionDefault::Scalar("2000")),
                 ("initial-repeat-time", TmuxOptionDefault::Scalar("0")),
+                ("lock-after-time", TmuxOptionDefault::Scalar("0")),
+                ("lock-command", TmuxOptionDefault::String("lock -np")),
                 ("mouse", TmuxOptionDefault::Scalar("on")),
                 ("prefix", TmuxOptionDefault::Scalar("C-b")),
                 (
@@ -649,6 +657,19 @@ mod tests {
                     TmuxOptionDefault::String(
                         "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}"
                     ),
+                ),
+                ("menu-border-lines", TmuxOptionDefault::Scalar("single")),
+                (
+                    "menu-border-style",
+                    TmuxOptionDefault::String("bg=themedarkgrey,fg=themelightgrey"),
+                ),
+                (
+                    "menu-selected-style",
+                    TmuxOptionDefault::String("bg=themeyellow,fg=themeblack"),
+                ),
+                (
+                    "menu-style",
+                    TmuxOptionDefault::String("bg=themedarkgrey,fg=themewhite"),
                 ),
                 ("mode-keys", TmuxOptionDefault::Scalar("emacs")),
                 ("pane-base-index", TmuxOptionDefault::Scalar("0")),

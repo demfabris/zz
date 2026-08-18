@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 63;
+pub const PROTOCOL_VERSION: u16 = 64;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
@@ -953,6 +953,12 @@ pub enum InputMessage {
     Popup {
         action: PopupAction,
     },
+    Menu {
+        action: MenuAction,
+    },
+    Confirm {
+        action: ConfirmAction,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1484,6 +1490,51 @@ pub enum PopupAction {
     Close,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MenuItem {
+    pub name: String,
+    pub key: Option<String>,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MenuState {
+    pub left: u16,
+    pub top: u16,
+    pub width: u16,
+    pub height: u16,
+    pub client_columns: u16,
+    pub client_rows: u16,
+    pub cell_width_px: u32,
+    pub cell_height_px: u32,
+    pub title: String,
+    pub style: String,
+    pub selected_style: String,
+    pub border_style: String,
+    pub border_lines: PopupBorderLines,
+    pub items: Vec<Option<MenuItem>>,
+    pub selected: Option<u32>,
+    pub stay_open: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MenuAction {
+    Choose(u32),
+    Cancel,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfirmState {
+    pub prompt: String,
+    pub confirm_key: u8,
+    pub default_yes: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConfirmAction {
+    Reply(bool),
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Event {
     pub sequence: u64,
@@ -1651,6 +1702,12 @@ pub enum EventPayload {
     },
     Popup {
         state: Option<PopupState>,
+    },
+    Menu {
+        state: Option<MenuState>,
+    },
+    Confirm {
+        state: Option<ConfirmState>,
     },
 }
 
@@ -2033,5 +2090,42 @@ mod tests {
             postcard::from_bytes::<super::Event>(&event_bytes).expect("popup event decodes"),
             event
         );
+
+        for (input, tag) in [
+            (
+                super::InputMessage::Menu {
+                    action: super::MenuAction::Cancel,
+                },
+                15,
+            ),
+            (
+                super::InputMessage::Confirm {
+                    action: super::ConfirmAction::Reply(false),
+                },
+                16,
+            ),
+        ] {
+            let bytes = postcard::to_stdvec(&input).expect("overlay input encodes");
+            assert_eq!(bytes[0], tag);
+            assert_eq!(
+                postcard::from_bytes::<super::InputMessage>(&bytes).expect("overlay input decodes"),
+                input
+            );
+        }
+        for (payload, tag) in [
+            (super::EventPayload::Menu { state: None }, 37),
+            (super::EventPayload::Confirm { state: None }, 38),
+        ] {
+            let event = super::Event {
+                sequence: 7,
+                payload,
+            };
+            let bytes = postcard::to_stdvec(&event).expect("overlay event encodes");
+            assert_eq!(bytes[1], tag);
+            assert_eq!(
+                postcard::from_bytes::<super::Event>(&bytes).expect("overlay event decodes"),
+                event
+            );
+        }
     }
 }

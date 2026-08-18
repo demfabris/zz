@@ -20,11 +20,11 @@ use zz_daemon::{
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferState, ChooseTreeState, ClientMessageKind,
-    CommandInvocation, CommandPromptState, CommandResponse, DisplayPanesState, Event, EventPayload,
-    GuiResponse, InputMessage, KeyBindingSnapshot, LayoutNode, MuxOptionKey, MuxSnapshot,
-    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PastedImageFormat,
-    PopupState, ProtocolError, ProtocolMessage, ServerError, ServerHello, SessionId, StatusLine,
-    TerminalUiCommand, WindowSnapshot,
+    CommandInvocation, CommandPromptState, CommandResponse, ConfirmState, DisplayPanesState, Event,
+    EventPayload, GuiResponse, InputMessage, KeyBindingSnapshot, LayoutNode, MenuState,
+    MuxOptionKey, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId,
+    PaneKindSnapshot, PastedImageFormat, PopupState, ProtocolError, ProtocolMessage, ServerError,
+    ServerHello, SessionId, StatusLine, TerminalUiCommand, WindowSnapshot,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME,
@@ -958,6 +958,8 @@ pub struct MuxClient {
     choose_buffer_revision: u64,
     display_panes_revision: u64,
     popup_revision: u64,
+    menu_revision: u64,
+    confirm_revision: u64,
     popup_pane: Option<PaneId>,
     next_prefix_cancel_request: u64,
     prefix_cancelled_request: Option<u64>,
@@ -1057,6 +1059,8 @@ impl MuxClient {
             choose_buffer_revision: 0,
             display_panes_revision: 0,
             popup_revision: 0,
+            menu_revision: 0,
+            confirm_revision: 0,
             popup_pane: None,
             next_prefix_cancel_request: 0,
             prefix_cancelled_request: None,
@@ -2347,6 +2351,26 @@ impl MuxClient {
     }
 
     #[must_use]
+    pub(crate) fn menu(&self) -> Option<&MenuState> {
+        self.core.menu()
+    }
+
+    #[must_use]
+    pub(crate) fn menu_revision(&self) -> u64 {
+        self.menu_revision
+    }
+
+    #[must_use]
+    pub(crate) fn confirm(&self) -> Option<&ConfirmState> {
+        self.core.confirm()
+    }
+
+    #[must_use]
+    pub(crate) fn confirm_revision(&self) -> u64 {
+        self.confirm_revision
+    }
+
+    #[must_use]
     pub const fn sidebar_focus_revision(&self) -> u64 {
         self.sidebar_focus_revision
     }
@@ -2686,6 +2710,8 @@ impl MuxClient {
         self.command_output_diff.invalidate();
         self.popup_pane = None;
         self.popup_revision = self.popup_revision.wrapping_add(1).max(1);
+        self.menu_revision = self.menu_revision.wrapping_add(1).max(1);
+        self.confirm_revision = self.confirm_revision.wrapping_add(1).max(1);
     }
 
     fn reset_session_state(&mut self, _cx: &mut Context<Self>) {
@@ -2709,6 +2735,8 @@ impl MuxClient {
             self.forget_pane(pane);
         }
         self.popup_revision = self.popup_revision.wrapping_add(1).max(1);
+        self.menu_revision = self.menu_revision.wrapping_add(1).max(1);
+        self.confirm_revision = self.confirm_revision.wrapping_add(1).max(1);
         self.clear_all_kitty_images();
         self.clear_all_pasted_images();
     }
@@ -3469,6 +3497,12 @@ impl MuxClient {
                 }
                 self.popup_pane = next;
                 self.popup_revision = self.popup_revision.wrapping_add(1).max(1);
+            }
+            CoreEvent::MenuChanged => {
+                self.menu_revision = self.menu_revision.wrapping_add(1).max(1);
+            }
+            CoreEvent::ConfirmChanged => {
+                self.confirm_revision = self.confirm_revision.wrapping_add(1).max(1);
             }
             CoreEvent::PaneRemoved { pane } => self.forget_pane(pane),
             CoreEvent::Bell { pane } => self.record_bell(host, pane),

@@ -6,9 +6,9 @@ use std::{
 use zz_protocol::{
     AgentCommand, AgentPaneWire, BrowserCommand, ChooseBufferSearchState, ChooseBufferState,
     ChooseTreeSearchState, ChooseTreeState, ClientMessageKind, CommandPromptState, CommandResponse,
-    DisplayPanesState, Event, EventPayload, KeyBindingSnapshot, KeyTableSnapshot, MuxOptions,
-    MuxSnapshot, PaneId, PopupState, ProtocolMessage, ServerHello, SessionId, StatusLine,
-    TerminalUiCommand,
+    ConfirmState, DisplayPanesState, Event, EventPayload, KeyBindingSnapshot, KeyTableSnapshot,
+    MenuState, MuxOptions, MuxSnapshot, PaneId, PopupState, ProtocolMessage, ServerHello,
+    SessionId, StatusLine, TerminalUiCommand,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, PackedCell, TerminalAppearance, TerminalDictionary,
@@ -67,6 +67,8 @@ pub enum CoreEvent {
     ChooseBufferChanged,
     DisplayPanesChanged,
     PopupChanged,
+    MenuChanged,
+    ConfirmChanged,
     PaneRemoved {
         pane: PaneId,
     },
@@ -190,6 +192,8 @@ pub struct ClientCore {
     choose_buffer: Option<ChooseBufferState>,
     display_panes: Option<DisplayPanesState>,
     popup: Option<PopupState>,
+    menu: Option<MenuState>,
+    confirm: Option<ConfirmState>,
     outbound: VecDeque<Outbound>,
     events: VecDeque<CoreEvent>,
 }
@@ -213,6 +217,8 @@ impl ClientCore {
                 self.full_pending.clear();
                 self.command_output = None;
                 self.popup = None;
+                self.menu = None;
+                self.confirm = None;
                 self.events.push_back(CoreEvent::Attached { session });
                 self.events.push_back(CoreEvent::SnapshotChanged);
             }
@@ -342,6 +348,16 @@ impl ClientCore {
         self.popup.as_ref()
     }
 
+    #[must_use]
+    pub const fn menu(&self) -> Option<&MenuState> {
+        self.menu.as_ref()
+    }
+
+    #[must_use]
+    pub const fn confirm(&self) -> Option<&ConfirmState> {
+        self.confirm.as_ref()
+    }
+
     /// Adopt a handshake's settings — capabilities, appearance, options, key
     /// tables, status — and nothing else. A shell that keeps rendering its
     /// last frame across a reconnect calls this instead of feeding the hello
@@ -387,6 +403,8 @@ impl ClientCore {
         self.choose_buffer = None;
         self.display_panes = None;
         self.popup = None;
+        self.menu = None;
+        self.confirm = None;
         self.agent_states.clear();
     }
 
@@ -482,6 +500,14 @@ impl ClientCore {
                 }
                 self.popup = state;
                 self.events.push_back(CoreEvent::PopupChanged);
+            }
+            EventPayload::Menu { state } => {
+                self.menu = state;
+                self.events.push_back(CoreEvent::MenuChanged);
+            }
+            EventPayload::Confirm { state } => {
+                self.confirm = state;
+                self.events.push_back(CoreEvent::ConfirmChanged);
             }
             EventPayload::PrefixArmed { armed } => {
                 self.prefix_armed = armed;
@@ -992,5 +1018,57 @@ mod tests {
         assert_eq!(drain(&mut core), vec![CoreEvent::PopupChanged]);
         assert_eq!(core.popup(), None);
         assert_eq!(core.viewport(pane), None);
+    }
+
+    #[test]
+    fn menu_and_confirm_descriptors_reduce_and_clear_with_attachment_state() {
+        let menu = MenuState {
+            left: 2,
+            top: 3,
+            width: 20,
+            height: 3,
+            client_columns: 80,
+            client_rows: 24,
+            cell_width_px: 8,
+            cell_height_px: 18,
+            title: "menu".to_owned(),
+            style: "default".to_owned(),
+            selected_style: "default".to_owned(),
+            border_style: "default".to_owned(),
+            border_lines: zz_protocol::PopupBorderLines::Single,
+            items: vec![Some(zz_protocol::MenuItem {
+                name: "Item".to_owned(),
+                key: Some("i".to_owned()),
+                enabled: true,
+            })],
+            selected: Some(0),
+            stay_open: false,
+        };
+        let confirm = ConfirmState {
+            prompt: "Confirm? ".to_owned(),
+            confirm_key: b'y',
+            default_yes: false,
+        };
+        let mut core = ClientCore::new();
+
+        core.handle_message(event(EventPayload::Menu {
+            state: Some(menu.clone()),
+        }));
+        core.handle_message(event(EventPayload::Confirm {
+            state: Some(confirm.clone()),
+        }));
+        assert_eq!(
+            drain(&mut core),
+            vec![CoreEvent::MenuChanged, CoreEvent::ConfirmChanged]
+        );
+        assert_eq!(core.menu(), Some(&menu));
+        assert_eq!(core.confirm(), Some(&confirm));
+
+        core.handle_message(ProtocolMessage::Attached {
+            session: SessionId(0),
+            snapshot: snapshot_with(&[]),
+        });
+        assert_eq!(core.menu(), None);
+        assert_eq!(core.confirm(), None);
     }
 }

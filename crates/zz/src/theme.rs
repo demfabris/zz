@@ -2,11 +2,54 @@
 
 use std::sync::Arc;
 
-use gpui::{App, Global, Hsla, Window};
+use gpui::{App, Global, Hsla, Rgba, Window};
+use zz_mux::{TmuxColour, indexed_colour_rgb, parse_tmux_colour};
 use zz_terminal::TerminalAppearance;
-use zz_ui::{Colorize as _, Theme, ThemeColor, ThemeMode};
+use zz_ui::{ActiveTheme as _, Colorize as _, Theme, ThemeColor, ThemeMode};
 
 use crate::config;
+
+pub(crate) fn tmux_style_colour(style: &str, key: &str, fallback: Hsla, cx: &App) -> Hsla {
+    let Some(value) = style.split(',').find_map(|part| {
+        let (name, value) = part.split_once('=')?;
+        name.eq_ignore_ascii_case(key).then_some(value)
+    }) else {
+        return fallback;
+    };
+    let Some(colour) = parse_tmux_colour(value) else {
+        return fallback;
+    };
+    match colour {
+        TmuxColour::Basic(index) | TmuxColour::Indexed(index) => {
+            packed_tmux_colour(indexed_colour_rgb(index))
+        }
+        TmuxColour::Rgb(colour) => packed_tmux_colour(colour),
+        TmuxColour::Default | TmuxColour::Terminal => fallback,
+        TmuxColour::Theme(index) => match index {
+            0 => cx.theme().background,
+            1 | 7..=9 => cx.theme().foreground,
+            2 => cx.theme().border,
+            3 => cx.theme().background.raised(1).opaque(),
+            4 => cx.theme().success,
+            5 => cx.theme().warning,
+            6 => cx.theme().danger,
+            _ => fallback,
+        },
+    }
+}
+
+fn packed_tmux_colour(colour: u32) -> Hsla {
+    let channel = |shift: u32| {
+        f32::from(u8::try_from((colour >> shift) & 0xff_u32).unwrap_or_default()) / 255.0
+    };
+    Rgba {
+        r: channel(16),
+        g: channel(8),
+        b: channel(0),
+        a: 1.0,
+    }
+    .into()
+}
 
 /// A palette root a user can recolor from `zz/config`.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]

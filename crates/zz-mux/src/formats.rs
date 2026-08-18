@@ -12,6 +12,13 @@ use crate::{MuxEngine, PaneKind, layout::CellLayout};
 const FORMAT_LOOP_LIMIT: usize = 100;
 const FORMAT_MAX_WIDTH: isize = 10_000;
 
+pub fn display_width(value: &str) -> usize {
+    value
+        .chars()
+        .map(|character| character.width().unwrap_or_default())
+        .sum()
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum FormatType {
     #[default]
@@ -2161,10 +2168,7 @@ fn parse_expression_number(value: &str) -> Option<f64> {
 
 fn pad_value(value: &str, width: isize) -> String {
     let target = width.unsigned_abs();
-    let current = value
-        .chars()
-        .map(|character| character.width().unwrap_or_default())
-        .sum::<usize>();
+    let current = display_width(value);
     if current >= target {
         return value.to_owned();
     }

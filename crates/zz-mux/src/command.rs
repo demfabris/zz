@@ -480,6 +480,18 @@ pub struct MuxEngine {
     session_popup_border_styles: BTreeMap<SessionId, String>,
     global_popup_border_lines: PopupBorderLines,
     window_popup_border_lines: BTreeMap<WindowId, PopupBorderLines>,
+    global_menu_style: String,
+    window_menu_styles: BTreeMap<WindowId, String>,
+    global_menu_selected_style: String,
+    window_menu_selected_styles: BTreeMap<WindowId, String>,
+    global_menu_border_style: String,
+    window_menu_border_styles: BTreeMap<WindowId, String>,
+    global_menu_border_lines: PopupBorderLines,
+    window_menu_border_lines: BTreeMap<WindowId, PopupBorderLines>,
+    global_lock_command: String,
+    session_lock_commands: BTreeMap<SessionId, String>,
+    global_lock_after_time: u32,
+    session_lock_after_times: BTreeMap<SessionId, u32>,
     global_default_command: String,
     session_default_commands: BTreeMap<SessionId, String>,
     global_default_shell: String,
@@ -546,10 +558,29 @@ pub struct PopupOptions {
     pub border_lines: PopupBorderLines,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuOptions {
+    pub style: String,
+    pub selected_style: String,
+    pub border_style: String,
+    pub border_lines: PopupBorderLines,
+}
+
 impl Default for PopupOptions {
     fn default() -> Self {
         Self {
             style: "bg=themedarkgrey,fg=themewhite".to_owned(),
+            border_style: "bg=themedarkgrey,fg=themelightgrey".to_owned(),
+            border_lines: PopupBorderLines::Single,
+        }
+    }
+}
+
+impl Default for MenuOptions {
+    fn default() -> Self {
+        Self {
+            style: "bg=themedarkgrey,fg=themewhite".to_owned(),
+            selected_style: "bg=themeyellow,fg=themeblack".to_owned(),
             border_style: "bg=themedarkgrey,fg=themelightgrey".to_owned(),
             border_lines: PopupBorderLines::Single,
         }
@@ -602,6 +633,18 @@ impl Default for MuxEngine {
             session_popup_border_styles: BTreeMap::new(),
             global_popup_border_lines: PopupBorderLines::Single,
             window_popup_border_lines: BTreeMap::new(),
+            global_menu_style: MenuOptions::default().style,
+            window_menu_styles: BTreeMap::new(),
+            global_menu_selected_style: MenuOptions::default().selected_style,
+            window_menu_selected_styles: BTreeMap::new(),
+            global_menu_border_style: MenuOptions::default().border_style,
+            window_menu_border_styles: BTreeMap::new(),
+            global_menu_border_lines: PopupBorderLines::Single,
+            window_menu_border_lines: BTreeMap::new(),
+            global_lock_command: "lock -np".to_owned(),
+            session_lock_commands: BTreeMap::new(),
+            global_lock_after_time: 0,
+            session_lock_after_times: BTreeMap::new(),
             global_default_command: String::new(),
             session_default_commands: BTreeMap::new(),
             global_default_shell: DEFAULT_SHELL.to_owned(),
@@ -848,6 +891,34 @@ impl MuxEngine {
                 .get(&window)
                 .copied()
                 .unwrap_or(self.global_popup_border_lines),
+        })
+    }
+
+    pub fn menu_options_for_window(&self, window: WindowId) -> Result<MenuOptions, ServerError> {
+        if !self.state.windows.contains_key(&window) {
+            return Err(ServerError::MissingTarget(window.to_string()));
+        }
+        Ok(MenuOptions {
+            style: self
+                .window_menu_styles
+                .get(&window)
+                .cloned()
+                .unwrap_or_else(|| self.global_menu_style.clone()),
+            selected_style: self
+                .window_menu_selected_styles
+                .get(&window)
+                .cloned()
+                .unwrap_or_else(|| self.global_menu_selected_style.clone()),
+            border_style: self
+                .window_menu_border_styles
+                .get(&window)
+                .cloned()
+                .unwrap_or_else(|| self.global_menu_border_style.clone()),
+            border_lines: self
+                .window_menu_border_lines
+                .get(&window)
+                .copied()
+                .unwrap_or(self.global_menu_border_lines),
         })
     }
 
@@ -1541,6 +1612,10 @@ impl MuxEngine {
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_popup_border_styles
             .retain(|session, _| self.state.sessions.contains_key(session));
+        self.session_lock_commands
+            .retain(|session, _| self.state.sessions.contains_key(session));
+        self.session_lock_after_times
+            .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_user_options
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_hooks
@@ -1564,6 +1639,14 @@ impl MuxEngine {
         self.window_remain_on_exit
             .retain(|window, _| self.state.windows.contains_key(window));
         self.window_popup_border_lines
+            .retain(|window, _| self.state.windows.contains_key(window));
+        self.window_menu_styles
+            .retain(|window, _| self.state.windows.contains_key(window));
+        self.window_menu_selected_styles
+            .retain(|window, _| self.state.windows.contains_key(window));
+        self.window_menu_border_styles
+            .retain(|window, _| self.state.windows.contains_key(window));
+        self.window_menu_border_lines
             .retain(|window, _| self.state.windows.contains_key(window));
         self.window_pane_base_indices
             .retain(|window, _| self.state.windows.contains_key(window));
@@ -4525,6 +4608,12 @@ impl MuxEngine {
             "popup-style" | "popup-border-style" | "popup-border-lines" => {
                 self.set_popup_option(table_option.name, value, &options, target)
             }
+            "menu-style" | "menu-selected-style" | "menu-border-style" | "menu-border-lines" => {
+                self.set_menu_option(table_option.name, value, &options, target)
+            }
+            "lock-command" | "lock-after-time" => {
+                self.set_lock_option(table_option.name, value, &options, target)
+            }
             "prefix" | "set-clipboard" | "copy-command" => {
                 self.set_scalar_tmux_option(table_option.name, value, &options)
             }
@@ -4955,6 +5044,16 @@ impl MuxEngine {
                     .get(&session)
                     .map(|value| (value.clone(), false))
                     .or_else(inherited),
+                "lock-command" => self
+                    .session_lock_commands
+                    .get(&session)
+                    .map(|value| (value.clone(), false))
+                    .or_else(inherited),
+                "lock-after-time" => self
+                    .session_lock_after_times
+                    .get(&session)
+                    .map(|value| (value.to_string(), false))
+                    .or_else(inherited),
                 "default-command" => self
                     .session_default_commands
                     .get(&session)
@@ -5048,6 +5147,26 @@ impl MuxEngine {
                     .get(&window)
                     .map(|value| (value.as_str().to_owned(), false))
                     .or_else(inherited),
+                "menu-style" => self
+                    .window_menu_styles
+                    .get(&window)
+                    .map(|value| (value.clone(), false))
+                    .or_else(inherited),
+                "menu-selected-style" => self
+                    .window_menu_selected_styles
+                    .get(&window)
+                    .map(|value| (value.clone(), false))
+                    .or_else(inherited),
+                "menu-border-style" => self
+                    .window_menu_border_styles
+                    .get(&window)
+                    .map(|value| (value.clone(), false))
+                    .or_else(inherited),
+                "menu-border-lines" => self
+                    .window_menu_border_lines
+                    .get(&window)
+                    .map(|value| (value.as_str().to_owned(), false))
+                    .or_else(inherited),
                 _ => inherited(),
             },
             TmuxOptionTarget::Pane(pane) => match option.name {
@@ -5127,6 +5246,12 @@ impl MuxEngine {
             "popup-style" => self.global_popup_style.clone(),
             "popup-border-style" => self.global_popup_border_style.clone(),
             "popup-border-lines" => self.global_popup_border_lines.as_str().to_owned(),
+            "menu-style" => self.global_menu_style.clone(),
+            "menu-selected-style" => self.global_menu_selected_style.clone(),
+            "menu-border-style" => self.global_menu_border_style.clone(),
+            "menu-border-lines" => self.global_menu_border_lines.as_str().to_owned(),
+            "lock-command" => self.global_lock_command.clone(),
+            "lock-after-time" => self.global_lock_after_time.to_string(),
             _ => return None,
         })
     }
@@ -5192,7 +5317,7 @@ impl MuxEngine {
                         value.to_owned()
                     }
                 };
-                if !valid_popup_style(&next) {
+                if !valid_style(&next) {
                     return Err(ServerError::InvalidCommand(format!(
                         "invalid style: {next}"
                     )));
@@ -5240,6 +5365,177 @@ impl MuxEngine {
                 }
             }
             _ => unreachable!("popup option is catalogued"),
+        }
+        Ok(Execution::default())
+    }
+
+    fn set_menu_option(
+        &mut self,
+        option: &str,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        let local_key = match target {
+            TmuxOptionTarget::Window(window) => Some(window),
+            TmuxOptionTarget::GlobalWindow => None,
+            _ => unreachable!("menu options are window scoped"),
+        };
+        if option == "menu-border-lines" {
+            if options.has("-o")
+                && !unset
+                && local_key.is_none_or(|key| self.window_menu_border_lines.contains_key(&key))
+            {
+                return already_set_or_quiet(options, option);
+            }
+            if unset {
+                if let Some(key) = local_key {
+                    self.window_menu_border_lines.remove(&key);
+                } else {
+                    self.global_menu_border_lines = PopupBorderLines::Single;
+                }
+                return Ok(Execution::default());
+            }
+            let value = value.ok_or_else(|| {
+                ServerError::InvalidCommand(format!("set-option {option} needs a value"))
+            })?;
+            let next = value
+                .parse()
+                .map_err(|()| ServerError::InvalidCommand(format!("unknown value: {value}")))?;
+            if let Some(key) = local_key {
+                self.window_menu_border_lines.insert(key, next);
+            } else {
+                self.global_menu_border_lines = next;
+            }
+            return Ok(Execution::default());
+        }
+        let defaults = MenuOptions::default();
+        let (global, locals, default) = match option {
+            "menu-style" => (
+                &mut self.global_menu_style,
+                &mut self.window_menu_styles,
+                defaults.style,
+            ),
+            "menu-selected-style" => (
+                &mut self.global_menu_selected_style,
+                &mut self.window_menu_selected_styles,
+                defaults.selected_style,
+            ),
+            "menu-border-style" => (
+                &mut self.global_menu_border_style,
+                &mut self.window_menu_border_styles,
+                defaults.border_style,
+            ),
+            _ => unreachable!("menu option is catalogued"),
+        };
+        if options.has("-o") && !unset && local_key.is_none_or(|key| locals.contains_key(&key)) {
+            return already_set_or_quiet(options, option);
+        }
+        if unset {
+            if let Some(key) = local_key {
+                locals.remove(&key);
+            } else {
+                *global = default;
+            }
+            return Ok(Execution::default());
+        }
+        let value = value.ok_or_else(|| {
+            ServerError::InvalidCommand(format!("set-option {option} needs a value"))
+        })?;
+        let next = if options.has("-a") {
+            format!(
+                "{}{value}",
+                local_key.and_then(|key| locals.get(&key)).unwrap_or(global)
+            )
+        } else {
+            value.to_owned()
+        };
+        if !valid_style(&next) {
+            return Err(ServerError::InvalidCommand(format!(
+                "invalid style: {next}"
+            )));
+        }
+        if let Some(key) = local_key {
+            locals.insert(key, next);
+        } else {
+            *global = next;
+        }
+        Ok(Execution::default())
+    }
+
+    fn set_lock_option(
+        &mut self,
+        option: &str,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        let local_key = match target {
+            TmuxOptionTarget::Session(session) => Some(session),
+            TmuxOptionTarget::GlobalSession => None,
+            _ => unreachable!("lock options are session scoped"),
+        };
+        if option == "lock-after-time" {
+            if options.has("-o")
+                && !unset
+                && local_key.is_none_or(|key| self.session_lock_after_times.contains_key(&key))
+            {
+                return already_set_or_quiet(options, option);
+            }
+            let next = if unset {
+                0
+            } else {
+                parse_index_option(
+                    value.ok_or_else(|| {
+                        ServerError::InvalidCommand(format!("set-option {option} needs a value"))
+                    })?,
+                    i32::MAX.cast_unsigned(),
+                )?
+            };
+            if let Some(key) = local_key {
+                if unset {
+                    self.session_lock_after_times.remove(&key);
+                } else {
+                    self.session_lock_after_times.insert(key, next);
+                }
+            } else {
+                self.global_lock_after_time = next;
+            }
+            return Ok(Execution::default());
+        }
+        if options.has("-o")
+            && !unset
+            && local_key.is_none_or(|key| self.session_lock_commands.contains_key(&key))
+        {
+            return already_set_or_quiet(options, option);
+        }
+        if unset {
+            if let Some(key) = local_key {
+                self.session_lock_commands.remove(&key);
+            } else {
+                "lock -np".clone_into(&mut self.global_lock_command);
+            }
+            return Ok(Execution::default());
+        }
+        let value = value.ok_or_else(|| {
+            ServerError::InvalidCommand(format!("set-option {option} needs a value"))
+        })?;
+        let next = if options.has("-a") {
+            format!(
+                "{}{value}",
+                local_key
+                    .and_then(|key| self.session_lock_commands.get(&key))
+                    .unwrap_or(&self.global_lock_command)
+            )
+        } else {
+            value.to_owned()
+        };
+        if let Some(key) = local_key {
+            self.session_lock_commands.insert(key, next);
+        } else {
+            self.global_lock_command = next;
         }
         Ok(Execution::default())
     }
@@ -6769,7 +7065,7 @@ fn tmux_flag(value: bool) -> &'static str {
     if value { "on" } else { "off" }
 }
 
-fn valid_popup_style(value: &str) -> bool {
+pub fn valid_style(value: &str) -> bool {
     value
         .split([' ', ',', '\n'])
         .filter(|token| !token.is_empty())
@@ -16562,6 +16858,131 @@ mod tests {
     }
 
     #[test]
+    fn menu_and_lock_options_store_inherit_validate_and_read_back() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let window = context.window.unwrap();
+        assert_eq!(
+            engine.menu_options_for_window(window).unwrap(),
+            MenuOptions::default()
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gv", "lock-command"]),
+                )
+                .unwrap()
+                .output,
+            "lock -np"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gv", "lock-after-time"]),
+                )
+                .unwrap()
+                .output,
+            "0"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["lock-command", "secure-lock"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["lock-after-time", "90"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-v", "lock-command"]),
+                )
+                .unwrap()
+                .output,
+            "secure-lock"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-v", "lock-after-time"]),
+                )
+                .unwrap()
+                .output,
+            "90"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "menu-style", "bg=blue,fg=white"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["menu-selected-style", "bg=yellow,fg=black"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["menu-border-style", "fg=cyan"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["menu-border-lines", "rounded"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.menu_options_for_window(window).unwrap(),
+            MenuOptions {
+                style: "bg=blue,fg=white".to_owned(),
+                selected_style: "bg=yellow,fg=black".to_owned(),
+                border_style: "fg=cyan".to_owned(),
+                border_lines: PopupBorderLines::Rounded,
+            }
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-v", "menu-border-lines"]),
+                )
+                .unwrap()
+                .output,
+            "rounded"
+        );
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("set-option", &["menu-border-lines", "zigzag"])
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "unknown value: zigzag"
+        ));
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("set-option", &["menu-style", "fg=not-a-colour"])
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "invalid style: fg=not-a-colour"
+        ));
+    }
+
+    #[test]
     fn popup_style_options_reject_unknown_tokens_at_global_and_local_scope() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -16630,5 +17051,40 @@ mod tests {
             Err(ServerError::InvalidCommand(message))
                 if message == "invalid option: after-display-popup"
         ));
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("list-commands", &["display-menu"]))
+                .unwrap()
+                .output,
+            "display-menu (menu) [-MO] [-b border-lines] [-c target-client] [-C starting-choice] [-H selected-style] [-s style] [-S border-style] [-t target-pane] [-T title] [-x position] [-y position] name [key] [command] ..."
+        );
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("set-hook", &["after-display-menu", "display-message nope"])
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "invalid option: after-display-menu"
+        ));
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("list-commands", &["confirm-before"]))
+                .unwrap()
+                .output,
+            "confirm-before (confirm) [-by] [-c confirm-key] [-p prompt] [-t target-client] command"
+        );
+        for (name, expected) in [
+            ("lock-server", "lock-server (lock) "),
+            ("lock-session", "lock-session (locks) [-t target-session]"),
+            ("lock-client", "lock-client (lockc) [-t target-client]"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("list-commands", &[name]))
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
     }
 }

@@ -22,8 +22,8 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     CellLayout, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision,
     KeyEngine, KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts,
-    canonical_command, command_block_body, expand_format_values, hook_format_variables,
-    if_shell_truthy, parse_config,
+    canonical_command, command_block_body, display_width, expand_format_values,
+    hook_format_variables, if_shell_truthy, parse_config, valid_style,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -31,10 +31,11 @@ use zz_protocol::{
     ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget, ClientHello, ClientId,
     ClientInstanceId, ClientKind, ClientMessageKind, CommandInvocation, CommandPromptAction,
     CommandPromptKind, CommandPromptState, CommandRequest, CommandResponse, ConfigOverrideEntry,
-    DisplayPanesAction, DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage,
-    MAX_AGENT_SEND_BYTES, MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES, MuxOptionKey,
-    MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
-    PaneId, PaneIndicator, PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction,
+    ConfirmAction, ConfirmState, DisplayPanesAction, DisplayPanesState, Event, EventPayload,
+    GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_CHOOSE_BUFFER_QUERY_BYTES,
+    MAX_CHOOSE_TREE_QUERY_BYTES, MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource,
+    MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId,
+    PaneIndicator, PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction,
     PopupBorderLines, PopupState, ProtocolError, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError,
     ServerHello, SessionId, SessionViewer, SplitId, StatusLine, WindowId,
     encode_protocol_message_into, encode_terminal_viewport_event_into, read_protocol_message_into,
@@ -1519,6 +1520,9 @@ enum DaemonCommandDispatch {
     WaitFor,
     PipePane,
     DisplayPopup,
+    DisplayMenu,
+    ConfirmBefore,
+    Lock,
 }
 
 const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
@@ -1559,6 +1563,16 @@ const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
     ("pipep", DaemonCommandDispatch::PipePane),
     ("display-popup", DaemonCommandDispatch::DisplayPopup),
     ("popup", DaemonCommandDispatch::DisplayPopup),
+    ("display-menu", DaemonCommandDispatch::DisplayMenu),
+    ("menu", DaemonCommandDispatch::DisplayMenu),
+    ("confirm-before", DaemonCommandDispatch::ConfirmBefore),
+    ("confirm", DaemonCommandDispatch::ConfirmBefore),
+    ("lock-client", DaemonCommandDispatch::Lock),
+    ("lockc", DaemonCommandDispatch::Lock),
+    ("lock-server", DaemonCommandDispatch::Lock),
+    ("lock", DaemonCommandDispatch::Lock),
+    ("lock-session", DaemonCommandDispatch::Lock),
+    ("locks", DaemonCommandDispatch::Lock),
 ];
 
 fn daemon_command_dispatch(name: &str) -> Option<DaemonCommandDispatch> {
@@ -2427,7 +2441,7 @@ impl Shared {
     }
 
     fn request_shutdown(&self) {
-        let (wakes, pipes, shell_jobs, popups) = {
+        let (wakes, pipes, shell_jobs, popups, menu_waiters, confirm_waiters) = {
             let mut inner = self.inner.lock();
             self.stopping.store(true, Ordering::Release);
             let wakes = take_all_wait_wakes(&mut inner.wait_channels);
@@ -2444,7 +2458,25 @@ impl Shared {
                     (client, (popup, subscriber))
                 })
                 .collect::<Vec<_>>();
-            (wakes, pipes, shell_jobs, popups)
+            let menu_waiters = std::mem::take(&mut inner.menus)
+                .into_values()
+                .filter_map(|menu| menu.waiter)
+                .collect::<Vec<_>>();
+            let confirm_waiters = std::mem::take(&mut inner.confirms)
+                .into_values()
+                .filter_map(|confirm| match confirm.execution {
+                    ConfirmExecution::Blocking { wake, .. } => Some(wake),
+                    ConfirmExecution::Deferred { .. } | ConfirmExecution::Background { .. } => None,
+                })
+                .collect::<Vec<_>>();
+            (
+                wakes,
+                pipes,
+                shell_jobs,
+                popups,
+                menu_waiters,
+                confirm_waiters,
+            )
         };
         wake_wait_items(wakes);
         for pipe in pipes {
@@ -2455,6 +2487,12 @@ impl Shared {
         }
         for (client, popup) in popups {
             Self::retire_popup(client, popup, true);
+        }
+        for waiter in menu_waiters {
+            let _ = waiter.wake.try_send(());
+        }
+        for waiter in confirm_waiters {
+            let _ = waiter.try_send(false);
         }
     }
 
@@ -2676,6 +2714,8 @@ impl Shared {
             "native-choose-buffer".to_owned(),
             "native-display-panes".to_owned(),
             "native-display-popup".to_owned(),
+            "native-display-menu".to_owned(),
+            "native-confirm-before".to_owned(),
             "native-split-resize".to_owned(),
             "native-pane-swap".to_owned(),
             "native-pane-relocation".to_owned(),
@@ -2746,7 +2786,7 @@ impl Shared {
         }
         self.fail_gui_requests_for(client);
         self.status.lock().forget(client);
-        let (terminals, command_output, popup_waiters, shutdown) = {
+        let (terminals, command_output, popup_waiters, menu_waiters, confirm_waiters, shutdown) = {
             let mut inner = self.inner.lock();
             inner.subscribers.remove(&client);
             inner.client_color_schemes.remove(&client);
@@ -2779,11 +2819,38 @@ impl Shared {
                         .flatten()
                 })
                 .collect::<Vec<_>>();
+            let menu_waiters = inner
+                .menus
+                .values_mut()
+                .filter_map(|menu| {
+                    menu.waiter
+                        .as_ref()
+                        .is_some_and(|waiter| waiter.client == client)
+                        .then(|| menu.waiter.take())
+                        .flatten()
+                })
+                .collect::<Vec<_>>();
+            let confirm_waiters = inner
+                .confirms
+                .values_mut()
+                .filter_map(|confirm| {
+                    let ConfirmExecution::Blocking {
+                        client: owner,
+                        wake,
+                    } = &confirm.execution
+                    else {
+                        return None;
+                    };
+                    (*owner == client).then(|| wake.clone())
+                })
+                .collect::<Vec<_>>();
             let shutdown = self.should_shutdown_if_empty(&inner);
             (
                 inner.terminals.values().cloned().collect::<Vec<_>>(),
                 inner.command_outputs.remove(&client),
                 popup_waiters,
+                menu_waiters,
+                confirm_waiters,
                 shutdown,
             )
         };
@@ -2799,6 +2866,12 @@ impl Shared {
         }
         for waiter in popup_waiters {
             let _ = waiter.wake.try_send(129);
+        }
+        for waiter in menu_waiters {
+            let _ = waiter.wake.try_send(());
+        }
+        for waiter in confirm_waiters {
+            let _ = waiter.try_send(false);
         }
         if shutdown {
             self.request_shutdown();
@@ -2995,6 +3068,18 @@ impl Shared {
                     DaemonCommandDispatch::DisplayPopup => {
                         self.display_popup(client, kind, context, &command.args)
                     }
+                    DaemonCommandDispatch::DisplayMenu => {
+                        self.display_menu(client, kind, context, &command.args)
+                    }
+                    DaemonCommandDispatch::ConfirmBefore => {
+                        self.confirm_before(client, kind, context, &command.args)
+                    }
+                    DaemonCommandDispatch::Lock => self.lock_command(
+                        client,
+                        context,
+                        canonical_command(&command.name),
+                        &command.args,
+                    ),
                 }
             });
         if let Some(result) = preempted {
@@ -5997,6 +6082,344 @@ impl Shared {
         }
     }
 
+    fn display_menu(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        args: &[String],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_display_menu_args(args)?;
+        let (target_client, mut target) = {
+            let inner = self.inner.lock();
+            let target_client =
+                resolve_popup_client(&inner, client, context, parsed.target_client.as_deref())?;
+            let pane = inner.engine.resolve_pane(
+                parsed.target_pane.as_deref(),
+                context.window,
+                context.pane,
+            )?;
+            let mut target = ExecutionContext::for_pane(&inner.engine.state, pane)
+                .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+            target
+                .format_variables
+                .clone_from(&context.format_variables);
+            (target_client, target)
+        };
+        if any_overlay_present(&self.inner.lock(), target_client) {
+            return Ok(Execution::default());
+        }
+        let (state, commands) = {
+            let inner = self.inner.lock();
+            let geometry = popup_client_geometry(&inner, target_client)?;
+            let window = target
+                .window
+                .ok_or_else(|| ServerError::MissingTarget("current window".to_owned()))?;
+            let defaults = inner.engine.menu_options_for_window(window)?;
+            let title = parsed.title.as_deref().map_or_else(String::new, |title| {
+                expand_popup_value(&inner, &target, context.session, title)
+            });
+            let mut items = Vec::new();
+            let mut commands = Vec::new();
+            let mut index = 0;
+            while index < parsed.items.len() {
+                let name = &parsed.items[index];
+                index = index.saturating_add(1);
+                if name.is_empty() {
+                    if items.last().is_some_and(Option::is_some) {
+                        items.push(None);
+                        commands.push(None);
+                    }
+                    continue;
+                }
+                if parsed.items.len().saturating_sub(index) < 2 {
+                    return Err(
+                        ServerError::InvalidCommand("not enough arguments".to_owned()).into(),
+                    );
+                }
+                let key = &parsed.items[index];
+                let command = &parsed.items[index.saturating_add(1)];
+                index = index.saturating_add(2);
+                let name = expand_popup_value(&inner, &target, context.session, name);
+                if name.is_empty() {
+                    continue;
+                }
+                let enabled = !name.starts_with('-');
+                let name = if enabled {
+                    name
+                } else {
+                    name.strip_prefix('-').unwrap_or_default().to_owned()
+                };
+                let key = enabled.then(|| menu_shortcut(key)).flatten();
+                let command = expand_popup_value(&inner, &target, context.session, command);
+                items.push(Some(MenuItem { name, key, enabled }));
+                commands.push(Some(command));
+            }
+            if items.is_empty() {
+                return Ok(Execution::default());
+            }
+            let width = items
+                .iter()
+                .flatten()
+                .map(|item| {
+                    display_width(&item.name)
+                        + item
+                            .key
+                            .as_deref()
+                            .map_or(0, |key| display_width(key).saturating_add(3))
+                })
+                .max()
+                .unwrap_or_default()
+                .saturating_add(4);
+            let height = items.len().saturating_add(2);
+            let (Ok(width), Ok(height)) = (u16::try_from(width), u16::try_from(height)) else {
+                return Ok(Execution::default());
+            };
+            if width > geometry.columns || height > geometry.rows {
+                return Ok(Execution::default());
+            }
+            let selected = menu_starting_choice(parsed.starting_choice.as_deref(), &items)?;
+            let border_lines = if let Some(value) = parsed.border_lines.as_deref() {
+                value.parse().map_err(|()| {
+                    ServerError::InvalidCommand(format!("menu-border-lines unknown value: {value}"))
+                })?
+            } else {
+                defaults.border_lines
+            };
+            let style = parsed.style.clone().unwrap_or(defaults.style);
+            let selected_style = parsed
+                .selected_style
+                .clone()
+                .unwrap_or(defaults.selected_style);
+            let border_style = parsed.border_style.clone().unwrap_or(defaults.border_style);
+            for style in [&style, &selected_style, &border_style] {
+                if !valid_style(style) {
+                    return Err(
+                        ServerError::InvalidCommand(format!("invalid style: {style}")).into(),
+                    );
+                }
+            }
+            let variables = popup_position_variables(
+                &inner.engine,
+                &target,
+                geometry.columns,
+                geometry.rows,
+                width,
+                height,
+            );
+            target.format_variables.extend(variables);
+            let (left, top) = popup_position(
+                parsed.x.as_deref(),
+                parsed.y.as_deref(),
+                geometry.columns,
+                geometry.rows,
+                width,
+                height,
+                |value| expand_popup_value(&inner, &target, context.session, value),
+            );
+            (
+                MenuState {
+                    left,
+                    top,
+                    width,
+                    height,
+                    client_columns: geometry.columns,
+                    client_rows: geometry.rows,
+                    cell_width_px: geometry.cell_width_px,
+                    cell_height_px: geometry.cell_height_px,
+                    title,
+                    style,
+                    selected_style,
+                    border_style,
+                    border_lines,
+                    items,
+                    selected,
+                    stay_open: parsed.stay_open,
+                },
+                commands,
+            )
+        };
+        let (wake, wait) = crossbeam_channel::bounded(1);
+        {
+            let mut inner = self.inner.lock();
+            if any_overlay_present(&inner, target_client) {
+                return Ok(Execution::default());
+            }
+            inner.menus.insert(
+                target_client,
+                MenuSession {
+                    state: state.clone(),
+                    commands,
+                    target,
+                    waiter: (kind == ClientKind::Command).then_some(MenuWaiter { client, wake }),
+                },
+            );
+        }
+        self.publish_to_client(target_client, EventPayload::Menu { state: Some(state) });
+        if kind == ClientKind::Command {
+            let _ = wait.recv();
+        }
+        Ok(Execution::default())
+    }
+
+    fn confirm_before(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        args: &[String],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_confirm_before_args(args)?;
+        let (target_client, target, commands, prompt) = {
+            let inner = self.inner.lock();
+            let target_client =
+                resolve_popup_client(&inner, client, context, parsed.target_client.as_deref())?;
+            let pane = client_context_pane(&inner, target_client)
+                .ok_or_else(|| ServerError::InvalidCommand("no current client".to_owned()))?;
+            let mut target = ExecutionContext::for_pane(&inner.engine.state, pane)
+                .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+            target
+                .format_variables
+                .clone_from(&context.format_variables);
+            let command = parsed
+                .command
+                .as_deref()
+                .expect("confirm command was required");
+            let command = command_block_body(command).unwrap_or(command);
+            let command = expand_popup_value(&inner, &target, context.session, command);
+            let parsed_commands = parse_config("<confirm-before>", &command);
+            if let Some(diagnostic) = parsed_commands.diagnostics.first() {
+                return Err(ServerError::InvalidCommand(diagnostic.message.clone()).into());
+            }
+            let first = parsed_commands
+                .commands
+                .first()
+                .ok_or_else(|| ServerError::InvalidCommand("empty command".to_owned()))?;
+            let prompt = parsed.prompt.as_deref().map_or_else(
+                || {
+                    format!(
+                        "Confirm '{}'? ({{confirm-key}}/n) ",
+                        canonical_command(&first.name)
+                    )
+                },
+                |prompt| format!("{prompt} "),
+            );
+            (target_client, target, parsed_commands.commands, prompt)
+        };
+        let confirm_key = parsed.confirm_key.as_deref().unwrap_or("y");
+        let bytes = confirm_key.as_bytes();
+        if bytes.len() != 1 || !(32..=126).contains(&bytes[0]) {
+            return Err(ServerError::InvalidCommand("invalid confirm key".to_owned()).into());
+        }
+        let prompt = {
+            let inner = self.inner.lock();
+            let prompt = if parsed.prompt.is_some() {
+                prompt
+            } else {
+                prompt.replace("{confirm-key}", confirm_key)
+            };
+            expand_popup_value(&inner, &target, context.session, &prompt)
+        };
+        let state = ConfirmState {
+            prompt,
+            confirm_key: bytes[0],
+            default_yes: parsed.default_yes,
+        };
+        let (wake, wait) = crossbeam_channel::bounded(1);
+        let blocking_commands = commands.clone();
+        let execution = if parsed.background {
+            ConfirmExecution::Background { commands }
+        } else if kind == ClientKind::Command {
+            ConfirmExecution::Blocking { client, wake }
+        } else {
+            ConfirmExecution::Deferred {
+                commands,
+                context: context.clone(),
+            }
+        };
+        let mut events = Vec::new();
+        let mut outputs = Vec::new();
+        let mut popups = Vec::new();
+        {
+            let mut inner = self.inner.lock();
+            dismiss_overlays(
+                &mut inner,
+                target_client,
+                None,
+                &mut events,
+                &mut outputs,
+                &mut popups,
+            );
+            inner.confirms.insert(
+                target_client,
+                ConfirmSession {
+                    state: state.clone(),
+                    execution,
+                },
+            );
+        }
+        for event in events {
+            self.publish_to_client(target_client, event);
+        }
+        for (owner, output) in outputs {
+            Self::retire_command_output(owner, output);
+        }
+        for (owner, popup) in popups {
+            Self::retire_popup(owner, popup, true);
+        }
+        self.publish_to_client(target_client, EventPayload::Confirm { state: Some(state) });
+        if parsed.background || kind != ClientKind::Command {
+            return Ok(Execution::default());
+        }
+        let accepted = wait.recv().unwrap_or(false);
+        if !accepted {
+            return Err(DaemonError::CommandExit {
+                output: String::new(),
+                exit_code: 1,
+            });
+        }
+        let mut command_context = context.clone();
+        self.execute_overlay_commands(
+            client,
+            kind,
+            &mut command_context,
+            blocking_commands,
+            "confirm-before",
+        );
+        Ok(Execution::default())
+    }
+
+    fn lock_command(
+        &self,
+        client: ClientId,
+        context: &ExecutionContext,
+        name: &str,
+        args: &[String],
+    ) -> Result<Execution, DaemonError> {
+        let target = if name == "lock-server" {
+            let parsed = parse_buffer_command_args(name, args, &[], &[])?;
+            require_no_positionals(name, &parsed)?;
+            None
+        } else {
+            parse_target_only_args(name, args)?
+        };
+        let inner = self.inner.lock();
+        match name {
+            "lock-server" => {}
+            "lock-session" => {
+                inner
+                    .engine
+                    .state
+                    .resolve_session(target.as_deref(), context.session)?;
+            }
+            "lock-client" => {
+                resolve_attached_client(&inner, client, target.as_deref())?;
+            }
+            _ => unreachable!("lock command is catalogued"),
+        }
+        Ok(Execution::default())
+    }
+
     fn buffer_command(
         &self,
         context: &ExecutionContext,
@@ -6613,6 +7036,8 @@ impl Shared {
         let _ = take_display_panes(&mut inner, client);
         let command_output = take_command_output(&mut inner, client);
         let popup = take_popup(&mut inner, client);
+        let menu = inner.menus.remove(&client);
+        let confirm = inner.confirms.remove(&client);
         write_back_terminal_geometries(&mut inner, &affected_panes, true);
         let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
         let mut events = Vec::new();
@@ -6650,6 +7075,18 @@ impl Shared {
         }
         if let Some(popup) = popup {
             Self::retire_popup(client, popup, true);
+        }
+        if let Some(menu) = menu {
+            if let Some(waiter) = menu.waiter {
+                let _ = waiter.wake.try_send(());
+            }
+            self.publish_to_client(client, EventPayload::Menu { state: None });
+        }
+        if let Some(confirm) = confirm {
+            if let ConfirmExecution::Blocking { wake, .. } = confirm.execution {
+                let _ = wake.try_send(false);
+            }
+            self.publish_to_client(client, EventPayload::Confirm { state: None });
         }
         if let Some(terminal) = copy_session {
             terminal.view_action(
@@ -6882,6 +7319,12 @@ impl Shared {
                 InputMessage::Popup { action } => {
                     self.input_popup(client, action);
                 }
+                InputMessage::Menu { action } => {
+                    self.input_menu(client, context, action);
+                }
+                InputMessage::Confirm { action } => {
+                    self.input_confirm(client, context, action);
+                }
             }
             Ok(())
         })();
@@ -6974,6 +7417,166 @@ impl Shared {
             }
             PopupAction::Close => {}
         }
+    }
+
+    fn input_menu(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &ExecutionContext,
+        action: MenuAction,
+    ) {
+        let session = {
+            let mut inner = self.inner.lock();
+            let Some(menu) = inner.menus.get(&client) else {
+                return;
+            };
+            if let MenuAction::Choose(index) = action {
+                let selectable = usize::try_from(index)
+                    .ok()
+                    .and_then(|index| menu.state.items.get(index))
+                    .and_then(Option::as_ref)
+                    .is_some_and(|item| item.enabled);
+                if !selectable && menu.state.stay_open {
+                    return;
+                }
+            }
+            inner.menus.remove(&client).expect("menu was present")
+        };
+        self.publish_to_client(client, EventPayload::Menu { state: None });
+        if let Some(waiter) = session.waiter {
+            let _ = waiter.wake.try_send(());
+        }
+        let MenuAction::Choose(index) = action else {
+            return;
+        };
+        let Some(command) = usize::try_from(index)
+            .ok()
+            .and_then(|index| session.commands.get(index))
+            .and_then(Option::as_ref)
+        else {
+            return;
+        };
+        if !session
+            .state
+            .items
+            .get(usize::try_from(index).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .is_some_and(|item| item.enabled)
+        {
+            return;
+        }
+        let mut target = session.target;
+        let target_alive = target
+            .pane
+            .is_some_and(|pane| self.inner.lock().engine.state.pane(pane).is_some());
+        if !target_alive {
+            target = context.clone();
+        }
+        self.execute_overlay_source(client, &mut target, command, "display-menu");
+    }
+
+    fn input_confirm(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &ExecutionContext,
+        action: ConfirmAction,
+    ) {
+        let Some(session) = self.inner.lock().confirms.remove(&client) else {
+            return;
+        };
+        self.publish_to_client(client, EventPayload::Confirm { state: None });
+        let ConfirmAction::Reply(accepted) = action;
+        match session.execution {
+            ConfirmExecution::Blocking { wake, .. } => {
+                let _ = wake.try_send(accepted);
+            }
+            ConfirmExecution::Deferred {
+                commands,
+                mut context,
+            } if accepted => {
+                self.inner.lock().engine.repair_context(&mut context);
+                self.execute_overlay_commands(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    commands,
+                    "confirm-before",
+                );
+            }
+            ConfirmExecution::Background { commands } if accepted => {
+                let mut target = {
+                    let inner = self.inner.lock();
+                    client_context_pane(&inner, client)
+                        .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane))
+                        .unwrap_or_else(|| context.clone())
+                };
+                self.execute_overlay_commands(
+                    client,
+                    ClientKind::Interactive,
+                    &mut target,
+                    commands,
+                    "confirm-before",
+                );
+            }
+            ConfirmExecution::Deferred { .. } | ConfirmExecution::Background { .. } => {}
+        }
+    }
+
+    fn execute_overlay_source(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &mut ExecutionContext,
+        command: &str,
+        title: &str,
+    ) {
+        let source = inserted_command_source(command);
+        match self.execute_inserted_commands(
+            client,
+            ClientKind::Interactive,
+            context,
+            &source,
+            &format!("<{title}>"),
+        ) {
+            Ok(result) => self.route_background_inserted_output(
+                client,
+                ClientKind::Interactive,
+                context,
+                title.to_owned(),
+                &result.output,
+            ),
+            Err(error) => self.publish_background_command_error(client, context, &error, false),
+        }
+    }
+
+    fn execute_overlay_commands(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        commands: Vec<CommandInvocation>,
+        title: &str,
+    ) {
+        let mut output = String::new();
+        for command in commands {
+            match self.execute(client, kind, context, &command) {
+                Ok(execution) => append_inserted_output(&mut output, &execution.output),
+                Err(error) => {
+                    if let Some(error_output) = daemon_error_output(&error) {
+                        append_inserted_output(&mut output, error_output);
+                    }
+                    self.route_background_inserted_output(
+                        client,
+                        kind,
+                        context,
+                        title.to_owned(),
+                        &output,
+                    );
+                    self.publish_background_command_error(client, context, &error, false);
+                    return;
+                }
+            }
+        }
+        self.route_background_inserted_output(client, kind, context, title.to_owned(), &output);
     }
 
     fn reject_unattached_input(&self, client: ClientId, pane: PaneId) -> Result<(), ServerError> {
@@ -8711,7 +9314,17 @@ impl Shared {
     }
 
     fn send_resync(&self, client: ClientId, outbound: &OutboundMailbox) {
-        let (snapshot, viewports, command_prompt, choose_tree, choose_buffer, display_panes, popup) = {
+        let (
+            snapshot,
+            viewports,
+            command_prompt,
+            choose_tree,
+            choose_buffer,
+            display_panes,
+            popup,
+            menu,
+            confirm,
+        ) = {
             let inner = self.inner.lock();
             let mut snapshot = inner.engine.state.snapshot();
             let presence = snapshot_presence(&inner);
@@ -8739,6 +9352,11 @@ impl Shared {
                         .unwrap_or_else(|| popup.terminal.latest_viewport()),
                 )
             });
+            let menu = inner.menus.get(&client).map(|menu| menu.state.clone());
+            let confirm = inner
+                .confirms
+                .get(&client)
+                .map(|confirm| confirm.state.clone());
             let session = client_attached_session(&inner, client);
             let view = TerminalViewId(client.0);
             let viewports = session.map_or_else(Vec::new, |session| {
@@ -8758,6 +9376,8 @@ impl Shared {
                 choose_buffer,
                 display_panes,
                 popup,
+                menu,
+                confirm,
             )
         };
         Self::send_event(outbound, EventPayload::Snapshot(snapshot));
@@ -8773,6 +9393,8 @@ impl Shared {
                 state: popup.as_ref().map(|(state, _, _)| state.clone()),
             },
         );
+        Self::send_event(outbound, EventPayload::Menu { state: menu });
+        Self::send_event(outbound, EventPayload::Confirm { state: confirm });
         Self::send_event(outbound, EventPayload::ChooseTree { state: choose_tree });
         Self::send_event(
             outbound,
@@ -11608,6 +12230,8 @@ struct ServerState {
     choose_buffers: BTreeMap<ClientId, ChooseBufferSession>,
     display_panes: BTreeMap<ClientId, DisplayPanesSession>,
     popups: BTreeMap<ClientId, PopupSession>,
+    menus: BTreeMap<ClientId, MenuSession>,
+    confirms: BTreeMap<ClientId, ConfirmSession>,
     command_history: Vec<String>,
     message_log: VecDeque<ServerMessage>,
     next_message_number: u64,
@@ -12597,6 +13221,37 @@ struct PopupSession {
     waiter: Option<PopupWaiter>,
 }
 
+struct MenuSession {
+    state: MenuState,
+    commands: Vec<Option<String>>,
+    target: ExecutionContext,
+    waiter: Option<MenuWaiter>,
+}
+
+struct MenuWaiter {
+    client: ClientId,
+    wake: crossbeam_channel::Sender<()>,
+}
+
+enum ConfirmExecution {
+    Blocking {
+        client: ClientId,
+        wake: crossbeam_channel::Sender<bool>,
+    },
+    Deferred {
+        commands: Vec<CommandInvocation>,
+        context: ExecutionContext,
+    },
+    Background {
+        commands: Vec<CommandInvocation>,
+    },
+}
+
+struct ConfirmSession {
+    state: ConfirmState,
+    execution: ConfirmExecution,
+}
+
 enum EitherPopupFinish {
     Closed(RetiredPopup),
     Retained(PopupState),
@@ -12625,6 +13280,8 @@ enum Overlay {
     ChooseBuffer,
     DisplayPanes,
     Popup,
+    Menu,
+    Confirm,
 }
 
 fn dismiss_overlays(
@@ -12654,6 +13311,22 @@ fn dismiss_overlays(
         && let Some(popup) = take_popup(inner, client)
     {
         retired_popups.push((client, popup));
+    }
+    if raising != Some(Overlay::Menu)
+        && let Some(menu) = inner.menus.remove(&client)
+    {
+        if let Some(waiter) = menu.waiter {
+            let _ = waiter.wake.try_send(());
+        }
+        events.push(EventPayload::Menu { state: None });
+    }
+    if raising != Some(Overlay::Confirm)
+        && let Some(confirm) = inner.confirms.remove(&client)
+    {
+        if let ConfirmExecution::Blocking { wake, .. } = confirm.execution {
+            let _ = wake.try_send(false);
+        }
+        events.push(EventPayload::Confirm { state: None });
     }
 }
 
@@ -13259,6 +13932,36 @@ fn resolve_popup_client(
     eligible
         .into_iter()
         .next()
+        .ok_or_else(|| ServerError::InvalidCommand("no current client".to_owned()))
+}
+
+fn resolve_attached_client(
+    inner: &ServerState,
+    invoking_client: ClientId,
+    target: Option<&str>,
+) -> Result<ClientId, ServerError> {
+    let attached = inner
+        .attached
+        .values()
+        .flat_map(BTreeSet::iter)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    if let Some(target) = target {
+        return attached
+            .into_iter()
+            .find(|client| {
+                inner
+                    .client_names
+                    .get(client)
+                    .is_some_and(|name| name == target)
+                    || target == client.0.to_string()
+                    || target == format!("client-{}", client.0)
+            })
+            .ok_or_else(|| ServerError::InvalidCommand(format!("can't find client: {target}")));
+    }
+    attached
+        .contains(&invoking_client)
+        .then_some(invoking_client)
         .ok_or_else(|| ServerError::InvalidCommand("no current client".to_owned()))
 }
 
@@ -15195,6 +15898,33 @@ struct ParsedDisplayPopup {
     command: Vec<String>,
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ParsedDisplayMenu {
+    mouse: bool,
+    stay_open: bool,
+    border_lines: Option<String>,
+    target_client: Option<String>,
+    starting_choice: Option<String>,
+    selected_style: Option<String>,
+    style: Option<String>,
+    border_style: Option<String>,
+    target_pane: Option<String>,
+    title: Option<String>,
+    x: Option<String>,
+    y: Option<String>,
+    items: Vec<String>,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ParsedConfirmBefore {
+    background: bool,
+    default_yes: bool,
+    confirm_key: Option<String>,
+    prompt: Option<String>,
+    target_client: Option<String>,
+    command: Option<String>,
+}
+
 fn parse_display_popup_args(args: &[String]) -> Result<ParsedDisplayPopup, ServerError> {
     let mut parsed = ParsedDisplayPopup::default();
     let mut index = 0;
@@ -15258,6 +15988,139 @@ fn parse_display_popup_args(args: &[String]) -> Result<ParsedDisplayPopup, Serve
             }
         }
         index = index.saturating_add(1);
+    }
+    Ok(parsed)
+}
+
+fn parse_display_menu_args(args: &[String]) -> Result<ParsedDisplayMenu, ServerError> {
+    let mut parsed = ParsedDisplayMenu::default();
+    let mut index = 0;
+    while index < args.len() {
+        let argument = &args[index];
+        if argument == "--" {
+            parsed
+                .items
+                .extend(args[index.saturating_add(1)..].iter().cloned());
+            break;
+        }
+        if !argument.starts_with('-') || argument == "-" {
+            parsed.items.extend(args[index..].iter().cloned());
+            break;
+        }
+        for (offset, flag) in argument[1..].char_indices() {
+            match flag {
+                'M' => parsed.mouse = true,
+                'O' => parsed.stay_open = true,
+                'b' | 'c' | 'C' | 'H' | 's' | 'S' | 't' | 'T' | 'x' | 'y' => {
+                    let value_start = 1_usize
+                        .saturating_add(offset)
+                        .saturating_add(flag.len_utf8());
+                    let value = if value_start < argument.len() {
+                        argument[value_start..].to_owned()
+                    } else {
+                        index = index.saturating_add(1);
+                        args.get(index).cloned().ok_or_else(|| {
+                            ServerError::InvalidCommand(format!(
+                                "display-menu -{flag} requires a value"
+                            ))
+                        })?
+                    };
+                    match flag {
+                        'b' => parsed.border_lines = Some(value),
+                        'c' => parsed.target_client = Some(value),
+                        'C' => parsed.starting_choice = Some(value),
+                        'H' => parsed.selected_style = Some(value),
+                        's' => parsed.style = Some(value),
+                        'S' => parsed.border_style = Some(value),
+                        't' => parsed.target_pane = Some(value),
+                        'T' => parsed.title = Some(value),
+                        'x' => parsed.x = Some(value),
+                        'y' => parsed.y = Some(value),
+                        _ => unreachable!("valued menu option is matched"),
+                    }
+                    break;
+                }
+                _ => {
+                    return Err(ServerError::UnsupportedCommand(format!(
+                        "display-menu -{flag}"
+                    )));
+                }
+            }
+        }
+        index = index.saturating_add(1);
+    }
+    if parsed.items.is_empty() {
+        return Err(ServerError::InvalidCommand(
+            "display-menu requires at least one argument".to_owned(),
+        ));
+    }
+    Ok(parsed)
+}
+
+fn parse_confirm_before_args(args: &[String]) -> Result<ParsedConfirmBefore, ServerError> {
+    let mut parsed = ParsedConfirmBefore::default();
+    let mut index = 0;
+    while index < args.len() {
+        let argument = &args[index];
+        if argument == "--" {
+            let positional = &args[index.saturating_add(1)..];
+            if positional.len() != 1 {
+                return Err(ServerError::InvalidCommand(
+                    "confirm-before requires exactly one command".to_owned(),
+                ));
+            }
+            parsed.command = positional.first().cloned();
+            break;
+        }
+        if !argument.starts_with('-') || argument == "-" {
+            let positional = &args[index..];
+            if positional.len() != 1 {
+                return Err(ServerError::InvalidCommand(
+                    "confirm-before requires exactly one command".to_owned(),
+                ));
+            }
+            parsed.command = positional.first().cloned();
+            break;
+        }
+        for (offset, flag) in argument[1..].char_indices() {
+            match flag {
+                'b' => parsed.background = true,
+                'y' => parsed.default_yes = true,
+                'c' | 'p' | 't' => {
+                    let value_start = 1_usize
+                        .saturating_add(offset)
+                        .saturating_add(flag.len_utf8());
+                    let value = if value_start < argument.len() {
+                        argument[value_start..].to_owned()
+                    } else {
+                        index = index.saturating_add(1);
+                        args.get(index).cloned().ok_or_else(|| {
+                            ServerError::InvalidCommand(format!(
+                                "confirm-before -{flag} requires a value"
+                            ))
+                        })?
+                    };
+                    match flag {
+                        'c' => parsed.confirm_key = Some(value),
+                        'p' => parsed.prompt = Some(value),
+                        't' => parsed.target_client = Some(value),
+                        _ => unreachable!("valued confirm option is matched"),
+                    }
+                    break;
+                }
+                _ => {
+                    return Err(ServerError::UnsupportedCommand(format!(
+                        "confirm-before -{flag}"
+                    )));
+                }
+            }
+        }
+        index = index.saturating_add(1);
+    }
+    if parsed.command.is_none() {
+        return Err(ServerError::InvalidCommand(
+            "confirm-before requires exactly one command".to_owned(),
+        ));
     }
     Ok(parsed)
 }
@@ -15337,6 +16200,88 @@ fn popup_other_overlay_present(inner: &ServerState, client: ClientId) -> bool {
         || inner.choose_buffers.contains_key(&client)
         || inner.display_panes.contains_key(&client)
         || inner.command_outputs.contains_key(&client)
+        || inner.menus.contains_key(&client)
+        || inner.confirms.contains_key(&client)
+}
+
+fn any_overlay_present(inner: &ServerState, client: ClientId) -> bool {
+    popup_other_overlay_present(inner, client) || inner.popups.contains_key(&client)
+}
+
+fn menu_shortcut(value: &str) -> Option<String> {
+    let key = zz_protocol::canonical_key(value);
+    let mut base = key.as_str();
+    while let Some(rest) = base.strip_prefix("C-").or_else(|| base.strip_prefix("M-")) {
+        base = rest;
+    }
+    let named = matches!(
+        base,
+        "Enter"
+            | "Escape"
+            | "Space"
+            | "Tab"
+            | "BTab"
+            | "BSpace"
+            | "Up"
+            | "Down"
+            | "Left"
+            | "Right"
+            | "Home"
+            | "End"
+            | "PPage"
+            | "NPage"
+            | "DC"
+            | "IC"
+    );
+    let function = base
+        .strip_prefix('F')
+        .and_then(|number| number.parse::<u8>().ok())
+        .is_some_and(|number| number > 0);
+    let character = {
+        let mut characters = base.chars();
+        characters
+            .next()
+            .is_some_and(|character| !character.is_control())
+            && characters.next().is_none()
+    };
+    (named || function || character).then_some(key)
+}
+
+fn menu_starting_choice(
+    value: Option<&str>,
+    items: &[Option<MenuItem>],
+) -> Result<Option<u32>, ServerError> {
+    let Some(value) = value else {
+        return Ok(menu_selectable_from(items, 0, false));
+    };
+    if value == "-" {
+        return Ok(None);
+    }
+    let start = parse_popup_number(value, 0, u64::from(u32::MAX))
+        .map_err(|cause| ServerError::InvalidCommand(format!("starting choice {cause}")))?;
+    let start = usize::try_from(start).unwrap_or(usize::MAX);
+    Ok(if start >= items.len() {
+        menu_selectable_from(items, items.len().saturating_sub(1), true)
+    } else {
+        menu_selectable_from(items, start, false)
+    })
+}
+
+fn menu_selectable_from(items: &[Option<MenuItem>], start: usize, reverse: bool) -> Option<u32> {
+    if items.is_empty() {
+        return None;
+    }
+    (0..items.len()).find_map(|offset| {
+        let index = if reverse {
+            (start + items.len() - offset % items.len()) % items.len()
+        } else {
+            (start + offset) % items.len()
+        };
+        items[index]
+            .as_ref()
+            .is_some_and(|item| item.enabled)
+            .then(|| u32::try_from(index).unwrap_or(u32::MAX))
+    })
 }
 
 fn expand_popup_value(
@@ -27336,6 +28281,462 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(closed.is_some());
     }
 
+    #[test]
+    fn display_menu_builds_pin_grammar_and_fires_against_the_saved_target() {
+        let (shared, client, mailbox, mut context) = popup_test_workspace("desktop");
+        let first = context.pane.expect("first pane");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("split-window", ["-h"]),
+            )
+            .expect("second pane");
+        let second = context.pane.expect("second pane");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-menu",
+                    [
+                        "-C",
+                        "2",
+                        "-t",
+                        &first.to_string(),
+                        "First",
+                        "f",
+                        "select-pane -T first-choice",
+                        "",
+                        "-Disabled",
+                        "d",
+                        "select-pane -T disabled-choice",
+                        "Last",
+                        "l",
+                        "select-pane -T chosen",
+                        "",
+                    ],
+                ),
+            )
+            .expect("open menu");
+        let state = shared.inner.lock().menus[&client].state.clone();
+        assert_eq!((state.width, state.height), (13, 7));
+        assert_eq!(state.selected, Some(3));
+        assert_eq!(state.items.len(), 5);
+        assert!(state.items[1].is_none());
+        assert!(state.items[4].is_none());
+        assert!(matches!(
+            &state.items[2],
+            Some(MenuItem { name, enabled: false, key: None }) if name == "Disabled"
+        ));
+        assert!(
+            take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::Menu { state: Some(_) },
+                        ..
+                    })
+                ))
+        );
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Menu {
+                    action: MenuAction::Choose(3),
+                },
+            )
+            .expect("choose menu item");
+        let inner = shared.inner.lock();
+        assert_eq!(inner.engine.state.pane(first).unwrap().title, "chosen");
+        assert_ne!(inner.engine.state.pane(second).unwrap().title, "chosen");
+        assert!(!inner.menus.contains_key(&client));
+    }
+
+    #[test]
+    fn display_menu_drops_empty_expansions_and_obeys_overlay_and_size_noops() {
+        let (shared, client, _, mut context) = popup_test_workspace("desktop");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-menu",
+                    [
+                        "Kept",
+                        "k",
+                        "display-message kept",
+                        "",
+                        "#{missing}",
+                        "x",
+                        "display-message dropped",
+                        "",
+                    ],
+                ),
+            )
+            .expect("open compacted menu");
+        let state = shared.inner.lock().menus[&client].state.clone();
+        assert_eq!(state.items.len(), 2);
+        assert!(state.items[1].is_none());
+        shared.input_menu(client, &context, MenuAction::Cancel);
+        assert!(matches!(
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-menu",
+                    ["-C", "-1", "Item", "i", "display-message nope"]
+                ),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "starting choice too small"
+        ));
+        assert!(matches!(
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-menu",
+                    ["-b", "zigzag", "Item", "i", "display-message nope"]
+                ),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "menu-border-lines unknown value: zigzag"
+        ));
+
+        shared.inner.lock().command_prompts.insert(
+            client,
+            CommandPrompt::new("prompt".to_owned(), String::new(), None),
+        );
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-menu", ["Incomplete"]),
+            )
+            .expect("existing overlay wins before item validation");
+        assert!(!shared.inner.lock().menus.contains_key(&client));
+        shared.inner.lock().command_prompts.remove(&client);
+
+        let pane = context.pane.expect("menu pane");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane,
+                    columns: 4,
+                    rows: 2,
+                    cell_width_px: 8,
+                    cell_height_px: 18,
+                },
+            )
+            .expect("shrink menu client");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-menu", ["Too wide", "t", "display-message nope"]),
+            )
+            .expect("too-small menu is silent");
+        assert!(!shared.inner.lock().menus.contains_key(&client));
+    }
+
+    #[test]
+    fn display_menu_blocking_cancel_returns_zero_and_disabled_stay_open_is_defensive() {
+        let (shared, interactive, _, context) = popup_test_workspace("desktop");
+        let sender = Arc::clone(&shared);
+        let mut command_context = context.clone();
+        let (send, receive) = crossbeam_channel::bounded(1);
+        let worker = thread::spawn(move || {
+            let result = sender.execute(
+                ClientId(900),
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new(
+                    "display-menu",
+                    [
+                        "-c",
+                        "desktop",
+                        "-O",
+                        "--",
+                        "-Disabled",
+                        "d",
+                        "display-message nope",
+                    ],
+                ),
+            );
+            send.send(result).expect("return menu result");
+        });
+        wait_for_menu_state(&shared, interactive);
+        shared.input_menu(interactive, &context, MenuAction::Choose(0));
+        assert!(shared.inner.lock().menus.contains_key(&interactive));
+        shared.input_menu(interactive, &context, MenuAction::Cancel);
+        assert_eq!(
+            receive
+                .recv_timeout(Duration::from_secs(5))
+                .expect("menu cancel result")
+                .expect("menu cancel succeeds"),
+            Execution::default()
+        );
+        worker.join().expect("menu command worker");
+    }
+
+    #[test]
+    fn confirm_before_parses_first_shapes_prompts_and_uses_one_reply() {
+        let (shared, client, _, mut context) = popup_test_workspace("desktop");
+        assert!(matches!(
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("confirm-before", ["-c", "bad", "{ broken"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message != "invalid confirm key"
+        ));
+        for key in ["", "yy", "é", "\n"] {
+            assert!(matches!(
+                shared.execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "confirm-before",
+                        ["-c", key, "display-message valid"]
+                    ),
+                ),
+                Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                    if message == "invalid confirm key"
+            ));
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("confirm-before", ["-c", "Y", "renamew confirmed"]),
+            )
+            .expect("open default confirm");
+        assert_eq!(
+            shared.inner.lock().confirms[&client].state.prompt,
+            "Confirm 'rename-window'? (Y/n) "
+        );
+        shared.input_confirm(client, &context, ConfirmAction::Reply(false));
+        assert_ne!(
+            shared.inner.lock().engine.state.windows[&context.window.unwrap()].name,
+            "confirmed"
+        );
+
+        context
+            .format_variables
+            .insert("question".to_owned(), "Proceed?".to_owned());
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "confirm-before",
+                    ["-p", "#{question} {confirm-key}", "renamew accepted"],
+                ),
+            )
+            .expect("open custom confirm");
+        assert_eq!(
+            shared.inner.lock().confirms[&client].state.prompt,
+            "Proceed? {confirm-key} "
+        );
+        shared.input_confirm(client, &context, ConfirmAction::Reply(true));
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&context.window.unwrap()].name,
+            "accepted"
+        );
+    }
+
+    #[test]
+    fn confirm_before_blocking_status_background_state_and_overlay_clearing_match_pin() {
+        let (shared, interactive, _, mut context) = popup_test_workspace("desktop");
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-menu", ["Old", "o", "display-message old"]),
+            )
+            .expect("open old menu");
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("confirm-before", ["display-message replacement"]),
+            )
+            .expect("replace menu with confirm");
+        assert!(!shared.inner.lock().menus.contains_key(&interactive));
+        shared.input_confirm(interactive, &context, ConfirmAction::Reply(false));
+
+        let run_blocking = |accepted| {
+            let sender = Arc::clone(&shared);
+            let command_context = context.clone();
+            let (send, receive) = crossbeam_channel::bounded(1);
+            let worker = thread::spawn(move || {
+                let mut command_context = command_context;
+                let result = sender.execute(
+                    ClientId(901),
+                    ClientKind::Command,
+                    &mut command_context,
+                    &CommandInvocation::new(
+                        "confirm-before",
+                        ["-t", "desktop", "renamew blocking"],
+                    ),
+                );
+                send.send(result).expect("return confirm result");
+            });
+            wait_for_confirm_state(&shared, interactive);
+            shared.input_confirm(interactive, &context, ConfirmAction::Reply(accepted));
+            let result = receive
+                .recv_timeout(Duration::from_secs(5))
+                .expect("blocking confirm result");
+            worker.join().expect("confirm command worker");
+            result
+        };
+        assert!(matches!(
+            run_blocking(false),
+            Err(DaemonError::CommandExit { exit_code: 1, .. })
+        ));
+        run_blocking(true).expect("accepted blocking confirm");
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&context.window.unwrap()].name,
+            "blocking"
+        );
+
+        let original = context.pane.expect("original pane");
+        let original_window = context.window.expect("original window");
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-window", ["-n", "fresh"]),
+            )
+            .expect("fresh target window");
+        let fresh_window = context.window.expect("fresh window");
+        let mut original_context =
+            ExecutionContext::for_pane(&shared.inner.lock().engine.state, original)
+                .expect("original context");
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut original_context,
+                &CommandInvocation::new("confirm-before", ["-b", "rename-window background-fresh"]),
+            )
+            .expect("open background confirm");
+        shared.input_confirm(interactive, &context, ConfirmAction::Reply(true));
+        let inner = shared.inner.lock();
+        assert_eq!(
+            inner.engine.state.windows[&fresh_window].name,
+            "background-fresh"
+        );
+        assert_ne!(
+            inner.engine.state.windows[&original_window].name,
+            "background-fresh"
+        );
+    }
+
+    #[test]
+    fn lock_commands_store_only_and_keep_clientless_error_parity() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(99),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("lock-server", [] as [&str; 0]),
+            )
+            .expect("clientless lock-server");
+        assert!(matches!(
+            shared.execute(
+                ClientId(99),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("lock-client", [] as [&str; 0]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "no current client"
+        ));
+        assert!(matches!(
+            shared.execute(
+                ClientId(99),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("lock-session", ["-t", "missing"]),
+            ),
+            Err(DaemonError::Server(ServerError::SessionNotFound(message))) if message == "missing"
+        ));
+
+        shared
+            .execute(
+                ClientId(99),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "work"]),
+            )
+            .expect("lock test session");
+        shared
+            .execute(
+                ClientId(99),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    ["-g", "after-lock-server", "set-option -g @locked yes"],
+                ),
+            )
+            .expect("lock hook");
+        shared
+            .execute(
+                ClientId(99),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("lock-server", [] as [&str; 0]),
+            )
+            .expect("lock hook fires");
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(99),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-options", ["-gv", "@locked"]),
+                )
+                .expect("lock hook option")
+                .output,
+            "yes"
+        );
+        shared
+            .execute(
+                ClientId(99),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("lock-session", ["-t", "work"]),
+            )
+            .expect("existing lock session");
+    }
+
     #[cfg(unix)]
     #[test]
     fn display_popup_creates_modifies_and_clears_one_dead_overlay_safely() {
@@ -27827,6 +29228,21 @@ bind - split-window -v -c "#{pane_current_path}"
             Err(DaemonError::Server(ServerError::InvalidCommand(message)))
                 if message == "no current client"
         ));
+        for command in [
+            CommandInvocation::new("display-menu", ["Item", "i", "display-message item"]),
+            CommandInvocation::new("confirm-before", ["display-message confirmed"]),
+        ] {
+            assert!(matches!(
+                shared.execute(
+                    ClientId(99),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &command,
+                ),
+                Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                    if message == "no current client"
+            ));
+        }
 
         let (shared, _, _, context) = popup_test_workspace("desktop");
         assert!(matches!(
@@ -27839,6 +29255,27 @@ bind - split-window -v -c "#{pane_current_path}"
             Err(DaemonError::Server(ServerError::InvalidCommand(message)))
                 if message == "can't find client: bogus"
         ));
+        for command in [
+            CommandInvocation::new(
+                "display-menu",
+                ["-c", "bogus", "Item", "i", "display-message item"],
+            ),
+            CommandInvocation::new(
+                "confirm-before",
+                ["-t", "bogus", "display-message confirmed"],
+            ),
+        ] {
+            assert!(matches!(
+                shared.execute(
+                    ClientId(99),
+                    ClientKind::Command,
+                    &mut context.clone(),
+                    &command,
+                ),
+                Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                    if message == "can't find client: bogus"
+            ));
+        }
     }
 
     #[test]
@@ -32556,6 +33993,40 @@ bind - split-window -v -c "#{pane_current_path}"
                 return state;
             }
             assert!(Instant::now() < deadline, "popup state did not converge");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn wait_for_menu_state(shared: &Shared, client: ClientId) -> MenuState {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(state) = shared
+                .inner
+                .lock()
+                .menus
+                .get(&client)
+                .map(|menu| menu.state.clone())
+            {
+                return state;
+            }
+            assert!(Instant::now() < deadline, "menu state did not converge");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn wait_for_confirm_state(shared: &Shared, client: ClientId) -> ConfirmState {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(state) = shared
+                .inner
+                .lock()
+                .confirms
+                .get(&client)
+                .map(|confirm| confirm.state.clone())
+            {
+                return state;
+            }
+            assert!(Instant::now() < deadline, "confirm state did not converge");
             thread::sleep(Duration::from_millis(10));
         }
     }

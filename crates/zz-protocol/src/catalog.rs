@@ -171,22 +171,22 @@ pub static DAEMON_COMMAND_NAMES: &[&str] = &[
     "pipep",
     "display-popup",
     "popup",
-];
-
-pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
-    "new-pane",
-    "newp",
+    "display-menu",
+    "menu",
+    "confirm-before",
+    "confirm",
     "lock-client",
     "lockc",
     "lock-server",
     "lock",
     "lock-session",
     "locks",
+];
+
+pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
+    "new-pane",
+    "newp",
     "server-access",
-    "display-menu",
-    "menu",
-    "confirm-before",
-    "confirm",
     "customize-mode",
     "choose-client",
     "clock-mode",
@@ -325,6 +325,51 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         positionals: &[FreeForm],
         variadic: Some(FreeForm),
     },
+    CommandSpec {
+        name: "display-menu",
+        aliases: &["menu"],
+        description: "Display a menu on a client",
+        usage: "[-MO] [-b border-lines] [-c target-client] [-C starting-choice] [-H selected-style] [-s style] [-S border-style] [-t target-pane] [-T title] [-x position] [-y position] name [key] [command] ...",
+        options: &[],
+        positionals: &[FreeForm],
+        variadic: Some(FreeForm),
+    },
+    CommandSpec {
+        name: "confirm-before",
+        aliases: &["confirm"],
+        description: "Ask for confirmation before running a command",
+        usage: "[-by] [-c confirm-key] [-p prompt] [-t target-client] command",
+        options: &[],
+        positionals: &[FreeForm],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "lock-client",
+        aliases: &["lockc"],
+        description: "Lock a client",
+        usage: "[-t target-client]",
+        options: &[],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "lock-server",
+        aliases: &["lock"],
+        description: "Lock every client",
+        usage: "",
+        options: &[],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "lock-session",
+        aliases: &["locks"],
+        description: "Lock every client attached to a session",
+        usage: "[-t target-session]",
+        options: &[],
+        positionals: &[],
+        variadic: None,
+    },
 ];
 
 #[cfg(test)]
@@ -342,6 +387,11 @@ const DAEMON_COMMAND_ACCEPTED_OPTIONS: &[(&str, &str, &str)] = &[
     ("wait-for", "LSU", ""),
     ("pipe-pane", "IOo", "t"),
     ("display-popup", "BCEkN", "bcdehsStTwxy"),
+    ("display-menu", "MO", "bcCHsStTxy"),
+    ("confirm-before", "by", "cpt"),
+    ("lock-client", "", "t"),
+    ("lock-server", "", ""),
+    ("lock-session", "", "t"),
 ];
 
 /// Every tmux-compatible command currently executable by the mux engine.

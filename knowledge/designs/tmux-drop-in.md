@@ -189,8 +189,27 @@ Shipped so far, each reviewed to CONFIRMED-CLOSED against the pin:
   config-phase execution blocks boot with output dropped. The stray `-s` flag is
   accepted-and-ignored like the pin.
 
-Still to build (tiering below): wait-for + pipe-pane (wave 5b, in flight), the
-hooks bus, popups/menus/confirm-before/lock. Original tiering:
+- **Wave 5b** (`081e88a`..`2d7a655`, CONFIRMED-CLOSED 2026-08-18) — `wait-for`/
+  `wait` and `pipe-pane`/`pipep` execute for real. wait-for: channel registry
+  with the pin's exact sticky-signal parity (a second `-S` destroys the channel
+  — reproduced), FIFO lock handoff, locks deliberately leak across holder
+  disconnect like the pin, kill-server flush, sticky signals survive the
+  signaling client's disconnect; Command clients block faithfully, Interactive
+  clients get the pin's clientless errors (accepted divergence — the GUI
+  multiplexes one connection). pipe-pane: raw PTY output tap with pre-parse
+  forwarding (tapped bytes reach the pipe child BEFORE VT parsing; a bounded
+  4MiB ordered backlog feeds the parser in 16KiB turns — piped floods now
+  drain FASTER than un-piped), bounded blocking tap = true backpressure with
+  no drop path (8MB floods lossless), always-close-old-then-`-o`-toggle,
+  strftime command expansion, `-I` injection, `#{pane_pipe}`/`#{pane_pipe_pid}`,
+  pipe SURVIVES respawn-pane with the same child (pin-verified), receiver loss
+  is loud (pipe fully closed, formats cleared), kill-server reaps job process
+  groups, MAX_SHELL_JOBS raised to 256. Three probe-driven fix rounds; the
+  final root cause was measured (VT parse was pacing the old serial path:
+  55.9s of a 55.9s 2MB run), not guessed.
+
+Still to build (tiering below): the hooks bus (wave 5c, in flight),
+popups/menus/confirm-before/lock. Original tiering:
 
 - `run-shell`, `if-shell`, `wait-for`, `pipe-pane` — genuinely `sh -c` + effects (~1 week).
   `if-shell` is already parsed and kept (only `%if` is skipped at parse time); the upgrade is
@@ -353,6 +372,15 @@ this list is the campaign-level index of it plus the items that never got a matr
   `-b` jobs fail with a background message like the pin's job_run failure);
   Interactive clients cannot park on blocking `wait-for` (they get the pin's
   clientless error; zz's GUI multiplexes one connection — scripts are faithful).
+- Wave-5b ledger (reviewer-CONFIRMED, non-blocking): the raw-output tap now
+  leads the screen transiently under flood (bounded by the 4MiB backlog,
+  exactly convergent — harmless for pipe-pane, but phase-6 `%output` consumers
+  that correlate output against concurrently-queried screen state will see the
+  output lead where tmux keeps them in lockstep); VT parser throughput is the
+  largest pin-adjacent gap (debug-build measurement: 8MB un-piped flood 93s vs
+  the pin's 1s — it is the direct cause of the mid-flood capture-pane timeout
+  and the copy_pipe_timeout load-flake; deserves its own wave, not more
+  per-test margin raising).
 - Error-text surface: zz wraps stderr in `zz: mux command failed:` (+
   `invalid command:`/`unsupported command:` nouns vs the pin's bare
   `bad value:`/`unknown command:`; usage-text arity errors vs too-few/too-many) —

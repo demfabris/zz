@@ -44,14 +44,16 @@ gating only the exec commands was theater. The user's own `mux.conf` is trusted 
 `run` and `if-shell` / `if` now execute for real (wave 5a-2, `9f55f87`) with
 pin-parity semantics — see the drop-in plan's phase-5 section for the accepted
 divergences (overlay output routing, no `$TMUX` in job env, job cap backstop).
+`wait-for` / `wait` and `pipe-pane` / `pipep` shipped in wave 5b (`2d7a655`)
+with pin-parity semantics (sticky signals, lock leak-on-disconnect, pre-parse
+output tap, pipe survives respawn); Interactive clients cannot park on blocking
+waits — they get the pin's clientless errors (scripts are faithful).
 
 Still unimplemented and skipped from config:
 
 | Command | What it does in tmux |
 | --- | --- |
 | `set-hook` / `show-hooks` | Run commands automatically on server events. |
-| `wait-for` | Lets shell scripts block until another script signals. |
-| `pipe-pane` | Streams pane output into a shell command. |
 | `lock-client` / `lock-server` / `lock-session` | Lock by spawning an external lock program. |
 | `server-access` | Per-user ACLs for a shared server socket. |
 

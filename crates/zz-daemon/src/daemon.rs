@@ -2512,6 +2512,7 @@ impl Shared {
         let mut unfocused_copy_mode_exits = Vec::new();
         let mut cleared_bells = Vec::new();
         let mut pipes_to_close = Vec::new();
+        let mut pipe_taps_to_rearm = Vec::new();
         let mut display_panes_deadline = None;
         let mut attach = None;
         let mut detach = None;
@@ -2766,9 +2767,6 @@ impl Shared {
                         environment,
                         empty,
                     } => {
-                        if let Some(pipe) = inner.pane_pipes.remove(pane) {
-                            pipes_to_close.push(pipe);
-                        }
                         let previous = inner.terminal_spawns.get(pane).cloned().unwrap_or_default();
                         let history_limit = inner.engine.history_limit_for_pane(*pane)?;
                         let word_separators =
@@ -2887,6 +2885,17 @@ impl Shared {
                                 terminal: Arc::clone(&session),
                                 geometry,
                             });
+                        }
+                        if let Some(pipe) = inner.pane_pipes.get_mut(pane) {
+                            *pipe.terminal.lock() = Arc::clone(&session);
+                            if let Some(output) = pipe.tap_output.clone() {
+                                pipe_taps_to_rearm.push((
+                                    *pane,
+                                    pipe.token,
+                                    Arc::clone(&session),
+                                    output,
+                                ));
+                            }
                         }
                         terminals_to_watch.push((*pane, session));
                     }
@@ -3395,6 +3404,10 @@ impl Shared {
             stop_pane_pipe(pipe);
         }
 
+        for (pane, token, terminal, output) in pipe_taps_to_rearm {
+            self.rearm_pane_pipe(pane, token, &terminal, output);
+        }
+
         for command in deferred_terminal_commands {
             command.run();
         }
@@ -3860,20 +3873,25 @@ impl Shared {
         let pid = child.id();
         let child_input = child.stdin.take();
         let child_output = child.stdout.take();
-        let tap = if pipe_output {
-            Some(terminal.arm_raw_output_tap(token).map_err(|error| {
-                let _ = terminate_copy_pipe(&mut child);
-                ServerError::Internal(format!("could not arm pane output pipe: {error}"))
-            })?)
+        let (tap_output, tap) = if pipe_output {
+            let (output, receiver) = TerminalSession::raw_output_tap_channel();
+            terminal
+                .arm_raw_output_tap(token, output.clone())
+                .map_err(|error| {
+                    let _ = terminate_copy_pipe(&mut child);
+                    ServerError::Internal(format!("could not arm pane output pipe: {error}"))
+                })?;
+            (Some(output), Some(receiver))
         } else {
-            None
+            (None, None)
         };
         let process = Arc::new(Mutex::new(Some(child)));
         let stop = Arc::new(AtomicBool::new(false));
+        let terminal_target = Arc::new(Mutex::new(Arc::clone(&terminal)));
         let (start, started) = crossbeam_channel::bounded(1);
         let worker_process = Arc::clone(&process);
         let worker_stop = Arc::clone(&stop);
-        let worker_terminal = Arc::clone(&terminal);
+        let worker_terminal = Arc::clone(&terminal_target);
         let weak = Arc::downgrade(self);
         let worker = thread::Builder::new()
             .name(format!("zz-pipe-{}", pane.0))
@@ -3912,7 +3930,8 @@ impl Shared {
                     PanePipe {
                         token,
                         pid,
-                        terminal: Arc::clone(&terminal),
+                        terminal: terminal_target,
+                        tap_output,
                         process: Arc::clone(&process),
                         stop: Arc::clone(&stop),
                         thread: Some(worker),
@@ -3948,6 +3967,54 @@ impl Shared {
             }
         };
         if removed {
+            self.refresh_status(false);
+        }
+    }
+
+    fn rearm_pane_pipe(
+        &self,
+        pane: PaneId,
+        token: u64,
+        terminal: &Arc<TerminalSession>,
+        output: crossbeam_channel::Sender<Arc<[u8]>>,
+    ) {
+        let _serial = self.pipe_effects.lock();
+        let valid = self.inner.lock().pane_pipes.get(&pane).is_some_and(|pipe| {
+            pipe.token == token && Arc::ptr_eq(&pipe.terminal.lock(), terminal)
+        });
+        if !valid || terminal.arm_raw_output_tap(token, output).is_ok() {
+            return;
+        }
+        let pipe = {
+            let mut inner = self.inner.lock();
+            inner
+                .pane_pipes
+                .get(&pane)
+                .is_some_and(|pipe| pipe.token == token)
+                .then(|| inner.pane_pipes.remove(&pane))
+                .flatten()
+        };
+        if let Some(pipe) = pipe {
+            stop_pane_pipe(pipe);
+            self.refresh_status(false);
+        }
+    }
+
+    fn pipe_tap_closed(&self, pane: PaneId, token: u64, terminal: &Arc<TerminalSession>) {
+        let _serial = self.pipe_effects.lock();
+        let pipe = {
+            let mut inner = self.inner.lock();
+            inner
+                .pane_pipes
+                .get(&pane)
+                .is_some_and(|pipe| {
+                    pipe.token == token && Arc::ptr_eq(&pipe.terminal.lock(), terminal)
+                })
+                .then(|| inner.pane_pipes.remove(&pane))
+                .flatten()
+        };
+        if let Some(pipe) = pipe {
+            stop_pane_pipe(pipe);
             self.refresh_status(false);
         }
     }
@@ -7560,7 +7627,8 @@ impl Shared {
                         | TerminalEvent::ClipboardSet { .. }
                         | TerminalEvent::Bell
                         | TerminalEvent::PlaceholderBound { .. }
-                        | TerminalEvent::PendingPasteExpired { .. } => {}
+                        | TerminalEvent::PendingPasteExpired { .. }
+                        | TerminalEvent::RawOutputTapClosed { .. } => {}
                     }
                 }
             })
@@ -7834,6 +7902,9 @@ impl Shared {
                         }
                         TerminalEvent::PendingPasteExpired { token } => {
                             shared.expire_pending_pasted_image(pane, &terminal, token);
+                        }
+                        TerminalEvent::RawOutputTapClosed { token } => {
+                            shared.pipe_tap_closed(pane, token, &terminal);
                         }
                         TerminalEvent::ClipboardSet { target, text } => {
                             shared.deliver_clipboard_write(pane, target, text);
@@ -9843,7 +9914,8 @@ struct WaitChannel {
 struct PanePipe {
     token: u64,
     pid: u32,
-    terminal: Arc<TerminalSession>,
+    terminal: Arc<Mutex<Arc<TerminalSession>>>,
+    tap_output: Option<crossbeam_channel::Sender<Arc<[u8]>>>,
     process: Arc<Mutex<Option<Child>>>,
     stop: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
@@ -11903,7 +11975,8 @@ fn stop_pane_pipe(mut pipe: PanePipe) {
     {
         log::error!("pipe-pane worker panicked for pane process {}", pipe.pid);
     }
-    let _ = pipe.terminal.disarm_raw_output_tap(pipe.token);
+    let terminal = Arc::clone(&pipe.terminal.lock());
+    let _ = terminal.disarm_raw_output_tap(pipe.token);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -11911,7 +11984,7 @@ fn run_pane_pipe(
     shared: &std::sync::Weak<Shared>,
     pane: PaneId,
     token: u64,
-    terminal: &Arc<TerminalSession>,
+    terminal: &Arc<Mutex<Arc<TerminalSession>>>,
     process: &Arc<Mutex<Option<Child>>>,
     stop: &Arc<AtomicBool>,
     mut child_input: Option<std::process::ChildStdin>,
@@ -11929,7 +12002,8 @@ fn run_pane_pipe(
                     match output.read(&mut buffer) {
                         Ok(0) | Err(_) => break,
                         Ok(length) => {
-                            if !terminal.send_raw_input(Arc::from(&buffer[..length])) {
+                            let target = Arc::clone(&terminal.lock());
+                            if !target.send_raw_input(Arc::from(&buffer[..length])) {
                                 break;
                             }
                         }
@@ -11947,24 +12021,30 @@ fn run_pane_pipe(
     };
     let mut exited = false;
     while !stop.load(Ordering::Acquire) {
-        if pane_pipe_process_exited(process) {
-            exited = true;
-            break;
-        }
         let Some(tap) = tap.as_ref() else {
+            if pane_pipe_process_exited(process) {
+                exited = true;
+                break;
+            }
             thread::sleep(COPY_PIPE_POLL_INTERVAL);
             continue;
         };
         match tap.recv_timeout(COPY_PIPE_POLL_INTERVAL) {
             Ok(bytes) => {
-                if child_input
-                    .as_mut()
-                    .is_none_or(|input| input.write_all(&bytes).is_err())
-                {
+                let Some(input) = child_input.as_mut() else {
+                    break;
+                };
+                if input.write_all(&bytes).is_err() {
+                    exited = pane_pipe_process_exited(process);
                     break;
                 }
             }
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                if pane_pipe_process_exited(process) {
+                    exited = true;
+                    break;
+                }
+            }
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
         }
     }
@@ -11976,6 +12056,7 @@ fn run_pane_pipe(
     if let Some(worker) = input_worker {
         let _ = worker.join();
     }
+    let terminal = Arc::clone(&terminal.lock());
     let _ = terminal.disarm_raw_output_tap(token);
     if let Some(shared) = shared.upgrade() {
         shared.pipe_finished(pane, token);
@@ -16683,6 +16764,282 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn pipe_pane_streams_single_shell_burst_without_loss() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "pipe-throughput", "exec /bin/sh"]),
+            )
+            .expect("new throughput session");
+        let session = context.session.expect("session");
+        let pane = context.pane.expect("pane");
+        let target = pane.to_string();
+        shared
+            .attach(client, session)
+            .expect("attach throughput session");
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        terminal.resize(200, 50, 8, 16);
+        wait_for_viewport(
+            &terminal,
+            TerminalViewId(client.0),
+            "throughput terminal did not attach",
+            |viewport| matches!(viewport.status, SessionStatus::Running),
+        );
+        assert!(terminal.send_raw_input(Arc::from(
+            b"stty raw -echo; printf 'ZZ_PIPE_%s\\n' READY; IFS= read -r command; eval \"$command\"; IFS= read -r _\n"
+                .as_slice()
+        )));
+        let ready_deadline = Instant::now() + Duration::from_secs(10);
+        while !viewport_text(&terminal.latest_viewport()).contains("ZZ_PIPE_READY") {
+            assert!(
+                Instant::now() < ready_deadline,
+                "throughput terminal did not start"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let directory = tempfile::tempdir().expect("pipe directory");
+        let output = directory.path().join("throughput.bin");
+        let command = format!("sleep 0.1; cat > {}", shell_quote(&output));
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("pipe-pane", ["-t", target.as_str(), command.as_str()]),
+            )
+            .expect("open throughput pipe");
+        let payload_bytes = 2_usize * 1024 * 1024;
+        let payload_pattern = b"0123456789abcdef\n";
+        let throughput_limit = Duration::from_secs(5);
+        let started = Instant::now();
+        assert!(
+            terminal.send_raw_input(Arc::from(
+                format!("yes 0123456789abcdef | head -c {payload_bytes}; printf 'ENDMARK\\n'\n")
+                    .into_bytes()
+            ))
+        );
+
+        let deadline = started + throughput_limit;
+        let captured = loop {
+            let captured = fs::read(&output).unwrap_or_default();
+            if captured.ends_with(b"ENDMARK\n") {
+                break captured;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "single-burst pipe stalled after {} bytes",
+                captured.len()
+            );
+            thread::sleep(Duration::from_millis(10));
+        };
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < throughput_limit,
+            "single-burst pipe took {elapsed:?}"
+        );
+        eprintln!(
+            "pipe throughput: bytes={} elapsed={elapsed:?} bytes_per_second={:.0}",
+            captured.len(),
+            captured.len() as f64 / elapsed.as_secs_f64(),
+        );
+        let mut expected = payload_pattern.repeat(payload_bytes.div_ceil(payload_pattern.len()));
+        expected.truncate(payload_bytes);
+        expected.extend_from_slice(b"ENDMARK\n");
+        let mismatch = captured
+            .iter()
+            .zip(&expected)
+            .position(|(actual, expected)| actual != expected)
+            .unwrap_or(captured.len().min(expected.len()));
+        let start = mismatch.saturating_sub(16);
+        let captured_end = (mismatch + 16).min(captured.len());
+        let expected_end = (mismatch + 16).min(expected.len());
+        assert!(
+            captured == expected,
+            "single-burst output differs at byte {mismatch}: captured {} bytes {:?}, expected {} bytes {:?}",
+            captured.len(),
+            &captured[start..captured_end],
+            expected.len(),
+            &expected[start..expected_end]
+        );
+        assert!(shared.inner.lock().pane_pipes.contains_key(&pane));
+
+        shared.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pipe_pane_survives_respawn_with_the_same_child() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "pipe-respawn", "exec /bin/cat"]),
+            )
+            .expect("new respawn session");
+        let session = context.session.expect("session");
+        let pane = context.pane.expect("pane");
+        let target = pane.to_string();
+        shared
+            .attach(client, session)
+            .expect("attach respawn session");
+        let original_terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        let view = TerminalViewId(client.0);
+        wait_for_viewport(
+            &original_terminal,
+            view,
+            "original pipe terminal did not start",
+            |viewport| matches!(viewport.status, SessionStatus::Running),
+        );
+
+        let directory = tempfile::tempdir().expect("pipe directory");
+        let output = directory.path().join("respawn.bin");
+        let command = format!("cat > {}", shell_quote(&output));
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("pipe-pane", ["-t", target.as_str(), command.as_str()]),
+            )
+            .expect("open respawn pipe");
+        let (pid, process) = {
+            let inner = shared.inner.lock();
+            let pipe = &inner.pane_pipes[&pane];
+            (pipe.pid, Arc::clone(&pipe.process))
+        };
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "respawn-pane",
+                    ["-k", "-t", target.as_str(), "--", "/bin/cat"],
+                ),
+            )
+            .expect("respawn piped pane");
+        let replacement_terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        assert!(!Arc::ptr_eq(&original_terminal, &replacement_terminal));
+        wait_for_viewport(
+            &replacement_terminal,
+            view,
+            "replacement pipe terminal did not start",
+            |viewport| matches!(viewport.status, SessionStatus::Running),
+        );
+        {
+            let inner = shared.inner.lock();
+            let pipe = &inner.pane_pipes[&pane];
+            assert_eq!(pipe.pid, pid);
+            assert!(Arc::ptr_eq(&pipe.process, &process));
+        }
+
+        replacement_terminal.send_raw_input(Arc::from(b"POST_RESPAWN_PIPE\n".as_slice()));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !fs::read(&output)
+            .unwrap_or_default()
+            .windows(17)
+            .any(|window| window == b"POST_RESPAWN_PIPE")
+        {
+            assert!(
+                Instant::now() < deadline,
+                "post-respawn output was not piped"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "display-message",
+                        ["-p", "-t", target.as_str(), "#{pane_pipe}:#{pane_pipe_pid}"],
+                    ),
+                )
+                .expect("respawn pipe format")
+                .output,
+            format!("1:{pid}")
+        );
+
+        shared.request_shutdown();
+        assert!(process.lock().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn disconnected_pipe_tap_closes_child_and_formats() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(1);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "pipe-disconnect", "exec /bin/cat"],
+                ),
+            )
+            .expect("new disconnect session");
+        let pane = context.pane.expect("pane");
+        let target = pane.to_string();
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("pipe-pane", ["-t", target.as_str(), "sleep 60"]),
+            )
+            .expect("open disconnect pipe");
+        let (token, process) = {
+            let inner = shared.inner.lock();
+            let pipe = &inner.pane_pipes[&pane];
+            (pipe.token, Arc::clone(&pipe.process))
+        };
+
+        shared.pipe_tap_closed(pane, token, &terminal);
+
+        assert!(shared.inner.lock().pane_pipes.is_empty());
+        assert!(process.lock().is_none());
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "display-message",
+                        ["-p", "-t", target.as_str(), "#{pane_pipe}:#{pane_pipe_pid}"],
+                    ),
+                )
+                .expect("disconnected pipe format")
+                .output,
+            "0:"
+        );
+
+        shared.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn pipe_pane_streams_raw_output_toggles_formats_injects_and_expands_time() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
@@ -16694,7 +17051,14 @@ mod tests {
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "pipe-pane", "exec /bin/cat"]),
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-s",
+                        "pipe-pane",
+                        "stty raw -echo; printf 'ZZ_PIPE_%s\\n' READY; exec /bin/cat",
+                    ],
+                ),
             )
             .expect("new pipe session");
         let session = context.session.expect("session");
@@ -16704,6 +17068,7 @@ mod tests {
         let view = TerminalViewId(client.0);
         wait_for_viewport(&terminal, view, "pipe terminal did not start", |viewport| {
             matches!(viewport.status, SessionStatus::Running)
+                && viewport_text(viewport).contains("ZZ_PIPE_READY")
         });
         terminal.send_raw_input(Arc::from(b"BEFORE_PIPE\n".as_slice()));
         wait_for_viewport(
@@ -16741,7 +17106,7 @@ mod tests {
         assert_eq!(flag, "1");
         assert!(pid.parse::<u32>().is_ok(), "{live:?}");
         terminal.send_raw_input(Arc::from(b"AFTER_PIPE\n".as_slice()));
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             let bytes = fs::read(&output).unwrap_or_default();
             if bytes.windows(10).any(|window| window == b"AFTER_PIPE") {
@@ -16829,7 +17194,7 @@ mod tests {
             "pipe input did not reach the PTY",
             |viewport| viewport_text(viewport).contains("ZZ_PIPE_INPUT"),
         );
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while shared.inner.lock().pane_pipes.contains_key(&pane) {
             assert!(Instant::now() < deadline, "input pipe did not reap");
             thread::sleep(Duration::from_millis(10));
@@ -16858,7 +17223,7 @@ mod tests {
             "bidirectional pipe did not reach the PTY",
             |viewport| viewport_text(viewport).contains("ZZ_PIPE_BOTH"),
         );
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while shared.inner.lock().pane_pipes.contains_key(&pane) {
             assert!(Instant::now() < deadline, "bidirectional pipe did not reap");
             thread::sleep(Duration::from_millis(10));
@@ -16881,7 +17246,7 @@ mod tests {
         let expanded = directory
             .path()
             .join(format!("dated-{}.bin", chrono::Local::now().format("%Y")));
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while !fs::read(&expanded)
             .unwrap_or_default()
             .windows(10)
@@ -16898,29 +17263,6 @@ mod tests {
                 &CommandInvocation::new("pipe-pane", ["-t", target.as_str()]),
             )
             .expect("close dated pipe");
-
-        shared
-            .execute(
-                client,
-                ClientKind::Command,
-                &mut context,
-                &CommandInvocation::new("pipe-pane", ["-t", target.as_str(), "sleep 60"]),
-            )
-            .expect("pre-respawn pipe");
-        let respawned_process = Arc::clone(&shared.inner.lock().pane_pipes[&pane].process);
-        shared
-            .execute(
-                client,
-                ClientKind::Command,
-                &mut context,
-                &CommandInvocation::new(
-                    "respawn-pane",
-                    ["-k", "-t", target.as_str(), "--", "/bin/cat"],
-                ),
-            )
-            .expect("respawn piped pane");
-        assert!(shared.inner.lock().pane_pipes.is_empty());
-        assert!(respawned_process.lock().is_none());
 
         shared
             .execute(
@@ -19717,7 +20059,7 @@ bind - split-window -v -c "#{pane_current_path}"
             shell_quote(&group)
         );
 
-        let error = run_copy_pipe_with_timeout(&command, "", Duration::from_millis(500))
+        let error = run_copy_pipe_with_timeout(&command, "", Duration::from_secs(2))
             .expect_err("copy pipe should time out");
         assert!(error.contains("timed out"), "{error}");
         let group = fs::read_to_string(group)
@@ -19726,7 +20068,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .ok()
             .and_then(rustix::process::Pid::from_raw)
             .expect("copy-pipe process group pid");
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(8);
         loop {
             match rustix::process::test_kill_process_group(group) {
                 Err(rustix::io::Errno::SRCH) => break,

@@ -81,6 +81,9 @@ const MAX_WHEEL_REPEAT: u32 = 32;
 const MAX_KITTY_PLACEMENTS: usize = 512;
 const PTY_READ_BUFFER_BYTES: usize = 64 * 1024;
 const RAW_OUTPUT_TAP_PENDING_CHUNKS: usize = 4;
+const RAW_OUTPUT_PARSE_BACKLOG_BYTES: usize = 4 * 1024 * 1024;
+const RAW_OUTPUT_PARSE_READ_RESERVE_BYTES: usize = 8 * PTY_READ_BUFFER_BYTES;
+const RAW_OUTPUT_PARSE_TURN_BYTES: usize = 16 * 1024;
 #[cfg(target_os = "linux")]
 const PTY_BUFFER_POOL_SIZE: usize = 4;
 #[cfg(all(not(target_os = "linux"), any(not(unix), test)))]
@@ -246,6 +249,9 @@ pub enum TerminalEvent {
         number: u32,
     },
     PendingPasteExpired {
+        token: u64,
+    },
+    RawOutputTapClosed {
         token: u64,
     },
 }
@@ -876,8 +882,15 @@ impl TerminalSession {
         self.send_command(Command::RawInput(bytes))
     }
 
-    pub fn arm_raw_output_tap(&self, token: u64) -> Result<Receiver<Arc<[u8]>>, RawOutputTapError> {
-        let (output, receiver) = crossbeam_channel::bounded(RAW_OUTPUT_TAP_PENDING_CHUNKS);
+    pub fn raw_output_tap_channel() -> (Sender<Arc<[u8]>>, Receiver<Arc<[u8]>>) {
+        crossbeam_channel::bounded(RAW_OUTPUT_TAP_PENDING_CHUNKS)
+    }
+
+    pub fn arm_raw_output_tap(
+        &self,
+        token: u64,
+        output: Sender<Arc<[u8]>>,
+    ) -> Result<(), RawOutputTapError> {
         let (reply, response) = crossbeam_channel::bounded(1);
         let started = Instant::now();
         self.commands
@@ -896,7 +909,7 @@ impl TerminalSession {
                 }
             })?;
         match response.recv_timeout(CAPTURE_TIMEOUT.saturating_sub(started.elapsed())) {
-            Ok(true) => Ok(receiver),
+            Ok(true) => Ok(()),
             Ok(false) => Err(RawOutputTapError::Unavailable),
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => Err(RawOutputTapError::TimedOut),
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
@@ -2774,6 +2787,10 @@ impl Publisher {
         self.send_reliable(TerminalEvent::PendingPasteExpired { token })
     }
 
+    fn raw_output_tap_closed(&self, token: u64) -> Result<(), WorkerError> {
+        self.send_reliable(TerminalEvent::RawOutputTapClosed { token })
+    }
+
     fn send_user_action(&self, event: TerminalEvent, description: &str) -> Result<(), WorkerError> {
         match self.send_reliable(event) {
             Err(WorkerError::EventBackpressure) => {
@@ -2801,7 +2818,8 @@ fn reliable_event_bytes(event: &TerminalEvent) -> usize {
         | TerminalEvent::ViewClosed(_)
         | TerminalEvent::Bell
         | TerminalEvent::PlaceholderBound { .. }
-        | TerminalEvent::PendingPasteExpired { .. } => 0,
+        | TerminalEvent::PendingPasteExpired { .. }
+        | TerminalEvent::RawOutputTapClosed { .. } => 0,
     };
     std::mem::size_of::<TerminalEvent>().saturating_add(payload)
 }
@@ -3695,6 +3713,9 @@ fn run_terminal(
     let mut last_content_publish = Instant::now();
     let mut output_pending = false;
     let mut raw_output_tap = None;
+    let mut raw_output_parse_backlog = VecDeque::<(Arc<[u8]>, usize)>::new();
+    let mut raw_output_parse_backlog_bytes = 0_usize;
+    let mut raw_output_parse_buffer = Vec::with_capacity(RAW_OUTPUT_PARSE_TURN_BYTES);
     #[cfg(unix)]
     let mut active_input_permit = None::<InputPermit>;
 
@@ -3801,6 +3822,9 @@ fn run_terminal(
         if let Some(due) = pasted_image_bindings.next_deadline() {
             deadline = deadline.min(due);
         }
+        if !raw_output_parse_backlog.is_empty() {
+            deadline = Instant::now();
+        }
         #[cfg(unix)]
         if writer.has_pending() {
             deadline = deadline.min(Instant::now() + PTY_WRITE_RETRY);
@@ -3815,20 +3839,30 @@ fn run_terminal(
         let available_input = (!writer.has_pending()).then_some(input_rx);
         #[cfg(not(unix))]
         let available_input = Some(input_rx);
+        let raw_output_read_ahead = raw_output_parse_backlog_bytes
+            <= RAW_OUTPUT_PARSE_BACKLOG_BYTES.saturating_sub(RAW_OUTPUT_PARSE_READ_RESERVE_BYTES);
         #[cfg(all(unix, not(target_os = "linux")))]
         let wakeup = wait_for_wake(
             control_rx,
             available_input,
             &search_results,
             child_exit,
-            (!reader_eof).then_some(&drain_fd),
+            (!reader_eof && raw_output_read_ahead).then_some(&drain_fd),
             &wake_rx,
             timeout,
         )?;
         #[cfg(target_os = "linux")]
-        let available_output = if reader_eof { &no_output } else { &output_rx };
+        let available_output = if reader_eof || !raw_output_read_ahead {
+            &no_output
+        } else {
+            &output_rx
+        };
         #[cfg(not(unix))]
-        let available_output = if reader_eof { &no_output } else { &output_rx };
+        let available_output = if reader_eof || !raw_output_read_ahead {
+            &no_output
+        } else {
+            &output_rx
+        };
         #[cfg(any(target_os = "linux", not(unix)))]
         let wakeup = wait_for_wake(
             control_rx,
@@ -4417,12 +4451,24 @@ fn run_terminal(
                                 &read_buffer[..length],
                                 String::from_utf8_lossy(&read_buffer[..length]),
                             );
-                            tap_raw_output(&mut raw_output_tap, &read_buffer[..length]);
-                            terminal.vt_write(&read_buffer[..length]);
-                            output_pending = true;
+                            if raw_output_tap.is_some() || !raw_output_parse_backlog.is_empty() {
+                                let bytes = Arc::<[u8]>::from(&read_buffer[..length]);
+                                if let Some(token) = tap_raw_output_arc(&mut raw_output_tap, &bytes)
+                                {
+                                    publisher.raw_output_tap_closed(token)?;
+                                }
+                                raw_output_parse_backlog_bytes =
+                                    raw_output_parse_backlog_bytes.saturating_add(bytes.len());
+                                raw_output_parse_backlog.push_back((bytes, 0));
+                            } else {
+                                terminal.vt_write(&read_buffer[..length]);
+                                output_pending = true;
+                            }
                             burst += length;
                             spins = 0;
-                            if burst >= PTY_DRAIN_TURN_BYTES {
+                            if burst >= PTY_DRAIN_TURN_BYTES
+                                || raw_output_parse_backlog_bytes >= RAW_OUTPUT_PARSE_BACKLOG_BYTES
+                            {
                                 break;
                             }
                         }
@@ -4444,17 +4490,41 @@ fn run_terminal(
             #[cfg(any(target_os = "linux", not(unix)))]
             Wake::PtyMessage(message) => match message {
                 ReaderMessage::Data { buffer, length } => {
+                    let mut closed_tap = None;
+                    let mut consumed_output = false;
                     reader_eof |=
                         drain_pty_output_burst(&output_rx, buffer, length, |buffer, length| {
-                            consume_pty_output(
-                                &mut terminal,
-                                &mut raw_output_tap,
-                                buffer,
-                                length,
-                                &recycle_tx,
-                            );
+                            if raw_output_tap.is_some() || !raw_output_parse_backlog.is_empty() {
+                                log::trace!(
+                                    target: "zz_terminal::diagnostics::pty",
+                                    "read length={length} bytes={:?} text={:?}",
+                                    &buffer[..length],
+                                    String::from_utf8_lossy(&buffer[..length]),
+                                );
+                                let bytes = Arc::<[u8]>::from(&buffer[..length]);
+                                closed_tap = closed_tap
+                                    .or_else(|| tap_raw_output_arc(&mut raw_output_tap, &bytes));
+                                raw_output_parse_backlog_bytes =
+                                    raw_output_parse_backlog_bytes.saturating_add(bytes.len());
+                                raw_output_parse_backlog.push_back((bytes, 0));
+                                let _ = recycle_tx.try_send(buffer);
+                            } else {
+                                closed_tap = closed_tap.or_else(|| {
+                                    consume_pty_output(
+                                        &mut terminal,
+                                        &mut raw_output_tap,
+                                        buffer,
+                                        length,
+                                        &recycle_tx,
+                                    )
+                                });
+                                consumed_output = true;
+                            }
                         });
-                    output_pending = true;
+                    if let Some(token) = closed_tap {
+                        publisher.raw_output_tap_closed(token)?;
+                    }
+                    output_pending |= consumed_output;
                 }
                 ReaderMessage::Eof => reader_eof = true,
             },
@@ -4465,7 +4535,14 @@ fn run_terminal(
                     let _ = master_close_tx.send(master);
                 }
             }
-            Wake::Deadline => {}
+            Wake::Deadline => {
+                output_pending |= drain_raw_output_parse_backlog(
+                    &mut terminal,
+                    &mut raw_output_parse_backlog,
+                    &mut raw_output_parse_backlog_bytes,
+                    &mut raw_output_parse_buffer,
+                );
+            }
         }
 
         #[cfg(unix)]
@@ -4475,20 +4552,22 @@ fn run_terminal(
         #[cfg(not(unix))]
         drop(input_permit);
 
-        if exit_status.is_some() && reader_eof {
+        if exit_status.is_some() && reader_eof && raw_output_parse_backlog.is_empty() {
             #[cfg(all(unix, not(target_os = "linux")))]
             let had_output = false;
             #[cfg(any(target_os = "linux", not(unix)))]
             let had_output = {
                 let mut had_output = false;
                 while let Ok(ReaderMessage::Data { buffer, length }) = output_rx.try_recv() {
-                    consume_pty_output(
+                    if let Some(token) = consume_pty_output(
                         &mut terminal,
                         &mut raw_output_tap,
                         buffer,
                         length,
                         &recycle_tx,
-                    );
+                    ) {
+                        publisher.raw_output_tap_closed(token)?;
+                    }
                     had_output = true;
                 }
                 had_output
@@ -9160,24 +9239,65 @@ fn consume_pty_output(
     buffer: Vec<u8>,
     length: usize,
     recycled: &Sender<Vec<u8>>,
-) {
+) -> Option<u64> {
     log::trace!(
         target: "zz_terminal::diagnostics::pty",
         "read length={length} bytes={:?} text={:?}",
         &buffer[..length],
         String::from_utf8_lossy(&buffer[..length]),
     );
-    tap_raw_output(raw_output_tap, &buffer[..length]);
+    let closed_tap = tap_raw_output(raw_output_tap, &buffer[..length]);
     terminal.vt_write(&buffer[..length]);
     let _ = recycled.try_send(buffer);
+    closed_tap
 }
 
-fn tap_raw_output(tap: &mut Option<(u64, Sender<Arc<[u8]>>)>, bytes: &[u8]) {
+#[cfg(any(target_os = "linux", not(unix), test))]
+fn tap_raw_output(tap: &mut Option<(u64, Sender<Arc<[u8]>>)>, bytes: &[u8]) -> Option<u64> {
+    tap_raw_output_arc(tap, &Arc::from(bytes))
+}
+
+fn tap_raw_output_arc(
+    tap: &mut Option<(u64, Sender<Arc<[u8]>>)>,
+    bytes: &Arc<[u8]>,
+) -> Option<u64> {
     let disconnected = tap
         .as_ref()
-        .is_some_and(|(_, output)| output.send(Arc::from(bytes)).is_err());
+        .is_some_and(|(_, output)| output.send(Arc::clone(bytes)).is_err());
     if disconnected {
-        *tap = None;
+        tap.take().map(|(token, _)| token)
+    } else {
+        None
+    }
+}
+
+fn drain_raw_output_parse_backlog(
+    terminal: &mut Terminal<'_, '_>,
+    backlog: &mut VecDeque<(Arc<[u8]>, usize)>,
+    backlog_bytes: &mut usize,
+    buffer: &mut Vec<u8>,
+) -> bool {
+    buffer.clear();
+    while buffer.len() < RAW_OUTPUT_PARSE_TURN_BYTES {
+        let Some((bytes, offset)) = backlog.front_mut() else {
+            break;
+        };
+        let length = bytes
+            .len()
+            .saturating_sub(*offset)
+            .min(RAW_OUTPUT_PARSE_TURN_BYTES.saturating_sub(buffer.len()));
+        buffer.extend_from_slice(&bytes[*offset..offset.saturating_add(length)]);
+        *offset = offset.saturating_add(length);
+        *backlog_bytes = backlog_bytes.saturating_sub(length);
+        if *offset == bytes.len() {
+            backlog.pop_front();
+        }
+    }
+    if buffer.is_empty() {
+        false
+    } else {
+        terminal.vt_write(buffer);
+        true
     }
 }
 
@@ -10787,7 +10907,8 @@ mod tests {
                 | TerminalEvent::ClipboardSet { .. }
                 | TerminalEvent::Bell
                 | TerminalEvent::PlaceholderBound { .. }
-                | TerminalEvent::PendingPasteExpired { .. } => {
+                | TerminalEvent::PendingPasteExpired { .. }
+                | TerminalEvent::RawOutputTapClosed { .. } => {
                     panic!("unexpected event in queue invariant test")
                 }
             }
@@ -14364,14 +14485,17 @@ mod tests {
         let (output, receiver) = crossbeam_channel::bounded(RAW_OUTPUT_TAP_PENDING_CHUNKS);
         let mut tap = Some((1, output));
         for _ in 0..RAW_OUTPUT_TAP_PENDING_CHUNKS {
-            tap_raw_output(&mut tap, &vec![0_u8; PTY_READ_BUFFER_BYTES]);
+            assert_eq!(
+                tap_raw_output(&mut tap, &vec![0_u8; PTY_READ_BUFFER_BYTES]),
+                None
+            );
         }
         let (entered, waiting) = crossbeam_channel::bounded(1);
         let (finished, done) = crossbeam_channel::bounded(1);
         let worker = thread::spawn(move || {
             entered.send(()).expect("announce blocked send");
-            tap_raw_output(&mut tap, &vec![1_u8; PTY_READ_BUFFER_BYTES]);
-            finished.send(tap.is_none()).expect("announce completion");
+            let closed = tap_raw_output(&mut tap, &vec![1_u8; PTY_READ_BUFFER_BYTES]);
+            finished.send(closed).expect("announce completion");
         });
         waiting.recv().expect("worker entered send");
         assert!(matches!(
@@ -14379,9 +14503,10 @@ mod tests {
             Err(crossbeam_channel::RecvTimeoutError::Timeout)
         ));
         drop(receiver);
-        assert!(
+        assert_eq!(
             done.recv_timeout(Duration::from_secs(2))
-                .expect("receiver drop unblocked tap")
+                .expect("receiver drop unblocked tap"),
+            Some(1)
         );
         worker.join().expect("tap worker");
     }
@@ -14392,8 +14517,11 @@ mod tests {
             16,
             Arc::new(TerminalAppearance::default()),
         );
+        let (output, _) = TerminalSession::raw_output_tap_channel();
         assert_eq!(
-            session.arm_raw_output_tap(1).expect_err("PTY-free tap"),
+            session
+                .arm_raw_output_tap(1, output)
+                .expect_err("PTY-free tap"),
             RawOutputTapError::Unavailable
         );
     }
@@ -14425,7 +14553,8 @@ mod tests {
             contents.contains("BEFORE")
         });
 
-        let output = session.arm_raw_output_tap(9).expect("arm tap");
+        let (tap, output) = TerminalSession::raw_output_tap_channel();
+        session.arm_raw_output_tap(9, tap).expect("arm tap");
         session.send_raw_input(Arc::from(b"second\n".as_slice()));
         let deadline = Instant::now() + Duration::from_secs(2);
         let mut bytes = Vec::new();
@@ -14451,6 +14580,47 @@ mod tests {
             }
             contents.contains("LATER")
         });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn raw_output_tap_receiver_loss_is_reported() {
+        let session = TerminalSession::spawn(
+            DEFAULT_HISTORY_LIMIT,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                command: Some(vec!["read _; printf 'TAP_CLOSED\\n'; read _".to_owned()]),
+                ..TerminalSpawn::default()
+            },
+        );
+        let events = session.events();
+        wait_for_test_viewport(&session, |viewport| {
+            matches!(viewport.status, SessionStatus::Running)
+        });
+
+        let (tap, output) = TerminalSession::raw_output_tap_channel();
+        session.arm_raw_output_tap(27, tap).expect("arm tap");
+        drop(output);
+        session.send_raw_input(Arc::from(b"ready\n".as_slice()));
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match events.try_recv() {
+                Ok(TerminalEvent::RawOutputTapClosed { token }) => {
+                    assert_eq!(token, 27);
+                    break;
+                }
+                Ok(_) | Err(async_channel::TryRecvError::Empty) => {}
+                Err(async_channel::TryRecvError::Closed) => {
+                    panic!("terminal stopped before reporting the closed tap")
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "terminal did not report the closed tap"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]

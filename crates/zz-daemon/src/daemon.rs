@@ -147,6 +147,108 @@ fn mode_keys_from_environment(visual: Option<&OsStr>, editor: Option<&OsStr>) ->
     }
 }
 
+#[cfg(unix)]
+fn shell_is_valid_for_program(shell: &Path, program: &OsStr) -> bool {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    if !shell.is_absolute() || !shell.is_file() {
+        return false;
+    }
+    let Some(shell_name) = shell.file_name() else {
+        return false;
+    };
+    let program = Path::new(program).file_name().unwrap_or(program).as_bytes();
+    let program = program.strip_prefix(b"-").unwrap_or(program);
+    if shell_name.as_bytes() == program {
+        return false;
+    }
+    rustix::fs::access(shell, rustix::fs::Access::EXEC_OK).is_ok()
+}
+
+#[cfg(unix)]
+fn shell_is_valid(shell: &Path) -> bool {
+    let program = std::env::args_os().next().unwrap_or_default();
+    shell_is_valid_for_program(shell, &program)
+}
+
+#[cfg(not(unix))]
+fn shell_is_valid(shell: &Path) -> bool {
+    !shell.as_os_str().is_empty()
+}
+
+#[cfg(unix)]
+#[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
+fn passwd_shell() -> Option<PathBuf> {
+    use std::{ffi::CStr, mem::MaybeUninit, os::unix::ffi::OsStrExt as _};
+
+    let mut passwd = MaybeUninit::<libc::passwd>::uninit();
+    let mut result = std::ptr::null_mut();
+    let mut buffer = vec![0_u8; 16 * 1024];
+    let status = unsafe {
+        libc::getpwuid_r(
+            libc::getuid(),
+            passwd.as_mut_ptr(),
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            &raw mut result,
+        )
+    };
+    if status != 0 || result.is_null() {
+        return None;
+    }
+    let passwd = unsafe { passwd.assume_init() };
+    if passwd.pw_shell.is_null() {
+        return None;
+    }
+    let shell = unsafe { CStr::from_ptr(passwd.pw_shell) };
+    Some(PathBuf::from(OsStr::from_bytes(shell.to_bytes())))
+}
+
+#[cfg(unix)]
+fn resolve_runtime_default_shell(environment_shell: Option<&OsStr>) -> String {
+    if let Some(shell) = environment_shell {
+        let shell = Path::new(shell);
+        if shell_is_valid(shell) {
+            return shell.to_string_lossy().into_owned();
+        }
+    }
+    if let Some(shell) = passwd_shell()
+        && shell_is_valid(&shell)
+    {
+        return shell.to_string_lossy().into_owned();
+    }
+    "/bin/sh".to_owned()
+}
+
+#[cfg(not(unix))]
+fn resolve_runtime_default_shell(environment_shell: Option<&OsStr>) -> String {
+    environment_shell
+        .and_then(OsStr::to_str)
+        .unwrap_or("cmd.exe")
+        .to_owned()
+}
+
+#[cfg(unix)]
+fn terminal_shell_for_session(
+    engine: &MuxEngine,
+    session: SessionId,
+) -> Result<String, ServerError> {
+    let shell = engine.default_shell_for_session(session)?;
+    if shell_is_valid(Path::new(shell)) {
+        Ok(shell.to_owned())
+    } else {
+        Ok("/bin/sh".to_owned())
+    }
+}
+
+#[cfg(not(unix))]
+fn terminal_shell_for_session(
+    engine: &MuxEngine,
+    session: SessionId,
+) -> Result<String, ServerError> {
+    engine.default_shell_for_session(session).map(str::to_owned)
+}
+
 fn daemon_environment() -> Vec<(String, String)> {
     let mut environment = std::env::vars_os()
         .map(|(name, value)| {
@@ -1707,6 +1809,15 @@ impl Shared {
         K: Into<String>,
         V: Into<String>,
     {
+        let environment = environment
+            .into_iter()
+            .map(|(name, value)| (name.into(), value.into()))
+            .collect::<Vec<(String, String)>>();
+        let default_shell = resolve_runtime_default_shell(
+            environment
+                .iter()
+                .find_map(|(name, value)| (name == "SHELL").then(|| OsStr::new(value))),
+        );
         let mut state = ServerState {
             active_color_scheme: appearance.color_scheme,
             appearance,
@@ -1717,6 +1828,7 @@ impl Shared {
             .engine
             .set_default_mode_keys(default_mode_keys)
             .expect("daemon mode-keys default is valid");
+        state.engine.initialize_default_shell(default_shell);
         state.engine.seed_global_environment(environment);
         let (host, host_short) = host_names();
         state.engine.set_format_server_context(
@@ -2399,9 +2511,12 @@ impl Shared {
             let facts = format_hook_facts(&inner);
             let mut hooks = DaemonFormatHooks::command(&facts);
             inner.engine.set_format_now(unix_timestamp());
-            let execution = inner
-                .engine
-                .execute_with_format_hooks(context, command, &mut hooks)?;
+            let execution = inner.engine.execute_with_shell_validator(
+                context,
+                command,
+                &mut hooks,
+                &mut |shell| shell_is_valid(Path::new(shell)),
+            )?;
             if !inner.engine.state.sessions.is_empty() {
                 self.exit_empty_armed.store(true, Ordering::Release);
             }
@@ -2516,6 +2631,18 @@ impl Shared {
                             .window_for_pane(*pane)
                             .map(|window| inner.engine.state.windows[&window].session)
                             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+                        let command = if let Some(command) =
+                            command.clone().filter(|command| !command.is_empty())
+                        {
+                            Some(command)
+                        } else {
+                            let default = inner.engine.default_command_for_session(pane_session)?;
+                            (!default.is_empty()).then(|| vec![default.to_owned()])
+                        };
+                        inner
+                            .engine
+                            .set_pane_start_command(*pane, command.clone().unwrap_or_default())?;
+                        let shell = Some(terminal_shell_for_session(&inner.engine, pane_session)?);
                         let mut env =
                             terminal_environment_for_session(&inner.engine, pane_session)?;
                         env.extend([
@@ -2531,7 +2658,8 @@ impl Shared {
                         }
                         let spawn = TerminalSpawn {
                             working_directory: working_directory.clone(),
-                            command: command.clone(),
+                            command,
+                            shell,
                             terminal_type: Some(
                                 inner.engine.default_terminal_for_spawn().to_owned(),
                             ),
@@ -2623,6 +2751,14 @@ impl Shared {
                             .window_for_pane(*pane)
                             .map(|window| inner.engine.state.windows[&window].session)
                             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+                        let command = command
+                            .clone()
+                            .filter(|command| !command.is_empty())
+                            .or_else(|| previous.command.clone());
+                        let shell = match previous.shell.clone() {
+                            Some(shell) => Some(shell),
+                            None => Some(terminal_shell_for_session(&inner.engine, pane_session)?),
+                        };
                         let mut env =
                             terminal_environment_for_session(&inner.engine, pane_session)?;
                         env.extend([
@@ -2643,7 +2779,8 @@ impl Shared {
                         }
                         let spawn = TerminalSpawn {
                             working_directory: working_directory.clone(),
-                            command: command.clone().or(previous.command),
+                            command,
+                            shell,
                             terminal_type: Some(
                                 inner.engine.default_terminal_for_spawn().to_owned(),
                             ),
@@ -3408,7 +3545,25 @@ impl Shared {
                 .ok_or(ServerError::PaneExited(pane))?;
             (pane, terminal)
         };
-        let output = match terminal.capture(parsed.options) {
+        let capture = match terminal.capture(parsed.options) {
+            Err(TerminalCaptureError::ActorStopped) => {
+                let retained = {
+                    let inner = self.inner.lock();
+                    inner
+                        .terminals
+                        .get(&pane)
+                        .is_some_and(|current| Arc::ptr_eq(current, &terminal))
+                        && inner.engine.state.pane(pane).is_some_and(|pane| pane.dead)
+                };
+                if retained {
+                    terminal.capture_frozen_frame(parsed.options)
+                } else {
+                    Err(TerminalCaptureError::ActorStopped)
+                }
+            }
+            result => result,
+        };
+        let output = match capture {
             Ok(output) => output,
             Err(TerminalCaptureError::AlternateUnavailable) if parsed.quiet => String::new(),
             Err(TerminalCaptureError::ActorStopped) => {
@@ -12127,6 +12282,42 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn checkshell_rejects_relative_non_executable_and_own_binary_paths() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        assert!(!shell_is_valid_for_program(
+            Path::new("sh"),
+            OsStr::new("zz")
+        ));
+
+        let non_executable = directory.path().join("not-executable");
+        fs::write(&non_executable, []).expect("write non-executable shell");
+        fs::set_permissions(&non_executable, fs::Permissions::from_mode(0o600))
+            .expect("set non-executable permissions");
+        assert!(!shell_is_valid_for_program(
+            &non_executable,
+            OsStr::new("zz")
+        ));
+
+        let own_binary = directory.path().join("zz-shell-test");
+        fs::write(&own_binary, []).expect("write own binary");
+        fs::set_permissions(&own_binary, fs::Permissions::from_mode(0o700))
+            .expect("set own binary permissions");
+        assert!(!shell_is_valid_for_program(
+            &own_binary,
+            OsStr::new("-zz-shell-test")
+        ));
+
+        let valid = directory.path().join("valid-shell");
+        fs::write(&valid, []).expect("write valid shell");
+        fs::set_permissions(&valid, fs::Permissions::from_mode(0o700))
+            .expect("set valid shell permissions");
+        assert!(shell_is_valid_for_program(&valid, OsStr::new("zz")));
+    }
+
     #[test]
     fn configured_engine_receives_boot_defaults_before_initialization() {
         let shared = Shared::configured_with_boot_environment(
@@ -12152,6 +12343,313 @@ mod tests {
                 .output,
             "PHASE4D_BOOT=seeded"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn default_shell_readback_is_the_resolved_runtime_value() {
+        let shared = Shared::new(1);
+        let mut inner = shared.inner.lock();
+        let readback = inner
+            .engine
+            .execute(
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("show-options", ["-gv", "default-shell"]),
+            )
+            .expect("default-shell readback")
+            .output;
+        assert!(readback.starts_with('/'));
+        assert!(shell_is_valid(Path::new(&readback)));
+        assert_eq!(readback, inner.engine.global_default_shell());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn default_shell_rejects_invalid_values_and_unset_controls_the_child_shell() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        let initial = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("show-options", ["-gv", "default-shell"]),
+            )
+            .expect("read initial default-shell")
+            .output;
+        let current_exe = std::env::current_exe()
+            .expect("current test executable")
+            .to_string_lossy()
+            .into_owned();
+        for invalid in [
+            "/nonexistent/sh",
+            "relative/sh",
+            "/etc/passwd",
+            "",
+            current_exe.as_str(),
+        ] {
+            let error = shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-option", ["-g", "default-shell", invalid]),
+                )
+                .expect_err("invalid default-shell accepted");
+            assert!(matches!(
+                error,
+                DaemonError::Server(ServerError::InvalidCommand(message))
+                    if message == format!("not a suitable shell: {invalid}")
+            ));
+            assert_eq!(
+                shared
+                    .execute(
+                        ClientId(7),
+                        ClientKind::Command,
+                        &mut context,
+                        &CommandInvocation::new("show-options", ["-gv", "default-shell"]),
+                    )
+                    .expect("read unchanged default-shell")
+                    .output,
+                initial
+            );
+        }
+
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "default-shell", "/bin/sh"]),
+            )
+            .expect("set valid default-shell");
+        let error = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-ga", "default-shell", "-invalid"]),
+            )
+            .expect_err("invalid appended default-shell accepted");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "not a suitable shell: /bin/sh-invalid"
+        ));
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-gu", "default-shell"]),
+            )
+            .expect("unset global default-shell");
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-options", ["-gv", "default-shell"]),
+                )
+                .expect("read unset default-shell")
+                .output,
+            "/bin/sh"
+        );
+
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["-g", "remain-on-exit", "on"]),
+            )
+            .expect("enable retained exits");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "shell-after-unset"]),
+            )
+            .expect("create default-shell pane");
+        let pane = context.pane.expect("default-shell pane");
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !matches!(terminal.latest_viewport().status, SessionStatus::Running) {
+            assert!(
+                Instant::now() < deadline,
+                "default-shell pane did not start"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        terminal.send_text("printf 'ZZ_DEFAULT_SHELL=%s\\n' \"$SHELL\"; exit\n");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(pane)
+                .is_some_and(|pane| pane.dead && pane.dead_status == Some(0))
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "default-shell pane did not exit");
+            thread::sleep(Duration::from_millis(10));
+        }
+        let capture = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("capture-pane", ["-p", "-t", &pane.to_string()]),
+            )
+            .expect("capture default-shell pane")
+            .output;
+        assert!(capture.contains("ZZ_DEFAULT_SHELL=/bin/sh"), "{capture:?}");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-session", ["-t", "shell-after-unset"]),
+            )
+            .expect("remove default-shell fixture");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn default_command_is_injected_only_when_nonempty_at_create() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "default-command", "sleep 30"]),
+            )
+            .expect("set default-command");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "with-default-command"]),
+            )
+            .expect("create session with default-command");
+        let pane = context.pane.expect("default-command pane");
+        assert_eq!(
+            shared.inner.lock().terminal_spawns[&pane]
+                .command
+                .as_deref(),
+            Some(["sleep 30".to_owned()].as_slice())
+        );
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-session", ["-t", "with-default-command"]),
+            )
+            .expect("remove default-command session");
+
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-gu", "default-command"]),
+            )
+            .expect("unset default-command");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "without-default-command"]),
+            )
+            .expect("create session without default-command");
+        let pane = context.pane.expect("integrated-shell pane");
+        assert!(shared.inner.lock().terminal_spawns[&pane].command.is_none());
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-session", ["-t", "without-default-command"]),
+            )
+            .expect("remove integrated-shell session");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn respawn_with_new_argv_reuses_the_creation_shell() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "default-shell", "/bin/sh"]),
+            )
+            .expect("set creation shell");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "respawn-shell", "--", "sleep", "30"],
+                ),
+            )
+            .expect("create respawn pane");
+        let pane = context.pane.expect("respawn pane");
+        assert_eq!(
+            shared.inner.lock().terminal_spawns[&pane].shell.as_deref(),
+            Some("/bin/sh")
+        );
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "default-shell", "/usr/bin/false"]),
+            )
+            .expect("change current default-shell");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "respawn-pane",
+                    ["-k", "-t", &pane.to_string(), "--", "sleep", "29"],
+                ),
+            )
+            .expect("respawn with new argv");
+        let inner = shared.inner.lock();
+        assert_eq!(
+            inner.terminal_spawns[&pane].command.as_deref(),
+            Some(["sleep".to_owned(), "29".to_owned()].as_slice())
+        );
+        assert_eq!(
+            inner.terminal_spawns[&pane].shell.as_deref(),
+            Some("/bin/sh")
+        );
+        drop(inner);
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-session", ["-t", "respawn-shell"]),
+            )
+            .expect("remove respawn fixture");
     }
 
     #[test]
@@ -12613,6 +13111,16 @@ mod tests {
         assert_eq!(delivered, pane);
         assert_eq!(viewport.status, SessionStatus::exited(7, None));
         assert!(viewport_text(&viewport).contains("ZZ_DEAD_FRAME"));
+        let captured = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("capture-pane", ["-p", "-t", &pane.to_string()]),
+            )
+            .expect("capture retained dead pane")
+            .output;
+        assert_eq!(captured.trim_end(), "ZZ_DEAD_FRAME");
 
         let previous = Arc::clone(&shared.inner.lock().terminals[&pane]);
         shared
@@ -12636,7 +13144,7 @@ mod tests {
             assert_eq!(replacement.foreground_process_id(), None);
             assert_eq!(
                 inner.terminal_spawns[&pane].command.as_deref(),
-                Some("sleep 30")
+                Some(["sleep 30".to_owned()].as_slice())
             );
             replacement
         };
@@ -12673,7 +13181,7 @@ mod tests {
             assert_eq!(inner.engine.state.windows[&window].layout.project(), layout);
             assert_eq!(
                 inner.terminal_spawns[&pane].command.as_deref(),
-                Some("sleep 30")
+                Some(["sleep 30".to_owned()].as_slice())
             );
         }
 
@@ -12685,6 +13193,117 @@ mod tests {
                 &CommandInvocation::new("kill-pane", ["-t", &pane.to_string()]),
             )
             .expect("clean up respawned pane");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn direct_spawn_failure_is_retained_with_status_one_and_no_output() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["-g", "remain-on-exit", "on"]),
+            )
+            .expect("enable retained exits");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "spawn-failure-fixture", "--", "sleep", "30"],
+                ),
+            )
+            .expect("create fixture session");
+        let execution = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-window",
+                    [
+                        "-d",
+                        "-t",
+                        "spawn-failure-fixture",
+                        "--",
+                        "nosuchcmd-zz",
+                        "extraarg",
+                    ],
+                ),
+            )
+            .expect("create direct spawn failure");
+        let pane = execution
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+            .expect("failed pane id");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(pane)
+                .is_some_and(|pane| pane.dead && pane.dead_status == Some(1))
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "spawn failure did not become retained-dead with status one"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "list-panes",
+                        [
+                            "-t",
+                            &pane.to_string(),
+                            "-F",
+                            "#{pane_dead}:#{pane_dead_status}",
+                        ],
+                    ),
+                )
+                .expect("read failed pane status")
+                .output,
+            "1:1"
+        );
+        assert!(
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("capture-pane", ["-p", "-t", &pane.to_string()]),
+                )
+                .expect("capture failed pane")
+                .output
+                .trim()
+                .is_empty()
+        );
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-session", ["-t", "spawn-failure-fixture"]),
+            )
+            .expect("remove spawn failure fixture");
     }
 
     #[cfg(unix)]

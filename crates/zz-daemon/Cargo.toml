@@ -67,7 +67,7 @@ security-framework-sys = "2.17"
 
 [target.'cfg(unix)'.dependencies]
 async-signal = { workspace = true, optional = true }
-rustix.workspace = true
+rustix = { workspace = true, features = ["fs"] }
 
 [lints]
 workspace = true

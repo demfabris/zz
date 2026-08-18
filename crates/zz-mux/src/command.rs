@@ -58,6 +58,7 @@ const DEFAULT_MOUSE: bool = true;
 const DEFAULT_ESCAPE_TIME_MS: u32 = 10;
 const DEFAULT_AUTOMATIC_RENAME_FORMAT: &str =
     "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}";
+const DEFAULT_SHELL: &str = "/bin/sh";
 const DEFAULT_TERMINAL: &str = "tmux-256color";
 const DEFAULT_DISPLAY_TIME_MS: u32 = 750;
 const DEFAULT_INITIAL_REPEAT_TIME_MS: u32 = 0;
@@ -92,21 +93,19 @@ pub enum MuxEffect {
         kind: PaneKindSnapshot,
         inherit_cwd_from: Option<PaneId>,
         cwd: Option<String>,
-        /// tmux-style shell command for terminal panes; `None` runs the
-        /// default shell. Always `None` for other kinds.
-        command: Option<String>,
+        command: Option<Vec<String>>,
     },
     PaneMaterialized {
         pane: PaneId,
         kind: PaneKindSnapshot,
         inherit_cwd_from: Option<PaneId>,
         cwd: Option<String>,
-        command: Option<String>,
+        command: Option<Vec<String>>,
     },
     PaneRespawned {
         pane: PaneId,
         cwd: Option<String>,
-        command: Option<String>,
+        command: Option<Vec<String>>,
         environment: Vec<(String, String)>,
         empty: bool,
     },
@@ -409,6 +408,10 @@ pub struct MuxEngine {
     global_remain_on_exit: RemainOnExit,
     window_remain_on_exit: BTreeMap<WindowId, RemainOnExit>,
     pane_remain_on_exit: BTreeMap<PaneId, RemainOnExit>,
+    global_default_command: String,
+    session_default_commands: BTreeMap<SessionId, String>,
+    global_default_shell: String,
+    session_default_shells: BTreeMap<SessionId, String>,
     default_terminal: Option<String>,
     global_display_time_ms: u32,
     session_display_time_ms: BTreeMap<SessionId, u32>,
@@ -434,6 +437,7 @@ pub struct MuxEngine {
     format_uid: String,
     format_user: String,
     pane_runtime_facts: BTreeMap<PaneId, PaneRuntimeFacts>,
+    pane_start_commands: BTreeMap<PaneId, Vec<String>>,
     experimental_agent_pane: bool,
     experimental_editor_pane: bool,
     agent: AgentOptions,
@@ -498,6 +502,10 @@ impl Default for MuxEngine {
             global_remain_on_exit: RemainOnExit::default(),
             window_remain_on_exit: BTreeMap::new(),
             pane_remain_on_exit: BTreeMap::new(),
+            global_default_command: String::new(),
+            session_default_commands: BTreeMap::new(),
+            global_default_shell: DEFAULT_SHELL.to_owned(),
+            session_default_shells: BTreeMap::new(),
             default_terminal: None,
             global_display_time_ms: DEFAULT_DISPLAY_TIME_MS,
             session_display_time_ms: BTreeMap::new(),
@@ -523,6 +531,7 @@ impl Default for MuxEngine {
             format_uid: String::new(),
             format_user: String::new(),
             pane_runtime_facts: BTreeMap::new(),
+            pane_start_commands: BTreeMap::new(),
             experimental_agent_pane: false,
             experimental_editor_pane: false,
             agent: AgentOptions::default(),
@@ -584,6 +593,75 @@ impl MuxEngine {
     pub fn set_default_mode_keys(&mut self, value: &str) -> Result<(), ServerError> {
         self.global_mode_keys = parse_mode_keys(Some(value), self.global_mode_keys)?;
         Ok(())
+    }
+
+    pub fn initialize_default_shell(&mut self, value: impl Into<String>) {
+        self.global_default_shell = value.into();
+    }
+
+    pub fn global_default_shell(&self) -> &str {
+        &self.global_default_shell
+    }
+
+    pub fn default_shell_for_session(&self, session: SessionId) -> Result<&str, ServerError> {
+        if !self.state.sessions.contains_key(&session) {
+            return Err(ServerError::MissingTarget(session.to_string()));
+        }
+        Ok(self
+            .session_default_shells
+            .get(&session)
+            .map_or(self.global_default_shell.as_str(), String::as_str))
+    }
+
+    pub fn default_command_for_session(&self, session: SessionId) -> Result<&str, ServerError> {
+        if !self.state.sessions.contains_key(&session) {
+            return Err(ServerError::MissingTarget(session.to_string()));
+        }
+        Ok(self
+            .session_default_commands
+            .get(&session)
+            .map_or(self.global_default_command.as_str(), String::as_str))
+    }
+
+    pub fn set_pane_start_command(
+        &mut self,
+        pane: PaneId,
+        command: Vec<String>,
+    ) -> Result<(), ServerError> {
+        if self.state.pane(pane).is_none() {
+            return Err(ServerError::MissingTarget(pane.to_string()));
+        }
+        self.pane_start_commands.insert(pane, command);
+        Ok(())
+    }
+
+    pub(crate) fn pane_start_command(&self, pane: PaneId) -> Option<&[String]> {
+        self.pane_start_commands.get(&pane).map(Vec::as_slice)
+    }
+
+    fn retain_pane_start_commands(&mut self, effects: &[MuxEffect]) {
+        for effect in effects {
+            match effect {
+                MuxEffect::PaneCreated { pane, command, .. }
+                | MuxEffect::PaneMaterialized { pane, command, .. } => {
+                    self.pane_start_commands
+                        .insert(*pane, command.clone().unwrap_or_default());
+                }
+                MuxEffect::PaneRespawned {
+                    pane,
+                    command: Some(command),
+                    ..
+                } if !command.is_empty() => {
+                    self.pane_start_commands.insert(*pane, command.clone());
+                }
+                MuxEffect::PanesRemoved(panes) => {
+                    for pane in panes {
+                        self.pane_start_commands.remove(pane);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     pub fn seed_global_environment<I, K, V>(&mut self, entries: I)
@@ -1073,6 +1151,16 @@ impl MuxEngine {
         command: &CommandInvocation,
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
+        self.execute_with_shell_validator(context, command, hooks, &mut |_| true)
+    }
+
+    pub fn execute_with_shell_validator(
+        &mut self,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+        hooks: &mut impl StatusHooks,
+        default_shell_is_valid: &mut impl FnMut(&str) -> bool,
+    ) -> Result<Execution, ServerError> {
         let generation = self.state.generation();
         let name = canonical_command(&command.name);
         let mut execution = match name {
@@ -1149,8 +1237,12 @@ impl MuxEngine {
             "unbind-key" => self.unbind_key(&command.args)?,
             "list-keys" => self.list_keys(&command.args)?,
             "list-commands" => self.list_commands(context, &command.args, hooks)?,
-            "set-option" => self.set_option(context, &command.args, false, hooks)?,
-            "set-window-option" => self.set_option(context, &command.args, true, hooks)?,
+            "set-option" => {
+                self.set_option(context, &command.args, false, hooks, default_shell_is_valid)?
+            }
+            "set-window-option" => {
+                self.set_option(context, &command.args, true, hooks, default_shell_is_valid)?
+            }
             "show-options" => self.show_options(context, &command.args, false)?,
             "show-window-options" => self.show_options(context, &command.args, true)?,
             "set-environment" => self.set_environment(context, &command.args, hooks)?,
@@ -1178,6 +1270,7 @@ impl MuxEngine {
             _ => return Err(ServerError::UnsupportedCommand(command.name.clone())),
         };
 
+        self.retain_pane_start_commands(&execution.effects);
         let created_panes = execution
             .effects
             .iter()
@@ -1210,13 +1303,17 @@ impl MuxEngine {
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_repeat_time_ms
             .retain(|session, _| self.state.sessions.contains_key(session));
+        self.session_default_commands
+            .retain(|session, _| self.state.sessions.contains_key(session));
+        self.session_default_shells
+            .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_user_options
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.window_user_options
             .retain(|window, _| self.state.windows.contains_key(window));
         self.pane_user_options
             .retain(|pane, _| self.state.pane(*pane).is_some());
-        self.pane_runtime_facts
+        self.pane_start_commands
             .retain(|pane, _| self.state.pane(*pane).is_some());
         self.session_environments
             .retain(|session, _| self.state.sessions.contains_key(session));
@@ -1493,7 +1590,7 @@ impl MuxEngine {
         context: &mut ExecutionContext,
         options: &Options,
         kind: PaneKind,
-        command: Option<String>,
+        command: Option<Vec<String>>,
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let destination = window_destination(&self.state, options.value("-t"), context)?;
@@ -2509,7 +2606,7 @@ impl MuxEngine {
         context: &mut ExecutionContext,
         options: &Options,
         kind: PaneKind,
-        command: Option<String>,
+        command: Option<Vec<String>>,
         size: Option<SplitSize<'_>>,
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
@@ -3698,6 +3795,7 @@ impl MuxEngine {
         args: &[String],
         force_window: bool,
         hooks: &mut impl StatusHooks,
+        default_shell_is_valid: &mut impl FnMut(&str) -> bool,
     ) -> Result<Execution, ServerError> {
         let command = if force_window {
             "set-window-option"
@@ -3784,6 +3882,13 @@ impl MuxEngine {
             "automatic-rename-format" => self.set_automatic_rename_format(value, &options, target),
             "remain-on-exit" => self.set_remain_on_exit(value, &options, target),
             "default-terminal" => self.set_default_terminal(value, &options),
+            "default-command" | "default-shell" => self.set_spawn_string_option(
+                table_option.name,
+                value,
+                &options,
+                target,
+                default_shell_is_valid,
+            ),
             "display-time" | "initial-repeat-time" | "repeat-time" => {
                 self.set_behavior_time(table_option.name, value, &options, target)
             }
@@ -4215,6 +4320,16 @@ impl MuxEngine {
                 .or_else(|| option.default.map(|default| default.value().to_owned()))
                 .map(|value| (value, false)),
             TmuxOptionTarget::Session(session) => match option.name {
+                "default-command" => self
+                    .session_default_commands
+                    .get(&session)
+                    .map(|value| (value.clone(), false))
+                    .or_else(inherited),
+                "default-shell" => self
+                    .session_default_shells
+                    .get(&session)
+                    .map(|value| (value.clone(), false))
+                    .or_else(inherited),
                 "mouse" => self
                     .session_mouse
                     .get(&session)
@@ -4337,6 +4452,8 @@ impl MuxEngine {
 
     fn global_tmux_option_value(&self, name: &str) -> Option<String> {
         Some(match name {
+            "default-command" => self.global_default_command.clone(),
+            "default-shell" => self.global_default_shell.clone(),
             "default-terminal" => self
                 .default_terminal
                 .clone()
@@ -5498,6 +5615,100 @@ impl MuxEngine {
         Ok(Execution::default())
     }
 
+    fn set_spawn_string_option(
+        &mut self,
+        option: &str,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+        default_shell_is_valid: &mut impl FnMut(&str) -> bool,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            let already = match (option, target) {
+                ("default-command" | "default-shell", TmuxOptionTarget::GlobalSession) => true,
+                ("default-command", TmuxOptionTarget::Session(session)) => {
+                    self.session_default_commands.contains_key(&session)
+                }
+                ("default-shell", TmuxOptionTarget::Session(session)) => {
+                    self.session_default_shells.contains_key(&session)
+                }
+                _ => unreachable!("spawn strings have session scope"),
+            };
+            if already {
+                return already_set_or_quiet(options, option);
+            }
+        }
+        let value = if unset {
+            None
+        } else {
+            Some(value.ok_or_else(|| {
+                ServerError::InvalidCommand(format!("set-option {option} needs a value"))
+            })?)
+        };
+        match (option, target) {
+            ("default-command", TmuxOptionTarget::GlobalSession) => {
+                if let Some(value) = value {
+                    if options.has("-a") {
+                        self.global_default_command.push_str(value);
+                    } else {
+                        value.clone_into(&mut self.global_default_command);
+                    }
+                } else {
+                    self.global_default_command.clear();
+                }
+            }
+            ("default-command", TmuxOptionTarget::Session(session)) => {
+                if let Some(value) = value {
+                    let next = if options.has("-a") {
+                        format!("{}{value}", self.default_command_for_session(session)?)
+                    } else {
+                        value.to_owned()
+                    };
+                    self.session_default_commands.insert(session, next);
+                } else {
+                    self.session_default_commands.remove(&session);
+                }
+            }
+            ("default-shell", TmuxOptionTarget::GlobalSession) => {
+                if let Some(value) = value {
+                    let next = if options.has("-a") {
+                        format!("{}{value}", self.global_default_shell)
+                    } else {
+                        value.to_owned()
+                    };
+                    if !default_shell_is_valid(&next) {
+                        return Err(ServerError::InvalidCommand(format!(
+                            "not a suitable shell: {next}"
+                        )));
+                    }
+                    self.global_default_shell = next;
+                } else {
+                    DEFAULT_SHELL.clone_into(&mut self.global_default_shell);
+                }
+            }
+            ("default-shell", TmuxOptionTarget::Session(session)) => {
+                if let Some(value) = value {
+                    let next = if options.has("-a") {
+                        format!("{}{value}", self.default_shell_for_session(session)?)
+                    } else {
+                        value.to_owned()
+                    };
+                    if !default_shell_is_valid(&next) {
+                        return Err(ServerError::InvalidCommand(format!(
+                            "not a suitable shell: {next}"
+                        )));
+                    }
+                    self.session_default_shells.insert(session, next);
+                } else {
+                    self.session_default_shells.remove(&session);
+                }
+            }
+            _ => unreachable!("spawn strings have session scope"),
+        }
+        Ok(Execution::default())
+    }
+
     fn set_behavior_time(
         &mut self,
         option: &str,
@@ -6383,8 +6594,8 @@ fn window_active_pane(state: &MuxState, window: WindowId) -> Result<PaneId, Serv
         .ok_or_else(|| ServerError::MissingTarget(window.to_string()))
 }
 
-fn shell_command_positional(positional: &[String]) -> Option<String> {
-    (!positional.is_empty()).then(|| positional.join(" "))
+fn shell_command_positional(positional: &[String]) -> Option<Vec<String>> {
+    (!positional.is_empty()).then(|| positional.to_vec())
 }
 
 fn spawn_cwd_source(
@@ -9888,10 +10099,24 @@ mod tests {
             Some(MuxEffect::PaneCreated {
                 command: Some(command),
                 ..
-            }) if command == "echo -n hello"
+            }) if command.as_slice() == ["echo", "-n", "hello"]
         ));
         let window = &engine.state.windows[&context.window.unwrap()];
         assert_eq!(window.name, window.index.to_string());
+
+        let single = engine
+            .execute(
+                &mut context,
+                &command("new-window", &["printf '%s' \"$HOME\""]),
+            )
+            .unwrap();
+        assert!(matches!(
+            single.effects.first(),
+            Some(MuxEffect::PaneCreated {
+                command: Some(command),
+                ..
+            }) if command.as_slice() == ["printf '%s' \"$HOME\""]
+        ));
 
         let sent = engine
             .execute(&mut context, &command("send-keys", &["ls", "-la", "Enter"]))
@@ -9921,6 +10146,48 @@ mod tests {
             )
             .unwrap();
         assert_eq!(engine.status.format(StatusOption::Left), Some("-foo"));
+    }
+
+    #[test]
+    fn pane_start_command_formats_render_retained_argv() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        let created = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-s", "work", "printf", "a b", "it's", "$HOME", ""],
+                ),
+            )
+            .unwrap();
+        assert!(matches!(
+            created.effects.first(),
+            Some(MuxEffect::PaneCreated {
+                command: Some(command),
+                ..
+            }) if command.as_slice() == ["printf", "a b", "it's", "$HOME", ""]
+        ));
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("display-message", &["-p", "#{pane_start_command}"]),
+                )
+                .unwrap()
+                .output,
+            r#"printf "a b" "it's" "\$HOME" ''"#
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("display-message", &["-p", "#{pane_start_command_list}"],),
+                )
+                .unwrap()
+                .output,
+            r"'printf' 'a b' 'it'\''s' '$HOME' ''"
+        );
     }
 
     #[test]
@@ -10981,7 +11248,7 @@ mod tests {
                 MuxEffect::SnapshotChanged,
             ] if *actual == pane
                 && cwd == "/tmp"
-                && command == "printf ready"
+                && command.as_slice() == ["printf ready"]
                 && environment == &vec![("ONE".to_owned(), "1".to_owned()), ("TWO".to_owned(), "2".to_owned())]
         ));
         assert_eq!(engine.state.windows[&window].layout.project(), layout);
@@ -11062,7 +11329,7 @@ mod tests {
                 command: Some(command),
                 empty: true,
                 ..
-            }, MuxEffect::SnapshotChanged] if *actual == pane && command == "printf ready"
+            }, MuxEffect::SnapshotChanged] if *actual == pane && command.as_slice() == ["printf ready"]
         ));
         let pane_state = engine.state.pane(pane).unwrap();
         assert!(!pane_state.dead);
@@ -11084,6 +11351,24 @@ mod tests {
             }, MuxEffect::SnapshotChanged] if *actual == pane
         ));
         assert!(!engine.state.pane(pane).unwrap().empty);
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &[
+                            "-p",
+                            "-t",
+                            &pane.to_string(),
+                            "#{pane_start_command}|#{pane_start_command_list}",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "\"printf ready\"|'printf ready'"
+        );
     }
 
     #[test]
@@ -11135,15 +11420,109 @@ mod tests {
     }
 
     #[test]
+    fn default_shell_is_concrete_validated_and_unsets_to_the_table_default() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gv", "default-shell"]),
+                )
+                .unwrap()
+                .output,
+            "/bin/sh"
+        );
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+        let mut hooks = CommandHooks::new(0);
+        let mut valid = |shell: &str| matches!(shell, "/bin/sh" | "/valid-shell");
+
+        engine
+            .execute_with_shell_validator(
+                &mut context,
+                &command("set-option", &["-g", "default-shell", "/valid-shell"]),
+                &mut hooks,
+                &mut valid,
+            )
+            .unwrap();
+        assert_eq!(
+            engine.default_shell_for_session(session).unwrap(),
+            "/valid-shell"
+        );
+
+        assert!(matches!(
+            engine.execute_with_shell_validator(
+                &mut context,
+                &command("set-option", &["-g", "default-shell", "/invalid"]),
+                &mut hooks,
+                &mut valid,
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "not a suitable shell: /invalid"
+        ));
+        assert_eq!(engine.global_default_shell(), "/valid-shell");
+
+        assert!(matches!(
+            engine.execute_with_shell_validator(
+                &mut context,
+                &command("set-option", &["-ga", "default-shell", "-invalid"]),
+                &mut hooks,
+                &mut valid,
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "not a suitable shell: /valid-shell-invalid"
+        ));
+        assert_eq!(engine.global_default_shell(), "/valid-shell");
+
+        engine
+            .execute_with_shell_validator(
+                &mut context,
+                &command("set-option", &["default-shell", "/bin/sh"]),
+                &mut hooks,
+                &mut valid,
+            )
+            .unwrap();
+        assert_eq!(
+            engine.default_shell_for_session(session).unwrap(),
+            "/bin/sh"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-u", "default-shell"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.default_shell_for_session(session).unwrap(),
+            "/valid-shell"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-gu", "default-shell"]),
+            )
+            .unwrap();
+        assert_eq!(engine.global_default_shell(), "/bin/sh");
+        assert_eq!(
+            engine.default_shell_for_session(session).unwrap(),
+            "/bin/sh"
+        );
+    }
+
+    #[test]
     fn option_table_defaults_match_the_engine_except_history_limit() {
         let engine = MuxEngine::default();
         let mismatches = tmux_options()
             .filter_map(|option| option.default.map(|default| (option, default)))
             .filter_map(|(option, default)| {
+                let expected = default.value();
                 let runtime = engine
                     .global_tmux_option_value(option.name)
                     .unwrap_or_else(|| panic!("missing runtime default for {}", option.name));
-                (runtime != default.value()).then_some(option.name)
+                (runtime != expected).then_some(option.name)
             })
             .collect::<BTreeSet<_>>();
 

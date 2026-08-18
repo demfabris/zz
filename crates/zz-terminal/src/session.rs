@@ -371,9 +371,8 @@ impl PublishedViewports {
 #[derive(Clone, Debug, Default)]
 pub struct TerminalSpawn {
     pub working_directory: Option<PathBuf>,
-    /// tmux-style shell command run under `sh -c`; the pane closes when it
-    /// exits. `None` spawns the interactive default shell.
-    pub command: Option<String>,
+    pub command: Option<Vec<String>>,
+    pub shell: Option<String>,
     pub terminal_type: Option<String>,
     /// Extra environment (`ZZ_PANE` etc.) layered over the defaults.
     pub env: Vec<(String, Option<String>)>,
@@ -897,6 +896,13 @@ impl TerminalSession {
                     TerminalCaptureError::ActorStopped
                 }
             })?
+    }
+
+    pub fn capture_frozen_frame(
+        &self,
+        options: CaptureOptions,
+    ) -> Result<String, TerminalCaptureError> {
+        capture_viewport(&self.latest_viewport(), options)
     }
 
     /// Copies one absolute span of retained primary-screen history without moving
@@ -2454,6 +2460,8 @@ impl PtyEffects {
 enum WorkerError {
     #[error("thread error: {0}")]
     Thread(String),
+    #[error("spawn error: {0}")]
+    Spawn(String),
     #[error("PTY error: {0}")]
     Pty(String),
     #[error("terminal emulation error: {0}")]
@@ -2565,28 +2573,32 @@ impl Publisher {
         }
     }
 
-    fn fail(&self, error: &WorkerError) {
+    fn set_status(&self, status: &SessionStatus) {
         let (fallback, by_view) = {
             let latest = self.latest.read();
             (Arc::clone(&latest.fallback), latest.by_view.clone())
         };
-        let failed = |viewport: &TerminalViewport| {
+        let update = |viewport: &TerminalViewport| {
             let mut viewport = viewport.clone();
             viewport.generation = viewport.generation.saturating_add(1);
             viewport.view_generation = viewport.view_generation.saturating_add(1);
-            viewport.status = SessionStatus::failed(error.to_string());
+            viewport.status = status.clone();
             viewport
         };
         if by_view.is_empty() {
-            self.publish(failed(&fallback));
+            self.publish(update(&fallback));
         } else {
             self.publish_viewports(
                 by_view
                     .into_iter()
-                    .map(|(view, viewport)| (view, failed(&viewport)))
+                    .map(|(view, viewport)| (view, update(&viewport)))
                     .collect(),
             );
         }
+    }
+
+    fn fail(&self, error: &WorkerError) {
+        self.set_status(&SessionStatus::failed(error.to_string()));
     }
 
     fn send_reliable(&self, event: TerminalEvent) -> Result<(), WorkerError> {
@@ -2738,7 +2750,11 @@ fn terminal_worker(
         wake_rx,
     ) {
         log::error!("terminal worker stopped: {error}");
-        publisher.fail(&error);
+        if matches!(&error, WorkerError::Spawn(_)) {
+            publisher.set_status(&SessionStatus::exited(1, None));
+        } else {
+            publisher.fail(&error);
+        }
     }
     publisher.set_foreground_source(None);
 }
@@ -3333,6 +3349,74 @@ fn refresh_frozen_view_appearance(
     Ok(true)
 }
 
+fn terminal_command(spawn: &TerminalSpawn) -> CommandBuilder {
+    match spawn.command.as_deref() {
+        #[cfg(windows)]
+        Some(argv) if !argv.is_empty() => {
+            let mut command = CommandBuilder::new("cmd.exe");
+            let joined = argv.join(" ");
+            command.args(["/C", joined.as_str()]);
+            command
+        }
+        #[cfg(not(windows))]
+        Some(argv) if argv.len() >= 2 => {
+            let mut command = CommandBuilder::new(&argv[0]);
+            command.args(&argv[1..]);
+            command
+        }
+        #[cfg(not(windows))]
+        Some([shell_command]) => {
+            let mut command = CommandBuilder::new(spawn.shell.as_deref().unwrap_or("/bin/sh"));
+            command.args(["-c", shell_command]);
+            command
+        }
+        _ => crate::shell_integration::default_shell_command(spawn.shell.as_deref()),
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+#[test]
+fn terminal_command_preserves_tmux_argv_shapes() {
+    let direct = terminal_command(&TerminalSpawn {
+        command: Some(vec![
+            "printf".to_owned(),
+            "%s".to_owned(),
+            "$HOME".to_owned(),
+        ]),
+        shell: Some("/bin/zsh".to_owned()),
+        ..TerminalSpawn::default()
+    });
+    assert_eq!(
+        direct.get_argv().as_slice(),
+        [
+            std::ffi::OsString::from("printf"),
+            std::ffi::OsString::from("%s"),
+            std::ffi::OsString::from("$HOME"),
+        ]
+    );
+
+    let shell = terminal_command(&TerminalSpawn {
+        command: Some(vec!["printf '%s' \"$HOME\"".to_owned()]),
+        shell: Some("/bin/zsh".to_owned()),
+        ..TerminalSpawn::default()
+    });
+    assert_eq!(
+        shell.get_argv().as_slice(),
+        [
+            std::ffi::OsString::from("/bin/zsh"),
+            std::ffi::OsString::from("-c"),
+            std::ffi::OsString::from("printf '%s' \"$HOME\""),
+        ]
+    );
+
+    let default = terminal_command(&TerminalSpawn {
+        shell: Some("/bin/sh".to_owned()),
+        ..TerminalSpawn::default()
+    });
+    assert!(default.is_default_prog());
+    assert_eq!(default.get_shell(), "/bin/sh");
+}
+
 fn run_terminal(
     control_rx: &Receiver<Command>,
     input_rx: &Receiver<QueuedInput>,
@@ -3356,18 +3440,7 @@ fn run_terminal(
     #[cfg(not(unix))]
     let tty = None;
 
-    let mut command = match spawn.command.as_deref() {
-        Some(shell_command) => {
-            #[cfg(windows)]
-            let (shell, dash_c) = ("cmd.exe", "/C");
-            #[cfg(not(windows))]
-            let (shell, dash_c) = ("/bin/sh", "-c");
-            let mut command = CommandBuilder::new(shell);
-            command.args([dash_c, shell_command]);
-            command
-        }
-        None => crate::shell_integration::default_shell_command(),
-    };
+    let mut command = terminal_command(spawn);
     command.env(
         "TERM",
         spawn.terminal_type.as_deref().unwrap_or("tmux-256color"),
@@ -3379,6 +3452,9 @@ fn run_terminal(
             command.env_remove(key);
         }
     }
+    if let Some(shell) = &spawn.shell {
+        command.env("SHELL", shell);
+    }
     command.env("COLORTERM", "truecolor");
     command.env("TERM_PROGRAM", "zz");
     command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
@@ -3389,7 +3465,7 @@ fn run_terminal(
     let mut child = pair
         .slave
         .spawn_command(command)
-        .map_err(|error| WorkerError::Pty(error.to_string()))?;
+        .map_err(|error| WorkerError::Spawn(error.to_string()))?;
     drop(pair.slave);
 
     let shell_process_id = child.process_id();
@@ -6114,6 +6190,125 @@ fn capture_terminal(
     let written = formatter.format_buf(&mut output).map_err(capture_failure)?;
     output.truncate(written);
     String::from_utf8(output).map_err(|error| TerminalCaptureError::Failed(error.to_string()))
+}
+
+fn capture_viewport(
+    viewport: &TerminalViewport,
+    options: CaptureOptions,
+) -> Result<String, TerminalCaptureError> {
+    if options.alternate {
+        return Err(TerminalCaptureError::AlternateUnavailable);
+    }
+    if options.mode && matches!(viewport.mode, TerminalMode::Live) {
+        return Err(TerminalCaptureError::ModeUnavailable);
+    }
+    let total = u64::from(viewport.rows);
+    if total == 0 {
+        return Ok(String::new());
+    }
+    let visible_end = total.saturating_sub(1);
+    let start = resolve_capture_boundary(options.start, 0, visible_end, total);
+    let end = resolve_capture_boundary(options.end, 0, visible_end, total);
+    if start > end {
+        return Ok(String::new());
+    }
+
+    let mut output = String::new();
+    for row in start..=end {
+        if options.escape_sequences {
+            capture_viewport_row_vt(
+                viewport,
+                u16::try_from(row).unwrap_or(u16::MAX),
+                options.preserve_trailing,
+                &mut output,
+            );
+        } else {
+            capture_viewport_row(
+                viewport,
+                u16::try_from(row).unwrap_or(u16::MAX),
+                options.preserve_trailing,
+                &mut output,
+            );
+        }
+        if row < end {
+            output.push('\n');
+        }
+        if output.len() > MAX_CAPTURE_BYTES {
+            return Err(TerminalCaptureError::TooLarge);
+        }
+    }
+    Ok(output)
+}
+
+fn capture_viewport_row(
+    viewport: &TerminalViewport,
+    row: u16,
+    preserve_trailing: bool,
+    output: &mut String,
+) {
+    let start = output.len();
+    for cell in viewport.row(row).unwrap_or_default() {
+        push_viewport_cell(viewport, *cell, output);
+    }
+    if !preserve_trailing {
+        let trimmed = output[start..].trim_end().len();
+        output.truncate(start.saturating_add(trimmed));
+    }
+}
+
+fn capture_viewport_row_vt(
+    viewport: &TerminalViewport,
+    row: u16,
+    preserve_trailing: bool,
+    output: &mut String,
+) {
+    let cells = viewport.row(row).unwrap_or_default();
+    let last = if preserve_trailing {
+        cells.len().checked_sub(1)
+    } else {
+        cells
+            .iter()
+            .rposition(|cell| viewport_cell_has_non_whitespace(viewport, *cell))
+    };
+    let Some(last) = last else {
+        return;
+    };
+    let mut active_style = None;
+    for cell in &cells[..=last] {
+        if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
+            continue;
+        }
+        if active_style != Some(cell.style_id()) {
+            if let Some(style) = viewport.style(*cell) {
+                mode_revision::push_sgr(output, style);
+            }
+            active_style = Some(cell.style_id());
+        }
+        push_viewport_cell(viewport, *cell, output);
+    }
+    if active_style.is_some() {
+        output.push_str("\x1b[0m");
+    }
+}
+
+fn viewport_cell_has_non_whitespace(viewport: &TerminalViewport, cell: PackedCell) -> bool {
+    !matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead)
+        && cell.glyph() != 0
+        && viewport
+            .cell_text(cell)
+            .chars()
+            .any(|character| !character.is_whitespace())
+}
+
+fn push_viewport_cell(viewport: &TerminalViewport, cell: PackedCell, output: &mut String) {
+    if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
+        return;
+    }
+    if cell.glyph() == 0 {
+        output.push(' ');
+    } else {
+        viewport.push_glyph(cell, output);
+    }
 }
 
 fn capture_mode_revision(
@@ -10033,7 +10228,7 @@ mod tests {
             DEFAULT_HISTORY_LIMIT,
             Arc::new(TerminalAppearance::default()),
             TerminalSpawn {
-                command: Some("sleep 30".to_owned()),
+                command: Some(vec!["sleep 30".to_owned()]),
                 ..TerminalSpawn::default()
             },
         ));
@@ -10110,10 +10305,10 @@ mod tests {
             DEFAULT_HISTORY_LIMIT,
             Arc::new(TerminalAppearance::default()),
             TerminalSpawn {
-                command: Some(
+                command: Some(vec![
                     "stty raw -echo; sleep 1; dd if=/dev/zero bs=262144 count=1 2>/dev/null; IFS= read -r line; printf '\\r\\nZZ_DUPLEX_DRAIN_OK\\r\\n'; sleep 30"
                         .to_owned(),
-                ),
+                ]),
                 ..TerminalSpawn::default()
             },
         );
@@ -14834,10 +15029,10 @@ mod tests {
             128,
             Arc::new(TerminalAppearance::default()),
             TerminalSpawn {
-                command: Some(
+                command: Some(vec![
                     "read _; i=0; while [ $i -lt 20 ]; do printf 'ZZH%02d\\n' \"$i\"; i=$((i+1)); done; printf 'ZZ_HISTORY_DONE\\n'; read _"
                         .to_owned(),
-                ),
+                ]),
                 ..TerminalSpawn::default()
             },
         );
@@ -14946,10 +15141,10 @@ mod tests {
             DEFAULT_HISTORY_LIMIT,
             Arc::new(TerminalAppearance::default()),
             TerminalSpawn {
-                command: Some(
+                command: Some(vec![
                     "read _; printf 'ZZ_PHASE4D_SET=%s\\n' \"$ZZ_PHASE4D_SET\"; if [ \"${ZZ_PHASE4D_REMOVE+x}\" = x ]; then printf 'ZZ_PHASE4D_REMOVE=set\\n'; else printf 'ZZ_PHASE4D_REMOVE=unset\\n'; fi; read _"
                         .to_owned(),
-                ),
+                ]),
                 env: vec![
                     ("ZZ_PHASE4D_SET".to_owned(), Some("session".to_owned())),
                     (
@@ -14991,7 +15186,7 @@ mod tests {
                     DEFAULT_HISTORY_LIMIT,
                     Arc::new(TerminalAppearance::default()),
                     TerminalSpawn {
-                        command: Some("printf 'ZZ_TERM:%s\\n' \"$TERM\"; read _".to_owned()),
+                        command: Some(vec!["printf 'ZZ_TERM:%s\\n' \"$TERM\"; read _".to_owned()]),
                         terminal_type: terminal_type.map(str::to_owned),
                         env,
                         ..TerminalSpawn::default()

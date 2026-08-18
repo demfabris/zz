@@ -49,6 +49,8 @@ pub struct StatusContext {
     pub pane_left: Option<u16>,
     pub pane_right: Option<u16>,
     pub pane_pid: Option<u32>,
+    pub pane_start_command: String,
+    pub pane_start_command_list: String,
     pub pane_start_path: String,
     pub pane_synchronized: bool,
     pub pane_title: String,
@@ -188,6 +190,8 @@ enum FormatBacking {
     PaneLeft,
     PaneRight,
     PanePid,
+    PaneStartCommand,
+    PaneStartCommandList,
     PaneStartPath,
     PaneSynchronized,
     PaneTitle,
@@ -381,8 +385,8 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_pipe_pid", Pane, Empty),
     variable!("pane_right", Pane, PaneRight),
     variable!("pane_search_string", Pane, Empty),
-    variable!("pane_start_command", Pane, Empty),
-    variable!("pane_start_command_list", Pane, Empty),
+    variable!("pane_start_command", Pane, PaneStartCommand),
+    variable!("pane_start_command_list", Pane, PaneStartCommandList),
     variable!("pane_start_path", Pane, PaneStartPath),
     variable!("pane_synchronized", Pane, PaneSynchronized),
     variable!("pane_tabs", Pane, Empty),
@@ -562,6 +566,10 @@ impl StatusContext {
             FormatBacking::PaneLeft => optional_display(self.pane_left),
             FormatBacking::PaneRight => optional_display(self.pane_right),
             FormatBacking::PanePid => optional_display(self.pane_pid),
+            FormatBacking::PaneStartCommand => Cow::Borrowed(self.pane_start_command.as_str()),
+            FormatBacking::PaneStartCommandList => {
+                Cow::Borrowed(self.pane_start_command_list.as_str())
+            }
             FormatBacking::PaneStartPath => Cow::Borrowed(self.pane_start_path.as_str()),
             FormatBacking::PaneSynchronized => Cow::Borrowed(bool_string(self.pane_synchronized)),
             FormatBacking::PaneTitle => Cow::Borrowed(self.pane_title.as_str()),
@@ -884,6 +892,18 @@ impl MuxEngine {
             .unwrap_or_default();
         context.pane_title.clone_from(&pane.title);
         context.pane_zoomed = window.zoomed_pane == Some(pane.id);
+        if let Some(command) = self.pane_start_command(pane.id) {
+            context.pane_start_command = command
+                .iter()
+                .map(|argument| quote_argument(argument))
+                .collect::<Vec<_>>()
+                .join(" ");
+            context.pane_start_command_list = command
+                .iter()
+                .map(|argument| quote_single(argument))
+                .collect::<Vec<_>>()
+                .join(" ");
+        }
         if let Some(facts) = self.pane_runtime_facts(pane.id) {
             context
                 .pane_current_command

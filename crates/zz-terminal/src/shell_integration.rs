@@ -43,8 +43,11 @@ enum Shell {
     Zsh,
 }
 
-pub(super) fn default_shell_command() -> CommandBuilder {
-    let command = CommandBuilder::new_default_prog();
+pub(super) fn default_shell_command(shell: Option<&str>) -> CommandBuilder {
+    let mut command = CommandBuilder::new_default_prog();
+    if let Some(shell) = shell {
+        command.env("SHELL", shell);
+    }
     #[cfg(any(unix, windows))]
     {
         configure_default_shell(command)

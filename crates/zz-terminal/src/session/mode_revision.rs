@@ -602,7 +602,7 @@ impl ModeRevision {
     }
 }
 
-fn push_sgr(output: &mut String, style: PackedStyle) {
+pub(super) fn push_sgr(output: &mut String, style: PackedStyle) {
     use std::fmt::Write as _;
 
     output.push_str("\x1b[0");

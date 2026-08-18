@@ -49,11 +49,16 @@ with pin-parity semantics (sticky signals, lock leak-on-disconnect, pre-parse
 output tap, pipe survives respawn); Interactive clients cannot park on blocking
 waits — they get the pin's clientless errors (scripts are faithful).
 
+`set-hook` / `show-hooks` shipped in wave 5c (`40ddd63`): full 68-name storage
+with pin scope, after-* + command-error + event hooks fire (events clientless
+like the pin), `@`-user hooks share the option slot. Ledgered: `-B` monitors
+rejected; 11 event names store-only (no zz seam); `window-layout-changed`
+single-fires where the pin double-fires on resize/select-layout.
+
 Still unimplemented and skipped from config:
 
 | Command | What it does in tmux |
 | --- | --- |
-| `set-hook` / `show-hooks` | Run commands automatically on server events. |
 | `lock-client` / `lock-server` / `lock-session` | Lock by spawning an external lock program. |
 | `server-access` | Per-user ACLs for a shared server socket. |
 

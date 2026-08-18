@@ -208,8 +208,36 @@ Shipped so far, each reviewed to CONFIRMED-CLOSED against the pin:
   final root cause was measured (VT parse was pacing the old serial path:
   55.9s of a 55.9s 2MB run), not guessed.
 
-Still to build (tiering below): the hooks bus (wave 5c, in flight),
-popups/menus/confirm-before/lock. Original tiering:
+- **Wave 5c** (`e4e6602` + `40ddd63`, CONFIRMED-CLOSED 2026-08-18) — the hooks
+  bus, both halves. 5c-1: all 68 hook names stored as array command options
+  with pin scope (57 session / 11 window; `show-hooks -g`/`-gw` listings
+  byte-identical incl. table order), set-time parsing, `-a` free-index
+  allocation with reuse-after-unset, prefix matching, `-R` immediate fire
+  (unknown silent), `@`-prefixed user hooks share the `@`-option slot exactly
+  like the pin (set-hook overwrites the option, unlisted in show-hooks, `-R`
+  parses-and-fires, parse failures swallowed), after-* fires only on success
+  at the daemon boundary with hook_arguments/hook_argument_N/hook_flag_*
+  formats, command-error on failures (hook output precedes the error text —
+  protocol v62: append-only `output` on CommandResponse::Error), NOHOOKS
+  one-level, hook output joins the TRIGGERING client. `set-hook -B` monitors
+  rejected (ledger row: pin validates the spec instead). 5c-2: event hooks
+  fire CLIENTLESS like the pin's deferred global queue (their output reaches
+  no CLI; side effects land): session-created/closed/renamed/window-changed,
+  window-linked/unlinked/renamed (incl. automatic-rename)/layout-changed/
+  resized/pane-changed, pane-died/exited (pin's 4-cell remain-on-exit matrix
+  matched)/mode-changed/title-changed, alert-bell,
+  client-attached/detached/session-changed; 3-tree lookup with per-window
+  isolation and session-shadows-window order; NOHOOKS full-drop; deferred
+  tolerance of dead subjects; boot-ordering (config-armed hooks fire for the
+  first session). Store-only (no zz seam yet; ledgered): alert-activity,
+  alert-silence, client-active, client-focus-in/out, client-resized,
+  client-light/dark-theme, pane-focus-in/out, pane-set-clipboard. Accepted
+  divergence: window-layout-changed fires once on resize-pane/select-layout
+  where the pin double-fires (under-fire, stable 3/3).
+
+Still to build (tiering below): popups/menus/confirm-before/lock (wave 5d —
+gated on a product decision: popup render surface in the GPUI client).
+Original tiering:
 
 - `run-shell`, `if-shell`, `wait-for`, `pipe-pane` — genuinely `sh -c` + effects (~1 week).
   `if-shell` is already parsed and kept (only `%if` is skipped at parse time); the upgrade is

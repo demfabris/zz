@@ -235,9 +235,46 @@ Shipped so far, each reviewed to CONFIRMED-CLOSED against the pin:
   divergence: window-layout-changed fires once on resize-pane/select-layout
   where the pin double-fires (under-fire, stable 3/3).
 
-Still to build (tiering below): popups/menus/confirm-before/lock (wave 5d —
-gated on a product decision: popup render surface in the GPUI client).
-Original tiering:
+- **Wave 5d-1** (`2a0eb23` + `bbfc9aa`, CONFIRMED-CLOSED 2026-08-18) —
+  `display-popup`/`popup` as a daemon-owned popup TerminalSession rendered by
+  the GPUI client as a floating zz-design-language pane (maintainer decision:
+  native visuals, one ledger row; zz-ui FloatingSurface hosts the terminal
+  element, keys claimed above the prefix). Pin-exact behavior: client
+  resolution (bare `no current client` byte-match, correct precedence),
+  blocking CLI with the retval contract (exit status / raw signal / 129
+  early-dismiss), size grammar (percent >100% errors `too large`), position
+  grammar (popup_* variables, bottom-anchored -y, last-flag-wins), the
+  command-shape matrix (default-command interplay, >=2-argv execvp,
+  JOB_DEFAULTSHELL), -E/-EE/-k close matrix, -C clears any overlay,
+  one-overlay-per-client with a dead-job-SAFE modify path (the pin's
+  popup_modify NULL-deref is deliberately not replicated),
+  popup-style/popup-border-style with pin `invalid style:` validation,
+  popup-border-lines choices, sub-3x3 refusal, SIGTERM cleanup on
+  detach/kill-server. Protocol v63 (append-only popup messages,
+  structurally verified tail appends). Ledgered omissions: right-click
+  context menu, border drag move/resize, to-pane transfer, TUI/control-mode
+  rendering, mouse/status-line position variables. Hardware smoke pending
+  (maintainer): blocking retvals, close matrix, input capture above the
+  prefix, dead-job modify, -C cross-client, position letters, -e/-d live.
+
+Phase 7a (binary surface) shipped in parallel (`a054c38` + `34d9d60`,
+autostart CONFIRMED-CLOSED): tmux argv (-V `tmux 3.8-zz`, -L/-S/-f, -c, -N,
+-l; tmux-shaped usage + `unknown option`/`option requires an argument`
+lines), daemon autostart gated to the pin's five CMD_STARTSERVER commands
+(the `ls || new-session -d` idiom restored; bare `error connecting to
+<path> (<errno>)`; distinct stale-socket `no server running on <path>`),
+no intermediate -L label dirs, and $TMUX=<socket>,<pid>,<session> +
+TMUX_PANE=%N in panes plus $TMUX (no TMUX_PANE) in exec-family jobs —
+closing the tpm-breaker ledger row. In flight: the native `zz attach`
+grammar becoming a tmux superset (`attach -t` muscle memory). Deferred to
+phase 8 with the attach contract: no-tty `new-session` divergence (pin:
+`open terminal failed: not a terminal` rc 1; zz: detached create rc 0) and
+the pty-gated nested-session refusal probe. Accepted wart adopted: `-L
+<nested/label> new-session` prints `error creating <path>` and exits 0 like
+the pin.
+
+Still to build (tiering below): display-menu + confirm-before + lock storage
+(wave 5d-2, next on the FloatingSurface foundation). Original tiering:
 
 - `run-shell`, `if-shell`, `wait-for`, `pipe-pane` — genuinely `sh -c` + effects (~1 week).
   `if-shell` is already parsed and kept (only `%if` is skipped at parse time); the upgrade is

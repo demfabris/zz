@@ -80,7 +80,11 @@ const ACCEPT_WAIT_TIMEOUT: Duration = Duration::from_millis(100);
 #[cfg(windows)]
 const ACCEPT_WAIT_TIMEOUT: Duration = Duration::from_millis(20);
 const DIAGNOSTIC_STATE_INTERVAL: Duration = Duration::from_secs(5);
-const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const CONTROL_SUBSCRIPTION_INTERVAL: Duration = Duration::from_secs(1);
+const CONTROL_CELL_WIDTH_PX: u32 = 8;
+const CONTROL_CELL_HEIGHT_PX: u32 = 18;
+const CONTROL_SIZE_MINIMUM: u16 = 1;
+const CONTROL_SIZE_MAXIMUM: u16 = 10_000;
 const MAX_CONFIG_DEPTH: usize = 16;
 const MAX_RELIABLE_MESSAGES: usize = 256;
 const MAX_KITTY_IMAGE_CHUNK_BYTES: usize = 1024 * 1024;
@@ -2638,6 +2642,67 @@ impl Shared {
         }
     }
 
+    fn refresh_control_subscriptions(&self) {
+        let events = {
+            let mut inner = self.inner.lock();
+            inner.engine.set_format_now(unix_timestamp());
+            let base_facts = format_hook_facts(&inner);
+            let clients = inner.control_outputs.keys().copied().collect::<Vec<_>>();
+            let mut events = Vec::new();
+            for client in clients {
+                let Some(session) = client_attached_session(&inner, client) else {
+                    continue;
+                };
+                let client_facts = client_format_facts(&inner, client, session);
+                let mut subscriptions = inner
+                    .control_outputs
+                    .get_mut(&client)
+                    .map(|output| std::mem::take(&mut output.subscriptions))
+                    .unwrap_or_default();
+                for (name, subscription) in &mut subscriptions {
+                    let mut current = BTreeMap::new();
+                    for target in control_subscription_targets(&inner, session, subscription.scope)
+                    {
+                        let context = inner.engine.format_status_context(
+                            Some(target.session),
+                            target.window,
+                            target.pane,
+                        );
+                        let facts = FormatHookFacts {
+                            client: Some(client_facts.clone()),
+                            ..base_facts.clone()
+                        };
+                        let mut hooks = DaemonFormatHooks::command(&facts);
+                        let value =
+                            expand_format_values(&subscription.format, &context, &mut hooks);
+                        if subscription.previous.get(&target) != Some(&value) {
+                            events.push((
+                                client,
+                                EventPayload::SubscriptionChanged {
+                                    name: name.clone(),
+                                    session: target.session,
+                                    window: target.window,
+                                    window_index: target.window_index,
+                                    pane: target.pane,
+                                    value: value.clone(),
+                                },
+                            ));
+                        }
+                        current.insert(target, value);
+                    }
+                    subscription.previous = current;
+                }
+                if let Some(output) = inner.control_outputs.get_mut(&client) {
+                    output.subscriptions = subscriptions;
+                }
+            }
+            events
+        };
+        for (client, payload) in events {
+            self.publish_to_client(client, payload);
+        }
+    }
+
     fn start_status_sampler(self: &Arc<Self>) -> Result<(), DaemonError> {
         let shared = Arc::downgrade(self);
         thread::Builder::new()
@@ -2645,13 +2710,14 @@ impl Shared {
             .spawn(move || {
                 let mut due = Instant::now();
                 loop {
-                    thread::sleep(STATUS_POLL_INTERVAL);
+                    thread::sleep(CONTROL_SUBSCRIPTION_INTERVAL);
                     let Some(shared) = shared.upgrade() else {
                         break;
                     };
                     if shared.stopping.load(Ordering::Acquire) {
                         break;
                     }
+                    shared.refresh_control_subscriptions();
                     let interval = shared.inner.lock().engine.status_formats().interval;
                     if interval.is_zero() {
                         due = Instant::now();
@@ -6168,29 +6234,10 @@ impl Shared {
                 inner
                     .engine
                     .format_status_context(Some(session_id), Some(focused), None);
+            let mut client_facts = client_format_facts(&inner, client, session_id);
+            client_facts.line = line;
             let facts = FormatHookFacts {
-                client: Some(ClientFormatFacts {
-                    name: inner
-                        .client_names
-                        .get(&client)
-                        .cloned()
-                        .unwrap_or_else(|| format!("device-{}", client.0)),
-                    session: session.name.clone(),
-                    width: 0,
-                    height: 0,
-                    termname: String::new(),
-                    uid: format_context.uid.clone(),
-                    user: format_context.user.clone(),
-                    flags: format_client_flags(&inner, client),
-                    theme: inner
-                        .client_color_schemes
-                        .get(&client)
-                        .copied()
-                        .unwrap_or_default()
-                        .as_str()
-                        .to_owned(),
-                    line,
-                }),
+                client: Some(client_facts),
                 ..FormatHookFacts::default()
             };
             let mut hooks = DaemonFormatHooks::command_with_optional_variables(
@@ -6311,6 +6358,57 @@ impl Shared {
         }
     }
 
+    fn set_control_client_size(&self, client: ClientId, value: &str) -> Result<(), DaemonError> {
+        let update = parse_control_client_size(value)?;
+        let (changed, resizes) = {
+            let mut inner = self.inner.lock();
+            let mut affected = control_client_sized_panes(&inner, client);
+            let output = inner.control_outputs.entry(client).or_default();
+            match update {
+                ControlClientSizeUpdate::Client(geometry) => output.geometry = Some(geometry),
+                ControlClientSizeUpdate::Window(window, Some(geometry)) => {
+                    output.window_geometries.insert(window, geometry);
+                }
+                ControlClientSizeUpdate::Window(window, None) => {
+                    output.window_geometries.remove(&window);
+                }
+            }
+            affected.extend(control_client_sized_panes(&inner, client));
+            let changed = write_back_terminal_geometries(&mut inner, &affected, false);
+            let resizes = terminal_resizes_for_panes(&inner, &affected);
+            (changed, resizes)
+        };
+        apply_terminal_resizes(resizes);
+        if changed {
+            self.publish_snapshot();
+        }
+        Ok(())
+    }
+
+    fn update_control_subscription(&self, client: ClientId, value: &str) {
+        let mut inner = self.inner.lock();
+        let output = inner.control_outputs.entry(client).or_default();
+        match parse_control_subscription(value) {
+            ControlSubscriptionUpdate::Remove(name) => {
+                output.subscriptions.remove(name);
+            }
+            ControlSubscriptionUpdate::Set {
+                name,
+                scope,
+                format,
+            } => {
+                output.subscriptions.insert(
+                    name.to_owned(),
+                    ControlSubscription {
+                        scope,
+                        format: format.to_owned(),
+                        previous: BTreeMap::new(),
+                    },
+                );
+            }
+        }
+    }
+
     fn refresh_client(
         &self,
         client: ClientId,
@@ -6371,11 +6469,23 @@ impl Shared {
             }
             return Ok(Execution::default());
         }
-        if parsed.value('B').is_some() || parsed.value('C').is_some() {
-            return Err(ServerError::UnsupportedCommand(
-                "refresh-client interactive behavior".to_owned(),
-            )
-            .into());
+        if parsed.value('B').is_some() {
+            if self.inner.lock().client_kinds.get(&target) != Some(&ClientKind::Control) {
+                return Err(ServerError::InvalidCommand("not a control client".to_owned()).into());
+            }
+            for value in parsed.values('B') {
+                self.update_control_subscription(target, value);
+            }
+            return Ok(Execution::default());
+        }
+        if parsed.value('C').is_some() {
+            if self.inner.lock().client_kinds.get(&target) != Some(&ClientKind::Control) {
+                return Err(ServerError::InvalidCommand("not a control client".to_owned()).into());
+            }
+            for value in parsed.values('C') {
+                self.set_control_client_size(target, value)?;
+            }
+            return Ok(Execution::default());
         }
         if handled_flags && !parsed.has('S') {
             return Ok(Execution::default());
@@ -6516,7 +6626,9 @@ impl Shared {
 
         let (geometry, history_limit, word_separators, appearance, spawn, mut state) = {
             let inner = self.inner.lock();
-            let geometry = popup_client_geometry(&inner, target_client)?;
+            let Some(geometry) = popup_client_geometry(&inner, target_client)? else {
+                return Ok(Execution::default());
+            };
             let width = parse_popup_dimension("width", parsed.width.as_deref(), geometry.columns)?;
             let height = parse_popup_dimension("height", parsed.height.as_deref(), geometry.rows)?;
             let window = target
@@ -6744,7 +6856,9 @@ impl Shared {
         let starting_choice = menu_starting_number(parsed.starting_choice.as_deref())?;
         let (state, commands) = {
             let inner = self.inner.lock();
-            let geometry = popup_client_geometry(&inner, target_client)?;
+            let Some(geometry) = popup_client_geometry(&inner, target_client)? else {
+                return Ok(Execution::default());
+            };
             let window = target
                 .window
                 .ok_or_else(|| ServerError::MissingTarget("current window".to_owned()))?;
@@ -7439,6 +7553,7 @@ impl Shared {
             .get(&client)
             .cloned()
             .unwrap_or_default();
+        affected_panes.extend(control_client_sized_panes(&inner, client));
         if switches_session {
             affected_panes.extend(remove_client_terminal_geometries(&mut inner, client));
             inner.focused_windows.remove(&client);
@@ -7459,6 +7574,7 @@ impl Shared {
         let visible = visible_terminal_panes(&inner, client, session);
         affected_panes.extend(visible.iter().copied());
         inner.visible_terminals.insert(client, visible);
+        affected_panes.extend(control_client_sized_panes(&inner, client));
         #[cfg(feature = "agent")]
         {
             let visible = visible_agent_panes(&inner, client, session);
@@ -7689,6 +7805,7 @@ impl Shared {
             .get(&client)
             .cloned()
             .unwrap_or_default();
+        affected_panes.extend(control_client_sized_panes(&inner, client));
         affected_panes.extend(remove_client_terminal_geometries(&mut inner, client));
         for clients in inner.attached.values_mut() {
             clients.remove(&client);
@@ -13049,12 +13166,38 @@ struct PendingControlOutput {
     enqueued_at: Instant,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ControlSubscriptionScope {
+    Session,
+    Pane(PaneId),
+    AllPanes,
+    Window(WindowId),
+    AllWindows,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ControlSubscriptionTarget {
+    session: SessionId,
+    window: Option<WindowId>,
+    window_index: Option<u32>,
+    pane: Option<PaneId>,
+}
+
+struct ControlSubscription {
+    scope: ControlSubscriptionScope,
+    format: String,
+    previous: BTreeMap<ControlSubscriptionTarget, String>,
+}
+
 #[derive(Default)]
 struct ControlClientOutput {
     panes: BTreeMap<PaneId, ControlPaneOutput>,
     no_output: bool,
     wait_exit: bool,
     pause_after_ms: Option<u64>,
+    geometry: Option<TerminalGeometry>,
+    window_geometries: BTreeMap<WindowId, TerminalGeometry>,
+    subscriptions: BTreeMap<String, ControlSubscription>,
 }
 
 #[derive(Debug)]
@@ -14675,6 +14818,76 @@ fn format_client_flags(inner: &ServerState, client: ClientId) -> String {
     flags.join(",")
 }
 
+fn control_client_geometry(
+    inner: &ServerState,
+    client: ClientId,
+    window: WindowId,
+) -> Option<TerminalGeometry> {
+    let output = inner.control_outputs.get(&client)?;
+    output
+        .window_geometries
+        .get(&window)
+        .copied()
+        .or(output.geometry)
+}
+
+fn control_client_sized_panes(inner: &ServerState, client: ClientId) -> BTreeSet<PaneId> {
+    let Some(session) = client_attached_session(inner, client)
+        .and_then(|session| inner.engine.state.sessions.get(&session))
+    else {
+        return BTreeSet::new();
+    };
+    let Some(output) = inner.control_outputs.get(&client) else {
+        return BTreeSet::new();
+    };
+    session
+        .windows
+        .iter()
+        .filter(|window| output.geometry.is_some() || output.window_geometries.contains_key(window))
+        .filter_map(|window| inner.engine.state.windows.get(window))
+        .flat_map(|window| window.panes.keys().copied())
+        .collect()
+}
+
+fn client_format_facts(
+    inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+) -> ClientFormatFacts {
+    let session_state = &inner.engine.state.sessions[&session];
+    let window = client_focused_window(inner, client, session_state);
+    let geometry = if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
+        control_client_geometry(inner, client, window)
+    } else {
+        None
+    };
+    let format_context = inner
+        .engine
+        .format_status_context(Some(session), Some(window), None);
+    ClientFormatFacts {
+        name: inner
+            .client_names
+            .get(&client)
+            .cloned()
+            .unwrap_or_else(|| format!("device-{}", client.0)),
+        session: session_state.name.clone(),
+        width: geometry.map_or(0, |geometry| geometry.columns),
+        height: geometry.map_or(0, |geometry| geometry.rows),
+        termname: String::new(),
+        uid: format_context.uid,
+        user: format_context.user,
+        flags: format_client_flags(inner, client),
+        theme: inner
+            .client_color_schemes
+            .get(&client)
+            .copied()
+            .unwrap_or_default()
+            .as_str()
+            .to_owned(),
+        line: 0,
+    }
+}
+
 fn client_focused_window(
     inner: &ServerState,
     client: ClientId,
@@ -14716,6 +14929,7 @@ fn resolve_popup_client(
                     .is_some_and(|name| name == target)
                     || target == client.0.to_string()
                     || target == format!("client-{}", client.0)
+                    || target == format!("device-{}", client.0)
             })
             .ok_or_else(|| ServerError::InvalidCommand(format!("can't find client: {target}")));
     }
@@ -14756,6 +14970,7 @@ fn resolve_attached_client(
                     .is_some_and(|name| name == target)
                     || target == client.0.to_string()
                     || target == format!("client-{}", client.0)
+                    || target == format!("device-{}", client.0)
             })
             .ok_or_else(|| ServerError::InvalidCommand(format!("can't find client: {target}")));
     }
@@ -14768,7 +14983,7 @@ fn resolve_attached_client(
 fn popup_client_geometry(
     inner: &ServerState,
     client: ClientId,
-) -> Result<TerminalGeometry, ServerError> {
+) -> Result<Option<TerminalGeometry>, ServerError> {
     let session_id = client_attached_session(inner, client)
         .ok_or_else(|| ServerError::InvalidCommand("no current client".to_owned()))?;
     let session = inner
@@ -14778,6 +14993,9 @@ fn popup_client_geometry(
         .get(&session_id)
         .ok_or_else(|| ServerError::MissingTarget(session_id.to_string()))?;
     let window_id = client_focused_window(inner, client, session);
+    if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
+        return Ok(control_client_geometry(inner, client, window_id));
+    }
     let window = inner
         .engine
         .state
@@ -14798,19 +15016,19 @@ fn popup_client_geometry(
         .engine
         .window_extent(window_id, zz_protocol::Axis::Vertical)
         .unwrap_or(24);
-    Ok(measured.map_or(
+    Ok(Some(measured.map_or(
         TerminalGeometry {
             columns,
             rows,
-            cell_width_px: 8,
-            cell_height_px: 18,
+            cell_width_px: CONTROL_CELL_WIDTH_PX,
+            cell_height_px: CONTROL_CELL_HEIGHT_PX,
         },
         |geometry| TerminalGeometry {
             columns,
             rows,
             ..geometry
         },
-    ))
+    )))
 }
 
 fn popup_position_variables(
@@ -15843,29 +16061,58 @@ fn remove_client_terminal_geometries(
 }
 
 fn terminal_geometry_owner(inner: &ServerState, pane: PaneId) -> Option<ClientId> {
+    let window = inner.engine.state.window_for_pane(pane)?;
+    let session = inner.engine.state.windows.get(&window)?.session;
     inner
-        .terminal_geometries
-        .get(&pane)?
+        .attached
+        .get(&session)?
         .iter()
-        .filter(|(client, _)| {
-            inner
-                .visible_terminals
-                .get(client)
-                .is_some_and(|visible| visible.contains(&pane))
+        .filter(|client| {
+            inner.client_kinds.get(*client) == Some(&ClientKind::Control)
+                || inner
+                    .visible_terminals
+                    .get(*client)
+                    .is_some_and(|visible| visible.contains(&pane))
         })
-        .min_by_key(|(client, _)| {
+        .filter(|client| client_terminal_geometry(inner, **client, pane).is_some())
+        .min_by_key(|client| {
             (
                 Reverse(
                     inner
                         .client_terminal_input_sequences
-                        .get(client)
+                        .get(*client)
                         .copied()
                         .unwrap_or_default(),
                 ),
                 client.0,
             )
         })
-        .map(|(client, _)| *client)
+        .copied()
+}
+
+fn client_terminal_geometry(
+    inner: &ServerState,
+    client: ClientId,
+    pane: PaneId,
+) -> Option<TerminalGeometry> {
+    if inner.client_kinds.get(&client) != Some(&ClientKind::Control) {
+        return inner.terminal_geometries.get(&pane)?.get(&client).copied();
+    }
+    let window = inner.engine.state.window_for_pane(pane)?;
+    let session = inner.engine.state.windows.get(&window)?.session;
+    if client_attached_session(inner, client) != Some(session) {
+        return None;
+    }
+    let geometry = control_client_geometry(inner, client, window)?;
+    let (columns, rows) =
+        inner
+            .engine
+            .pane_geometry_at_window_extent(pane, geometry.columns, geometry.rows)?;
+    Some(TerminalGeometry {
+        columns,
+        rows,
+        ..geometry
+    })
 }
 
 fn aggressive_terminal_geometry(inner: &ServerState, pane: PaneId) -> Option<TerminalGeometry> {
@@ -15877,12 +16124,16 @@ fn aggressive_terminal_geometry(inner: &ServerState, pane: PaneId) -> Option<Ter
     {
         return None;
     }
-    let geometries = inner.terminal_geometries.get(&pane)?;
-    let mut candidates = geometries.iter().filter(|(client, _)| {
-        client_focused_window_for_attachment(inner, **client) == Some(window)
+    let session = window_state.session;
+    let mut candidates = inner.attached.get(&session)?.iter().filter_map(|client| {
+        if client_focused_window_for_attachment(inner, *client) == Some(window) {
+            client_terminal_geometry(inner, *client, pane).map(|geometry| (*client, geometry))
+        } else {
+            None
+        }
     });
     let (first_client, first_geometry) = candidates.next()?;
-    let mut owner = (*first_client, *first_geometry);
+    let mut owner = (first_client, first_geometry);
     let mut columns = first_geometry.columns;
     let mut rows = first_geometry.rows;
     for (client, geometry) in candidates {
@@ -15892,7 +16143,7 @@ fn aggressive_terminal_geometry(inner: &ServerState, pane: PaneId) -> Option<Ter
             Reverse(
                 inner
                     .client_terminal_input_sequences
-                    .get(client)
+                    .get(&client)
                     .copied()
                     .unwrap_or_default(),
             ),
@@ -15909,7 +16160,7 @@ fn aggressive_terminal_geometry(inner: &ServerState, pane: PaneId) -> Option<Ter
             owner.0.0,
         );
         if current_key < owner_key {
-            owner = (*client, *geometry);
+            owner = (client, geometry);
         }
     }
     Some(TerminalGeometry {
@@ -15927,9 +16178,8 @@ fn terminal_resize_for_pane(
     let geometry = if inner.engine.state.window_aggressive_resize(window).ok()? {
         aggressive_terminal_geometry(inner, pane)?
     } else {
-        let geometries = inner.terminal_geometries.get(&pane)?;
         let owner = terminal_geometry_owner(inner, pane)?;
-        *geometries.get(&owner)?
+        client_terminal_geometry(inner, owner, pane)?
     };
     let terminal = inner.terminals.get(&pane).cloned()?;
     Some((terminal, geometry))
@@ -16446,6 +16696,164 @@ impl ParsedBufferCommandArgs {
 fn parse_control_pane_state(value: &str) -> Option<(PaneId, &str)> {
     let (pane, state) = value.split_once(':')?;
     Some((pane.parse().ok()?, state))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ControlClientSizeUpdate {
+    Client(TerminalGeometry),
+    Window(WindowId, Option<TerminalGeometry>),
+}
+
+fn parse_control_dimensions(value: &str, separator: char) -> Option<(u64, u64)> {
+    let (columns, rows) = value.split_once(separator)?;
+    if columns.is_empty() || rows.is_empty() || rows.contains(separator) {
+        return None;
+    }
+    Some((columns.parse().ok()?, rows.parse().ok()?))
+}
+
+fn checked_control_geometry(columns: u64, rows: u64) -> Result<TerminalGeometry, ServerError> {
+    let in_range = |value| {
+        (u64::from(CONTROL_SIZE_MINIMUM)..=u64::from(CONTROL_SIZE_MAXIMUM)).contains(&value)
+    };
+    if !in_range(columns) || !in_range(rows) {
+        return Err(ServerError::InvalidCommand(
+            "size too small or too big".to_owned(),
+        ));
+    }
+    Ok(TerminalGeometry {
+        columns: u16::try_from(columns).expect("validated control columns fit u16"),
+        rows: u16::try_from(rows).expect("validated control rows fit u16"),
+        cell_width_px: CONTROL_CELL_WIDTH_PX,
+        cell_height_px: CONTROL_CELL_HEIGHT_PX,
+    })
+}
+
+fn parse_control_client_size(value: &str) -> Result<ControlClientSizeUpdate, ServerError> {
+    if let Some((window, size)) = value.split_once(':')
+        && value.matches(':').count() == 1
+        && let Ok(window) = window.parse::<WindowId>()
+    {
+        if size.is_empty() {
+            return Ok(ControlClientSizeUpdate::Window(window, None));
+        }
+        let (columns, rows) = parse_control_dimensions(size, 'x')
+            .ok_or_else(|| ServerError::InvalidCommand("bad size argument".to_owned()))?;
+        return checked_control_geometry(columns, rows)
+            .map(|geometry| ControlClientSizeUpdate::Window(window, Some(geometry)));
+    }
+    let dimensions = parse_control_dimensions(value, ',')
+        .or_else(|| parse_control_dimensions(value, 'x'))
+        .ok_or_else(|| ServerError::InvalidCommand("bad size argument".to_owned()))?;
+    checked_control_geometry(dimensions.0, dimensions.1).map(ControlClientSizeUpdate::Client)
+}
+
+enum ControlSubscriptionUpdate<'a> {
+    Remove(&'a str),
+    Set {
+        name: &'a str,
+        scope: ControlSubscriptionScope,
+        format: &'a str,
+    },
+}
+
+fn parse_control_subscription(value: &str) -> ControlSubscriptionUpdate<'_> {
+    let mut fields = value.splitn(3, ':');
+    let name = fields.next().unwrap_or_default();
+    let Some(what) = fields.next() else {
+        return ControlSubscriptionUpdate::Remove(value);
+    };
+    let Some(format) = fields.next() else {
+        return ControlSubscriptionUpdate::Remove(value);
+    };
+    let scope = match what {
+        "%*" => ControlSubscriptionScope::AllPanes,
+        "@*" => ControlSubscriptionScope::AllWindows,
+        what if what.starts_with('%') => what.parse().map_or(
+            ControlSubscriptionScope::Session,
+            ControlSubscriptionScope::Pane,
+        ),
+        what if what.starts_with('@') => what.parse().map_or(
+            ControlSubscriptionScope::Session,
+            ControlSubscriptionScope::Window,
+        ),
+        _ => ControlSubscriptionScope::Session,
+    };
+    ControlSubscriptionUpdate::Set {
+        name,
+        scope,
+        format,
+    }
+}
+
+fn control_subscription_target(
+    session: SessionId,
+    window: Option<&zz_mux::Window>,
+    pane: Option<PaneId>,
+) -> ControlSubscriptionTarget {
+    ControlSubscriptionTarget {
+        session,
+        window: window.map(|window| window.id),
+        window_index: window.map(|window| window.index),
+        pane,
+    }
+}
+
+fn control_subscription_targets(
+    inner: &ServerState,
+    session: SessionId,
+    scope: ControlSubscriptionScope,
+) -> Vec<ControlSubscriptionTarget> {
+    let Some(session_state) = inner.engine.state.sessions.get(&session) else {
+        return Vec::new();
+    };
+    match scope {
+        ControlSubscriptionScope::Session => {
+            vec![control_subscription_target(session, None, None)]
+        }
+        ControlSubscriptionScope::Pane(pane) => {
+            let Some(window) = inner
+                .engine
+                .state
+                .window_for_pane(pane)
+                .and_then(|window| inner.engine.state.windows.get(&window))
+                .filter(|window| window.session == session)
+            else {
+                return Vec::new();
+            };
+            vec![control_subscription_target(
+                session,
+                Some(window),
+                Some(pane),
+            )]
+        }
+        ControlSubscriptionScope::Window(window) => inner
+            .engine
+            .state
+            .windows
+            .get(&window)
+            .filter(|window| window.session == session)
+            .map(|window| vec![control_subscription_target(session, Some(window), None)])
+            .unwrap_or_default(),
+        ControlSubscriptionScope::AllPanes => session_state
+            .windows
+            .iter()
+            .filter_map(|window| inner.engine.state.windows.get(window))
+            .flat_map(|window| {
+                window
+                    .panes
+                    .keys()
+                    .copied()
+                    .map(|pane| control_subscription_target(session, Some(window), Some(pane)))
+            })
+            .collect(),
+        ControlSubscriptionScope::AllWindows => session_state
+            .windows
+            .iter()
+            .filter_map(|window| inner.engine.state.windows.get(window))
+            .map(|window| control_subscription_target(session, Some(window), None))
+            .collect(),
+    }
 }
 
 fn apply_control_client_flags(output: &mut ControlClientOutput, flags: &str) {
@@ -20355,6 +20763,545 @@ mod tests {
             format_client_flags(&shared.inner.lock(), control),
             "control-mode"
         );
+    }
+
+    #[test]
+    fn refresh_client_c_parses_sizes_bounds_overrides_and_control_only() {
+        assert!(matches!(
+            parse_control_client_size("100,50"),
+            Ok(ControlClientSizeUpdate::Client(TerminalGeometry {
+                columns: 100,
+                rows: 50,
+                cell_width_px: CONTROL_CELL_WIDTH_PX,
+                cell_height_px: CONTROL_CELL_HEIGHT_PX,
+            }))
+        ));
+        assert!(matches!(
+            parse_control_client_size("100x50"),
+            Ok(ControlClientSizeUpdate::Client(TerminalGeometry {
+                columns: 100,
+                rows: 50,
+                ..
+            }))
+        ));
+        for value in ["bad", "100:50", "@1:100,50", "@bad:100x50"] {
+            assert!(matches!(
+                parse_control_client_size(value),
+                Err(ServerError::InvalidCommand(message)) if message == "bad size argument"
+            ));
+        }
+        for value in ["0x50", "50x0", "10001x50", "50x10001"] {
+            assert!(matches!(
+                parse_control_client_size(value),
+                Err(ServerError::InvalidCommand(message))
+                    if message == "size too small or too big"
+            ));
+        }
+
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "control-size", "size");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .unwrap();
+        let control_mailbox = OutboundMailbox::new();
+        let interactive_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("sized-control".to_owned()),
+            None,
+            control_mailbox,
+        );
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("interactive".to_owned()),
+            None,
+            interactive_mailbox,
+        );
+        shared.attach(control, session).unwrap();
+        shared.attach(interactive, session).unwrap();
+        assert_eq!(terminal_geometry_owner(&shared.inner.lock(), pane), None);
+        assert_eq!(
+            popup_client_geometry(&shared.inner.lock(), control).unwrap(),
+            None
+        );
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-C", "120x60"]),
+            )
+            .unwrap();
+        assert_eq!(
+            control_client_geometry(&shared.inner.lock(), control, window),
+            Some(TerminalGeometry {
+                columns: 120,
+                rows: 60,
+                cell_width_px: 8,
+                cell_height_px: 18,
+            })
+        );
+        assert_eq!(
+            terminal_geometry_owner(&shared.inner.lock(), pane),
+            Some(control)
+        );
+
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-C", "90x40", "-C", "120,60"]),
+            )
+            .unwrap();
+        assert_eq!(
+            control_client_geometry(&shared.inner.lock(), control, window)
+                .map(|geometry| (geometry.columns, geometry.rows)),
+            Some((120, 60))
+        );
+        let listed = shared
+            .list_clients(
+                &context,
+                "list-clients",
+                &[
+                    "-F".to_owned(),
+                    "#{client_name}:#{client_width}x#{client_height}".to_owned(),
+                ],
+            )
+            .unwrap();
+        assert!(listed.output.contains("sized-control:120x60"));
+
+        let override_value = format!("{window}:80x30");
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-C", &override_value]),
+            )
+            .unwrap();
+        assert_eq!(
+            control_client_geometry(&shared.inner.lock(), control, window)
+                .map(|geometry| (geometry.columns, geometry.rows)),
+            Some((80, 30))
+        );
+        let clear_value = format!("{window}:");
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-C", &clear_value]),
+            )
+            .unwrap();
+        assert_eq!(
+            control_client_geometry(&shared.inner.lock(), control, window)
+                .map(|geometry| (geometry.columns, geometry.rows)),
+            Some((120, 60))
+        );
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-C", &clear_value]),
+            )
+            .unwrap();
+
+        let error = shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-C", "100x50"]),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "not a control client"
+        ));
+    }
+
+    #[test]
+    fn control_size_feeds_aggressive_resize_and_menu_gating() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "control-gate", "size");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .unwrap();
+        let control_mailbox = OutboundMailbox::new();
+        let interactive_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control-target".to_owned()),
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("menu-source".to_owned()),
+            None,
+            interactive_mailbox,
+        );
+        shared.attach(control, session).unwrap();
+        shared.attach(interactive, session).unwrap();
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let menu = CommandInvocation::new(
+            "display-menu",
+            [
+                "-c",
+                "control-target",
+                "0123456789",
+                "x",
+                "display-message chosen",
+            ],
+        );
+        shared
+            .execute(interactive, ClientKind::Interactive, &mut context, &menu)
+            .unwrap();
+        assert!(!shared.inner.lock().menus.contains_key(&control));
+
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-C", "5x2"]),
+            )
+            .unwrap();
+        shared
+            .execute(interactive, ClientKind::Interactive, &mut context, &menu)
+            .unwrap();
+        assert!(!shared.inner.lock().menus.contains_key(&control));
+
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-C", "100x50"]),
+            )
+            .unwrap();
+        shared
+            .execute(interactive, ClientKind::Interactive, &mut context, &menu)
+            .unwrap();
+        assert_eq!(
+            shared.inner.lock().menus[&control].state.client_columns,
+            100
+        );
+        shared.inner.lock().menus.remove(&control);
+
+        shared
+            .input(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane,
+                    columns: 120,
+                    rows: 40,
+                    cell_width_px: 7,
+                    cell_height_px: 16,
+                },
+            )
+            .unwrap();
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["aggressive-resize", "on"]),
+            )
+            .unwrap();
+        let geometry = aggressive_terminal_geometry(&shared.inner.lock(), pane).unwrap();
+        assert_eq!((geometry.columns, geometry.rows), (100, 40));
+    }
+
+    #[test]
+    fn refresh_client_b_parses_replaces_removes_and_emits_changed_scopes() {
+        assert!(matches!(
+            parse_control_subscription("name:%*:#{pane_title}:tail"),
+            ControlSubscriptionUpdate::Set {
+                name: "name",
+                scope: ControlSubscriptionScope::AllPanes,
+                format: "#{pane_title}:tail",
+            }
+        ));
+        assert!(matches!(
+            parse_control_subscription("name"),
+            ControlSubscriptionUpdate::Remove("name")
+        ));
+        assert!(matches!(
+            parse_control_subscription("name:"),
+            ControlSubscriptionUpdate::Remove("name:")
+        ));
+
+        let shared = Arc::new(Shared::new(1));
+        let (session, first_window, first_pane, second_window, second_pane) = {
+            let mut inner = shared.inner.lock();
+            let (session, first_window, first_pane) =
+                inner.engine.state.create_session("watched").unwrap();
+            let (second_window, second_pane) = inner
+                .engine
+                .state
+                .create_window(
+                    session,
+                    Some("second".to_owned()),
+                    zz_mux::PaneKind::Terminal,
+                )
+                .unwrap();
+            (
+                session,
+                first_window,
+                first_pane,
+                second_window,
+                second_pane,
+            )
+        };
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("subscriber".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).unwrap();
+        take_reliable_messages(&mailbox);
+        let mut context =
+            ExecutionContext::new(Some(session), Some(first_window), Some(first_pane));
+        for value in [
+            "session::#{session_name}".to_owned(),
+            format!("pane:{first_pane}:#{{pane_id}}"),
+            "panes:%*:#{pane_id}".to_owned(),
+            format!("window:{first_window}:#{{window_name}}"),
+            "windows:@*:#{window_name}".to_owned(),
+            "fallback:bogus:#{session_name}".to_owned(),
+            "flags::#{client_flags}".to_owned(),
+        ] {
+            shared
+                .execute(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    &CommandInvocation::new("refresh-client", ["-B", &value]),
+                )
+                .unwrap();
+        }
+        shared.refresh_control_subscriptions();
+        let initial = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::SubscriptionChanged {
+                            name,
+                            session,
+                            window,
+                            window_index,
+                            pane,
+                            value,
+                        },
+                    ..
+                }) => Some((name, session, window, window_index, pane, value)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let first_pane_name = first_pane.to_string();
+        assert!(initial.iter().any(|event| {
+            event.0 == "session"
+                && event.1 == session
+                && event.2.is_none()
+                && event.3.is_none()
+                && event.4.is_none()
+                && event.5 == "watched"
+        }));
+        assert!(initial.iter().any(|event| {
+            event.0 == "pane"
+                && event.2 == Some(first_window)
+                && event.4 == Some(first_pane)
+                && event.5 == first_pane_name
+        }));
+        assert_eq!(initial.iter().filter(|event| event.0 == "panes").count(), 2);
+        assert_eq!(
+            initial.iter().filter(|event| event.0 == "window").count(),
+            1
+        );
+        assert_eq!(
+            initial.iter().filter(|event| event.0 == "windows").count(),
+            2
+        );
+        assert_eq!(
+            initial.iter().filter(|event| event.0 == "fallback").count(),
+            1
+        );
+        assert!(
+            initial
+                .iter()
+                .any(|event| event.0 == "flags" && event.5 == "control-mode")
+        );
+
+        shared.refresh_control_subscriptions();
+        assert!(take_reliable_messages(&mailbox).is_empty());
+        shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .rename_session(session, "renamed".to_owned())
+            .unwrap();
+        shared.refresh_control_subscriptions();
+        let changed = take_reliable_messages(&mailbox);
+        assert_eq!(changed.len(), 2);
+        assert_eq!(
+            changed
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::SubscriptionChanged { name, value, .. },
+                        ..
+                    }) if (name == "session" || name == "fallback") && value == "renamed"
+                ))
+                .count(),
+            2
+        );
+
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-B", "session::replacement"]),
+            )
+            .unwrap();
+        shared.refresh_control_subscriptions();
+        assert!(
+            take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::SubscriptionChanged { name, value, .. },
+                        ..
+                    }) if name == "session" && value == "replacement"
+                ))
+        );
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-B", "session"]),
+            )
+            .unwrap();
+        assert!(
+            !shared.inner.lock().control_outputs[&control]
+                .subscriptions
+                .contains_key("session")
+        );
+
+        shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .kill_window(second_window)
+            .unwrap();
+        shared.refresh_control_subscriptions();
+        let inner = shared.inner.lock();
+        for name in ["panes", "windows"] {
+            let previous = &inner.control_outputs[&control].subscriptions[name].previous;
+            assert!(previous.keys().all(|target| {
+                target.window != Some(second_window) && target.pane != Some(second_pane)
+            }));
+        }
+        assert_eq!(CONTROL_SUBSCRIPTION_INTERVAL, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn refresh_client_abc_uses_pin_precedence_and_b_c_reject_non_control_targets() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, pane) = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_session("precedence")
+            .unwrap();
+        let control_mailbox = OutboundMailbox::new();
+        let interactive_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            control_mailbox,
+        );
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("interactive".to_owned()),
+            None,
+            interactive_mailbox,
+        );
+        shared.attach(control, session).unwrap();
+        shared.attach(interactive, session).unwrap();
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new(
+                    "refresh-client",
+                    [
+                        "-C",
+                        "100x50",
+                        "-B",
+                        "ignored::value",
+                        "-A",
+                        &format!("{pane}:off"),
+                    ],
+                ),
+            )
+            .unwrap();
+        let inner = shared.inner.lock();
+        assert_eq!(
+            inner.control_outputs[&control].panes[&pane].mode,
+            ControlPaneOutputMode::Off
+        );
+        assert!(inner.control_outputs[&control].subscriptions.is_empty());
+        assert!(inner.control_outputs[&control].geometry.is_none());
+        drop(inner);
+
+        for flag in ['B', 'C'] {
+            let value = if flag == 'B' { "name::value" } else { "100x50" };
+            let error = shared
+                .execute(
+                    interactive,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "refresh-client",
+                        [format!("-{flag}"), value.to_owned()],
+                    ),
+                )
+                .unwrap_err();
+            assert!(matches!(
+                error,
+                DaemonError::Server(ServerError::InvalidCommand(message))
+                    if message == "not a control client"
+            ));
+        }
     }
 
     #[test]

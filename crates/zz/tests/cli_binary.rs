@@ -962,6 +962,165 @@ mod daemon_autostart {
         }
 
         #[test]
+        fn refresh_client_c_sizes_a_control_target_for_menu_gating() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let (control, mut stdin) = fixture.spawn_with_open_stdin(&[
+                "-C",
+                "new-session",
+                "-s",
+                "sizing",
+                "exec /bin/cat",
+            ]);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let listed = fixture.run(&["list-clients", "-F", "#{client_name}:#{client_flags}"]);
+                if listed.status.success()
+                    && String::from_utf8_lossy(&listed.stdout).contains("control-mode")
+                {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "control client did not attach");
+                thread::sleep(Duration::from_millis(10));
+            }
+            let listed = fixture.run(&["list-clients", "-F", "#{client_name}:#{client_flags}"]);
+            let line = String::from_utf8(listed.stdout)
+                .expect("client list")
+                .lines()
+                .find(|line| line.ends_with("control-mode"))
+                .expect("control client list row")
+                .to_owned();
+            let target = line
+                .split_once(':')
+                .expect("client row fields")
+                .0
+                .to_owned();
+            let menu_args = [
+                "display-menu",
+                "-c",
+                target.as_str(),
+                "Item",
+                "i",
+                "display-message chosen",
+            ];
+            let no_size = fixture.run(&menu_args);
+            assert_eq!(no_size.status.code(), Some(0));
+
+            stdin
+                .write_all(b"refresh-client -C 100x50\n")
+                .expect("set control size");
+            stdin.flush().expect("flush control size");
+            let expected_dimensions = format!("{target}:100x50");
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let dimensions = fixture.run(&[
+                    "list-clients",
+                    "-F",
+                    "#{client_name}:#{client_width}x#{client_height}",
+                ]);
+                if String::from_utf8_lossy(&dimensions.stdout)
+                    .lines()
+                    .any(|line| line == expected_dimensions)
+                {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "control size did not settle");
+                thread::sleep(Duration::from_millis(10));
+            }
+
+            let mut menu = fixture
+                .command()
+                .args(menu_args)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn sized menu");
+            let hold_deadline = Instant::now() + Duration::from_millis(300);
+            while Instant::now() < hold_deadline {
+                assert!(
+                    menu.try_wait().expect("poll sized menu").is_none(),
+                    "sized menu silently no-op'd"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            stdin.write_all(b"\n").expect("detach sized control");
+            drop(stdin);
+            let control_output = control.wait_with_output().expect("wait for control client");
+            assert_eq!(control_output.status.code(), Some(0));
+            let menu_output = menu.wait_with_output().expect("wait for sized menu");
+            assert_eq!(menu_output.status.code(), Some(0));
+        }
+
+        #[test]
+        fn refresh_client_b_reports_initial_change_and_exact_removal() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let (child, mut stdin) = fixture.spawn_with_open_stdin(&[
+                "-C",
+                "new-session",
+                "-s",
+                "subscribed",
+                "exec /bin/cat",
+            ]);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if fixture
+                    .run(&["has-session", "-t", "subscribed"])
+                    .status
+                    .success()
+                {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "control session did not start");
+                thread::sleep(Duration::from_millis(10));
+            }
+
+            stdin
+                .write_all(b"refresh-client -B watch::#{session_name}\n")
+                .expect("add subscription");
+            stdin.flush().expect("flush subscription");
+            thread::sleep(Duration::from_millis(1200));
+            assert_eq!(
+                fixture
+                    .run(&["rename-session", "-t", "subscribed", "renamed"])
+                    .status
+                    .code(),
+                Some(0)
+            );
+            thread::sleep(Duration::from_millis(1200));
+            stdin
+                .write_all(b"refresh-client -B watch\nrename-session -t renamed removed\n")
+                .expect("remove subscription and rename session");
+            stdin.flush().expect("flush removal");
+            thread::sleep(Duration::from_millis(1200));
+            stdin.write_all(b"\n").expect("end control input");
+            drop(stdin);
+
+            let output = child.wait_with_output().expect("wait for control stream");
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            let subscriptions = stream
+                .outside
+                .iter()
+                .filter(|line| line.starts_with("%subscription-changed watch "))
+                .cloned()
+                .collect::<Vec<_>>();
+            assert_eq!(subscriptions.len(), 2);
+            assert!(subscriptions[0].ends_with(" - - - : subscribed"));
+            assert!(subscriptions[1].ends_with(" - - - : renamed"));
+            assert!(
+                subscriptions
+                    .iter()
+                    .all(|line| !line.ends_with(" : removed"))
+            );
+        }
+
+        #[test]
         fn pause_after_emits_extended_output_then_pauses_a_slow_control_client() {
             let fixture = Fixture::new();
             if !local_socket_bind_available(&fixture.socket) {

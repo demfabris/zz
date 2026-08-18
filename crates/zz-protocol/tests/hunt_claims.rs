@@ -13,8 +13,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_sixty_seven() {
-    assert_eq!(PROTOCOL_VERSION, 67);
+fn protocol_version_on_this_commit_is_sixty_eight() {
+    assert_eq!(PROTOCOL_VERSION, 68);
 }
 
 #[test]
@@ -69,6 +69,17 @@ fn control_events_and_window_layout_fields_keep_the_frozen_wire_tail() {
             no_output: false,
         }),
         44
+    );
+    assert_eq!(
+        event_tag(EventPayload::SubscriptionChanged {
+            name: String::new(),
+            session: zz_protocol::SessionId(1),
+            window: None,
+            window_index: None,
+            pane: None,
+            value: String::new(),
+        }),
+        45
     );
 
     let window = WindowSnapshot {
@@ -134,7 +145,7 @@ fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x43, 0x00, 0x00, 0x43, 0x00, 0x00, 0x00, 0x00,
+            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x44, 0x00, 0x00, 0x44, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00,
         ]
     );

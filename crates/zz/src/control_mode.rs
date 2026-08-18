@@ -453,6 +453,19 @@ fn handle_protocol<W: Write>(
                 output.notify(&render_pane_output_aged(pane, age_ms, &bytes))?;
             }
             EventPayload::ControlFlags { wait_exit, .. } => state.wait_exit = wait_exit,
+            EventPayload::SubscriptionChanged {
+                name,
+                session,
+                window,
+                window_index,
+                pane,
+                value,
+            } => {
+                output.notify(
+                    render_subscription_changed(&name, session, window, window_index, pane, &value)
+                        .as_bytes(),
+                )?;
+            }
             EventPayload::TimedClientMessage { text, .. } => {
                 let mut line = b"%message ".to_vec();
                 line.extend(render_message(&text));
@@ -558,6 +571,25 @@ fn render_hook(
             value("hook_paste_buffer")?
         )),
         _ => None,
+    }
+}
+
+fn render_subscription_changed(
+    name: &str,
+    session: SessionId,
+    window: Option<WindowId>,
+    window_index: Option<u32>,
+    pane: Option<zz_protocol::PaneId>,
+    value: &str,
+) -> String {
+    match (window, window_index, pane) {
+        (Some(window), Some(index), Some(pane)) => {
+            format!("%subscription-changed {name} {session} {window} {index} {pane} : {value}")
+        }
+        (Some(window), Some(index), None) => {
+            format!("%subscription-changed {name} {session} {window} {index} - : {value}")
+        }
+        _ => format!("%subscription-changed {name} {session} - - - : {value}"),
     }
 }
 
@@ -1268,6 +1300,39 @@ mod tests {
         }
         assert!(state.wait_exit);
         assert_eq!(writer.output, b"%pause %7\n%continue %7\n");
+    }
+
+    #[test]
+    fn subscription_changes_render_the_three_pin_shapes_byte_exact() {
+        let session = SessionId(1);
+        let window = WindowId(2);
+        let pane = zz_protocol::PaneId(3);
+        assert_eq!(
+            render_subscription_changed(
+                "pane-watch",
+                session,
+                Some(window),
+                Some(4),
+                Some(pane),
+                "one\ntwo",
+            ),
+            "%subscription-changed pane-watch $1 @2 4 %3 : one\ntwo"
+        );
+        assert_eq!(
+            render_subscription_changed(
+                "window-watch",
+                session,
+                Some(window),
+                Some(4),
+                None,
+                "value",
+            ),
+            "%subscription-changed window-watch $1 @2 4 - : value"
+        );
+        assert_eq!(
+            render_subscription_changed("session-watch", session, None, None, None, "value"),
+            "%subscription-changed session-watch $1 - - - : value"
+        );
     }
 
     #[test]

@@ -3359,6 +3359,24 @@ impl MuxEngine {
     }
 
     #[must_use]
+    pub fn pane_geometry_at_window_extent(
+        &self,
+        pane: PaneId,
+        columns: u16,
+        rows: u16,
+    ) -> Option<(u16, u16)> {
+        let window = self.state.window_for_pane(pane)?;
+        let window = self.state.windows.get(&window)?;
+        if let Some(zoomed) = window.zoomed_pane {
+            return (zoomed == pane).then_some((columns, rows));
+        }
+        let mut layout = window.layout.clone();
+        layout.resize(columns, rows);
+        let geometry = layout.pane_geometry(pane)?;
+        Some((geometry.sx, geometry.sy))
+    }
+
+    #[must_use]
     pub fn window_extent(&self, window: WindowId, axis: Axis) -> Option<u16> {
         let extent = self.state.windows.get(&window)?.layout.extent();
         Some(match axis {
@@ -8746,6 +8764,40 @@ mod tests {
 
         let window = context.window.unwrap();
         assert_eq!(engine.state.windows[&window].layout.extent(), (200, 50));
+    }
+
+    #[test]
+    fn projected_client_extent_preserves_split_and_zoom_geometry() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-x", "80", "-y", "24"]),
+            )
+            .unwrap();
+        let first = context.pane.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        let second = context.pane.unwrap();
+        let first_size = engine
+            .pane_geometry_at_window_extent(first, 100, 50)
+            .unwrap();
+        let second_size = engine
+            .pane_geometry_at_window_extent(second, 100, 50)
+            .unwrap();
+        assert_eq!(first_size.0 + second_size.0 + 1, 100);
+        assert_eq!((first_size.1, second_size.1), (50, 50));
+
+        engine
+            .execute(&mut context, &command("resize-pane", &["-Z"]))
+            .unwrap();
+        assert_eq!(
+            engine.pane_geometry_at_window_extent(second, 100, 50),
+            Some((100, 50))
+        );
+        assert_eq!(engine.pane_geometry_at_window_extent(first, 100, 50), None);
     }
 
     #[test]

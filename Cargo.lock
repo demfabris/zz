@@ -10636,6 +10636,7 @@ dependencies = [
  "ignore",
  "image",
  "ksni",
+ "libc",
  "log",
  "mimalloc",
  "nucleo-matcher",

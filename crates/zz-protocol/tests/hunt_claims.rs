@@ -11,8 +11,16 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_sixty_four() {
-    assert_eq!(PROTOCOL_VERSION, 64);
+fn protocol_version_on_this_commit_is_sixty_five() {
+    assert_eq!(PROTOCOL_VERSION, 65);
+}
+
+#[test]
+fn control_client_kind_keeps_frozen_wire_tag_two() {
+    assert_eq!(
+        postcard::to_stdvec(&ClientKind::Control).expect("encode control client kind"),
+        [2]
+    );
 }
 
 #[test]
@@ -52,7 +60,7 @@ fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00,
+            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x41, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00,
         ]
     );

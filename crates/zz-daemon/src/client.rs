@@ -222,6 +222,19 @@ impl InteractiveClient {
         Self::connect_endpoint(&Endpoint::Local(path.to_owned()), TerminalColorScheme::Dark)
     }
 
+    pub fn connect_control(path: &Path) -> Result<Self, DaemonError> {
+        let stream = LocalTransport::connect(path)?;
+        let connected = connect_stream(
+            ClientStream::Local(stream),
+            path.display(),
+            ClientKind::Control,
+            None,
+            None,
+            false,
+        )?;
+        Ok(Self::from_connected(connected))
+    }
+
     pub fn connect_with_color_scheme(
         path: &Path,
         color_scheme: TerminalColorScheme,

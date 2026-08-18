@@ -30,26 +30,13 @@ fn unknown_tmux_flag_uses_tmux_usage_shape() {
     );
 }
 
-#[test]
-fn unsupported_control_mode_fails_on_one_line() {
-    let output = Command::new(env!("CARGO_BIN_EXE_zz"))
-        .arg("-CC")
-        .output()
-        .expect("run zz control mode rejection");
-    assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
-    assert_eq!(
-        output.stderr,
-        b"zz: -C and -CC control mode are not supported\n"
-    );
-}
-
 #[cfg(unix)]
 mod daemon_autostart {
     use std::{
         ffi::OsString,
+        io::Write as _,
         path::{Path, PathBuf},
-        process::{Command, Output},
+        process::{Child, ChildStdin, Command, Output, Stdio},
         thread,
         time::{Duration, Instant},
     };
@@ -91,6 +78,34 @@ mod daemon_autostart {
                 .args(arguments)
                 .output()
                 .expect("run zz command")
+        }
+
+        fn run_with_stdin(&self, arguments: &[&str], input: &[u8]) -> Output {
+            let mut child = self
+                .command()
+                .args(arguments)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn zz command");
+            let mut stdin = child.stdin.take().expect("piped stdin");
+            stdin.write_all(input).expect("write command stdin");
+            drop(stdin);
+            child.wait_with_output().expect("wait for zz command")
+        }
+
+        fn spawn_with_open_stdin(&self, arguments: &[&str]) -> (Child, ChildStdin) {
+            let mut child = self
+                .command()
+                .args(arguments)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn zz command");
+            let stdin = child.stdin.take().expect("piped stdin");
+            (child, stdin)
         }
 
         fn missing_message(&self) -> Vec<u8> {
@@ -397,5 +412,337 @@ mod daemon_autostart {
             )
             .as_bytes()
         );
+    }
+
+    mod control_mode {
+        use super::*;
+
+        #[derive(Debug)]
+        struct Block {
+            time: u64,
+            number: u64,
+            flags: u8,
+            payload: Vec<String>,
+            error: bool,
+        }
+
+        #[derive(Debug)]
+        struct Stream {
+            blocks: Vec<Block>,
+            outside: Vec<String>,
+        }
+
+        fn marker(line: &str, expected: &str) -> Option<(u64, u64, u8)> {
+            let mut fields = line.split(' ');
+            if fields.next()? != expected {
+                return None;
+            }
+            let time = fields.next()?.parse().ok()?;
+            let number = fields.next()?.parse().ok()?;
+            let flags = fields.next()?.parse().ok()?;
+            fields.next().is_none().then_some((time, number, flags))
+        }
+
+        fn parse_stream(output: &[u8], double: bool) -> Stream {
+            let output = if double {
+                assert!(output.starts_with(b"\x1bP1000p"));
+                assert!(output.ends_with(b"\x1b\\"));
+                &output[b"\x1bP1000p".len()..output.len() - b"\x1b\\".len()]
+            } else {
+                assert!(!output.starts_with(b"\x1bP1000p"));
+                assert!(!output.ends_with(b"\x1b\\"));
+                output
+            };
+            let text = std::str::from_utf8(output).expect("UTF-8 control output");
+            let text = text.strip_suffix('\n').unwrap_or(text);
+            let lines = text.split('\n').collect::<Vec<_>>();
+            let mut blocks = Vec::new();
+            let mut outside = Vec::new();
+            let mut index = 0;
+            while index < lines.len() {
+                let Some((time, number, flags)) = marker(lines[index], "%begin") else {
+                    outside.push(lines[index].to_owned());
+                    index += 1;
+                    continue;
+                };
+                index += 1;
+                let mut payload = Vec::new();
+                let error = loop {
+                    assert!(index < lines.len(), "unterminated block {number}");
+                    if let Some(end) = marker(lines[index], "%end") {
+                        assert_eq!(end, (time, number, flags));
+                        index += 1;
+                        break false;
+                    }
+                    if let Some(end) = marker(lines[index], "%error") {
+                        assert_eq!(end, (time, number, flags));
+                        index += 1;
+                        break true;
+                    }
+                    payload.push(lines[index].to_owned());
+                    index += 1;
+                };
+                blocks.push(Block {
+                    time,
+                    number,
+                    flags,
+                    payload,
+                    error,
+                });
+            }
+            for (index, block) in blocks.iter().enumerate() {
+                assert_eq!(block.number, index as u64 + 1);
+                assert!(block.time > 0);
+            }
+            Stream { blocks, outside }
+        }
+
+        fn assert_block(block: &Block, number: u64, flags: u8, payload: &[&str], error: bool) {
+            assert_eq!(block.number, number);
+            assert_eq!(block.flags, flags);
+            assert_eq!(
+                block.payload,
+                payload
+                    .iter()
+                    .map(|line| (*line).to_owned())
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(block.error, error);
+        }
+
+        #[test]
+        fn control_read_only_connect_failure_has_no_framing_or_exit() {
+            let fixture = Fixture::new();
+            let output = fixture.run(&["-C", "ls"]);
+            assert_missing(&output, &fixture.missing_message());
+            fixture.assert_not_started();
+        }
+
+        #[test]
+        fn control_list_commands_autostarts_and_frames_the_initial_command() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let output = fixture.run(&["-C", "list-commands"]);
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 1);
+            assert_eq!(stream.blocks[0].flags, 0);
+            assert!(!stream.blocks[0].payload.is_empty());
+            assert!(!stream.blocks[0].error);
+            assert_eq!(stream.outside, ["%exit"]);
+            assert!(fixture.socket.exists());
+        }
+
+        #[test]
+        fn detached_control_new_session_exits_without_reading_stdin() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let (mut child, stdin) =
+                fixture.spawn_with_open_stdin(&["-C", "new-session", "-d", "-s", "x"]);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let status = loop {
+                if let Some(status) = child.try_wait().expect("poll control process") {
+                    break status;
+                }
+                if Instant::now() >= deadline {
+                    child.kill().expect("kill stalled control process");
+                    panic!("detached control client read stdin");
+                }
+                thread::sleep(Duration::from_millis(10));
+            };
+            drop(stdin);
+            let output = child.wait_with_output().expect("collect control output");
+            assert_eq!(output.status, status);
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 1);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_eq!(stream.outside, ["%exit"]);
+        }
+
+        #[test]
+        fn control_ls_with_a_daemon_frames_session_output() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let created = fixture.run(&["new-session", "-d", "-s", "listed"]);
+            assert_eq!(created.status.code(), Some(0));
+            let output = fixture.run(&["-C", "ls"]);
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 1);
+            assert_eq!(stream.blocks[0].flags, 0);
+            assert!(!stream.blocks[0].error);
+            assert!(stream.blocks[0].payload[0].starts_with("listed:"));
+            assert_eq!(stream.outside, ["%exit"]);
+        }
+
+        #[test]
+        fn control_unknown_initial_command_is_bare_after_connect() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let created = fixture.run(&["new-session", "-d"]);
+            assert_eq!(created.status.code(), Some(0));
+            let output = fixture.run(&["-C", "frobnicate"]);
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert!(stream.blocks.is_empty());
+            assert_eq!(stream.outside, ["unknown command: frobnicate", "%exit"]);
+        }
+
+        #[test]
+        fn control_command_error_uses_the_inner_server_message() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let output = fixture.run(&["-C", "list-commands", "bogus-command"]);
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 1);
+            assert_block(
+                &stream.blocks[0],
+                1,
+                0,
+                &["unknown command: bogus-command"],
+                true,
+            );
+            assert_eq!(stream.outside, ["%exit"]);
+        }
+
+        #[test]
+        fn attached_control_executes_stdin_until_empty_line() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let output =
+                fixture.run_with_stdin(&["-C", "new-session", "-s", "attached"], b"ls\n\n");
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 2);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_eq!(stream.blocks[1].flags, 1);
+            assert!(!stream.blocks[1].error);
+            assert!(stream.blocks[1].payload[0].starts_with("attached:"));
+            assert!(stream.blocks[1].payload[0].ends_with(" (attached)"));
+            assert_eq!(stream.outside, ["%exit"]);
+        }
+
+        #[test]
+        fn control_chains_frame_each_command_and_abort_only_the_failing_line() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let output = fixture.run_with_stdin(
+                &["-C", "new-session", "-s", "chain"],
+                b"display-message -p one ; display-message -p two\nkill-session -t nosuch ; display-message -p skipped\ndisplay-message -p fresh\n\n",
+            );
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 5);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &["one"], false);
+            assert_block(&stream.blocks[2], 3, 1, &["two"], false);
+            assert_block(
+                &stream.blocks[3],
+                4,
+                1,
+                &["can't find session: nosuch"],
+                true,
+            );
+            assert_block(&stream.blocks[4], 5, 1, &["fresh"], false);
+            assert_eq!(stream.outside, ["%exit"]);
+        }
+
+        #[test]
+        fn bare_control_defaults_to_attached_new_session() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let output = fixture.run_with_stdin(&["-C"], b"ls\n\n");
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 2);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_eq!(stream.blocks[1].flags, 1);
+            assert!(!stream.blocks[1].payload.is_empty());
+            assert!(!stream.blocks[1].error);
+            assert_eq!(stream.outside, ["%exit"]);
+        }
+
+        #[test]
+        fn double_control_wraps_stdout_in_dcs_and_st() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let output = fixture.run(&["-CC", "new-session", "-d"]);
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, true);
+            assert_eq!(stream.blocks.len(), 1);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_eq!(stream.outside, ["%exit"]);
+        }
+
+        #[test]
+        fn control_stdin_parse_error_is_framed_and_the_loop_continues() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let output = fixture.run_with_stdin(
+                &["-C", "new-session", "-s", "parse-error"],
+                b"bogus-command\n\n",
+            );
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 2);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(
+                &stream.blocks[1],
+                2,
+                1,
+                &["parse error: unknown command: bogus-command"],
+                true,
+            );
+            assert_eq!(stream.outside, ["%exit"]);
+        }
+
+        #[test]
+        fn control_kill_server_closes_its_block_before_exit() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let output =
+                fixture.run_with_stdin(&["-C", "new-session", "-s", "stopping"], b"kill-server\n");
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 2);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_eq!(stream.outside, ["%exit"]);
+        }
     }
 }

@@ -2697,6 +2697,7 @@ impl Shared {
         let client = ClientId(inner.next_client_id);
         inner.next_client_id = inner.next_client_id.saturating_add(1);
         inner.client_instances.insert(client, client_instance_id);
+        inner.client_kinds.insert(client, kind);
         if let Some(device_name) = device_name {
             inner.client_names.insert(client, device_name);
         }
@@ -2783,7 +2784,7 @@ impl Shared {
     ) -> (ClientId, ServerHello) {
         let (client, hello) =
             self.register(kind, ClientInstanceId::default(), device_name, color_scheme);
-        if kind == ClientKind::Interactive {
+        if matches!(kind, ClientKind::Interactive | ClientKind::Control) {
             self.subscribe(client, outbound);
         }
         (client, hello)
@@ -2802,6 +2803,7 @@ impl Shared {
             inner.client_color_schemes.remove(&client);
             inner.client_names.remove(&client);
             inner.client_instances.remove(&client);
+            inner.client_kinds.remove(&client);
             inner.key_engines.remove(&client);
             inner.copy_sessions.remove(&client);
             inner.prefix_armed.remove(&client);
@@ -4276,7 +4278,7 @@ impl Shared {
             }
         }
         if let Some((session, detach_others)) = attach {
-            if kind == ClientKind::Interactive {
+            if matches!(kind, ClientKind::Interactive | ClientKind::Control) {
                 let mut snapshot =
                     self.attach_with_event_hooks(client, session, event_hooks_enabled)?;
                 if detach_others {
@@ -4533,7 +4535,9 @@ impl Shared {
             return Ok(Execution::default());
         }
         if parsed.has('L') {
-            if kind != ClientKind::Command || client == ClientId(u64::MAX) {
+            if !matches!(kind, ClientKind::Command | ClientKind::Control)
+                || client == ClientId(u64::MAX)
+            {
                 return Err(ServerError::InvalidCommand("not able to lock".to_owned()).into());
             }
             let receiver = {
@@ -4587,7 +4591,9 @@ impl Shared {
             }
             return Ok(Execution::default());
         }
-        if kind != ClientKind::Command || client == ClientId(u64::MAX) {
+        if !matches!(kind, ClientKind::Command | ClientKind::Control)
+            || client == ClientId(u64::MAX)
+        {
             return Err(ServerError::InvalidCommand("not able to wait".to_owned()).into());
         }
         let receiver = {
@@ -5263,7 +5269,7 @@ impl Shared {
         let (output, exit_code) = shell_job_output(command, result);
         let output = self.route_run_shell_output(route, command.to_owned(), &output);
         if route.foreground
-            && route.kind == ClientKind::Command
+            && matches!(route.kind, ClientKind::Command | ClientKind::Control)
             && route.client != ClientId(u64::MAX)
             && exit_code != 0
         {
@@ -5302,6 +5308,13 @@ impl Shared {
         if output.is_empty() {
             return String::new();
         }
+        if route.kind == ClientKind::Control {
+            return if route.foreground {
+                output.to_owned()
+            } else {
+                String::new()
+            };
+        }
         if route.target_requested
             && let Some(target) = route.target
             && self
@@ -5316,7 +5329,7 @@ impl Shared {
             return String::new();
         }
         if route.foreground {
-            if route.kind == ClientKind::Command {
+            if matches!(route.kind, ClientKind::Command | ClientKind::Control) {
                 return output.to_owned();
             }
             let _ = self.open_command_output(route.client, None, title, output);
@@ -5342,7 +5355,10 @@ impl Shared {
                 .into_iter()
                 .flatten()
                 .copied()
-                .filter(|client| inner.subscribers.contains_key(client))
+                .filter(|client| {
+                    inner.subscribers.contains_key(client)
+                        && inner.client_kinds.get(client) == Some(&ClientKind::Interactive)
+                })
                 .collect::<Vec<_>>()
         };
         for client in clients {
@@ -5779,6 +5795,9 @@ impl Shared {
         args: &[String],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_display_popup_args(args)?;
+        if kind == ClientKind::Control {
+            return Ok(Execution::default());
+        }
         let (target_client, mut target) = {
             let inner = self.inner.lock();
             let target_client =
@@ -6057,7 +6076,8 @@ impl Shared {
                     state: state.clone(),
                     cell_width_px: geometry.cell_width_px,
                     cell_height_px: geometry.cell_height_px,
-                    waiter: (kind == ClientKind::Command).then_some(PopupWaiter { client, wake }),
+                    waiter: matches!(kind, ClientKind::Command | ClientKind::Control)
+                        .then_some(PopupWaiter { client, wake }),
                 },
             );
         }
@@ -6078,7 +6098,7 @@ impl Shared {
             self.close_popup(target_client, true);
             return Err(error);
         }
-        if kind != ClientKind::Command {
+        if !matches!(kind, ClientKind::Command | ClientKind::Control) {
             return Ok(Execution::default());
         }
         let exit_code = wait.recv().unwrap_or(129);
@@ -6100,6 +6120,9 @@ impl Shared {
         args: &[String],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_display_menu_args(args)?;
+        if kind == ClientKind::Control {
+            return Ok(Execution::default());
+        }
         let (target_client, mut target) = {
             let inner = self.inner.lock();
             let target_client =
@@ -6255,12 +6278,13 @@ impl Shared {
                     state: state.clone(),
                     commands,
                     target,
-                    waiter: (kind == ClientKind::Command).then_some(MenuWaiter { client, wake }),
+                    waiter: matches!(kind, ClientKind::Command | ClientKind::Control)
+                        .then_some(MenuWaiter { client, wake }),
                 },
             );
         }
         self.publish_to_client(target_client, EventPayload::Menu { state: Some(state) });
-        if kind == ClientKind::Command {
+        if matches!(kind, ClientKind::Command | ClientKind::Control) {
             let _ = wait.recv();
         }
         Ok(Execution::default())
@@ -6333,7 +6357,7 @@ impl Shared {
         let blocking_commands = commands.clone();
         let execution = if parsed.background {
             ConfirmExecution::Background { commands }
-        } else if kind == ClientKind::Command {
+        } else if matches!(kind, ClientKind::Command | ClientKind::Control) {
             ConfirmExecution::Blocking { client, wake }
         } else {
             ConfirmExecution::Deferred {
@@ -6372,7 +6396,7 @@ impl Shared {
             Self::retire_popup(owner, popup, true);
         }
         self.publish_to_client(target_client, EventPayload::Confirm { state: Some(state) });
-        if parsed.background || kind != ClientKind::Command {
+        if parsed.background || !matches!(kind, ClientKind::Command | ClientKind::Control) {
             return Ok(Execution::default());
         }
         let accepted = wait.recv().unwrap_or(false);
@@ -6877,7 +6901,7 @@ impl Shared {
         context: &mut ExecutionContext,
         target: &str,
     ) -> Result<(SessionId, MuxSnapshot), ServerError> {
-        if kind == ClientKind::Interactive
+        if matches!(kind, ClientKind::Interactive | ClientKind::Control)
             && target.is_empty()
             && self.inner.lock().engine.state.sessions.is_empty()
         {
@@ -10692,7 +10716,11 @@ impl Shared {
             let client = inner
                 .attached
                 .get(&session)
-                .and_then(|clients| clients.iter().next())
+                .and_then(|clients| {
+                    clients.iter().find(|client| {
+                        inner.client_kinds.get(client) == Some(&ClientKind::Interactive)
+                    })
+                })
                 .copied()
                 .ok_or(ServerError::PaneNotAttached(pane))?;
             let subscriber = inner
@@ -12213,6 +12241,7 @@ struct ServerState {
     client_color_schemes: BTreeMap<ClientId, TerminalColorScheme>,
     client_names: BTreeMap<ClientId, String>,
     client_instances: BTreeMap<ClientId, ClientInstanceId>,
+    client_kinds: BTreeMap<ClientId, ClientKind>,
     terminals: BTreeMap<PaneId, Arc<TerminalSession>>,
     terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,
     command_outputs: BTreeMap<ClientId, CommandOutputSession>,
@@ -14860,6 +14889,9 @@ fn visible_terminal_panes(
     client: ClientId,
     session: SessionId,
 ) -> BTreeSet<PaneId> {
+    if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
+        return BTreeSet::new();
+    }
     let Some(session) = inner.engine.state.sessions.get(&session) else {
         return BTreeSet::new();
     };
@@ -15167,6 +15199,21 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
                 .map(|(pane, pipe)| (*pane, pipe.pid))
                 .collect(),
         ),
+        session_attachments: Arc::new(
+            inner
+                .attached
+                .iter()
+                .map(|(session, clients)| {
+                    let names = clients
+                        .iter()
+                        .filter_map(|client| inner.client_names.get(client))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    (*session, (clients.len(), names))
+                })
+                .collect(),
+        ),
         buffer: inner
             .paste_buffers
             .iter()
@@ -15396,7 +15443,10 @@ fn inserted_execution(
     kind: ClientKind,
     result: InsertedCommandResult,
 ) -> Result<Execution, DaemonError> {
-    if kind == ClientKind::Command && client != ClientId(u64::MAX) && result.exit_code != 0 {
+    if matches!(kind, ClientKind::Command | ClientKind::Control)
+        && client != ClientId(u64::MAX)
+        && result.exit_code != 0
+    {
         Err(DaemonError::CommandExit {
             output: result.output,
             exit_code: result.exit_code,
@@ -16675,7 +16725,7 @@ fn handle_connection<S: TransportStream>(
         .spawn(move || write_outbound(&mut writer, &writer_mailbox))
         .map_err(|error| DaemonError::Thread(error.to_string()))?;
     let _ = outbound.enqueue_reliable(&ProtocolMessage::ServerHello(server_hello));
-    if hello.kind == ClientKind::Interactive {
+    if matches!(hello.kind, ClientKind::Interactive | ClientKind::Control) {
         shared.subscribe(client, Arc::clone(&outbound));
     }
 
@@ -16685,7 +16735,7 @@ fn handle_connection<S: TransportStream>(
             .origin
             .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane))
             .or_else(|| {
-                let fallback = if hello.kind == ClientKind::Command {
+                let fallback = if matches!(hello.kind, ClientKind::Command | ClientKind::Control) {
                     inner.engine.state.most_recent_context()
                 } else {
                     inner.engine.state.default_context()
@@ -16817,12 +16867,26 @@ fn handle_connection<S: TransportStream>(
                 shared.detach(client);
             }
             ProtocolMessage::SetColorScheme(color_scheme) => {
-                shared.set_client_color_scheme(client, color_scheme);
+                if hello.kind == ClientKind::Interactive {
+                    shared.set_client_color_scheme(client, color_scheme);
+                }
             }
             ProtocolMessage::SetConfigOverrides { entries } => {
                 shared.set_config_overrides(client, hello.kind, &entries);
             }
             ProtocolMessage::Input(input) => {
+                if hello.kind != ClientKind::Interactive {
+                    let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
+                        CommandResponse::Error {
+                            request_id: 0,
+                            error: ServerError::InvalidCommand(
+                                "command client cannot send input".to_owned(),
+                            ),
+                            output: String::new(),
+                        },
+                    ));
+                    continue;
+                }
                 let Some(context) = context.as_mut() else {
                     let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
                         CommandResponse::Error {
@@ -16875,7 +16939,9 @@ fn handle_connection<S: TransportStream>(
             ProtocolMessage::PasteUploadChunk { upload_id, bytes } => {
                 shared.extend_paste_upload(client, upload_id, &bytes);
             }
-            ProtocolMessage::FetchPastedImage { pane, number } => {
+            ProtocolMessage::FetchPastedImage { pane, number }
+                if hello.kind == ClientKind::Interactive =>
+            {
                 shared.fetch_pasted_image(client, pane, number);
             }
             message @ (ProtocolMessage::AgentPrompt { .. }
@@ -18689,6 +18755,50 @@ mod tests {
         assert!(attached_index.is_some());
         assert!(snapshot_index.is_some());
         assert!(attached_index < snapshot_index);
+    }
+
+    #[test]
+    fn control_new_session_attaches_without_terminal_frames() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, hello) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        assert!(
+            hello
+                .capabilities
+                .iter()
+                .any(|capability| capability == NEW_SESSION_ATTACH_CAPABILITY)
+        );
+        let mut context = ExecutionContext::default();
+
+        shared
+            .execute(
+                client,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("new-session", [] as [&str; 0]),
+            )
+            .expect("create and attach control session");
+        let session = context.session.expect("session id");
+        let pane = context.pane.expect("pane id");
+
+        assert_eq!(
+            shared.inner.lock().attached.get(&session),
+            Some(&BTreeSet::from([client]))
+        );
+        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Attached {
+                    session: attached,
+                    ..
+                } if *attached == session
+            )
+        }));
+        shared.send_resync(client, &mailbox);
+        shared.send_full(client, pane, &mailbox);
+        thread::sleep(Duration::from_millis(50));
+        assert!(mailbox.state.lock().terminals.is_empty());
     }
 
     #[test]
@@ -21169,7 +21279,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn run_shell_routes_to_command_interactive_target_and_background_sinks() {
+    fn run_shell_routes_to_command_interactive_control_and_background_sinks() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
         let (interactive, _) =
@@ -21184,6 +21294,17 @@ mod tests {
             )
             .expect("routing session");
         let target = context.pane.expect("target pane");
+        let session = context.session.expect("target session");
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        shared
+            .attach(control, session)
+            .expect("attach control client");
 
         let output = shared
             .execute(
@@ -21224,6 +21345,38 @@ mod tests {
             )
             .expect("missing target falls back to command output");
         assert_eq!(output.output, "fallback");
+
+        let output = shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context.clone(),
+                &CommandInvocation::new("run-shell", ["-t", &target.to_string(), "printf control"]),
+            )
+            .expect("control shell output");
+        assert_eq!(output.output, "control");
+        assert!(!shared.inner.lock().command_outputs.contains_key(&control));
+
+        let mut control_context = context.clone();
+        let response = shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut control_context,
+            71,
+            &CommandInvocation::new("run-shell", ["exit 4"]),
+        );
+        assert!(
+            matches!(
+                response,
+                CommandResponse::Success {
+                    request_id: 71,
+                    ref output,
+                    exit_code: 4,
+                } if output == "'exit 4' returned 4"
+            ),
+            "{response:?}"
+        );
+        assert!(!shared.inner.lock().command_outputs.contains_key(&control));
 
         let output = shared
             .execute(
@@ -21268,6 +21421,22 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(shared.inner.lock().active_shell_jobs, 0);
+
+        let output = shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["-b", "printf control-background"]),
+            )
+            .expect("control background shell job");
+        assert!(output.output.is_empty());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared.inner.lock().active_shell_jobs != 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(shared.inner.lock().active_shell_jobs, 0);
+        assert!(!shared.inner.lock().command_outputs.contains_key(&control));
     }
 
     #[cfg(unix)]
@@ -31728,7 +31897,7 @@ bind - split-window -v -c "#{pane_current_path}"
             viewport.mode,
             zz_terminal::TerminalMode::View { .. }
         ));
-        assert!(viewport_text(&viewport).contains("terminal"));
+        assert!(viewport_text(&viewport).contains("[history "));
         assert!(
             shared.inner.lock().key_engines[&client]
                 .active_table()
@@ -33542,6 +33711,102 @@ bind - split-window -v -c "#{pane_current_path}"
             assert!(Instant::now() < deadline, "detach hook did not fire");
             thread::sleep(Duration::from_millis(5));
         }
+        drop(client_stream);
+        connection
+            .join()
+            .expect("connection thread")
+            .expect("connection");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn control_connection_attaches_rejects_input_and_sends_no_terminal_frames() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        let (mut client_stream, server_stream) =
+            std::os::unix::net::UnixStream::pair().expect("create paired stream");
+        client_stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set read timeout");
+        let connection_shared = Arc::clone(&shared);
+        let connection =
+            thread::spawn(move || handle_connection(server_stream, &connection_shared));
+
+        zz_protocol::write_protocol_message(
+            &mut client_stream,
+            &ProtocolMessage::ClientHello(ClientHello {
+                protocol_version: PROTOCOL_VERSION,
+                client_instance_id: ClientInstanceId(1),
+                kind: ClientKind::Control,
+                device_name: None,
+                capabilities: Vec::new(),
+                color_scheme: None,
+                origin: None,
+            }),
+        )
+        .expect("send control hello");
+        assert!(matches!(
+            zz_protocol::read_protocol_message(&mut client_stream).expect("server hello"),
+            ProtocolMessage::ServerHello(_)
+        ));
+
+        zz_protocol::write_protocol_message(
+            &mut client_stream,
+            &ProtocolMessage::Attach {
+                session: String::new(),
+            },
+        )
+        .expect("attach control client");
+        let pane = loop {
+            let message = zz_protocol::read_protocol_message(&mut client_stream)
+                .expect("control attach response");
+            assert!(!matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::TerminalViewport { .. }
+                        | EventPayload::TerminalPatch { .. },
+                    ..
+                })
+            ));
+            if let ProtocolMessage::Attached { snapshot, .. } = message {
+                break snapshot.sessions[0].windows[0].active_pane;
+            }
+        };
+
+        zz_protocol::write_protocol_message(
+            &mut client_stream,
+            &ProtocolMessage::Input(InputMessage::ResizeTerminal {
+                pane,
+                columns: 90,
+                rows: 30,
+                cell_width_px: 8,
+                cell_height_px: 18,
+            }),
+        )
+        .expect("send forbidden input");
+        loop {
+            let message =
+                zz_protocol::read_protocol_message(&mut client_stream).expect("input rejection");
+            assert!(!matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::TerminalViewport { .. }
+                        | EventPayload::TerminalPatch { .. },
+                    ..
+                })
+            ));
+            if matches!(
+                message,
+                ProtocolMessage::CommandResponse(CommandResponse::Error {
+                    request_id: 0,
+                    error: ServerError::InvalidCommand(message),
+                    ..
+                }) if message == "command client cannot send input"
+            ) {
+                break;
+            }
+        }
+
         drop(client_stream);
         connection
             .join()

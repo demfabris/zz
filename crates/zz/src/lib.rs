@@ -5,6 +5,8 @@ mod browser;
 mod chooser;
 mod command;
 mod config;
+#[cfg(not(target_os = "ios"))]
+mod control_mode;
 mod diagnostics;
 mod editor;
 #[cfg(any(feature = "agent-pane", feature = "editor-pane"))]
@@ -149,6 +151,7 @@ fn run_startup(socket_path: PathBuf) -> Startup {
         remaining,
         mux_config_files,
         no_start_server,
+        control_mode,
         shell_command,
         login_shell,
         early_output,
@@ -156,6 +159,20 @@ fn run_startup(socket_path: PathBuf) -> Startup {
     if let Some(output) = early_output {
         println!("{output}");
         return Startup::Exit(ExitCode::SUCCESS);
+    }
+    if control_mode != 0 && shell_command.is_none() {
+        if host.is_some() {
+            eprintln!("zz: --host is not supported with control mode");
+            return Startup::Exit(ExitCode::FAILURE);
+        }
+        return Startup::Exit(control_mode::run(
+            &socket_path,
+            socket_source,
+            &mux_config_files,
+            no_start_server,
+            control_mode,
+            remaining,
+        ));
     }
     match run_command_mode(
         remaining,
@@ -311,6 +328,7 @@ struct ApplicationArguments {
     remaining: Vec<String>,
     mux_config_files: Vec<PathBuf>,
     no_start_server: bool,
+    control_mode: u8,
     shell_command: Option<String>,
     login_shell: bool,
     early_output: Option<&'static str>,
@@ -357,7 +375,7 @@ fn application_arguments(
     let mut no_start_server = false;
     let mut shell_command = None;
     let mut login_shell = false;
-    let mut control_mode = false;
+    let mut control_mode = 0_u8;
     let mut foreground_server = false;
     let mut parsing_tmux_options = true;
     let mut arguments = arguments.into_iter().collect::<Vec<_>>().into_iter();
@@ -428,7 +446,7 @@ fn application_arguments(
                         shell_command = Some(value(&mut arguments)?);
                         break;
                     }
-                    'C' => control_mode = true,
+                    'C' => control_mode = control_mode.saturating_add(1),
                     'D' => foreground_server = true,
                     'f' => {
                         mux_config_files.push(PathBuf::from(value(&mut arguments)?));
@@ -442,6 +460,7 @@ fn application_arguments(
                             remaining: Vec::new(),
                             mux_config_files: Vec::new(),
                             no_start_server: false,
+                            control_mode: 0,
                             shell_command: None,
                             login_shell: false,
                             early_output: Some(TMUX_USAGE),
@@ -470,6 +489,7 @@ fn application_arguments(
                             remaining: Vec::new(),
                             mux_config_files: Vec::new(),
                             no_start_server: false,
+                            control_mode: 0,
                             shell_command: None,
                             login_shell: false,
                             early_output: Some(TMUX_VERSION_OUTPUT),
@@ -492,11 +512,6 @@ fn application_arguments(
     }
     if foreground_server && !remaining.is_empty() {
         return Err(ApplicationArgumentError::Usage);
-    }
-    if control_mode {
-        return Err(ApplicationArgumentError::Message(
-            "-C and -CC control mode are not supported".to_owned(),
-        ));
     }
     if foreground_server {
         return Err(ApplicationArgumentError::Message(
@@ -528,6 +543,7 @@ fn application_arguments(
         remaining,
         mux_config_files,
         no_start_server,
+        control_mode,
         shell_command,
         login_shell,
         early_output: None,
@@ -2044,13 +2060,6 @@ mod tests {
             Err(ApplicationArgumentError::Raw(message))
                 if message == format!("zz: option requires an argument -- L\n{TMUX_USAGE}")
         ));
-        for flag in ["-C", "-CC"] {
-            assert!(matches!(
-                application_arguments([flag.to_owned()], PathBuf::from("/tmp/default.sock")),
-                Err(ApplicationArgumentError::Message(message))
-                    if message == "-C and -CC control mode are not supported"
-            ));
-        }
         assert!(matches!(
             application_arguments(["-D".to_owned()], PathBuf::from("/tmp/default.sock")),
             Err(ApplicationArgumentError::Message(message))
@@ -2063,6 +2072,45 @@ mod tests {
             ),
             Err(ApplicationArgumentError::Usage)
         );
+    }
+
+    #[test]
+    fn control_flags_count_and_compose_with_tmux_options() {
+        for (flag, expected) in [("-C", 1), ("-CC", 2), ("-CCC", 3)] {
+            let parsed = application_arguments(
+                [flag.to_owned(), "list-sessions".to_owned()],
+                PathBuf::from("/tmp/default.sock"),
+            )
+            .unwrap();
+            assert_eq!(parsed.control_mode, expected);
+            assert_eq!(parsed.remaining, ["list-sessions"]);
+        }
+        let parsed = application_arguments(
+            [
+                "-2CulN".to_owned(),
+                "-f/tmp/control.conf".to_owned(),
+                "-S/tmp/control.sock".to_owned(),
+                "new-session".to_owned(),
+            ],
+            PathBuf::from("/tmp/default.sock"),
+        )
+        .unwrap();
+        assert_eq!(parsed.control_mode, 1);
+        assert!(parsed.login_shell);
+        assert!(parsed.no_start_server);
+        assert_eq!(
+            parsed.mux_config_files,
+            [PathBuf::from("/tmp/control.conf")]
+        );
+        assert_eq!(parsed.socket_path, PathBuf::from("/tmp/control.sock"));
+        assert_eq!(parsed.remaining, ["new-session"]);
+        let shell = application_arguments(
+            ["-Cc".to_owned(), "printf ok".to_owned()],
+            PathBuf::from("/tmp/default.sock"),
+        )
+        .unwrap();
+        assert_eq!(shell.control_mode, 1);
+        assert_eq!(shell.shell_command.as_deref(), Some("printf ok"));
     }
 
     #[cfg(unix)]

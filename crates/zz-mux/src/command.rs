@@ -42,6 +42,38 @@ const DEFAULT_DISPLAY_MESSAGE: &str =
     "[#{session_name}] #{window_index}:#{window_name}, current pane #{pane_index}";
 const DEFAULT_LIST_COMMANDS_FORMAT: &str =
     "#{command_list_name}#{?command_list_alias, (#{command_list_alias}),} #{command_list_usage}";
+const DEFAULT_LIST_SESSIONS_FORMAT: &str = concat!(
+    "#{session_name}: #{session_windows} windows (created #{t:session_created})",
+    "#{?session_grouped, (group ,}#{session_group}#{?session_grouped,),}",
+    "#{?session_attached, (attached),}",
+);
+const DEFAULT_LIST_WINDOWS_FORMAT: &str = concat!(
+    "#{window_index}: #{window_name}#{window_raw_flags} (#{window_panes} panes) ",
+    "[#{window_width}x#{window_height}] [layout #{window_layout}] #{window_id}",
+    "#{?window_active, (active),}",
+);
+const DEFAULT_LIST_WINDOWS_WITH_SESSION_FORMAT: &str = concat!(
+    "#{session_name}:#{window_index}: #{window_name}#{window_raw_flags} ",
+    "(#{window_panes} panes) [#{window_width}x#{window_height}] ",
+);
+const DEFAULT_LIST_PANES_FORMAT: &str = concat!(
+    "#{pane_index}: [#{pane_width}x#{pane_height}",
+    "#{?pane_floating_flag, #{pane_x}#,#{pane_y}#,#{pane_z}}] ",
+    "[history #{history_size}/#{history_limit}, #{history_bytes} bytes] #{pane_id}",
+    "#{?pane_active, (active),}#{?pane_dead, (dead),}",
+);
+const DEFAULT_LIST_PANES_WITH_SESSION_FORMAT: &str = concat!(
+    "#{window_index}.#{pane_index}: [#{pane_width}x#{pane_height}",
+    "#{?pane_floating_flag, #{pane_x}#,#{pane_y}#,#{pane_z}}] ",
+    "[history #{history_size}/#{history_limit}, #{history_bytes} bytes] #{pane_id}",
+    "#{?pane_active, (active),}#{?pane_dead, (dead),}",
+);
+const DEFAULT_LIST_PANES_WITH_SERVER_FORMAT: &str = concat!(
+    "#{session_name}:#{window_index}.#{pane_index}: [#{pane_width}x#{pane_height}",
+    "#{?pane_floating_flag, #{pane_x}#,#{pane_y}#,#{pane_z}}] ",
+    "[history #{history_size}/#{history_limit}, #{history_bytes} bytes] #{pane_id}",
+    "#{?pane_active, (active),}#{?pane_dead, (dead),}",
+);
 pub const DEFAULT_BUFFER_LIMIT: usize = 50;
 const MAX_BUFFER_LIMIT: usize = i32::MAX.cast_unsigned() as usize;
 const DEFAULT_MESSAGE_LIMIT: usize = 1_000;
@@ -1748,39 +1780,23 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-sessions", args)?;
         reject_positionals("list-sessions", &positional)?;
-        if let Some(format) = options.value("-F") {
-            let output = self
-                .state
-                .sessions_by_name()
-                .into_iter()
-                .map(|session| {
-                    expand_format_with_hooks(
-                        format,
-                        self,
-                        FormatContext {
-                            session: Some(session.id),
-                            window: None,
-                            pane: None,
-                            active_session: context.session,
-                            format_type: FormatType::Session,
-                        },
-                        hooks,
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            return Ok(Execution::output(output));
-        }
+        let format = options.value("-F").unwrap_or(DEFAULT_LIST_SESSIONS_FORMAT);
         let output = self
             .state
             .sessions_by_name()
             .into_iter()
             .map(|session| {
-                format!(
-                    "{}: {} windows (id {})",
-                    session.name,
-                    session.windows.len(),
-                    session.id
+                expand_format_with_hooks(
+                    format,
+                    self,
+                    FormatContext {
+                        session: Some(session.id),
+                        window: None,
+                        pane: None,
+                        active_session: context.session,
+                        format_type: FormatType::Session,
+                    },
+                    hooks,
                 )
             })
             .collect::<Vec<_>>()
@@ -2041,6 +2057,11 @@ impl MuxEngine {
         } else {
             vec![target_session]
         };
+        let format = options.value("-F").unwrap_or(if options.has("-a") {
+            DEFAULT_LIST_WINDOWS_WITH_SESSION_FORMAT
+        } else {
+            DEFAULT_LIST_WINDOWS_FORMAT
+        });
         let mut output = Vec::new();
         for session_id in session_ids {
             let session = self
@@ -2052,38 +2073,17 @@ impl MuxEngine {
                 let Some(window) = self.state.windows.get(window_id) else {
                     continue;
                 };
-                if let Some(format) = options.value("-F") {
-                    output.push(expand_format_with_hooks(
-                        format,
-                        self,
-                        FormatContext {
-                            session: Some(session_id),
-                            window: Some(window.id),
-                            pane: None,
-                            active_session: context.session,
-                            format_type: FormatType::Window,
-                        },
-                        hooks,
-                    ));
-                    continue;
-                }
-                let active = if window.id == session.active_window {
-                    '*'
-                } else {
-                    '-'
-                };
-                let prefix = if options.has("-a") {
-                    format!("{}:", session.name)
-                } else {
-                    String::new()
-                };
-                output.push(format!(
-                    "{prefix}{}: {}{} ({} panes) [id {}]",
-                    window.index,
-                    window.name,
-                    active,
-                    window.panes.len(),
-                    window.id
+                output.push(expand_format_with_hooks(
+                    format,
+                    self,
+                    FormatContext {
+                        session: Some(session_id),
+                        window: Some(window.id),
+                        pane: None,
+                        active_session: context.session,
+                        format_type: FormatType::Window,
+                    },
+                    hooks,
                 ));
             }
         }
@@ -3173,6 +3173,13 @@ impl MuxEngine {
         } else {
             vec![target_window]
         };
+        let format = options.value("-F").unwrap_or(if options.has("-a") {
+            DEFAULT_LIST_PANES_WITH_SERVER_FORMAT
+        } else if options.has("-s") {
+            DEFAULT_LIST_PANES_WITH_SESSION_FORMAT
+        } else {
+            DEFAULT_LIST_PANES_FORMAT
+        });
         let mut output = Vec::new();
         for window_id in window_ids {
             let window = self
@@ -3180,55 +3187,21 @@ impl MuxEngine {
                 .windows
                 .get(&window_id)
                 .ok_or_else(|| ServerError::MissingTarget(window_id.to_string()))?;
-            let session = &self.state.sessions[&window.session];
             for pane_id in window.pane_order() {
                 let Some(pane) = window.panes.get(pane_id) else {
                     continue;
                 };
-                if let Some(format) = options.value("-F") {
-                    output.push(expand_format_with_hooks(
-                        format,
-                        self,
-                        FormatContext {
-                            session: Some(window.session),
-                            window: Some(window_id),
-                            pane: Some(pane.id),
-                            active_session: context.session,
-                            format_type: FormatType::Pane,
-                        },
-                        hooks,
-                    ));
-                    continue;
-                }
-                let kind = match pane.kind {
-                    PaneKind::Picker { .. } => "picker",
-                    PaneKind::Terminal => "terminal",
-                    PaneKind::Browser(_) => "browser",
-                    PaneKind::Agent(_) => "agent",
-                    PaneKind::Editor(_) => "editor",
-                };
-                let active = if pane.id == window.active_pane {
-                    '*'
-                } else {
-                    '-'
-                };
-                let prefix = if options.has("-a") {
-                    format!("{}:{}.", session.name, window.index)
-                } else if options.has("-s") {
-                    format!("{}.", window.index)
-                } else {
-                    String::new()
-                };
-                let pane_label = if options.has("-a") || options.has("-s") {
-                    self.pane_index(window_id, pane.id)
-                        .expect("listed pane has an index")
-                        .to_string()
-                } else {
-                    pane.id.to_string()
-                };
-                output.push(format!(
-                    "{prefix}{pane_label}: {kind}{active} {}",
-                    pane.title
+                output.push(expand_format_with_hooks(
+                    format,
+                    self,
+                    FormatContext {
+                        session: Some(window.session),
+                        window: Some(window_id),
+                        pane: Some(pane.id),
+                        active_session: context.session,
+                        format_type: FormatType::Pane,
+                    },
+                    hooks,
                 ));
             }
         }
@@ -8480,6 +8453,40 @@ mod tests {
         CommandInvocation::new(name, args.iter().copied())
     }
 
+    fn assert_bare_matches_format(
+        engine: &mut MuxEngine,
+        context: &mut ExecutionContext,
+        name: &str,
+        args: &[&str],
+        format: &str,
+    ) -> String {
+        let bare = engine
+            .execute(context, &command(name, args))
+            .unwrap()
+            .output;
+        let mut explicit = command(name, args);
+        explicit.args.extend(["-F".to_owned(), format.to_owned()]);
+        let formatted = engine.execute(context, &explicit).unwrap().output;
+        assert_eq!(bare, formatted);
+        bare
+    }
+
+    struct AttachedSessionHooks;
+
+    impl StatusHooks for AttachedSessionHooks {
+        fn strftime(&mut self, literal: &str) -> String {
+            literal.to_owned()
+        }
+
+        fn shell(&mut self, _command: &str) -> String {
+            String::new()
+        }
+
+        fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+            (name == "session_attached").then(|| "1".to_owned())
+        }
+    }
+
     fn window_layout(engine: &MuxEngine, session: SessionId) -> Vec<String> {
         engine.state.sessions[&session]
             .windows
@@ -9293,8 +9300,9 @@ mod tests {
     }
 
     #[test]
-    fn list_formats_are_contextual_and_default_output_is_unchanged() {
+    fn list_formats_are_contextual_and_bare_output_uses_the_pin_templates() {
         let mut engine = MuxEngine::default();
+        engine.set_format_now(1_700_000_000);
         let mut context = ExecutionContext::default();
         engine
             .execute(&mut context, &command("new-session", &["-s", "work"]))
@@ -9306,26 +9314,74 @@ mod tests {
             .execute(&mut context, &command("split-window", &["-h"]))
             .unwrap();
 
-        assert_eq!(
-            engine
-                .execute(&mut context, &command("list-sessions", &[]))
-                .unwrap()
-                .output,
-            "work: 1 windows (id $0)"
+        let session_format = concat!(
+            "#{session_name}: #{session_windows} windows (created #{t:session_created})",
+            "#{?session_grouped, (group ,}#{session_group}#{?session_grouped,),}",
+            "#{?session_attached, (attached),}",
         );
-        assert_eq!(
-            engine
-                .execute(&mut context, &command("list-windows", &[]))
-                .unwrap()
-                .output,
-            "0: main* (2 panes) [id @0]"
+        let window_format = concat!(
+            "#{window_index}: #{window_name}#{window_raw_flags} (#{window_panes} panes) ",
+            "[#{window_width}x#{window_height}] [layout #{window_layout}] #{window_id}",
+            "#{?window_active, (active),}",
         );
-        assert_eq!(
-            engine
-                .execute(&mut context, &command("list-panes", &[]))
-                .unwrap()
-                .output,
-            "%0: terminal- terminal\n%1: terminal* terminal"
+        let window_with_session_format = concat!(
+            "#{session_name}:#{window_index}: #{window_name}#{window_raw_flags} ",
+            "(#{window_panes} panes) [#{window_width}x#{window_height}] ",
+        );
+        let pane_format = concat!(
+            "#{pane_index}: [#{pane_width}x#{pane_height}",
+            "#{?pane_floating_flag, #{pane_x}#,#{pane_y}#,#{pane_z}}] ",
+            "[history #{history_size}/#{history_limit}, #{history_bytes} bytes] #{pane_id}",
+            "#{?pane_active, (active),}#{?pane_dead, (dead),}",
+        );
+        let pane_with_session_format = concat!(
+            "#{window_index}.#{pane_index}: [#{pane_width}x#{pane_height}",
+            "#{?pane_floating_flag, #{pane_x}#,#{pane_y}#,#{pane_z}}] ",
+            "[history #{history_size}/#{history_limit}, #{history_bytes} bytes] #{pane_id}",
+            "#{?pane_active, (active),}#{?pane_dead, (dead),}",
+        );
+        let pane_with_server_format = concat!(
+            "#{session_name}:#{window_index}.#{pane_index}: [#{pane_width}x#{pane_height}",
+            "#{?pane_floating_flag, #{pane_x}#,#{pane_y}#,#{pane_z}}] ",
+            "[history #{history_size}/#{history_limit}, #{history_bytes} bytes] #{pane_id}",
+            "#{?pane_active, (active),}#{?pane_dead, (dead),}",
+        );
+
+        assert_bare_matches_format(
+            &mut engine,
+            &mut context,
+            "list-sessions",
+            &[],
+            session_format,
+        );
+        assert_bare_matches_format(
+            &mut engine,
+            &mut context,
+            "list-windows",
+            &[],
+            window_format,
+        );
+        assert_bare_matches_format(
+            &mut engine,
+            &mut context,
+            "list-windows",
+            &["-a"],
+            window_with_session_format,
+        );
+        assert_bare_matches_format(&mut engine, &mut context, "list-panes", &[], pane_format);
+        assert_bare_matches_format(
+            &mut engine,
+            &mut context,
+            "list-panes",
+            &["-s"],
+            pane_with_session_format,
+        );
+        assert_bare_matches_format(
+            &mut engine,
+            &mut context,
+            "list-panes",
+            &["-a"],
+            pane_with_server_format,
         );
 
         assert_eq!(
@@ -9367,6 +9423,38 @@ mod tests {
                 .output,
             "$0:@0:%0:0:terminal\n$0:@0:%1:1:terminal"
         );
+
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "second"]))
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("list-windows", &["-F", "#{window_raw_flags}"]),
+                )
+                .unwrap()
+                .output,
+            "-\n*"
+        );
+
+        let mut hooks = AttachedSessionHooks;
+        let attached = engine
+            .execute_with_format_hooks(&mut context, &command("list-sessions", &[]), &mut hooks)
+            .unwrap()
+            .output;
+        assert!(attached.ends_with(" (attached)"));
+        let mut hooks = AttachedSessionHooks;
+        let explicitly_attached = engine
+            .execute_with_format_hooks(
+                &mut context,
+                &command("list-sessions", &["-F", session_format]),
+                &mut hooks,
+            )
+            .unwrap()
+            .output;
+        assert_eq!(attached, explicitly_attached);
+
         assert!(
             engine
                 .execute(&mut context, &command("list-sessions", &["-x"]))

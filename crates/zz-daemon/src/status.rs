@@ -40,6 +40,7 @@ pub(crate) struct StatusRequest {
 pub(crate) struct FormatHookFacts {
     pub(crate) terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
     pub(crate) pane_pipes: Arc<BTreeMap<PaneId, u32>>,
+    pub(crate) session_attachments: Arc<BTreeMap<SessionId, (usize, String)>>,
     pub(crate) buffer: Option<BufferFormatFacts>,
     pub(crate) client: Option<ClientFormatFacts>,
     pub(crate) message: Option<MessageFormatFacts>,
@@ -362,6 +363,32 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                 .pane_pipes
                 .get(&context.pane_id.parse().ok()?)
                 .map(u32::to_string),
+            "session_attached" => Some(
+                self.facts
+                    .session_attachments
+                    .get(&context.session_id.parse().ok()?)
+                    .map_or(0, |(count, _)| *count)
+                    .to_string(),
+            ),
+            "session_attached_list" => Some(
+                self.facts
+                    .session_attachments
+                    .get(&context.session_id.parse().ok()?)
+                    .map_or_else(String::new, |(_, names)| names.clone()),
+            ),
+            "session_many_attached" => Some(
+                if self
+                    .facts
+                    .session_attachments
+                    .get(&context.session_id.parse().ok()?)
+                    .is_some_and(|(count, _)| *count > 1)
+                {
+                    "1"
+                } else {
+                    "0"
+                }
+                .to_owned(),
+            ),
             _ => None,
         }
     }

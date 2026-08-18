@@ -41,7 +41,8 @@ pub use paste::{PastePreparationError, prepare_paste_buffer};
 #[cfg(feature = "session")]
 pub use session::{
     CaptureBoundary, CaptureOptions, KittyImage, KittyImageRequestError, LastCommandCapture,
-    MAX_LAST_COMMAND_BYTES, MAX_LAST_COMMAND_LINES, TerminalCaptureError, TerminalCopyReady,
-    TerminalEvent, TerminalEvents, TerminalSession, TerminalSessionDiagnostics, TerminalSpawn,
+    MAX_LAST_COMMAND_BYTES, MAX_LAST_COMMAND_LINES, RawOutputTapError, TerminalCaptureError,
+    TerminalCopyReady, TerminalEvent, TerminalEvents, TerminalSession, TerminalSessionDiagnostics,
+    TerminalSpawn,
 };
 pub use word::{DEFAULT_WORD_SEPARATORS, WordSeparators};

@@ -94,7 +94,7 @@ const MAX_HISTORY_CHUNK_ROWS: u32 = 512;
 const MAX_RECYCLED_FRAME_BUFFERS: usize = 8;
 const MAX_RECYCLED_FRAME_CAPACITY: usize = 8 * 1024 * 1024;
 const MAX_COPY_PIPE_PROCESSES: usize = 8;
-const MAX_SHELL_JOBS: usize = 16;
+const MAX_SHELL_JOBS: usize = 256;
 const MAX_COPY_PIPE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_COPY_PIPE_COMMAND_BYTES: usize = 8 * 1024;
 const COPY_PIPE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -515,6 +515,7 @@ impl Daemon {
             shared.request_shutdown();
         }
         accept_result?;
+        shared.request_shutdown();
         shared.publish(EventPayload::ServerStopping);
         // The adapter children are told to close and joined before the socket
         // goes; what refuses to settle is the acp crate's problem, not ours.
@@ -1497,6 +1498,8 @@ enum DaemonCommandDispatch {
     ListClients,
     ShowMessages,
     RefreshClient,
+    WaitFor,
+    PipePane,
 }
 
 const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
@@ -1531,6 +1534,10 @@ const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
     ("showmsgs", DaemonCommandDispatch::ShowMessages),
     ("refresh-client", DaemonCommandDispatch::RefreshClient),
     ("refresh", DaemonCommandDispatch::RefreshClient),
+    ("wait-for", DaemonCommandDispatch::WaitFor),
+    ("wait", DaemonCommandDispatch::WaitFor),
+    ("pipe-pane", DaemonCommandDispatch::PipePane),
+    ("pipep", DaemonCommandDispatch::PipePane),
 ];
 
 fn daemon_command_dispatch(name: &str) -> Option<DaemonCommandDispatch> {
@@ -1541,6 +1548,7 @@ fn daemon_command_dispatch(name: &str) -> Option<DaemonCommandDispatch> {
 
 struct Shared {
     inner: Mutex<ServerState>,
+    pipe_effects: Mutex<()>,
     /// Built on the first agent pane rather than at startup: a daemon that
     /// never opens one never touches the journal directory.
     #[cfg(feature = "agent")]
@@ -1860,6 +1868,7 @@ impl Shared {
         let (display_panes_deadline_tx, display_panes_deadline_rx) = crossbeam_channel::unbounded();
         Self {
             inner: Mutex::new(state),
+            pipe_effects: Mutex::new(()),
             #[cfg(feature = "agent")]
             agent: Mutex::new(None),
             #[cfg(feature = "agent")]
@@ -1991,16 +2000,31 @@ impl Shared {
     }
 
     fn request_shutdown(&self) {
-        self.stopping.store(true, Ordering::Release);
+        let (wakes, pipes, shell_jobs) = {
+            let mut inner = self.inner.lock();
+            self.stopping.store(true, Ordering::Release);
+            let wakes = take_all_wait_wakes(&mut inner.wait_channels);
+            let pipes = std::mem::take(&mut inner.pane_pipes)
+                .into_values()
+                .collect::<Vec<_>>();
+            let shell_jobs = std::mem::take(&mut inner.shell_jobs)
+                .into_values()
+                .collect::<Vec<_>>();
+            (wakes, pipes, shell_jobs)
+        };
+        wake_wait_items(wakes);
+        for pipe in pipes {
+            stop_pane_pipe(pipe);
+        }
+        for process in shell_jobs {
+            terminate_managed_process(&process);
+        }
     }
 
-    fn request_shutdown_if_empty(&self, state: &ServerState) {
-        if self.exit_empty_armed.load(Ordering::Acquire)
+    fn should_shutdown_if_empty(&self, state: &ServerState) -> bool {
+        self.exit_empty_armed.load(Ordering::Acquire)
             && state.engine.state.sessions.is_empty()
             && state.subscribers.is_empty()
-        {
-            self.request_shutdown();
-        }
     }
 
     fn refresh_status(&self, refresh: bool) {
@@ -2281,7 +2305,7 @@ impl Shared {
         self.detach(client);
         self.fail_gui_requests_for(client);
         self.status.lock().forget(client);
-        let (terminals, command_output) = {
+        let (terminals, command_output, shutdown) = {
             let mut inner = self.inner.lock();
             inner.subscribers.remove(&client);
             inner.client_color_schemes.remove(&client);
@@ -2301,9 +2325,12 @@ impl Shared {
             inner
                 .paste_uploads
                 .retain(|(uploader, _), _| *uploader != client);
+            remove_client_wait_items(&mut inner.wait_channels, client);
+            let shutdown = self.should_shutdown_if_empty(&inner);
             (
                 inner.terminals.values().cloned().collect::<Vec<_>>(),
                 inner.command_outputs.remove(&client),
+                shutdown,
             )
         };
         let view = TerminalViewId(client.0);
@@ -2316,7 +2343,9 @@ impl Shared {
         for terminal in terminals {
             terminal.release_view(view);
         }
-        self.request_shutdown_if_empty(&self.inner.lock());
+        if shutdown {
+            self.request_shutdown();
+        }
     }
 
     fn execute_command_request(
@@ -2438,6 +2467,8 @@ impl Shared {
                     DaemonCommandDispatch::RefreshClient => {
                         self.refresh_client(client, kind, &command.name, &command.args)
                     }
+                    DaemonCommandDispatch::WaitFor => self.wait_for(client, kind, &command.args),
+                    DaemonCommandDispatch::PipePane => self.pipe_pane(context, &command.args),
                 }
             });
         if let Some(result) = preempted {
@@ -2480,6 +2511,7 @@ impl Shared {
         let mut deferred_terminal_commands = Vec::new();
         let mut unfocused_copy_mode_exits = Vec::new();
         let mut cleared_bells = Vec::new();
+        let mut pipes_to_close = Vec::new();
         let mut display_panes_deadline = None;
         let mut attach = None;
         let mut detach = None;
@@ -2490,6 +2522,7 @@ impl Shared {
         #[cfg(feature = "agent")]
         let mut agent_options_changed = false;
         let mut status_formats_changed = false;
+        let mut shutdown_requested = false;
 
         let (execution, mux_options_event) = {
             let mut inner = self.inner.lock();
@@ -2733,6 +2766,9 @@ impl Shared {
                         environment,
                         empty,
                     } => {
+                        if let Some(pipe) = inner.pane_pipes.remove(pane) {
+                            pipes_to_close.push(pipe);
+                        }
                         let previous = inner.terminal_spawns.get(pane).cloned().unwrap_or_default();
                         let history_limit = inner.engine.history_limit_for_pane(*pane)?;
                         let word_separators =
@@ -2932,6 +2968,9 @@ impl Shared {
                             }
                         }
                         for pane in panes {
+                            if let Some(pipe) = inner.pane_pipes.remove(pane) {
+                                pipes_to_close.push(pipe);
+                            }
                             inner.terminals.remove(pane);
                             inner.terminal_spawns.remove(pane);
                             inner.terminal_geometries.remove(pane);
@@ -3323,11 +3362,11 @@ impl Shared {
                         source_files.push((path.clone(), *quiet));
                     }
                     MuxEffect::ReloadConfig => reload_config = true,
-                    MuxEffect::KillServer => self.request_shutdown(),
+                    MuxEffect::KillServer => shutdown_requested = true,
                     MuxEffect::SnapshotChanged => snapshot_changed = true,
                 }
             }
-            self.request_shutdown_if_empty(&inner);
+            shutdown_requested |= self.should_shutdown_if_empty(&inner);
             if snapshot_changed {
                 unfocused_copy_mode_exits = unfocused_copy_sessions(&mut inner);
                 let clients = inner
@@ -3347,6 +3386,14 @@ impl Shared {
             let mux_options_event = mux_options_changed.then(|| inner.mux_options.clone());
             (execution, mux_options_event)
         };
+
+        if shutdown_requested {
+            self.request_shutdown();
+        }
+
+        for pipe in pipes_to_close {
+            stop_pane_pipe(pipe);
+        }
 
         for command in deferred_terminal_commands {
             command.run();
@@ -3612,6 +3659,297 @@ impl Shared {
             output,
             effects: Vec::new(),
         })
+    }
+
+    fn wait_for(
+        &self,
+        client: ClientId,
+        kind: ClientKind,
+        args: &[String],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_buffer_command_args("wait-for", args, &[], &['L', 'S', 'U'])?;
+        let [name] = parsed.positional.as_slice() else {
+            return Err(ServerError::InvalidCommand(WAIT_FOR_USAGE.to_owned()).into());
+        };
+        if parsed.has('S') {
+            let wakes = {
+                let mut inner = self.inner.lock();
+                let channel = inner.wait_channels.entry(name.clone()).or_default();
+                if channel.waiters.is_empty() && !channel.woken {
+                    channel.woken = true;
+                    return Ok(Execution::default());
+                }
+                let wakes = channel
+                    .waiters
+                    .drain(..)
+                    .map(|item| item.wake)
+                    .collect::<Vec<_>>();
+                remove_wait_channel_if_unused(&mut inner.wait_channels, name);
+                wakes
+            };
+            wake_wait_items(wakes);
+            return Ok(Execution::default());
+        }
+        if parsed.has('L') {
+            if kind != ClientKind::Command || client == ClientId(u64::MAX) {
+                return Err(ServerError::InvalidCommand("not able to lock".to_owned()).into());
+            }
+            let receiver = {
+                let mut inner = self.inner.lock();
+                if self.stopping.load(Ordering::Acquire)
+                    || !inner.client_instances.contains_key(&client)
+                {
+                    return Ok(Execution::default());
+                }
+                let token = next_wait_token(&mut inner);
+                let channel = inner.wait_channels.entry(name.clone()).or_default();
+                if !channel.locked {
+                    channel.locked = true;
+                    return Ok(Execution::default());
+                }
+                let (wake, receiver) = crossbeam_channel::bounded(1);
+                channel.lockers.push_back(WaitItem {
+                    token,
+                    client,
+                    wake,
+                });
+                (token, receiver)
+            };
+            let _ = receiver.1.recv();
+            remove_wait_item(&mut self.inner.lock(), name, receiver.0);
+            return Ok(Execution::default());
+        }
+        if parsed.has('U') {
+            let wake = {
+                let mut inner = self.inner.lock();
+                let Some(channel) = inner.wait_channels.get_mut(name) else {
+                    return Err(
+                        ServerError::InvalidCommand(format!("channel {name} not locked")).into(),
+                    );
+                };
+                if !channel.locked {
+                    return Err(
+                        ServerError::InvalidCommand(format!("channel {name} not locked")).into(),
+                    );
+                }
+                if let Some(item) = channel.lockers.pop_front() {
+                    Some(item.wake)
+                } else {
+                    channel.locked = false;
+                    remove_wait_channel_if_unused(&mut inner.wait_channels, name);
+                    None
+                }
+            };
+            if let Some(wake) = wake {
+                let _ = wake.try_send(());
+            }
+            return Ok(Execution::default());
+        }
+        if kind != ClientKind::Command || client == ClientId(u64::MAX) {
+            return Err(ServerError::InvalidCommand("not able to wait".to_owned()).into());
+        }
+        let receiver = {
+            let mut inner = self.inner.lock();
+            if self.stopping.load(Ordering::Acquire)
+                || !inner.client_instances.contains_key(&client)
+            {
+                return Ok(Execution::default());
+            }
+            let token = next_wait_token(&mut inner);
+            let channel = inner.wait_channels.entry(name.clone()).or_default();
+            if channel.woken {
+                remove_wait_channel_if_unused(&mut inner.wait_channels, name);
+                return Ok(Execution::default());
+            }
+            let (wake, receiver) = crossbeam_channel::bounded(1);
+            channel.waiters.push_back(WaitItem {
+                token,
+                client,
+                wake,
+            });
+            (token, receiver)
+        };
+        let _ = receiver.1.recv();
+        remove_wait_item(&mut self.inner.lock(), name, receiver.0);
+        Ok(Execution::default())
+    }
+
+    fn pipe_pane(
+        self: &Arc<Self>,
+        context: &ExecutionContext,
+        args: &[String],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_buffer_command_args("pipe-pane", args, &['t'], &['I', 'O', 'o'])?;
+        if parsed.positional.len() > 1 {
+            return Err(ServerError::InvalidCommand(PIPE_PANE_USAGE.to_owned()).into());
+        }
+        let _serial = self.pipe_effects.lock();
+        let (pane, terminal, old_pipe) = {
+            let mut inner = self.inner.lock();
+            let pane =
+                inner
+                    .engine
+                    .resolve_pane(parsed.value('t'), context.window, context.pane)?;
+            if inner.engine.state.pane(pane).is_some_and(|pane| pane.dead) {
+                return Err(
+                    ServerError::InvalidCommand("target pane has exited".to_owned()).into(),
+                );
+            }
+            let terminal = inner
+                .terminals
+                .get(&pane)
+                .cloned()
+                .ok_or(ServerError::PaneExited(pane))?;
+            let old_pipe = inner.pane_pipes.remove(&pane);
+            (pane, terminal, old_pipe)
+        };
+        let had_pipe = old_pipe.is_some();
+        if let Some(pipe) = old_pipe {
+            stop_pane_pipe(pipe);
+        }
+        let Some(command) = parsed
+            .positional
+            .first()
+            .filter(|command| !command.is_empty())
+        else {
+            self.refresh_status(false);
+            return Ok(Execution::default());
+        };
+        if parsed.has('o') && had_pipe {
+            self.refresh_status(false);
+            return Ok(Execution::default());
+        }
+        let pipe_input = parsed.has('I');
+        let pipe_output = parsed.has('O') || !pipe_input;
+        let (token, command) = {
+            let mut inner = self.inner.lock();
+            inner.next_pipe_token = inner.next_pipe_token.wrapping_add(1).max(1);
+            inner.engine.set_format_now(unix_timestamp());
+            let target = ExecutionContext::for_pane(&inner.engine.state, pane)
+                .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+            let facts = format_hook_facts(&inner);
+            let mut hooks = DaemonFormatHooks::command(&facts);
+            let command =
+                inner
+                    .engine
+                    .expand_pane_format_time(command, &target, context.session, &mut hooks);
+            (inner.next_pipe_token, command)
+        };
+        let mut process = shell_process(&command);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt as _;
+
+            process.arg0("sh").process_group(0);
+        }
+        process
+            .stdin(if pipe_output {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(if pipe_input {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stderr(Stdio::null());
+        let mut child = process.spawn().map_err(|error| {
+            ServerError::InvalidCommand(format!("could not start pipe-pane command: {error}"))
+        })?;
+        let pid = child.id();
+        let child_input = child.stdin.take();
+        let child_output = child.stdout.take();
+        let tap = if pipe_output {
+            Some(terminal.arm_raw_output_tap(token).map_err(|error| {
+                let _ = terminate_copy_pipe(&mut child);
+                ServerError::Internal(format!("could not arm pane output pipe: {error}"))
+            })?)
+        } else {
+            None
+        };
+        let process = Arc::new(Mutex::new(Some(child)));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (start, started) = crossbeam_channel::bounded(1);
+        let worker_process = Arc::clone(&process);
+        let worker_stop = Arc::clone(&stop);
+        let worker_terminal = Arc::clone(&terminal);
+        let weak = Arc::downgrade(self);
+        let worker = thread::Builder::new()
+            .name(format!("zz-pipe-{}", pane.0))
+            .spawn(move || {
+                if started.recv().is_err() {
+                    return;
+                }
+                run_pane_pipe(
+                    &weak,
+                    pane,
+                    token,
+                    &worker_terminal,
+                    &worker_process,
+                    &worker_stop,
+                    child_input,
+                    child_output,
+                    tap,
+                );
+            })
+            .map_err(|error| {
+                terminate_managed_process(&process);
+                let _ = terminal.disarm_raw_output_tap(token);
+                DaemonError::Thread(error.to_string())
+            })?;
+        let valid = {
+            let mut inner = self.inner.lock();
+            let valid = !self.stopping.load(Ordering::Acquire)
+                && inner
+                    .terminals
+                    .get(&pane)
+                    .is_some_and(|current| Arc::ptr_eq(current, &terminal))
+                && inner.engine.state.pane(pane).is_some_and(|pane| !pane.dead);
+            if valid {
+                inner.pane_pipes.insert(
+                    pane,
+                    PanePipe {
+                        token,
+                        pid,
+                        terminal: Arc::clone(&terminal),
+                        process: Arc::clone(&process),
+                        stop: Arc::clone(&stop),
+                        thread: Some(worker),
+                    },
+                );
+            }
+            valid
+        };
+        if !valid {
+            drop(start);
+            stop.store(true, Ordering::Release);
+            terminate_managed_process(&process);
+            let _ = terminal.disarm_raw_output_tap(token);
+            return Err(ServerError::PaneExited(pane).into());
+        }
+        let _ = start.send(());
+        self.refresh_status(false);
+        Ok(Execution::default())
+    }
+
+    fn pipe_finished(&self, pane: PaneId, token: u64) {
+        let removed = {
+            let mut inner = self.inner.lock();
+            if inner
+                .pane_pipes
+                .get(&pane)
+                .is_some_and(|pipe| pipe.token == token)
+            {
+                inner.pane_pipes.remove(&pane);
+                true
+            } else {
+                false
+            }
+        };
+        if removed {
+            self.refresh_status(false);
+        }
     }
 
     fn run_shell(
@@ -4139,7 +4477,13 @@ impl Shared {
             .name("zz-run-shell".to_owned())
             .spawn(move || {
                 thread::sleep(delay);
-                let result = run_shell_job(&command, &cwd, show_stderr);
+                let result = run_shell_job(
+                    &command,
+                    &cwd,
+                    show_stderr,
+                    &permit.process,
+                    &permit.shared.stopping,
+                );
                 drop(permit);
                 callback(result);
             })
@@ -7520,6 +7864,18 @@ impl Shared {
             zz_terminal::SessionStatus::Failed(_) => (true, None, None),
             zz_terminal::SessionStatus::Starting | zz_terminal::SessionStatus::Running => return,
         };
+        let pipe = {
+            let mut inner = self.inner.lock();
+            inner
+                .terminals
+                .get(&pane)
+                .is_some_and(|current| Arc::ptr_eq(current, terminal))
+                .then(|| inner.pane_pipes.remove(&pane))
+                .flatten()
+        };
+        if let Some(pipe) = pipe {
+            stop_pane_pipe(pipe);
+        }
         let Some((mut context, retained, changed)) = ({
             let mut inner = self.inner.lock();
             if !inner
@@ -9457,11 +9813,40 @@ struct ServerState {
     automatic_paste_buffer_limit: AutomaticPasteBufferLimit,
     active_copy_pipes: usize,
     active_shell_jobs: usize,
+    shell_jobs: BTreeMap<u64, Arc<Mutex<Option<Child>>>>,
+    next_shell_job_token: u64,
     next_buffer_id: u64,
     next_client_id: u64,
     next_display_panes_token: u64,
     pending_gui_requests: BTreeMap<u64, PendingGuiRequest>,
     paste_uploads: BTreeMap<(ClientId, u64), PasteUpload>,
+    wait_channels: BTreeMap<String, WaitChannel>,
+    next_wait_token: u64,
+    pane_pipes: BTreeMap<PaneId, PanePipe>,
+    next_pipe_token: u64,
+}
+
+struct WaitItem {
+    token: u64,
+    client: ClientId,
+    wake: crossbeam_channel::Sender<()>,
+}
+
+#[derive(Default)]
+struct WaitChannel {
+    locked: bool,
+    woken: bool,
+    waiters: VecDeque<WaitItem>,
+    lockers: VecDeque<WaitItem>,
+}
+
+struct PanePipe {
+    token: u64,
+    pid: u32,
+    terminal: Arc<TerminalSession>,
+    process: Arc<Mutex<Option<Child>>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
 }
 
 #[derive(Debug)]
@@ -11159,18 +11544,26 @@ fn command_prompt_key(
 
 struct ShellJobPermit {
     shared: Arc<Shared>,
+    token: u64,
+    process: Arc<Mutex<Option<Child>>>,
 }
 
 impl ShellJobPermit {
     fn acquire(shared: &Arc<Shared>) -> Option<Self> {
         let mut inner = shared.inner.lock();
-        if inner.active_shell_jobs >= MAX_SHELL_JOBS {
+        if shared.stopping.load(Ordering::Acquire) || inner.active_shell_jobs >= MAX_SHELL_JOBS {
             return None;
         }
+        inner.next_shell_job_token = inner.next_shell_job_token.wrapping_add(1).max(1);
+        let token = inner.next_shell_job_token;
+        let process = Arc::new(Mutex::new(None));
         inner.active_shell_jobs += 1;
+        inner.shell_jobs.insert(token, Arc::clone(&process));
         drop(inner);
         Some(Self {
             shared: Arc::clone(shared),
+            token,
+            process,
         })
     }
 }
@@ -11178,6 +11571,7 @@ impl ShellJobPermit {
 impl Drop for ShellJobPermit {
     fn drop(&mut self) {
         let mut inner = self.shared.inner.lock();
+        inner.shell_jobs.remove(&self.token);
         inner.active_shell_jobs = inner.active_shell_jobs.saturating_sub(1);
     }
 }
@@ -11188,7 +11582,13 @@ struct ShellJobResult {
 }
 
 #[cfg(unix)]
-fn run_shell_job(command: &str, cwd: &Path, show_stderr: bool) -> Result<ShellJobResult, ()> {
+fn run_shell_job(
+    command: &str,
+    cwd: &Path,
+    show_stderr: bool,
+    job_process: &Mutex<Option<Child>>,
+    stopping: &AtomicBool,
+) -> Result<ShellJobResult, ()> {
     use std::{
         os::{fd::OwnedFd, unix::net::UnixStream, unix::process::CommandExt as _},
         process::Stdio,
@@ -11212,12 +11612,16 @@ fn run_shell_job(command: &str, cwd: &Path, show_stderr: bool) -> Result<ShellJo
     } else {
         process.stderr(Stdio::null());
     }
-    let mut child = process.spawn().map_err(|_| ())?;
+    let child = process.spawn().map_err(|_| ())?;
     drop(process);
     drop(child_socket);
+    install_shell_job_process(job_process, stopping, child)?;
     let mut bytes = Vec::new();
-    output.read_to_end(&mut bytes).map_err(|_| ())?;
-    let status = child.wait().map_err(|_| ())?;
+    if output.read_to_end(&mut bytes).is_err() {
+        terminate_managed_process(job_process);
+        return Err(());
+    }
+    let status = wait_shell_job_process(job_process)?;
     Ok(ShellJobResult {
         output: bytes,
         status,
@@ -11225,7 +11629,13 @@ fn run_shell_job(command: &str, cwd: &Path, show_stderr: bool) -> Result<ShellJo
 }
 
 #[cfg(not(unix))]
-fn run_shell_job(command: &str, cwd: &Path, show_stderr: bool) -> Result<ShellJobResult, ()> {
+fn run_shell_job(
+    command: &str,
+    cwd: &Path,
+    show_stderr: bool,
+    job_process: &Mutex<Option<Child>>,
+    stopping: &AtomicBool,
+) -> Result<ShellJobResult, ()> {
     let cwd = existing_job_working_directory(cwd);
     let mut process = shell_process(command);
     process
@@ -11240,23 +11650,67 @@ fn run_shell_job(command: &str, cwd: &Path, show_stderr: bool) -> Result<ShellJo
         });
     let mut child = process.spawn().map_err(|_| ())?;
     let _stdin = child.stdin.take();
-    let mut stdout = child.stdout.take().ok_or(())?;
+    let Some(mut stdout) = child.stdout.take() else {
+        let _ = terminate_copy_pipe(&mut child);
+        return Err(());
+    };
+    let stderr = child.stderr.take();
+    install_shell_job_process(job_process, stopping, child)?;
     let stdout = thread::spawn(move || {
         let mut output = Vec::new();
         stdout.read_to_end(&mut output).map(|_| output)
     });
-    let stderr = child.stderr.take().map(|mut stderr| {
+    let stderr = stderr.map(|mut stderr| {
         thread::spawn(move || {
             let mut output = Vec::new();
             stderr.read_to_end(&mut output).map(|_| output)
         })
     });
-    let status = child.wait().map_err(|_| ())?;
+    let status = wait_shell_job_process(job_process);
     let mut output = stdout.join().map_err(|_| ())?.map_err(|_| ())?;
     if let Some(stderr) = stderr {
         output.extend(stderr.join().map_err(|_| ())?.map_err(|_| ())?);
     }
+    let status = status?;
     Ok(ShellJobResult { output, status })
+}
+
+fn install_shell_job_process(
+    process: &Mutex<Option<Child>>,
+    stopping: &AtomicBool,
+    mut child: Child,
+) -> Result<(), ()> {
+    let mut process = process.lock();
+    if stopping.load(Ordering::Acquire) {
+        drop(process);
+        let _ = terminate_copy_pipe(&mut child);
+        return Err(());
+    }
+    *process = Some(child);
+    Ok(())
+}
+
+fn wait_shell_job_process(process: &Mutex<Option<Child>>) -> Result<ExitStatus, ()> {
+    loop {
+        let mut process = process.lock();
+        let Some(child) = process.as_mut() else {
+            return Err(());
+        };
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                process.take();
+                return Ok(status);
+            }
+            Ok(None) => drop(process),
+            Err(_) => {
+                let mut child = process.take().expect("shell job process was present");
+                drop(process);
+                let _ = terminate_copy_pipe(&mut child);
+                return Err(());
+            }
+        }
+        thread::sleep(COPY_PIPE_POLL_INTERVAL);
+    }
 }
 
 fn shell_job_output(command: &str, result: &ShellJobResult) -> (String, u8) {
@@ -11415,6 +11869,120 @@ fn terminate_copy_pipe(child: &mut Child) -> (Option<String>, Option<std::io::Er
     });
     let wait_error = child.wait().err();
     (kill_error, wait_error)
+}
+
+fn terminate_managed_process(process: &Mutex<Option<Child>>) {
+    let Some(mut child) = process.lock().take() else {
+        return;
+    };
+    let _ = terminate_copy_pipe(&mut child);
+}
+
+fn pane_pipe_process_exited(process: &Mutex<Option<Child>>) -> bool {
+    let mut process = process.lock();
+    let Some(child) = process.as_mut() else {
+        return true;
+    };
+    match child.try_wait() {
+        Ok(Some(_)) => {
+            process.take();
+            true
+        }
+        Ok(None) => false,
+        Err(_) => {
+            let mut child = process.take().expect("pipe process was present");
+            drop(process);
+            let _ = terminate_copy_pipe(&mut child);
+            true
+        }
+    }
+}
+
+fn stop_pane_pipe(mut pipe: PanePipe) {
+    pipe.stop.store(true, Ordering::Release);
+    terminate_managed_process(&pipe.process);
+    if let Some(worker) = pipe.thread.take()
+        && worker.join().is_err()
+    {
+        log::error!("pipe-pane worker panicked for pane process {}", pipe.pid);
+    }
+    let _ = pipe.terminal.disarm_raw_output_tap(pipe.token);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_pane_pipe(
+    shared: &std::sync::Weak<Shared>,
+    pane: PaneId,
+    token: u64,
+    terminal: &Arc<TerminalSession>,
+    process: &Arc<Mutex<Option<Child>>>,
+    stop: &Arc<AtomicBool>,
+    mut child_input: Option<std::process::ChildStdin>,
+    child_output: Option<std::process::ChildStdout>,
+    tap: Option<crossbeam_channel::Receiver<Arc<[u8]>>>,
+) {
+    let input_worker = child_output.map(|mut output| {
+        let terminal = Arc::clone(terminal);
+        let stop = Arc::clone(stop);
+        thread::Builder::new()
+            .name(format!("zz-pipe-input-{}", pane.0))
+            .spawn(move || {
+                let mut buffer = vec![0_u8; 64 * 1024];
+                while !stop.load(Ordering::Acquire) {
+                    match output.read(&mut buffer) {
+                        Ok(0) | Err(_) => break,
+                        Ok(length) => {
+                            if !terminal.send_raw_input(Arc::from(&buffer[..length])) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            })
+    });
+    let input_worker = match input_worker {
+        Some(Ok(worker)) => Some(worker),
+        Some(Err(_)) => {
+            stop.store(true, Ordering::Release);
+            None
+        }
+        None => None,
+    };
+    let mut exited = false;
+    while !stop.load(Ordering::Acquire) {
+        if pane_pipe_process_exited(process) {
+            exited = true;
+            break;
+        }
+        let Some(tap) = tap.as_ref() else {
+            thread::sleep(COPY_PIPE_POLL_INTERVAL);
+            continue;
+        };
+        match tap.recv_timeout(COPY_PIPE_POLL_INTERVAL) {
+            Ok(bytes) => {
+                if child_input
+                    .as_mut()
+                    .is_none_or(|input| input.write_all(&bytes).is_err())
+                {
+                    break;
+                }
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    drop(tap);
+    drop(child_input);
+    if !exited {
+        terminate_managed_process(process);
+    }
+    if let Some(worker) = input_worker {
+        let _ = worker.join();
+    }
+    let _ = terminal.disarm_raw_output_tap(token);
+    if let Some(shared) = shared.upgrade() {
+        shared.pipe_finished(pane, token);
+    }
 }
 
 enum PaneSink {
@@ -11833,6 +12401,13 @@ fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
 fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
     FormatHookFacts {
         terminals: Arc::new(inner.terminals.clone()),
+        pane_pipes: Arc::new(
+            inner
+                .pane_pipes
+                .iter()
+                .map(|(pane, pipe)| (*pane, pipe.pid))
+                .collect(),
+        ),
         buffer: inner
             .paste_buffers
             .iter()
@@ -11857,6 +12432,55 @@ fn resolve_buffer<'a>(
 const RUN_SHELL_USAGE: &str = "usage: run-shell [-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]";
 const IF_SHELL_USAGE: &str =
     "usage: if-shell [-bF] [-t target-pane] shell-command command [command]";
+const WAIT_FOR_USAGE: &str = "usage: wait-for [-L|-S|-U] channel";
+const PIPE_PANE_USAGE: &str = "usage: pipe-pane [-IOo] [-t target-pane] [shell-command]";
+
+fn next_wait_token(inner: &mut ServerState) -> u64 {
+    inner.next_wait_token = inner.next_wait_token.wrapping_add(1).max(1);
+    inner.next_wait_token
+}
+
+fn remove_wait_channel_if_unused(channels: &mut BTreeMap<String, WaitChannel>, name: &str) {
+    if channels
+        .get(name)
+        .is_some_and(|channel| !channel.locked && channel.waiters.is_empty() && channel.woken)
+    {
+        channels.remove(name);
+    }
+}
+
+fn remove_wait_item(inner: &mut ServerState, name: &str, token: u64) {
+    let Some(channel) = inner.wait_channels.get_mut(name) else {
+        return;
+    };
+    channel.waiters.retain(|item| item.token != token);
+    channel.lockers.retain(|item| item.token != token);
+    remove_wait_channel_if_unused(&mut inner.wait_channels, name);
+}
+
+fn wake_wait_items(wakes: impl IntoIterator<Item = crossbeam_channel::Sender<()>>) {
+    for wake in wakes {
+        let _ = wake.try_send(());
+    }
+}
+
+fn take_all_wait_wakes(
+    channels: &mut BTreeMap<String, WaitChannel>,
+) -> Vec<crossbeam_channel::Sender<()>> {
+    let mut wakes = Vec::new();
+    for (_, mut channel) in std::mem::take(channels) {
+        wakes.extend(channel.waiters.drain(..).map(|item| item.wake));
+        wakes.extend(channel.lockers.drain(..).map(|item| item.wake));
+    }
+    wakes
+}
+
+fn remove_client_wait_items(channels: &mut BTreeMap<String, WaitChannel>, client: ClientId) {
+    for channel in channels.values_mut() {
+        channel.waiters.retain(|item| item.client != client);
+        channel.lockers.retain(|item| item.client != client);
+    }
+}
 
 #[derive(Clone)]
 enum InsertedCommandSource {
@@ -12783,7 +13407,7 @@ fn handle_connection<S: TransportStream>(
         shared.subscribe(client, Arc::clone(&outbound));
     }
 
-    let mut context = {
+    let context = {
         let inner = shared.inner.lock();
         hello
             .origin
@@ -12801,6 +13425,41 @@ fn handle_connection<S: TransportStream>(
                 })
             })
             .unwrap_or_default()
+    };
+    let (command_sender, command_worker, mut context) = if hello.kind == ClientKind::Command {
+        let (sender, receiver) = crossbeam_channel::unbounded::<CommandRequest>();
+        let worker_shared = Arc::clone(shared);
+        let worker_outbound = Arc::clone(&outbound);
+        let worker = match thread::Builder::new()
+            .name(format!("zz-client-command-{}", client.0))
+            .spawn(move || {
+                let mut context = context;
+                while let Ok(CommandRequest {
+                    request_id,
+                    command,
+                }) = receiver.recv()
+                {
+                    let response = worker_shared.execute_command_request(
+                        client,
+                        ClientKind::Command,
+                        &mut context,
+                        request_id,
+                        &command,
+                    );
+                    let _ = worker_outbound
+                        .enqueue_reliable(&ProtocolMessage::CommandResponse(response));
+                }
+            }) {
+            Ok(worker) => worker,
+            Err(error) => {
+                outbound.close();
+                let _ = writer_thread.join();
+                return Err(DaemonError::Thread(error.to_string()));
+            }
+        };
+        (Some(sender), Some(worker), None)
+    } else {
+        (None, None, Some(context))
     };
 
     let result = loop {
@@ -12828,17 +13487,42 @@ fn handle_connection<S: TransportStream>(
                 request_id,
                 command,
             }) => {
-                let response = shared.execute_command_request(
-                    client,
-                    hello.kind,
-                    &mut context,
-                    request_id,
-                    &command,
-                );
-                let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
+                if let Some(sender) = &command_sender {
+                    if sender
+                        .send(CommandRequest {
+                            request_id,
+                            command,
+                        })
+                        .is_err()
+                    {
+                        break Err(DaemonError::Thread(
+                            "command client worker stopped".to_owned(),
+                        ));
+                    }
+                } else {
+                    let response = shared.execute_command_request(
+                        client,
+                        hello.kind,
+                        context.as_mut().expect("interactive client owns context"),
+                        request_id,
+                        &command,
+                    );
+                    let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
+                }
             }
             ProtocolMessage::Attach { session } => {
-                match shared.attach_target(client, hello.kind, &mut context, &session) {
+                let Some(context) = context.as_mut() else {
+                    let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
+                        CommandResponse::Error {
+                            request_id: 0,
+                            error: ServerError::InvalidCommand(
+                                "command client cannot attach".to_owned(),
+                            ),
+                        },
+                    ));
+                    continue;
+                };
+                match shared.attach_target(client, hello.kind, context, &session) {
                     Ok((session, snapshot)) => {
                         outbound.reset_kitty_images();
                         outbound.reset_pasted_images();
@@ -12867,7 +13551,18 @@ fn handle_connection<S: TransportStream>(
                 shared.set_config_overrides(client, hello.kind, &entries);
             }
             ProtocolMessage::Input(input) => {
-                if let Err(error) = shared.input(client, hello.kind, &mut context, input) {
+                let Some(context) = context.as_mut() else {
+                    let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
+                        CommandResponse::Error {
+                            request_id: 0,
+                            error: ServerError::InvalidCommand(
+                                "command client cannot send input".to_owned(),
+                            ),
+                        },
+                    ));
+                    continue;
+                };
+                if let Err(error) = shared.input(client, hello.kind, context, input) {
                     let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
                         CommandResponse::Error {
                             request_id: 0,
@@ -12938,6 +13633,13 @@ fn handle_connection<S: TransportStream>(
     };
 
     registration.unregister();
+    drop(command_sender);
+    if command_worker.is_some_and(|worker| worker.join().is_err()) {
+        log::error!(
+            target: "zz_daemon::diagnostics::connection",
+            "command worker panicked for client={client}",
+        );
+    }
     outbound.close();
     if writer_thread.join().is_err() {
         log::error!(
@@ -13152,6 +13854,14 @@ mod tests {
         fn try_clone(&self) -> std::io::Result<Self> {
             std::os::unix::net::UnixStream::try_clone(self)
         }
+    }
+
+    fn register_wait_clients(shared: &Shared, clients: impl IntoIterator<Item = u64>) {
+        shared.inner.lock().client_instances.extend(
+            clients
+                .into_iter()
+                .map(|client| (ClientId(client), ClientInstanceId(client))),
+        );
     }
 
     #[test]
@@ -13719,6 +14429,138 @@ mod tests {
                 server: PROTOCOL_VERSION,
             })) if client == stale
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_connection_waits_without_hiding_peer_disconnects() {
+        fn connect(
+            shared: &Arc<Shared>,
+            instance: u64,
+        ) -> (
+            std::os::unix::net::UnixStream,
+            thread::JoinHandle<Result<(), DaemonError>>,
+            ClientId,
+        ) {
+            let (mut client, server) = std::os::unix::net::UnixStream::pair().expect("pair");
+            client
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("read timeout");
+            let server_shared = Arc::clone(shared);
+            let connection = thread::spawn(move || handle_connection(server, &server_shared));
+            zz_protocol::write_protocol_message(
+                &mut client,
+                &ProtocolMessage::ClientHello(ClientHello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_instance_id: ClientInstanceId(instance),
+                    kind: ClientKind::Command,
+                    device_name: None,
+                    capabilities: Vec::new(),
+                    color_scheme: None,
+                    origin: None,
+                }),
+            )
+            .expect("hello");
+            let ProtocolMessage::ServerHello(hello) =
+                zz_protocol::read_protocol_message(&mut client).expect("server hello")
+            else {
+                panic!("missing server hello");
+            };
+            (client, connection, hello.client_id)
+        }
+
+        let shared = Arc::new(Shared::new(1));
+        let (mut waiter, waiter_connection, _) = connect(&shared, 1);
+        let (mut signaler, signaler_connection, _) = connect(&shared, 2);
+        zz_protocol::write_protocol_message(
+            &mut waiter,
+            &ProtocolMessage::CommandRequest(CommandRequest {
+                request_id: 1,
+                command: CommandInvocation::new("wait-for", ["connection"]),
+            }),
+        )
+        .expect("wait request");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared
+            .inner
+            .lock()
+            .wait_channels
+            .get("connection")
+            .map_or(0, |channel| channel.waiters.len())
+            != 1
+        {
+            assert!(Instant::now() < deadline, "connection wait did not queue");
+            thread::yield_now();
+        }
+        zz_protocol::write_protocol_message(
+            &mut signaler,
+            &ProtocolMessage::CommandRequest(CommandRequest {
+                request_id: 2,
+                command: CommandInvocation::new("wait-for", ["-S", "connection"]),
+            }),
+        )
+        .expect("signal request");
+        for (stream, request_id) in [(&mut signaler, 2), (&mut waiter, 1)] {
+            assert!(matches!(
+                zz_protocol::read_protocol_message(stream).expect("wait response"),
+                ProtocolMessage::CommandResponse(CommandResponse::Success {
+                    request_id: response_id,
+                    ..
+                }) if response_id == request_id
+            ));
+        }
+        drop(waiter);
+        drop(signaler);
+        waiter_connection
+            .join()
+            .expect("waiter handler")
+            .expect("waiter connection");
+        signaler_connection
+            .join()
+            .expect("signaler handler")
+            .expect("signaler connection");
+
+        let (mut dropped, dropped_connection, dropped_client) = connect(&shared, 3);
+        zz_protocol::write_protocol_message(
+            &mut dropped,
+            &ProtocolMessage::CommandRequest(CommandRequest {
+                request_id: 3,
+                command: CommandInvocation::new("wait-for", ["dropped"]),
+            }),
+        )
+        .expect("dropped wait request");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared
+            .inner
+            .lock()
+            .wait_channels
+            .get("dropped")
+            .map_or(0, |channel| channel.waiters.len())
+            != 1
+        {
+            assert!(Instant::now() < deadline, "dropped wait did not queue");
+            thread::yield_now();
+        }
+        drop(dropped);
+        dropped_connection
+            .join()
+            .expect("dropped handler")
+            .expect("dropped connection");
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .client_instances
+                .contains_key(&dropped_client)
+        );
+        assert!(
+            shared
+                .inner
+                .lock()
+                .wait_channels
+                .get("dropped")
+                .is_none_or(|channel| channel.waiters.is_empty())
+        );
     }
 
     #[test]
@@ -15544,6 +16386,560 @@ mod tests {
     }
 
     #[test]
+    fn wait_for_matches_sticky_signal_gc_and_dispatch_precedence() {
+        let shared = Arc::new(Shared::new(1));
+        register_wait_clients(&shared, [1]);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(1),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("wait-for", ["-SL", "sticky"]),
+            )
+            .expect("signal wins over lock");
+        assert!(shared.inner.lock().wait_channels["sticky"].woken);
+        assert!(!shared.inner.lock().wait_channels["sticky"].locked);
+        shared
+            .execute(
+                ClientId(1),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("wait", ["sticky"]),
+            )
+            .expect("consume sticky signal");
+        assert!(!shared.inner.lock().wait_channels.contains_key("sticky"));
+        let error = shared
+            .execute(
+                ClientId(1),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("wait-for", ["-U", "sticky"]),
+            )
+            .expect_err("unlocked channel");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "channel sticky not locked"
+        ));
+    }
+
+    #[test]
+    fn wait_for_sticky_signal_survives_signaling_client_disconnect() {
+        let shared = Arc::new(Shared::new(1));
+        register_wait_clients(&shared, [1, 2]);
+        shared
+            .execute(
+                ClientId(1),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("wait-for", ["-S", "ch1"]),
+            )
+            .expect("sticky signal");
+        shared.unregister(ClientId(1));
+        assert!(shared.inner.lock().wait_channels["ch1"].woken);
+
+        shared
+            .execute(
+                ClientId(2),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("wait-for", ["ch1"]),
+            )
+            .expect("consume sticky signal after signaler disconnects");
+        assert!(!shared.inner.lock().wait_channels.contains_key("ch1"));
+
+        let error = shared
+            .execute(
+                ClientId(2),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("wait-for", ["-U", "ch1"]),
+            )
+            .expect_err("consumed channel is gone");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "channel ch1 not locked"
+        ));
+    }
+
+    #[test]
+    fn wait_for_wakes_all_waiters_and_hands_locks_off_fifo() {
+        let shared = Arc::new(Shared::new(1));
+        register_wait_clients(&shared, [1, 2, 3, 4]);
+        let wait = |client, flag: Option<&'static str>, name: &'static str| {
+            let shared = Arc::clone(&shared);
+            thread::spawn(move || {
+                let args = flag.map_or_else(|| vec![name], |flag| vec![flag, name]);
+                shared.execute(
+                    ClientId(client),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("wait-for", args),
+                )
+            })
+        };
+        let first = wait(1, None, "wake-all");
+        let second = wait(2, None, "wake-all");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared
+            .inner
+            .lock()
+            .wait_channels
+            .get("wake-all")
+            .map_or(0, |channel| channel.waiters.len())
+            != 2
+        {
+            assert!(Instant::now() < deadline, "waiters did not queue");
+            thread::yield_now();
+        }
+        shared
+            .wait_for(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &["-S".to_owned(), "wake-all".to_owned()],
+            )
+            .expect("signal waiters");
+        first.join().expect("first waiter").expect("first wait");
+        second.join().expect("second waiter").expect("second wait");
+
+        shared
+            .wait_for(
+                ClientId(3),
+                ClientKind::Command,
+                &["-L".to_owned(), "lock".to_owned()],
+            )
+            .expect("first lock");
+        let locker = wait(4, Some("-L"), "lock");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared.inner.lock().wait_channels["lock"].lockers.len() != 1 {
+            assert!(Instant::now() < deadline, "locker did not queue");
+            thread::yield_now();
+        }
+        shared
+            .wait_for(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &["-U".to_owned(), "lock".to_owned()],
+            )
+            .expect("handoff lock");
+        locker.join().expect("locker").expect("lock handoff");
+        assert!(shared.inner.lock().wait_channels["lock"].locked);
+        shared
+            .wait_for(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &["-U".to_owned(), "lock".to_owned()],
+            )
+            .expect("free lock");
+        assert!(!shared.inner.lock().wait_channels["lock"].locked);
+    }
+
+    #[test]
+    fn wait_for_rejects_interactive_blocking_and_disconnect_cleanup_unblocks() {
+        let shared = Arc::new(Shared::new(1));
+        for (client, kind) in [
+            (ClientId(1), ClientKind::Interactive),
+            (ClientId(u64::MAX), ClientKind::Command),
+        ] {
+            for (args, expected) in [
+                (vec!["channel".to_owned()], "not able to wait"),
+                (
+                    vec!["-L".to_owned(), "channel".to_owned()],
+                    "not able to lock",
+                ),
+            ] {
+                let error = shared
+                    .wait_for(client, kind, &args)
+                    .expect_err("clientless block");
+                assert!(matches!(
+                    error,
+                    DaemonError::Server(ServerError::InvalidCommand(message)) if message == expected
+                ));
+            }
+        }
+        register_wait_clients(&shared, [9]);
+        let waiter_shared = Arc::clone(&shared);
+        let waiter = thread::spawn(move || {
+            waiter_shared.wait_for(ClientId(9), ClientKind::Command, &["drop".to_owned()])
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared
+            .inner
+            .lock()
+            .wait_channels
+            .get("drop")
+            .map_or(0, |channel| channel.waiters.len())
+            != 1
+        {
+            assert!(Instant::now() < deadline, "waiter did not queue");
+            thread::yield_now();
+        }
+        shared.unregister(ClientId(9));
+        waiter.join().expect("waiter").expect("disconnect wake");
+        assert!(
+            shared
+                .inner
+                .lock()
+                .wait_channels
+                .get("drop")
+                .is_none_or(|channel| channel.waiters.is_empty())
+        );
+        shared
+            .wait_for(ClientId(9), ClientKind::Command, &["late".to_owned()])
+            .expect("disconnected wait does not park");
+        assert!(!shared.inner.lock().wait_channels.contains_key("late"));
+    }
+
+    #[test]
+    fn kill_server_flushes_waiters() {
+        let shared = Arc::new(Shared::new(1));
+        register_wait_clients(&shared, [5]);
+        let waiter_shared = Arc::clone(&shared);
+        let waiter = thread::spawn(move || {
+            waiter_shared.wait_for(ClientId(5), ClientKind::Command, &["shutdown".to_owned()])
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !shared.inner.lock().wait_channels.contains_key("shutdown") {
+            assert!(Instant::now() < deadline, "shutdown waiter did not queue");
+            thread::yield_now();
+        }
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("kill-server", [] as [&str; 0]),
+            )
+            .expect("kill server");
+        waiter.join().expect("waiter").expect("shutdown flush");
+        assert!(shared.inner.lock().wait_channels.is_empty());
+    }
+
+    #[test]
+    fn pipe_pane_enforces_arity_and_hard_targets() {
+        let shared = Arc::new(Shared::new(1));
+        let error = shared
+            .pipe_pane(
+                &ExecutionContext::default(),
+                &["one".to_owned(), "two".to_owned()],
+            )
+            .expect_err("extra shell command");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == PIPE_PANE_USAGE
+        ));
+        let error = shared
+            .pipe_pane(
+                &ExecutionContext::default(),
+                &["-t".to_owned(), "%999".to_owned()],
+            )
+            .expect_err("missing hard target");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::PaneNotFound(target)) if target == "%999"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pipe_pane_rejects_dead_targets_before_closing_the_existing_pipe() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(1),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "dead-pipe", "exec /bin/cat"]),
+            )
+            .expect("new session");
+        let pane = context.pane.expect("pane");
+        let target = pane.to_string();
+        shared
+            .pipe_pane(
+                &context,
+                &["-t".to_owned(), target.clone(), "sleep 60".to_owned()],
+            )
+            .expect("open pipe");
+        shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .pane_mut(pane)
+            .expect("pane state")
+            .dead = true;
+        let error = shared
+            .pipe_pane(&context, &["-t".to_owned(), target])
+            .expect_err("dead target");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "target pane has exited"
+        ));
+        assert!(shared.inner.lock().pane_pipes.contains_key(&pane));
+        shared.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pipe_pane_streams_raw_output_toggles_formats_injects_and_expands_time() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "pipe-pane", "exec /bin/cat"]),
+            )
+            .expect("new pipe session");
+        let session = context.session.expect("session");
+        let pane = context.pane.expect("pane");
+        shared.attach(client, session).expect("attach pipe session");
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        let view = TerminalViewId(client.0);
+        wait_for_viewport(&terminal, view, "pipe terminal did not start", |viewport| {
+            matches!(viewport.status, SessionStatus::Running)
+        });
+        terminal.send_raw_input(Arc::from(b"BEFORE_PIPE\n".as_slice()));
+        wait_for_viewport(
+            &terminal,
+            view,
+            "pre-pipe output was not rendered",
+            |viewport| viewport_text(viewport).contains("BEFORE_PIPE"),
+        );
+
+        let directory = tempfile::tempdir().expect("pipe directory");
+        let output = directory.path().join("output.bin");
+        let command = format!("cat > {}", shell_quote(&output));
+        let target = pane.to_string();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("pipe-pane", ["-t", target.as_str(), command.as_str()]),
+            )
+            .expect("open output pipe");
+        let live = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-p", "-t", target.as_str(), "#{pane_pipe}:#{pane_pipe_pid}"],
+                ),
+            )
+            .expect("live pipe format")
+            .output;
+        let (flag, pid) = live.split_once(':').expect("pipe format fields");
+        assert_eq!(flag, "1");
+        assert!(pid.parse::<u32>().is_ok(), "{live:?}");
+        terminal.send_raw_input(Arc::from(b"AFTER_PIPE\n".as_slice()));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let bytes = fs::read(&output).unwrap_or_default();
+            if bytes.windows(10).any(|window| window == b"AFTER_PIPE") {
+                assert!(!bytes.windows(11).any(|window| window == b"BEFORE_PIPE"));
+                break;
+            }
+            assert!(Instant::now() < deadline, "pipe output was not written");
+            thread::sleep(Duration::from_millis(10));
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("pipe-pane", ["-t", target.as_str()]),
+            )
+            .expect("close output pipe");
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "display-message",
+                        ["-p", "-t", target.as_str(), "#{pane_pipe}:#{pane_pipe_pid}"],
+                    ),
+                )
+                .expect("closed pipe format")
+                .output,
+            "0:"
+        );
+
+        let toggled = directory.path().join("toggle.bin");
+        let toggle_command = format!("cat > {}", shell_quote(&toggled));
+        for expected in [true, false] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "pipep",
+                        ["-o", "-t", target.as_str(), toggle_command.as_str()],
+                    ),
+                )
+                .expect("toggle pipe");
+            assert_eq!(shared.inner.lock().pane_pipes.contains_key(&pane), expected);
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "pipe-pane",
+                    ["-t", target.as_str(), toggle_command.as_str()],
+                ),
+            )
+            .expect("reopen pipe");
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("pipe-pane", ["-t", target.as_str(), ""]),
+            )
+            .expect("empty command closes pipe");
+        assert!(!shared.inner.lock().pane_pipes.contains_key(&pane));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "pipe-pane",
+                    ["-I", "-t", target.as_str(), "printf 'ZZ_PIPE_INPUT\\n'"],
+                ),
+            )
+            .expect("input pipe");
+        wait_for_viewport(
+            &terminal,
+            view,
+            "pipe input did not reach the PTY",
+            |viewport| viewport_text(viewport).contains("ZZ_PIPE_INPUT"),
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while shared.inner.lock().pane_pipes.contains_key(&pane) {
+            assert!(Instant::now() < deadline, "input pipe did not reap");
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "pipe-pane",
+                    [
+                        "-IO",
+                        "-t",
+                        target.as_str(),
+                        "IFS= read -r line; printf 'ZZ_PIPE_BOTH\\n'",
+                    ],
+                ),
+            )
+            .expect("bidirectional pipe");
+        terminal.send_raw_input(Arc::from(b"ZZ_PIPE_TRIGGER\n".as_slice()));
+        wait_for_viewport(
+            &terminal,
+            view,
+            "bidirectional pipe did not reach the PTY",
+            |viewport| viewport_text(viewport).contains("ZZ_PIPE_BOTH"),
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while shared.inner.lock().pane_pipes.contains_key(&pane) {
+            assert!(Instant::now() < deadline, "bidirectional pipe did not reap");
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let dated = directory.path().join("dated-%Y.bin");
+        let dated_command = format!("cat > {}", shell_quote(&dated));
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "pipe-pane",
+                    ["-t", target.as_str(), dated_command.as_str()],
+                ),
+            )
+            .expect("dated pipe");
+        terminal.send_raw_input(Arc::from(b"DATED_PIPE\n".as_slice()));
+        let expanded = directory
+            .path()
+            .join(format!("dated-{}.bin", chrono::Local::now().format("%Y")));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !fs::read(&expanded)
+            .unwrap_or_default()
+            .windows(10)
+            .any(|window| window == b"DATED_PIPE")
+        {
+            assert!(Instant::now() < deadline, "strftime pipe was not written");
+            thread::sleep(Duration::from_millis(10));
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("pipe-pane", ["-t", target.as_str()]),
+            )
+            .expect("close dated pipe");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("pipe-pane", ["-t", target.as_str(), "sleep 60"]),
+            )
+            .expect("pre-respawn pipe");
+        let respawned_process = Arc::clone(&shared.inner.lock().pane_pipes[&pane].process);
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "respawn-pane",
+                    ["-k", "-t", target.as_str(), "--", "/bin/cat"],
+                ),
+            )
+            .expect("respawn piped pane");
+        assert!(shared.inner.lock().pane_pipes.is_empty());
+        assert!(respawned_process.lock().is_none());
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("pipe-pane", ["-t", target.as_str(), "sleep 60"]),
+            )
+            .expect("shutdown pipe");
+        let process = Arc::clone(&shared.inner.lock().pane_pipes[&pane].process);
+        shared.request_shutdown();
+        assert!(shared.inner.lock().pane_pipes.is_empty());
+        assert!(process.lock().is_none());
+    }
+
+    #[test]
     fn shell_command_arguments_match_the_pin_grammar() {
         assert_eq!(parse_shell_delay("").expect("empty delay"), Duration::ZERO);
         assert_eq!(
@@ -16120,6 +17516,77 @@ mod tests {
                 if message == "failed to run command: printf never"
         ));
         shared.inner.lock().active_shell_jobs = 0;
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_server_reaps_running_shell_job_process_groups() {
+        let shared = Arc::new(Shared::new(1));
+        let scratch = tempfile::tempdir().expect("temporary directory");
+        let group_path = scratch.path().join("shell-job-group");
+        let command = format!(
+            "printf '%s' \"$$\" > {}; sleep 30 & wait",
+            shell_quote(&group_path)
+        );
+        shared
+            .execute(
+                ClientId(105),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("run-shell", ["-b", command.as_str()]),
+            )
+            .expect("background shell job");
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let group = loop {
+            if let Some(group) = fs::read_to_string(&group_path)
+                .ok()
+                .and_then(|group| group.parse().ok())
+                .and_then(rustix::process::Pid::from_raw)
+            {
+                break group;
+            }
+            assert!(Instant::now() < deadline, "shell job never started");
+            thread::sleep(Duration::from_millis(10));
+        };
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.active_shell_jobs, 1);
+            assert_eq!(inner.shell_jobs.len(), 1);
+            assert!(
+                inner
+                    .shell_jobs
+                    .values()
+                    .all(|process| process.lock().is_some())
+            );
+        }
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("kill-server", [] as [&str; 0]),
+            )
+            .expect("kill server");
+        assert!(shared.inner.lock().shell_jobs.is_empty());
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match rustix::process::test_kill_process_group(group) {
+                Err(rustix::io::Errno::SRCH) => break,
+                Ok(()) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Ok(()) => panic!("shell job process group survived kill-server"),
+                Err(error) => panic!("could not query shell job process group: {error}"),
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared.inner.lock().active_shell_jobs != 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(shared.inner.lock().active_shell_jobs, 0);
     }
 
     #[cfg(unix)]

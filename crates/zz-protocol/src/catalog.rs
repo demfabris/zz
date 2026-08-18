@@ -165,6 +165,10 @@ pub static DAEMON_COMMAND_NAMES: &[&str] = &[
     "showmsgs",
     "refresh-client",
     "refresh",
+    "wait-for",
+    "wait",
+    "pipe-pane",
+    "pipep",
 ];
 
 pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
@@ -172,10 +176,6 @@ pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "newp",
     "set-hook",
     "show-hooks",
-    "wait-for",
-    "wait",
-    "pipe-pane",
-    "pipep",
     "lock-client",
     "lockc",
     "lock-server",
@@ -300,6 +300,24 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         positionals: &[],
         variadic: None,
     },
+    CommandSpec {
+        name: "wait-for",
+        aliases: &["wait"],
+        description: "Block or wake a client on a named channel",
+        usage: "[-L|-S|-U] channel",
+        options: &[],
+        positionals: &[FreeForm],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "pipe-pane",
+        aliases: &["pipep"],
+        description: "Pipe pane input or output to a shell command",
+        usage: "[-IOo] [-t target-pane] [shell-command]",
+        options: &[],
+        positionals: &[FreeForm],
+        variadic: None,
+    },
 ];
 
 #[cfg(test)]
@@ -314,6 +332,8 @@ const DAEMON_COMMAND_ACCEPTED_OPTIONS: &[(&str, &str, &str)] = &[
     ("save-buffer", "a", "b"),
     ("set-buffer", "a", "b"),
     ("show-buffer", "", "b"),
+    ("wait-for", "LSU", ""),
+    ("pipe-pane", "IOo", "t"),
 ];
 
 /// Every tmux-compatible command currently executable by the mux engine.
@@ -1498,7 +1518,7 @@ mod tests {
             if takes_value {
                 assert_eq!(flags.len(), 1, "valued usage option is not grouped");
             }
-            for flag in flags.chars() {
+            for flag in flags.chars().filter(|flag| !matches!(flag, '|' | '-')) {
                 assert!(
                     options.insert(flag, takes_value).is_none(),
                     "duplicate usage option -{flag}"
@@ -1620,18 +1640,20 @@ mod tests {
             CommandSpec::UNIMPLEMENTED_TMUX_COMMANDS,
             crate::catalog::UNIMPLEMENTED_TMUX_COMMANDS
         );
-        for name in ["run-shell", "run", "if-shell", "if"] {
-            assert!(DAEMON_COMMAND_NAMES.contains(&name));
-            assert!(!UNIMPLEMENTED_TMUX_COMMANDS.contains(&name));
-        }
         for name in [
-            "set-hook",
-            "show-hooks",
+            "run-shell",
+            "run",
+            "if-shell",
+            "if",
             "wait-for",
             "wait",
             "pipe-pane",
             "pipep",
         ] {
+            assert!(DAEMON_COMMAND_NAMES.contains(&name));
+            assert!(!UNIMPLEMENTED_TMUX_COMMANDS.contains(&name));
+        }
+        for name in ["set-hook", "show-hooks"] {
             assert!(UNIMPLEMENTED_TMUX_COMMANDS.contains(&name));
         }
     }

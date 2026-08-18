@@ -584,6 +584,27 @@ impl MuxEngine {
         self.format_now = now;
     }
 
+    pub fn expand_pane_format_time(
+        &self,
+        format: &str,
+        target: &ExecutionContext,
+        active_session: Option<SessionId>,
+        hooks: &mut impl StatusHooks,
+    ) -> String {
+        expand_format_time_with_hooks(
+            format,
+            self,
+            FormatContext {
+                session: target.session,
+                window: target.window,
+                pane: target.pane,
+                active_session,
+                format_type: FormatType::Pane,
+            },
+            hooks,
+        )
+    }
+
     pub fn set_format_server_identity(
         &mut self,
         pid: u32,
@@ -10279,6 +10300,16 @@ mod tests {
             engine.keys.get("prefix", "y").expect("binding").commands,
             [CommandInvocation::new("new-window", [] as [&str; 0])]
         );
+        engine
+            .execute(
+                &mut context,
+                &command("bind-key", &["p", "pipe-pane", "cat"]),
+            )
+            .expect("pipe-pane binding");
+        assert_eq!(
+            engine.keys.get("prefix", "p").expect("binding").commands,
+            [CommandInvocation::new("pipe-pane", ["cat"])]
+        );
     }
 
     #[test]
@@ -14509,6 +14540,8 @@ mod tests {
         assert!(rows.contains(
             &"run-shell (run) [-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]"
         ));
+        assert!(rows.contains(&"wait-for (wait) [-L|-S|-U] channel"));
+        assert!(rows.contains(&"pipe-pane (pipep) [-IOo] [-t target-pane] [shell-command]"));
         assert_eq!(
             engine
                 .execute(&mut context, &command("list-commands", &["capturep"]))
@@ -14532,6 +14565,24 @@ mod tests {
                     .unwrap()
                     .output,
                 "run-shell (run) [-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]"
+            );
+        }
+        for name in ["wait-for", "wait"] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("list-commands", &[name]))
+                    .unwrap()
+                    .output,
+                "wait-for (wait) [-L|-S|-U] channel"
+            );
+        }
+        for name in ["pipe-pane", "pipep"] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("list-commands", &[name]))
+                    .unwrap()
+                    .output,
+                "pipe-pane (pipep) [-IOo] [-t target-pane] [shell-command]"
             );
         }
         assert_eq!(

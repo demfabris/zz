@@ -80,6 +80,7 @@ const MAX_SEARCH_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_WHEEL_REPEAT: u32 = 32;
 const MAX_KITTY_PLACEMENTS: usize = 512;
 const PTY_READ_BUFFER_BYTES: usize = 64 * 1024;
+const RAW_OUTPUT_TAP_PENDING_CHUNKS: usize = 4;
 #[cfg(target_os = "linux")]
 const PTY_BUFFER_POOL_SIZE: usize = 4;
 #[cfg(all(not(target_os = "linux"), any(not(unix), test)))]
@@ -433,6 +434,16 @@ pub enum KittyImageRequestError {
     TimedOut,
     #[error("terminal actor stopped before answering the Kitty image request")]
     ActorStopped,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
+pub enum RawOutputTapError {
+    #[error("terminal actor did not answer the raw output tap request in time")]
+    TimedOut,
+    #[error("terminal actor stopped before answering the raw output tap request")]
+    ActorStopped,
+    #[error("terminal surface has no PTY output")]
+    Unavailable,
 }
 
 impl std::fmt::Debug for TerminalSession {
@@ -861,6 +872,63 @@ impl TerminalSession {
         });
     }
 
+    pub fn send_raw_input(&self, bytes: Arc<[u8]>) -> bool {
+        self.send_command(Command::RawInput(bytes))
+    }
+
+    pub fn arm_raw_output_tap(&self, token: u64) -> Result<Receiver<Arc<[u8]>>, RawOutputTapError> {
+        let (output, receiver) = crossbeam_channel::bounded(RAW_OUTPUT_TAP_PENDING_CHUNKS);
+        let (reply, response) = crossbeam_channel::bounded(1);
+        let started = Instant::now();
+        self.commands
+            .send_timeout(
+                Command::ArmRawOutputTap {
+                    token,
+                    output,
+                    reply,
+                },
+                CAPTURE_TIMEOUT,
+            )
+            .map_err(|error| match error {
+                crossbeam_channel::SendTimeoutError::Timeout(_) => RawOutputTapError::TimedOut,
+                crossbeam_channel::SendTimeoutError::Disconnected(_) => {
+                    RawOutputTapError::ActorStopped
+                }
+            })?;
+        match response.recv_timeout(CAPTURE_TIMEOUT.saturating_sub(started.elapsed())) {
+            Ok(true) => Ok(receiver),
+            Ok(false) => Err(RawOutputTapError::Unavailable),
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => Err(RawOutputTapError::TimedOut),
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                Err(RawOutputTapError::ActorStopped)
+            }
+        }
+    }
+
+    pub fn disarm_raw_output_tap(&self, token: u64) -> Result<(), RawOutputTapError> {
+        let (reply, response) = crossbeam_channel::bounded(1);
+        let started = Instant::now();
+        self.commands
+            .send_timeout(
+                Command::DisarmRawOutputTap { token, reply },
+                CAPTURE_TIMEOUT,
+            )
+            .map_err(|error| match error {
+                crossbeam_channel::SendTimeoutError::Timeout(_) => RawOutputTapError::TimedOut,
+                crossbeam_channel::SendTimeoutError::Disconnected(_) => {
+                    RawOutputTapError::ActorStopped
+                }
+            })?;
+        response
+            .recv_timeout(CAPTURE_TIMEOUT.saturating_sub(started.elapsed()))
+            .map_err(|error| match error {
+                crossbeam_channel::RecvTimeoutError::Timeout => RawOutputTapError::TimedOut,
+                crossbeam_channel::RecvTimeoutError::Disconnected => {
+                    RawOutputTapError::ActorStopped
+                }
+            })
+    }
+
     /// Open the observation window that binds one pasted image to the next
     /// numbered placeholder the application prints.
     pub fn open_pending_paste(&self, token: u64) {
@@ -1132,6 +1200,16 @@ enum Command {
         bytes: Arc<[u8]>,
         bracketed: bool,
     },
+    RawInput(Arc<[u8]>),
+    ArmRawOutputTap {
+        token: u64,
+        output: Sender<Arc<[u8]>>,
+        reply: Sender<bool>,
+    },
+    DisarmRawOutputTap {
+        token: u64,
+        reply: Sender<()>,
+    },
     Capture(Box<CaptureRequest>),
     SemanticCapture(Box<LastCommandRequest>),
     History(Box<HistoryCommand>),
@@ -1159,6 +1237,9 @@ impl Command {
             Self::ReleaseView(_) => "release-view",
             Self::ViewAction { .. } => "view-action",
             Self::PastePreparedBytes { .. } => "paste-prepared-bytes",
+            Self::RawInput(_) => "raw-input",
+            Self::ArmRawOutputTap { .. } => "arm-raw-output-tap",
+            Self::DisarmRawOutputTap { .. } => "disarm-raw-output-tap",
             Self::Capture(_) => "capture",
             Self::SemanticCapture(_) => "semantic-capture",
             Self::History(_) => "history",
@@ -3205,9 +3286,16 @@ fn run_output_view(
                     Command::Text { .. }
                     | Command::Key { .. }
                     | Command::PastePreparedBytes { .. }
+                    | Command::RawInput(_)
                     | Command::PendingPasteOpened { .. }
                     | Command::UnbindPastedImage { .. },
                 ) => {}
+                Ok(Command::ArmRawOutputTap { reply, .. }) => {
+                    let _ = reply.send(false);
+                }
+                Ok(Command::DisarmRawOutputTap { reply, .. }) => {
+                    let _ = reply.send(());
+                }
                 Ok(Command::Shutdown) | Err(_) => return Ok(()),
             },
             recv(search_results) -> result => {
@@ -3606,6 +3694,7 @@ fn run_terminal(
     let mut search_refresh_due = None::<Instant>;
     let mut last_content_publish = Instant::now();
     let mut output_pending = false;
+    let mut raw_output_tap = None;
     #[cfg(unix)]
     let mut active_input_permit = None::<InputPermit>;
 
@@ -3864,6 +3953,29 @@ fn run_terminal(
                             )?;
                         }
                     }
+                }
+                Command::RawInput(bytes) => {
+                    if exit_status.is_none() {
+                        writer.write_all(&bytes)?;
+                        writer.flush()?;
+                    }
+                }
+                Command::ArmRawOutputTap {
+                    token,
+                    output,
+                    reply,
+                } => {
+                    raw_output_tap = Some((token, output));
+                    let _ = reply.send(true);
+                }
+                Command::DisarmRawOutputTap { token, reply } => {
+                    if raw_output_tap
+                        .as_ref()
+                        .is_some_and(|(armed, _)| *armed == token)
+                    {
+                        raw_output_tap = None;
+                    }
+                    let _ = reply.send(());
                 }
                 Command::Resize(next) => {
                     if next != geometry {
@@ -4305,6 +4417,7 @@ fn run_terminal(
                                 &read_buffer[..length],
                                 String::from_utf8_lossy(&read_buffer[..length]),
                             );
+                            tap_raw_output(&mut raw_output_tap, &read_buffer[..length]);
                             terminal.vt_write(&read_buffer[..length]);
                             output_pending = true;
                             burst += length;
@@ -4333,7 +4446,13 @@ fn run_terminal(
                 ReaderMessage::Data { buffer, length } => {
                     reader_eof |=
                         drain_pty_output_burst(&output_rx, buffer, length, |buffer, length| {
-                            consume_pty_output(&mut terminal, buffer, length, &recycle_tx);
+                            consume_pty_output(
+                                &mut terminal,
+                                &mut raw_output_tap,
+                                buffer,
+                                length,
+                                &recycle_tx,
+                            );
                         });
                     output_pending = true;
                 }
@@ -4363,7 +4482,13 @@ fn run_terminal(
             let had_output = {
                 let mut had_output = false;
                 while let Ok(ReaderMessage::Data { buffer, length }) = output_rx.try_recv() {
-                    consume_pty_output(&mut terminal, buffer, length, &recycle_tx);
+                    consume_pty_output(
+                        &mut terminal,
+                        &mut raw_output_tap,
+                        buffer,
+                        length,
+                        &recycle_tx,
+                    );
                     had_output = true;
                 }
                 had_output
@@ -9031,6 +9156,7 @@ fn read_pty(
 #[cfg(any(target_os = "linux", not(unix)))]
 fn consume_pty_output(
     terminal: &mut Terminal<'_, '_>,
+    raw_output_tap: &mut Option<(u64, Sender<Arc<[u8]>>)>,
     buffer: Vec<u8>,
     length: usize,
     recycled: &Sender<Vec<u8>>,
@@ -9041,8 +9167,18 @@ fn consume_pty_output(
         &buffer[..length],
         String::from_utf8_lossy(&buffer[..length]),
     );
+    tap_raw_output(raw_output_tap, &buffer[..length]);
     terminal.vt_write(&buffer[..length]);
     let _ = recycled.try_send(buffer);
+}
+
+fn tap_raw_output(tap: &mut Option<(u64, Sender<Arc<[u8]>>)>, bytes: &[u8]) {
+    let disconnected = tap
+        .as_ref()
+        .is_some_and(|(_, output)| output.send(Arc::from(bytes)).is_err());
+    if disconnected {
+        *tap = None;
+    }
 }
 
 #[cfg(any(target_os = "linux", not(unix), test))]
@@ -14221,6 +14357,100 @@ mod tests {
             Ok(ReaderMessage::Data { buffer, length: 1 })
                 if buffer == vec![burst_limit]
         ));
+    }
+
+    #[test]
+    fn raw_output_tap_blocks_at_four_read_chunks_and_receiver_drop_unblocks_it() {
+        let (output, receiver) = crossbeam_channel::bounded(RAW_OUTPUT_TAP_PENDING_CHUNKS);
+        let mut tap = Some((1, output));
+        for _ in 0..RAW_OUTPUT_TAP_PENDING_CHUNKS {
+            tap_raw_output(&mut tap, &vec![0_u8; PTY_READ_BUFFER_BYTES]);
+        }
+        let (entered, waiting) = crossbeam_channel::bounded(1);
+        let (finished, done) = crossbeam_channel::bounded(1);
+        let worker = thread::spawn(move || {
+            entered.send(()).expect("announce blocked send");
+            tap_raw_output(&mut tap, &vec![1_u8; PTY_READ_BUFFER_BYTES]);
+            finished.send(tap.is_none()).expect("announce completion");
+        });
+        waiting.recv().expect("worker entered send");
+        assert!(matches!(
+            done.recv_timeout(Duration::from_millis(50)),
+            Err(crossbeam_channel::RecvTimeoutError::Timeout)
+        ));
+        drop(receiver);
+        assert!(
+            done.recv_timeout(Duration::from_secs(2))
+                .expect("receiver drop unblocked tap")
+        );
+        worker.join().expect("tap worker");
+    }
+
+    #[test]
+    fn pty_free_surface_rejects_a_raw_output_tap() {
+        let session = TerminalSession::spawn_empty_with_appearance(
+            16,
+            Arc::new(TerminalAppearance::default()),
+        );
+        assert_eq!(
+            session.arm_raw_output_tap(1).expect_err("PTY-free tap"),
+            RawOutputTapError::Unavailable
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn raw_output_tap_starts_at_arm_and_stops_at_disarm() {
+        let session = TerminalSession::spawn(
+            DEFAULT_HISTORY_LIMIT,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                command: Some(vec![
+                    "read _; printf 'BEFORE\\n'; read _; printf 'AFTER\\001\\002\\n'; read _; printf 'LATER\\n'; read _"
+                        .to_owned(),
+                ]),
+                ..TerminalSpawn::default()
+            },
+        );
+        session.attach_view(TerminalViewId(104));
+        wait_for_test_viewport(&session, |viewport| {
+            matches!(viewport.status, SessionStatus::Running)
+        });
+        session.send_raw_input(Arc::from(b"first\n".as_slice()));
+        wait_for_test_viewport(&session, |viewport| {
+            let mut contents = String::new();
+            for cell in viewport.cells.iter() {
+                viewport.push_glyph(*cell, &mut contents);
+            }
+            contents.contains("BEFORE")
+        });
+
+        let output = session.arm_raw_output_tap(9).expect("arm tap");
+        session.send_raw_input(Arc::from(b"second\n".as_slice()));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut bytes = Vec::new();
+        while !bytes.windows(5).any(|window| window == b"AFTER") {
+            let chunk = output
+                .recv_deadline(deadline)
+                .expect("post-arm terminal output");
+            bytes.extend_from_slice(&chunk);
+        }
+        assert!(!bytes.windows(6).any(|window| window == b"BEFORE"));
+        assert!(bytes.windows(7).any(|window| window == b"AFTER\x01\x02"));
+
+        session.disarm_raw_output_tap(9).expect("disarm tap");
+        assert!(matches!(
+            output.recv_timeout(Duration::from_secs(2)),
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected)
+        ));
+        session.send_raw_input(Arc::from(b"third\n".as_slice()));
+        wait_for_test_viewport(&session, |viewport| {
+            let mut contents = String::new();
+            for cell in viewport.cells.iter() {
+                viewport.push_glyph(*cell, &mut contents);
+            }
+            contents.contains("LATER")
+        });
     }
 
     #[test]

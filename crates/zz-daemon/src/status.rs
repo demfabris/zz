@@ -39,6 +39,7 @@ pub(crate) struct StatusRequest {
 #[derive(Clone, Default)]
 pub(crate) struct FormatHookFacts {
     pub(crate) terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
+    pub(crate) pane_pipes: Arc<BTreeMap<PaneId, u32>>,
     pub(crate) buffer: Option<BufferFormatFacts>,
     pub(crate) client: Option<ClientFormatFacts>,
     pub(crate) message: Option<MessageFormatFacts>,
@@ -310,7 +311,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         output
     }
 
-    fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+    fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
         if let Some(value) = self.variables.and_then(|variables| variables.get(name)) {
             return Some(value.clone());
         }
@@ -351,6 +352,16 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                     .as_secs()
                     .to_string(),
             ),
+            "pane_pipe" => self
+                .facts
+                .pane_pipes
+                .contains_key(&context.pane_id.parse().ok()?)
+                .then(|| "1".to_owned()),
+            "pane_pipe_pid" => self
+                .facts
+                .pane_pipes
+                .get(&context.pane_id.parse().ok()?)
+                .map(u32::to_string),
             _ => None,
         }
     }

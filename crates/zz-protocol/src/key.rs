@@ -875,26 +875,27 @@ pub fn canonical_key(value: &str) -> String {
     if value == " " || trimmed == "Space" {
         return " ".to_owned();
     }
-    let mut modifiers = String::new();
+    let mut control = false;
+    let mut alt = false;
     let mut rest = trimmed;
     loop {
         if let Some(tail) = rest
             .strip_prefix("Ctrl-")
             .or_else(|| rest.strip_prefix("C-"))
         {
-            modifiers.push_str("C-");
+            control = true;
             rest = tail;
         } else if let Some(tail) = rest
             .strip_prefix("Alt-")
             .or_else(|| rest.strip_prefix("M-"))
         {
-            modifiers.push_str("M-");
+            alt = true;
             rest = tail;
         } else {
             break;
         }
     }
-    if modifiers.is_empty() {
+    if !control && !alt {
         return trimmed.to_owned();
     }
     if rest == "Space" {
@@ -902,6 +903,13 @@ pub fn canonical_key(value: &str) -> String {
     }
     if rest.is_empty() && value.ends_with(' ') {
         rest = " ";
+    }
+    let mut modifiers = String::new();
+    if control {
+        modifiers.push_str("C-");
+    }
+    if alt {
+        modifiers.push_str("M-");
     }
     format!("{modifiers}{rest}")
 }
@@ -975,6 +983,34 @@ mod tests {
             assert_eq!(rendered.as_str(), name);
             assert!(!rendered.spilled());
         }
+    }
+
+    #[test]
+    fn modifier_aliases_canonicalize_in_live_order() {
+        for key in ["Alt-Ctrl-x", "M-C-x", "Ctrl-Alt-x", "C-M-x"] {
+            assert_eq!(canonical_key(key), "C-M-x");
+        }
+        assert_eq!(canonical_key("Alt-Ctrl-Space"), "C-M- ");
+        assert_eq!(canonical_key("M-C- "), "C-M- ");
+    }
+
+    #[test]
+    fn inverse_order_modifier_binding_resolves_live_input() {
+        let mut tables = KeyTables::default();
+        let binding = Binding {
+            commands: vec![CommandInvocation::new("display-message", ["matched"])],
+            repeat: false,
+            note: None,
+        };
+        tables.bind("root", "Alt-Ctrl-x", binding.clone());
+        let input = press(
+            KeyCode::Character('x'),
+            Modifiers::new(false, true, true, false),
+            None,
+        );
+
+        assert_eq!(input_key_name(&input).as_str(), "C-M-x");
+        assert_eq!(tables.resolve_input("root", &input), Some(&binding));
     }
 
     #[test]

@@ -57,6 +57,9 @@ pub enum CoreEvent {
     PrefixArmed {
         armed: bool,
     },
+    PrefixCancelled {
+        request_id: u64,
+    },
     CommandPromptChanged,
     CommandOutputChanged,
     ChooseTreeChanged,
@@ -464,6 +467,10 @@ impl ClientCore {
                 self.prefix_armed = armed;
                 self.events.push_back(CoreEvent::PrefixArmed { armed });
             }
+            EventPayload::PrefixCancelled { request_id } => {
+                self.events
+                    .push_back(CoreEvent::PrefixCancelled { request_id });
+            }
             EventPayload::PaneRemoved(pane) => {
                 self.viewports.remove(&pane);
                 self.agent_states.remove(&pane);
@@ -795,6 +802,16 @@ mod tests {
             events.push(event);
         }
         events
+    }
+
+    #[test]
+    fn prefix_cancel_ack_passes_through_with_its_request_id() {
+        let mut core = ClientCore::new();
+        core.handle_message(event(EventPayload::PrefixCancelled { request_id: 73 }));
+        assert_eq!(
+            drain(&mut core),
+            vec![CoreEvent::PrefixCancelled { request_id: 73 }]
+        );
     }
 
     #[test]

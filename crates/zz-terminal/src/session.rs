@@ -35,7 +35,7 @@ use libghostty_vt::{
         SecondaryDeviceAttributes, SizeReportSize, TertiaryDeviceAttributes,
     },
 };
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use portable_pty::{CommandBuilder, ExitStatus, PtySize, native_pty_system};
 use regex::RegexBuilder;
 use smallvec::SmallVec;
@@ -95,6 +95,15 @@ const PTY_BRIDGE_SPIN_MAX: u32 = 512;
 #[cfg(target_os = "linux")]
 const PTY_GATHER_BRIDGE_SPIN_MAX: u32 = 16;
 const CONTENT_PUBLISH_STALENESS: Duration = Duration::from_millis(16);
+#[cfg(unix)]
+const PTY_WRITE_RETRY: Duration = Duration::from_millis(16);
+#[cfg(unix)]
+const PTY_WRITE_BUDGET_BYTES: usize = 1024 * 1024;
+#[cfg(unix)]
+const PTY_WRITE_RETAIN_BYTES: usize = 64 * 1024;
+const MAX_PENDING_PTY_INPUT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_PENDING_PTY_INPUT_COMMANDS: usize = 256;
+const PTY_INPUT_COMMAND_FLOOR_BYTES: usize = 4 * 1024;
 const PENDING_PASTE_WINDOW: Duration = Duration::from_secs(5);
 const IDLE_SLEEP: Duration = Duration::from_hours(1);
 const MAX_PTY_RESPONSE_BYTES: usize = 1024 * 1024;
@@ -382,6 +391,7 @@ pub struct TerminalSession {
 pub struct TerminalSessionDiagnostics {
     pub command_queue_len: usize,
     pub command_queue_capacity: Option<usize>,
+    pub pending_pty_input_bytes: usize,
     pub event_queue_len: usize,
     pub event_queue_capacity: Option<usize>,
     pub pending_reliable_events: usize,
@@ -447,9 +457,13 @@ impl TerminalSession {
     ) -> Self {
         let max_scrollback = max_scrollback.min(MAX_HISTORY_LIMIT);
         let (command_tx, command_rx) = command_channel();
+        let (input_tx, input_rx) = input_channel();
         let (wake, wake_rx) = actor_wake();
         let commands = CommandSender {
-            commands: command_tx,
+            queues: Box::new(CommandQueues {
+                control: command_tx,
+                input: Some(input_tx),
+            }),
             wake: wake.clone(),
         };
         let event_state = Arc::new(EventQueueState::new());
@@ -474,6 +488,7 @@ impl TerminalSession {
             .spawn(move || {
                 terminal_worker(
                     command_rx,
+                    input_rx,
                     worker_publisher,
                     max_scrollback,
                     appearance,
@@ -546,7 +561,10 @@ impl TerminalSession {
     ) -> Self {
         let (command_tx, command_rx) = command_channel();
         let commands = CommandSender {
-            commands: command_tx,
+            queues: Box::new(CommandQueues {
+                control: command_tx,
+                input: None,
+            }),
             wake: ActorWake::none(),
         };
         let event_state = Arc::new(EventQueueState::new());
@@ -730,9 +748,11 @@ impl TerminalSession {
     #[must_use]
     pub fn diagnostics(&self) -> TerminalSessionDiagnostics {
         let viewport = self.latest_viewport();
+        let (_, pending_pty_input_bytes) = self.commands.pending_input();
         TerminalSessionDiagnostics {
             command_queue_len: self.commands.len(),
             command_queue_capacity: self.commands.capacity(),
+            pending_pty_input_bytes,
             event_queue_len: self.events.receiver.len(),
             event_queue_capacity: self.events.receiver.capacity(),
             pending_reliable_events: self.events.state.pending_reliable.load(Ordering::Acquire),
@@ -958,7 +978,7 @@ impl TerminalSession {
             })?
     }
 
-    fn send_command(&self, command: Command) {
+    fn send_command(&self, command: Command) -> bool {
         let started = diagnostic_timer();
         let queue_before = if started.is_some() {
             self.commands.len()
@@ -971,14 +991,28 @@ impl TerminalSession {
             self.commands.capacity(),
         );
         let result = self.commands.send(command);
+        let success = result.is_ok();
+        if let Err(crossbeam_channel::TrySendError::Full(command)) = &result {
+            let (pending_commands, pending_bytes) = self.commands.pending_input();
+            log::warn!(
+                "rejected terminal PTY input command={} charge_bytes={} pending_commands={} pending_bytes={} limits_commands={} limits_bytes={}",
+                command.name(),
+                command.pty_input_bytes().unwrap_or(0),
+                pending_commands,
+                pending_bytes,
+                MAX_PENDING_PTY_INPUT_COMMANDS,
+                MAX_PENDING_PTY_INPUT_BYTES,
+            );
+        }
         log::trace!(
             target: "zz_terminal::diagnostics::command",
             "enqueue end success={} queue_before={} queue_after={} elapsed_us={}",
-            result.is_ok(),
+            success,
             queue_before,
             self.commands.len(),
             diagnostic_elapsed_us(started),
         );
+        success
     }
 }
 
@@ -1106,8 +1140,149 @@ enum Command {
     Shutdown,
 }
 
+impl Command {
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::Text { .. } => "text",
+            Self::Key { .. } => "key",
+            Self::Resize(_) => "resize",
+            Self::SetWordSeparators(_) => "set-word-separators",
+            Self::SetAppearance(_) => "set-appearance",
+            Self::AttachView(_) => "attach-view",
+            Self::DetachView(_) => "detach-view",
+            Self::ReleaseView(_) => "release-view",
+            Self::ViewAction { .. } => "view-action",
+            Self::PastePreparedBytes { .. } => "paste-prepared-bytes",
+            Self::Capture(_) => "capture",
+            Self::SemanticCapture(_) => "semantic-capture",
+            Self::History(_) => "history",
+            Self::KittyImage(_) => "kitty-image",
+            Self::KittyImageGeneration(_) => "kitty-image-generation",
+            Self::PendingPasteOpened { .. } => "pending-paste-opened",
+            Self::UnbindPastedImage { .. } => "unbind-pasted-image",
+            Self::Shutdown => "shutdown",
+        }
+    }
+
+    fn pty_input_bytes(&self) -> Option<usize> {
+        let payload = match self {
+            Self::Text { text, .. } => text.len(),
+            Self::Key { input, .. } => input.text.as_deref().map_or(0, str::len),
+            Self::ViewAction { action, .. } => match action {
+                TerminalViewAction::Mouse(_)
+                | TerminalViewAction::ScrollWheel { .. }
+                | TerminalViewAction::Focus(_) => 0,
+                TerminalViewAction::Paste(text) => text.len(),
+                _ => return None,
+            },
+            Self::PastePreparedBytes { bytes, .. } => bytes.len(),
+            Self::PendingPasteOpened { .. } => 0,
+            _ => return None,
+        };
+        Some(payload.saturating_add(PTY_INPUT_COMMAND_FLOOR_BYTES))
+    }
+}
+
 fn command_channel() -> (Sender<Command>, Receiver<Command>) {
     crossbeam_channel::bounded(MAX_PENDING_ACTOR_COMMANDS)
+}
+
+#[derive(Default)]
+struct InputAdmission {
+    commands: usize,
+    bytes: usize,
+}
+
+struct InputPermit {
+    admission: Arc<Mutex<InputAdmission>>,
+    bytes: usize,
+}
+
+impl Drop for InputPermit {
+    fn drop(&mut self) {
+        let mut admission = self.admission.lock();
+        admission.commands = admission.commands.saturating_sub(1);
+        admission.bytes = admission.bytes.saturating_sub(self.bytes);
+    }
+}
+
+struct QueuedInput {
+    command: Command,
+    permit: InputPermit,
+}
+
+struct InputSender {
+    commands: Sender<QueuedInput>,
+    admission: Arc<Mutex<InputAdmission>>,
+    max_commands: usize,
+    max_bytes: usize,
+}
+
+impl InputSender {
+    fn try_send(&self, command: Command) -> Result<(), crossbeam_channel::TrySendError<Command>> {
+        let bytes = command
+            .pty_input_bytes()
+            .expect("only PTY input commands use the input queue");
+        {
+            let mut admission = self.admission.lock();
+            if admission.commands >= self.max_commands
+                || bytes > self.max_bytes.saturating_sub(admission.bytes)
+            {
+                return Err(crossbeam_channel::TrySendError::Full(command));
+            }
+            admission.commands += 1;
+            admission.bytes += bytes;
+        }
+        let queued = QueuedInput {
+            command,
+            permit: InputPermit {
+                admission: Arc::clone(&self.admission),
+                bytes,
+            },
+        };
+        self.commands.try_send(queued).map_err(|error| match error {
+            crossbeam_channel::TrySendError::Full(queued) => {
+                let QueuedInput { command, permit } = queued;
+                drop(permit);
+                crossbeam_channel::TrySendError::Full(command)
+            }
+            crossbeam_channel::TrySendError::Disconnected(queued) => {
+                let QueuedInput { command, permit } = queued;
+                drop(permit);
+                crossbeam_channel::TrySendError::Disconnected(command)
+            }
+        })
+    }
+
+    const fn capacity(&self) -> usize {
+        self.max_commands
+    }
+
+    fn pending(&self) -> (usize, usize) {
+        let admission = self.admission.lock();
+        (admission.commands, admission.bytes)
+    }
+}
+
+fn input_channel() -> (InputSender, Receiver<QueuedInput>) {
+    input_channel_with_limits(MAX_PENDING_PTY_INPUT_COMMANDS, MAX_PENDING_PTY_INPUT_BYTES)
+}
+
+fn input_channel_with_limits(
+    max_commands: usize,
+    max_bytes: usize,
+) -> (InputSender, Receiver<QueuedInput>) {
+    let (commands, receiver) = crossbeam_channel::bounded(max_commands);
+    let admission = Arc::new(Mutex::new(InputAdmission::default()));
+    (
+        InputSender {
+            commands,
+            admission,
+            max_commands,
+            max_bytes,
+        },
+        receiver,
+    )
 }
 
 #[derive(Clone)]
@@ -1126,45 +1301,82 @@ impl ActorWake {
 
     fn notify(&self) {
         #[cfg(unix)]
-        if let Some(pipe) = &self.pipe {
-            let _ = rustix::io::write(&**pipe, &[1_u8]);
+        if let Some(pipe) = &self.pipe
+            && let Err(error) = write_actor_wake(|| rustix::io::write(&**pipe, &[1_u8]))
+        {
+            log::error!("failed to wake terminal actor: {error}");
         }
     }
 }
 
 #[cfg(all(unix, not(target_os = "linux")))]
-type WakeReceiver = Option<std::os::fd::OwnedFd>;
+type WakeReceiver = Result<std::os::fd::OwnedFd, rustix::io::Errno>;
 #[cfg(any(target_os = "linux", not(unix)))]
 type WakeReceiver = ();
+
+#[cfg(unix)]
+fn write_actor_wake(
+    mut write: impl FnMut() -> Result<usize, rustix::io::Errno>,
+) -> Result<(), rustix::io::Errno> {
+    loop {
+        match write() {
+            Ok(_) | Err(rustix::io::Errno::AGAIN) => return Ok(()),
+            Err(rustix::io::Errno::INTR) => {}
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn configured_actor_wake_pipe()
+-> Result<(std::os::fd::OwnedFd, std::os::fd::OwnedFd), rustix::io::Errno> {
+    let (read, write) = rustix::pipe::pipe()?;
+    rustix::io::fcntl_setfd(&read, rustix::io::FdFlags::CLOEXEC)?;
+    rustix::io::fcntl_setfd(&write, rustix::io::FdFlags::CLOEXEC)?;
+    rustix::io::ioctl_fionbio(&read, true)?;
+    rustix::io::ioctl_fionbio(&write, true)?;
+    Ok((read, write))
+}
 
 fn actor_wake() -> (ActorWake, WakeReceiver) {
     #[cfg(all(unix, not(target_os = "linux")))]
     {
-        let Ok((read, write)) = rustix::pipe::pipe() else {
-            return (ActorWake::none(), None);
-        };
-        let _ = rustix::io::fcntl_setfd(&read, rustix::io::FdFlags::CLOEXEC);
-        let _ = rustix::io::fcntl_setfd(&write, rustix::io::FdFlags::CLOEXEC);
-        let _ = rustix::io::ioctl_fionbio(&write, true);
-        (
-            ActorWake {
-                pipe: Some(Arc::new(write)),
-            },
-            Some(read),
-        )
+        match configured_actor_wake_pipe() {
+            Ok((read, write)) => (
+                ActorWake {
+                    pipe: Some(Arc::new(write)),
+                },
+                Ok(read),
+            ),
+            Err(error) => (ActorWake::none(), Err(error)),
+        }
     }
     #[cfg(any(target_os = "linux", not(unix)))]
     (ActorWake::none(), ())
 }
 
+struct CommandQueues {
+    control: Sender<Command>,
+    input: Option<InputSender>,
+}
+
 struct CommandSender {
-    commands: Sender<Command>,
+    queues: Box<CommandQueues>,
     wake: ActorWake,
 }
 
 impl CommandSender {
-    fn send(&self, command: Command) -> Result<(), crossbeam_channel::SendError<Command>> {
-        let result = self.commands.send(command);
+    fn send(&self, command: Command) -> Result<(), crossbeam_channel::TrySendError<Command>> {
+        let result = if command.pty_input_bytes().is_some()
+            && let Some(input) = &self.queues.input
+        {
+            input.try_send(command)
+        } else {
+            self.queues
+                .control
+                .send(command)
+                .map_err(|error| crossbeam_channel::TrySendError::Disconnected(error.0))
+        };
         if result.is_ok() {
             self.wake.notify();
         }
@@ -1176,7 +1388,20 @@ impl CommandSender {
         command: Command,
         timeout: Duration,
     ) -> Result<(), crossbeam_channel::SendTimeoutError<Command>> {
-        let result = self.commands.send_timeout(command, timeout);
+        let result = if command.pty_input_bytes().is_some()
+            && let Some(input) = &self.queues.input
+        {
+            input.try_send(command).map_err(|error| match error {
+                crossbeam_channel::TrySendError::Full(command) => {
+                    crossbeam_channel::SendTimeoutError::Timeout(command)
+                }
+                crossbeam_channel::TrySendError::Disconnected(command) => {
+                    crossbeam_channel::SendTimeoutError::Disconnected(command)
+                }
+            })
+        } else {
+            self.queues.control.send_timeout(command, timeout)
+        };
         if result.is_ok() {
             self.wake.notify();
         }
@@ -1184,7 +1409,13 @@ impl CommandSender {
     }
 
     fn try_send(&self, command: Command) -> Result<(), crossbeam_channel::TrySendError<Command>> {
-        let result = self.commands.try_send(command);
+        let result = if command.pty_input_bytes().is_some()
+            && let Some(input) = &self.queues.input
+        {
+            input.try_send(command)
+        } else {
+            self.queues.control.try_send(command)
+        };
         if result.is_ok() {
             self.wake.notify();
         }
@@ -1192,11 +1423,23 @@ impl CommandSender {
     }
 
     fn len(&self) -> usize {
-        self.commands.len()
+        self.queues
+            .control
+            .len()
+            .saturating_add(self.pending_input().0)
     }
 
     fn capacity(&self) -> Option<usize> {
-        self.commands.capacity()
+        let control = self.queues.control.capacity()?;
+        let input = self.queues.input.as_ref().map_or(0, InputSender::capacity);
+        Some(control.saturating_add(input))
+    }
+
+    fn pending_input(&self) -> (usize, usize) {
+        self.queues
+            .input
+            .as_ref()
+            .map_or((0, 0), InputSender::pending)
     }
 }
 
@@ -2475,7 +2718,8 @@ fn reliable_event_bytes(event: &TerminalEvent) -> usize {
     reason = "the worker thread must own its channel and publisher"
 )]
 fn terminal_worker(
-    command_rx: Receiver<Command>,
+    control_rx: Receiver<Command>,
+    input_rx: Receiver<QueuedInput>,
     publisher: Publisher,
     max_scrollback: usize,
     appearance: Arc<TerminalAppearance>,
@@ -2484,7 +2728,8 @@ fn terminal_worker(
     wake_rx: WakeReceiver,
 ) {
     if let Err(error) = run_terminal(
-        &command_rx,
+        &control_rx,
+        &input_rx,
         &publisher,
         max_scrollback,
         &appearance,
@@ -3089,7 +3334,8 @@ fn refresh_frozen_view_appearance(
 }
 
 fn run_terminal(
-    command_rx: &Receiver<Command>,
+    control_rx: &Receiver<Command>,
+    input_rx: &Receiver<QueuedInput>,
     publisher: &Publisher,
     max_scrollback: usize,
     appearance: &TerminalAppearance,
@@ -3166,8 +3412,9 @@ fn run_terminal(
         .map_err(WorkerError::Io)?;
 
     #[cfg(all(unix, not(target_os = "linux")))]
-    let wake_rx =
-        wake_rx.ok_or_else(|| WorkerError::Pty("terminal wake pipe unavailable".to_owned()))?;
+    let wake_rx = wake_rx.map_err(|error| {
+        WorkerError::Pty(format!("failed to configure terminal wake pipe: {error}"))
+    })?;
     #[cfg(unix)]
     let (drain_fd, mut writer) = {
         let dup = || {
@@ -3185,7 +3432,7 @@ fn run_terminal(
                 "failed to make the PTY master nonblocking: {errno}"
             ))
         })?;
-        let writer: Box<dyn Write + Send> = Box::new(PtyWriter { fd: writer_fd });
+        let writer = PtyWriter::new(writer_fd);
         (drain_fd, writer)
     };
     #[cfg(not(unix))]
@@ -3283,6 +3530,8 @@ fn run_terminal(
     let mut search_refresh_due = None::<Instant>;
     let mut last_content_publish = Instant::now();
     let mut output_pending = false;
+    #[cfg(unix)]
+    let mut active_input_permit = None::<InputPermit>;
 
     publisher.publish(snapshot(
         &terminal,
@@ -3297,6 +3546,14 @@ fn run_terminal(
     )?);
 
     loop {
+        #[cfg(unix)]
+        {
+            writer.flush_pending()?;
+            if !writer.has_pending() {
+                active_input_permit.take();
+            }
+            drain_effects_if_writer_ready(&effects, &mut writer)?;
+        }
         let now = Instant::now();
         if search_refresh_due.is_some_and(|due| now >= due) {
             search_refresh_due = None;
@@ -3319,6 +3576,9 @@ fn run_terminal(
                 || pending_window_due
                 || last_content_publish.elapsed() >= CONTENT_PUBLISH_STALENESS)
         {
+            #[cfg(unix)]
+            drain_effects_if_writer_ready(&effects, &mut writer)?;
+            #[cfg(not(unix))]
             drain_effects(&effects, &mut writer)?;
             if let Some((token, number)) = pasted_image_bindings.observe(&terminal)? {
                 publisher.placeholder_bound(token, number)?;
@@ -3376,30 +3636,52 @@ fn run_terminal(
         if let Some(due) = pasted_image_bindings.next_deadline() {
             deadline = deadline.min(due);
         }
+        #[cfg(unix)]
+        if writer.has_pending() {
+            deadline = deadline.min(Instant::now() + PTY_WRITE_RETRY);
+        }
         let timeout = deadline.saturating_duration_since(Instant::now());
         let child_exit = if exit_status.is_some() {
             &no_exit
         } else {
             &exit_rx
         };
+        #[cfg(unix)]
+        let available_input = (!writer.has_pending()).then_some(input_rx);
+        #[cfg(not(unix))]
+        let available_input = Some(input_rx);
         #[cfg(all(unix, not(target_os = "linux")))]
         let wakeup = wait_for_wake(
-            command_rx,
+            control_rx,
+            available_input,
             &search_results,
             child_exit,
             (!reader_eof).then_some(&drain_fd),
             &wake_rx,
             timeout,
         )?;
+        #[cfg(target_os = "linux")]
+        let available_output = if reader_eof { &no_output } else { &output_rx };
+        #[cfg(not(unix))]
+        let available_output = if reader_eof { &no_output } else { &output_rx };
         #[cfg(any(target_os = "linux", not(unix)))]
         let wakeup = wait_for_wake(
-            command_rx,
+            control_rx,
+            available_input,
             &search_results,
             child_exit,
-            if reader_eof { &no_output } else { &output_rx },
+            available_output,
             timeout,
         )?;
 
+        let mut input_permit = None;
+        let wakeup = match wakeup {
+            Wake::Input(QueuedInput { command, permit }) => {
+                input_permit = Some(permit);
+                Wake::Command(command)
+            }
+            wakeup => wakeup,
+        };
         match wakeup {
             Wake::Command(command) => match command {
                 Command::Text { view, text } => {
@@ -3532,6 +3814,9 @@ fn run_terminal(
                         for view in inactive_views.values_mut() {
                             view.invalidate_layout();
                         }
+                        #[cfg(unix)]
+                        drain_effects_if_writer_ready(&effects, &mut writer)?;
+                        #[cfg(not(unix))]
                         drain_effects(&effects, &mut writer)?;
                         for (view_id, view) in &mut active_views {
                             view.invalidate_layout();
@@ -3903,6 +4188,7 @@ fn run_terminal(
                 let _ = killer.kill();
                 return Ok(());
             }
+            Wake::Input(_) => unreachable!("PTY input is normalized before dispatch"),
             Wake::Search(result) => {
                 if apply_search_results(
                     &mut terminal,
@@ -3987,6 +4273,13 @@ fn run_terminal(
             Wake::Deadline => {}
         }
 
+        #[cfg(unix)]
+        if input_permit.is_some() && writer.has_pending() {
+            active_input_permit = input_permit.take();
+        }
+        #[cfg(not(unix))]
+        drop(input_permit);
+
         if exit_status.is_some() && reader_eof {
             #[cfg(all(unix, not(target_os = "linux")))]
             let had_output = false;
@@ -3999,6 +4292,9 @@ fn run_terminal(
                 }
                 had_output
             };
+            #[cfg(unix)]
+            drain_effects_if_writer_ready(&effects, &mut writer)?;
+            #[cfg(not(unix))]
             drain_effects(&effects, &mut writer)?;
             if (had_output || output_pending)
                 && let Some((token, number)) = pasted_image_bindings.observe(&terminal)?
@@ -4371,7 +4667,7 @@ fn apply_view_action(
     view: &mut TerminalViewState,
     action: TerminalViewAction,
     geometry: Geometry,
-    writer: &mut Box<dyn Write + Send>,
+    writer: &mut dyn Write,
     mouse_encoder: &mut mouse::Encoder<'_>,
     mouse_event: &mut mouse::Event<'_>,
     input_bytes: &mut Vec<u8>,
@@ -5062,7 +5358,7 @@ fn route_mouse_input(
     hover_link: &mut Option<HoverLink>,
     copy_mode: Option<&mut CopyModeState>,
     input: TerminalMouseInput,
-    writer: &mut Box<dyn Write + Send>,
+    writer: &mut dyn Write,
     encoder: &mut mouse::Encoder<'_>,
     event: &mut mouse::Event<'_>,
     button_pressed: &mut bool,
@@ -7060,7 +7356,7 @@ fn move_copy_word(
 fn write_focus_event(
     terminal: &Terminal<'_, '_>,
     focused: bool,
-    writer: &mut impl Write,
+    writer: &mut dyn Write,
 ) -> Result<(), WorkerError> {
     if !terminal.mode(Mode::FOCUS_EVENT)? {
         return Ok(());
@@ -8175,6 +8471,7 @@ fn saturating_isize_i128(value: i128) -> isize {
 
 enum Wake {
     Command(Command),
+    Input(QueuedInput),
     CommandsClosed,
     Search(SearchResults),
     ChildExit(std::io::Result<ExitStatus>),
@@ -8188,35 +8485,92 @@ enum Wake {
 #[cfg(unix)]
 struct PtyWriter {
     fd: filedescriptor::FileDescriptor,
+    pending: Vec<u8>,
+    offset: usize,
+}
+
+#[cfg(unix)]
+impl PtyWriter {
+    fn new(fd: filedescriptor::FileDescriptor) -> Self {
+        Self {
+            fd,
+            pending: Vec::new(),
+            offset: 0,
+        }
+    }
+
+    fn has_pending(&self) -> bool {
+        self.offset < self.pending.len()
+    }
+
+    #[cfg(test)]
+    fn queued_bytes(&self) -> usize {
+        self.pending.len().saturating_sub(self.offset)
+    }
+
+    fn flush_pending(&mut self) -> std::io::Result<()> {
+        let mut budget = PTY_WRITE_BUDGET_BYTES;
+        while self.has_pending() && budget != 0 {
+            let end = self.offset.saturating_add(budget).min(self.pending.len());
+            match rustix::io::write(&self.fd, &self.pending[self.offset..end]) {
+                Ok(0) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::WriteZero,
+                        "PTY writer accepted no bytes",
+                    ));
+                }
+                Ok(written) => {
+                    self.offset = self.offset.saturating_add(written);
+                    budget = budget.saturating_sub(written);
+                }
+                Err(rustix::io::Errno::AGAIN) => return Ok(()),
+                Err(rustix::io::Errno::INTR) => {}
+                Err(errno) => return Err(std::io::Error::from(errno)),
+            }
+        }
+        if !self.has_pending() {
+            self.pending.clear();
+            self.offset = 0;
+            if self.pending.capacity() > PTY_WRITE_RETAIN_BYTES {
+                self.pending = Vec::new();
+            }
+        }
+        Ok(())
+    }
+
+    fn compact_for(&mut self, additional: usize) {
+        if self.pending.capacity().saturating_sub(self.pending.len()) < additional
+            && self.offset != 0
+        {
+            let queued = self.pending.len().saturating_sub(self.offset);
+            self.pending.copy_within(self.offset.., 0);
+            self.pending.truncate(queued);
+            self.offset = 0;
+        }
+    }
 }
 
 #[cfg(unix)]
 impl Write for PtyWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        loop {
-            match rustix::io::write(&self.fd, buf) {
-                Ok(written) => return Ok(written),
-                Err(rustix::io::Errno::AGAIN) => {
-                    let mut fds = [rustix::event::PollFd::new(
-                        &self.fd,
-                        rustix::event::PollFlags::OUT,
-                    )];
-                    let _ = rustix::event::poll(&mut fds, None);
-                }
-                Err(rustix::io::Errno::INTR) => {}
-                Err(errno) => return Err(std::io::Error::from(errno)),
-            }
+        if buf.is_empty() {
+            return Ok(0);
         }
+        self.compact_for(buf.len());
+        self.pending.extend_from_slice(buf);
+        self.flush_pending()?;
+        Ok(buf.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
+        self.flush_pending()
     }
 }
 
 #[cfg(all(unix, not(target_os = "linux")))]
 fn wait_for_wake(
-    command_rx: &Receiver<Command>,
+    control_rx: &Receiver<Command>,
+    input_rx: Option<&Receiver<QueuedInput>>,
     search_results: &Receiver<SearchResults>,
     child_exit: &Receiver<std::io::Result<ExitStatus>>,
     pty: Option<&filedescriptor::FileDescriptor>,
@@ -8227,14 +8581,21 @@ fn wait_for_wake(
     use rustix::event::{PollFd, PollFlags};
 
     fn check_channels(
-        command_rx: &Receiver<Command>,
+        control_rx: &Receiver<Command>,
+        input_rx: Option<&Receiver<QueuedInput>>,
         search_results: &Receiver<SearchResults>,
         child_exit: &Receiver<std::io::Result<ExitStatus>>,
     ) -> Result<Option<Wake>, WorkerError> {
-        match command_rx.try_recv() {
+        match control_rx.try_recv() {
             Ok(command) => return Ok(Some(Wake::Command(command))),
             Err(TryRecvError::Disconnected) => return Ok(Some(Wake::CommandsClosed)),
             Err(TryRecvError::Empty) => {}
+        }
+        if let Some(input_rx) = input_rx {
+            match input_rx.try_recv() {
+                Ok(command) => return Ok(Some(Wake::Input(command))),
+                Err(TryRecvError::Disconnected | TryRecvError::Empty) => {}
+            }
         }
         match search_results.try_recv() {
             Ok(result) => return Ok(Some(Wake::Search(result))),
@@ -8254,7 +8615,7 @@ fn wait_for_wake(
         }
     }
 
-    if let Some(wake) = check_channels(command_rx, search_results, child_exit)? {
+    if let Some(wake) = check_channels(control_rx, input_rx, search_results, child_exit)? {
         return Ok(wake);
     }
 
@@ -8281,9 +8642,8 @@ fn wait_for_wake(
         }
     };
     if wake_ready {
-        let mut drained = [0_u8; 64];
-        let _ = rustix::io::read(wake_rx, &mut drained[..]);
-        if let Some(wake) = check_channels(command_rx, search_results, child_exit)? {
+        drain_wake_pipe(wake_rx)?;
+        if let Some(wake) = check_channels(control_rx, input_rx, search_results, child_exit)? {
             return Ok(wake);
         }
     }
@@ -8293,24 +8653,54 @@ fn wait_for_wake(
     Ok(Wake::Deadline)
 }
 
+#[cfg(all(unix, not(target_os = "linux")))]
+fn drain_wake_pipe(wake_rx: &std::os::fd::OwnedFd) -> Result<(), WorkerError> {
+    let mut drained = [0_u8; 64];
+    loop {
+        match rustix::io::read(wake_rx, &mut drained) {
+            Ok(0) | Err(rustix::io::Errno::AGAIN) => return Ok(()),
+            Ok(_) | Err(rustix::io::Errno::INTR) => {}
+            Err(error) => return Err(WorkerError::Io(error.into())),
+        }
+    }
+}
+
 #[cfg(any(target_os = "linux", not(unix)))]
 fn wait_for_wake(
-    command_rx: &Receiver<Command>,
+    control_rx: &Receiver<Command>,
+    input_rx: Option<&Receiver<QueuedInput>>,
     search_results: &Receiver<SearchResults>,
     child_exit: &Receiver<std::io::Result<ExitStatus>>,
     output_rx: &Receiver<ReaderMessage>,
     timeout: Duration,
 ) -> Result<Wake, WorkerError> {
-    crossbeam_channel::select_biased! {
-        recv(command_rx) -> message => Ok(message.map_or(Wake::CommandsClosed, Wake::Command)),
-        recv(search_results) -> result => result.map(Wake::Search).map_err(|_| {
-            WorkerError::Thread("terminal search worker stopped".to_owned())
-        }),
-        recv(output_rx) -> message => Ok(Wake::PtyMessage(message.unwrap_or(ReaderMessage::Eof))),
-        recv(child_exit) -> status => status.map(Wake::ChildExit).map_err(|_| {
-            WorkerError::Thread("terminal child waiter stopped".to_owned())
-        }),
-        default(timeout) => Ok(Wake::Deadline),
+    if let Some(input_rx) = input_rx {
+        crossbeam_channel::select_biased! {
+            recv(control_rx) -> message => Ok(message.map_or(Wake::CommandsClosed, Wake::Command)),
+            recv(input_rx) -> message => message.map(Wake::Input).map_err(|_| {
+                WorkerError::Thread("terminal input channel stopped".to_owned())
+            }),
+            recv(search_results) -> result => result.map(Wake::Search).map_err(|_| {
+                WorkerError::Thread("terminal search worker stopped".to_owned())
+            }),
+            recv(output_rx) -> message => Ok(Wake::PtyMessage(message.unwrap_or(ReaderMessage::Eof))),
+            recv(child_exit) -> status => status.map(Wake::ChildExit).map_err(|_| {
+                WorkerError::Thread("terminal child waiter stopped".to_owned())
+            }),
+            default(timeout) => Ok(Wake::Deadline),
+        }
+    } else {
+        crossbeam_channel::select_biased! {
+            recv(control_rx) -> message => Ok(message.map_or(Wake::CommandsClosed, Wake::Command)),
+            recv(search_results) -> result => result.map(Wake::Search).map_err(|_| {
+                WorkerError::Thread("terminal search worker stopped".to_owned())
+            }),
+            recv(output_rx) -> message => Ok(Wake::PtyMessage(message.unwrap_or(ReaderMessage::Eof))),
+            recv(child_exit) -> status => status.map(Wake::ChildExit).map_err(|_| {
+                WorkerError::Thread("terminal child waiter stopped".to_owned())
+            }),
+            default(timeout) => Ok(Wake::Deadline),
+        }
     }
 }
 
@@ -8494,12 +8884,28 @@ fn drain_effects(effects: &RefCell<PtyEffects>, writer: &mut dyn Write) -> Resul
     Ok(())
 }
 
+fn pty_effects_pending(effects: &RefCell<PtyEffects>) -> bool {
+    let effects = effects.borrow();
+    !effects.bytes.is_empty() || effects.overflowed
+}
+
+#[cfg(unix)]
+fn drain_effects_if_writer_ready(
+    effects: &RefCell<PtyEffects>,
+    writer: &mut PtyWriter,
+) -> Result<(), WorkerError> {
+    if writer.has_pending() || !pty_effects_pending(effects) {
+        return Ok(());
+    }
+    drain_effects(effects, writer)
+}
+
 fn encode_key(
     terminal: &Terminal<'_, '_>,
     encoder: &mut key::Encoder<'_>,
     event: &mut key::Event<'_>,
     input: KeyInput,
-    writer: &mut Box<dyn Write + Send>,
+    writer: &mut dyn Write,
     input_bytes: &mut Vec<u8>,
 ) -> Result<(), WorkerError> {
     let mut modifiers = key::Mods::empty();
@@ -9570,6 +9976,427 @@ mod tests {
         ));
     }
 
+    #[cfg(all(unix, not(target_os = "linux")))]
+    #[test]
+    fn wake_pipe_drain_reads_until_empty() {
+        let (read, write) = configured_actor_wake_pipe().expect("configured wake pipe");
+        for fd in [&read, &write] {
+            assert!(
+                rustix::io::fcntl_getfd(fd)
+                    .expect("wake fd flags")
+                    .contains(rustix::io::FdFlags::CLOEXEC)
+            );
+            assert!(
+                rustix::fs::fcntl_getfl(fd)
+                    .expect("wake status flags")
+                    .contains(rustix::fs::OFlags::NONBLOCK)
+            );
+        }
+
+        for length in [128, 129] {
+            let bytes = vec![1_u8; length];
+            assert_eq!(
+                rustix::io::write(&write, &bytes).expect("fill wake pipe"),
+                length
+            );
+            drain_wake_pipe(&read).expect("drain wake pipe");
+            let mut byte = [0_u8; 1];
+            assert!(matches!(
+                rustix::io::read(&read, &mut byte),
+                Err(rustix::io::Errno::AGAIN)
+            ));
+        }
+    }
+
+    #[cfg(all(unix, not(target_os = "linux")))]
+    #[test]
+    fn wake_pipe_write_retries_interrupt_and_accepts_a_full_pipe() {
+        let mut attempts = 0;
+        write_actor_wake(|| {
+            attempts += 1;
+            if attempts == 1 {
+                Err(rustix::io::Errno::INTR)
+            } else {
+                Ok(1)
+            }
+        })
+        .expect("interrupted wake retry");
+        assert_eq!(attempts, 2);
+
+        write_actor_wake(|| Err(rustix::io::Errno::AGAIN)).expect("full pipe is already readable");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saturated_pty_input_does_not_block_resize_or_shutdown() {
+        let session = Arc::new(TerminalSession::spawn(
+            DEFAULT_HISTORY_LIMIT,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                command: Some("sleep 30".to_owned()),
+                ..TerminalSpawn::default()
+            },
+        ));
+        wait_for_test_viewport(&session, |viewport| {
+            matches!(viewport.status, SessionStatus::Running)
+        });
+        let view = TerminalViewId(1);
+        session.attach_view(view);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while session.latest_viewport_for(view).is_none() {
+            assert!(Instant::now() < deadline, "view never attached");
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let chunk = Arc::<str>::from("x".repeat(1024 * 1024));
+        let mut accepted = 0;
+        let mut rejected = 0;
+        for _ in 0..(MAX_PENDING_PTY_INPUT_BYTES / chunk.len() + 8) {
+            if session.send_command(Command::Text {
+                view: Some(view),
+                text: Arc::clone(&chunk),
+            }) {
+                accepted += 1;
+            } else {
+                rejected += 1;
+                break;
+            }
+        }
+        assert!(accepted > 0);
+        assert_eq!(rejected, 1);
+
+        let (pending_commands, pending_bytes) = session.commands.pending_input();
+        let diagnostics = session.diagnostics();
+        assert_eq!(diagnostics.command_queue_len, pending_commands);
+        assert_eq!(diagnostics.pending_pty_input_bytes, pending_bytes);
+        assert!(diagnostics.pending_pty_input_bytes >= chunk.len());
+
+        session.resize(37, 9, 8, 18);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let viewport = session.latest_viewport();
+            if viewport.columns == 37 && viewport.rows == 9 {
+                break;
+            }
+            assert!(Instant::now() < deadline, "resize stayed behind PTY input");
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(session.send_command(Command::ViewAction {
+            view,
+            action: TerminalViewAction::EnterCopyMode,
+        }));
+        wait_for_test_viewport(&session, |viewport| {
+            matches!(viewport.mode, TerminalMode::Copy { .. })
+        });
+
+        let events = session.events();
+        drop(session);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !events.receiver.is_closed() {
+            assert!(
+                Instant::now() < deadline,
+                "shutdown stayed behind PTY input"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pty_output_drains_while_the_input_writer_is_backpressured() {
+        let session = TerminalSession::spawn(
+            DEFAULT_HISTORY_LIMIT,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                command: Some(
+                    "stty raw -echo; sleep 1; dd if=/dev/zero bs=262144 count=1 2>/dev/null; IFS= read -r line; printf '\\r\\nZZ_DUPLEX_DRAIN_OK\\r\\n'; sleep 30"
+                        .to_owned(),
+                ),
+                ..TerminalSpawn::default()
+            },
+        );
+        let view = TerminalViewId(2);
+        session.attach_view(view);
+        wait_for_test_viewport(&session, |viewport| {
+            matches!(viewport.status, SessionStatus::Running)
+        });
+
+        assert!(session.send_command(Command::Text {
+            view: Some(view),
+            text: Arc::from(format!("{}\n", "i".repeat(256 * 1024))),
+        }));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while session.commands.pending_input().0 == 0
+            || !session
+                .commands
+                .queues
+                .input
+                .as_ref()
+                .expect("live terminal input queue")
+                .commands
+                .is_empty()
+        {
+            assert!(
+                Instant::now() < deadline,
+                "PTY input never reached the backpressured writer"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let viewport = session.latest_viewport_for(view);
+            let mut contents = String::new();
+            if let Some(viewport) = viewport {
+                for cell in viewport.cells.iter() {
+                    viewport.push_glyph(*cell, &mut contents);
+                }
+            }
+            if contents.contains("ZZ_DUPLEX_DRAIN_OK") {
+                assert_eq!(session.commands.pending_input(), (0, 0));
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "PTY output stopped behind the backpressured writer"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn pty_input_admission_is_count_and_byte_bounded() {
+        let (input, pending) = input_channel_with_limits(2, PTY_INPUT_COMMAND_FLOOR_BYTES * 4);
+        let small = || Command::PendingPasteOpened { token: 1 };
+        input.try_send(small()).expect("first input");
+        input.try_send(small()).expect("second input");
+        assert!(matches!(
+            input.try_send(small()),
+            Err(crossbeam_channel::TrySendError::Full(
+                Command::PendingPasteOpened { .. }
+            ))
+        ));
+        assert_eq!(input.pending(), (2, PTY_INPUT_COMMAND_FLOOR_BYTES * 2));
+        drop(pending.recv().expect("release first input"));
+        input.try_send(small()).expect("count released");
+
+        let (input, pending) = input_channel_with_limits(8, PTY_INPUT_COMMAND_FLOOR_BYTES * 2);
+        assert!(matches!(
+            input.try_send(Command::Text {
+                view: None,
+                text: Arc::from("x".repeat(PTY_INPUT_COMMAND_FLOOR_BYTES + 1)),
+            }),
+            Err(crossbeam_channel::TrySendError::Full(Command::Text { .. }))
+        ));
+        assert!(pending.is_empty());
+        assert_eq!(input.pending(), (0, 0));
+    }
+
+    #[test]
+    fn pty_input_lane_preserves_paste_order_and_keeps_view_actions_on_control() {
+        let (control, control_rx) = command_channel();
+        let (input, input_rx) = input_channel();
+        let commands = CommandSender {
+            queues: Box::new(CommandQueues {
+                control,
+                input: Some(input),
+            }),
+            wake: ActorWake::none(),
+        };
+        commands
+            .send(Command::PendingPasteOpened { token: 7 })
+            .expect("open pending paste");
+        commands
+            .send(Command::ViewAction {
+                view: TerminalViewId(1),
+                action: TerminalViewAction::Paste("image.png".to_owned()),
+            })
+            .expect("paste path");
+        commands
+            .send(Command::ViewAction {
+                view: TerminalViewId(1),
+                action: TerminalViewAction::ScrollTop,
+            })
+            .expect("scroll view");
+
+        assert!(matches!(
+            input_rx.recv().expect("pending paste input").command,
+            Command::PendingPasteOpened { token: 7 }
+        ));
+        assert!(matches!(
+            input_rx.recv().expect("paste input").command,
+            Command::ViewAction {
+                action: TerminalViewAction::Paste(_),
+                ..
+            }
+        ));
+        assert!(matches!(
+            control_rx.recv().expect("view control"),
+            Command::ViewAction {
+                action: TerminalViewAction::ScrollTop,
+                ..
+            }
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pty_writer_retains_every_reported_byte_during_saturation() {
+        let (read, write) = rustix::pipe::pipe().expect("PTY writer test pipe");
+        rustix::io::ioctl_fionbio(&read, true).expect("nonblocking pipe reader");
+        rustix::io::ioctl_fionbio(&write, true).expect("nonblocking pipe writer");
+        let filler = [0_u8; 4096];
+        loop {
+            match rustix::io::write(&write, &filler) {
+                Ok(_) | Err(rustix::io::Errno::INTR) => {}
+                Err(rustix::io::Errno::AGAIN) => break,
+                Err(error) => panic!("fill writer test pipe: {error}"),
+            }
+        }
+
+        let fd = filedescriptor::FileDescriptor::dup(&write).expect("duplicate pipe writer");
+        let mut writer = PtyWriter::new(fd);
+        let chunk = vec![1_u8; 32 * 1024];
+        for _ in 0..8 {
+            assert_eq!(
+                writer.write(&chunk).expect("queue saturated input"),
+                chunk.len()
+            );
+        }
+        assert_eq!(writer.queued_bytes(), chunk.len() * 8);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pty_effects_wait_for_the_existing_writer_backlog() {
+        let (read, write) = rustix::pipe::pipe().expect("PTY effects test pipe");
+        rustix::io::ioctl_fionbio(&read, true).expect("nonblocking pipe reader");
+        rustix::io::ioctl_fionbio(&write, true).expect("nonblocking pipe writer");
+        let filler = [0_u8; 4096];
+        let mut filler_bytes = 0;
+        loop {
+            match rustix::io::write(&write, &filler) {
+                Ok(written) => filler_bytes += written,
+                Err(rustix::io::Errno::INTR) => {}
+                Err(rustix::io::Errno::AGAIN) => break,
+                Err(error) => panic!("fill PTY effects pipe: {error}"),
+            }
+        }
+
+        let fd = filedescriptor::FileDescriptor::dup(&write).expect("duplicate pipe writer");
+        let mut writer = PtyWriter::new(fd);
+        writer.write_all(b"input").expect("queue PTY input");
+        assert_eq!(writer.queued_bytes(), 5);
+
+        let effects = RefCell::new(PtyEffects::new());
+        effects.borrow_mut().push(b"reply");
+        drain_effects_if_writer_ready(&effects, &mut writer).expect("defer PTY effect");
+        assert_eq!(effects.borrow().bytes, b"reply");
+
+        let mut scratch = [0_u8; 8192];
+        let mut drained_filler = 0;
+        while drained_filler < filler_bytes {
+            match rustix::io::read(&read, &mut scratch) {
+                Ok(read) => drained_filler += read,
+                Err(rustix::io::Errno::INTR) => {}
+                Err(error) => panic!("drain PTY effects filler: {error}"),
+            }
+        }
+        writer.flush_pending().expect("flush PTY input");
+        assert!(!writer.has_pending());
+        drain_effects_if_writer_ready(&effects, &mut writer).expect("flush PTY effect");
+        assert!(effects.borrow().bytes.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pty_writer_preserves_order_across_partial_writes() {
+        let (read, write) = rustix::pipe::pipe().expect("PTY writer test pipe");
+        rustix::io::ioctl_fionbio(&read, true).expect("nonblocking pipe reader");
+        rustix::io::ioctl_fionbio(&write, true).expect("nonblocking pipe writer");
+        let filler = [0_u8; 4096];
+        let mut filler_bytes = 0;
+        loop {
+            match rustix::io::write(&write, &filler) {
+                Ok(written) => filler_bytes += written,
+                Err(rustix::io::Errno::INTR) => {}
+                Err(rustix::io::Errno::AGAIN) => break,
+                Err(error) => panic!("fill writer test pipe: {error}"),
+            }
+        }
+
+        let fd = filedescriptor::FileDescriptor::dup(&write).expect("duplicate pipe writer");
+        let mut writer = PtyWriter::new(fd);
+        let first = vec![0x31_u8; 96 * 1024];
+        let second = vec![0x32_u8; 96 * 1024];
+        assert_eq!(
+            writer.write(&first).expect("queue first input"),
+            first.len()
+        );
+        assert_eq!(
+            writer.write(&second).expect("queue second input"),
+            second.len()
+        );
+
+        let mut scratch = [0_u8; 8192];
+        let mut drained_filler = 0;
+        while drained_filler < filler_bytes {
+            match rustix::io::read(&read, &mut scratch) {
+                Ok(read) => drained_filler += read,
+                Err(rustix::io::Errno::INTR) => {}
+                Err(error) => panic!("drain writer test filler: {error}"),
+            }
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut actual = Vec::with_capacity(first.len() + second.len());
+        while writer.has_pending() {
+            writer.flush_pending().expect("flush queued input");
+            loop {
+                match rustix::io::read(&read, &mut scratch) {
+                    Ok(read) => actual.extend_from_slice(&scratch[..read]),
+                    Err(rustix::io::Errno::INTR) => {}
+                    Err(rustix::io::Errno::AGAIN) => break,
+                    Err(error) => panic!("read flushed input: {error}"),
+                }
+            }
+            assert!(Instant::now() < deadline, "partial writes never drained");
+        }
+        loop {
+            match rustix::io::read(&read, &mut scratch) {
+                Ok(read) => actual.extend_from_slice(&scratch[..read]),
+                Err(rustix::io::Errno::INTR) => {}
+                Err(rustix::io::Errno::AGAIN) => break,
+                Err(error) => panic!("read final flushed input: {error}"),
+            }
+        }
+
+        let mut expected = first;
+        expected.extend_from_slice(&second);
+        assert_eq!(actual, expected);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pty_writer_releases_large_drained_allocation() {
+        let sink = std::fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/null")
+            .expect("null sink");
+        let fd = filedescriptor::FileDescriptor::dup(&sink).expect("duplicate null sink");
+        let mut writer = PtyWriter::new(fd);
+
+        writer
+            .write_all(&vec![0_u8; PTY_WRITE_RETAIN_BYTES * 2])
+            .expect("write large input");
+        writer.flush_pending().expect("drain large input");
+
+        assert!(!writer.has_pending());
+        assert_eq!(writer.pending.capacity(), 0);
+    }
+
     #[test]
     fn terminal_event_queue_has_one_coalesced_and_four_reliable_slots() {
         let event_state = Arc::new(EventQueueState::new());
@@ -9820,7 +10647,11 @@ mod tests {
         assert!(std::mem::size_of::<EventQueueState>() <= 6 * word);
         assert_eq!(std::mem::size_of::<Publisher>(), 3 * word);
         assert_eq!(std::mem::size_of::<TerminalEvents>(), 3 * word);
-        assert!(std::mem::size_of::<TerminalSession>() <= 15 * word);
+        assert!(
+            std::mem::size_of::<TerminalSession>() <= 15 * word,
+            "{}",
+            std::mem::size_of::<TerminalSession>()
+        );
     }
 
     #[test]

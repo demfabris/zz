@@ -1,7 +1,7 @@
 ---
 type: Research Report
 title: Codebase Audit for Code Smells, Rust Antipatterns, and Performance Issues
-description: Source-checked audit at 9ba4d0f. Fifteen findings that hold; nineteen first-pass claims removed after caller, timeout, cfg, and guard checks.
+description: Revalidation at 758dac0 found nine confirmed issues, four qualified or latent findings, one intentional ABI contract, and one overstated impact claim.
 tags:
   - research
   - audit
@@ -10,205 +10,230 @@ tags:
   - performance
   - ffi
 timestamp: 2026-08-17T14:45:00-03:00
-git_commit: 9ba4d0f0074e9081dad46dfccebda2ffe8843265
+git_commit: 758dac01cd491b7927d56a79685de3e3f05d802f
 ---
 
 # Overview
 
-A first pass listed 34 findings across the workspace. A second pass at
-`9ba4d0f0074e9081dad46dfccebda2ffe8843265` kept 15. Dropped claims usually
-named the right file and the wrong failure: a guard, timeout, `cfg`, or a
-caller that never takes that path.
+The first audit listed 34 findings. Source checks at
+`9ba4d0f0074e9081dad46dfccebda2ffe8843265` removed 19 claims whose callers,
+timeouts, platform guards, or existing containment changed the verdict.
 
-One hang is real. The rest are input bugs, FFI footguns, and performance
-smells.
+A second source check after the large merge, at
+`758dac01cd491b7927d56a79685de3e3f05d802f`, found the remaining implementation
+shapes intact. Nine findings describe confirmed issues. Four need qualified or
+latent wording, one records an intentional ABI contract, and one overstated its
+runtime impact.
 
-# Hang
+| # | Finding | Verdict |
+|---:|---|---|
+| 1 | PTY writer blocks the terminal actor | Confirmed, Unix-only |
+| 2 | Prefix interception preempts dialog input | Confirmed, conditional |
+| 3 | Alt-Ctrl bindings use a different canonical order | Confirmed |
+| 4 | Git refreshes can overlap | Confirmed performance risk, no production profile |
+| 5 | Large copy-mode counts clone command values | Confirmed bounded cost |
+| 6 | Frame diff scores every row shift | Confirmed algorithm, no production profile |
+| 7 | FFI pane getters repeat layout traversal | Confirmed algorithm, no production profile |
+| 8 | FFI exports lack panic containment | Latent containment gap |
+| 9 | Connect queues HELLO without waking the event fd | Confirmed contract bug |
+| 10 | `zz_bytes` uses pointer plus length | Intentional ABI contract |
+| 11 | Editor reducer starts with process cwd | Qualified edge case |
+| 12 | Copy-pipe stages input and kills one process | Qualified implementation fact |
+| 13 | DPAPI output allocation is freed without a wipe | Confirmed, Windows-only |
+| 14 | AppKit send-event state lacks unwind restoration | Latent hardening gap |
+| 15 | BSD wake pipe drains one chunk | Impact claim overstated |
 
-## PTY writer waits forever on the terminal thread
+# Confirmed correctness issues
+
+## 1. PTY writer can block the terminal actor
 
 `crates/zz-terminal/src/session.rs` `PtyWriter::write`
 
-The master PTY is made nonblocking with `ioctl_fionbio` on a `dup`. Writer,
-drain, and master share that open-file flag. When the kernel write buffer is
-full (`EAGAIN`), `PtyWriter::write` calls `rustix::event::poll(..., None)` on
-the `zz-terminal` thread and retries.
+The master PTY and its duplicate share the nonblocking open-file flag. Once the
+kernel write buffer returns `EAGAIN`, the writer polls with no timeout on the
+`zz-terminal` thread. An open slave whose process does not read can leave that
+wait with no bound.
 
-That thread is the one that handles `Command::Resize` and `Command::Shutdown`.
-A child that stops reading (job-control stop, slow stdin consumer) can leave
-the pane frozen until the child reads again.
+The same actor handles resize, shutdown, and terminal producers. The blocked
+write can delay all three. `wait_for_wake` uses a separate bounded wait and does
+not protect this path.
 
-There is no separate writer thread. `wait_for_wake` is a different wait with a
-bounded timeout.
-
-# Input
-
-## Prefix interceptor runs before dialog keymap
+## 2. Prefix interception can preempt dialog input
 
 `crates/zz/src/workspace/view.rs` `AppView::intercept_keystroke`
 
-The interceptor is registered with `App::intercept_keystrokes` and runs before
-keymap dispatch. It skips Settings and platform/function keys. It does not
-check `Root::has_active_dialog` (that is the real name; `has_active_modal`
-does not exist).
+The global interceptor runs before keymap dispatch. The failure needs an active
+mux pane and an armed prefix. Under those conditions, the interceptor forwards
+the next non-platform key to the mux or daemon and stops propagation before the
+dialog handles Enter or Escape. The prefix table consumes the key in the common
+case, so the audit cannot claim that the PTY receives it.
 
-Unarmed, only the prefix chord is claimed (stock `C-b`). Armed, every
-non-platform key is forwarded to the mux active pane and
-`cx.stop_propagation()` runs, so dialog Enter/Escape never fire. SSH secret
-and add-host dialogs use `InputState`. Host-key and agent confirms are
-buttons only.
+With no active pane, or with no armed prefix beyond the prefix chord itself, the
+interceptor returns without swallowing arbitrary dialog keys.
 
-With no attached session there is no active pane and the interceptor returns
-without stopping propagation.
-
-## `Alt-Ctrl-x` stores a different map key than live Ctrl+Alt
+## 3. Alt-Ctrl bindings use a different canonical order
 
 `crates/zz-protocol/src/key.rs` `canonical_key`, `input_key_name`
 
-`canonical_key` peels prefixes in encounter order. `canonical_key("Alt-Ctrl-x")`
-stores `M-C-x`. Live input always emits Control then Alt (`C-M-x`), tested as
-`C-M-Left` / `C-M-F255` / `C-M-λ`. `KeyTables::get` looks up
-`canonical_key` of the live name, so a bind written `Alt-Ctrl-x` misses.
+`canonical_key("Alt-Ctrl-x")` preserves encounter order and stores `M-C-x`.
+Live input emits Control before Alt and looks up `C-M-x`. A binding written with
+the inverse modifier order misses even though both strings describe the same
+key chord.
 
-`Ctrl-Alt-x` and `C-M-x` store `C-M-x` and match. Stock tables do not ship
-`Alt-Ctrl-` chords.
+## 9. Connect queues HELLO without waking the event fd
 
-# Performance
+`crates/zz-client-ffi/src/ffi.rs` `zz_client_connect`
 
-## Agent git summary stages the whole worktree on every refresh
+Connect feeds `ServerHello` into `ClientCore` and queues `ZZ_EVENT_HELLO`. It
+writes no byte to the event fd until the reader receives a later daemon message
+or disconnects. The header documents a poll-then-drain contract, so a poll-first
+client can wait on a quiet daemon while HELLO already sits in the queue.
+
+The Swift client drains after connect, and the C smoke client did the same at
+the audited commit. Those consumers mask the contract bug.
+
+## 13. DPAPI output allocation is freed without a wipe
+
+`crates/zz-chrome-import/src/cookie.rs` `dpapi_unprotect`
+
+`CryptUnprotectData` returns plaintext in a `LocalAlloc` buffer. The importer
+copies it into `Zeroizing<Vec<u8>>`, then calls `LocalFree` without clearing the
+original allocation. Microsoft asks callers to clear sensitive output before
+freeing it. This Windows path runs during user-triggered Chrome cookie import.
+
+# Confirmed performance shapes
+
+## 4. Agent Git refreshes can overlap
 
 `crates/zz-daemon/src/agent/host.rs` `start_git_refresh`
 `crates/zz-daemon/src/agent/git_summary.rs` `capture_git_summary`, `write_tree`
 
-`SessionReady`, `SessionSwitched`, and `PromptFinished` each spawn a
-`zz-agent-git-*` thread with no debounce and no in-flight skip. Overlapping
-runs can exist; `apply_git_summary` drops stale generations.
+`SessionReady`, `SessionSwitched`, and `PromptFinished` each start a refresh.
+The audited gate drops stale completed results but does not prevent captures
+from overlapping.
 
-A successful capture with HEAD runs seven sequential git processes. `write_tree`
-always does `git add -A --ignore-errors .` into a scratch `GIT_INDEX_FILE`, then
-`write-tree`, then two `diff-tree`s. Each command starts two reader threads and
-joins them before the next command, so concurrent OS threads during one refresh
-are about three, not twelve to fourteen.
+A repository with HEAD runs seven Git children per capture. An unborn
+repository runs eight. Each command uses two reader threads, so one active
+capture has the Rust refresh thread, two reader threads, and one Git child
+during command execution. The scratch `GIT_INDEX_FILE` keeps the real index
+untouched. No production measurement establishes user-visible cost.
 
-## Copy-mode `9999j` clones thousands of heap commands
+The scratch-tree approach includes tracked and untracked content. A status
+query has not shown equivalent additions, deletions, and rename behavior.
+
+## 5. Large copy-mode counts clone command values
 
 `crates/zz-protocol/src/key.rs` `KeyEngine::decide`
 
-Digits accumulate a repeat count clamped at 9,999. The next copy-mode `-X`
-motion clones `CommandInvocation` that many times. Stock `j` is
-`send-keys -X cursor-down`: each clone copies two heap `String`s plus a `Vec`.
-The daemon then executes the list one command at a time.
+Copy-mode counts stop at 9,999. Stock `j` expands to `send-keys -X cursor-down`.
+Each repeated invocation clones the command name, two argument strings, and a
+`Vec`, then the daemon executes the invocations in sequence. The allocation is
+eager and bounded.
 
-## Frame diff scores every row shift
+## 6. Frame diff scores every row shift
 
 `crates/zz-terminal/src/model.rs` `best_row_shift_from_fingerprints`
 
-When previous and current cell `Arc`s differ, the shift search scores every
-offset in `-(rows-1)..rows` except zero. Matches are `u64` fingerprint
-equality, not full-row memcmp. At 250 rows that is about 62,500 `u64`
-compares plus an O(rows × columns) fingerprint build. The daemon pane watcher
-runs this on coalesced `ViewportReady` events.
+The shift search scores zero on its own, then visits every nonzero offset. At
+250 rows it performs 62,500 fingerprint equalities plus 124,500 nonzero-loop
+predicate visits, along with fingerprint construction. The comparison uses
+`u64` fingerprints rather than full rows. No profile links this work to a
+production frame-time problem.
 
-## FFI snapshot getters walk the layout tree per property
+## 7. FFI pane getters repeat layout traversal
 
 `crates/zz-client-ffi/src/ffi.rs` `pane_at`
 
 `pane_id`, `pane_title`, `pane_kind`, `pane_is_active`, and `pane_has_bell`
-each call `pane_at`, which allocates a `Vec` and walks `LayoutNode::panes`.
-iOS `refreshSnapshot` does all five getters for every pane index: 5N walks
-for N panes in the active window. `pane_count` uses `window.panes.len()` and
-does not walk.
+each call `pane_at`. That helper allocates a `Vec` and walks
+`LayoutNode::panes`. The Swift snapshot loop calls all five getters for each
+pane, causing 5N complete traversals and quadratic layout-node work for an
+N-pane active window. No profile measures the cost in a real client refresh.
 
-# FFI
+# Qualified and latent findings
 
-## Uncaught panic in an `extern "C"` export aborts the process
+## 8. FFI exports lack panic containment
 
-`crates/zz-client-ffi/src/ffi.rs` (44 `extern "C"` exports)
+`crates/zz-client-ffi/src/ffi.rs` (44 Unix `extern "C"` exports)
 
-None of the exports wrap `catch_unwind`. There is no wrapper in `lib.rs`.
-Rust 1.81+ aborts an uncaught panic leaving `extern "C"`; MSRV is 1.97. This
-is process abort, not silent undefined behavior. Lock poison is recovered with
-`PoisonError::into_inner`. Consumers are the C smoke client and the iOS app.
+The 44 exports use no `catch_unwind` boundary. A Rust panic that escapes an
+`extern "C"` function aborts the process. Lock poison already recovers through
+`PoisonError::into_inner`, and the audit found no valid normal-call path that
+panics. Treat this as one latent containment gap across the ABI, not 44 proven
+defects.
 
-## Connect queues hello without writing the wake fd
+## 11. Editor reducer starts with process cwd
 
-`crates/zz-client-ffi/src/ffi.rs` `zz_client_connect`
+`crates/zz-mux/src/command.rs` `select_pane_kind`
+`crates/zz-daemon/src/daemon.rs` editor materialization
 
-Connect feeds `ServerHello` into `ClientCore`, drains `poll_event` into the
-queue (`ZZ_EVENT_HELLO`), and starts the reader. Wake bytes are written only
-from the reader after a later `recv()`, or on disconnect.
+The reducer installs `std::env::current_dir()` as a placeholder. Before the
+daemon publishes the pane, it replaces the placeholder with the donor
+terminal's live cwd under the same lock. The live-cwd integration test passes.
+Only direct reducer use and `current_dir()` failure remain as edge cases.
 
-`zz_client_next_event` pops the queue even if the fd is dry. In-tree iOS and
-the C smoke client drain that way, so they see hello. A client that blocks on
-`zz_client_event_fd()` with the documented poll-then-drain contract, before
-any later daemon message, waits on a fd that is not readable.
+## 12. Copy-pipe staging and timeout have separate risk profiles
 
-## `zz_bytes` is pointer plus length, not a C string
+`crates/zz-daemon/src/daemon.rs` `spawn_copy_pipe`, `run_copy_pipe`
+
+`spawn_copy_pipe` enforces the 32 MiB selection cap before worker creation.
+`run_copy_pipe` stages the selection in a tempfile, rewinds it, and gives that
+file to the shell as stdin. The 30-second timer starts after staging and spawn.
+The audit found no failure caused by tempfile staging.
+
+At the audited commit, timeout kills the immediate shell child. A pipeline or
+background descendant can survive. This is a process-tree containment gap,
+separate from the staging choice.
+
+## 14. AppKit send-event state lacks unwind restoration
+
+`crates/zz-browser/src/mac_app_protocol.rs` `send_event`
+
+The swizzled `sendEvent:` sets `HANDLING_SEND_EVENT`, calls the previous IMP
+through `extern "C-unwind"`, and restores the outer value after a normal return.
+A native or Objective-C unwind can skip the store. The wrapper itself has no
+reachable Rust panic path in the audited source. Treat this as hardening for a
+foreign unwind, not a demonstrated crash.
+
+# Contracts and corrected impact
+
+## 10. `zz_bytes` is an intentional pointer-plus-length ABI
 
 `crates/zz-client-ffi/include/zz-client.h` `zz_bytes`
 `crates/zz-client-ffi/src/ffi.rs` `ZzBytes::new`
 
-`ZzBytes::new` points at a Rust `String` with `as_ptr()` and `len`. No trailing
-NUL is guaranteed. The header does not mention `%s`. In-tree C compares with
-`len` and `memcmp`. Swift decodes `UnsafeBufferPointer` of `len` bytes.
-`zz_viewport_row_text` does write a NUL into the caller buffer; snapshot
-name and title do not.
+The header declares `uint8_t *` plus `len`, not `char *`. Rust returns
+`as_ptr()` and `len`; C uses `memcmp` with that length, and Swift constructs an
+`UnsafeBufferPointer` with it. Consumers must copy data before the next API
+call that can invalidate the backing snapshot. The missing NUL terminator is
+part of the contract, not a defect.
 
-# Smaller
+## 15. A partial wake drain causes short no-op actor cycles
 
-## Mux reducer reads process cwd for editor panes
+`crates/zz-terminal/src/session.rs` `wait_for_wake` (macOS and BSD)
 
-`crates/zz-mux/src/command.rs` `select_pane_kind`
+One wait drains at most 64 wake bytes. More bytes leave the pipe readable and
+can trigger extra actor cycles with no work. The actor checks channels before
+polling and checks them again after the drain, so queued commands do not remain
+untouched as the original audit claimed.
 
-The editor arm of `select_pane_kind` calls `std::env::current_dir()` so
-`EditorDescriptor.cwd` can pass validation. `ExecutionContext` has no cwd
-field. After `PaneMaterialized`, the daemon overwrites editor cwd from the
-donor terminal when that PTY has a working directory, and falls back to
-`current_dir()` again if it does not. Agent kind uses `-c` and does not take
-this path in the reducer.
+# Remediation in the working tree
 
-## Copy-pipe stages stdin through a tempfile
+The changes following this revalidation address the confirmed correctness
+issues and the containment fixes that fit the existing architecture:
 
-`crates/zz-daemon/src/daemon.rs` `run_copy_pipe`
+| Finding | Change |
+|---:|---|
+| 1 | Admit whole PTY-input commands through a 256-command, 64 MiB budget; buffer complete nonblocking writes and retry them while control work and PTY reads continue. |
+| 2 | Send a tokenized prefix-cancel barrier whenever a dialog opens, and keep ordinary workspace keys gated until the matching daemon acknowledgement or a connection reset. |
+| 3 | Canonicalize Control before Alt for stored and live key names. |
+| 4 | Coalesce Git captures through a single-flight, latest-wins gate. |
+| 9 | Wake the event fd when connect queues HELLO. |
+| 12 | Put the copy-pipe shell in a process group and terminate its descendants on timeout. |
+| 13 | Zero the DPAPI-owned plaintext before `LocalFree`. |
+| 14 | Restore the AppKit flag from a `Drop` guard during unwind. |
+| 15 | Make both BSD wake-pipe ends nonblocking, retry interrupted wake writes, and drain until `EAGAIN`. |
 
-Selection text (capped at 32 MiB) is written to `tempfile::tempfile()`, seeked
-to start, and handed to the child as stdin. Exit is polled every 20 ms for up
-to 30 s. stdout and stderr are discarded. Same path on every platform.
-
-## Windows DPAPI buffer is not zeroed before `LocalFree`
-
-`crates/zz-chrome-import/src/cookie.rs` `dpapi_unprotect`
-
-`CryptUnprotectData` fills a `LocalAlloc` buffer. The code copies those bytes
-into `Zeroizing<Vec<u8>>` and `LocalFree`s `pbData` without `SecureZeroMemory`
-on the allocator buffer. Windows-only. Same-user Chrome profile import from
-`%LOCALAPPDATA%\Google\Chrome\User Data`.
-
-## AppKit `HANDLING_SEND_EVENT` restore is not RAII
-
-`crates/zz-browser/src/mac_app_protocol.rs` `send_event`
-
-The swizzled `sendEvent:` swaps the flag to true, calls the previous IMP
-(`extern "C-unwind"`), then stores the outer value. There is no `Drop` guard
-and no `catch_unwind`. A panic or Objective-C exception from the original IMP
-skips the restore. Later `setHandlingSendEvent:` can still write false.
-macOS-only.
-
-## macOS wake pipe drains 64 bytes once
-
-`crates/zz-terminal/src/session.rs` `wait_for_wake` (macOS/BSD)
-
-Each `ActorWake::notify` writes one byte. The wait path reads at most 64 bytes
-in a single `read`. Leftover bytes keep `POLLIN` set, so the next poll returns
-without a new write and the loop takes `Wake::Deadline` until the pipe is
-empty. Commands still sit on their channels. Linux uses `select_biased!` and
-has no wake pipe.
-
-# Next
-
-1. Fold PTY writes into the actor wait loop, or give `poll` a timeout, so
-   resize and shutdown can run while the child is not reading.
-2. Return from `intercept_keystroke` when `Root::has_active_dialog` is true.
-3. Debounce git refresh onto one worker, and replace `git add -A` with a
-   non-staging status query.
-4. Write a wake byte from `zz_client_connect` when the hello event is queued.
+Findings 5 through 7 need profiles before a more complex implementation earns
+its maintenance cost. Finding 8 needs a reachable panic case or one shared ABI
+boundary design. Findings 10 and 11 do not need a production fix.

@@ -221,6 +221,22 @@ fn queue_event(events: &Mutex<VecDeque<ZzEvent>>, event: &CoreEvent) {
     });
 }
 
+fn wake_event_fd(wake_write: &UnixStream) -> std::io::Result<()> {
+    loop {
+        match rustix::io::write(wake_write, &[1]) {
+            Ok(1) | Err(rustix::io::Errno::AGAIN) => return Ok(()),
+            Ok(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "event fd accepted no wake byte",
+                ));
+            }
+            Err(rustix::io::Errno::INTR) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
 fn spawn_reader(
     client: &Arc<InteractiveClient>,
     core: &Arc<Mutex<ClientCore>>,
@@ -250,7 +266,7 @@ fn spawn_reader(
                 }
                 drop(guard);
                 if queued {
-                    let _ = rustix::io::write(&wake_write, &[1]);
+                    let _ = wake_event_fd(&wake_write);
                 }
             }
             lock(&events).push_back(ZzEvent {
@@ -260,7 +276,7 @@ fn spawn_reader(
                 row_start: 0,
                 row_end: 0,
             });
-            let _ = rustix::io::write(&wake_write, &[1]);
+            let _ = wake_event_fd(&wake_write);
         })
 }
 
@@ -301,11 +317,16 @@ pub unsafe extern "C" fn zz_client_connect(socket_path: *const c_char) -> *mut Z
     let core = Arc::new(Mutex::new(ClientCore::new()));
     lock(&core).handle_message(ProtocolMessage::ServerHello(client.server_hello().clone()));
     let events = Arc::new(Mutex::new(VecDeque::new()));
+    let mut queued = false;
     {
         let mut guard = lock(&core);
         while let Some(event) = guard.poll_event() {
             queue_event(&events, &event);
+            queued = true;
         }
+    }
+    if queued && wake_event_fd(&wake_write).is_err() {
+        return std::ptr::null_mut();
     }
     let Ok(reader) = spawn_reader(&client, &core, &events, wake_write) else {
         return std::ptr::null_mut();

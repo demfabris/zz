@@ -482,6 +482,7 @@ struct AppRevision {
     choose_buffer: u64,
     display_panes: u64,
     prefix_armed: bool,
+    prefix_cancelled_request: Option<u64>,
     sidebar_focus: u64,
     bell: u64,
     pending_commands: u64,
@@ -503,6 +504,7 @@ impl AppRevision {
             choose_buffer: mux.choose_buffer_revision(),
             display_panes: mux.display_panes_revision(),
             prefix_armed: mux.prefix_armed(),
+            prefix_cancelled_request: mux.prefix_cancelled_request(),
             sidebar_focus: mux.sidebar_focus_revision(),
             bell: mux.bell_revision(),
             pending_commands: mux.pending_commands_revision(),
@@ -564,6 +566,8 @@ pub struct AppView {
     pane_layout_override: Option<PaneLayoutOverride>,
     pane_canvas_size: Rc<Cell<Size<Pixels>>>,
     prefix_claim: PrefixClaim,
+    dialog_prefix_cancel_sent: bool,
+    dialog_prefix_cancel_pending: Option<u64>,
     synchronized_signature: Option<SynchronizeSignature>,
 }
 
@@ -748,6 +752,8 @@ impl AppView {
             pane_layout_override: None,
             pane_canvas_size: Rc::new(Cell::new(Size::default())),
             prefix_claim: PrefixClaim::default(),
+            dialog_prefix_cancel_sent: false,
+            dialog_prefix_cancel_pending: None,
             synchronized_signature: None,
         };
         view.register_agent_panes(cx);
@@ -763,11 +769,18 @@ impl AppView {
         if window.window_handle() != self.window_handle {
             return;
         }
+        if self.reconcile_dialog_prefix(window, cx) {
+            return;
+        }
         if self.sidebar.read(cx).route() == WorkspaceRoute::Settings {
             return;
         }
         let keystroke = &event.keystroke;
         if keystroke.modifiers.platform || keystroke.modifiers.function {
+            return;
+        }
+        if self.dialog_prefix_cancel_pending.is_some() {
+            cx.stop_propagation();
             return;
         }
         let (armed, prefix) = {
@@ -818,6 +831,29 @@ impl AppView {
             }
         }
         cx.stop_propagation();
+    }
+
+    fn reconcile_dialog_prefix(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let active = window
+            .root::<zz_ui::Root>()
+            .flatten()
+            .is_some_and(|root| root.read(cx).has_active_dialog());
+        let acknowledged = self.mux.read(cx).prefix_cancelled_request();
+        if self
+            .dialog_prefix_cancel_pending
+            .is_some_and(|pending| acknowledged.is_some_and(|acknowledged| acknowledged >= pending))
+        {
+            self.dialog_prefix_cancel_pending = None;
+        }
+        if !active {
+            self.dialog_prefix_cancel_sent = false;
+        } else if !self.dialog_prefix_cancel_sent
+            && let Some(request_id) = self.mux.update(cx, |mux, _| mux.send_prefix_cancel())
+        {
+            self.dialog_prefix_cancel_pending = Some(request_id);
+            self.dialog_prefix_cancel_sent = true;
+        }
+        active
     }
 
     /// Forward a claimed key's release to the daemon and stop it reaching the
@@ -2243,6 +2279,7 @@ impl AppView {
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let started = diagnostics::timer(DIAGNOSTIC_TARGET);
+        self.reconcile_dialog_prefix(window, cx);
         self.synchronize_panes(window, cx);
 
         let (snapshot, attached, error, prefix_armed, has_hosts) = {
@@ -2807,6 +2844,7 @@ mod tests {
             choose_buffer: 0,
             display_panes: 0,
             prefix_armed: false,
+            prefix_cancelled_request: None,
             sidebar_focus: 0,
             bell: 0,
             pending_commands: 0,
@@ -3403,6 +3441,163 @@ mod tests {
         });
         update_geometry(during, cx);
         assert!(sent.borrow().is_empty());
+    }
+
+    #[gpui::test]
+    fn dialog_prefix_cancel_barrier_handles_acknowledgements_and_connection_reset(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(zz_ui::init);
+        let observed = Rc::new(RefCell::new(Vec::new()));
+        let captured_observed = Rc::clone(&observed);
+        cx.update(move |cx| {
+            cx.observe_keystrokes(move |event, _, _| {
+                captured_observed.borrow_mut().push((
+                    event.keystroke.modifiers.platform,
+                    event.keystroke.modifiers.function,
+                    event.keystroke.key.clone(),
+                ));
+            })
+            .detach();
+        });
+        let workspace_slot = Rc::new(RefCell::new(None));
+        let mux_slot = Rc::new(RefCell::new(None));
+        let input_slot = Rc::new(RefCell::new(None));
+        let captured_workspace = Rc::clone(&workspace_slot);
+        let captured_mux = Rc::clone(&mux_slot);
+        let captured_input = Rc::clone(&input_slot);
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+            let workspace =
+                cx.new(|cx| AppView::new(controller, agent_controller, mux.clone(), window, cx));
+            captured_workspace.replace(Some(workspace.clone()));
+            captured_mux.replace(Some(mux));
+            captured_input.replace(Some(input));
+            zz_ui::Root::new(workspace, window, cx)
+        });
+        let workspace = workspace_slot.borrow().clone().expect("captured workspace");
+        let mux = mux_slot.borrow().clone().expect("captured mux");
+        let input = input_slot.borrow().clone().expect("captured input");
+        input.borrow_mut().clear();
+
+        cx.update(|window, cx| window.open_dialog(cx, |dialog, _, _| dialog));
+        cx.run_until_parked();
+        assert_eq!(
+            input.borrow().as_slice(),
+            &[InputMessage::CancelPrefix { request_id: 1 }]
+        );
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| workspace.dialog_prefix_cancel_pending),
+            Some(1)
+        );
+
+        cx.update(zz_ui::WindowExt::close_dialog);
+        cx.simulate_keystrokes("c cmd-dialogtest fn-dialogtest");
+        assert_eq!(
+            input.borrow().as_slice(),
+            &[InputMessage::CancelPrefix { request_id: 1 }]
+        );
+        assert_eq!(
+            observed.borrow().as_slice(),
+            &[
+                (true, false, "dialogtest".to_owned()),
+                (false, true, "dialogtest".to_owned()),
+            ]
+        );
+
+        mux.update(cx, |mux, cx| {
+            mux.acknowledge_prefix_cancel_for_test(1, cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| workspace.dialog_prefix_cancel_pending),
+            None
+        );
+        cx.simulate_keystrokes("c");
+        assert_eq!(
+            observed.borrow().as_slice(),
+            &[
+                (true, false, "dialogtest".to_owned()),
+                (false, true, "dialogtest".to_owned()),
+                (false, false, "c".to_owned()),
+            ]
+        );
+
+        cx.update(|window, cx| window.open_dialog(cx, |dialog, _, _| dialog));
+        cx.run_until_parked();
+        assert_eq!(
+            input.borrow().as_slice(),
+            &[
+                InputMessage::CancelPrefix { request_id: 1 },
+                InputMessage::CancelPrefix { request_id: 2 },
+            ]
+        );
+        cx.update(zz_ui::WindowExt::close_dialog);
+        mux.update(cx, |mux, cx| {
+            mux.acknowledge_prefix_cancel_for_test(1, cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| workspace.dialog_prefix_cancel_pending),
+            Some(2)
+        );
+        mux.update(cx, |mux, cx| {
+            mux.acknowledge_prefix_cancel_for_test(2, cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| workspace.dialog_prefix_cancel_pending),
+            None
+        );
+
+        cx.update(|window, cx| window.open_dialog(cx, |dialog, _, _| dialog));
+        cx.run_until_parked();
+        assert_eq!(
+            input.borrow().as_slice(),
+            &[
+                InputMessage::CancelPrefix { request_id: 1 },
+                InputMessage::CancelPrefix { request_id: 2 },
+                InputMessage::CancelPrefix { request_id: 3 },
+            ]
+        );
+        cx.update(zz_ui::WindowExt::close_dialog);
+        mux.update(cx, |mux, cx| {
+            mux.reset_session_state_for_test(cx);
+            mux.acknowledge_prefix_cancel_for_test(2, cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            mux.read_with(cx, |mux, _| mux.prefix_cancelled_request()),
+            Some(3)
+        );
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| workspace.dialog_prefix_cancel_pending),
+            None
+        );
+        cx.simulate_keystrokes("r");
+        assert_eq!(
+            observed.borrow().as_slice(),
+            &[
+                (true, false, "dialogtest".to_owned()),
+                (false, true, "dialogtest".to_owned()),
+                (false, false, "c".to_owned()),
+                (false, false, "r".to_owned()),
+            ]
+        );
     }
 
     #[gpui::test]

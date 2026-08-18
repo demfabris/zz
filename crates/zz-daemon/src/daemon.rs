@@ -7,7 +7,7 @@ use std::{
     fs,
     io::{ErrorKind, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
-    process::Stdio,
+    process::{Child, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -4498,6 +4498,9 @@ impl Shared {
                 } => {
                     self.input_resize_split(client, kind, window, split, ratio_basis_points)?;
                 }
+                InputMessage::CancelPrefix { request_id } => {
+                    self.cancel_prefix(client, request_id);
+                }
             }
             Ok(())
         })();
@@ -5948,6 +5951,26 @@ impl Shared {
             );
             self.publish_to_client(client, EventPayload::PrefixArmed { armed });
         }
+    }
+
+    fn cancel_prefix(&self, client: ClientId, request_id: u64) {
+        {
+            let mut inner = self.inner.lock();
+            if inner
+                .key_engines
+                .get(&client)
+                .and_then(KeyEngine::active_table)
+                == Some("prefix")
+            {
+                inner
+                    .key_engines
+                    .entry(client)
+                    .or_default()
+                    .switch_table(None);
+            }
+        }
+        self.sync_prefix_armed(client);
+        self.publish_to_client(client, EventPayload::PrefixCancelled { request_id });
     }
 
     fn key_decision(&self, client: ClientId, key: &str, release: bool) -> KeyDecision {
@@ -10434,6 +10457,10 @@ impl Drop for CopyPipePermit {
 }
 
 fn run_copy_pipe(command: &str, data: &str) -> Result<(), String> {
+    run_copy_pipe_with_timeout(command, data, COPY_PIPE_TIMEOUT)
+}
+
+fn run_copy_pipe_with_timeout(command: &str, data: &str, timeout: Duration) -> Result<(), String> {
     let mut input = tempfile::tempfile()
         .map_err(|error| format!("could not stage input in a temporary file: {error}"))?;
     input
@@ -10444,6 +10471,12 @@ fn run_copy_pipe(command: &str, data: &str) -> Result<(), String> {
         .map_err(|error| format!("could not rewind staged input: {error}"))?;
 
     let mut process = shell_process(command);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+
+        process.process_group(0);
+    }
     process
         .stdin(Stdio::from(input))
         .stdout(Stdio::null())
@@ -10456,34 +10489,77 @@ fn run_copy_pipe(command: &str, data: &str) -> Result<(), String> {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return Ok(()),
             Ok(Some(status)) => return Err(format!("process exited unsuccessfully ({status})")),
-            Ok(None) if started.elapsed() >= COPY_PIPE_TIMEOUT => {
-                let kill_error = child.kill().err();
-                let wait_error = child.wait().err();
+            Ok(None) if started.elapsed() >= timeout => {
+                let (kill_error, wait_error) = terminate_copy_pipe(&mut child);
                 if let Some(error) = kill_error {
                     return Err(format!(
                         "process timed out after {} seconds and could not be terminated: {error}",
-                        COPY_PIPE_TIMEOUT.as_secs()
+                        timeout.as_secs()
                     ));
                 }
                 if let Some(error) = wait_error {
                     return Err(format!(
                         "process timed out after {} seconds and could not be reaped: {error}",
-                        COPY_PIPE_TIMEOUT.as_secs()
+                        timeout.as_secs()
                     ));
                 }
                 return Err(format!(
                     "process timed out after {} seconds",
-                    COPY_PIPE_TIMEOUT.as_secs()
+                    timeout.as_secs()
                 ));
             }
             Ok(None) => thread::sleep(COPY_PIPE_POLL_INTERVAL),
             Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                terminate_copy_pipe(&mut child);
                 return Err(format!("could not query process status: {error}"));
             }
         }
     }
+}
+
+fn terminate_copy_pipe(child: &mut Child) -> (Option<String>, Option<std::io::Error>) {
+    #[cfg(unix)]
+    let tree_result = rustix::process::kill_process_group(
+        rustix::process::Pid::from_child(&*child),
+        rustix::process::Signal::KILL,
+    )
+    .or_else(|error| {
+        if error == rustix::io::Errno::SRCH {
+            Ok(())
+        } else {
+            Err(error)
+        }
+    })
+    .map_err(|error| format!("could not terminate process group: {error}"));
+    #[cfg(windows)]
+    let tree_result = {
+        let pid = child.id().to_string();
+        std::process::Command::new("taskkill")
+            .args(["/PID", pid.as_str(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|error| format!("could not run taskkill: {error}"))
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("taskkill exited unsuccessfully ({status})"))
+                }
+            })
+    };
+    #[cfg(not(any(unix, windows)))]
+    let tree_result = Err("process-tree termination is unsupported".to_owned());
+    let child_error = child.kill().err();
+    let kill_error = tree_result.err().map(|tree_error| match child_error {
+        Some(child_error) => {
+            format!("{tree_error}; could not terminate immediate child: {child_error}")
+        }
+        None => tree_error,
+    });
+    let wait_error = child.wait().err();
+    (kill_error, wait_error)
 }
 
 enum PaneSink {
@@ -13536,6 +13612,102 @@ mod tests {
     }
 
     #[test]
+    fn cancel_prefix_disarms_only_the_prefix_table() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let prefix_events = |mailbox: &OutboundMailbox| {
+            let mut states = Vec::new();
+            let mut cancelled = Vec::new();
+            for message in take_reliable_messages(mailbox) {
+                match message {
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::PrefixArmed { armed },
+                        ..
+                    }) => states.push(armed),
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::PrefixCancelled { request_id },
+                        ..
+                    }) => cancelled.push(request_id),
+                    _ => {}
+                }
+            }
+            (states, cancelled)
+        };
+        assert_eq!(
+            shared.key_decision(client, "C-b", false),
+            KeyDecision::Prefix
+        );
+        shared.sync_prefix_armed(client);
+        assert_eq!(prefix_events(&mailbox), (vec![true], Vec::new()));
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::CancelPrefix { request_id: 11 },
+            )
+            .expect("cancel prefix");
+        assert_eq!(
+            shared.inner.lock().key_engines[&client].active_table(),
+            None
+        );
+        assert!(!shared.inner.lock().prefix_armed.contains(&client));
+        assert_eq!(prefix_events(&mailbox), (vec![false], vec![11]));
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::CancelPrefix { request_id: 12 },
+            )
+            .expect("cancel unarmed prefix");
+        assert_eq!(prefix_events(&mailbox), (Vec::new(), vec![12]));
+
+        for table in ["copy-mode-vi", "custom-client-table"] {
+            shared
+                .inner
+                .lock()
+                .key_engines
+                .entry(client)
+                .or_default()
+                .switch_table(None);
+            assert_eq!(
+                shared.key_decision(client, "C-b", false),
+                KeyDecision::Prefix
+            );
+            shared.sync_prefix_armed(client);
+            assert_eq!(prefix_events(&mailbox), (vec![true], Vec::new()));
+            shared
+                .inner
+                .lock()
+                .key_engines
+                .entry(client)
+                .or_default()
+                .switch_table(Some(table.to_owned()));
+
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut ExecutionContext::default(),
+                    InputMessage::CancelPrefix { request_id: 13 },
+                )
+                .expect("cancel outside prefix table");
+
+            assert_eq!(
+                shared.inner.lock().key_engines[&client].active_table(),
+                Some(table)
+            );
+            assert!(!shared.inner.lock().prefix_armed.contains(&client));
+            assert_eq!(prefix_events(&mailbox), (vec![false], vec![13]));
+        }
+    }
+
+    #[test]
     fn capture_pane_parser_supports_history_mode_and_wrapped_output() {
         let args = ["-pJ", "-M", "-S", "-", "-E4", "-t%7", "-bcaptured"].map(str::to_owned);
         let parsed = parse_capture_pane_args(&args).expect("capture args");
@@ -15846,6 +16018,38 @@ bind - split-window -v -c "#{pane_current_path}"
             fs::read_to_string(output.path()).expect("piped output"),
             "native selection\nwith two lines"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_pipe_timeout_kills_descendants() {
+        let scratch = tempfile::tempdir().expect("temporary directory");
+        let group = scratch.path().join("group");
+        let command = format!(
+            "printf '%s' \"$$\" > {}; sleep 30 & wait",
+            shell_quote(&group)
+        );
+
+        let error = run_copy_pipe_with_timeout(&command, "", Duration::from_millis(500))
+            .expect_err("copy pipe should time out");
+        assert!(error.contains("timed out"), "{error}");
+        let group = fs::read_to_string(group)
+            .expect("copy-pipe process group never started")
+            .parse()
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+            .expect("copy-pipe process group pid");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match rustix::process::test_kill_process_group(group) {
+                Err(rustix::io::Errno::SRCH) => break,
+                Ok(()) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Ok(()) => panic!("copy-pipe process group survived timeout"),
+                Err(error) => panic!("could not query copy-pipe process group: {error}"),
+            }
+        }
     }
 
     #[test]

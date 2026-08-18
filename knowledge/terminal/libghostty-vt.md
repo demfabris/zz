@@ -61,8 +61,11 @@ libghostty render-state dirty tracking and viewport snapshots are **stateful and
 zz-terminal enforces one invariant: **all libghostty objects for a pane live on that pane's worker
 thread and are mutated only by the actor.** Consequences:
 
-- PTY writes, key/mouse encoding, resize, focus, and snapshot extraction are serialized through the
-  actor's bounded command channel, so they can never interleave (see [pty-worker](/concepts/pty-worker.md)).
+- `CommandSender` routes control work and PTY-writing input through separate bounded lanes. The actor
+  consumes both on one thread, pauses the input lane while `PtyWriter` has a backlog, and keeps
+  draining PTY output so full-duplex children can make progress. The actor serializes PTY writes,
+  key/mouse encoding, resize, focus, and snapshot extraction (see
+  [pty-worker](/concepts/pty-worker.md)).
 - Search runs on a separate thread but never borrows libghostty; it scans an immutable
   `HistorySearchSnapshot` copied out on demand.
 - `capture()` blocks only the calling client thread and is answered by the actor; terminal state never

@@ -1177,6 +1177,7 @@ fn handle_core_event(
         | CoreEvent::ViewportChanged { .. }
         | CoreEvent::MuxOptionsChanged
         | CoreEvent::KeyTablesChanged
+        | CoreEvent::PrefixCancelled { .. }
         | CoreEvent::Bell { .. }
         | CoreEvent::OpenUri { .. }
         | CoreEvent::HistoryChunk { .. }

@@ -35,11 +35,17 @@ command sender + frame subscriber, while all mutable state lives behind one work
 | `SearchWorker` thread | Scans an immutable `HistorySearchSnapshot` off-thread so search never borrows or blocks libghostty. |
 | `Publisher` | Writes each new frame into `Arc<RwLock<Arc<TerminalViewport>>>` and coalesces a `ViewportReady` notification. |
 
-Commands are serialized through a **bounded (capacity 1)** `crossbeam_channel`
-(`MAX_PENDING_ACTOR_COMMANDS`), so PTY writes, resize, view actions, and snapshot extraction can never
-interleave. The worker waits on the command channel, the PTY output channel, search results, and the
-child-exit channel, with a timeout only when a content publish or a search refresh is due; an idle
-pane wakes for nothing. See [pty-worker](/concepts/pty-worker.md) for the actor lifecycle in depth.
+`CommandSender` routes work through two bounded lanes. A capacity-one control lane carries resize,
+capture, copy-mode, and pure view operations. An ordered PTY-input lane carries text, keys,
+mouse/focus/paste operations, and pending-paste markers; it caps admission at 256 commands and 64
+MiB, charging each command's payload plus a 4 KiB floor. Producers use nonblocking input admission
+and reject the whole command when either cap is full. The actor chooses control first and executes
+both lanes on its single worker thread, so terminal state mutations cannot interleave. While
+`PtyWriter` holds unwritten bytes, the actor pauses further PTY input, continues PTY reads and control
+work, and retains libghostty-generated PTY replies in `PtyEffects` until the writer drains.
+`command_queue_len` includes writer-held and queued input permits; `pending_pty_input_bytes` exposes
+their combined admission charge. See
+[pty-worker](/concepts/pty-worker.md) for the actor lifecycle in depth.
 
 On Unix, `run_terminal` obtains its default shell command from `shell_integration.rs`. zsh and modern
 Bash receive original zz-owned startup hooks that publish the exact interactive command as OSC 2

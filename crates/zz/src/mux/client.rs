@@ -957,6 +957,8 @@ pub struct MuxClient {
     choose_tree_revision: u64,
     choose_buffer_revision: u64,
     display_panes_revision: u64,
+    next_prefix_cancel_request: u64,
+    prefix_cancelled_request: Option<u64>,
     sidebar_focus_revision: u64,
     bell_revision: u64,
     error: Option<Arc<str>>,
@@ -1052,6 +1054,8 @@ impl MuxClient {
             choose_tree_revision: 0,
             choose_buffer_revision: 0,
             display_panes_revision: 0,
+            next_prefix_cancel_request: 0,
+            prefix_cancelled_request: None,
             sidebar_focus_revision: 0,
             bell_revision: 0,
             error: None,
@@ -2021,6 +2025,11 @@ impl MuxClient {
         self.core.prefix_armed()
     }
 
+    #[must_use]
+    pub(crate) const fn prefix_cancelled_request(&self) -> Option<u64> {
+        self.prefix_cancelled_request
+    }
+
     /// The daemon-published prefix key table, or empty while disconnected.
     /// Keys are tmux-grammar strings; commands carry canonical names.
     #[must_use]
@@ -2079,6 +2088,23 @@ impl MuxClient {
     #[cfg(test)]
     pub(crate) fn set_prefix_armed_for_test(&mut self, armed: bool, cx: &mut Context<Self>) {
         self.seed_core(EventPayload::PrefixArmed { armed });
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn acknowledge_prefix_cancel_for_test(
+        &mut self,
+        request_id: u64,
+        cx: &mut Context<Self>,
+    ) {
+        self.seed_core(EventPayload::PrefixCancelled { request_id });
+        self.prefix_cancelled_request = self.prefix_cancelled_request.max(Some(request_id));
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reset_session_state_for_test(&mut self, cx: &mut Context<Self>) {
+        self.reset_session_state(cx);
         cx.notify();
     }
 
@@ -2337,6 +2363,16 @@ impl MuxClient {
             diagnostics::elapsed_us(started)
         );
         sent
+    }
+
+    pub(crate) fn send_prefix_cancel(&mut self) -> Option<u64> {
+        let request_id = self.next_prefix_cancel_request.saturating_add(1).max(1);
+        if self.send_input(InputMessage::CancelPrefix { request_id }) {
+            self.next_prefix_cancel_request = request_id;
+            Some(request_id)
+        } else {
+            None
+        }
     }
 
     /// Ship a pasted image to the daemon that owns `pane`, which lands it on
@@ -2633,6 +2669,11 @@ impl MuxClient {
         connection.full_requests_pending.clear();
         connection.history_requests_pending.clear();
         connection.history_backfill_deferred.clear();
+        if self.next_prefix_cancel_request != 0 {
+            self.prefix_cancelled_request = self
+                .prefix_cancelled_request
+                .max(Some(self.next_prefix_cancel_request));
+        }
         self.core.reset_session();
         self.command_prompt_revision = self.command_prompt_revision.wrapping_add(1).max(1);
         self.command_output = None;
@@ -3374,6 +3415,9 @@ impl MuxClient {
                 target: "zz::diagnostics::input",
                 "prefix_armed_received armed={armed}"
             ),
+            CoreEvent::PrefixCancelled { request_id } => {
+                self.prefix_cancelled_request = self.prefix_cancelled_request.max(Some(request_id));
+            }
             CoreEvent::CommandPromptChanged => {
                 self.command_prompt_revision = self.command_prompt_revision.wrapping_add(1).max(1);
             }

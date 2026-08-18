@@ -18,6 +18,8 @@ use sha2::{Digest as _, Sha256};
 use tempfile::TempDir;
 use thiserror::Error;
 use url::Url;
+#[cfg(target_os = "windows")]
+use zeroize::Zeroize as _;
 use zeroize::Zeroizing;
 use zz_browser::{
     BrowserCookie, CookieImportBatch, CookieImportError, MAX_COOKIE_IMPORT_BYTES,
@@ -763,6 +765,9 @@ fn dpapi_unprotect(protected: &[u8]) -> Option<Zeroizing<Vec<u8>>> {
         // `pbData`, and the copy finishes before the buffer is released.
         Zeroizing::new(unsafe { std::slice::from_raw_parts(output.pbData, length) }.to_vec())
     });
+    if !output.pbData.is_null() && length > 0 {
+        unsafe { std::slice::from_raw_parts_mut(output.pbData, length) }.zeroize();
+    }
     // SAFETY: `pbData` is the LocalAlloc'd buffer CryptUnprotectData returned,
     // and nothing references it once the copy above is done.
     let _ = unsafe { LocalFree(Some(HLOCAL(output.pbData.cast()))) };

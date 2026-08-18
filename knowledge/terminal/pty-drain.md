@@ -219,15 +219,14 @@ while a saturated stream stays hot. The turn budget (`PTY_DRAIN_TURN_BYTES`, 256
 
 ## The macOS sleep and wake pipe (`wait_for_wake`, `ActorWake`)
 
-The actor sleeps in `rustix::event::poll` on two fds: the pty and a self-pipe. Anything
-that sends the actor work (`CommandSender::send`, the search worker's result send) writes
-one byte to the pipe **after** the channel send. That ordering is race-free because the
-actor re-checks its channels before every sleep:
+The actor sleeps in `rustix::event::poll` on two fds: the pty and a self-pipe. `CommandSender` and the
+search worker write one byte to the pipe **after** each successful channel send. `InputSender`
+rejects a full command before this step. The actor re-checks its channels before every sleep:
 
 ```mermaid
 sequenceDiagram
     participant G as GPUI thread (CommandSender)
-    participant C as crossbeam channel
+    participant C as admitted channel
     participant P as wake pipe
     participant A as actor
     A->>C: try_recv . empty
@@ -237,12 +236,14 @@ sequenceDiagram
     P-->>A: poll returns immediately
     A->>P: drain pipe
     A->>C: try_recv → command
-    Note over A: a byte can never be missed:<br/>either the pre-sleep try_recv sees the send,<br/>or the byte lands and ends the poll
+    Note over A: the actor sees the accepted send:<br/>either try_recv finds it before sleep,<br/>or the byte ends the poll
 ```
 
-Command priority over pty output (the old `select_biased!` ordering) is preserved by
-checking the channels first on every wake. Output views and non-unix targets use
-`ActorWake::none()` . the same call sites, zero cfg noise.
+Control commands retain priority over PTY input and output because the actor checks the control lane
+first on every wake. The actor excludes the PTY-input lane from the wait set whenever `PtyWriter` has
+a backlog, while PTY reads, resize, capture, and pure view actions keep running. Continuing reads lets
+an echoing terminal or a full-duplex child consume input without deadlocking behind its own output.
+Output views and non-Unix targets use `ActorWake::none()`: the same call sites, zero cfg noise.
 
 ## The 16 ms gate (bookkeeping moved out of the hot loop)
 
@@ -253,7 +254,7 @@ is the only thing the drain sets; the top of the loop owns the rest:
 if output_pending
     && (reader_eof || last_content_publish.elapsed() >= CONTENT_PUBLISH_STALENESS)
 {
-    drain_effects(&effects, &mut writer)?;         // pty query replies
+    drain_effects_if_writer_ready(&effects, &mut writer)?; // pty query replies
     let output_screen = terminal.active_screen()?; // FFI . once per frame now
     /* note_output for every view, reconcile_view_screen, search debounce */
     publisher.publish(snapshot(/* Content */)?);
@@ -265,18 +266,24 @@ if output_pending
 Interactive output still publishes immediately (elapsed is ≥ 16 ms when a pane was quiet);
 a flood pays for effects flushes, view reconciliation, and the snapshot **once per frame
 instead of once per kilobyte**. The trade: terminal query replies (DA/DSR) batch up to
-16 ms mid-flood. The search-refresh debounce runs from the same deadline sweep, and it is
-the only other deadline left: child status arrives as an event from the per-session
+16 ms mid-flood when the writer is ready; the actor holds replies while prior bytes drain.
+The search-refresh debounce runs from the same deadline sweep. Child status arrives as an event from the per-session
 `zz-child-wait` thread parked in `wait()`, so an idle actor sleeps `IDLE_SLEEP` (1 hour)
-rather than waking on a status tick. A `Wake::Deadline` does no work by design.
+rather than waking on a status tick. The `Wake::Deadline` arm stays empty; the top of the next actor
+turn handles due work, including a 16 ms writer retry.
 
 ## The writer (`PtyWriter`)
 
 `O_NONBLOCK` is a property of the open file description, and every dup of the master shares
 it . so making the drain fd nonblocking makes the *writer* nonblocking too. `PtyWriter`
-wraps a second dup and converts `EAGAIN` into a `POLLOUT` wait, which reproduces the old
-blocking-writer backpressure exactly. Symmetric gotcha to remember: you cannot make the
-reader nonblocking "privately".
+wraps a second dup and keeps a FIFO byte buffer. Each `Write` queues the complete slice, tries up to
+1 MiB per flush attempt, and retains the remainder on `EAGAIN`; it never reports a silent partial write.
+While bytes remain, the actor stops consuming further PTY input but continues PTY output and control work.
+The input sender reserves each whole command before enqueueing it, with caps of 256 commands and 64
+MiB including a 4 KiB per-command floor, so producers never block behind the writer and a rejected
+command contributes no bytes. The actor also leaves libghostty-generated replies in the bounded
+`PtyEffects` buffer until the writer drains. Symmetric gotcha to remember: you cannot make the reader
+nonblocking "privately".
 
 # Why the platforms differ
 

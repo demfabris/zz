@@ -24,6 +24,14 @@ use objc2::{
 static HANDLING_SEND_EVENT: AtomicBool = AtomicBool::new(false);
 static ORIGINAL_SEND_EVENT: AtomicUsize = AtomicUsize::new(0);
 
+struct SendEventRestore(bool);
+
+impl Drop for SendEventRestore {
+    fn drop(&mut self) {
+        HANDLING_SEND_EVENT.store(self.0, Ordering::Relaxed);
+    }
+}
+
 type SendEvent = unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject);
 
 const SEND_EVENT_TYPES: &CStr = c"v@:@";
@@ -139,7 +147,7 @@ unsafe extern "C-unwind" fn send_event(
     event: *mut AnyObject,
 ) {
     // Restore rather than clear: AppKit dispatch nests.
-    let outer = HANDLING_SEND_EVENT.swap(true, Ordering::Relaxed);
+    let _restore = SendEventRestore(HANDLING_SEND_EVENT.swap(true, Ordering::Relaxed));
     let original = ORIGINAL_SEND_EVENT.load(Ordering::Relaxed);
     if original != 0 {
         // SAFETY: `original` is the implementation `sendEvent:` resolved to
@@ -148,7 +156,6 @@ unsafe extern "C-unwind" fn send_event(
         // SAFETY: forwarding the arguments AppKit passed us.
         unsafe { original(application, selector, event) };
     }
-    HANDLING_SEND_EVENT.store(outer, Ordering::Relaxed);
 }
 
 fn class_ptr(class: &AnyClass) -> *mut AnyClass {
@@ -158,4 +165,21 @@ fn class_ptr(class: &AnyClass) -> *mut AnyClass {
 fn erase(function: *const ()) -> Imp {
     // SAFETY: `Imp` is a function pointer of the same width.
     unsafe { mem::transmute(function) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn send_event_state_restores_during_unwind() {
+        HANDLING_SEND_EVENT.store(false, Ordering::Relaxed);
+        let result = std::panic::catch_unwind(|| {
+            let _restore = SendEventRestore(HANDLING_SEND_EVENT.swap(true, Ordering::Relaxed));
+            panic!("native dispatch unwound");
+        });
+
+        assert!(result.is_err());
+        assert!(!HANDLING_SEND_EVENT.load(Ordering::Relaxed));
+    }
 }

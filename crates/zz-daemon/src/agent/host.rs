@@ -496,7 +496,7 @@ async fn run_pane(
         close: close_tx,
         seq: 0,
         queue: VecDeque::new(),
-        git_refresh: 0,
+        git_refresh: GitRefreshGate::default(),
         next_turn_id: 0,
         active_turn: None,
         dispatched_prompt: None,
@@ -524,11 +524,51 @@ struct PanePump {
     close: Sender<()>,
     seq: u64,
     queue: VecDeque<AgentPrompt>,
-    git_refresh: u64,
+    git_refresh: GitRefreshGate,
     next_turn_id: u64,
     active_turn: Option<u64>,
     dispatched_prompt: Option<(u64, AgentPrompt)>,
     closing: bool,
+}
+
+#[derive(Default)]
+struct GitRefreshGate {
+    latest: u64,
+    running: Option<u64>,
+    pending: Option<u64>,
+}
+
+impl GitRefreshGate {
+    fn request(&mut self) -> Option<u64> {
+        self.latest = self.latest.saturating_add(1);
+        if self.running.is_some() {
+            self.pending = Some(self.latest);
+            None
+        } else {
+            self.running = Some(self.latest);
+            Some(self.latest)
+        }
+    }
+
+    fn invalidate(&mut self) {
+        self.latest = self.latest.saturating_add(1);
+        self.pending = None;
+    }
+
+    fn complete(&mut self, refresh: u64) -> Option<u64> {
+        if self.running != Some(refresh) {
+            return None;
+        }
+        self.running = self.pending.take();
+        self.running
+    }
+
+    fn spawn_failed(&mut self, refresh: u64) {
+        if self.running == Some(refresh) {
+            self.running = None;
+            self.pending = None;
+        }
+    }
 }
 
 /// What an observed payload asks the pump to do once it has been emitted.
@@ -586,7 +626,7 @@ impl PanePump {
                     refresh,
                     cwd,
                     summary,
-                } => self.apply_git_summary(generation, refresh, &cwd, summary),
+                } => self.finish_git_refresh(generation, refresh, &cwd, summary),
                 PaneInput::Finished(result) => {
                     self.finish(&result);
                     self.reclaim_accepted_inputs(&prompts, &inbox);
@@ -749,7 +789,7 @@ impl PanePump {
             self.reclaim_dispatched_prompt();
         }
         if matches!(&payload, AgentStreamPayload::SessionReset { .. }) {
-            self.git_refresh = self.git_refresh.saturating_add(1);
+            self.git_refresh.invalidate();
         }
         let refresh_git = matches!(
             &payload,
@@ -986,9 +1026,14 @@ impl PanePump {
     }
 
     fn start_git_refresh(&mut self) {
-        self.git_refresh = self.git_refresh.saturating_add(1);
+        let Some(refresh) = self.git_refresh.request() else {
+            return;
+        };
+        self.spawn_git_refresh(refresh);
+    }
+
+    fn spawn_git_refresh(&mut self, refresh: u64) {
         let generation = self.generation;
-        let refresh = self.git_refresh;
         let cwd = self.state.lock().cwd.clone();
         let capture_cwd = cwd.clone();
         let inbox = self.inbox.clone();
@@ -1011,7 +1056,22 @@ impl PanePump {
                 });
             })
         {
+            self.git_refresh.spawn_failed(refresh);
             log::warn!(target: "zz::agent", "could not start Git summary capture for pane {pane}: {error}");
+        }
+    }
+
+    fn finish_git_refresh(
+        &mut self,
+        generation: u64,
+        refresh: u64,
+        cwd: &Path,
+        summary: Option<AgentGitSummary>,
+    ) {
+        let next = self.git_refresh.complete(refresh);
+        self.apply_git_summary(generation, refresh, cwd, summary);
+        if let Some(refresh) = next {
+            self.spawn_git_refresh(refresh);
         }
     }
 
@@ -1022,7 +1082,7 @@ impl PanePump {
         cwd: &Path,
         summary: Option<AgentGitSummary>,
     ) {
-        if generation != self.generation || refresh != self.git_refresh {
+        if generation != self.generation || refresh != self.git_refresh.latest {
             return;
         }
         let state = {
@@ -1165,6 +1225,57 @@ mod tests {
     use std::{fs, process::Command};
 
     const DEADLINE: Duration = Duration::from_secs(10);
+
+    #[test]
+    fn git_refresh_gate_is_single_flight_and_latest_wins() {
+        let mut gate = GitRefreshGate::default();
+
+        assert_eq!(gate.request(), Some(1));
+        assert_eq!(gate.request(), None);
+        assert_eq!(gate.request(), None);
+        assert_eq!(gate.running, Some(1));
+        assert_eq!(gate.pending, Some(3));
+
+        assert_eq!(gate.complete(2), None);
+        assert_eq!(gate.running, Some(1));
+        assert_eq!(gate.complete(1), Some(3));
+        assert_eq!(gate.running, Some(3));
+        assert_eq!(gate.pending, None);
+        assert_eq!(gate.complete(3), None);
+        assert_eq!(gate.running, None);
+    }
+
+    #[test]
+    fn git_refresh_gate_invalidation_discards_only_older_pending_work() {
+        let mut gate = GitRefreshGate::default();
+
+        assert_eq!(gate.request(), Some(1));
+        assert_eq!(gate.request(), None);
+        gate.invalidate();
+        assert_eq!(gate.latest, 3);
+        assert_eq!(gate.pending, None);
+        assert_eq!(gate.complete(1), None);
+        assert_eq!(gate.running, None);
+
+        assert_eq!(gate.request(), Some(4));
+        gate.invalidate();
+        assert_eq!(gate.request(), None);
+        assert_eq!(gate.complete(4), Some(6));
+        assert_eq!(gate.running, Some(6));
+    }
+
+    #[test]
+    fn git_refresh_gate_recovers_after_spawn_failure() {
+        let mut gate = GitRefreshGate::default();
+
+        assert_eq!(gate.request(), Some(1));
+        gate.spawn_failed(2);
+        assert_eq!(gate.running, Some(1));
+        gate.spawn_failed(1);
+        assert_eq!(gate.running, None);
+        assert_eq!(gate.pending, None);
+        assert_eq!(gate.request(), Some(2));
+    }
 
     fn git_available() -> bool {
         Command::new("git")

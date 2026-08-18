@@ -119,6 +119,26 @@ int main(int argc, char **argv) {
         fprintf(stderr, "smoke: connect failed\n");
         return 1;
     }
+    struct pollfd initial_wake = {
+        .fd = zz_client_event_fd(client),
+        .events = POLLIN,
+    };
+    if (poll(&initial_wake, 1, 0) != 1 ||
+        (initial_wake.revents & POLLIN) == 0) {
+        fprintf(stderr, "smoke: initial hello did not wake the event fd\n");
+        return 1;
+    }
+    zz_client_event initial_event;
+    int saw_hello = 0;
+    while (zz_client_next_event(client, &initial_event)) {
+        if (initial_event.kind == ZZ_EVENT_HELLO) {
+            saw_hello = 1;
+        }
+    }
+    if (!saw_hello) {
+        fprintf(stderr, "smoke: initial hello event was not queued\n");
+        return 1;
+    }
     if (!zz_client_attach(client, "smoke")) {
         fprintf(stderr, "smoke: attach failed\n");
         return 1;

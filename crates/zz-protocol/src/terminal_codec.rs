@@ -2613,6 +2613,26 @@ mod tests {
     }
 
     #[test]
+    fn cancel_prefix_round_trips_as_control_input() {
+        let message = ProtocolMessage::Input(crate::InputMessage::CancelPrefix { request_id: 17 });
+        let frame = encode_protocol_message(&message).expect("encode prefix cancellation");
+        assert_eq!(
+            decode_protocol_frame(&frame).expect("decode prefix cancellation"),
+            message
+        );
+
+        let message = ProtocolMessage::Event(crate::Event {
+            sequence: 9,
+            payload: crate::EventPayload::PrefixCancelled { request_id: 17 },
+        });
+        let frame = encode_protocol_message(&message).expect("encode prefix cancellation ack");
+        assert_eq!(
+            decode_protocol_frame(&frame).expect("decode prefix cancellation ack"),
+            message
+        );
+    }
+
+    #[test]
     fn key_input_and_prefix_state_round_trip() {
         let input = zz_terminal::KeyInput {
             action: zz_terminal::KeyAction::Press,

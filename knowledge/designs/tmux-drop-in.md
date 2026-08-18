@@ -354,7 +354,7 @@ So:
   host's config sits in that host's trust domain.
 - Interactively-typed commands (`prefix :`) always run without ceremony.
 
-## Phase 6 — control mode (~2–3 weeks)
+## Phase 6 — control mode (COMPLETE 2026-08-18)
 
 `-C`/`-CC` for iTerm2 and control-mode scripts. The transport, verified against iTerm2's
 `TmuxGateway.m`: iTerm2 launches `tmux -CC` **in a PTY and parses the `%begin`/`%output` text
@@ -394,7 +394,54 @@ pane visibility). The harness (phase 2) does not wait for this.
   the pin adds a flags-0 block per after-hook; no `default-client-command`
   option (new-session hardcoded, the pin's default).
 
-- **Wave 6b** (`cbb34a2`, CONFIRMED-CLOSED 2026-08-18, zero findings) —
+- **Waves 6c + 6d** (`0e5ea00` + `4e69882` + `ed7d3c5`, combined
+  CONFIRMED-CLOSED 2026-08-18 — closes phase 6) — flow control, sizing,
+  subscriptions. 6c: protocol v67 (PaneOutputState/PaneOutputAged/
+  ControlFlags); per-(Control client, pane) output state with off/paused
+  DISCARDING AT QUEUE ENTRY; auto-pause on oldest-chunk age under
+  pause-after; AGE-KILL at the pin's 300s without pause-after (closes the
+  A5 divergence — the mailbox count/size cap is now only a backstop);
+  pacing with the pin constants (8192/512/32, headroom÷panes÷3, message-
+  count gate at half the mailbox cap); refresh-client -A on/off/continue/
+  pause with silent-malformed; -f/-F no-output (resets offsets),
+  pause-after[=N], wait-exit (empty-line/EOF release); %extended-output
+  `%N <age> : ` + %pause/%continue. The load-bearing 6c lesson: flow
+  control requires REAL backpressure — the front-end reads through a
+  bounded sync_channel(32) so a stalled consumer reaches the daemon (an
+  unbounded channel silently absorbed floods and pause-after could never
+  fire), and detach/EOF DRAIN queued events before %exit (the pin's
+  control_all_done flush; the daemon acks a Control self-detach with
+  Detached as the FIFO flush marker). Hook delivery uses the pin's exact
+  per-name session guards (window-layout-changed/linked/unlinked/renamed +
+  client-session-changed are attached-only; sessions/paste-buffer/
+  pane-mode/client-detached reach session-less clients), the departing
+  client is excluded from its own client-detached, and the front-end
+  renders hooks only once attached (pin CLIENT_EXIT analog: `-C
+  new-session -d` shows zero notifications). 6d: protocol v68
+  (SubscriptionChanged); refresh-client -C whole-client + @w:WxH
+  per-window sizing with pin error shapes and 1-10000 bounds — a sized
+  Control client legitimately drives window sizing exactly like the pin
+  (pin-probed: 150x40 -> 200x60 during attach, persists after detach) and
+  feeds menu/popup geometry gating; -B subscriptions (session/%pane/%*/
+  @window/@* scopes, first-two-colons split, fewer = REMOVE, 1s
+  change-only evaluation with initial report and entity sweeps —
+  kill-window probe shows no phantom reports and no stale state);
+  client_flags format. Client-name spelling unified: device-{N} is
+  canonical everywhere (generation + all print surfaces), client-{N} kept
+  as a resolver-only alias — the resolvers accept exactly what
+  list-clients prints. Live probes: -A matrix semantics, -C matrix,
+  %extended-output, no-output, and all three %subscription-changed shapes
+  byte-identical to the pin (subscription probes must hold the control
+  client's stdin OPEN across the pin's 1s timer). Ledgered: %pause/
+  %continue placement (pin writes them INSIDE the triggering block via
+  synchronous control_write; zz after it — blocks-complete family,
+  reviewer-endorsed); zz-lax %-word parsing on the control stdin (pin:
+  `parse error: syntax error` for unquoted %0:pause); stdin commands share
+  the 32-slot channel with %output (a flood can delay a new command by up
+  to 32 events — bounded, thin-client property); pipe_pane_has_no_gap +
+  default_shell_rejects join the load-flake set (VT-throughput root
+  cause). Hardware smoke pending (maintainer): zz -CC under REAL iTerm2 —
+  attach, pane content, window sizing via -C, detach.
   notifications + layout strings + basic %output. Protocol v66:
   `EventPayload::HookEvent {name, variables}` (tag 40) exposes the 5c hook
   bus to Control subscribers only, `PaneOutput {pane, bytes}` (tag 41), a

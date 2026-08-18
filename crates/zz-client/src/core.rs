@@ -681,7 +681,10 @@ impl ClientCore {
             }
             EventPayload::ControlExit { .. }
             | EventPayload::HookEvent { .. }
-            | EventPayload::PaneOutput { .. } => {}
+            | EventPayload::PaneOutput { .. }
+            | EventPayload::PaneOutputState { .. }
+            | EventPayload::PaneOutputAged { .. }
+            | EventPayload::ControlFlags { .. } => {}
         }
     }
 

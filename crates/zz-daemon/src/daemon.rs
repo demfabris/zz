@@ -101,6 +101,11 @@ const MAX_COPY_PIPE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_COPY_PIPE_COMMAND_BYTES: usize = 8 * 1024;
 const COPY_PIPE_TIMEOUT: Duration = Duration::from_secs(30);
 const COPY_PIPE_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const CONTROL_BUFFER_HIGH: usize = 8192;
+const CONTROL_WRITE_MINIMUM: usize = 32;
+const CONTROL_PENDING_MESSAGE_LIMIT: usize = MAX_RELIABLE_MESSAGES / 2;
+const CONTROL_MAXIMUM_AGE: Duration = Duration::from_mins(5);
+const CONTROL_PENDING_CHUNKS_PER_PANE: usize = 4;
 const GUI_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CONTEXT_PATH_BYTES: usize = 4 * 1024;
 const MAX_COMMAND_PROMPT_HISTORY: usize = 100;
@@ -1392,6 +1397,18 @@ impl OutboundMailbox {
         self.ready.notify_all();
     }
 
+    fn queued_reliable(&self) -> Option<(usize, usize)> {
+        let state = self.state.lock();
+        (!state.closed).then_some((state.queued_bytes, state.reliable.len()))
+    }
+
+    fn close_too_far_behind(&self) {
+        let mut state = self.state.lock();
+        close_outbound_too_far_behind(&mut state);
+        drop(state);
+        self.ready.notify_all();
+    }
+
     #[cfg(test)]
     fn cancel_terminal(&self, pane: PaneId) {
         let mut state = self.state.lock();
@@ -1639,6 +1656,7 @@ struct PendingHookEvent {
     name: &'static str,
     context: ExecutionContext,
     variables: BTreeMap<String, String>,
+    exclude_client: Option<ClientId>,
 }
 
 #[derive(Clone)]
@@ -1682,6 +1700,7 @@ impl PendingHookEvent {
         Self {
             name,
             context,
+            exclude_client: None,
             variables: BTreeMap::from([
                 ("hook".to_owned(), name.to_owned()),
                 ("hook_session".to_owned(), session.to_string()),
@@ -1704,6 +1723,7 @@ impl PendingHookEvent {
         Self {
             name,
             context: snapshot.window_context(window),
+            exclude_client: None,
             variables: BTreeMap::from([
                 ("hook".to_owned(), name.to_owned()),
                 ("hook_session".to_owned(), state.session.to_string()),
@@ -1726,6 +1746,7 @@ impl PendingHookEvent {
         Self {
             name,
             context: snapshot.window_context(window),
+            exclude_client: None,
             variables: BTreeMap::from([
                 ("hook".to_owned(), name.to_owned()),
                 ("hook_session".to_owned(), session.to_string()),
@@ -1755,6 +1776,7 @@ impl PendingHookEvent {
         Self {
             name,
             context: ExecutionContext::new(Some(state.session), Some(state.window), Some(pane)),
+            exclude_client: None,
             variables: BTreeMap::from([
                 ("hook".to_owned(), name.to_owned()),
                 ("hook_session".to_owned(), state.session.to_string()),
@@ -1790,6 +1812,7 @@ impl PendingHookEvent {
             name,
             context,
             variables,
+            exclude_client: (name == "client-detached").then_some(client),
         }
     }
 
@@ -1797,6 +1820,7 @@ impl PendingHookEvent {
         Self {
             name,
             context: ExecutionContext::new(None, None, None),
+            exclude_client: None,
             variables: BTreeMap::from([
                 ("hook".to_owned(), name.to_owned()),
                 ("hook_paste_buffer".to_owned(), buffer),
@@ -2833,7 +2857,11 @@ impl Shared {
     }
 
     fn subscribe(&self, client: ClientId, outbound: Arc<OutboundMailbox>) {
-        self.inner.lock().subscribers.insert(client, outbound);
+        let mut inner = self.inner.lock();
+        inner.subscribers.insert(client, outbound);
+        if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
+            inner.control_outputs.entry(client).or_default();
+        }
     }
 
     fn client_instance_id(&self, client: ClientId) -> Option<ClientInstanceId> {
@@ -2870,6 +2898,7 @@ impl Shared {
             inner.client_names.remove(&client);
             inner.client_instances.remove(&client);
             inner.client_kinds.remove(&client);
+            inner.control_outputs.remove(&client);
             inner.key_engines.remove(&client);
             inner.copy_sessions.remove(&client);
             inner.prefix_armed.remove(&client);
@@ -3273,10 +3302,22 @@ impl Shared {
 
     fn run_event_hooks(self: &Arc<Self>, events: Vec<PendingHookEvent>) {
         for event in events {
-            self.publish_to_control_clients(EventPayload::HookEvent {
-                name: event.name.to_owned(),
-                variables: event.variables.clone(),
-            });
+            let attached_only = matches!(
+                event.name,
+                "window-layout-changed"
+                    | "window-linked"
+                    | "window-unlinked"
+                    | "window-renamed"
+                    | "client-session-changed"
+            );
+            self.publish_to_control_clients(
+                EventPayload::HookEvent {
+                    name: event.name.to_owned(),
+                    variables: event.variables.clone(),
+                },
+                event.exclude_client,
+                attached_only,
+            );
             let (context, commands) = {
                 let inner = self.inner.lock();
                 let mut context = event.context.clone();
@@ -5062,39 +5103,210 @@ impl Shared {
     }
 
     fn publish_control_output_for_pane(&self, pane: PaneId, bytes: &Arc<[u8]>) {
-        let (pipe, subscribers) = {
+        self.publish_pipe_output_for_pane(pane, bytes);
+
+        loop {
+            let queued = {
+                let mut inner = self.inner.lock();
+                let Some(window) = inner.engine.state.window_for_pane(pane) else {
+                    return;
+                };
+                let clients = inner
+                    .engine
+                    .state
+                    .sessions
+                    .iter()
+                    .filter(|(_, session)| session.windows.contains(&window))
+                    .flat_map(|(session, _)| inner.attached.get(session).into_iter().flatten())
+                    .filter(|client| {
+                        inner.client_kinds.get(client) == Some(&ClientKind::Control)
+                            && inner.subscribers.contains_key(client)
+                    })
+                    .copied()
+                    .collect::<BTreeSet<_>>();
+                let blocked = clients.iter().any(|client| {
+                    let output = inner.control_outputs.entry(*client).or_default();
+                    if output.no_output {
+                        return false;
+                    }
+                    let pane_output = output.panes.entry(pane).or_default();
+                    pane_output.mode == ControlPaneOutputMode::On
+                        && pane_output.pending.len() >= CONTROL_PENDING_CHUNKS_PER_PANE
+                });
+                if blocked {
+                    false
+                } else {
+                    let enqueued_at = Instant::now();
+                    for client in clients {
+                        let output = inner.control_outputs.entry(client).or_default();
+                        if output.no_output {
+                            continue;
+                        }
+                        let pane_output = output.panes.entry(pane).or_default();
+                        if pane_output.mode == ControlPaneOutputMode::On {
+                            pane_output.pending.push_back(PendingControlOutput {
+                                bytes: Arc::clone(bytes),
+                                offset: 0,
+                                enqueued_at,
+                            });
+                        }
+                    }
+                    true
+                }
+            };
+            self.pump_control_output_at(Instant::now());
+            if queued {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn publish_pipe_output_for_pane(&self, pane: PaneId, bytes: &Arc<[u8]>) {
+        let pipe = {
             let inner = self.inner.lock();
-            let pipe = inner
+            inner
                 .pane_pipes
                 .get(&pane)
-                .and_then(|pipe| pipe.tap_output.clone());
-            let Some(window) = inner.engine.state.window_for_pane(pane) else {
-                return;
-            };
-            let clients = inner
-                .engine
-                .state
-                .sessions
-                .iter()
-                .filter(|(_, session)| session.windows.contains(&window))
-                .flat_map(|(session, _)| inner.attached.get(session).into_iter().flatten())
-                .filter(|client| inner.client_kinds.get(client) == Some(&ClientKind::Control))
-                .collect::<BTreeSet<_>>();
-            let subscribers = clients
-                .into_iter()
-                .filter_map(|client| inner.subscribers.get(client).cloned())
-                .collect::<Vec<_>>();
-            (pipe, subscribers)
+                .and_then(|pipe| pipe.tap_output.clone())
         };
         if let Some(pipe) = pipe {
             let _ = pipe.send(Arc::clone(bytes));
         }
-        let message = Self::event(EventPayload::PaneOutput {
-            pane,
-            bytes: bytes.as_ref().to_vec(),
-        });
-        for subscriber in subscribers {
-            let _ = subscriber.enqueue_reliable(&message);
+    }
+
+    fn pump_control_output_at(&self, now: Instant) {
+        loop {
+            let (deliveries, kills, progressed) = {
+                let mut inner = self.inner.lock();
+                let clients = inner.control_outputs.keys().copied().collect::<Vec<_>>();
+                let mut deliveries = Vec::new();
+                let mut kills = Vec::new();
+                let mut progressed = false;
+                for client in clients {
+                    let Some(subscriber) = inner.subscribers.get(&client).cloned() else {
+                        continue;
+                    };
+                    let Some((queued_bytes, queued_messages)) = subscriber.queued_reliable() else {
+                        if let Some(output) = inner.control_outputs.get_mut(&client) {
+                            for pane in output.panes.values_mut() {
+                                pane.pending.clear();
+                            }
+                        }
+                        continue;
+                    };
+                    let output = inner
+                        .control_outputs
+                        .get_mut(&client)
+                        .expect("control output state is present");
+                    if output.no_output {
+                        continue;
+                    }
+                    let pause_after_ms = output.pause_after_ms;
+                    let pending_panes = output
+                        .panes
+                        .iter()
+                        .filter_map(|(pane, output)| (!output.pending.is_empty()).then_some(*pane))
+                        .collect::<Vec<_>>();
+                    let mut kill = false;
+                    for pane in pending_panes {
+                        let pane_output = output
+                            .panes
+                            .get_mut(&pane)
+                            .expect("pending control pane is present");
+                        let enqueued_at = pane_output
+                            .pending
+                            .front()
+                            .expect("pending control output is present")
+                            .enqueued_at;
+                        match control_output_age_action(pause_after_ms, enqueued_at, now) {
+                            ControlOutputAgeAction::Output(_) => {}
+                            ControlOutputAgeAction::Pause => {
+                                pane_output.pending.clear();
+                                pane_output.mode = ControlPaneOutputMode::Paused;
+                                deliveries.push((
+                                    client,
+                                    Arc::clone(&subscriber),
+                                    Self::event(EventPayload::PaneOutputState {
+                                        pane,
+                                        paused: true,
+                                    }),
+                                ));
+                                progressed = true;
+                            }
+                            ControlOutputAgeAction::Kill => {
+                                kill = true;
+                                break;
+                            }
+                        }
+                    }
+                    if kill {
+                        for pane in output.panes.values_mut() {
+                            pane.pending.clear();
+                        }
+                        kills.push(subscriber);
+                        progressed = true;
+                        continue;
+                    }
+                    let pending_panes = output
+                        .panes
+                        .iter()
+                        .filter_map(|(pane, output)| {
+                            (!output.pending.is_empty() && output.mode == ControlPaneOutputMode::On)
+                                .then_some(*pane)
+                        })
+                        .collect::<Vec<_>>();
+                    if pending_panes.is_empty()
+                        || queued_bytes >= CONTROL_BUFFER_HIGH
+                        || queued_messages >= CONTROL_PENDING_MESSAGE_LIMIT
+                    {
+                        continue;
+                    }
+                    let limit = ((CONTROL_BUFFER_HIGH - queued_bytes) / pending_panes.len() / 3)
+                        .max(CONTROL_WRITE_MINIMUM);
+                    for pane in pending_panes {
+                        let pane_output = output
+                            .panes
+                            .get_mut(&pane)
+                            .expect("pending control pane is present");
+                        let (age_ms, bytes) = drain_control_pane_output(pane_output, limit, now);
+                        let payload = if pause_after_ms.is_some() {
+                            EventPayload::PaneOutputAged {
+                                pane,
+                                age_ms,
+                                bytes,
+                            }
+                        } else {
+                            EventPayload::PaneOutput { pane, bytes }
+                        };
+                        deliveries.push((client, Arc::clone(&subscriber), Self::event(payload)));
+                        progressed = true;
+                    }
+                }
+                (deliveries, kills, progressed)
+            };
+            for subscriber in kills {
+                subscriber.close_too_far_behind();
+            }
+            let mut failed = BTreeSet::new();
+            for (client, subscriber, message) in deliveries {
+                if !subscriber.enqueue_reliable(&message) {
+                    failed.insert(client);
+                }
+            }
+            if !failed.is_empty() {
+                let mut inner = self.inner.lock();
+                for client in failed {
+                    if let Some(output) = inner.control_outputs.get_mut(&client) {
+                        for pane in output.panes.values_mut() {
+                            pane.pending.clear();
+                        }
+                    }
+                }
+            }
+            if !progressed {
+                break;
+            }
         }
     }
 
@@ -5969,7 +6181,7 @@ impl Shared {
                     termname: String::new(),
                     uid: format_context.uid.clone(),
                     user: format_context.user.clone(),
-                    flags: String::new(),
+                    flags: format_client_flags(&inner, client),
                     theme: inner
                         .client_color_schemes
                         .get(&client)
@@ -6023,6 +6235,82 @@ impl Shared {
         })
     }
 
+    fn set_control_client_flags(&self, client: ClientId, flags: &str) {
+        let event = {
+            let mut inner = self.inner.lock();
+            if inner.client_kinds.get(&client) != Some(&ClientKind::Control) {
+                return;
+            }
+            let (before, after) = {
+                let output = inner.control_outputs.entry(client).or_default();
+                let before = (output.wait_exit, output.pause_after_ms, output.no_output);
+                apply_control_client_flags(output, flags);
+                let after = (output.wait_exit, output.pause_after_ms, output.no_output);
+                (before, after)
+            };
+            (before != after).then(|| {
+                (
+                    inner.subscribers.get(&client).cloned(),
+                    EventPayload::ControlFlags {
+                        wait_exit: after.0,
+                        pause_after_ms: after.1,
+                        no_output: after.2,
+                    },
+                )
+            })
+        };
+        if let Some((Some(subscriber), payload)) = event {
+            Self::send_event(&subscriber, payload);
+        }
+    }
+
+    fn set_control_pane_state(&self, client: ClientId, value: &str) {
+        let Some((pane, state)) = parse_control_pane_state(value) else {
+            return;
+        };
+        let event = {
+            let mut inner = self.inner.lock();
+            if inner.engine.state.pane(pane).is_none() {
+                return;
+            }
+            let output = inner.control_outputs.entry(client).or_default();
+            let pane_output = output.panes.entry(pane).or_default();
+            let paused = match state {
+                "on" if pane_output.mode == ControlPaneOutputMode::Off => {
+                    pane_output.pending.clear();
+                    pane_output.mode = ControlPaneOutputMode::On;
+                    None
+                }
+                "off" => {
+                    pane_output.pending.clear();
+                    pane_output.mode = ControlPaneOutputMode::Off;
+                    None
+                }
+                "pause" if pane_output.mode != ControlPaneOutputMode::Paused => {
+                    pane_output.pending.clear();
+                    pane_output.mode = ControlPaneOutputMode::Paused;
+                    Some(true)
+                }
+                "continue" if pane_output.mode == ControlPaneOutputMode::Paused => {
+                    pane_output.pending.clear();
+                    pane_output.mode = ControlPaneOutputMode::On;
+                    Some(false)
+                }
+                "on" | "pause" | "continue" => None,
+                _ => return,
+            };
+            paused.map(|paused| {
+                (
+                    inner.subscribers.get(&client).cloned(),
+                    EventPayload::PaneOutputState { pane, paused },
+                )
+            })
+        };
+        if let Some((Some(subscriber), payload)) = event {
+            Self::send_event(&subscriber, payload);
+        }
+    }
+
     fn refresh_client(
         &self,
         client: ClientId,
@@ -6042,8 +6330,55 @@ impl Shared {
             )
             .into());
         }
-        if client_attached_session(&self.inner.lock(), client).is_none() {
-            return Err(ServerError::InvalidCommand("no current client".to_owned()).into());
+        let target = {
+            let inner = self.inner.lock();
+            resolve_attached_client(&inner, client, parsed.value('t'))?
+        };
+        if parsed.has('c')
+            || parsed.has('D')
+            || parsed.has('L')
+            || parsed.has('R')
+            || parsed.has('U')
+            || !parsed.positional.is_empty()
+            || parsed.has('l')
+        {
+            return Err(ServerError::UnsupportedCommand(
+                "refresh-client interactive behavior".to_owned(),
+            )
+            .into());
+        }
+        let mut handled_flags = false;
+        for flags in parsed.values('F') {
+            self.set_control_client_flags(target, flags);
+            handled_flags = true;
+        }
+        for flags in parsed.values('f') {
+            self.set_control_client_flags(target, flags);
+            handled_flags = true;
+        }
+        if parsed.value('r').is_some() {
+            return Err(ServerError::UnsupportedCommand(
+                "refresh-client interactive behavior".to_owned(),
+            )
+            .into());
+        }
+        if parsed.value('A').is_some() {
+            if self.inner.lock().client_kinds.get(&target) != Some(&ClientKind::Control) {
+                return Err(ServerError::InvalidCommand("not a control client".to_owned()).into());
+            }
+            for value in parsed.values('A') {
+                self.set_control_pane_state(target, value);
+            }
+            return Ok(Execution::default());
+        }
+        if parsed.value('B').is_some() || parsed.value('C').is_some() {
+            return Err(ServerError::UnsupportedCommand(
+                "refresh-client interactive behavior".to_owned(),
+            )
+            .into());
+        }
+        if handled_flags && !parsed.has('S') {
+            return Ok(Execution::default());
         }
         Err(
             ServerError::UnsupportedCommand("refresh-client interactive behavior".to_owned())
@@ -7115,6 +7450,11 @@ impl Shared {
         }
         inner.attached.retain(|_, clients| !clients.is_empty());
         inner.attached.entry(session).or_default().insert(client);
+        if let Some(output) = inner.control_outputs.get_mut(&client) {
+            for pane in output.panes.values_mut() {
+                pane.pending.clear();
+            }
+        }
         inner.engine.mark_session_active(session);
         let visible = visible_terminal_panes(&inner, client, session);
         affected_panes.extend(visible.iter().copied());
@@ -7354,6 +7694,11 @@ impl Shared {
             clients.remove(&client);
         }
         inner.attached.retain(|_, clients| !clients.is_empty());
+        if let Some(output) = inner.control_outputs.get_mut(&client) {
+            for pane in output.panes.values_mut() {
+                pane.pending.clear();
+            }
+        }
         inner.visible_terminals.remove(&client);
         inner.visible_agents.remove(&client);
         inner.focused_windows.remove(&client);
@@ -11009,14 +11354,27 @@ impl Shared {
         }
     }
 
-    fn publish_to_control_clients(&self, payload: EventPayload) {
+    fn publish_to_control_clients(
+        &self,
+        payload: EventPayload,
+        exclude: Option<ClientId>,
+        attached_only: bool,
+    ) {
         let message = Self::event(payload);
         let subscribers = {
             let inner = self.inner.lock();
             inner
                 .subscribers
                 .iter()
-                .filter(|(client, _)| inner.client_kinds.get(client) == Some(&ClientKind::Control))
+                .filter(|(client, _)| {
+                    inner.client_kinds.get(client) == Some(&ClientKind::Control)
+                        && Some(**client) != exclude
+                        && (!attached_only
+                            || inner
+                                .attached
+                                .values()
+                                .any(|attached| attached.contains(client)))
+                })
                 .map(|(_, subscriber)| Arc::clone(subscriber))
                 .collect::<Vec<_>>()
         };
@@ -12636,6 +12994,7 @@ struct ServerState {
     next_wait_token: u64,
     pane_pipes: BTreeMap<PaneId, PanePipe>,
     control_output_taps: BTreeMap<PaneId, ControlOutputTap>,
+    control_outputs: BTreeMap<ClientId, ControlClientOutput>,
     next_pipe_token: u64,
 }
 
@@ -12668,6 +13027,34 @@ struct ControlOutputTap {
     terminal: Arc<TerminalSession>,
     stop: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ControlPaneOutputMode {
+    #[default]
+    On,
+    Off,
+    Paused,
+}
+
+#[derive(Default)]
+struct ControlPaneOutput {
+    mode: ControlPaneOutputMode,
+    pending: VecDeque<PendingControlOutput>,
+}
+
+struct PendingControlOutput {
+    bytes: Arc<[u8]>,
+    offset: usize,
+    enqueued_at: Instant,
+}
+
+#[derive(Default)]
+struct ControlClientOutput {
+    panes: BTreeMap<PaneId, ControlPaneOutput>,
+    no_output: bool,
+    wait_exit: bool,
+    pause_after_ms: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -14269,6 +14656,25 @@ fn client_attached_session(inner: &ServerState, client: ClientId) -> Option<Sess
         .find_map(|(session, clients)| clients.contains(&client).then_some(*session))
 }
 
+fn format_client_flags(inner: &ServerState, client: ClientId) -> String {
+    if inner.client_kinds.get(&client) != Some(&ClientKind::Control) {
+        return String::new();
+    }
+    let mut flags = vec!["control-mode".to_owned()];
+    if let Some(output) = inner.control_outputs.get(&client) {
+        if output.no_output {
+            flags.push("no-output".to_owned());
+        }
+        if output.wait_exit {
+            flags.push("wait-exit".to_owned());
+        }
+        if let Some(pause_after_ms) = output.pause_after_ms {
+            flags.push(format!("pause-after={}", pause_after_ms / 1000));
+        }
+    }
+    flags.join(",")
+}
+
 fn client_focused_window(
     inner: &ServerState,
     client: ClientId,
@@ -15065,6 +15471,60 @@ fn control_output_wanted(inner: &ServerState, pane: PaneId) -> bool {
         .any(|client| inner.client_kinds.get(client) == Some(&ClientKind::Control))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ControlOutputAgeAction {
+    Output(u64),
+    Pause,
+    Kill,
+}
+
+fn control_output_age_action(
+    pause_after_ms: Option<u64>,
+    enqueued_at: Instant,
+    now: Instant,
+) -> ControlOutputAgeAction {
+    let age = now.saturating_duration_since(enqueued_at);
+    let age_ms = u64::try_from(age.as_millis()).unwrap_or(u64::MAX);
+    if let Some(pause_after_ms) = pause_after_ms {
+        if age_ms >= pause_after_ms {
+            ControlOutputAgeAction::Pause
+        } else {
+            ControlOutputAgeAction::Output(age_ms)
+        }
+    } else if age >= CONTROL_MAXIMUM_AGE {
+        ControlOutputAgeAction::Kill
+    } else {
+        ControlOutputAgeAction::Output(age_ms)
+    }
+}
+
+fn drain_control_pane_output(
+    output: &mut ControlPaneOutput,
+    limit: usize,
+    now: Instant,
+) -> (u64, Vec<u8>) {
+    let enqueued_at = output
+        .pending
+        .front()
+        .expect("pending control output is present")
+        .enqueued_at;
+    let age_ms =
+        u64::try_from(now.saturating_duration_since(enqueued_at).as_millis()).unwrap_or(u64::MAX);
+    let mut bytes = Vec::with_capacity(limit);
+    while bytes.len() < limit {
+        let Some(chunk) = output.pending.front_mut() else {
+            break;
+        };
+        let take = (limit - bytes.len()).min(chunk.bytes.len().saturating_sub(chunk.offset));
+        bytes.extend_from_slice(&chunk.bytes[chunk.offset..chunk.offset + take]);
+        chunk.offset += take;
+        if chunk.offset == chunk.bytes.len() {
+            output.pending.pop_front();
+        }
+    }
+    (age_ms, bytes)
+}
+
 fn stop_control_output_tap(mut tap: ControlOutputTap) {
     tap.stop.store(true, Ordering::Release);
     let _ = tap.terminal.disarm_raw_output_tap(tap.token);
@@ -15081,15 +15541,27 @@ fn run_control_output_tap(
     stop: &Arc<AtomicBool>,
     receiver: &crossbeam_channel::Receiver<Arc<[u8]>>,
 ) {
-    while !stop.load(Ordering::Acquire) {
+    loop {
         match receiver.recv_timeout(COPY_PIPE_POLL_INTERVAL) {
             Ok(bytes) => {
                 let Some(shared) = shared.upgrade() else {
                     break;
                 };
-                shared.publish_control_output_for_pane(pane, &bytes);
+                if stop.load(Ordering::Acquire) {
+                    shared.publish_pipe_output_for_pane(pane, &bytes);
+                } else {
+                    shared.publish_control_output_for_pane(pane, &bytes);
+                }
             }
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                let Some(shared) = shared.upgrade() else {
+                    break;
+                };
+                shared.pump_control_output_at(Instant::now());
+                if stop.load(Ordering::Acquire) {
+                    break;
+                }
+            }
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
         }
     }
@@ -15949,6 +16421,7 @@ fn uppercase_first(message: &mut String) {
 struct ParsedBufferCommandArgs {
     flags: BTreeSet<char>,
     values: BTreeMap<char, String>,
+    repeated_values: BTreeMap<char, Vec<String>>,
     positional: Vec<String>,
 }
 
@@ -15959,6 +16432,49 @@ impl ParsedBufferCommandArgs {
 
     fn value(&self, option: char) -> Option<&str> {
         self.values.get(&option).map(String::as_str)
+    }
+
+    fn values(&self, option: char) -> impl Iterator<Item = &str> {
+        self.repeated_values
+            .get(&option)
+            .into_iter()
+            .flatten()
+            .map(String::as_str)
+    }
+}
+
+fn parse_control_pane_state(value: &str) -> Option<(PaneId, &str)> {
+    let (pane, state) = value.split_once(':')?;
+    Some((pane.parse().ok()?, state))
+}
+
+fn apply_control_client_flags(output: &mut ControlClientOutput, flags: &str) {
+    for raw in flags.split(',') {
+        let (clear, flag) = raw
+            .strip_prefix('!')
+            .map_or((false, raw), |flag| (true, flag));
+        match flag {
+            "no-output" => {
+                output.no_output = !clear;
+                output.panes.clear();
+            }
+            "wait-exit" => output.wait_exit = !clear,
+            "pause-after" => {
+                output.pause_after_ms = (!clear).then_some(0);
+            }
+            _ => {
+                let Some(seconds) = flag
+                    .strip_prefix("pause-after=")
+                    .and_then(|seconds| seconds.parse::<u64>().ok())
+                else {
+                    continue;
+                };
+                let Some(milliseconds) = seconds.checked_mul(1000) else {
+                    continue;
+                };
+                output.pause_after_ms = (!clear).then_some(milliseconds);
+            }
+        }
     }
 }
 
@@ -15993,7 +16509,12 @@ fn parse_buffer_command_args(
                         ServerError::InvalidCommand(format!("{command} -{option} requires a value"))
                     })?
                 };
-                parsed.values.insert(option, value);
+                parsed.values.insert(option, value.clone());
+                parsed
+                    .repeated_values
+                    .entry(option)
+                    .or_default()
+                    .push(value);
                 break;
             }
             if flags.contains(&option) {
@@ -17289,7 +17810,22 @@ fn handle_connection<S: TransportStream>(
                 }
             }
             ProtocolMessage::Detach => {
+                let control_session = (hello.kind == ClientKind::Control)
+                    .then(|| {
+                        shared
+                            .inner
+                            .lock()
+                            .attached
+                            .iter()
+                            .find_map(|(session, clients)| {
+                                clients.contains(&client).then_some(*session)
+                            })
+                    })
+                    .flatten();
                 shared.detach(client);
+                if let Some(session) = control_session {
+                    shared.publish_to_client(client, EventPayload::Detached { session, by: None });
+                }
             }
             ProtocolMessage::SetColorScheme(color_scheme) => {
                 if hello.kind == ClientKind::Interactive {
@@ -19586,6 +20122,397 @@ mod tests {
     }
 
     #[test]
+    fn refresh_client_controls_pane_entry_gates_and_state_notifications() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, pane) = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_session("control-state")
+            .expect("control state session");
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(client, session).expect("attach control");
+        take_reliable_messages(&mailbox);
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let state = |state: &str| {
+            CommandInvocation::new("refresh-client", ["-A", &format!("{pane}:{state}")])
+        };
+
+        shared
+            .execute(client, ClientKind::Control, &mut context, &state("off"))
+            .expect("disable pane output");
+        shared.publish_control_output_for_pane(pane, &Arc::from(b"hidden".as_slice()));
+        shared
+            .execute(client, ClientKind::Control, &mut context, &state("on"))
+            .expect("enable pane output");
+        shared.publish_control_output_for_pane(pane, &Arc::from(b"visible".as_slice()));
+        shared
+            .execute(client, ClientKind::Control, &mut context, &state("pause"))
+            .expect("pause pane output");
+        shared
+            .execute(client, ClientKind::Control, &mut context, &state("pause"))
+            .expect("pause pane output twice");
+        shared.publish_control_output_for_pane(pane, &Arc::from(b"paused".as_slice()));
+        shared
+            .execute(
+                client,
+                ClientKind::Control,
+                &mut context,
+                &state("continue"),
+            )
+            .expect("continue pane output");
+        shared
+            .execute(
+                client,
+                ClientKind::Control,
+                &mut context,
+                &state("continue"),
+            )
+            .expect("continue pane output twice");
+        shared.publish_control_output_for_pane(pane, &Arc::from(b"resumed".as_slice()));
+        shared
+            .execute(
+                client,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new(
+                    "refresh-client",
+                    [
+                        "-A",
+                        "bad",
+                        "-A",
+                        "%999999:on",
+                        "-A",
+                        &format!("{pane}:bogus"),
+                    ],
+                ),
+            )
+            .expect("ignore malformed pane states");
+
+        let payloads = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event { payload, .. }) => Some(payload),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(payloads.iter().all(|payload| !matches!(
+            payload,
+            EventPayload::PaneOutput { bytes, .. } if bytes == b"hidden" || bytes == b"paused"
+        )));
+        assert_eq!(
+            payloads
+                .iter()
+                .filter_map(|payload| match payload {
+                    EventPayload::PaneOutput { bytes, .. } => Some(bytes.as_slice()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            [b"visible".as_slice(), b"resumed".as_slice()]
+        );
+        assert_eq!(
+            payloads
+                .iter()
+                .filter_map(|payload| match payload {
+                    EventPayload::PaneOutputState { paused, .. } => Some(*paused),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            [true, false]
+        );
+    }
+
+    #[test]
+    fn refresh_client_a_requires_control_and_flags_round_trip() {
+        let mut parsed_flags = ControlClientOutput::default();
+        apply_control_client_flags(&mut parsed_flags, "no-output,wait-exit,pause-after,unknown");
+        assert!(parsed_flags.no_output);
+        assert!(parsed_flags.wait_exit);
+        assert_eq!(parsed_flags.pause_after_ms, Some(0));
+        apply_control_client_flags(
+            &mut parsed_flags,
+            "!no-output,!wait-exit,!pause-after,pause-after=3",
+        );
+        assert!(!parsed_flags.no_output);
+        assert!(!parsed_flags.wait_exit);
+        assert_eq!(parsed_flags.pause_after_ms, Some(3000));
+        apply_control_client_flags(&mut parsed_flags, "!pause-after=3,pause-after=overflow");
+        assert_eq!(parsed_flags.pause_after_ms, None);
+
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, pane) = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_session("control-flags")
+            .expect("control flags session");
+        let control_mailbox = OutboundMailbox::new();
+        let interactive_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("interactive".to_owned()),
+            None,
+            Arc::clone(&interactive_mailbox),
+        );
+        shared.attach(control, session).expect("attach control");
+        shared
+            .attach(interactive, session)
+            .expect("attach interactive");
+        take_reliable_messages(&control_mailbox);
+        take_reliable_messages(&interactive_mailbox);
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+
+        let error = shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-A", &format!("{pane}:off")]),
+            )
+            .expect_err("non-control pane state");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "not a control client"
+        ));
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-f", "no-output,pause-after=2"]),
+            )
+            .expect("ignore control flags on an interactive client");
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "refresh-client",
+                    ["-t", "control", "-F", "no-output,wait-exit,pause-after=2"],
+                ),
+            )
+            .expect("set control flags from another client");
+        shared.publish_control_output_for_pane(pane, &Arc::from(b"suppressed".as_slice()));
+
+        let listed = shared
+            .list_clients(
+                &context,
+                "list-clients",
+                &["-F".to_owned(), "#{client_name}:#{client_flags}".to_owned()],
+            )
+            .expect("list client flags")
+            .output;
+        assert!(listed.contains("control:control-mode,no-output,wait-exit,pause-after=2"));
+        assert!(listed.contains("interactive:"));
+        let messages = take_reliable_messages(&control_mailbox);
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::ControlFlags {
+                    wait_exit: true,
+                    pause_after_ms: Some(2000),
+                    no_output: true,
+                },
+                ..
+            })
+        )));
+        assert!(messages.iter().all(|message| !matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::PaneOutput { bytes, .. },
+                ..
+            }) if bytes == b"suppressed"
+        )));
+
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new(
+                    "refresh-client",
+                    ["-f", "!no-output,!wait-exit,!pause-after"],
+                ),
+            )
+            .expect("clear control flags");
+        assert_eq!(
+            format_client_flags(&shared.inner.lock(), control),
+            "control-mode"
+        );
+    }
+
+    #[test]
+    fn control_output_age_pause_kill_and_fair_pacing_are_deterministic() {
+        let now = Instant::now();
+        assert_eq!(
+            control_output_age_action(
+                Some(1000),
+                now.checked_sub(Duration::from_millis(999)).unwrap(),
+                now,
+            ),
+            ControlOutputAgeAction::Output(999)
+        );
+        assert_eq!(
+            control_output_age_action(
+                Some(1000),
+                now.checked_sub(Duration::from_secs(1)).unwrap(),
+                now,
+            ),
+            ControlOutputAgeAction::Pause
+        );
+        assert_eq!(
+            control_output_age_action(None, now.checked_sub(CONTROL_MAXIMUM_AGE).unwrap(), now,),
+            ControlOutputAgeAction::Kill
+        );
+
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+        let flood = PaneId(1);
+        let quiet = PaneId(2);
+        {
+            let mut inner = shared.inner.lock();
+            let output = inner
+                .control_outputs
+                .get_mut(&client)
+                .expect("control output");
+            output.pause_after_ms = Some(10_000);
+            for (pane, bytes) in [
+                (flood, Arc::<[u8]>::from(vec![b'x'; 20_000])),
+                (quiet, Arc::<[u8]>::from(b"quiet".as_slice())),
+            ] {
+                output
+                    .panes
+                    .entry(pane)
+                    .or_default()
+                    .pending
+                    .push_back(PendingControlOutput {
+                        bytes,
+                        offset: 0,
+                        enqueued_at: now.checked_sub(Duration::from_millis(5)).unwrap(),
+                    });
+            }
+        }
+        shared.pump_control_output_at(now);
+        let output = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::PaneOutputAged {
+                            pane,
+                            age_ms,
+                            bytes,
+                        },
+                    ..
+                }) => Some((pane, age_ms, bytes)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(output.len() >= 2);
+        assert!(output.iter().all(|(_, _, bytes)| bytes.len() <= 2730));
+        assert!(output.iter().take(2).any(|(pane, _, _)| *pane == quiet));
+        let flood_ages = output
+            .iter()
+            .filter_map(|(pane, age, _)| (*pane == flood).then_some(*age))
+            .collect::<Vec<_>>();
+        assert!(flood_ages.windows(2).all(|ages| ages[0] <= ages[1]));
+
+        let paused_mailbox = OutboundMailbox::new();
+        let (paused, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&paused_mailbox),
+        );
+        take_reliable_messages(&paused_mailbox);
+        {
+            let mut inner = shared.inner.lock();
+            let output = inner
+                .control_outputs
+                .get_mut(&paused)
+                .expect("paused output");
+            output.pause_after_ms = Some(1000);
+            output
+                .panes
+                .entry(flood)
+                .or_default()
+                .pending
+                .push_back(PendingControlOutput {
+                    bytes: Arc::from(b"old".as_slice()),
+                    offset: 0,
+                    enqueued_at: now.checked_sub(Duration::from_secs(1)).unwrap(),
+                });
+        }
+        shared.pump_control_output_at(now);
+        assert!(
+            take_reliable_messages(&paused_mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::PaneOutputState { pane, paused: true },
+                        ..
+                    }) if *pane == flood
+                ))
+        );
+
+        let killed_mailbox = OutboundMailbox::new();
+        let (killed, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&killed_mailbox),
+        );
+        {
+            let mut inner = shared.inner.lock();
+            inner
+                .control_outputs
+                .get_mut(&killed)
+                .expect("killed output")
+                .panes
+                .entry(flood)
+                .or_default()
+                .pending
+                .push_back(PendingControlOutput {
+                    bytes: Arc::from(b"ancient".as_slice()),
+                    offset: 0,
+                    enqueued_at: now.checked_sub(CONTROL_MAXIMUM_AGE).unwrap(),
+                });
+        }
+        shared.pump_control_output_at(now);
+        assert!(
+            take_reliable_messages(&killed_mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlExit { reason },
+                        ..
+                    }) if reason == "too far behind"
+                ))
+        );
+    }
+
+    #[test]
     fn configuration_override_updates_state_provenance_and_broadcast() {
         let shared = Arc::new(Shared::new(44));
         let mailbox = OutboundMailbox::new();
@@ -21167,6 +22094,121 @@ mod tests {
             &expected[start..expected_end]
         );
         assert!(shared.inner.lock().pane_pipes.contains_key(&pane));
+
+        shared.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pipe_pane_has_no_gap_when_control_attaches_during_a_flood() {
+        let shared = Arc::new(Shared::new(1));
+        let interactive_mailbox = OutboundMailbox::new();
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&interactive_mailbox),
+        );
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-s", "pipe-control-flood", "exec /bin/sh"],
+                ),
+            )
+            .expect("new flood session");
+        let session = context.session.expect("session");
+        let pane = context.pane.expect("pane");
+        shared
+            .attach(interactive, session)
+            .expect("attach flood session");
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        terminal.resize(200, 50, 8, 16);
+        wait_for_viewport(
+            &terminal,
+            TerminalViewId(interactive.0),
+            "flood terminal did not attach",
+            |viewport| matches!(viewport.status, SessionStatus::Running),
+        );
+        assert!(terminal.send_raw_input(Arc::from(
+            b"stty raw -echo; printf 'ZZ_HANDOFF_READY\\n'; IFS= read -r command; eval \"$command\"; IFS= read -r _\n"
+                .as_slice()
+        )));
+        let ready_deadline = Instant::now() + Duration::from_secs(10);
+        while !viewport_text(&terminal.latest_viewport()).contains("ZZ_HANDOFF_READY") {
+            assert!(
+                Instant::now() < ready_deadline,
+                "flood terminal did not start"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let directory = tempfile::tempdir().expect("pipe directory");
+        let output = directory.path().join("handoff.bin");
+        let pipe_command = format!("cat > {}", shell_quote(&output));
+        shared
+            .execute(
+                interactive,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "pipe-pane",
+                    ["-t", pane.to_string().as_str(), pipe_command.as_str()],
+                ),
+            )
+            .expect("open handoff pipe");
+        let payload_bytes = 2_usize * 1024 * 1024;
+        assert!(
+            terminal.send_raw_input(Arc::from(
+                format!("yes 0123456789abcdef | head -c {payload_bytes}; printf 'ENDMARK\\n'\n")
+                    .into_bytes()
+            ))
+        );
+        let attach_deadline = Instant::now() + Duration::from_secs(10);
+        while fs::metadata(&output).map_or(0, |metadata| metadata.len()) < 128 * 1024 {
+            assert!(
+                Instant::now() < attach_deadline,
+                "flood did not reach the handoff point"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        shared
+            .attach(control, session)
+            .expect("attach control during flood");
+        take_reliable_messages(&control_mailbox);
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let captured = loop {
+            let captured = fs::read(&output).unwrap_or_default();
+            let _ = take_reliable_messages(&control_mailbox);
+            if captured.ends_with(b"ENDMARK\n") {
+                break captured;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "handoff flood stalled after {} bytes",
+                captured.len()
+            );
+            thread::sleep(Duration::from_millis(5));
+        };
+        let pattern = b"0123456789abcdef\n";
+        let mut expected = pattern.repeat(payload_bytes.div_ceil(pattern.len()));
+        expected.truncate(payload_bytes);
+        expected.extend_from_slice(b"ENDMARK\n");
+        assert_eq!(captured.len(), expected.len());
+        assert_eq!(captured, expected);
 
         shared.request_shutdown();
     }
@@ -31974,7 +33016,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn detached_refresh_client_accepts_the_pin_grammar_then_errors_exactly() {
+    fn detached_refresh_client_accepts_the_pin_grammar_then_rejects_the_unknown_target() {
         let shared = Arc::new(Shared::new(1));
         let mut context = ExecutionContext::default();
         let error = shared
@@ -32008,7 +33050,7 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(matches!(
             error,
             DaemonError::Server(ServerError::InvalidCommand(message))
-                if message == "no current client"
+                if message == "can't find client: client"
         ));
     }
 

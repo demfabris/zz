@@ -83,11 +83,21 @@ fn drive<W: Write>(
     initial: CommandInvocation,
     output: &mut ControlWriter<W>,
 ) -> io::Result<u8> {
-    let (events, receiver) = mpsc::channel();
+    let (events, receiver) = mpsc::sync_channel(32);
     spawn_protocol_reader(Arc::clone(client), events.clone());
+    let mut stdin_started = false;
     if let Some(error) = unknown_command(&initial.name) {
         output.write_line(&error)?;
-        output.exit(None)?;
+        finish_exit(
+            output,
+            None,
+            false,
+            false,
+            &events,
+            &mut stdin_started,
+            &receiver,
+            &mut VecDeque::new(),
+        )?;
         return Ok(1);
     }
 
@@ -103,15 +113,33 @@ fn drive<W: Write>(
         &mut pending_stdin,
     )?;
     if initial_result.exit.is_some() {
-        output.exit(initial_result.exit.reason())?;
+        finish_exit(
+            output,
+            initial_result.exit.reason(),
+            state.wait_exit,
+            false,
+            &events,
+            &mut stdin_started,
+            &receiver,
+            &mut pending_stdin,
+        )?;
         return Ok(initial_result.exit_code);
     }
     if initial_result.exit_code != 0 || state.attached_session.is_none() {
-        output.exit(None)?;
+        finish_exit(
+            output,
+            None,
+            state.wait_exit,
+            false,
+            &events,
+            &mut stdin_started,
+            &receiver,
+            &mut pending_stdin,
+        )?;
         return Ok(initial_result.exit_code);
     }
 
-    spawn_stdin_reader(events);
+    ensure_stdin_reader(&events, &mut stdin_started);
     loop {
         let event = pending_stdin.pop_front().map_or_else(
             || receiver.recv().unwrap_or(MainEvent::Disconnected),
@@ -121,7 +149,17 @@ fn drive<W: Write>(
             MainEvent::Stdin(StdinEvent::Line(line)) => match parse_line(&line) {
                 ParsedLine::Detach => {
                     let _ = client.detach();
-                    output.exit(None)?;
+                    drain_before_exit(&receiver, &mut state, output)?;
+                    finish_exit(
+                        output,
+                        None,
+                        state.wait_exit,
+                        false,
+                        &events,
+                        &mut stdin_started,
+                        &receiver,
+                        &mut pending_stdin,
+                    )?;
                     return Ok(0);
                 }
                 ParsedLine::Ignore => {}
@@ -138,7 +176,16 @@ fn drive<W: Write>(
                             &mut pending_stdin,
                         )?;
                         if result.exit.is_some() {
-                            output.exit(result.exit.reason())?;
+                            finish_exit(
+                                output,
+                                result.exit.reason(),
+                                state.wait_exit,
+                                false,
+                                &events,
+                                &mut stdin_started,
+                                &receiver,
+                                &mut pending_stdin,
+                            )?;
                             return Ok(result.exit_code);
                         }
                         if result.abort_line {
@@ -149,24 +196,61 @@ fn drive<W: Write>(
             },
             MainEvent::Stdin(StdinEvent::Eof) => {
                 let _ = client.detach();
-                output.exit(None)?;
+                drain_before_exit(&receiver, &mut state, output)?;
+                finish_exit(
+                    output,
+                    None,
+                    state.wait_exit,
+                    true,
+                    &events,
+                    &mut stdin_started,
+                    &receiver,
+                    &mut pending_stdin,
+                )?;
                 return Ok(0);
             }
             MainEvent::Stdin(StdinEvent::Error(error)) => {
                 eprintln!("zz: {error}");
                 let _ = client.detach();
-                output.exit(None)?;
+                finish_exit(
+                    output,
+                    None,
+                    state.wait_exit,
+                    true,
+                    &events,
+                    &mut stdin_started,
+                    &receiver,
+                    &mut pending_stdin,
+                )?;
                 return Ok(1);
             }
             MainEvent::Protocol(message) => {
                 let exit = handle_protocol(*message, &mut state, output)?;
                 if exit.is_some() {
-                    output.exit(exit.reason())?;
+                    finish_exit(
+                        output,
+                        exit.reason(),
+                        state.wait_exit,
+                        false,
+                        &events,
+                        &mut stdin_started,
+                        &receiver,
+                        &mut pending_stdin,
+                    )?;
                     return Ok(u8::from(exit != ExitSignal::Clean));
                 }
             }
             MainEvent::Disconnected => {
-                output.exit(Some("server exited unexpectedly"))?;
+                finish_exit(
+                    output,
+                    Some("server exited unexpectedly"),
+                    state.wait_exit,
+                    false,
+                    &events,
+                    &mut stdin_started,
+                    &receiver,
+                    &mut pending_stdin,
+                )?;
                 return Ok(1);
             }
         }
@@ -247,6 +331,7 @@ struct ControlState {
     snapshot: MuxSnapshot,
     last_windows: BTreeMap<SessionId, WindowId>,
     self_name: Option<String>,
+    wait_exit: bool,
 }
 
 impl ControlState {
@@ -346,13 +431,28 @@ fn handle_protocol<W: Write>(
         ProtocolMessage::Event(event) => match event.payload {
             EventPayload::Snapshot(snapshot) => state.adopt_snapshot(snapshot),
             EventPayload::HookEvent { name, variables } => {
-                if let Some(line) = render_hook(state, &name, &variables) {
+                if state.attached_session.is_some()
+                    && let Some(line) = render_hook(state, &name, &variables)
+                {
                     output.notify(line.as_bytes())?;
                 }
             }
             EventPayload::PaneOutput { pane, bytes } => {
                 output.notify(&render_pane_output(pane, &bytes))?;
             }
+            EventPayload::PaneOutputState { pane, paused } => {
+                output.notify(
+                    format!("%{} {pane}", if paused { "pause" } else { "continue" }).as_bytes(),
+                )?;
+            }
+            EventPayload::PaneOutputAged {
+                pane,
+                age_ms,
+                bytes,
+            } => {
+                output.notify(&render_pane_output_aged(pane, age_ms, &bytes))?;
+            }
+            EventPayload::ControlFlags { wait_exit, .. } => state.wait_exit = wait_exit,
             EventPayload::TimedClientMessage { text, .. } => {
                 let mut line = b"%message ".to_vec();
                 line.extend(render_message(&text));
@@ -463,6 +563,17 @@ fn render_hook(
 
 fn render_pane_output(pane: zz_protocol::PaneId, bytes: &[u8]) -> Vec<u8> {
     let mut line = format!("%output {pane} ").into_bytes();
+    append_output_bytes(&mut line, bytes);
+    line
+}
+
+fn render_pane_output_aged(pane: zz_protocol::PaneId, age_ms: u64, bytes: &[u8]) -> Vec<u8> {
+    let mut line = format!("%extended-output {pane} {age_ms} : ").into_bytes();
+    append_output_bytes(&mut line, bytes);
+    line
+}
+
+fn append_output_bytes(line: &mut Vec<u8>, bytes: &[u8]) {
     for byte in bytes {
         if *byte < 0x20 || *byte == b'\\' {
             line.extend([
@@ -475,7 +586,6 @@ fn render_pane_output(pane: zz_protocol::PaneId, bytes: &[u8]) -> Vec<u8> {
             line.push(*byte);
         }
     }
-    line
 }
 
 fn render_message(text: &str) -> Vec<u8> {
@@ -521,7 +631,29 @@ fn response_request_id(response: &CommandResponse) -> u64 {
     }
 }
 
-fn spawn_protocol_reader(client: Arc<InteractiveClient>, events: mpsc::Sender<MainEvent>) {
+fn drain_before_exit<W: Write>(
+    receiver: &mpsc::Receiver<MainEvent>,
+    state: &mut ControlState,
+    output: &mut ControlWriter<W>,
+) -> io::Result<()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
+            return Ok(());
+        };
+        match receiver.recv_timeout(remaining) {
+            Ok(MainEvent::Protocol(message)) => {
+                if handle_protocol(*message, state, output)?.is_some() {
+                    return Ok(());
+                }
+            }
+            Ok(_) => {}
+            Err(_) => return Ok(()),
+        }
+    }
+}
+
+fn spawn_protocol_reader(client: Arc<InteractiveClient>, events: mpsc::SyncSender<MainEvent>) {
     let _ = thread::Builder::new()
         .name("zz-control-protocol".to_owned())
         .spawn(move || {
@@ -538,7 +670,7 @@ fn spawn_protocol_reader(client: Arc<InteractiveClient>, events: mpsc::Sender<Ma
         });
 }
 
-fn spawn_stdin_reader(events: mpsc::Sender<MainEvent>) {
+fn spawn_stdin_reader(events: mpsc::SyncSender<MainEvent>) {
     let _ = thread::Builder::new()
         .name("zz-control-stdin".to_owned())
         .spawn(move || {
@@ -577,6 +709,52 @@ fn spawn_stdin_reader(events: mpsc::Sender<MainEvent>) {
                 }
             }
         });
+}
+
+fn ensure_stdin_reader(events: &mpsc::SyncSender<MainEvent>, started: &mut bool) {
+    if !*started {
+        spawn_stdin_reader(events.clone());
+        *started = true;
+    }
+}
+
+fn finish_exit<W: Write>(
+    output: &mut ControlWriter<W>,
+    reason: Option<&str>,
+    wait_exit: bool,
+    input_closed: bool,
+    events: &mpsc::SyncSender<MainEvent>,
+    stdin_started: &mut bool,
+    receiver: &mpsc::Receiver<MainEvent>,
+    pending_stdin: &mut VecDeque<StdinEvent>,
+) -> io::Result<()> {
+    output.emit_exit(reason)?;
+    if wait_exit && !input_closed {
+        ensure_stdin_reader(events, stdin_started);
+        wait_for_exit_input(receiver, pending_stdin);
+    }
+    output.finish()
+}
+
+fn wait_for_exit_input(
+    receiver: &mpsc::Receiver<MainEvent>,
+    pending_stdin: &mut VecDeque<StdinEvent>,
+) {
+    loop {
+        let event = pending_stdin
+            .pop_front()
+            .map(MainEvent::Stdin)
+            .or_else(|| receiver.recv().ok());
+        match event {
+            Some(MainEvent::Stdin(StdinEvent::Line(line))) if line.is_empty() => return,
+            Some(MainEvent::Stdin(StdinEvent::Eof | StdinEvent::Error(_))) | None => return,
+            Some(
+                MainEvent::Stdin(StdinEvent::Line(_))
+                | MainEvent::Protocol(_)
+                | MainEvent::Disconnected,
+            ) => {}
+        }
+    }
 }
 
 fn parse_line(line: &str) -> ParsedLine {
@@ -744,13 +922,17 @@ impl<W: Write> ControlWriter<W> {
         self.output.flush()
     }
 
-    fn exit(&mut self, reason: Option<&str>) -> io::Result<()> {
+    fn emit_exit(&mut self, reason: Option<&str>) -> io::Result<()> {
         self.block_open = false;
         self.flush_deferred()?;
         match reason {
             Some(reason) => writeln!(self.output, "%exit {reason}")?,
             None => self.output.write_all(b"%exit\n")?,
         }
+        self.output.flush()
+    }
+
+    fn finish(&mut self) -> io::Result<()> {
         if self.double {
             self.output.write_all(ST)?;
             self.st_sent = true;
@@ -781,7 +963,7 @@ struct CommandResult {
     abort_line: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExitSignal {
     None,
     Clean,
@@ -969,7 +1151,8 @@ mod tests {
     fn double_control_wraps_the_stream() {
         let mut writer = ControlWriter::new(Vec::new(), true);
         writer.start().unwrap();
-        writer.exit(None).unwrap();
+        writer.emit_exit(None).unwrap();
+        writer.finish().unwrap();
         assert_eq!(writer.output, b"\x1bP1000p%exit\n\x1b\\");
     }
 
@@ -1038,11 +1221,68 @@ mod tests {
             render_pane_output(zz_protocol::PaneId(7), &[0, 0x1f, b'\\', 0x7f, 0x80, 0xff]),
             b"%output %7 \\000\\037\\134\x7f\x80\xff"
         );
+        assert_eq!(
+            render_pane_output_aged(
+                zz_protocol::PaneId(7),
+                42,
+                &[0, 0x1f, b'\\', 0x7f, 0x80, 0xff]
+            ),
+            b"%extended-output %7 42 : \\000\\037\\134\x7f\x80\xff"
+        );
         let mut writer = ControlWriter::new(Vec::new(), false);
         let frame = writer.begin_at(22, 1).unwrap();
         writer.notify(&[b'%', 0xff]).unwrap();
         writer.end(&frame, false).unwrap();
         assert_eq!(writer.output, b"%begin 22 1 1\n%end 22 1 1\n%\xff\n");
+    }
+
+    #[test]
+    fn pane_output_state_and_flags_follow_the_control_event_channel() {
+        let pane = zz_protocol::PaneId(7);
+        let mut state = ControlState::default();
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        for payload in [
+            EventPayload::PaneOutputState { pane, paused: true },
+            EventPayload::PaneOutputState {
+                pane,
+                paused: false,
+            },
+            EventPayload::ControlFlags {
+                wait_exit: true,
+                pause_after_ms: Some(1000),
+                no_output: false,
+            },
+        ] {
+            assert_eq!(
+                handle_protocol(
+                    ProtocolMessage::Event(zz_protocol::Event {
+                        sequence: 1,
+                        payload,
+                    }),
+                    &mut state,
+                    &mut writer,
+                )
+                .unwrap(),
+                ExitSignal::None
+            );
+        }
+        assert!(state.wait_exit);
+        assert_eq!(writer.output, b"%pause %7\n%continue %7\n");
+    }
+
+    #[test]
+    fn wait_exit_releases_on_empty_line_and_eof() {
+        let (_sender, receiver) = mpsc::sync_channel(32);
+        let mut pending = VecDeque::from([
+            StdinEvent::Line("keep draining".to_owned()),
+            StdinEvent::Line(String::new()),
+        ]);
+        wait_for_exit_input(&receiver, &mut pending);
+        assert!(pending.is_empty());
+
+        let mut pending = VecDeque::from([StdinEvent::Eof]);
+        wait_for_exit_input(&receiver, &mut pending);
+        assert!(pending.is_empty());
     }
 
     #[test]

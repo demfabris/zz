@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 66;
+pub const PROTOCOL_VERSION: u16 = 67;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
@@ -1721,6 +1721,20 @@ pub enum EventPayload {
         pane: PaneId,
         bytes: Vec<u8>,
     },
+    PaneOutputState {
+        pane: PaneId,
+        paused: bool,
+    },
+    PaneOutputAged {
+        pane: PaneId,
+        age_ms: u64,
+        bytes: Vec<u8>,
+    },
+    ControlFlags {
+        wait_exit: bool,
+        pause_after_ms: Option<u64>,
+        no_output: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2170,6 +2184,29 @@ mod tests {
                 bytes: Vec::new(),
             }),
             41
+        );
+        assert_eq!(
+            payload_tag(super::EventPayload::PaneOutputState {
+                pane: crate::PaneId(1),
+                paused: false,
+            }),
+            42
+        );
+        assert_eq!(
+            payload_tag(super::EventPayload::PaneOutputAged {
+                pane: crate::PaneId(1),
+                age_ms: 0,
+                bytes: Vec::new(),
+            }),
+            43
+        );
+        assert_eq!(
+            payload_tag(super::EventPayload::ControlFlags {
+                wait_exit: false,
+                pause_after_ms: None,
+                no_output: false,
+            }),
+            44
         );
     }
 }

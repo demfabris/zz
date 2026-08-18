@@ -365,6 +365,35 @@ tap (the wire ships rendered grids today; `%output` carries raw bytes), notifica
 (from phase 5's hook bus), and `refresh-client -C`/`-B`/`-A` (client size, subscriptions,
 pane visibility). The harness (phase 2) does not wait for this.
 
+- **Wave 6a** (`c4206f0` + `4c7bfa5`, CONFIRMED-CLOSED 2026-08-18) — the
+  skeleton + framing. Protocol v65: `ClientKind::Control` appended (attach
+  rights + event subscription + Command-style output routing, no frames, no
+  input, no color scheme; never-wedge on interactive-only commands).
+  `crates/zz/src/control_mode.rs`: -C/-CC argv counting, CMD_STARTSERVER-
+  gated autostart (pin-probed: `-C ls` neither starts nor frames; bare `-C`
+  = new-session and does), connect failure = bare stderr with no framing,
+  `%begin/%end/%error <t> <n> <f>` (f=0 argv / f=1 stdin; per-client
+  monotonic n = ledgered safe subset of the pin's server-global sparse
+  counter), the attach rule (non-attaching commands exit rc 0 with a bare
+  `%exit` after their block; `new-session -d` never reads stdin; stdin
+  gated until attached), argv parse failures unframed, stdin `parse error:`
+  blocks, empty-line detach, whitespace/comment no-block, `;` chains one
+  block per command with abort-on-error per line (pin-probed), all %exit
+  paths, -CC near-raw termios + `\x1bP1000p`/`\x1b\\` envelope (both
+  RAII-guaranteed on unwind), and a block-state writer that defers
+  notification lines while a block is open (the 6b seam). Fix round: bare
+  `list-sessions`/`list-windows`/`list-panes` now render the pin's default
+  templates through the format engine — a pre-existing phase-4 gap (the
+  harness always diffed with -F; the legacy `(id $N)` shapes reached no
+  other surface). Live stream differ 10/10 vs the pin with a re-proven
+  positive control. Ledgered: `history_size`/`history_bytes` render honest
+  zeros (shape exact, needs a history-stats seam);
+  `session_grouped`/`session_group`/`pane_floating_flag` render empty
+  through conditionals; zz blocks are COMPLETE where the pin's WAIT
+  commands emit late bare lines; zz emits ONE block per stdin command where
+  the pin adds a flags-0 block per after-hook; no `default-client-command`
+  option (new-session hardcoded, the pin's default).
+
 ## Phase 7 — the binary surface (~1 week)
 
 - tmux argv on the zz binary: `-L` (name → socket path), `-S`, `-f`, `-2`, `-u`, plus `-C`/

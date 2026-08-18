@@ -381,14 +381,15 @@ pane visibility). The harness (phase 2) does not wait for this.
 
 ## Phase 8 — the attach contract (gated on the TUI design)
 
-The four invocations the alias lives on, none of which work today:
+The four invocations the alias lives on (rows 3-4 largely closed by 7a,
+2026-08-18):
 
 | Invocation | tmux | zz today |
 | --- | --- | --- |
 | `tmux` | new session + attach this TTY | boots the GUI, no TTY/headless check |
 | `tmux new -s foo` | create **and** attach this process | creates, exits — the daemon applies `MuxEffect::Attach` only for Interactive clients |
-| `tmux attach -t foo` | attach this TTY | usage error — the attach subcommand takes only a bare positional |
-| `tmux attach` | attach, starting the server if needed | closest match, but refuses to spawn a missing daemon (command mode does auto-spawn; attach doesn't) |
+| `tmux attach -t foo` | attach this TTY | works — full `-t`/`-d` grammar, TUI attach on a TTY, engine-identical `can't find session:` headless (7a) |
+| `tmux attach` | attach, starting the server if needed | works — autostarts the daemon (CMD_STARTSERVER), `no sessions` on an empty server, TTY check last (7a) |
 
 Needs: TUI-as-default on a TTY (the [TUI client](/designs/tui-client.md) design's open
 rungs — this is why the phase is gated, not estimated), `attach -t`/flag parsing,

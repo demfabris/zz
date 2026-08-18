@@ -756,7 +756,13 @@ fn run_command_mode(
                 .then(tui_browser_provider)
                 .flatten()
         };
-        let reconnect = |path: &Path| connect_interactive_client(path, TerminalColorScheme::Dark);
+        let reconnect = |path: &Path| {
+            connect_interactive_client_with_config(
+                path,
+                TerminalColorScheme::Dark,
+                mux_config_files,
+            )
+        };
         let request = options
             .with_browser_provider(browser_provider)
             .with_local_reconnect(&reconnect);
@@ -1031,7 +1037,7 @@ fn tmux_label_creation_error(
     match std::fs::metadata(parent) {
         Ok(metadata) if metadata.is_dir() => None,
         Ok(_) => Some(TmuxLabelCreationError {
-            message: format!("error creating {} (Not a directory)", path.display()),
+            message: format!("error connecting to {} (Not a directory)", path.display()),
             kind: ErrorKind::NotADirectory,
         }),
         Err(error) => Some(TmuxLabelCreationError {
@@ -1644,10 +1650,19 @@ fn connect_interactive_client(
     path: &Path,
     color_scheme: TerminalColorScheme,
 ) -> Result<InteractiveClient, DaemonError> {
+    connect_interactive_client_with_config(path, color_scheme, &[])
+}
+
+#[cfg(not(target_os = "ios"))]
+fn connect_interactive_client_with_config(
+    path: &Path,
+    color_scheme: TerminalColorScheme,
+    mux_config_files: &[PathBuf],
+) -> Result<InteractiveClient, DaemonError> {
     connect_or_spawn_daemon(
         path,
         Some(color_scheme),
-        &[],
+        mux_config_files,
         || InteractiveClient::connect_with_color_scheme(path, color_scheme),
         InteractiveClient::server_hello,
     )

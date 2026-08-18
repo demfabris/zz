@@ -27,6 +27,7 @@ use zz_daemon::{
     DaemonError, Endpoint, InteractiveClient, classify_local_connect_error, configured_fleet_hosts,
     default_socket_path, short_device_name, terminate_incompatible_daemon,
 };
+use zz_protocol::{CommandInvocation, CommandResponse, ProtocolMessage, ServerError};
 use zz_terminal::TerminalColorScheme;
 
 use crate::browser::BrowserFrameProvider;
@@ -143,6 +144,7 @@ pub fn run<'a>(request: impl Into<RunRequest<'a>>) -> Result<(), Error> {
         options.restart_daemon,
         request.local_reconnect,
     )?;
+    resolve_attach_target(&initial, options.session.as_deref())?;
     if !interactive {
         return Err(Error::message("attach requires an interactive terminal"));
     }
@@ -237,19 +239,25 @@ fn initial_connection(
     restart_daemon: bool,
     reconnect: Option<&dyn Fn(&Path) -> Result<InteractiveClient, DaemonError>>,
 ) -> Result<InteractiveClient, Error> {
-    if !interactive && !matches!(endpoint, Endpoint::Local(_)) {
-        return Err(Error::message("attach requires an interactive terminal"));
-    }
     match InteractiveClient::connect_endpoint(endpoint, TerminalColorScheme::Dark) {
         Ok(client) => Ok(client),
         Err(error) if matches!(endpoint, Endpoint::Local(_)) => {
             let error = classify_local_connect_error(local_socket, error);
+            if matches!(
+                &error,
+                DaemonError::Io(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::NotFound
+                            | io::ErrorKind::ConnectionRefused
+                            | io::ErrorKind::ConnectionReset
+                    )
+            ) {
+                return reconnect.ok_or_else(|| Error::message(error.to_string()))?(local_socket)
+                    .map_err(|restart| Error::message(format!("daemon start failed: {restart}")));
+            }
             let DaemonError::IncompatibleDaemon { .. } = error else {
-                return Err(Error::message(if interactive {
-                    error.to_string()
-                } else {
-                    "attach requires an interactive terminal".to_owned()
-                }));
+                return Err(Error::message(error.to_string()));
             };
             if !interactive {
                 return Err(Error::message(format!("{error}\n{MANUAL_RESTART_HINT}")));
@@ -273,11 +281,48 @@ fn initial_connection(
             )
             .map_err(|restart| Error::message(format!("daemon restart failed: {restart}")))
         }
-        Err(error) => Err(Error::message(if interactive {
-            error.to_string()
-        } else {
-            "attach requires an interactive terminal".to_owned()
-        })),
+        Err(error) => Err(Error::message(error.to_string())),
+    }
+}
+
+fn resolve_attach_target(client: &InteractiveClient, target: Option<&str>) -> Result<(), Error> {
+    let arguments = target.map_or_else(Vec::new, |target| vec!["-t".to_owned(), target.to_owned()]);
+    let request_id = client
+        .execute(CommandInvocation::new("has-session", arguments))
+        .map_err(|error| Error::message(error.to_string()))?;
+    loop {
+        match client
+            .recv()
+            .map_err(|error| Error::message(error.to_string()))?
+        {
+            ProtocolMessage::CommandResponse(CommandResponse::Success {
+                request_id: response_id,
+                exit_code: 0,
+                ..
+            }) if response_id == request_id => return Ok(()),
+            ProtocolMessage::CommandResponse(CommandResponse::Success {
+                request_id: response_id,
+                exit_code,
+                ..
+            }) if response_id == request_id => {
+                return Err(Error::message(format!(
+                    "command exited with status {exit_code}"
+                )));
+            }
+            ProtocolMessage::CommandResponse(CommandResponse::Error {
+                request_id: response_id,
+                error: ServerError::SessionNotFound(_),
+                ..
+            }) if response_id == request_id && target.is_none() => {
+                return Err(Error::message("no sessions"));
+            }
+            ProtocolMessage::CommandResponse(CommandResponse::Error {
+                request_id: response_id,
+                error,
+                ..
+            }) if response_id == request_id => return Err(Error::message(error.to_string())),
+            _ => {}
+        }
     }
 }
 

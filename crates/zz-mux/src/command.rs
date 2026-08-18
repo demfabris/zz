@@ -7069,41 +7069,122 @@ pub fn valid_style(value: &str) -> bool {
     value
         .split([' ', ',', '\n'])
         .filter(|token| !token.is_empty())
-        .all(|token| {
-            if token.len() > 255 {
-                return false;
-            }
-            let lower = token.to_ascii_lowercase();
-            if matches!(lower.as_str(), "default" | "none") {
-                return true;
-            }
-            if lower.starts_with("fg=") || lower.starts_with("bg=") {
-                return parse_tmux_colour(&token[3..]).is_some();
-            }
-            lower.split('|').all(|attribute| {
-                let attribute = attribute.strip_prefix("no").unwrap_or(attribute);
-                matches!(
-                    attribute,
-                    "acs"
-                        | "bright"
-                        | "bold"
-                        | "dim"
-                        | "underscore"
-                        | "blink"
-                        | "reverse"
-                        | "hidden"
-                        | "italics"
-                        | "strikethrough"
-                        | "double-underscore"
-                        | "curly-underscore"
-                        | "dotted-underscore"
-                        | "dashed-underscore"
-                        | "overline"
-                        | "attr"
-                        | "link"
-                )
-            })
-        })
+        .all(valid_style_token)
+}
+
+fn valid_style_token(token: &str) -> bool {
+    if token.len() > 255 {
+        return false;
+    }
+    let lower = token.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "default"
+            | "none"
+            | "ignore"
+            | "noignore"
+            | "push-default"
+            | "pop-default"
+            | "set-default"
+            | "nolist"
+            | "norange"
+            | "noalign"
+            | "nolink"
+            | "noattr"
+    ) {
+        return true;
+    }
+    if let Some(colour) = lower
+        .strip_prefix("fg=")
+        .or_else(|| lower.strip_prefix("bg="))
+        .or_else(|| lower.strip_prefix("fill="))
+        .or_else(|| lower.strip_prefix("us="))
+    {
+        return parse_tmux_colour(colour).is_some();
+    }
+    if let Some(align) = lower.strip_prefix("align=") {
+        return matches!(align, "left" | "centre" | "right" | "absolute-centre");
+    }
+    if let Some(list) = lower.strip_prefix("list=") {
+        return matches!(list, "on" | "focus" | "left-marker" | "right-marker" | "no");
+    }
+    if let Some(range) = lower.strip_prefix("range=") {
+        return valid_style_range(range);
+    }
+    if let Some(dim) = lower.strip_prefix("dim=") {
+        return valid_style_percentage(dim);
+    }
+    if let Some(width) = lower.strip_prefix("width=") {
+        return valid_style_unsigned(width.strip_suffix('%').unwrap_or(width));
+    }
+    if let Some(pad) = lower.strip_prefix("pad=") {
+        return valid_style_unsigned(pad);
+    }
+    if lower.starts_with("link=") {
+        return true;
+    }
+    if let Some(attributes) = lower.strip_prefix("no") {
+        return valid_style_attributes(attributes);
+    }
+    valid_style_attributes(&lower)
+}
+
+fn valid_style_range(range: &str) -> bool {
+    let Some((kind, argument)) = range.split_once('|') else {
+        return !matches!(
+            range,
+            "control" | "pane" | "window" | "session" | "user" | ""
+        );
+    };
+    if argument.is_empty() {
+        return false;
+    }
+    match kind {
+        "control" => argument.parse::<u8>().is_ok_and(|value| value <= 9),
+        "pane" => argument.strip_prefix('%').is_some_and(valid_style_unsigned),
+        "window" => valid_style_unsigned(argument),
+        "session" => argument.strip_prefix('$').is_some_and(valid_style_unsigned),
+        "left" | "right" => false,
+        _ => true,
+    }
+}
+
+fn valid_style_percentage(value: &str) -> bool {
+    value
+        .strip_suffix('%')
+        .unwrap_or(value)
+        .parse::<u8>()
+        .is_ok_and(|value| value <= 100)
+}
+
+fn valid_style_unsigned(value: &str) -> bool {
+    !value.is_empty() && value.parse::<u32>().is_ok()
+}
+
+fn valid_style_attributes(attributes: &str) -> bool {
+    if matches!(attributes, "default" | "none") {
+        return true;
+    }
+    attributes.split('|').all(|attribute| {
+        matches!(
+            attribute,
+            "acs"
+                | "bright"
+                | "bold"
+                | "dim"
+                | "underscore"
+                | "blink"
+                | "reverse"
+                | "hidden"
+                | "italics"
+                | "strikethrough"
+                | "double-underscore"
+                | "curly-underscore"
+                | "dotted-underscore"
+                | "dashed-underscore"
+                | "overline"
+        )
+    })
 }
 
 fn validate_environment_name(name: &str) -> Result<(), ServerError> {
@@ -17022,6 +17103,75 @@ mod tests {
                 Err(ServerError::InvalidCommand(message))
                     if message == format!("invalid style: {value}")
             ));
+        }
+    }
+
+    #[test]
+    fn style_validator_accepts_the_pinned_style_parse_keys() {
+        for value in [
+            "align=left",
+            "align=centre",
+            "align=right",
+            "align=absolute-centre",
+            "noalign",
+            "fill=red",
+            "us=blue",
+            "list=on",
+            "list=focus",
+            "list=left-marker",
+            "list=right-marker",
+            "list=no",
+            "nolist",
+            "range=left",
+            "range=right",
+            "range=control|9",
+            "range=pane|%12",
+            "range=window|12",
+            "range=session|$12",
+            "range=user|owner",
+            "range=custom",
+            "range=custom|value",
+            "norange",
+            "push-default",
+            "pop-default",
+            "set-default",
+            "ignore",
+            "noignore",
+            "dim=50%",
+            "width=80%",
+            "pad=2",
+            "link=https://example.com",
+            "nolink",
+            "nodefault",
+            "nobold|underscore",
+        ] {
+            assert!(valid_style(value), "{value}");
+        }
+    }
+
+    #[test]
+    fn style_validator_rejects_invalid_pinned_values() {
+        for value in [
+            "fg=colour256",
+            "fg=#zzzzzz",
+            "bogus",
+            "fg=",
+            "align=middle",
+            "fill=",
+            "us=",
+            "list=bogus",
+            "range=control|10",
+            "range=pane|12",
+            "range=session|12",
+            "range=user|",
+            "dim=101",
+            "width=-1",
+            "pad=-1",
+            "hyperlink",
+            "nohyperlink",
+            "bold|noitalics",
+        ] {
+            assert!(!valid_style(value), "{value}");
         }
     }
 

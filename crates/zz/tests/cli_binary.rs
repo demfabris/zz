@@ -206,6 +206,42 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn headless_attach_resolves_the_target_before_rejecting_the_terminal() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "named"]);
+        assert_eq!(created.status.code(), Some(0));
+        for command in ["attach", "attach-session"] {
+            let output = fixture.run(&[command, "-t", "bogus"]);
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stdout.is_empty());
+            assert_eq!(output.stderr, b"zz attach: can't find session: bogus\n");
+        }
+    }
+
+    #[test]
+    fn headless_attach_autostarts_before_reporting_no_sessions() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        std::fs::write(&fixture.config, b"set-environment -g started YES\n")
+            .expect("write autostart marker config");
+        let output = fixture.run(&["attach"]);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert_eq!(output.stderr, b"zz attach: no sessions\n");
+        assert!(fixture.socket.exists());
+
+        let started = fixture.run(&["show-environment", "-g", "started"]);
+        assert_eq!(started.status.code(), Some(0));
+        assert_eq!(started.stdout, b"started=YES\n");
+        assert!(started.stderr.is_empty());
+    }
+
+    #[test]
     fn native_attach_rejections_match_the_engine() {
         let fixture = Fixture::new();
         for args in [
@@ -334,7 +370,7 @@ mod daemon_autostart {
         assert_eq!(
             not_a_directory.stderr,
             format!(
-                "error creating {} (Not a directory)\n",
+                "error connecting to {} (Not a directory)\n",
                 file.join("socket").display()
             )
             .as_bytes()

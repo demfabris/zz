@@ -345,10 +345,13 @@ fn unix_timestamp() -> u64 {
         .as_secs()
 }
 
-struct ControlWriter<W> {
+struct ControlWriter<W: Write> {
     output: W,
     double: bool,
     next_number: u64,
+    block_open: bool,
+    deferred: VecDeque<String>,
+    st_sent: bool,
 }
 
 impl<W: Write> ControlWriter<W> {
@@ -357,6 +360,9 @@ impl<W: Write> ControlWriter<W> {
             output,
             double,
             next_number: 1,
+            block_open: false,
+            deferred: VecDeque::new(),
+            st_sent: false,
         }
     }
 
@@ -364,6 +370,27 @@ impl<W: Write> ControlWriter<W> {
         if self.double {
             self.output.write_all(DCS)?;
             self.output.flush()?;
+        }
+        Ok(())
+    }
+
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "wired by the 6b notification renderer")
+    )]
+    fn notify(&mut self, line: &str) -> io::Result<()> {
+        if self.block_open {
+            self.deferred.push_back(line.to_owned());
+            return Ok(());
+        }
+        self.write_line(line)?;
+        self.output.flush()
+    }
+
+    fn flush_deferred(&mut self) -> io::Result<()> {
+        while let Some(line) = self.deferred.pop_front() {
+            self.output.write_all(line.as_bytes())?;
+            self.output.write_all(b"\n")?;
         }
         Ok(())
     }
@@ -379,6 +406,7 @@ impl<W: Write> ControlWriter<W> {
             flags,
         };
         self.next_number = self.next_number.saturating_add(1);
+        self.block_open = true;
         writeln!(
             self.output,
             "%begin {} {} {}",
@@ -442,18 +470,32 @@ impl<W: Write> ControlWriter<W> {
             "{marker} {} {} {}",
             frame.time, frame.number, frame.flags
         )?;
+        self.block_open = false;
+        self.flush_deferred()?;
         self.output.flush()
     }
 
     fn exit(&mut self, reason: Option<&str>) -> io::Result<()> {
+        self.block_open = false;
+        self.flush_deferred()?;
         match reason {
             Some(reason) => writeln!(self.output, "%exit {reason}")?,
             None => self.output.write_all(b"%exit\n")?,
         }
         if self.double {
             self.output.write_all(ST)?;
+            self.st_sent = true;
         }
         self.output.flush()
+    }
+}
+
+impl<W: Write> Drop for ControlWriter<W> {
+    fn drop(&mut self) {
+        if self.double && !self.st_sent {
+            let _ = self.output.write_all(ST);
+            let _ = self.output.flush();
+        }
     }
 }
 
@@ -655,5 +697,48 @@ mod tests {
         writer.start().unwrap();
         writer.exit(None).unwrap();
         assert_eq!(writer.output, b"\x1bP1000p%exit\n\x1b\\");
+    }
+
+    #[test]
+    fn notifications_defer_while_a_block_is_open() {
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        writer.notify("%sessions-changed").unwrap();
+        let frame = writer.begin_at(21, 1).unwrap();
+        writer.notify("%window-add @3").unwrap();
+        writer.notify("%window-renamed @3 shell").unwrap();
+        writer
+            .response(
+                &frame,
+                CommandResponse::Success {
+                    request_id: 5,
+                    output: "body\n".to_owned(),
+                    exit_code: 0,
+                },
+            )
+            .unwrap();
+        writer.notify("%session-renamed $1 dev").unwrap();
+        assert_eq!(
+            writer.output,
+            b"%sessions-changed\n%begin 21 1 1\nbody\n%end 21 1 1\n%window-add @3\n%window-renamed @3 shell\n%session-renamed $1 dev\n"
+        );
+    }
+
+    #[test]
+    fn dropping_a_double_writer_without_exit_still_terminates_the_dcs() {
+        let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        struct Shared(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+        impl Write for Shared {
+            fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buffer);
+                Ok(buffer.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut writer = ControlWriter::new(Shared(std::sync::Arc::clone(&output)), true);
+        writer.start().unwrap();
+        drop(writer);
+        assert_eq!(*output.lock().unwrap(), b"\x1bP1000p\x1b\\");
     }
 }

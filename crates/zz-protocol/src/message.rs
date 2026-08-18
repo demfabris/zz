@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 65;
+pub const PROTOCOL_VERSION: u16 = 66;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
@@ -1710,6 +1710,17 @@ pub enum EventPayload {
     Confirm {
         state: Option<ConfirmState>,
     },
+    ControlExit {
+        reason: String,
+    },
+    HookEvent {
+        name: String,
+        variables: BTreeMap<String, String>,
+    },
+    PaneOutput {
+        pane: PaneId,
+        bytes: Vec<u8>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2128,5 +2139,37 @@ mod tests {
                 event
             );
         }
+    }
+
+    #[test]
+    fn control_event_variants_hold_the_appended_wire_tails() {
+        let payload_tag = |payload| {
+            postcard::to_stdvec(&super::Event {
+                sequence: 0,
+                payload,
+            })
+            .expect("control event encodes")[1]
+        };
+
+        assert_eq!(
+            payload_tag(super::EventPayload::ControlExit {
+                reason: String::new(),
+            }),
+            39
+        );
+        assert_eq!(
+            payload_tag(super::EventPayload::HookEvent {
+                name: String::new(),
+                variables: std::collections::BTreeMap::new(),
+            }),
+            40
+        );
+        assert_eq!(
+            payload_tag(super::EventPayload::PaneOutput {
+                pane: crate::PaneId(1),
+                bytes: Vec::new(),
+            }),
+            41
+        );
     }
 }

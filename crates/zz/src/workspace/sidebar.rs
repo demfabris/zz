@@ -2248,6 +2248,8 @@ mod tests {
             zoomed_pane: None,
             layout: LayoutNode::Pane(pane.id),
             panes: BTreeMap::from([(pane.id, pane)]),
+            layout_dump: String::new(),
+            visible_layout_dump: String::new(),
         }
     }
 
@@ -2269,6 +2271,8 @@ mod tests {
                 second: Box::new(LayoutNode::Pane(terminal.id)),
             },
             panes: BTreeMap::from([(terminal.id, terminal), (browser.id, browser)]),
+            layout_dump: String::new(),
+            visible_layout_dump: String::new(),
         };
         MuxSnapshot {
             generation: 7,

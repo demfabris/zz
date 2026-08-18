@@ -1,8 +1,10 @@
+use std::collections::BTreeMap;
+
 use zz_protocol::{
     BrowserDescriptor, ClientHello, ClientInstanceId, ClientKind, CommandResponse, Event,
-    EventPayload, GuiResponse, InputMessage, MuxOptionKey, MuxSnapshot, PROTOCOL_VERSION, PaneId,
-    PaneKindSnapshot, PaneSnapshot, PasteUploadPurpose, ProtocolMessage, ServerError,
-    encode_protocol_message,
+    EventPayload, GuiResponse, InputMessage, LayoutNode, MuxOptionKey, MuxSnapshot,
+    PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PaneSnapshot, PasteUploadPurpose, ProtocolMessage,
+    ServerError, WindowId, WindowSnapshot, encode_protocol_message,
 };
 use zz_terminal::TerminalColorScheme;
 
@@ -11,8 +13,57 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_sixty_five() {
-    assert_eq!(PROTOCOL_VERSION, 65);
+fn protocol_version_on_this_commit_is_sixty_six() {
+    assert_eq!(PROTOCOL_VERSION, 66);
+}
+
+#[test]
+fn control_events_and_window_layout_fields_keep_the_frozen_wire_tail() {
+    let pane = PaneId(3);
+    let event_tag = |payload| {
+        postcard::to_stdvec(&Event {
+            sequence: 0,
+            payload,
+        })
+        .expect("encode event")[1]
+    };
+    assert_eq!(
+        event_tag(EventPayload::ControlExit {
+            reason: String::new(),
+        }),
+        39
+    );
+    assert_eq!(
+        event_tag(EventPayload::HookEvent {
+            name: String::new(),
+            variables: BTreeMap::new(),
+        }),
+        40
+    );
+    assert_eq!(
+        event_tag(EventPayload::PaneOutput {
+            pane,
+            bytes: Vec::new(),
+        }),
+        41
+    );
+
+    let window = WindowSnapshot {
+        id: WindowId(1),
+        index: 2,
+        name: "w".to_owned(),
+        automatic_rename: true,
+        active_pane: pane,
+        zoomed_pane: None,
+        layout: LayoutNode::Pane(pane),
+        panes: BTreeMap::new(),
+        layout_dump: "L".to_owned(),
+        visible_layout_dump: "V".to_owned(),
+    };
+    assert_eq!(
+        postcard::to_stdvec(&window).expect("encode window"),
+        [1, 2, 1, b'w', 1, 3, 0, 0, 3, 0, 1, b'L', 1, b'V']
+    );
 }
 
 #[test]
@@ -60,7 +111,7 @@ fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x41, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00, 0x00,
+            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x42, 0x00, 0x00, 0x42, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00,
         ]
     );

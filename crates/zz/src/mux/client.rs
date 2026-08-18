@@ -7556,6 +7556,8 @@ mod tests {
             zoomed_pane: None,
             layout,
             panes,
+            layout_dump: String::new(),
+            visible_layout_dump: String::new(),
         }
     }
 

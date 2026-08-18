@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     io::{self, BufRead as _, IsTerminal as _, Write},
     path::{Path, PathBuf},
     process::ExitCode,
@@ -11,7 +11,7 @@ use std::{
 use zz_daemon::InteractiveClient;
 use zz_protocol::{
     COMMAND_SPECS, CommandInvocation, CommandResponse, CommandSpec, DAEMON_COMMAND_SPECS,
-    EventPayload, ProtocolMessage, ServerError,
+    EventPayload, MuxSnapshot, ProtocolMessage, ServerError, SessionId, WindowId,
 };
 
 use super::{
@@ -91,7 +91,7 @@ fn drive<W: Write>(
         return Ok(1);
     }
 
-    let mut attached = false;
+    let mut state = ControlState::default();
     let mut pending_stdin = VecDeque::new();
     let initial_result = execute_command(
         client.as_ref(),
@@ -99,14 +99,14 @@ fn drive<W: Write>(
         output,
         initial,
         0,
-        &mut attached,
+        &mut state,
         &mut pending_stdin,
     )?;
     if initial_result.exit.is_some() {
         output.exit(initial_result.exit.reason())?;
         return Ok(initial_result.exit_code);
     }
-    if initial_result.exit_code != 0 || !attached {
+    if initial_result.exit_code != 0 || state.attached_session.is_none() {
         output.exit(None)?;
         return Ok(initial_result.exit_code);
     }
@@ -134,7 +134,7 @@ fn drive<W: Write>(
                             output,
                             command,
                             1,
-                            &mut attached,
+                            &mut state,
                             &mut pending_stdin,
                         )?;
                         if result.exit.is_some() {
@@ -158,17 +158,13 @@ fn drive<W: Write>(
                 output.exit(None)?;
                 return Ok(1);
             }
-            MainEvent::Protocol(message) => match *message {
-                ProtocolMessage::Attached { .. } => attached = true,
-                ProtocolMessage::Event(event) => match event.payload {
-                    EventPayload::Detached { .. } | EventPayload::ServerStopping => {
-                        output.exit(None)?;
-                        return Ok(0);
-                    }
-                    _ => {}
-                },
-                _ => {}
-            },
+            MainEvent::Protocol(message) => {
+                let exit = handle_protocol(*message, &mut state, output)?;
+                if exit.is_some() {
+                    output.exit(exit.reason())?;
+                    return Ok(u8::from(exit != ExitSignal::Clean));
+                }
+            }
             MainEvent::Disconnected => {
                 output.exit(Some("server exited unexpectedly"))?;
                 return Ok(1);
@@ -183,7 +179,7 @@ fn execute_command<W: Write>(
     output: &mut ControlWriter<W>,
     command: CommandInvocation,
     flags: u8,
-    attached: &mut bool,
+    state: &mut ControlState,
     pending_stdin: &mut VecDeque<StdinEvent>,
 ) -> io::Result<CommandResult> {
     let frame = output.begin(flags)?;
@@ -213,24 +209,28 @@ fn execute_command<W: Write>(
                         abort_line,
                     });
                 }
-                ProtocolMessage::Attached { .. } => *attached = true,
-                ProtocolMessage::Event(event) => match event.payload {
-                    EventPayload::Detached { .. } => {
-                        *attached = false;
-                        exit = ExitSignal::Clean;
+                message => {
+                    let signal = handle_protocol(message, state, output)?;
+                    if signal == ExitSignal::TooFarBehind {
+                        output.error(&frame, "too far behind")?;
+                        return Ok(CommandResult {
+                            exit_code: 1,
+                            exit: signal,
+                            abort_line: true,
+                        });
                     }
-                    EventPayload::ServerStopping => exit = ExitSignal::Clean,
-                    _ => {}
-                },
-                _ => {}
+                    if signal.is_some() {
+                        exit = signal;
+                    }
+                }
             },
             MainEvent::Stdin(stdin) => pending_stdin.push_back(stdin),
             MainEvent::Disconnected => {
                 output.error(&frame, "server exited unexpectedly")?;
                 return Ok(CommandResult {
                     exit_code: 1,
-                    exit: if exit == ExitSignal::Clean {
-                        ExitSignal::Clean
+                    exit: if exit.is_some() {
+                        exit
                     } else {
                         ExitSignal::Unexpected
                     },
@@ -239,6 +239,278 @@ fn execute_command<W: Write>(
             }
         }
     }
+}
+
+#[derive(Default)]
+struct ControlState {
+    attached_session: Option<SessionId>,
+    snapshot: MuxSnapshot,
+    last_windows: BTreeMap<SessionId, WindowId>,
+    self_name: Option<String>,
+}
+
+impl ControlState {
+    fn attach(&mut self, session: SessionId, snapshot: MuxSnapshot) {
+        self.attached_session = Some(session);
+        self.adopt_snapshot(snapshot);
+    }
+
+    fn adopt_snapshot(&mut self, snapshot: MuxSnapshot) {
+        for session in &snapshot.sessions {
+            if let Some(previous) = self
+                .snapshot
+                .sessions
+                .iter()
+                .find(|previous| previous.id == session.id)
+                && previous.active_window != session.active_window
+            {
+                self.last_windows.insert(session.id, previous.active_window);
+            }
+        }
+        self.snapshot = snapshot;
+        self.self_name = self
+            .attached_session
+            .and_then(|attached| {
+                self.snapshot
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == attached)
+            })
+            .and_then(|session| session.viewers.iter().find(|viewer| viewer.is_self))
+            .map(|viewer| viewer.name.clone());
+    }
+
+    fn window(
+        &self,
+        id: &str,
+    ) -> Option<(&zz_protocol::SessionSnapshot, &zz_protocol::WindowSnapshot)> {
+        let attached = self.attached_session.and_then(|attached| {
+            self.snapshot
+                .sessions
+                .iter()
+                .find(|session| session.id == attached)
+        });
+        attached
+            .and_then(|session| {
+                session
+                    .windows
+                    .iter()
+                    .find(|window| window.id.to_string() == id)
+                    .map(|window| (session, window))
+            })
+            .or_else(|| {
+                self.snapshot.sessions.iter().find_map(|session| {
+                    session
+                        .windows
+                        .iter()
+                        .find(|window| window.id.to_string() == id)
+                        .map(|window| (session, window))
+                })
+            })
+    }
+
+    fn mine(&self, variables: &BTreeMap<String, String>) -> bool {
+        self.attached_session
+            .is_some_and(|session| variables.get("hook_session") == Some(&session.to_string()))
+    }
+
+    fn raw_window_flags(
+        &self,
+        session: &zz_protocol::SessionSnapshot,
+        window: &zz_protocol::WindowSnapshot,
+    ) -> String {
+        let mut flags = String::new();
+        if window.panes.values().any(|pane| pane.bell) {
+            flags.push('!');
+        }
+        if session.active_window == window.id {
+            flags.push('*');
+        }
+        if self.last_windows.get(&session.id) == Some(&window.id) {
+            flags.push('-');
+        }
+        if window.zoomed_pane.is_some() {
+            flags.push('Z');
+        }
+        flags
+    }
+}
+
+fn handle_protocol<W: Write>(
+    message: ProtocolMessage,
+    state: &mut ControlState,
+    output: &mut ControlWriter<W>,
+) -> io::Result<ExitSignal> {
+    match message {
+        ProtocolMessage::Attached { session, snapshot } => state.attach(session, snapshot),
+        ProtocolMessage::Event(event) => match event.payload {
+            EventPayload::Snapshot(snapshot) => state.adopt_snapshot(snapshot),
+            EventPayload::HookEvent { name, variables } => {
+                if let Some(line) = render_hook(state, &name, &variables) {
+                    output.notify(line.as_bytes())?;
+                }
+            }
+            EventPayload::PaneOutput { pane, bytes } => {
+                output.notify(&render_pane_output(pane, &bytes))?;
+            }
+            EventPayload::TimedClientMessage { text, .. } => {
+                let mut line = b"%message ".to_vec();
+                line.extend(render_message(&text));
+                output.notify(&line)?;
+            }
+            EventPayload::ClientMessage { kind, text, .. }
+                if kind == zz_protocol::ClientMessageKind::Warning && is_config_message(&text) =>
+            {
+                output.notify(format!("%config-error {text}").as_bytes())?;
+            }
+            EventPayload::Detached { .. } => {
+                state.attached_session = None;
+                return Ok(ExitSignal::Clean);
+            }
+            EventPayload::ServerStopping => return Ok(ExitSignal::Clean),
+            EventPayload::ControlExit { reason } if reason == "too far behind" => {
+                return Ok(ExitSignal::TooFarBehind);
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+    Ok(ExitSignal::None)
+}
+
+fn render_hook(
+    state: &ControlState,
+    name: &str,
+    variables: &BTreeMap<String, String>,
+) -> Option<String> {
+    let value = |key| variables.get(key).map(String::as_str);
+    match name {
+        "window-linked" => Some(format!(
+            "{} {}",
+            if state.mine(variables) {
+                "%window-add"
+            } else {
+                "%unlinked-window-add"
+            },
+            value("hook_window")?
+        )),
+        "window-unlinked" => Some(format!("%unlinked-window-close {}", value("hook_window")?)),
+        "window-renamed" => Some(format!(
+            "{} {} {}",
+            if state.mine(variables) {
+                "%window-renamed"
+            } else {
+                "%unlinked-window-renamed"
+            },
+            value("hook_window")?,
+            value("hook_window_name")?
+        )),
+        "window-pane-changed" => Some(format!(
+            "%window-pane-changed {} {}",
+            value("hook_window")?,
+            value("hook_pane")?
+        )),
+        "window-layout-changed" => {
+            let window_id = value("hook_window")?;
+            let (session, window) = state.window(window_id)?;
+            Some(format!(
+                "%layout-change {window_id} {} {} {}",
+                window.layout_dump,
+                window.visible_layout_dump,
+                state.raw_window_flags(session, window)
+            ))
+        }
+        "session-created" | "session-closed" => Some("%sessions-changed".to_owned()),
+        "session-renamed" => Some(format!(
+            "%session-renamed {} {}",
+            value("hook_session")?,
+            value("hook_session_name")?
+        )),
+        "session-window-changed" => Some(format!(
+            "%session-window-changed {} {}",
+            value("hook_session")?,
+            value("hook_window")?
+        )),
+        "client-session-changed" => {
+            let client = value("hook_client")?;
+            if state.self_name.as_deref() == Some(client) {
+                Some(format!(
+                    "%session-changed {} {}",
+                    value("hook_session")?,
+                    value("hook_session_name")?
+                ))
+            } else {
+                Some(format!(
+                    "%client-session-changed {client} {} {}",
+                    value("hook_session")?,
+                    value("hook_session_name")?
+                ))
+            }
+        }
+        "client-detached" => Some(format!("%client-detached {}", value("hook_client")?)),
+        "pane-mode-changed" => Some(format!("%pane-mode-changed {}", value("hook_pane")?)),
+        "paste-buffer-changed" => Some(format!(
+            "%paste-buffer-changed {}",
+            value("hook_paste_buffer")?
+        )),
+        "paste-buffer-deleted" => Some(format!(
+            "%paste-buffer-deleted {}",
+            value("hook_paste_buffer")?
+        )),
+        _ => None,
+    }
+}
+
+fn render_pane_output(pane: zz_protocol::PaneId, bytes: &[u8]) -> Vec<u8> {
+    let mut line = format!("%output {pane} ").into_bytes();
+    for byte in bytes {
+        if *byte < 0x20 || *byte == b'\\' {
+            line.extend([
+                b'\\',
+                b'0' + (byte >> 6),
+                b'0' + ((byte >> 3) & 7),
+                b'0' + (byte & 7),
+            ]);
+        } else {
+            line.push(*byte);
+        }
+    }
+    line
+}
+
+fn render_message(text: &str) -> Vec<u8> {
+    let bytes = text.as_bytes();
+    let mut rendered = Vec::with_capacity(bytes.len());
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        match byte {
+            0 => {
+                rendered.extend_from_slice(b"\\0");
+                if bytes.get(index + 1).is_some_and(u8::is_ascii_digit) && bytes[index + 1] < b'8' {
+                    rendered.extend_from_slice(b"00");
+                }
+            }
+            b'\r' => rendered.extend_from_slice(b"\\r"),
+            8 => rendered.extend_from_slice(b"\\b"),
+            7 => rendered.extend_from_slice(b"\\a"),
+            11 => rendered.extend_from_slice(b"\\v"),
+            12 => rendered.extend_from_slice(b"\\f"),
+            b'\t' | b'\n' | b' ' | b'!'..=b'~' | 0x80..=0xff => rendered.push(byte),
+            _ => rendered.extend([
+                b'\\',
+                b'0' + (byte >> 6),
+                b'0' + ((byte >> 3) & 7),
+                b'0' + (byte & 7),
+            ]),
+        }
+    }
+    rendered
+}
+
+fn is_config_message(text: &str) -> bool {
+    text.starts_with("source-file ")
+        || text.starts_with("no such file: ")
+        || text.contains(" invalid line")
+        || text.starts_with("invalid line")
 }
 
 fn response_request_id(response: &CommandResponse) -> u64 {
@@ -350,7 +622,7 @@ struct ControlWriter<W: Write> {
     double: bool,
     next_number: u64,
     block_open: bool,
-    deferred: VecDeque<String>,
+    deferred: VecDeque<Vec<u8>>,
     st_sent: bool,
 }
 
@@ -374,22 +646,19 @@ impl<W: Write> ControlWriter<W> {
         Ok(())
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "wired by the 6b notification renderer")
-    )]
-    fn notify(&mut self, line: &str) -> io::Result<()> {
+    fn notify(&mut self, line: &[u8]) -> io::Result<()> {
         if self.block_open {
-            self.deferred.push_back(line.to_owned());
+            self.deferred.push_back(line.to_vec());
             return Ok(());
         }
-        self.write_line(line)?;
+        self.output.write_all(line)?;
+        self.output.write_all(b"\n")?;
         self.output.flush()
     }
 
     fn flush_deferred(&mut self) -> io::Result<()> {
         while let Some(line) = self.deferred.pop_front() {
-            self.output.write_all(line.as_bytes())?;
+            self.output.write_all(&line)?;
             self.output.write_all(b"\n")?;
         }
         Ok(())
@@ -516,6 +785,7 @@ struct CommandResult {
 enum ExitSignal {
     None,
     Clean,
+    TooFarBehind,
     Unexpected,
 }
 
@@ -525,7 +795,11 @@ impl ExitSignal {
     }
 
     fn reason(self) -> Option<&'static str> {
-        (self == Self::Unexpected).then_some("server exited unexpectedly")
+        match self {
+            Self::TooFarBehind => Some("too far behind"),
+            Self::Unexpected => Some("server exited unexpectedly"),
+            Self::None | Self::Clean => None,
+        }
     }
 }
 
@@ -702,10 +976,10 @@ mod tests {
     #[test]
     fn notifications_defer_while_a_block_is_open() {
         let mut writer = ControlWriter::new(Vec::new(), false);
-        writer.notify("%sessions-changed").unwrap();
+        writer.notify(b"%sessions-changed").unwrap();
         let frame = writer.begin_at(21, 1).unwrap();
-        writer.notify("%window-add @3").unwrap();
-        writer.notify("%window-renamed @3 shell").unwrap();
+        writer.notify(b"%window-add @3").unwrap();
+        writer.notify(b"%window-renamed @3 shell").unwrap();
         writer
             .response(
                 &frame,
@@ -716,10 +990,119 @@ mod tests {
                 },
             )
             .unwrap();
-        writer.notify("%session-renamed $1 dev").unwrap();
+        writer.notify(b"%session-renamed $1 dev").unwrap();
         assert_eq!(
             writer.output,
             b"%sessions-changed\n%begin 21 1 1\nbody\n%end 21 1 1\n%window-add @3\n%window-renamed @3 shell\n%session-renamed $1 dev\n"
+        );
+    }
+
+    #[test]
+    fn window_notifications_use_the_owning_session_for_unlinked_prefixes() {
+        let state = ControlState {
+            attached_session: Some(SessionId(1)),
+            ..ControlState::default()
+        };
+        let variables = |session: SessionId| {
+            BTreeMap::from([
+                ("hook_session".to_owned(), session.to_string()),
+                ("hook_window".to_owned(), WindowId(3).to_string()),
+                ("hook_window_name".to_owned(), "shell".to_owned()),
+            ])
+        };
+        assert_eq!(
+            render_hook(&state, "window-linked", &variables(SessionId(1))).as_deref(),
+            Some("%window-add @3")
+        );
+        assert_eq!(
+            render_hook(&state, "window-linked", &variables(SessionId(2))).as_deref(),
+            Some("%unlinked-window-add @3")
+        );
+        assert_eq!(
+            render_hook(&state, "window-unlinked", &variables(SessionId(1))).as_deref(),
+            Some("%unlinked-window-close @3")
+        );
+        assert_eq!(
+            render_hook(&state, "window-unlinked", &variables(SessionId(2))).as_deref(),
+            Some("%unlinked-window-close @3")
+        );
+        assert_eq!(
+            render_hook(&state, "window-renamed", &variables(SessionId(2))).as_deref(),
+            Some("%unlinked-window-renamed @3 shell")
+        );
+    }
+
+    #[test]
+    fn output_escaping_preserves_del_and_raw_eight_bit_bytes() {
+        assert_eq!(
+            render_pane_output(zz_protocol::PaneId(7), &[0, 0x1f, b'\\', 0x7f, 0x80, 0xff]),
+            b"%output %7 \\000\\037\\134\x7f\x80\xff"
+        );
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        let frame = writer.begin_at(22, 1).unwrap();
+        writer.notify(&[b'%', 0xff]).unwrap();
+        writer.end(&frame, false).unwrap();
+        assert_eq!(writer.output, b"%begin 22 1 1\n%end 22 1 1\n%\xff\n");
+    }
+
+    #[test]
+    fn layout_notifications_use_snapshot_dumps_and_raw_flag_order() {
+        let pane = zz_protocol::PaneId(5);
+        let window = zz_protocol::WindowSnapshot {
+            id: WindowId(3),
+            index: 0,
+            name: "shell".to_owned(),
+            automatic_rename: true,
+            active_pane: pane,
+            zoomed_pane: Some(pane),
+            layout: zz_protocol::LayoutNode::Pane(pane),
+            panes: BTreeMap::from([(
+                pane,
+                zz_protocol::PaneSnapshot {
+                    id: pane,
+                    title: "shell".to_owned(),
+                    kind: zz_protocol::PaneKindSnapshot::Terminal,
+                    synchronized_input: false,
+                    bell: true,
+                    dead: false,
+                    dead_status: None,
+                },
+            )]),
+            layout_dump: "abcd,80x24,0,0,5".to_owned(),
+            visible_layout_dump: "ef01,80x24,0,0,5".to_owned(),
+        };
+        let mut state = ControlState::default();
+        state.attach(
+            SessionId(1),
+            MuxSnapshot {
+                generation: 1,
+                sessions: vec![zz_protocol::SessionSnapshot {
+                    id: SessionId(1),
+                    name: "work".to_owned(),
+                    active_window: window.id,
+                    windows: vec![window],
+                    viewers: vec![zz_protocol::SessionViewer {
+                        name: "device-9".to_owned(),
+                        window: WindowId(3),
+                        is_self: true,
+                    }],
+                }],
+                focused_window: Some(WindowId(3)),
+            },
+        );
+        state.last_windows.insert(SessionId(1), WindowId(3));
+        let variables = BTreeMap::from([("hook_window".to_owned(), "@3".to_owned())]);
+        assert_eq!(
+            render_hook(&state, "window-layout-changed", &variables).as_deref(),
+            Some("%layout-change @3 abcd,80x24,0,0,5 ef01,80x24,0,0,5 !*-Z")
+        );
+    }
+
+    #[test]
+    fn message_escaping_is_separate_from_output_escaping() {
+        assert_eq!(
+            render_message("a\\b\t\n\r\u{7}\u{1b}é"),
+            b"a\\b\t\n\\r\\a\\033\xc3\xa9"
         );
     }
 

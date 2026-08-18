@@ -937,7 +937,7 @@ impl OutboundMailbox {
         if state.reliable.len() >= MAX_RELIABLE_MESSAGES
             || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
         {
-            close_outbound(&mut state);
+            close_outbound_too_far_behind(&mut state);
             self.ready.notify_all();
             return false;
         }
@@ -1513,6 +1513,24 @@ fn close_outbound(state: &mut OutboundState) {
     state.queued_bytes = 0;
 }
 
+fn close_outbound_too_far_behind(state: &mut OutboundState) {
+    let message = ProtocolMessage::Event(Event {
+        sequence: 0,
+        payload: EventPayload::ControlExit {
+            reason: "too far behind".to_owned(),
+        },
+    });
+    let mut encoded = Vec::new();
+    let encoded = encode_protocol_message_into(&message, &mut encoded)
+        .is_ok()
+        .then_some(encoded);
+    close_outbound(state);
+    if let Some(encoded) = encoded {
+        state.queued_bytes = encoded.len();
+        state.reliable.push_back(encoded);
+    }
+}
+
 #[derive(Clone, Copy)]
 enum DaemonCommandDispatch {
     CapturePane,
@@ -1678,13 +1696,21 @@ impl PendingHookEvent {
         state: &HookWindowState,
         snapshot: &MuxHookSnapshot,
     ) -> Self {
+        let session_name = snapshot
+            .sessions
+            .get(&state.session)
+            .map(|session| session.name.clone())
+            .unwrap_or_default();
         Self {
             name,
             context: snapshot.window_context(window),
             variables: BTreeMap::from([
                 ("hook".to_owned(), name.to_owned()),
+                ("hook_session".to_owned(), state.session.to_string()),
+                ("hook_session_name".to_owned(), session_name),
                 ("hook_window".to_owned(), window.to_string()),
                 ("hook_window_name".to_owned(), state.name.clone()),
+                ("hook_pane".to_owned(), state.active_pane.to_string()),
             ]),
         }
     }
@@ -1721,11 +1747,18 @@ impl PendingHookEvent {
             .get(&state.window)
             .map(|window| window.name.clone())
             .unwrap_or_default();
+        let session_name = snapshot
+            .sessions
+            .get(&state.session)
+            .map(|session| session.name.clone())
+            .unwrap_or_default();
         Self {
             name,
             context: ExecutionContext::new(Some(state.session), Some(state.window), Some(pane)),
             variables: BTreeMap::from([
                 ("hook".to_owned(), name.to_owned()),
+                ("hook_session".to_owned(), state.session.to_string()),
+                ("hook_session_name".to_owned(), session_name),
                 ("hook_window".to_owned(), state.window.to_string()),
                 ("hook_window_name".to_owned(), window_name),
                 ("hook_pane".to_owned(), pane.to_string()),
@@ -1733,15 +1766,41 @@ impl PendingHookEvent {
         }
     }
 
-    fn client(name: &'static str, context: ExecutionContext, client_name: Option<&str>) -> Self {
-        let mut variables = BTreeMap::from([("hook".to_owned(), name.to_owned())]);
-        if let Some(client_name) = client_name {
-            variables.insert("hook_client".to_owned(), client_name.to_owned());
+    fn client(
+        name: &'static str,
+        context: ExecutionContext,
+        client: ClientId,
+        client_name: Option<&str>,
+        snapshot: &MuxHookSnapshot,
+    ) -> Self {
+        let mut variables = BTreeMap::from([
+            ("hook".to_owned(), name.to_owned()),
+            (
+                "hook_client".to_owned(),
+                client_name.map_or_else(|| format!("device-{}", client.0), str::to_owned),
+            ),
+        ]);
+        if let Some(session) = context.session {
+            variables.insert("hook_session".to_owned(), session.to_string());
+            if let Some(state) = snapshot.sessions.get(&session) {
+                variables.insert("hook_session_name".to_owned(), state.name.clone());
+            }
         }
         Self {
             name,
             context,
             variables,
+        }
+    }
+
+    fn paste_buffer(name: &'static str, buffer: String) -> Self {
+        Self {
+            name,
+            context: ExecutionContext::new(None, None, None),
+            variables: BTreeMap::from([
+                ("hook".to_owned(), name.to_owned()),
+                ("hook_paste_buffer".to_owned(), buffer),
+            ]),
         }
     }
 }
@@ -2185,16 +2244,16 @@ fn pasted_image_frames(
     Some(frames)
 }
 
-struct ClientRegistrationGuard<'a> {
-    shared: &'a Shared,
+struct ClientRegistrationGuard {
+    shared: Arc<Shared>,
     client: ClientId,
     armed: bool,
 }
 
-impl<'a> ClientRegistrationGuard<'a> {
-    fn new(shared: &'a Shared, client: ClientId) -> Self {
+impl ClientRegistrationGuard {
+    fn new(shared: &Arc<Shared>, client: ClientId) -> Self {
         Self {
-            shared,
+            shared: Arc::clone(shared),
             client,
             armed: true,
         }
@@ -2207,7 +2266,7 @@ impl<'a> ClientRegistrationGuard<'a> {
     }
 }
 
-impl Drop for ClientRegistrationGuard<'_> {
+impl Drop for ClientRegistrationGuard {
     fn drop(&mut self) {
         self.unregister();
     }
@@ -2451,11 +2510,14 @@ impl Shared {
     }
 
     fn request_shutdown(&self) {
-        let (wakes, pipes, shell_jobs, popups, menu_waiters, confirm_waiters) = {
+        let (wakes, pipes, output_taps, shell_jobs, popups, menu_waiters, confirm_waiters) = {
             let mut inner = self.inner.lock();
             self.stopping.store(true, Ordering::Release);
             let wakes = take_all_wait_wakes(&mut inner.wait_channels);
             let pipes = std::mem::take(&mut inner.pane_pipes)
+                .into_values()
+                .collect::<Vec<_>>();
+            let output_taps = std::mem::take(&mut inner.control_output_taps)
                 .into_values()
                 .collect::<Vec<_>>();
             let shell_jobs = std::mem::take(&mut inner.shell_jobs)
@@ -2482,6 +2544,7 @@ impl Shared {
             (
                 wakes,
                 pipes,
+                output_taps,
                 shell_jobs,
                 popups,
                 menu_waiters,
@@ -2491,6 +2554,9 @@ impl Shared {
         wake_wait_items(wakes);
         for pipe in pipes {
             stop_pane_pipe(pipe);
+        }
+        for tap in output_taps {
+            stop_control_output_tap(tap);
         }
         for process in shell_jobs {
             terminate_managed_process(&process);
@@ -2790,7 +2856,7 @@ impl Shared {
         (client, hello)
     }
 
-    fn unregister(&self, client: ClientId) {
+    fn unregister(self: &Arc<Self>, client: ClientId) {
         let (detached, _) = self.detach_client_state(client, false);
         if detached {
             self.publish_snapshot();
@@ -2885,6 +2951,7 @@ impl Shared {
         for waiter in confirm_waiters {
             let _ = waiter.try_send(false);
         }
+        self.refresh_control_output_taps();
         if shutdown {
             self.request_shutdown();
         }
@@ -3206,6 +3273,10 @@ impl Shared {
 
     fn run_event_hooks(self: &Arc<Self>, events: Vec<PendingHookEvent>) {
         for event in events {
+            self.publish_to_control_clients(EventPayload::HookEvent {
+                name: event.name.to_owned(),
+                variables: event.variables.clone(),
+            });
             let (context, commands) = {
                 let inner = self.inner.lock();
                 let mut context = event.context.clone();
@@ -3655,9 +3726,12 @@ impl Shared {
                                 geometry,
                             });
                         }
+                        let multiplexed = inner.control_output_taps.contains_key(pane);
                         if let Some(pipe) = inner.pane_pipes.get_mut(pane) {
                             *pipe.terminal.lock() = Arc::clone(&session);
-                            if let Some(output) = pipe.tap_output.clone() {
+                            if let Some(output) = pipe.tap_output.clone()
+                                && !multiplexed
+                            {
                                 pipe_taps_to_rearm.push((
                                     *pane,
                                     pipe.token,
@@ -4186,7 +4260,9 @@ impl Shared {
                             pending_hook_events.push(PendingHookEvent::client(
                                 "client-detached",
                                 before.session_context(*session),
+                                *attached_client,
                                 inner.client_names.get(attached_client).map(String::as_str),
+                                before,
                             ));
                         }
                     }
@@ -4231,6 +4307,7 @@ impl Shared {
         for (pane, token, terminal, output) in pipe_taps_to_rearm {
             self.rearm_pane_pipe(pane, token, &terminal, output);
         }
+        self.refresh_control_output_taps();
 
         for command in deferred_terminal_commands {
             command.run();
@@ -4279,8 +4356,9 @@ impl Shared {
         }
         if let Some((session, detach_others)) = attach {
             if matches!(kind, ClientKind::Interactive | ClientKind::Control) {
-                let mut snapshot =
-                    self.attach_with_event_hooks(client, session, event_hooks_enabled)?;
+                let (mut snapshot, attach_hook_events) =
+                    self.attach_collect_event_hooks(client, session, event_hooks_enabled)?;
+                pending_hook_events.extend(attach_hook_events);
                 if detach_others {
                     self.evict_clients_with_event_hooks(Some(session), client, event_hooks_enabled);
                     let inner = self.inner.lock();
@@ -4437,7 +4515,7 @@ impl Shared {
     }
 
     fn capture_pane(
-        &self,
+        self: &Arc<Self>,
         context: &ExecutionContext,
         args: &[String],
     ) -> Result<Execution, DaemonError> {
@@ -4491,12 +4569,19 @@ impl Shared {
             Err(error) => return Err(ServerError::InvalidCommand(error.to_string()).into()),
         };
         if let Some(buffer_name) = parsed.buffer_name.as_deref() {
-            insert_paste_buffer(
-                &mut self.inner.lock(),
-                Some(buffer_name),
-                "buffer",
-                output.into_bytes(),
-            )?;
+            let events = {
+                let mut inner = self.inner.lock();
+                insert_paste_buffer(
+                    &mut inner,
+                    Some(buffer_name),
+                    "buffer",
+                    output.into_bytes(),
+                    true,
+                )?
+            };
+            if !context.no_hooks {
+                self.run_event_hooks(events);
+            }
             return Ok(Execution::default());
         }
         Ok(Execution {
@@ -4669,6 +4754,7 @@ impl Shared {
         }
         let pipe_input = parsed.has('I');
         let pipe_output = parsed.has('O') || !pipe_input;
+        let multiplexed = self.inner.lock().control_output_taps.contains_key(&pane);
         let (token, command) = {
             let mut inner = self.inner.lock();
             inner.next_pipe_token = inner.next_pipe_token.wrapping_add(1).max(1);
@@ -4713,12 +4799,14 @@ impl Shared {
         let child_output = child.stdout.take();
         let (tap_output, tap) = if pipe_output {
             let (output, receiver) = TerminalSession::raw_output_tap_channel();
-            terminal
-                .arm_raw_output_tap(token, output.clone())
-                .map_err(|error| {
-                    let _ = terminate_copy_pipe(&mut child);
-                    ServerError::Internal(format!("could not arm pane output pipe: {error}"))
-                })?;
+            if !multiplexed {
+                terminal
+                    .arm_raw_output_tap(token, output.clone())
+                    .map_err(|error| {
+                        let _ = terminate_copy_pipe(&mut child);
+                        ServerError::Internal(format!("could not arm pane output pipe: {error}"))
+                    })?;
+            }
             (Some(output), Some(receiver))
         } else {
             (None, None)
@@ -4786,6 +4874,8 @@ impl Shared {
             return Err(ServerError::PaneExited(pane).into());
         }
         let _ = start.send(());
+        drop(_serial);
+        self.refresh_control_output_taps();
         self.refresh_status(false);
         Ok(Execution::default())
     }
@@ -4817,10 +4907,16 @@ impl Shared {
         output: crossbeam_channel::Sender<Arc<[u8]>>,
     ) {
         let _serial = self.pipe_effects.lock();
-        let valid = self.inner.lock().pane_pipes.get(&pane).is_some_and(|pipe| {
-            pipe.token == token && Arc::ptr_eq(&pipe.terminal.lock(), terminal)
-        });
-        if !valid || terminal.arm_raw_output_tap(token, output).is_ok() {
+        let (valid, multiplexed) = {
+            let inner = self.inner.lock();
+            (
+                inner.pane_pipes.get(&pane).is_some_and(|pipe| {
+                    pipe.token == token && Arc::ptr_eq(&pipe.terminal.lock(), terminal)
+                }),
+                inner.control_output_taps.contains_key(&pane),
+            )
+        };
+        if !valid || multiplexed || terminal.arm_raw_output_tap(token, output).is_ok() {
             return;
         }
         let pipe = {
@@ -4855,6 +4951,174 @@ impl Shared {
             stop_pane_pipe(pipe);
             self.refresh_status(false);
         }
+    }
+
+    fn refresh_control_output_taps(self: &Arc<Self>) {
+        let serial = self.pipe_effects.lock();
+        let (stale, desired) = {
+            let mut inner = self.inner.lock();
+            let desired = inner
+                .terminals
+                .iter()
+                .filter(|(pane, _)| control_output_wanted(&inner, **pane))
+                .map(|(pane, terminal)| (*pane, Arc::clone(terminal)))
+                .collect::<BTreeMap<_, _>>();
+            let stale_panes = inner
+                .control_output_taps
+                .iter()
+                .filter_map(|(pane, tap)| {
+                    desired
+                        .get(pane)
+                        .is_none_or(|terminal| !Arc::ptr_eq(terminal, &tap.terminal))
+                        .then_some(*pane)
+                })
+                .collect::<Vec<_>>();
+            let stale = stale_panes
+                .into_iter()
+                .filter_map(|pane| inner.control_output_taps.remove(&pane))
+                .collect::<Vec<_>>();
+            (stale, desired)
+        };
+        for tap in stale {
+            stop_control_output_tap(tap);
+        }
+        for (pane, terminal) in desired {
+            if self.inner.lock().control_output_taps.contains_key(&pane) {
+                continue;
+            }
+            self.start_control_output_tap(pane, &terminal);
+        }
+        let direct_pipes = {
+            let inner = self.inner.lock();
+            inner
+                .pane_pipes
+                .iter()
+                .filter(|(pane, pipe)| {
+                    pipe.tap_output.is_some()
+                        && !inner.control_output_taps.contains_key(pane)
+                        && !control_output_wanted(&inner, **pane)
+                })
+                .filter_map(|(pane, pipe)| {
+                    Some((
+                        *pane,
+                        pipe.token,
+                        Arc::clone(&pipe.terminal.lock()),
+                        pipe.tap_output.clone()?,
+                    ))
+                })
+                .collect::<Vec<_>>()
+        };
+        drop(serial);
+        for (pane, token, terminal, output) in direct_pipes {
+            self.rearm_pane_pipe(pane, token, &terminal, output);
+        }
+    }
+
+    fn start_control_output_tap(self: &Arc<Self>, pane: PaneId, terminal: &Arc<TerminalSession>) {
+        let (output, receiver) = TerminalSession::raw_output_tap_channel();
+        let token = {
+            let mut inner = self.inner.lock();
+            inner.next_pipe_token = inner.next_pipe_token.wrapping_add(1).max(1);
+            inner.next_pipe_token
+        };
+        if terminal.arm_raw_output_tap(token, output).is_err() {
+            return;
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let weak = Arc::downgrade(self);
+        let worker_stop = Arc::clone(&stop);
+        let Ok(worker) = thread::Builder::new()
+            .name(format!("zz-control-output-{}", pane.0))
+            .spawn(move || run_control_output_tap(&weak, pane, &worker_stop, &receiver))
+        else {
+            let _ = terminal.disarm_raw_output_tap(token);
+            return;
+        };
+        let mut tap = Some(ControlOutputTap {
+            token,
+            terminal: Arc::clone(terminal),
+            stop,
+            thread: Some(worker),
+        });
+        let valid = {
+            let mut inner = self.inner.lock();
+            let valid = !self.stopping.load(Ordering::Acquire)
+                && control_output_wanted(&inner, pane)
+                && inner
+                    .terminals
+                    .get(&pane)
+                    .is_some_and(|current| Arc::ptr_eq(current, terminal))
+                && !inner.control_output_taps.contains_key(&pane);
+            if valid {
+                inner
+                    .control_output_taps
+                    .insert(pane, tap.take().expect("control output tap is present"));
+            }
+            valid
+        };
+        if !valid {
+            stop_control_output_tap(tap.expect("invalid control output tap is retained"));
+        }
+    }
+
+    fn publish_control_output_for_pane(&self, pane: PaneId, bytes: &Arc<[u8]>) {
+        let (pipe, subscribers) = {
+            let inner = self.inner.lock();
+            let pipe = inner
+                .pane_pipes
+                .get(&pane)
+                .and_then(|pipe| pipe.tap_output.clone());
+            let Some(window) = inner.engine.state.window_for_pane(pane) else {
+                return;
+            };
+            let clients = inner
+                .engine
+                .state
+                .sessions
+                .iter()
+                .filter(|(_, session)| session.windows.contains(&window))
+                .flat_map(|(session, _)| inner.attached.get(session).into_iter().flatten())
+                .filter(|client| inner.client_kinds.get(client) == Some(&ClientKind::Control))
+                .collect::<BTreeSet<_>>();
+            let subscribers = clients
+                .into_iter()
+                .filter_map(|client| inner.subscribers.get(client).cloned())
+                .collect::<Vec<_>>();
+            (pipe, subscribers)
+        };
+        if let Some(pipe) = pipe {
+            let _ = pipe.send(Arc::clone(bytes));
+        }
+        let message = Self::event(EventPayload::PaneOutput {
+            pane,
+            bytes: bytes.as_ref().to_vec(),
+        });
+        for subscriber in subscribers {
+            let _ = subscriber.enqueue_reliable(&message);
+        }
+    }
+
+    fn control_output_tap_closed(
+        self: &Arc<Self>,
+        pane: PaneId,
+        token: u64,
+        terminal: &Arc<TerminalSession>,
+    ) -> bool {
+        let tap = {
+            let mut inner = self.inner.lock();
+            inner
+                .control_output_taps
+                .get(&pane)
+                .is_some_and(|tap| tap.token == token && Arc::ptr_eq(&tap.terminal, terminal))
+                .then(|| inner.control_output_taps.remove(&pane))
+                .flatten()
+        };
+        let Some(tap) = tap else {
+            return false;
+        };
+        stop_control_output_tap(tap);
+        self.refresh_control_output_taps();
+        true
     }
 
     fn run_shell(
@@ -6449,7 +6713,7 @@ impl Shared {
     }
 
     fn buffer_command(
-        &self,
+        self: &Arc<Self>,
         context: &ExecutionContext,
         name: &str,
         args: &[String],
@@ -6487,8 +6751,17 @@ impl Shared {
                     appended.append(&mut data);
                     data = appended;
                 }
-                insert_paste_buffer(&mut inner, requested_name, "buffer", data)?;
+                let events = insert_paste_buffer(
+                    &mut inner,
+                    requested_name,
+                    "buffer",
+                    data,
+                    !parsed.has('a'),
+                )?;
                 drop(inner);
+                if !context.no_hooks {
+                    self.run_event_hooks(events);
+                }
                 self.refresh_choose_buffers();
                 Ok(Execution::default())
             }
@@ -6583,8 +6856,12 @@ impl Shared {
                     validate_paste_buffer_name(name)?;
                 }
                 let mut inner = self.inner.lock();
-                insert_paste_buffer(&mut inner, parsed.value('b'), "buffer", data)?;
+                let events =
+                    insert_paste_buffer(&mut inner, parsed.value('b'), "buffer", data, true)?;
                 drop(inner);
+                if !context.no_hooks {
+                    self.run_event_hooks(events);
+                }
                 self.refresh_choose_buffers();
                 Ok(Execution::default())
             }
@@ -6611,6 +6888,12 @@ impl Shared {
                 let name = resolve_buffer(&inner, parsed.value('b'))?.name.clone();
                 inner.paste_buffers.retain(|buffer| buffer.name != name);
                 drop(inner);
+                if !context.no_hooks {
+                    self.run_event_hooks(vec![PendingHookEvent::paste_buffer(
+                        "paste-buffer-deleted",
+                        name,
+                    )]);
+                }
                 self.refresh_choose_buffers();
                 Ok(Execution::default())
             }
@@ -6642,6 +6925,7 @@ impl Shared {
                         separator,
                         literal: parsed.has('S'),
                         expected_client: None,
+                        event_hooks_enabled: !context.no_hooks,
                     },
                 )?;
                 Ok(Execution::default())
@@ -6651,7 +6935,7 @@ impl Shared {
     }
 
     fn paste_buffer_to_pane(
-        &self,
+        self: &Arc<Self>,
         pane: PaneId,
         request: PasteBufferPaste<'_>,
     ) -> Result<(), DaemonError> {
@@ -6662,6 +6946,7 @@ impl Shared {
             separator,
             literal,
             expected_client,
+            event_hooks_enabled,
         } = request;
         let (client, sinks, buffer_name, data) = {
             let inner = self.inner.lock();
@@ -6740,6 +7025,12 @@ impl Shared {
             inner.paste_buffers.len() != before
         };
         if removed {
+            if event_hooks_enabled {
+                self.run_event_hooks(vec![PendingHookEvent::paste_buffer(
+                    "paste-buffer-deleted",
+                    buffer_name,
+                )]);
+            }
             self.refresh_choose_buffers();
         }
         Ok(())
@@ -6759,6 +7050,18 @@ impl Shared {
         session: SessionId,
         event_hooks_enabled: bool,
     ) -> Result<MuxSnapshot, ServerError> {
+        let (snapshot, events) =
+            self.attach_collect_event_hooks(client, session, event_hooks_enabled)?;
+        self.run_event_hooks(events);
+        Ok(snapshot)
+    }
+
+    fn attach_collect_event_hooks(
+        self: &Arc<Self>,
+        client: ClientId,
+        session: SessionId,
+        event_hooks_enabled: bool,
+    ) -> Result<(MuxSnapshot, Vec<PendingHookEvent>), ServerError> {
         let mut inner = self.inner.lock();
         if !inner.engine.state.sessions.contains_key(&session) {
             return Err(ServerError::MissingTarget(session.to_string()));
@@ -6852,13 +7155,17 @@ impl Shared {
                 hook_events.push(PendingHookEvent::client(
                     "client-session-changed",
                     context.clone(),
+                    client,
                     client_name.as_deref(),
+                    &hook_snapshot_after,
                 ));
                 if previous_session.is_none() {
                     hook_events.push(PendingHookEvent::client(
                         "client-attached",
                         context,
+                        client,
                         client_name.as_deref(),
+                        &hook_snapshot_after,
                     ));
                 }
             }
@@ -6890,8 +7197,8 @@ impl Shared {
             terminal.attach_view(view);
         }
         apply_terminal_resizes(resizes);
-        self.run_event_hooks(hook_events);
-        Ok(snapshot)
+        self.refresh_control_output_taps();
+        Ok((snapshot, hook_events))
     }
 
     fn attach_target(
@@ -6964,6 +7271,7 @@ impl Shared {
         if detached {
             self.publish_snapshot();
         }
+        self.refresh_control_output_taps();
         self.run_event_hooks(events);
     }
 
@@ -7091,7 +7399,9 @@ impl Shared {
                 events.push(PendingHookEvent::client(
                     "client-detached",
                     hook_snapshot_before.session_context(*session),
+                    client,
                     client_name.as_deref(),
+                    hook_snapshot_before,
                 ));
             }
         }
@@ -8074,7 +8384,7 @@ impl Shared {
             .into());
         }
 
-        let outcome = {
+        let (outcome, deleted) = {
             let mut inner = self.inner.lock();
             let Some(mut chooser) = inner.choose_buffers.remove(&client) else {
                 return Ok(());
@@ -8101,7 +8411,7 @@ impl Shared {
             if attached_session != Some(chooser.source_session)
                 || source_session != Some(chooser.source_session)
             {
-                ChooseBufferInputOutcome::Close
+                (ChooseBufferInputOutcome::Close, None)
             } else {
                 let result = match chooser.apply(action, &inner.paste_buffers) {
                     Ok(result) => result,
@@ -8110,7 +8420,8 @@ impl Shared {
                         return Err(error.into());
                     }
                 };
-                match result {
+                let mut deleted = None;
+                let outcome = match result {
                     ChooseBufferResult::Updated => {
                         let search = chooser.rendered.search.clone();
                         let selected = chooser.rendered.selected;
@@ -8122,6 +8433,7 @@ impl Shared {
                             .unwrap_or(usize::MAX)
                             .min(inner.paste_buffers.len().saturating_sub(1));
                         inner.paste_buffers.retain(|buffer| buffer.name != name);
+                        deleted = Some(name);
                         chooser.selected = inner
                             .paste_buffers
                             .get(deleted_index)
@@ -8141,9 +8453,17 @@ impl Shared {
                         name,
                     },
                     ChooseBufferResult::Close => ChooseBufferInputOutcome::Close,
-                }
+                };
+                (outcome, deleted)
             }
         };
+
+        if let Some(name) = deleted {
+            self.run_event_hooks(vec![PendingHookEvent::paste_buffer(
+                "paste-buffer-deleted",
+                name,
+            )]);
+        }
 
         match outcome {
             ChooseBufferInputOutcome::Delta { search, selected } => {
@@ -8167,6 +8487,7 @@ impl Shared {
                         separator: b"\r",
                         literal: false,
                         expected_client: Some(client),
+                        event_hooks_enabled: true,
                     },
                 )?;
             }
@@ -10211,7 +10532,9 @@ impl Shared {
                             shared.expire_pending_pasted_image(pane, &terminal, token);
                         }
                         TerminalEvent::RawOutputTapClosed { token } => {
-                            shared.pipe_tap_closed(pane, token, &terminal);
+                            if !shared.control_output_tap_closed(pane, token, &terminal) {
+                                shared.pipe_tap_closed(pane, token, &terminal);
+                            }
                         }
                         TerminalEvent::ClipboardSet { target, text } => {
                             shared.deliver_clipboard_write(pane, target, text);
@@ -10686,6 +11009,22 @@ impl Shared {
         }
     }
 
+    fn publish_to_control_clients(&self, payload: EventPayload) {
+        let message = Self::event(payload);
+        let subscribers = {
+            let inner = self.inner.lock();
+            inner
+                .subscribers
+                .iter()
+                .filter(|(client, _)| inner.client_kinds.get(client) == Some(&ClientKind::Control))
+                .map(|(_, subscriber)| Arc::clone(subscriber))
+                .collect::<Vec<_>>()
+        };
+        for subscriber in subscribers {
+            let _ = subscriber.enqueue_reliable(&message);
+        }
+    }
+
     fn publish_to_client(&self, client: ClientId, payload: EventPayload) {
         let subscriber = self.inner.lock().subscribers.get(&client).cloned();
         if let Some(subscriber) = subscriber {
@@ -10876,7 +11215,12 @@ impl Shared {
         }
     }
 
-    fn deliver_clipboard_write(&self, pane: PaneId, target: ClipboardTarget, text: String) {
+    fn deliver_clipboard_write(
+        self: &Arc<Self>,
+        pane: PaneId,
+        target: ClipboardTarget,
+        text: String,
+    ) {
         let set_clipboard = self
             .inner
             .lock()
@@ -10931,15 +11275,15 @@ impl Shared {
         cleared
     }
 
-    fn store_copy_buffer(&self, data: String, action: PasteBufferAction) {
+    fn store_copy_buffer(self: &Arc<Self>, data: String, action: PasteBufferAction) {
         if data.is_empty() {
             return;
         }
         let mut data = data.into_bytes();
         let mut inner = self.inner.lock();
-        let (requested_name, prefix) = match action {
+        let (requested_name, prefix, replacement_delete) = match action {
             PasteBufferAction::Create { prefix } => {
-                (None, prefix.unwrap_or_else(|| "buffer".to_owned()))
+                (None, prefix.unwrap_or_else(|| "buffer".to_owned()), true)
             }
             PasteBufferAction::Append => {
                 let requested_name = inner
@@ -10963,16 +11307,24 @@ impl Shared {
                         return;
                     }
                 };
-                (requested_name, "buffer".to_owned())
+                (requested_name, "buffer".to_owned(), false)
             }
         };
-        if let Err(error) =
-            insert_paste_buffer(&mut inner, requested_name.as_deref(), &prefix, data)
-        {
-            log::warn!("could not create native copy buffer: {error}");
-            return;
-        }
+        let events = match insert_paste_buffer(
+            &mut inner,
+            requested_name.as_deref(),
+            &prefix,
+            data,
+            replacement_delete,
+        ) {
+            Ok(events) => events,
+            Err(error) => {
+                log::warn!("could not create native copy buffer: {error}");
+                return;
+            }
+        };
         drop(inner);
+        self.run_event_hooks(events);
         self.refresh_choose_buffers();
     }
 
@@ -12283,6 +12635,7 @@ struct ServerState {
     wait_channels: BTreeMap<String, WaitChannel>,
     next_wait_token: u64,
     pane_pipes: BTreeMap<PaneId, PanePipe>,
+    control_output_taps: BTreeMap<PaneId, ControlOutputTap>,
     next_pipe_token: u64,
 }
 
@@ -12306,6 +12659,13 @@ struct PanePipe {
     terminal: Arc<Mutex<Arc<TerminalSession>>>,
     tap_output: Option<crossbeam_channel::Sender<Arc<[u8]>>>,
     process: Arc<Mutex<Option<Child>>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+struct ControlOutputTap {
+    token: u64,
+    terminal: Arc<TerminalSession>,
     stop: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
 }
@@ -13404,6 +13764,7 @@ struct PasteBufferPaste<'a> {
     delete: bool,
     bracketed: bool,
     literal: bool,
+    event_hooks_enabled: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -14689,6 +15050,51 @@ fn stop_pane_pipe(mut pipe: PanePipe) {
     let _ = terminal.disarm_raw_output_tap(pipe.token);
 }
 
+fn control_output_wanted(inner: &ServerState, pane: PaneId) -> bool {
+    let Some(window) = inner.engine.state.window_for_pane(pane) else {
+        return false;
+    };
+    inner
+        .engine
+        .state
+        .sessions
+        .iter()
+        .filter(|(_, session)| session.windows.contains(&window))
+        .filter_map(|(session, _)| inner.attached.get(session))
+        .flatten()
+        .any(|client| inner.client_kinds.get(client) == Some(&ClientKind::Control))
+}
+
+fn stop_control_output_tap(mut tap: ControlOutputTap) {
+    tap.stop.store(true, Ordering::Release);
+    let _ = tap.terminal.disarm_raw_output_tap(tap.token);
+    if let Some(worker) = tap.thread.take()
+        && worker.join().is_err()
+    {
+        log::error!("control output worker panicked");
+    }
+}
+
+fn run_control_output_tap(
+    shared: &std::sync::Weak<Shared>,
+    pane: PaneId,
+    stop: &Arc<AtomicBool>,
+    receiver: &crossbeam_channel::Receiver<Arc<[u8]>>,
+) {
+    while !stop.load(Ordering::Acquire) {
+        match receiver.recv_timeout(COPY_PIPE_POLL_INTERVAL) {
+            Ok(bytes) => {
+                let Some(shared) = shared.upgrade() else {
+                    break;
+                };
+                shared.publish_control_output_for_pane(pane, &bytes);
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_pane_pipe(
     shared: &std::sync::Weak<Shared>,
@@ -15662,10 +16068,12 @@ fn insert_paste_buffer(
     requested_name: Option<&str>,
     automatic_prefix: &str,
     data: Vec<u8>,
-) -> Result<(), ServerError> {
+    replacement_delete: bool,
+) -> Result<Vec<PendingHookEvent>, ServerError> {
     if data.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
+    let mut events = Vec::new();
     validate_paste_buffer_size(data.len())?;
     let (name, automatic) = if let Some(name) = requested_name {
         validate_paste_buffer_name(name)?;
@@ -15702,24 +16110,41 @@ fn insert_paste_buffer(
             else {
                 break;
             };
-            inner.paste_buffers.remove(index);
+            let removed = inner.paste_buffers.remove(index);
+            events.push(PendingHookEvent::paste_buffer(
+                "paste-buffer-deleted",
+                removed.name,
+            ));
         }
         (name, true)
     };
 
     let utf8 = std::str::from_utf8(&data).is_ok();
-    inner.paste_buffers.retain(|buffer| buffer.name != name);
+    inner.paste_buffers.retain(|buffer| {
+        if buffer.name == name {
+            if replacement_delete {
+                events.push(PendingHookEvent::paste_buffer(
+                    "paste-buffer-deleted",
+                    buffer.name.clone(),
+                ));
+            }
+            false
+        } else {
+            true
+        }
+    });
     inner.paste_buffers.insert(
         0,
         PasteBuffer {
-            name,
+            name: name.clone(),
             data: Arc::from(data),
             created: SystemTime::now(),
             automatic,
             utf8,
         },
     );
-    Ok(())
+    events.push(PendingHookEvent::paste_buffer("paste-buffer-changed", name));
+    Ok(events)
 }
 
 fn read_paste_buffer_file(path: &Path) -> Result<Vec<u8>, ServerError> {
@@ -17060,6 +17485,7 @@ fn write_outbound(stream: &mut impl TransportStream, outbound: &OutboundMailbox)
         }
         outbound.recycle_frame(frame);
     }
+    let _ = stream.shutdown();
 }
 
 fn validate_hello(hello: &ClientHello) -> Result<(), DaemonError> {
@@ -17212,6 +17638,10 @@ mod tests {
     impl TransportStream for std::os::unix::net::UnixStream {
         fn try_clone(&self) -> std::io::Result<Self> {
             std::os::unix::net::UnixStream::try_clone(self)
+        }
+
+        fn shutdown(&self) -> std::io::Result<()> {
+            std::os::unix::net::UnixStream::shutdown(self, std::net::Shutdown::Both)
         }
     }
 
@@ -17502,7 +17932,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn default_shell_readback_is_the_resolved_runtime_value() {
-        let shared = Shared::new(1);
+        let shared = Arc::new(Shared::new(1));
         let mut inner = shared.inner.lock();
         let readback = inner
             .engine
@@ -18112,7 +18542,7 @@ mod tests {
 
     #[test]
     fn client_registration_guard_cleans_up_automatic_and_explicit_exits() {
-        let shared = Shared::new(1);
+        let shared = Arc::new(Shared::new(1));
 
         let automatic = {
             let (client, _) = shared.register_subscribed(
@@ -18786,7 +19216,8 @@ mod tests {
             shared.inner.lock().attached.get(&session),
             Some(&BTreeSet::from([client]))
         );
-        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+        let messages = take_reliable_messages(&mailbox);
+        assert!(messages.iter().any(|message| {
             matches!(
                 message,
                 ProtocolMessage::Attached {
@@ -18795,10 +19226,363 @@ mod tests {
                 } if *attached == session
             )
         }));
+        assert_eq!(
+            messages
+                .iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::HookEvent { name, .. },
+                        ..
+                    }) => Some(name.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            [
+                "window-linked",
+                "session-created",
+                "client-session-changed",
+                "client-attached",
+            ]
+        );
         shared.send_resync(client, &mailbox);
         shared.send_full(client, pane, &mailbox);
         thread::sleep(Duration::from_millis(50));
         assert!(mailbox.state.lock().terminals.is_empty());
+        assert!(shared.inner.lock().control_output_taps.contains_key(&pane));
+        shared.detach(client);
+        assert!(!shared.inner.lock().control_output_taps.contains_key(&pane));
+    }
+
+    #[test]
+    fn control_output_taps_follow_new_pty_panes_and_skip_browser_panes() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "control-output-kinds"]),
+            )
+            .expect("new control session");
+        let terminal = context.pane.expect("terminal pane");
+        shared
+            .execute(
+                client,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new(
+                    "split-browser",
+                    ["-h", "https://example.com/control-output"],
+                ),
+            )
+            .expect("split browser");
+        let browser = context.pane.expect("browser pane");
+
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.control_output_taps.contains_key(&terminal));
+            assert!(!inner.control_output_taps.contains_key(&browser));
+        }
+        shared.detach(client);
+    }
+
+    #[test]
+    fn hook_events_reach_only_control_clients_and_buffer_mutations_name_the_buffer() {
+        let shared = Arc::new(Shared::new(1));
+        let control_mailbox = OutboundMailbox::new();
+        let interactive_mailbox = OutboundMailbox::new();
+        shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&interactive_mailbox),
+        );
+        let context = ExecutionContext::default();
+        shared
+            .buffer_command(
+                &context,
+                "set-buffer",
+                &["-b", "named", "payload"].map(str::to_owned),
+            )
+            .expect("set buffer");
+        shared
+            .buffer_command(
+                &context,
+                "set-buffer",
+                &["-a", "-b", "named", "more"].map(str::to_owned),
+            )
+            .expect("append buffer");
+        shared
+            .buffer_command(
+                &context,
+                "delete-buffer",
+                &["-b", "named"].map(str::to_owned),
+            )
+            .expect("delete buffer");
+
+        let events = take_reliable_messages(&control_mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::HookEvent { name, variables },
+                    ..
+                }) => Some((name, variables)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            events
+                .iter()
+                .map(|(name, variables)| {
+                    (
+                        name.as_str(),
+                        variables.get("hook_paste_buffer").map(String::as_str),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            [
+                ("paste-buffer-changed", Some("named")),
+                ("paste-buffer-changed", Some("named")),
+                ("paste-buffer-deleted", Some("named")),
+            ]
+        );
+        assert!(take_reliable_messages(&interactive_mailbox).is_empty());
+    }
+
+    #[test]
+    fn paste_buffer_hooks_respect_the_existing_no_hooks_boundary() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        let context = ExecutionContext {
+            no_hooks: true,
+            ..ExecutionContext::default()
+        };
+        shared
+            .buffer_command(
+                &context,
+                "set-buffer",
+                &["-b", "outer", "outer"].map(str::to_owned),
+            )
+            .expect("outer paste buffer");
+
+        let inner = shared.inner.lock();
+        assert!(
+            inner
+                .paste_buffers
+                .iter()
+                .any(|buffer| buffer.name == "outer")
+        );
+        drop(inner);
+        assert!(take_reliable_messages(&mailbox).is_empty());
+    }
+
+    #[test]
+    fn control_hook_inventory_carries_every_rendering_variable() {
+        let mut engine = MuxEngine::default();
+        let (session, window, pane) = engine
+            .state
+            .create_session("inventory")
+            .expect("hook inventory session");
+        let snapshot = MuxHookSnapshot::capture(&engine);
+        let session_state = &snapshot.sessions[&session];
+        let window_state = &snapshot.windows[&window];
+        let pane_state = &snapshot.panes[&pane];
+        let require = |event: PendingHookEvent, keys: &[&str]| {
+            for key in keys {
+                assert!(
+                    event.variables.contains_key(*key),
+                    "{} lacks {key}",
+                    event.name
+                );
+            }
+        };
+
+        for name in ["session-created", "session-closed", "session-renamed"] {
+            require(
+                PendingHookEvent::session(name, session, session_state, &snapshot),
+                &["hook_session", "hook_session_name"],
+            );
+        }
+        for name in ["window-linked", "window-unlinked", "session-window-changed"] {
+            require(
+                PendingHookEvent::winlink(
+                    name,
+                    session,
+                    session_state,
+                    window,
+                    window_state,
+                    &snapshot,
+                ),
+                &[
+                    "hook_session",
+                    "hook_session_name",
+                    "hook_window",
+                    "hook_window_name",
+                ],
+            );
+        }
+        for name in [
+            "window-renamed",
+            "window-layout-changed",
+            "window-resized",
+            "window-pane-changed",
+        ] {
+            require(
+                PendingHookEvent::window(name, window, window_state, &snapshot),
+                &[
+                    "hook_session",
+                    "hook_session_name",
+                    "hook_window",
+                    "hook_window_name",
+                    "hook_pane",
+                ],
+            );
+        }
+        for name in [
+            "pane-title-changed",
+            "pane-mode-changed",
+            "pane-died",
+            "pane-exited",
+            "alert-bell",
+        ] {
+            require(
+                PendingHookEvent::pane(name, pane, pane_state, &snapshot),
+                &[
+                    "hook_session",
+                    "hook_session_name",
+                    "hook_window",
+                    "hook_window_name",
+                    "hook_pane",
+                ],
+            );
+        }
+        for name in [
+            "client-attached",
+            "client-session-changed",
+            "client-detached",
+        ] {
+            require(
+                PendingHookEvent::client(
+                    name,
+                    snapshot.session_context(session),
+                    ClientId(7),
+                    None,
+                    &snapshot,
+                ),
+                &["hook_client", "hook_session", "hook_session_name"],
+            );
+        }
+        for name in ["paste-buffer-changed", "paste-buffer-deleted"] {
+            require(
+                PendingHookEvent::paste_buffer(name, "named".to_owned()),
+                &["hook_paste_buffer"],
+            );
+        }
+    }
+
+    #[test]
+    fn window_link_events_carry_the_session_that_owned_the_link_edge() {
+        let mut engine = MuxEngine::default();
+        let (_, window, _) = engine
+            .state
+            .create_session("source")
+            .expect("source session");
+        let (linked_session, _, _) = engine
+            .state
+            .create_session("linked")
+            .expect("linked session");
+        let before = MuxHookSnapshot::capture(&engine);
+        engine
+            .state
+            .sessions
+            .get_mut(&linked_session)
+            .expect("linked session state")
+            .windows
+            .push(window);
+        let linked = MuxHookSnapshot::capture(&engine);
+        let added = mux_hook_events(&before, &linked, "link-window")
+            .into_iter()
+            .find(|event| event.name == "window-linked")
+            .expect("window linked event");
+        assert_eq!(
+            added.variables.get("hook_session"),
+            Some(&linked_session.to_string())
+        );
+
+        engine
+            .state
+            .sessions
+            .get_mut(&linked_session)
+            .expect("linked session state")
+            .windows
+            .retain(|candidate| *candidate != window);
+        let unlinked = MuxHookSnapshot::capture(&engine);
+        let removed = mux_hook_events(&linked, &unlinked, "unlink-window")
+            .into_iter()
+            .find(|event| event.name == "window-unlinked")
+            .expect("window unlinked event");
+        assert_eq!(
+            removed.variables.get("hook_session"),
+            Some(&linked_session.to_string())
+        );
+    }
+
+    #[test]
+    fn control_output_fans_out_only_to_attached_control_clients() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "output", "pane");
+        let first_mailbox = OutboundMailbox::new();
+        let second_mailbox = OutboundMailbox::new();
+        let interactive_mailbox = OutboundMailbox::new();
+        let (first, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&first_mailbox));
+        let (second, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&second_mailbox),
+        );
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&interactive_mailbox),
+        );
+        shared.attach(first, session).expect("attach first control");
+        shared
+            .attach(second, session)
+            .expect("attach second control");
+        shared
+            .attach(interactive, session)
+            .expect("attach interactive");
+        take_reliable_messages(&first_mailbox);
+        take_reliable_messages(&second_mailbox);
+        take_reliable_messages(&interactive_mailbox);
+
+        shared.publish_control_output_for_pane(pane, &Arc::from(b"bytes".as_slice()));
+        for mailbox in [&first_mailbox, &second_mailbox] {
+            assert!(take_reliable_messages(mailbox).iter().any(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::PaneOutput { pane: target, bytes },
+                        ..
+                    }) if *target == pane && bytes == b"bytes"
+                )
+            }));
+        }
+        assert!(take_reliable_messages(&interactive_mailbox).is_empty());
     }
 
     #[test]
@@ -19567,7 +20351,7 @@ mod tests {
 
     #[test]
     fn text_suppression_filter_borrows_the_normal_path_and_owns_changes() {
-        let shared = Shared::new(1);
+        let shared = Arc::new(Shared::new(1));
         let client = ClientId(99);
         let text = String::from("xλz");
         assert!(matches!(
@@ -19591,7 +20375,7 @@ mod tests {
 
     #[test]
     fn text_that_fails_to_repay_a_binding_disarms_the_suppression() {
-        let shared = Shared::new(1);
+        let shared = Arc::new(Shared::new(1));
         let client = ClientId(98);
         shared
             .inner
@@ -19604,7 +20388,7 @@ mod tests {
 
     #[test]
     fn a_swallowed_chord_press_pairs_with_its_bare_release() {
-        let shared = Shared::new(1);
+        let shared = Arc::new(Shared::new(1));
         let client = ClientId(97);
         assert_eq!(
             shared.key_decision(client, "C-b", false),
@@ -20434,6 +21218,58 @@ mod tests {
             let pipe = &inner.pane_pipes[&pane];
             (pipe.pid, Arc::clone(&pipe.process))
         };
+
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        shared
+            .attach(control, session)
+            .expect("attach control to piped session");
+        {
+            let inner = shared.inner.lock();
+            let pipe = &inner.pane_pipes[&pane];
+            assert_eq!(pipe.pid, pid);
+            assert!(Arc::ptr_eq(&pipe.process, &process));
+            assert!(inner.control_output_taps.contains_key(&pane));
+        }
+        original_terminal.send_raw_input(Arc::from(b"WITH_CONTROL\n".as_slice()));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !fs::read(&output)
+            .unwrap_or_default()
+            .windows(12)
+            .any(|window| window == b"WITH_CONTROL")
+        {
+            assert!(
+                Instant::now() < deadline,
+                "control attach evicted the live pane pipe"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        shared.detach(control);
+        {
+            let inner = shared.inner.lock();
+            let pipe = &inner.pane_pipes[&pane];
+            assert_eq!(pipe.pid, pid);
+            assert!(Arc::ptr_eq(&pipe.process, &process));
+            assert!(!inner.control_output_taps.contains_key(&pane));
+        }
+        original_terminal.send_raw_input(Arc::from(b"AFTER_CONTROL\n".as_slice()));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !fs::read(&output)
+            .unwrap_or_default()
+            .windows(13)
+            .any(|window| window == b"AFTER_CONTROL")
+        {
+            assert!(
+                Instant::now() < deadline,
+                "control detach did not restore the live pane pipe"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
 
         shared
             .execute(
@@ -21979,7 +22815,7 @@ mod tests {
         let bytes = b"head\0middle\n\xfftail";
         fs::write(&input, bytes).expect("binary fixture");
 
-        let shared = Shared::new(1);
+        let shared = Arc::new(Shared::new(1));
         let context = ExecutionContext::default();
         shared
             .buffer_command(
@@ -22032,7 +22868,7 @@ mod tests {
 
     #[test]
     fn set_buffer_append_updates_named_buffers_but_creates_automatic_buffers_without_a_name() {
-        let shared = Shared::new(1);
+        let shared = Arc::new(Shared::new(1));
         let context = ExecutionContext::default();
         for arguments in [
             vec!["-b", "named", "alpha"],
@@ -22128,7 +22964,7 @@ mod tests {
 
     #[test]
     fn unnamed_buffer_commands_target_the_newest_automatic_buffer() {
-        let shared = Shared::new(1);
+        let shared = Arc::new(Shared::new(1));
         let context = ExecutionContext::default();
         for arguments in [
             vec!["-b", "named-old", "named old"],
@@ -22671,7 +23507,7 @@ mod tests {
             .set_len(u64::try_from(MAX_PASTE_BUFFER_BYTES).unwrap() + 1)
             .expect("sparse oversized fixture");
 
-        let shared = Shared::new(1);
+        let shared = Arc::new(Shared::new(1));
         let context = ExecutionContext::default();
         shared
             .buffer_command(
@@ -22719,12 +23555,18 @@ mod tests {
     #[test]
     fn named_buffers_replace_in_place_and_automatic_eviction_preserves_them() {
         let mut inner = ServerState::default();
-        insert_paste_buffer(&mut inner, Some("named"), "buffer", b"alpha".to_vec())
+        insert_paste_buffer(&mut inner, Some("named"), "buffer", b"alpha".to_vec(), true)
             .expect("named buffer");
-        insert_paste_buffer(&mut inner, None, "buffer", b"automatic".to_vec())
+        insert_paste_buffer(&mut inner, None, "buffer", b"automatic".to_vec(), true)
             .expect("automatic buffer");
-        insert_paste_buffer(&mut inner, Some("named"), "buffer", b"replacement".to_vec())
-            .expect("replace named buffer");
+        insert_paste_buffer(
+            &mut inner,
+            Some("named"),
+            "buffer",
+            b"replacement".to_vec(),
+            true,
+        )
+        .expect("replace named buffer");
         assert_eq!(inner.paste_buffers[0].name, "named");
         assert_eq!(inner.paste_buffers[0].data.as_ref(), b"replacement");
         assert!(!inner.paste_buffers[0].automatic);
@@ -22743,6 +23585,7 @@ mod tests {
                 None,
                 "buffer",
                 vec![u8::try_from(index).unwrap_or(u8::MAX)],
+                true,
             )
             .expect("bounded automatic buffer");
         }
@@ -23591,7 +24434,7 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[test]
     fn native_copy_buffers_create_named_entries_and_append_to_the_top() {
-        let shared = Shared::new(1);
+        let shared = Arc::new(Shared::new(1));
         shared.store_copy_buffer(
             "alpha".to_owned(),
             PasteBufferAction::Create {
@@ -25303,6 +26146,68 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn reliable_overflow_delivers_the_control_exit_reason_before_closing() {
+        let mailbox = OutboundMailbox::new();
+        for sequence in 0..MAX_RELIABLE_MESSAGES {
+            assert!(mailbox.enqueue_reliable(&ProtocolMessage::Event(Event {
+                sequence: u64::try_from(sequence).unwrap(),
+                payload: EventPayload::ServerStopping,
+            })));
+        }
+        assert!(!mailbox.enqueue_reliable(&ProtocolMessage::Event(Event {
+            sequence: u64::try_from(MAX_RELIABLE_MESSAGES).unwrap(),
+            payload: EventPayload::ServerStopping,
+        })));
+        let encoded = mailbox.recv().expect("control overflow exit");
+        assert_eq!(
+            decode_protocol_frame(&encoded).expect("decode control overflow exit"),
+            ProtocolMessage::Event(Event {
+                sequence: 0,
+                payload: EventPayload::ControlExit {
+                    reason: "too far behind".to_owned(),
+                },
+            })
+        );
+        assert!(mailbox.recv().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reliable_overflow_flushes_the_reason_and_closes_the_transport() {
+        let mailbox = OutboundMailbox::new();
+        for sequence in 0..MAX_RELIABLE_MESSAGES {
+            assert!(mailbox.enqueue_reliable(&ProtocolMessage::Event(Event {
+                sequence: u64::try_from(sequence).unwrap(),
+                payload: EventPayload::ServerStopping,
+            })));
+        }
+        assert!(!mailbox.enqueue_reliable(&ProtocolMessage::Event(Event {
+            sequence: u64::try_from(MAX_RELIABLE_MESSAGES).unwrap(),
+            payload: EventPayload::ServerStopping,
+        })));
+        let (mut client, mut server) =
+            std::os::unix::net::UnixStream::pair().expect("paired overflow transport");
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("overflow read timeout");
+        let writer_mailbox = Arc::clone(&mailbox);
+        let writer = thread::spawn(move || write_outbound(&mut server, &writer_mailbox));
+
+        assert_eq!(
+            zz_protocol::read_protocol_message(&mut client).expect("control overflow exit"),
+            ProtocolMessage::Event(Event {
+                sequence: 0,
+                payload: EventPayload::ControlExit {
+                    reason: "too far behind".to_owned(),
+                },
+            })
+        );
+        let mut byte = [0_u8; 1];
+        assert_eq!(client.read(&mut byte).expect("transport EOF"), 0);
+        writer.join().expect("overflow writer");
+    }
+
+    #[test]
     fn command_output_encoding_releases_state_lock_and_revalidates_before_enqueue() {
         let shared = Shared::new(1);
         let mailbox = OutboundMailbox::new();
@@ -25738,8 +26643,14 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.attach(client, session).expect("attach session");
         {
             let mut inner = shared.inner.lock();
-            insert_paste_buffer(&mut inner, Some("binary"), "buffer", b"a\nb\0\xff".to_vec())
-                .expect("binary buffer");
+            insert_paste_buffer(
+                &mut inner,
+                Some("binary"),
+                "buffer",
+                b"a\nb\0\xff".to_vec(),
+                true,
+            )
+            .expect("binary buffer");
         }
         take_reliable_messages(&mailbox);
         shared

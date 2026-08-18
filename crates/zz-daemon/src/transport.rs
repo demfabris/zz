@@ -42,6 +42,10 @@ pub(crate) trait TransportListener {
 
 pub(crate) trait TransportStream: Read + Write + Send + Sized + 'static {
     fn try_clone(&self) -> io::Result<Self>;
+
+    fn shutdown(&self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 #[must_use]
@@ -165,6 +169,11 @@ impl LocalStream {
 impl TransportStream for LocalStream {
     fn try_clone(&self) -> io::Result<Self> {
         self.0.try_clone().map(Self)
+    }
+
+    #[cfg(unix)]
+    fn shutdown(&self) -> io::Result<()> {
+        LocalStream::shutdown(self)
     }
 }
 

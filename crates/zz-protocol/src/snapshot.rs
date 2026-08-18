@@ -377,6 +377,8 @@ pub struct WindowSnapshot {
     pub zoomed_pane: Option<PaneId>,
     pub layout: LayoutNode,
     pub panes: BTreeMap<PaneId, PaneSnapshot>,
+    pub layout_dump: String,
+    pub visible_layout_dump: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -447,6 +449,8 @@ mod tests {
             zoomed_pane: None,
             layout: LayoutNode::Pane(pane),
             panes: BTreeMap::new(),
+            layout_dump: String::new(),
+            visible_layout_dump: String::new(),
         };
         let first = WindowId(1);
         let second = WindowId(2);

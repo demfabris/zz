@@ -474,6 +474,8 @@ mod tests {
                     ),
                 ),
             ]),
+            layout_dump: String::new(),
+            visible_layout_dump: String::new(),
         }
     }
 

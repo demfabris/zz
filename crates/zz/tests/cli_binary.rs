@@ -510,6 +510,23 @@ mod daemon_autostart {
             assert_eq!(block.error, error);
         }
 
+        fn assert_attached_startup(outside: &[String], name: &str) {
+            let settled = outside
+                .iter()
+                .filter(|line| !line.starts_with("%window-renamed @0 "))
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                settled,
+                [
+                    "%window-add @0",
+                    "%sessions-changed",
+                    &format!("%session-changed $0 {name}"),
+                    "%exit",
+                ]
+            );
+        }
+
         #[test]
         fn control_read_only_connect_failure_has_no_framing_or_exit() {
             let fixture = Fixture::new();
@@ -563,7 +580,10 @@ mod daemon_autostart {
             let stream = parse_stream(&output.stdout, false);
             assert_eq!(stream.blocks.len(), 1);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
-            assert_eq!(stream.outside, ["%exit"]);
+            assert_eq!(
+                stream.outside,
+                ["%unlinked-window-add @0", "%sessions-changed", "%exit"]
+            );
         }
 
         #[test]
@@ -639,7 +659,7 @@ mod daemon_autostart {
             assert!(!stream.blocks[1].error);
             assert!(stream.blocks[1].payload[0].starts_with("attached:"));
             assert!(stream.blocks[1].payload[0].ends_with(" (attached)"));
-            assert_eq!(stream.outside, ["%exit"]);
+            assert_attached_startup(&stream.outside, "attached");
         }
 
         #[test]
@@ -667,7 +687,7 @@ mod daemon_autostart {
                 true,
             );
             assert_block(&stream.blocks[4], 5, 1, &["fresh"], false);
-            assert_eq!(stream.outside, ["%exit"]);
+            assert_attached_startup(&stream.outside, "chain");
         }
 
         #[test]
@@ -685,7 +705,7 @@ mod daemon_autostart {
             assert_eq!(stream.blocks[1].flags, 1);
             assert!(!stream.blocks[1].payload.is_empty());
             assert!(!stream.blocks[1].error);
-            assert_eq!(stream.outside, ["%exit"]);
+            assert_attached_startup(&stream.outside, "0");
         }
 
         #[test]
@@ -700,7 +720,10 @@ mod daemon_autostart {
             let stream = parse_stream(&output.stdout, true);
             assert_eq!(stream.blocks.len(), 1);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
-            assert_eq!(stream.outside, ["%exit"]);
+            assert_eq!(
+                stream.outside,
+                ["%unlinked-window-add @0", "%sessions-changed", "%exit"]
+            );
         }
 
         #[test]
@@ -725,7 +748,7 @@ mod daemon_autostart {
                 &["parse error: unknown command: bogus-command"],
                 true,
             );
-            assert_eq!(stream.outside, ["%exit"]);
+            assert_attached_startup(&stream.outside, "parse-error");
         }
 
         #[test]
@@ -742,7 +765,126 @@ mod daemon_autostart {
             assert_eq!(stream.blocks.len(), 2);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
-            assert_eq!(stream.outside, ["%exit"]);
+            assert_attached_startup(&stream.outside, "stopping");
+        }
+
+        #[test]
+        fn control_notifications_layout_and_output_follow_the_live_socket_stream() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let (child, mut stdin) = fixture.spawn_with_open_stdin(&[
+                "-C",
+                "new-session",
+                "-s",
+                "watched",
+                "exec /bin/cat",
+            ]);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let ready = fixture.run(&["has-session", "-t", "watched"]);
+                if ready.status.success() {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "control session did not start");
+                thread::sleep(Duration::from_millis(10));
+            }
+
+            let added = fixture.run(&[
+                "new-window",
+                "-d",
+                "-t",
+                "watched",
+                "-n",
+                "added",
+                "exec /bin/cat",
+            ]);
+            assert_eq!(added.status.code(), Some(0));
+            let foreign = fixture.run(&["new-session", "-d", "-s", "foreign", "exec /bin/cat"]);
+            assert_eq!(foreign.status.code(), Some(0));
+            let split = fixture.run(&[
+                "split-window",
+                "-h",
+                "-d",
+                "-t",
+                "watched:0",
+                "exec /bin/cat",
+            ]);
+            assert_eq!(split.status.code(), Some(0));
+            let typed = fixture.run(&["send-keys", "-l", "-t", "watched:0.0", "CONTROL_OUTPUT"]);
+            assert_eq!(typed.status.code(), Some(0));
+            let entered = fixture.run(&["send-keys", "-t", "watched:0.0", "Enter"]);
+            assert_eq!(entered.status.code(), Some(0));
+
+            stdin
+                .write_all(b"run-shell \"sleep 1\"\n")
+                .expect("start slow control command");
+            stdin.flush().expect("flush slow control command");
+            thread::sleep(Duration::from_millis(100));
+            let renamed = fixture.run(&["rename-window", "-t", "watched:0", "during"]);
+            assert_eq!(renamed.status.code(), Some(0));
+            thread::sleep(Duration::from_millis(1100));
+            stdin.write_all(b"\n").expect("end control input");
+            drop(stdin);
+
+            let output = child.wait_with_output().expect("wait for control stream");
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 2);
+            assert!(
+                stream
+                    .blocks
+                    .iter()
+                    .all(|block| { block.payload.iter().all(|line| !line.starts_with('%')) })
+            );
+
+            let notifications = stream
+                .outside
+                .iter()
+                .filter(|line| !line.starts_with("%output ") && line.as_str() != "%exit")
+                .collect::<Vec<_>>();
+            assert!(notifications[0].starts_with("%window-add @"));
+            assert_eq!(notifications[1], "%sessions-changed");
+            assert!(notifications[2].starts_with("%session-changed $"));
+            assert!(notifications[2].ends_with(" watched"));
+            assert!(
+                notifications
+                    .iter()
+                    .any(|line| line.starts_with("%window-add @"))
+            );
+            assert!(
+                notifications
+                    .iter()
+                    .any(|line| line.starts_with("%unlinked-window-add @"))
+            );
+            assert!(notifications.iter().any(|line| {
+                let fields = line.split_whitespace().collect::<Vec<_>>();
+                fields.first() == Some(&"%layout-change")
+                    && fields.get(2).is_some_and(|layout| checked_layout(layout))
+                    && fields.get(3).is_some_and(|layout| checked_layout(layout))
+            }));
+            assert!(
+                notifications
+                    .iter()
+                    .any(|line| line.starts_with("%window-renamed @") && line.ends_with(" during"))
+            );
+            assert!(
+                stream
+                    .outside
+                    .iter()
+                    .any(|line| line.starts_with("%output %") && line.contains("CONTROL_OUTPUT"))
+            );
+            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+        }
+
+        fn checked_layout(layout: &str) -> bool {
+            layout.split_once(',').is_some_and(|(checksum, body)| {
+                checksum.len() == 4
+                    && checksum.bytes().all(|byte| byte.is_ascii_hexdigit())
+                    && !body.is_empty()
+            })
         }
     }
 }

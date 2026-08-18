@@ -3123,6 +3123,8 @@ mod tests {
             zoomed_pane: None,
             layout: LayoutNode::Pane(pane),
             panes: BTreeMap::new(),
+            layout_dump: String::new(),
+            visible_layout_dump: String::new(),
         };
         let attached = SessionId(1);
         let session = zz_protocol::SessionSnapshot {
@@ -3552,6 +3554,8 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+            layout_dump: String::new(),
+            visible_layout_dump: String::new(),
         };
         MuxSnapshot {
             generation,
@@ -3892,6 +3896,8 @@ mod tests {
             ]
             .into_iter()
             .collect(),
+            layout_dump: String::new(),
+            visible_layout_dump: String::new(),
         };
         MuxSnapshot {
             generation: 10 + active.0 + generation_bias,
@@ -4629,6 +4635,8 @@ mod tests {
             zoomed_pane: None,
             layout: three_pane_layout(),
             panes: BTreeMap::new(),
+            layout_dump: String::new(),
+            visible_layout_dump: String::new(),
         };
 
         assert!(pending.still_predicts(Some(&window), 12));

@@ -679,6 +679,9 @@ impl ClientCore {
                     result,
                 });
             }
+            EventPayload::ControlExit { .. }
+            | EventPayload::HookEvent { .. }
+            | EventPayload::PaneOutput { .. } => {}
         }
     }
 
@@ -838,6 +841,8 @@ mod tests {
                     zoomed_pane: None,
                     layout: LayoutNode::Pane(first),
                     panes: entries,
+                    layout_dump: String::new(),
+                    visible_layout_dump: String::new(),
                 }],
                 viewers: Vec::new(),
             }],

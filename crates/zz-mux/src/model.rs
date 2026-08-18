@@ -3101,6 +3101,12 @@ impl MuxState {
             .input_options
             .synchronize_panes()
             .unwrap_or_else(|| self.global_synchronize_panes());
+        let (width, height) = window.layout.extent();
+        let layout_dump = window.layout.dump();
+        let visible_layout_dump = window.zoomed_pane.map_or_else(
+            || layout_dump.clone(),
+            |pane| CellLayout::new(pane, width, height).dump(),
+        );
         WindowSnapshot {
             id: window.id,
             index: window.index,
@@ -3133,6 +3139,8 @@ impl MuxState {
                     )
                 })
                 .collect(),
+            layout_dump,
+            visible_layout_dump,
         }
     }
 

@@ -739,6 +739,8 @@ mod tests {
                             dead_status: None,
                         },
                     )]),
+                    layout_dump: String::new(),
+                    visible_layout_dump: String::new(),
                 }],
                 viewers: Vec::new(),
             }],

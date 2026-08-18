@@ -136,6 +136,10 @@ use CommandValueKind::{
 pub static DAEMON_COMMAND_NAMES: &[&str] = &[
     "capture-pane",
     "capturep",
+    "run-shell",
+    "run",
+    "if-shell",
+    "if",
     "agent-send",
     "send-last-output",
     "capture-browser",
@@ -166,10 +170,6 @@ pub static DAEMON_COMMAND_NAMES: &[&str] = &[
 pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "new-pane",
     "newp",
-    "run-shell",
-    "run",
-    "if-shell",
-    "if",
     "set-hook",
     "show-hooks",
     "wait-for",
@@ -209,10 +209,6 @@ pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "switch-mode",
 ];
 
-/// Implemented tmux commands the daemon dispatches outside the engine
-/// (capture-pane and the buffer family). They never route through spec
-/// parsing, so these rows exist only so `list-commands` tells the truth
-/// about them.
 pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "capture-pane",
@@ -222,6 +218,24 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         options: &[],
         positionals: &[],
         variadic: None,
+    },
+    CommandSpec {
+        name: "if-shell",
+        aliases: &["if"],
+        description: "Run a command when a shell command succeeds",
+        usage: "[-bF] [-t target-pane] shell-command command [command]",
+        options: &[],
+        positionals: &[FreeForm, FreeForm, FreeForm],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "run-shell",
+        aliases: &["run"],
+        description: "Run a shell command without a pane",
+        usage: "[-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]",
+        options: &[],
+        positionals: &[FreeForm],
+        variadic: Some(FreeForm),
     },
     CommandSpec {
         name: "delete-buffer",
@@ -291,6 +305,8 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
 #[cfg(test)]
 const DAEMON_COMMAND_ACCEPTED_OPTIONS: &[(&str, &str, &str)] = &[
     ("capture-pane", "aeJMNpqT", "bESt"),
+    ("if-shell", "bF", "t"),
+    ("run-shell", "bCE", "cdt"),
     ("delete-buffer", "", "b"),
     ("list-buffers", "", "F"),
     ("load-buffer", "", "b"),
@@ -1454,7 +1470,13 @@ pub fn command_spec(name: &str) -> Option<&'static CommandSpec> {
 /// Resolve a known alias while preserving unknown input for structured errors.
 #[must_use]
 pub fn canonical_command(command: &str) -> &str {
-    command_spec(command).map_or(command, |spec| spec.name)
+    command_spec(command)
+        .or_else(|| {
+            DAEMON_COMMAND_SPECS
+                .iter()
+                .find(|spec| spec.name == command || spec.aliases.contains(&command))
+        })
+        .map_or(command, |spec| spec.name)
 }
 
 #[cfg(test)]
@@ -1577,6 +1599,12 @@ mod tests {
             assert!(names.insert(*name), "duplicate daemon command {name}");
         }
         assert_eq!(names.len(), DAEMON_COMMAND_NAMES.len());
+        for spec in DAEMON_COMMAND_SPECS {
+            assert_eq!(canonical_command(spec.name), spec.name);
+            for alias in spec.aliases {
+                assert_eq!(canonical_command(alias), spec.name);
+            }
+        }
         for name in UNIMPLEMENTED_TMUX_COMMANDS {
             assert!(
                 names.insert(*name),
@@ -1592,6 +1620,20 @@ mod tests {
             CommandSpec::UNIMPLEMENTED_TMUX_COMMANDS,
             crate::catalog::UNIMPLEMENTED_TMUX_COMMANDS
         );
+        for name in ["run-shell", "run", "if-shell", "if"] {
+            assert!(DAEMON_COMMAND_NAMES.contains(&name));
+            assert!(!UNIMPLEMENTED_TMUX_COMMANDS.contains(&name));
+        }
+        for name in [
+            "set-hook",
+            "show-hooks",
+            "wait-for",
+            "wait",
+            "pipe-pane",
+            "pipep",
+        ] {
+            assert!(UNIMPLEMENTED_TMUX_COMMANDS.contains(&name));
+        }
     }
 
     #[test]

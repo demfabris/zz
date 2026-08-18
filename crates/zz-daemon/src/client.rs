@@ -178,7 +178,14 @@ impl CommandClient {
                 ProtocolMessage::CommandResponse(CommandResponse::Success {
                     request_id: response_id,
                     output,
-                }) if response_id == request_id => return Ok(output),
+                    exit_code,
+                }) if response_id == request_id => {
+                    return if exit_code == 0 {
+                        Ok(output)
+                    } else {
+                        Err(DaemonError::CommandExit { output, exit_code })
+                    };
+                }
                 ProtocolMessage::CommandResponse(CommandResponse::Error {
                     request_id: response_id,
                     error,

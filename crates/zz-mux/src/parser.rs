@@ -86,7 +86,7 @@ impl Block {
     }
 }
 
-pub(crate) fn command_block_body(argument: &str) -> Option<&str> {
+pub fn command_block_body(argument: &str) -> Option<&str> {
     argument
         .strip_prefix('{')
         .and_then(|rest| rest.strip_suffix('}'))

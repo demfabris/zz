@@ -1,4 +1,4 @@
-use zz_mux::{ExecutionContext, MuxEffect, MuxEngine, parse_config};
+use zz_mux::{CommandSpec, ExecutionContext, MuxEffect, MuxEngine, parse_config};
 use zz_protocol::ServerError;
 
 #[test]
@@ -11,6 +11,9 @@ fn existing_tmux_config_applies_supported_subset_and_skips_the_rest() {
     let mut context = ExecutionContext::default();
     let mut unsupported = Vec::new();
     for command in parsed.commands {
+        if CommandSpec::DAEMON_COMMAND_NAMES.contains(&command.name.as_str()) {
+            continue;
+        }
         match engine.execute(&mut context, &command) {
             Ok(_) => {}
             Err(ServerError::UnsupportedCommand(command)) => unsupported.push(command),
@@ -35,7 +38,7 @@ fn existing_tmux_config_applies_supported_subset_and_skips_the_rest() {
             ["-I", "#W", "rename-window -- '%%'"],
         )]
     );
-    assert_eq!(unsupported, ["if-shell"]);
+    assert!(unsupported.is_empty());
     let status = engine.status_formats();
     assert!(!status.enabled);
     assert_eq!(status.interval, std::time::Duration::from_secs(5));

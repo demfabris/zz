@@ -462,6 +462,12 @@ fn run_command_mode(
             }
             Some(ExitCode::SUCCESS)
         }
+        Err(DaemonError::CommandExit { output, exit_code }) => {
+            if !output.is_empty() {
+                println!("{output}");
+            }
+            Some(ExitCode::from(exit_code))
+        }
         Err(error) => {
             eprintln!("{}", command_error_message(&error));
             Some(ExitCode::FAILURE)

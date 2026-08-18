@@ -194,6 +194,7 @@ fn render(
 
 pub(crate) struct DaemonFormatHooks<'a> {
     facts: &'a FormatHookFacts,
+    variables: Option<&'a BTreeMap<String, String>>,
     cache: Option<&'a mut BTreeMap<String, String>>,
     touched: Option<&'a mut BTreeSet<String>>,
     refresh: bool,
@@ -204,6 +205,21 @@ impl<'a> DaemonFormatHooks<'a> {
     pub(crate) fn command(facts: &'a FormatHookFacts) -> Self {
         Self {
             facts,
+            variables: None,
+            cache: None,
+            touched: None,
+            refresh: false,
+            now: Local::now(),
+        }
+    }
+
+    pub(crate) fn command_with_variables(
+        facts: &'a FormatHookFacts,
+        variables: &'a BTreeMap<String, String>,
+    ) -> Self {
+        Self {
+            facts,
+            variables: Some(variables),
             cache: None,
             touched: None,
             refresh: false,
@@ -220,6 +236,7 @@ impl<'a> DaemonFormatHooks<'a> {
     ) -> Self {
         Self {
             facts,
+            variables: None,
             cache: Some(cache),
             touched: Some(touched),
             refresh,
@@ -294,6 +311,9 @@ impl StatusHooks for DaemonFormatHooks<'_> {
     }
 
     fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+        if let Some(value) = self.variables.and_then(|variables| variables.get(name)) {
+            return Some(value.clone());
+        }
         match name {
             "buffer_created" => Some(
                 self.facts

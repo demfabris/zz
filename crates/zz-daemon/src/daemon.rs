@@ -7,10 +7,11 @@ use std::{
     fs,
     io::{ErrorKind, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
-    process::{Child, Stdio},
+    process::{Child, ExitStatus, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc,
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -21,7 +22,7 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision, KeyEngine,
     KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts, canonical_command,
-    expand_format_values, parse_config,
+    command_block_body, expand_format_values, if_shell_truthy, parse_config,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -93,6 +94,7 @@ const MAX_HISTORY_CHUNK_ROWS: u32 = 512;
 const MAX_RECYCLED_FRAME_BUFFERS: usize = 8;
 const MAX_RECYCLED_FRAME_CAPACITY: usize = 8 * 1024 * 1024;
 const MAX_COPY_PIPE_PROCESSES: usize = 8;
+const MAX_SHELL_JOBS: usize = 16;
 const MAX_COPY_PIPE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_COPY_PIPE_COMMAND_BYTES: usize = 8 * 1024;
 const COPY_PIPE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -151,7 +153,7 @@ fn mode_keys_from_environment(visual: Option<&OsStr>, editor: Option<&OsStr>) ->
 fn shell_is_valid_for_program(shell: &Path, program: &OsStr) -> bool {
     use std::os::unix::ffi::OsStrExt as _;
 
-    if !shell.is_absolute() || !shell.is_file() {
+    if !shell.is_absolute() {
         return false;
     }
     let Some(shell_name) = shell.file_name() else {
@@ -1484,6 +1486,8 @@ fn close_outbound(state: &mut OutboundState) {
 #[derive(Clone, Copy)]
 enum DaemonCommandDispatch {
     CapturePane,
+    RunShell,
+    IfShell,
     AgentSend,
     SendLastOutput,
     CaptureBrowser,
@@ -1498,6 +1502,10 @@ enum DaemonCommandDispatch {
 const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
     ("capture-pane", DaemonCommandDispatch::CapturePane),
     ("capturep", DaemonCommandDispatch::CapturePane),
+    ("run-shell", DaemonCommandDispatch::RunShell),
+    ("run", DaemonCommandDispatch::RunShell),
+    ("if-shell", DaemonCommandDispatch::IfShell),
+    ("if", DaemonCommandDispatch::IfShell),
     ("agent-send", DaemonCommandDispatch::AgentSend),
     ("send-last-output", DaemonCommandDispatch::SendLastOutput),
     ("capture-browser", DaemonCommandDispatch::CaptureBrowser),
@@ -2353,8 +2361,14 @@ impl Shared {
                 CommandResponse::Success {
                     request_id,
                     output: execution.output,
+                    exit_code: 0,
                 }
             }
+            Err(DaemonError::CommandExit { output, exit_code }) => CommandResponse::Success {
+                request_id,
+                output,
+                exit_code,
+            },
             Err(error) => {
                 let error = daemon_server_error(error);
                 let mut inner = self.inner.lock();
@@ -2395,6 +2409,12 @@ impl Shared {
                     .expect("daemon command catalog and dispatch must agree")
                 {
                     DaemonCommandDispatch::CapturePane => self.capture_pane(context, &command.args),
+                    DaemonCommandDispatch::RunShell => {
+                        self.run_shell(client, kind, context, &command.args)
+                    }
+                    DaemonCommandDispatch::IfShell => {
+                        self.if_shell(client, kind, context, &command.args)
+                    }
                     DaemonCommandDispatch::AgentSend => self.agent_send(context, &command.args),
                     DaemonCommandDispatch::SendLastOutput => {
                         self.send_last_output(context, &command.args)
@@ -3592,6 +3612,542 @@ impl Shared {
             output,
             effects: Vec::new(),
         })
+    }
+
+    fn run_shell(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        args: &[String],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_run_shell_args(args)?;
+        let (target, command_context, command, cwd) = {
+            let mut inner = self.inner.lock();
+            let target = parsed
+                .target
+                .as_deref()
+                .and_then(|target| {
+                    inner
+                        .engine
+                        .resolve_pane(Some(target), context.window, context.pane)
+                        .ok()
+                })
+                .filter(|pane| {
+                    inner
+                        .engine
+                        .state
+                        .pane(*pane)
+                        .is_some_and(|pane| !pane.dead)
+                });
+            let command_context = target
+                .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane))
+                .unwrap_or_else(|| context.clone());
+            inner.engine.set_format_now(unix_timestamp());
+            let format_context = inner.engine.format_status_context(
+                command_context.session,
+                command_context.window,
+                command_context.pane,
+            );
+            let facts = format_hook_facts(&inner);
+            let command = parsed.positional.first().map(|command| {
+                if parsed.command_mode {
+                    command_block_body(command).map_or_else(
+                        || {
+                            let mut hooks = DaemonFormatHooks::command(&facts);
+                            InsertedCommandSource::String(expand_format_values(
+                                command,
+                                &format_context,
+                                &mut hooks,
+                            ))
+                        },
+                        |body| InsertedCommandSource::Block(body.to_owned()),
+                    )
+                } else if let Some(body) = command_block_body(command) {
+                    InsertedCommandSource::Block(body.to_owned())
+                } else {
+                    let variables = parsed
+                        .positional
+                        .iter()
+                        .skip(1)
+                        .enumerate()
+                        .map(|(index, value)| ((index + 1).to_string(), value.clone()))
+                        .collect::<BTreeMap<_, _>>();
+                    let mut hooks = DaemonFormatHooks::command_with_variables(&facts, &variables);
+                    InsertedCommandSource::Shell(expand_format_values(
+                        command,
+                        &format_context,
+                        &mut hooks,
+                    ))
+                }
+            });
+            let cwd = job_working_directory(&inner, &command_context, parsed.cwd.as_deref());
+            (target, command_context, command, cwd)
+        };
+
+        if matches!(&command, Some(InsertedCommandSource::Block(_))) && !parsed.command_mode {
+            return Err(ServerError::InvalidCommand(RUN_SHELL_USAGE.to_owned()).into());
+        }
+
+        let route = RunShellRoute {
+            client,
+            kind,
+            foreground: !parsed.background,
+            target_requested: parsed.target.is_some(),
+            target,
+        };
+        let delay = parsed.delay.unwrap_or_default();
+        match command {
+            None if parsed.delay.is_none() => Ok(Execution::default()),
+            None => {
+                if parsed.background {
+                    self.spawn_delay(delay, || {})?;
+                    Ok(Execution::default())
+                } else {
+                    let (sender, receiver) = mpsc::sync_channel(1);
+                    self.spawn_delay(delay, move || {
+                        let _ = sender.send(());
+                    })?;
+                    receiver.recv().map_err(|error| {
+                        DaemonError::Thread(format!("run-shell delay worker stopped: {error}"))
+                    })?;
+                    Ok(Execution::default())
+                }
+            }
+            Some(source @ (InsertedCommandSource::String(_) | InsertedCommandSource::Block(_))) => {
+                if parsed.background {
+                    let shared = Arc::clone(self);
+                    self.spawn_delay(delay, move || {
+                        let mut context = command_context;
+                        match shared.execute_inserted_commands(
+                            client,
+                            kind,
+                            &mut context,
+                            &source,
+                            "<run-shell -C>",
+                        ) {
+                            Ok(result) => {
+                                let _ = shared.finish_inserted_run_shell(
+                                    route,
+                                    "run-shell".to_owned(),
+                                    &result,
+                                );
+                            }
+                            Err(error) => shared
+                                .publish_background_command_error(client, &context, &error, true),
+                        }
+                    })?;
+                    Ok(Execution::default())
+                } else {
+                    let (sender, receiver) = mpsc::sync_channel(1);
+                    self.spawn_delay(delay, move || {
+                        let _ = sender.send(());
+                    })?;
+                    receiver.recv().map_err(|error| {
+                        DaemonError::Thread(format!("run-shell delay worker stopped: {error}"))
+                    })?;
+                    let mut command_context = command_context;
+                    let result = self.execute_inserted_commands(
+                        client,
+                        kind,
+                        &mut command_context,
+                        &source,
+                        "<run-shell -C>",
+                    )?;
+                    *context = command_context;
+                    self.finish_inserted_run_shell(route, "run-shell".to_owned(), &result)
+                }
+            }
+            Some(InsertedCommandSource::Shell(command)) => {
+                if parsed.background {
+                    let shared = Arc::clone(self);
+                    let background_command = command.clone();
+                    let worker_context = command_context.clone();
+                    if let Err(error) = self.spawn_shell_job(
+                        command,
+                        cwd,
+                        parsed.show_stderr,
+                        delay,
+                        move |result| {
+                            if let Ok(result) = result {
+                                let _ =
+                                    shared.finish_run_shell(route, &background_command, &result);
+                            } else {
+                                let error = ServerError::InvalidCommand(format!(
+                                    "failed to run command: {background_command}"
+                                ))
+                                .into();
+                                shared.publish_background_command_error(
+                                    route.client,
+                                    &worker_context,
+                                    &error,
+                                    false,
+                                );
+                            }
+                        },
+                    ) {
+                        self.publish_background_command_error(
+                            client,
+                            &command_context,
+                            &error,
+                            false,
+                        );
+                    }
+                    Ok(Execution::default())
+                } else {
+                    let (sender, receiver) = mpsc::sync_channel(1);
+                    let failed_command = command.clone();
+                    self.spawn_shell_job(
+                        command.clone(),
+                        cwd,
+                        parsed.show_stderr,
+                        delay,
+                        move |result| {
+                            let _ = sender.send(result);
+                        },
+                    )?;
+                    let result = receiver.recv().map_err(|error| {
+                        DaemonError::Thread(format!("run-shell worker stopped: {error}"))
+                    })?;
+                    let result = result.map_err(|()| {
+                        ServerError::InvalidCommand(format!(
+                            "failed to run command: {failed_command}"
+                        ))
+                    })?;
+                    self.finish_run_shell(route, &command, &result)
+                }
+            }
+        }
+    }
+
+    fn if_shell(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        args: &[String],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_if_shell_args(args)?;
+        let (condition, command_context, cwd) = {
+            let mut inner = self.inner.lock();
+            let target = parsed.target.as_deref().and_then(|target| {
+                inner
+                    .engine
+                    .resolve_pane(Some(target), context.window, context.pane)
+                    .ok()
+            });
+            let command_context = target
+                .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane))
+                .unwrap_or_else(|| context.clone());
+            inner.engine.set_format_now(unix_timestamp());
+            let format_context = inner.engine.format_status_context(
+                command_context.session,
+                command_context.window,
+                command_context.pane,
+            );
+            let facts = format_hook_facts(&inner);
+            let mut hooks = DaemonFormatHooks::command(&facts);
+            let condition =
+                expand_format_values(&parsed.positional[0], &format_context, &mut hooks);
+            let cwd = job_working_directory(&inner, &command_context, None);
+            (condition, command_context, cwd)
+        };
+
+        if parsed.format {
+            let Some(branch) =
+                select_if_shell_branch(&parsed.positional, if_shell_truthy(&condition))
+            else {
+                return Ok(Execution::default());
+            };
+            let source = inserted_command_source(branch);
+            let mut command_context = command_context;
+            let result = self.execute_inserted_commands(
+                client,
+                kind,
+                &mut command_context,
+                &source,
+                "<if-shell>",
+            )?;
+            *context = command_context;
+            return inserted_execution(client, kind, result);
+        }
+
+        if parsed.background {
+            let shared = Arc::clone(self);
+            let branches = parsed.positional;
+            let condition_for_error = condition.clone();
+            self.spawn_shell_job(condition, cwd, false, Duration::ZERO, move |result| {
+                if let Ok(result) = result {
+                    let Some(branch) = select_if_shell_branch(&branches, result.status.success())
+                    else {
+                        return;
+                    };
+                    let source = inserted_command_source(branch);
+                    let mut context = command_context;
+                    match shared.execute_inserted_commands(
+                        client,
+                        kind,
+                        &mut context,
+                        &source,
+                        "<if-shell>",
+                    ) {
+                        Ok(result) => shared.route_background_inserted_output(
+                            client,
+                            kind,
+                            &context,
+                            "if-shell".to_owned(),
+                            &result.output,
+                        ),
+                        Err(error) => {
+                            shared.publish_background_command_error(client, &context, &error, true);
+                        }
+                    }
+                } else {
+                    let error = ServerError::InvalidCommand(format!(
+                        "failed to run command: {condition_for_error}"
+                    ))
+                    .into();
+                    shared.publish_background_command_error(
+                        client,
+                        &command_context,
+                        &error,
+                        false,
+                    );
+                }
+            })?;
+            return Ok(Execution::default());
+        }
+
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let failed_condition = condition.clone();
+        self.spawn_shell_job(condition, cwd, false, Duration::ZERO, move |result| {
+            let _ = sender.send(result);
+        })?;
+        let result = receiver
+            .recv()
+            .map_err(|error| DaemonError::Thread(format!("if-shell worker stopped: {error}")))?;
+        let result = result.map_err(|()| {
+            ServerError::InvalidCommand(format!("failed to run command: {failed_condition}"))
+        })?;
+        let Some(branch) = select_if_shell_branch(&parsed.positional, result.status.success())
+        else {
+            return Ok(Execution::default());
+        };
+        let source = inserted_command_source(branch);
+        let mut command_context = command_context;
+        let result = self.execute_inserted_commands(
+            client,
+            kind,
+            &mut command_context,
+            &source,
+            "<if-shell>",
+        )?;
+        *context = command_context;
+        inserted_execution(client, kind, result)
+    }
+
+    fn execute_inserted_commands(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        source: &InsertedCommandSource,
+        label: &str,
+    ) -> Result<InsertedCommandResult, DaemonError> {
+        let input = match source {
+            InsertedCommandSource::String(input) | InsertedCommandSource::Block(input) => input,
+            InsertedCommandSource::Shell(_) => unreachable!(),
+        };
+        let parsed = parse_config(label, input);
+        if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
+            return Err(ServerError::InvalidCommand(diagnostic.message).into());
+        }
+        let mut result = InsertedCommandResult::default();
+        for command in parsed.commands {
+            match self.execute(client, kind, context, &command) {
+                Ok(execution) => append_inserted_output(&mut result.output, &execution.output),
+                Err(DaemonError::CommandExit { output, exit_code }) => {
+                    append_inserted_output(&mut result.output, &output);
+                    result.exit_code = exit_code;
+                    break;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(result)
+    }
+
+    fn finish_run_shell(
+        self: &Arc<Self>,
+        route: RunShellRoute,
+        command: &str,
+        result: &ShellJobResult,
+    ) -> Result<Execution, DaemonError> {
+        let (output, exit_code) = shell_job_output(command, result);
+        let output = self.route_run_shell_output(route, command.to_owned(), &output);
+        if route.foreground
+            && route.kind == ClientKind::Command
+            && route.client != ClientId(u64::MAX)
+            && exit_code != 0
+        {
+            Err(DaemonError::CommandExit { output, exit_code })
+        } else {
+            Ok(Execution {
+                output,
+                effects: Vec::new(),
+            })
+        }
+    }
+
+    fn finish_inserted_run_shell(
+        self: &Arc<Self>,
+        route: RunShellRoute,
+        title: String,
+        result: &InsertedCommandResult,
+    ) -> Result<Execution, DaemonError> {
+        let output = self.route_run_shell_output(route, title, &result.output);
+        inserted_execution(
+            route.client,
+            route.kind,
+            InsertedCommandResult {
+                output,
+                exit_code: result.exit_code,
+            },
+        )
+    }
+
+    fn route_run_shell_output(
+        self: &Arc<Self>,
+        route: RunShellRoute,
+        title: String,
+        output: &str,
+    ) -> String {
+        if output.is_empty() {
+            return String::new();
+        }
+        if route.target_requested
+            && let Some(target) = route.target
+            && self
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(target)
+                .is_some_and(|pane| !pane.dead)
+        {
+            self.open_command_output_for_pane(target, &title, output);
+            return String::new();
+        }
+        if route.foreground {
+            if route.kind == ClientKind::Command {
+                return output.to_owned();
+            }
+            let _ = self.open_command_output(route.client, None, title, output);
+            return String::new();
+        }
+        let pane = self
+            .inner
+            .lock()
+            .engine
+            .state
+            .most_recent_context()
+            .map(|(_, _, pane)| pane);
+        if let Some(pane) = pane {
+            self.open_command_output_for_pane(pane, &title, output);
+        }
+        String::new()
+    }
+
+    fn open_command_output_for_pane(self: &Arc<Self>, pane: PaneId, title: &str, output: &str) {
+        let clients = {
+            let inner = self.inner.lock();
+            attached_clients_for_pane(&inner, pane)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|client| inner.subscribers.contains_key(client))
+                .collect::<Vec<_>>()
+        };
+        for client in clients {
+            let _ = self.open_command_output(client, Some(pane), title.to_owned(), output);
+        }
+    }
+
+    fn route_background_inserted_output(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        title: String,
+        output: &str,
+    ) {
+        if kind == ClientKind::Interactive && !output.is_empty() {
+            let _ = self.open_command_output(client, context.pane, title, output);
+        }
+    }
+
+    fn publish_background_command_error(
+        &self,
+        client: ClientId,
+        context: &ExecutionContext,
+        error: &DaemonError,
+        uppercase: bool,
+    ) {
+        let mut message = daemon_error_text(error);
+        if uppercase {
+            uppercase_first(&mut message);
+        }
+        push_server_message(&mut self.inner.lock(), message.clone());
+        self.publish_to_client(
+            client,
+            EventPayload::ClientMessage {
+                pane: context.pane,
+                kind: ClientMessageKind::Error,
+                text: message,
+            },
+        );
+    }
+
+    fn spawn_delay(
+        &self,
+        delay: Duration,
+        callback: impl FnOnce() + Send + 'static,
+    ) -> Result<(), DaemonError> {
+        thread::Builder::new()
+            .name("zz-run-shell".to_owned())
+            .spawn(move || {
+                thread::sleep(delay);
+                callback();
+            })
+            .map(|_| ())
+            .map_err(|error| DaemonError::Thread(error.to_string()))
+    }
+
+    fn spawn_shell_job(
+        self: &Arc<Self>,
+        command: String,
+        cwd: PathBuf,
+        show_stderr: bool,
+        delay: Duration,
+        callback: impl FnOnce(Result<ShellJobResult, ()>) + Send + 'static,
+    ) -> Result<(), DaemonError> {
+        let permit = ShellJobPermit::acquire(self).ok_or_else(|| {
+            ServerError::InvalidCommand(format!("failed to run command: {command}"))
+        })?;
+        let failed_command = command.clone();
+        thread::Builder::new()
+            .name("zz-run-shell".to_owned())
+            .spawn(move || {
+                thread::sleep(delay);
+                let result = run_shell_job(&command, &cwd, show_stderr);
+                drop(permit);
+                callback(result);
+            })
+            .map(|_| ())
+            .map_err(|_| {
+                ServerError::InvalidCommand(format!("failed to run command: {failed_command}"))
+                    .into()
+            })
     }
 
     fn agent_send(
@@ -8900,6 +9456,7 @@ struct ServerState {
     paste_buffers: Vec<PasteBuffer>,
     automatic_paste_buffer_limit: AutomaticPasteBufferLimit,
     active_copy_pipes: usize,
+    active_shell_jobs: usize,
     next_buffer_id: u64,
     next_client_id: u64,
     next_display_panes_token: u64,
@@ -10600,6 +11157,149 @@ fn command_prompt_key(
     }
 }
 
+struct ShellJobPermit {
+    shared: Arc<Shared>,
+}
+
+impl ShellJobPermit {
+    fn acquire(shared: &Arc<Shared>) -> Option<Self> {
+        let mut inner = shared.inner.lock();
+        if inner.active_shell_jobs >= MAX_SHELL_JOBS {
+            return None;
+        }
+        inner.active_shell_jobs += 1;
+        drop(inner);
+        Some(Self {
+            shared: Arc::clone(shared),
+        })
+    }
+}
+
+impl Drop for ShellJobPermit {
+    fn drop(&mut self) {
+        let mut inner = self.shared.inner.lock();
+        inner.active_shell_jobs = inner.active_shell_jobs.saturating_sub(1);
+    }
+}
+
+struct ShellJobResult {
+    output: Vec<u8>,
+    status: ExitStatus,
+}
+
+#[cfg(unix)]
+fn run_shell_job(command: &str, cwd: &Path, show_stderr: bool) -> Result<ShellJobResult, ()> {
+    use std::{
+        os::{fd::OwnedFd, unix::net::UnixStream, unix::process::CommandExt as _},
+        process::Stdio,
+    };
+
+    let (mut output, child_socket) = UnixStream::pair().map_err(|_| ())?;
+    let stdin = OwnedFd::from(child_socket.try_clone().map_err(|_| ())?);
+    let stdout = OwnedFd::from(child_socket.try_clone().map_err(|_| ())?);
+    let cwd = existing_job_working_directory(cwd);
+    let mut process = shell_process(command);
+    process
+        .arg0("sh")
+        .process_group(0)
+        .current_dir(&cwd)
+        .env("PWD", cwd.as_os_str())
+        .stdin(Stdio::from(stdin))
+        .stdout(Stdio::from(stdout));
+    if show_stderr {
+        let stderr = OwnedFd::from(child_socket.try_clone().map_err(|_| ())?);
+        process.stderr(Stdio::from(stderr));
+    } else {
+        process.stderr(Stdio::null());
+    }
+    let mut child = process.spawn().map_err(|_| ())?;
+    drop(process);
+    drop(child_socket);
+    let mut bytes = Vec::new();
+    output.read_to_end(&mut bytes).map_err(|_| ())?;
+    let status = child.wait().map_err(|_| ())?;
+    Ok(ShellJobResult {
+        output: bytes,
+        status,
+    })
+}
+
+#[cfg(not(unix))]
+fn run_shell_job(command: &str, cwd: &Path, show_stderr: bool) -> Result<ShellJobResult, ()> {
+    let cwd = existing_job_working_directory(cwd);
+    let mut process = shell_process(command);
+    process
+        .current_dir(&cwd)
+        .env("PWD", cwd.as_os_str())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(if show_stderr {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        });
+    let mut child = process.spawn().map_err(|_| ())?;
+    let _stdin = child.stdin.take();
+    let mut stdout = child.stdout.take().ok_or(())?;
+    let stdout = thread::spawn(move || {
+        let mut output = Vec::new();
+        stdout.read_to_end(&mut output).map(|_| output)
+    });
+    let stderr = child.stderr.take().map(|mut stderr| {
+        thread::spawn(move || {
+            let mut output = Vec::new();
+            stderr.read_to_end(&mut output).map(|_| output)
+        })
+    });
+    let status = child.wait().map_err(|_| ())?;
+    let mut output = stdout.join().map_err(|_| ())?.map_err(|_| ())?;
+    if let Some(stderr) = stderr {
+        output.extend(stderr.join().map_err(|_| ())?.map_err(|_| ())?);
+    }
+    Ok(ShellJobResult { output, status })
+}
+
+fn shell_job_output(command: &str, result: &ShellJobResult) -> (String, u8) {
+    let mut output = String::from_utf8_lossy(&result.output).into_owned();
+    if output.ends_with('\n') {
+        output.pop();
+    }
+    let (exit_code, message) = shell_exit(result.status).map_or_else(
+        || {
+            let exit_code = result
+                .status
+                .code()
+                .and_then(|code| u8::try_from(code).ok())
+                .unwrap_or(1);
+            let message = (exit_code != 0).then(|| format!("'{command}' returned {exit_code}"));
+            (exit_code, message)
+        },
+        |signal| {
+            let exit_code = u8::try_from(128_i32.saturating_add(signal)).unwrap_or(u8::MAX);
+            (
+                exit_code,
+                Some(format!("'{command}' terminated by signal {signal}")),
+            )
+        },
+    );
+    if let Some(message) = message {
+        append_inserted_output(&mut output, &message);
+    }
+    (output, exit_code)
+}
+
+#[cfg(unix)]
+fn shell_exit(status: ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt as _;
+
+    status.signal()
+}
+
+#[cfg(not(unix))]
+fn shell_exit(_: ExitStatus) -> Option<i32> {
+    None
+}
+
 struct CopyPipePermit {
     shared: Arc<Shared>,
 }
@@ -11152,6 +11852,198 @@ fn resolve_buffer<'a>(
             |name| ServerError::MissingTarget(name.to_owned()),
         )
     })
+}
+
+const RUN_SHELL_USAGE: &str = "usage: run-shell [-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]";
+const IF_SHELL_USAGE: &str =
+    "usage: if-shell [-bF] [-t target-pane] shell-command command [command]";
+
+#[derive(Clone)]
+enum InsertedCommandSource {
+    Shell(String),
+    String(String),
+    Block(String),
+}
+
+#[derive(Default)]
+struct InsertedCommandResult {
+    output: String,
+    exit_code: u8,
+}
+
+#[derive(Clone, Copy)]
+struct RunShellRoute {
+    client: ClientId,
+    kind: ClientKind,
+    foreground: bool,
+    target_requested: bool,
+    target: Option<PaneId>,
+}
+
+struct ParsedRunShellArgs {
+    background: bool,
+    command_mode: bool,
+    show_stderr: bool,
+    cwd: Option<String>,
+    delay: Option<Duration>,
+    target: Option<String>,
+    positional: Vec<String>,
+}
+
+struct ParsedIfShellArgs {
+    background: bool,
+    format: bool,
+    target: Option<String>,
+    positional: Vec<String>,
+}
+
+fn parse_run_shell_args(args: &[String]) -> Result<ParsedRunShellArgs, ServerError> {
+    let parsed =
+        parse_buffer_command_args("run-shell", args, &['c', 'd', 's', 't'], &['b', 'C', 'E'])?;
+    let delay = parsed.value('d').map(parse_shell_delay).transpose()?;
+    Ok(ParsedRunShellArgs {
+        background: parsed.has('b'),
+        command_mode: parsed.has('C'),
+        show_stderr: parsed.has('E'),
+        cwd: parsed.value('c').map(str::to_owned),
+        delay,
+        target: parsed.value('t').map(str::to_owned),
+        positional: parsed.positional,
+    })
+}
+
+fn parse_if_shell_args(args: &[String]) -> Result<ParsedIfShellArgs, ServerError> {
+    let parsed = parse_buffer_command_args("if-shell", args, &['t'], &['b', 'F'])?;
+    if !(2..=3).contains(&parsed.positional.len()) {
+        return Err(ServerError::InvalidCommand(IF_SHELL_USAGE.to_owned()));
+    }
+    Ok(ParsedIfShellArgs {
+        background: parsed.has('b'),
+        format: parsed.has('F'),
+        target: parsed.value('t').map(str::to_owned),
+        positional: parsed.positional,
+    })
+}
+
+fn parse_shell_delay(value: &str) -> Result<Duration, ServerError> {
+    let seconds = parse_shell_delay_seconds(value)
+        .ok_or_else(|| ServerError::InvalidCommand(format!("invalid delay time: {value}")))?;
+    Duration::try_from_secs_f64(seconds)
+        .map_err(|_| ServerError::InvalidCommand(format!("invalid delay time: {value}")))
+}
+
+fn parse_shell_delay_seconds(value: &str) -> Option<f64> {
+    if value.is_empty() {
+        return Some(0.0);
+    }
+    let value = value.trim_start_matches(char::is_whitespace);
+    if value.is_empty() {
+        return Some(0.0);
+    }
+    let (negative, unsigned) = value
+        .strip_prefix('-')
+        .map_or((false, value), |value| (true, value));
+    let unsigned = unsigned.strip_prefix('+').unwrap_or(unsigned);
+    let seconds = if let Some(hex) = unsigned
+        .strip_prefix("0x")
+        .or_else(|| unsigned.strip_prefix("0X"))
+    {
+        u64::from_str_radix(hex, 16).ok()? as f64
+    } else {
+        value.parse::<f64>().ok()?
+    };
+    let seconds = if negative { -seconds } else { seconds };
+    (seconds.is_finite() && seconds >= 0.0).then_some(seconds)
+}
+
+fn inserted_command_source(argument: &str) -> InsertedCommandSource {
+    command_block_body(argument).map_or_else(
+        || InsertedCommandSource::String(argument.to_owned()),
+        |body| InsertedCommandSource::Block(body.to_owned()),
+    )
+}
+
+fn select_if_shell_branch(positional: &[String], truthy: bool) -> Option<&str> {
+    if truthy {
+        positional.get(1)
+    } else {
+        positional.get(2)
+    }
+    .map(String::as_str)
+}
+
+fn append_inserted_output(output: &mut String, addition: &str) {
+    if addition.is_empty() {
+        return;
+    }
+    if !output.is_empty() && !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push_str(addition);
+}
+
+fn inserted_execution(
+    client: ClientId,
+    kind: ClientKind,
+    result: InsertedCommandResult,
+) -> Result<Execution, DaemonError> {
+    if kind == ClientKind::Command && client != ClientId(u64::MAX) && result.exit_code != 0 {
+        Err(DaemonError::CommandExit {
+            output: result.output,
+            exit_code: result.exit_code,
+        })
+    } else {
+        Ok(Execution {
+            output: result.output,
+            effects: Vec::new(),
+        })
+    }
+}
+
+fn job_working_directory(
+    inner: &ServerState,
+    context: &ExecutionContext,
+    requested: Option<&str>,
+) -> PathBuf {
+    if let Some(requested) = requested {
+        return PathBuf::from(requested);
+    }
+    context
+        .pane
+        .and_then(|pane| inner.terminals.get(&pane))
+        .and_then(|terminal| terminal_working_directory(terminal))
+        .filter(|path| path.is_dir())
+        .or_else(|| std::env::current_dir().ok().filter(|path| path.is_dir()))
+        .unwrap_or_else(fallback_job_working_directory)
+}
+
+fn fallback_job_working_directory() -> PathBuf {
+    home_directory()
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
+fn existing_job_working_directory(path: &Path) -> Cow<'_, Path> {
+    if path.is_dir() {
+        Cow::Borrowed(path)
+    } else {
+        Cow::Owned(fallback_job_working_directory())
+    }
+}
+
+fn daemon_error_text(error: &DaemonError) -> String {
+    match error {
+        DaemonError::Server(ServerError::InvalidCommand(message)) => message.clone(),
+        _ => error.to_string(),
+    }
+}
+
+fn uppercase_first(message: &mut String) {
+    let Some(first) = message.chars().next() else {
+        return;
+    };
+    let length = first.len_utf8();
+    message.replace_range(..length, &first.to_uppercase().collect::<String>());
 }
 
 #[derive(Debug, Default)]
@@ -12139,6 +13031,9 @@ fn validate_hello(hello: &ClientHello) -> Result<(), DaemonError> {
 fn daemon_server_error(error: DaemonError) -> ServerError {
     match error {
         DaemonError::Server(error) => error,
+        DaemonError::CommandExit { exit_code, .. } => {
+            ServerError::Internal(format!("command exited with status {exit_code}"))
+        }
         other => ServerError::Internal(other.to_string()),
     }
 }
@@ -12290,6 +13185,10 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory");
         assert!(!shell_is_valid_for_program(
             Path::new("sh"),
+            OsStr::new("zz")
+        ));
+        assert!(shell_is_valid_for_program(
+            directory.path(),
             OsStr::new("zz")
         ));
 
@@ -13661,6 +14560,49 @@ mod tests {
             .expect("a missing mux config file loads defaults");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn config_shell_commands_block_and_execute_in_order_without_an_output_sink() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let ready = directory.path().join("ready");
+        let ready = shell_quote(&ready);
+        let missing = shell_quote(&directory.path().join("missing-tpm"));
+        let unexpected = directory.path().join("unexpected-tpm-run");
+        let config = directory.path().join("mux.conf");
+        fs::write(
+            &config,
+            format!(
+                "run-shell \"sleep 0.05; printf ready > {ready}\"\n\
+                 if-shell \"test -f {ready}\" \"set-option -g @phase ready\" \
+                 \"set-option -g @phase missed\"\n\
+                 if-shell \"test -d {missing}\" \
+                 \"run-shell 'printf unexpected > {}'\"\n\
+                 run-shell \"printf hidden\"\n",
+                unexpected.display()
+            ),
+        )
+        .expect("shell config fixture");
+
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        let started = Instant::now();
+        shared
+            .load_config_file(&config, &mut context, 0)
+            .expect("blocking shell config");
+        assert!(started.elapsed() >= Duration::from_millis(40));
+        let phase = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("show-options", ["-gqv", "@phase"]),
+            )
+            .expect("config branch result");
+        assert_eq!(phase.output, "ready");
+        assert!(!unexpected.exists());
+        assert!(shared.inner.lock().command_outputs.is_empty());
+    }
+
     #[test]
     fn source_file_globs_nested_sources_and_refuses_standard_input() {
         let directory = tempfile::tempdir().expect("temporary directory");
@@ -13870,7 +14812,6 @@ mod tests {
         .expect("mux config fixture");
         let defaults = KeyTables::default();
         let default_x = defaults.get("prefix", "x").cloned();
-        let default_r = defaults.get("prefix", "r").cloned();
 
         let shared = Arc::new(Shared::new(52));
         let mailbox = OutboundMailbox::new();
@@ -13885,9 +14826,13 @@ mod tests {
             assert!(inner.engine.keys.get("prefix", "F2").is_some());
             assert!(inner.engine.keys.get("prefix", "F3").is_some());
             assert_eq!(inner.engine.keys.get("prefix", "x"), default_x.as_ref());
-            assert_eq!(inner.engine.keys.get("prefix", "r"), default_r.as_ref());
+            assert_eq!(
+                inner.engine.keys.get("prefix", "r").unwrap().commands,
+                [CommandInvocation::new("run-shell", ["x"])]
+            );
         }
-        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+        let messages = take_reliable_messages(&mailbox);
+        assert!(messages.iter().any(|message| {
             matches!(
                 message,
                 ProtocolMessage::Event(Event {
@@ -13897,10 +14842,17 @@ mod tests {
                         ..
                     },
                     ..
-                }) if text.contains("skipped 1 unsupported tmux command")
-                    && text.contains("bind-key run-shell")
-                    && text.contains("1 invalid line")
+                }) if text.contains("1 invalid line")
                     && text.contains("unknown command: not-a-command")
+            )
+        }));
+        assert!(!messages.iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage { text, .. },
+                    ..
+                }) if text.contains("run-shell") || text.contains("unsupported tmux command")
             )
         }));
     }
@@ -14589,6 +15541,658 @@ mod tests {
         for name in ["new-session", "capture-pane-extra"] {
             assert!(daemon_command_dispatch(name).is_none());
         }
+    }
+
+    #[test]
+    fn shell_command_arguments_match_the_pin_grammar() {
+        assert_eq!(parse_shell_delay("").expect("empty delay"), Duration::ZERO);
+        assert_eq!(
+            parse_shell_delay("   ").expect("whitespace delay"),
+            Duration::ZERO
+        );
+        assert_eq!(
+            parse_shell_delay("0x2").expect("hex delay"),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            parse_shell_delay(".125").expect("fractional delay"),
+            Duration::from_millis(125)
+        );
+        for value in ["abc", "1abc"] {
+            assert!(matches!(
+                parse_shell_delay(value),
+                Err(ServerError::InvalidCommand(message))
+                    if message == format!("invalid delay time: {value}")
+            ));
+        }
+
+        let parsed = parse_run_shell_args(&["-s", "ignored", "printf ok"].map(str::to_owned))
+            .expect("hidden -s option");
+        assert_eq!(parsed.positional, ["printf ok"]);
+
+        for args in [
+            vec!["condition".to_owned()],
+            ["condition", "yes", "no", "extra"]
+                .map(str::to_owned)
+                .to_vec(),
+        ] {
+            assert!(matches!(
+                parse_if_shell_args(&args),
+                Err(ServerError::InvalidCommand(message)) if message == IF_SHELL_USAGE
+            ));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn foreground_run_shell_captures_output_status_and_numeric_arguments() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["printf hi"]),
+            )
+            .expect("successful shell job");
+        assert_eq!(output.output, "hi");
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("run", ["printf '%s' '#{1}'", "numeric-value"]),
+            )
+            .expect("numeric format argument");
+        assert_eq!(output.output, "numeric-value");
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["-s", "ignored", "printf hidden-option"]),
+            )
+            .expect("hidden option remains accepted");
+        assert_eq!(output.output, "hidden-option");
+
+        let started = Instant::now();
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["-d", ".03"]),
+            )
+            .expect("delay without a command");
+        assert!(output.output.is_empty());
+        assert!(started.elapsed() >= Duration::from_millis(20));
+
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["-d", "1abc"]),
+            )
+            .expect_err("invalid delay");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "invalid delay time: 1abc"
+        ));
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["-E", "printf out; printf err >&2"]),
+            )
+            .expect("stderr capture");
+        assert_eq!(output.output, "outerr");
+
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["exit 3"]),
+            )
+            .expect_err("nonzero shell status");
+        assert!(matches!(
+            error,
+            DaemonError::CommandExit { output, exit_code: 3 }
+                if output == "'exit 3' returned 3"
+        ));
+
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["kill -TERM $$"]),
+            )
+            .expect_err("shell signal status");
+        assert!(matches!(
+            error,
+            DaemonError::CommandExit { output, exit_code: 143 }
+                if output == "'kill -TERM $$' terminated by signal 15"
+        ));
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["-c", "/tmp", "pwd"]),
+            )
+            .expect("literal working directory");
+        assert_eq!(output.output, "/tmp");
+
+        let fallback = fallback_job_working_directory();
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["-c", "/zz-run-shell-path-that-does-not-exist", "pwd"],
+                ),
+            )
+            .expect("invalid working directory falls back");
+        assert_eq!(output.output, fallback.to_string_lossy().as_ref());
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "default-shell", "/usr/bin/false"]),
+            )
+            .expect("configure an unusable session shell");
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["printf bourne-shell"]),
+            )
+            .expect("run-shell always uses the Bourne shell");
+        assert_eq!(output.output, "bourne-shell");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_shell_command_mode_and_if_shell_execute_inserted_commands() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(8);
+        let mut context = ExecutionContext::default();
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["-C", "display-message -p x"]),
+            )
+            .expect("run-shell command insertion");
+        assert_eq!(output.output, "x");
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["-C", "display-message -p 'x#{1}'", "not-numeric"],
+                ),
+            )
+            .expect("command insertion without numeric variables");
+        assert_eq!(output.output, "x");
+
+        for (condition, expected) in [("true", "yes"), ("false", "no")] {
+            let output = shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "if-shell",
+                        [condition, "display-message -p yes", "display-message -p no"],
+                    ),
+                )
+                .expect("shell branch");
+            assert_eq!(output.output, expected);
+        }
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("if-shell", ["false", "display-message -p unreachable"]),
+            )
+            .expect("missing false branch");
+        assert!(output.output.is_empty());
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "format-truth"]),
+            )
+            .expect("format session");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "run-shell",
+                    [
+                        "-C",
+                        "set-option -g @expanded-command '#{session_name}:#{1}'",
+                        "not-numeric",
+                    ],
+                ),
+            )
+            .expect("command string format expansion");
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("show-options", ["-gqv", "@expanded-command"]),
+            )
+            .expect("expanded command value");
+        assert_eq!(output.output, "format-truth:");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["-C", "{ set-option -g @raw-block '#{session_name}' }"],
+                ),
+            )
+            .expect("unexpanded command block");
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("show-options", ["-gqv", "@raw-block"]),
+            )
+            .expect("raw block value");
+        assert_eq!(output.output, "#{session_name}");
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "if",
+                    [
+                        "-F",
+                        "#{session_name}",
+                        "display-message -p truthy",
+                        "display-message -p falsy",
+                    ],
+                ),
+            )
+            .expect("truthy format branch");
+        assert_eq!(output.output, "truthy");
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "if-shell",
+                    [
+                        "test '#{session_name}' = format-truth",
+                        "display-message -p expanded-condition",
+                        "display-message -p missed-condition",
+                    ],
+                ),
+            )
+            .expect("non-format condition expansion");
+        assert_eq!(output.output, "expanded-condition");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "if-shell",
+                    ["-F", "1", "set-option -g @raw-branch '#{session_name}'"],
+                ),
+            )
+            .expect("unexpanded branch command");
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("show-options", ["-gqv", "@raw-branch"]),
+            )
+            .expect("raw branch value");
+        assert_eq!(output.output, "#{session_name}");
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "if-shell",
+                    [
+                        "-bF",
+                        "#{missing_value}",
+                        "display-message -p truthy",
+                        "display-message -p falsy",
+                    ],
+                ),
+            )
+            .expect("falsy format branch");
+        assert_eq!(output.output, "falsy");
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "if-shell",
+                    [
+                        "-F",
+                        "1",
+                        "{ display-message -p first ; display-message -p second }",
+                    ],
+                ),
+            )
+            .expect("brace command block");
+        assert_eq!(output.output, "first\nsecond");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "if-shell",
+                    [
+                        "-F",
+                        "1",
+                        "not-a-command ; set-option -g @after-error reached",
+                    ],
+                ),
+            )
+            .expect_err("first inserted command aborts the branch");
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("show-options", ["-gqv", "@after-error"]),
+            )
+            .expect("query skipped branch mutation");
+        assert!(output.output.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_shell_routes_to_command_interactive_target_and_background_sinks() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (interactive, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "shell-routes"]),
+            )
+            .expect("routing session");
+        let target = context.pane.expect("target pane");
+
+        let output = shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut context.clone(),
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["-t", &target.to_string(), "printf targeted"],
+                ),
+            )
+            .expect("targeted shell output");
+        assert!(output.output.is_empty());
+        assert_eq!(
+            shared.inner.lock().command_outputs[&interactive].pane,
+            target
+        );
+
+        let error = shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut context.clone(),
+                &CommandInvocation::new("run-shell", ["-t", &target.to_string(), "exit 4"]),
+            )
+            .expect_err("targeted status still propagates");
+        assert!(matches!(
+            error,
+            DaemonError::CommandExit { output, exit_code: 4 } if output.is_empty()
+        ));
+
+        let output = shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut context.clone(),
+                &CommandInvocation::new("run-shell", ["-t", "%999999", "printf fallback"]),
+            )
+            .expect("missing target falls back to command output");
+        assert_eq!(output.output, "fallback");
+
+        let output = shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["printf interactive"]),
+            )
+            .expect("interactive output overlay");
+        assert!(output.output.is_empty());
+        assert_eq!(
+            shared.inner.lock().command_outputs[&interactive].pane,
+            target
+        );
+
+        shared.inner.lock().command_outputs.remove(&interactive);
+        let output = shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("run-shell", ["-b", "sleep 0.2; printf background"]),
+            )
+            .expect("background shell job");
+        assert!(output.output.is_empty());
+        assert_eq!(shared.inner.lock().active_shell_jobs, 1);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !shared
+            .inner
+            .lock()
+            .command_outputs
+            .contains_key(&interactive)
+            && Instant::now() < deadline
+        {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let inner = shared.inner.lock();
+        assert_eq!(inner.command_outputs[&interactive].pane, target);
+        drop(inner);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared.inner.lock().active_shell_jobs != 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(shared.inner.lock().active_shell_jobs, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn foreground_shell_jobs_run_concurrently_and_obey_the_process_cap() {
+        let shared = Arc::new(Shared::new(1));
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let workers = [(ClientId(101), "first"), (ClientId(102), "second")]
+            .into_iter()
+            .map(|(client, output)| {
+                let shared = Arc::clone(&shared);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    let mut context = ExecutionContext::default();
+                    barrier.wait();
+                    shared.execute(
+                        client,
+                        ClientKind::Command,
+                        &mut context,
+                        &CommandInvocation::new(
+                            "run-shell",
+                            [format!("sleep 0.3; printf {output}")],
+                        ),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        barrier.wait();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared.inner.lock().active_shell_jobs != 2 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(shared.inner.lock().active_shell_jobs, 2);
+        let outputs = workers
+            .into_iter()
+            .map(|worker| {
+                worker
+                    .join()
+                    .expect("foreground request thread")
+                    .expect("foreground shell job")
+                    .output
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(outputs, ["first", "second"]);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared.inner.lock().active_shell_jobs != 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(shared.inner.lock().active_shell_jobs, 0);
+
+        shared.inner.lock().active_shell_jobs = MAX_SHELL_JOBS;
+        let error = shared
+            .execute(
+                ClientId(103),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("run-shell", ["printf never"]),
+            )
+            .expect_err("job process cap");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "failed to run command: printf never"
+        ));
+        shared.inner.lock().active_shell_jobs = 0;
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn background_command_insertion_and_if_shell_return_before_their_work_runs() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(104);
+        let mut context = ExecutionContext::default();
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["-bC", "set-option -g @background-command ready"],
+                ),
+            )
+            .expect("background command insertion");
+        assert!(output.output.is_empty());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let value = shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-options", ["-gqv", "@background-command"]),
+                )
+                .expect("background command value");
+            if value.output == "ready" {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "if-shell",
+                    [
+                        "-b",
+                        "sleep 0.1; true",
+                        "set-option -g @background-if true",
+                        "set-option -g @background-if false",
+                    ],
+                ),
+            )
+            .expect("background if-shell");
+        assert!(output.output.is_empty());
+        assert_eq!(shared.inner.lock().active_shell_jobs, 1);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let value = shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-options", ["-gqv", "@background-if"]),
+                )
+                .expect("background branch value");
+            if value.output == "true" {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(shared.inner.lock().active_shell_jobs, 0);
     }
 
     #[test]
@@ -21612,6 +23216,27 @@ bind - split-window -v -c "#{pane_current_path}"
                 "client-7 command: select-window -t 99",
                 "client-7 message: can't find window: 99",
             ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_response_carries_shell_output_and_nonzero_exit_status_together() {
+        let shared = Arc::new(Shared::new(1));
+        let response = shared.execute_command_request(
+            ClientId(7),
+            ClientKind::Command,
+            &mut ExecutionContext::default(),
+            44,
+            &CommandInvocation::new("run-shell", ["printf before; exit 3"]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 44,
+                output: "before\n'printf before; exit 3' returned 3".to_owned(),
+                exit_code: 3,
+            }
         );
     }
 

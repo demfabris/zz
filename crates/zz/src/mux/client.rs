@@ -7371,6 +7371,7 @@ mod tests {
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Success {
                         request_id: 1,
                         output: String::new(),
+                        exit_code: 0,
                     }),
                     cx,
                 );

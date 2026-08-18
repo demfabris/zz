@@ -287,13 +287,13 @@ fn bind_key_validates_payloads_before_storing_them() {
         .unwrap();
     assert!(engine.keys.get("copy-mode-vi", "5").is_some());
 
-    let original_r = engine.keys.get("prefix", "r").cloned();
-    let error = engine
+    engine
         .execute(&mut context, &command("bind-key", &["r", "run-shell", "x"]))
-        .unwrap_err();
-    assert!(matches!(error, ServerError::UnsupportedCommand(message)
-        if message == "bind-key run-shell"));
-    assert_eq!(engine.keys.get("prefix", "r"), original_r.as_ref());
+        .unwrap();
+    assert_eq!(
+        engine.keys.get("prefix", "r").unwrap().commands,
+        [zz_protocol::CommandInvocation::new("run-shell", ["x"])]
+    );
 
     engine
         .execute(

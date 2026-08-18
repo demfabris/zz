@@ -1,7 +1,8 @@
 use zz_protocol::{
-    BrowserDescriptor, ClientHello, ClientInstanceId, ClientKind, Event, EventPayload, GuiResponse,
-    InputMessage, MuxOptionKey, MuxSnapshot, PROTOCOL_VERSION, PaneId, PaneKindSnapshot,
-    PaneSnapshot, PasteUploadPurpose, ProtocolMessage, ServerError, encode_protocol_message,
+    BrowserDescriptor, ClientHello, ClientInstanceId, ClientKind, CommandResponse, Event,
+    EventPayload, GuiResponse, InputMessage, MuxOptionKey, MuxSnapshot, PROTOCOL_VERSION, PaneId,
+    PaneKindSnapshot, PaneSnapshot, PasteUploadPurpose, ProtocolMessage, ServerError,
+    encode_protocol_message,
 };
 use zz_terminal::TerminalColorScheme;
 
@@ -10,8 +11,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_sixty() {
-    assert_eq!(PROTOCOL_VERSION, 60);
+fn protocol_version_on_this_commit_is_sixty_one() {
+    assert_eq!(PROTOCOL_VERSION, 61);
 }
 
 #[test]
@@ -51,9 +52,23 @@ fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x00, 0x3c, 0x00, 0x00, 0x00, 0x00,
+            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3d, 0x00, 0x00, 0x3d, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00,
         ]
+    );
+}
+
+#[test]
+fn command_success_round_trips_output_and_exit_code() {
+    let message = ProtocolMessage::CommandResponse(CommandResponse::Success {
+        request_id: 7,
+        output: "job output".to_owned(),
+        exit_code: 3,
+    });
+    let frame = encode_protocol_message(&message).expect("encode command response");
+    assert_eq!(
+        zz_protocol::decode_protocol_frame(&frame).expect("decode command response"),
+        message
     );
 }
 

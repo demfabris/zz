@@ -14,14 +14,14 @@ mod tmux_options;
 
 pub use command::{
     AgentOptions, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
-    MAX_WORD_SEPARATORS_BYTES, MuxEffect, MuxEngine, PaneRuntimeFacts,
+    MAX_WORD_SEPARATORS_BYTES, MuxEffect, MuxEngine, PaneRuntimeFacts, if_shell_truthy,
 };
 pub use layout::{CellLayout, SplitSize};
 pub use model::{
     LayoutPreset, MuxState, Pane, PaneDirection, PaneKind, Session, SplitPlacement, Window,
     joined_layout, swapped_layout,
 };
-pub use parser::{ConfigDiagnostic, ParsedConfig, parse_config};
+pub use parser::{ConfigDiagnostic, ParsedConfig, command_block_body, parse_config};
 pub use status::{
     DEFAULT_STATUS_INTERVAL, DEFAULT_STATUS_LEFT, DEFAULT_STATUS_RIGHT, FormatUniverse,
     StatusContext, StatusFormats, StatusHooks, StatusOption, expand_format_values, expand_status,

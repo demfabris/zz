@@ -66,6 +66,11 @@ const DEFAULT_REPEAT_TIME_MS: u32 = 500;
 const MAX_REPEAT_TIME_MS: u32 = 2_000_000;
 pub const MAX_WORD_SEPARATORS_BYTES: usize = 8 * 1024;
 
+#[must_use]
+pub fn if_shell_truthy(value: &str) -> bool {
+    value.as_bytes().first().is_some_and(|first| *first != b'0')
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ExecutionContext {
     pub session: Option<SessionId>,
@@ -5661,7 +5666,13 @@ impl MuxEngine {
             ("default-command", TmuxOptionTarget::Session(session)) => {
                 if let Some(value) = value {
                     let next = if options.has("-a") {
-                        format!("{}{value}", self.default_command_for_session(session)?)
+                        format!(
+                            "{}{value}",
+                            self.session_default_commands
+                                .get(&session)
+                                .map(String::as_str)
+                                .unwrap_or_default()
+                        )
                     } else {
                         value.to_owned()
                     };
@@ -5690,7 +5701,13 @@ impl MuxEngine {
             ("default-shell", TmuxOptionTarget::Session(session)) => {
                 if let Some(value) = value {
                     let next = if options.has("-a") {
-                        format!("{}{value}", self.default_shell_for_session(session)?)
+                        format!(
+                            "{}{value}",
+                            self.session_default_shells
+                                .get(&session)
+                                .map(String::as_str)
+                                .unwrap_or_default()
+                        )
                     } else {
                         value.to_owned()
                     };
@@ -11513,6 +11530,67 @@ mod tests {
     }
 
     #[test]
+    fn session_spawn_string_append_uses_only_the_sessions_own_value() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "default-command", "AAA"]),
+            )
+            .unwrap();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "q"]))
+            .unwrap();
+        let session = context.session.unwrap();
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-at", "q", "default-command", "BBB"]),
+            )
+            .unwrap();
+        assert_eq!(engine.default_command_for_session(session).unwrap(), "BBB");
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-t", "q", "default-command", "SSS"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-at", "q", "default-command", "BBB"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.default_command_for_session(session).unwrap(),
+            "SSSBBB"
+        );
+
+        let mut hooks = CommandHooks::new(0);
+        let mut valid = |shell: &str| shell == "/bin";
+        engine
+            .execute_with_shell_validator(
+                &mut context,
+                &command("set-option", &["-g", "default-shell", "/bin"]),
+                &mut hooks,
+                &mut valid,
+            )
+            .unwrap();
+        assert!(matches!(
+            engine.execute_with_shell_validator(
+                &mut context,
+                &command("set-option", &["-at", "q", "default-shell", "/sh"]),
+                &mut hooks,
+                &mut valid,
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "not a suitable shell: /sh"
+        ));
+    }
+
+    #[test]
     fn option_table_defaults_match_the_engine_except_history_limit() {
         let engine = MuxEngine::default();
         let mismatches = tmux_options()
@@ -14422,8 +14500,14 @@ mod tests {
         assert!(rows.contains(
             &"capture-pane (capturep) [-aeJMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
         ));
+        assert!(
+            rows.contains(&"if-shell (if) [-bF] [-t target-pane] shell-command command [command]")
+        );
         assert!(rows.contains(
             &"paste-buffer (pasteb) [-dprS] [-s separator] [-b buffer-name] [-t target-pane]"
+        ));
+        assert!(rows.contains(
+            &"run-shell (run) [-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]"
         ));
         assert_eq!(
             engine
@@ -14432,12 +14516,40 @@ mod tests {
                 .output,
             "capture-pane (capturep) [-aeJMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
         );
+        for name in ["if-shell", "if"] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("list-commands", &[name]))
+                    .unwrap()
+                    .output,
+                "if-shell (if) [-bF] [-t target-pane] shell-command command [command]"
+            );
+        }
+        for name in ["run-shell", "run"] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("list-commands", &[name]))
+                    .unwrap()
+                    .output,
+                "run-shell (run) [-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]"
+            );
+        }
         assert_eq!(
             engine
                 .execute(&mut context, &command("start", &[]))
                 .unwrap(),
             Execution::default()
         );
+    }
+
+    #[test]
+    fn if_shell_truthiness_uses_the_first_byte() {
+        for value in ["", "0", "0abc"] {
+            assert!(!if_shell_truthy(value), "{value:?}");
+        }
+        for value in [" 0", "1", "false"] {
+            assert!(if_shell_truthy(value), "{value:?}");
+        }
     }
 
     #[test]

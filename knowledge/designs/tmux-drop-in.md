@@ -394,6 +394,38 @@ pane visibility). The harness (phase 2) does not wait for this.
   the pin adds a flags-0 block per after-hook; no `default-client-command`
   option (new-session hardcoded, the pin's default).
 
+- **Wave 6b** (`cbb34a2`, CONFIRMED-CLOSED 2026-08-18, zero findings) —
+  notifications + layout strings + basic %output. Protocol v66:
+  `EventPayload::HookEvent {name, variables}` (tag 40) exposes the 5c hook
+  bus to Control subscribers only, `PaneOutput {pane, bytes}` (tag 41), a
+  typed overflow exit (tag 39), and `WindowSnapshot` gained trailing
+  `layout_dump`/`visible_layout_dump` (tmux layout strings, checksummed).
+  Daemon: paste-buffer-changed/deleted seams added; a daemon-owned
+  raw-output multiplexer owns the pane tap and feeds BOTH pipe-pane and
+  Control subscribers — ownership transfers (rearm), never evicts; verified
+  live in both orders (pipe-then-control and control-then-pipe). Front-end:
+  the full notification inventory rendered through the block-deferral seam
+  (one FIFO for notifications AND %output → nothing ever interleaves into
+  an open block, arrival order preserved), %output with the pin's exact
+  escaping (\NNN for 0x00-0x1F + backslash, 8-bit raw — byte-identical
+  concatenated streams), %message, %config-error, `%exit too far behind` on
+  the overflow disconnect. window-unlinked ALWAYS renders
+  %unlinked-window-close (the pin's deferred callback runs post-unlink, so
+  plain %window-close is unreachable without linked windows — probe-caught,
+  reviewer-verified against control-notify.c). Live two-client mutation
+  probe: notification streams line-identical INCLUDING ordering, modulo the
+  ledgered automatic-rename class (the pin's 500ms sniffer emits transient
+  `tmux`/`kernel_task` names; zz single-fires the settled name). Ledgered:
+  the A5 overflow trigger divergence (count/size vs the pin's 5-minute age
+  model — same %exit text, different trigger); the tap handoff is
+  replace-then-rearm, not atomic (flood-test in 6c); startup notification
+  ordering verified empirically, not proven structurally (re-probe if
+  publish ordering changes); client-name spellings in %client-* lines
+  unverified vs the pin's c->name. NEXT: 6c = -A pane states +
+  no-output/pause-after flags + the pin's pacing constants (pacing
+  implemented faithfully even while the kill trigger stays divergent;
+  pause must gate queue ENTRY, not drain), then 6d sizing/subscriptions.
+
 ## Phase 7 — the binary surface (~1 week)
 
 - tmux argv on the zz binary: `-L` (name → socket path), `-S`, `-f`, `-2`, `-u`, plus `-C`/

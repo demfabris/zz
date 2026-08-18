@@ -36,6 +36,76 @@ impl TmuxOptionDefault {
 pub(crate) const STATUS_LEFT_DEFAULT: &str = "[#{session_name}] ";
 pub(crate) const STATUS_RIGHT_DEFAULT: &str = "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y";
 pub(crate) const UPDATE_ENVIRONMENT_DEFAULT: &str = "DISPLAY KRB5CCNAME MSYSTEM SSH_ASKPASS SSH_AUTH_SOCK SSH_AGENT_PID SSH_CONNECTION WAYLAND_DISPLAY WINDOWID XAUTHORITY XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE";
+pub(crate) const HOOK_NAMES: &[&str] = &[
+    "after-bind-key",
+    "after-capture-pane",
+    "after-copy-mode",
+    "after-display-message",
+    "after-display-panes",
+    "after-kill-pane",
+    "after-list-buffers",
+    "after-list-clients",
+    "after-list-keys",
+    "after-list-panes",
+    "after-list-sessions",
+    "after-list-windows",
+    "after-load-buffer",
+    "after-lock-server",
+    "after-new-session",
+    "after-new-window",
+    "after-paste-buffer",
+    "after-pipe-pane",
+    "after-queue",
+    "after-refresh-client",
+    "after-rename-session",
+    "after-rename-window",
+    "after-resize-pane",
+    "after-resize-window",
+    "after-save-buffer",
+    "after-select-layout",
+    "after-select-pane",
+    "after-select-window",
+    "after-send-keys",
+    "after-set-buffer",
+    "after-set-environment",
+    "after-set-hook",
+    "after-set-option",
+    "after-show-environment",
+    "after-show-messages",
+    "after-show-options",
+    "after-split-window",
+    "after-unbind-key",
+    "alert-activity",
+    "alert-bell",
+    "alert-silence",
+    "client-active",
+    "client-attached",
+    "client-detached",
+    "client-focus-in",
+    "client-focus-out",
+    "client-resized",
+    "client-session-changed",
+    "client-light-theme",
+    "client-dark-theme",
+    "command-error",
+    "pane-died",
+    "pane-exited",
+    "pane-focus-in",
+    "pane-focus-out",
+    "pane-mode-changed",
+    "pane-set-clipboard",
+    "pane-title-changed",
+    "session-closed",
+    "session-created",
+    "session-renamed",
+    "session-window-changed",
+    "window-layout-changed",
+    "window-linked",
+    "window-pane-changed",
+    "window-renamed",
+    "window-resized",
+    "window-unlinked",
+];
 
 const SERVER_OPTIONS: &[&str] = &[
     "backspace",
@@ -370,29 +440,11 @@ fn tmux_option_is_array(name: &str) -> bool {
             | "status-format"
             | "update-environment"
             | "pane-colours"
-            | "alert-activity"
-            | "alert-bell"
-            | "alert-silence"
-            | "command-error"
-            | "pane-died"
-            | "pane-exited"
-            | "pane-focus-in"
-            | "pane-focus-out"
-            | "pane-mode-changed"
-            | "pane-set-clipboard"
-            | "pane-title-changed"
-            | "session-closed"
-            | "session-created"
-            | "session-renamed"
-            | "session-window-changed"
-            | "window-layout-changed"
-            | "window-linked"
-            | "window-pane-changed"
-            | "window-renamed"
-            | "window-resized"
-            | "window-unlinked"
-    ) || name.starts_with("after-")
-        || name.starts_with("client-")
+    ) || tmux_option_is_hook(name)
+}
+
+pub(crate) fn tmux_option_is_hook(name: &str) -> bool {
+    HOOK_NAMES.contains(&name)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -526,6 +578,12 @@ mod tests {
         ] {
             assert!(arrays.contains(name), "{name}");
         }
+        let hooks = tmux_options()
+            .filter(|option| tmux_option_is_hook(option.name))
+            .map(|option| option.name)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(hooks.len(), 68);
+        assert_eq!(hooks, HOOK_NAMES.iter().copied().collect());
     }
 
     #[test]

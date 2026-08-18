@@ -30,7 +30,7 @@ mod workspace;
 
 #[cfg(not(target_os = "ios"))]
 use std::{
-    io::ErrorKind,
+    io::{self, ErrorKind, Write as _},
     path::PathBuf,
     process::{Command, ExitCode, Stdio},
 };
@@ -456,26 +456,18 @@ fn run_command_mode(
         command
     };
     match client.execute(CommandInvocation::new(command, args)) {
-        Ok(mut output) => {
-            if !output.is_empty() {
-                if output.ends_with('\n') {
-                    output.pop();
-                }
-                println!("{output}");
-            }
+        Ok(output) => {
+            print_command_output(output);
             Some(ExitCode::SUCCESS)
         }
-        Err(DaemonError::CommandExit {
-            mut output,
-            exit_code,
-        }) => {
-            if !output.is_empty() {
-                if output.ends_with('\n') {
-                    output.pop();
-                }
-                println!("{output}");
-            }
+        Err(DaemonError::CommandExit { output, exit_code }) => {
+            print_command_output(output);
             Some(ExitCode::from(exit_code))
+        }
+        Err(DaemonError::CommandFailed { output, error }) => {
+            print_command_output(output);
+            eprintln!("{}", command_error_message(&error));
+            Some(ExitCode::FAILURE)
         }
         Err(error) => {
             eprintln!("{}", command_error_message(&error));
@@ -533,8 +525,21 @@ fn format_local_daemon_error(error: DaemonError) -> String {
 }
 
 #[cfg(not(target_os = "ios"))]
+fn print_command_output(mut output: String) {
+    if output.is_empty() {
+        return;
+    }
+    if output.ends_with('\n') {
+        output.pop();
+    }
+    println!("{output}");
+    let _ = io::stdout().flush();
+}
+
+#[cfg(not(target_os = "ios"))]
 fn command_error_message(error: &DaemonError) -> String {
     match error {
+        DaemonError::CommandFailed { error, .. } => command_error_message(error),
         DaemonError::Server(ServerError::InvalidCommand(message))
             if message == "no current client" =>
         {

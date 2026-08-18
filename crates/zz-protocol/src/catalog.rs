@@ -174,8 +174,6 @@ pub static DAEMON_COMMAND_NAMES: &[&str] = &[
 pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "new-pane",
     "newp",
-    "set-hook",
-    "show-hooks",
     "lock-client",
     "lockc",
     "lock-server",
@@ -1336,6 +1334,39 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         variadic: None,
     },
     CommandSpec {
+        name: "set-hook",
+        aliases: &[],
+        description: "Set or immediately run a hook",
+        usage: "[-agpRuw] [-B name:what:format] [-t target-pane] [hook] [command]",
+        options: &[
+            CommandOptionSpec::value("-B", FreeForm, "format monitor"),
+            CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::flag("-a", "append"),
+            CommandOptionSpec::flag("-g", "global scope"),
+            CommandOptionSpec::flag("-p", "pane scope"),
+            CommandOptionSpec::flag("-R", "run immediately"),
+            CommandOptionSpec::flag("-u", "unset"),
+            CommandOptionSpec::flag("-w", "window scope"),
+        ],
+        positionals: &[FreeForm, FreeForm],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "show-hooks",
+        aliases: &[],
+        description: "Show hooks",
+        usage: "[-Bgpw] [-t target-pane] [hook]",
+        options: &[
+            CommandOptionSpec::flag("-B", "show format monitors"),
+            CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::flag("-g", "global scope"),
+            CommandOptionSpec::flag("-p", "pane scope"),
+            CommandOptionSpec::flag("-w", "window scope"),
+        ],
+        positionals: &[FreeForm],
+        variadic: None,
+    },
+    CommandSpec {
         name: "set-option",
         aliases: &["set"],
         description: "Set a server, session, window, or pane option",
@@ -1654,7 +1685,8 @@ mod tests {
             assert!(!UNIMPLEMENTED_TMUX_COMMANDS.contains(&name));
         }
         for name in ["set-hook", "show-hooks"] {
-            assert!(UNIMPLEMENTED_TMUX_COMMANDS.contains(&name));
+            assert!(!UNIMPLEMENTED_TMUX_COMMANDS.contains(&name));
+            assert!(command_spec(name).is_some());
         }
     }
 
@@ -1724,6 +1756,8 @@ mod tests {
             "unbind-key",
             "list-keys",
             "list-commands",
+            "set-hook",
+            "show-hooks",
             "set-option",
             "set-window-option",
             "show-options",

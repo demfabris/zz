@@ -189,7 +189,18 @@ impl CommandClient {
                 ProtocolMessage::CommandResponse(CommandResponse::Error {
                     request_id: response_id,
                     error,
-                }) if response_id == request_id => return Err(error.into()),
+                    output,
+                }) if response_id == request_id => {
+                    let error = DaemonError::Server(error);
+                    return if output.is_empty() {
+                        Err(error)
+                    } else {
+                        Err(DaemonError::CommandFailed {
+                            output,
+                            error: Box::new(error),
+                        })
+                    };
+                }
                 _ => {}
             }
         }

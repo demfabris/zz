@@ -3306,6 +3306,7 @@ impl MuxClient {
                 ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                     request_id,
                     error,
+                    ..
                 }) => {
                     if !self.report_command_failure(host, request_id, &error, cx) {
                         log::warn!(
@@ -3740,10 +3741,12 @@ impl MuxClient {
             CommandResponse::Error {
                 request_id: 0,
                 error: ServerError::MissingTarget(_) | ServerError::SessionNotFound(_),
+                ..
             } if self.retry_default_after_missing_session() => {}
             CommandResponse::Error {
                 request_id: 0,
                 error: ServerError::MissingTarget(_) | ServerError::SessionNotFound(_),
+                ..
             } if self.core.attached_session().is_none()
                 && self.core.snapshot().sessions.is_empty() =>
             {
@@ -3762,8 +3765,11 @@ impl MuxClient {
             CommandResponse::Error {
                 request_id: 0,
                 error: ServerError::PaneExited(pane) | ServerError::PaneNotAttached(pane),
+                ..
             } => log::debug!("ignoring stale input for detached pane {pane}"),
-            CommandResponse::Error { request_id, error } => {
+            CommandResponse::Error {
+                request_id, error, ..
+            } => {
                 if !self.report_command_failure(host, request_id, &error, cx) {
                     self.attached_connection_mut().reconnect_attach = None;
                     self.error = Some(Arc::from(error.to_string()));
@@ -5135,6 +5141,7 @@ mod tests {
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id: 0,
                         error: ServerError::SessionNotFound("9".to_owned()),
+                        output: String::new(),
                     }),
                     cx,
                 );
@@ -7128,6 +7135,7 @@ mod tests {
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id: 0,
                         error: ServerError::SessionNotFound(String::new()),
+                        output: String::new(),
                     }),
                     cx,
                 );
@@ -7174,6 +7182,7 @@ mod tests {
                             ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                                 request_id: 0,
                                 error: late_error.clone(),
+                                output: String::new(),
                             })
                         };
                         let empty_snapshot = || {
@@ -7300,6 +7309,7 @@ mod tests {
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id,
                         error: ServerError::PaneNotFound("%2".to_owned()),
+                        output: String::new(),
                     }),
                     cx,
                 );
@@ -7339,6 +7349,7 @@ mod tests {
                         ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                             request_id,
                             error: late_error.clone(),
+                            output: String::new(),
                         }),
                         cx,
                     );
@@ -7414,6 +7425,7 @@ mod tests {
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id,
                         error: ServerError::SessionNotFound("9".to_owned()),
+                        output: String::new(),
                     }),
                     cx,
                 );

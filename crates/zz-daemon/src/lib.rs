@@ -77,6 +77,12 @@ pub enum DaemonError {
     Thread(String),
     #[error("command exited with status {exit_code}")]
     CommandExit { output: String, exit_code: u8 },
+    #[error("{error}")]
+    CommandFailed {
+        output: String,
+        #[source]
+        error: Box<DaemonError>,
+    },
     #[error("{}", incompatible_daemon_message(*daemon, *client))]
     IncompatibleDaemon { daemon: Option<u16>, client: u16 },
 }

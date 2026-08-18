@@ -22,7 +22,7 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision, KeyEngine,
     KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts, canonical_command,
-    command_block_body, expand_format_values, if_shell_truthy, parse_config,
+    command_block_body, expand_format_values, hook_format_variables, if_shell_truthy, parse_config,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -2367,44 +2367,58 @@ impl Shared {
             push_server_message(&mut inner, format!("{client_name} command: {command}"));
             client_name
         };
-        match self.execute(client, kind, context, command) {
-            Ok(execution) => {
-                if kind == ClientKind::Interactive
-                    && !execution.output.is_empty()
-                    && let Err(error) = self.open_command_output(
-                        client,
-                        context.pane,
-                        command.name.clone(),
-                        &execution.output,
-                    )
-                {
-                    self.publish_to_client(
-                        client,
-                        EventPayload::ClientMessage {
-                            pane: context.pane,
-                            kind: ClientMessageKind::Error,
-                            text: error.to_string(),
-                        },
-                    );
-                }
-                CommandResponse::Success {
-                    request_id,
-                    output: execution.output,
-                    exit_code: 0,
-                }
-            }
+        let response = match self.execute(client, kind, context, command) {
+            Ok(execution) => CommandResponse::Success {
+                request_id,
+                output: execution.output,
+                exit_code: 0,
+            },
             Err(DaemonError::CommandExit { output, exit_code }) => CommandResponse::Success {
                 request_id,
                 output,
                 exit_code,
             },
+            Err(DaemonError::CommandFailed { output, error }) => {
+                let error = daemon_server_error(*error);
+                let mut inner = self.inner.lock();
+                push_server_message(&mut inner, format!("{client_name} message: {error}"));
+                CommandResponse::Error {
+                    request_id,
+                    error,
+                    output,
+                }
+            }
             Err(error) => {
                 let error = daemon_server_error(error);
                 let mut inner = self.inner.lock();
                 push_server_message(&mut inner, format!("{client_name} message: {error}"));
-                CommandResponse::Error { request_id, error }
+                CommandResponse::Error {
+                    request_id,
+                    error,
+                    output: String::new(),
+                }
             }
+        };
+        let output = match &response {
+            CommandResponse::Success { output, .. } | CommandResponse::Error { output, .. } => {
+                output
+            }
+        };
+        if kind == ClientKind::Interactive
+            && !output.is_empty()
+            && let Err(error) =
+                self.open_command_output(client, context.pane, command.name.clone(), output)
+        {
+            self.publish_to_client(
+                client,
+                EventPayload::ClientMessage {
+                    pane: context.pane,
+                    kind: ClientMessageKind::Error,
+                    text: error.to_string(),
+                },
+            );
         }
+        response
     }
 
     fn execute(
@@ -2424,6 +2438,58 @@ impl Shared {
     }
 
     fn execute_with_mux_source(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+        mux_source: MuxOptionSource,
+    ) -> Result<Execution, DaemonError> {
+        let no_hooks = context.no_hooks;
+        let original_context = context.clone();
+        let name = canonical_command(&command.name).to_owned();
+        let result = self.execute_with_mux_source_raw(client, kind, context, command, mux_source);
+        let hook_output = if no_hooks {
+            String::new()
+        } else {
+            let (hook, mut hook_context) = match &result {
+                Ok(execution) => (
+                    format!("after-{name}"),
+                    self.command_hook_context(&name, execution, context),
+                ),
+                Err(_) => ("command-error".to_owned(), original_context),
+            };
+            {
+                let inner = self.inner.lock();
+                inner.engine.repair_context(&mut hook_context);
+            }
+            self.run_command_hook(client, kind, &hook_context, command, &hook)
+        };
+        match result {
+            Ok(mut execution) => {
+                append_inserted_output(&mut execution.output, &hook_output);
+                Ok(execution)
+            }
+            Err(DaemonError::CommandExit {
+                mut output,
+                exit_code,
+            }) => {
+                append_inserted_output(&mut output, &hook_output);
+                Err(DaemonError::CommandExit { output, exit_code })
+            }
+            Err(DaemonError::CommandFailed { mut output, error }) => {
+                append_inserted_output(&mut output, &hook_output);
+                Err(DaemonError::CommandFailed { output, error })
+            }
+            Err(error) if hook_output.is_empty() => Err(error),
+            Err(error) => Err(DaemonError::CommandFailed {
+                output: hook_output,
+                error: Box::new(error),
+            }),
+        }
+    }
+
+    fn execute_with_mux_source_raw(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
@@ -2490,6 +2556,82 @@ impl Shared {
         result
     }
 
+    fn command_hook_context(
+        &self,
+        name: &str,
+        execution: &Execution,
+        context: &ExecutionContext,
+    ) -> ExecutionContext {
+        let mut hook_context = context.clone();
+        if matches!(name, "new-session" | "new-window" | "split-window")
+            && let Some(pane) = execution.effects.iter().find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+        {
+            let inner = self.inner.lock();
+            hook_context.retarget_to_pane(&inner.engine.state, pane);
+        }
+        hook_context
+    }
+
+    fn run_command_hook(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        command: &CommandInvocation,
+        hook: &str,
+    ) -> String {
+        let commands = self
+            .inner
+            .lock()
+            .engine
+            .hook_commands(context.session, hook);
+        let Some(commands) = commands else {
+            return String::new();
+        };
+        self.run_hook_commands(
+            client,
+            kind,
+            context,
+            commands,
+            &hook_format_variables(command, hook),
+        )
+    }
+
+    fn run_hook_commands(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        commands: Vec<Vec<CommandInvocation>>,
+        variables: &BTreeMap<String, String>,
+    ) -> String {
+        let mut output = String::new();
+        for commands in commands {
+            let mut hook_context = context.clone();
+            hook_context.enter_hook(variables.clone());
+            for command in commands {
+                hook_context.no_hooks = true;
+                hook_context.format_variables.clone_from(variables);
+                match self.execute(client, kind, &mut hook_context, &command) {
+                    Ok(execution) => {
+                        append_inserted_output(&mut output, &execution.output);
+                    }
+                    Err(error) => {
+                        if let Some(error_output) = daemon_error_output(&error) {
+                            append_inserted_output(&mut output, error_output);
+                        }
+                        self.publish_background_command_error(client, &hook_context, &error, false);
+                        break;
+                    }
+                }
+            }
+        }
+        output
+    }
+
     fn execute_with_mux_source_inner(
         self: &Arc<Self>,
         client: ClientId,
@@ -2498,6 +2640,7 @@ impl Shared {
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
     ) -> Result<Execution, DaemonError> {
+        let format_variables = context.format_variables.clone();
         let mut terminals_to_watch = Vec::new();
         let mut client_events = Vec::new();
         let mut direct_events = Vec::new();
@@ -2524,8 +2667,9 @@ impl Shared {
         let mut agent_options_changed = false;
         let mut status_formats_changed = false;
         let mut shutdown_requested = false;
+        let mut immediate_hooks = Vec::new();
 
-        let (execution, mux_options_event) = {
+        let (mut execution, mux_options_event) = {
             let mut inner = self.inner.lock();
             let active_windows_before = inner
                 .engine
@@ -2563,7 +2707,10 @@ impl Shared {
                 }
             }
             let facts = format_hook_facts(&inner);
-            let mut hooks = DaemonFormatHooks::command(&facts);
+            let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                &facts,
+                (!format_variables.is_empty()).then_some(&format_variables),
+            );
             inner.engine.set_format_now(unix_timestamp());
             let execution = inner.engine.execute_with_shell_validator(
                 context,
@@ -3370,6 +3517,13 @@ impl Shared {
                     MuxEffect::SourceFile { path, quiet } => {
                         source_files.push((path.clone(), *quiet));
                     }
+                    MuxEffect::RunHook {
+                        name,
+                        commands,
+                        context,
+                    } => {
+                        immediate_hooks.push((name.clone(), commands.clone(), context.clone()));
+                    }
                     MuxEffect::ReloadConfig => reload_config = true,
                     MuxEffect::KillServer => shutdown_requested = true,
                     MuxEffect::SnapshotChanged => snapshot_changed = true,
@@ -3395,6 +3549,17 @@ impl Shared {
             let mux_options_event = mux_options_changed.then(|| inner.mux_options.clone());
             (execution, mux_options_event)
         };
+
+        for (name, commands, context) in immediate_hooks {
+            let hook_output = self.run_hook_commands(
+                client,
+                kind,
+                &context,
+                commands,
+                &BTreeMap::from([("hook".to_owned(), name)]),
+            );
+            append_inserted_output(&mut execution.output, &hook_output);
+        }
 
         if shutdown_requested {
             self.request_shutdown();
@@ -3841,7 +4006,10 @@ impl Shared {
             let target = ExecutionContext::for_pane(&inner.engine.state, pane)
                 .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
             let facts = format_hook_facts(&inner);
-            let mut hooks = DaemonFormatHooks::command(&facts);
+            let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                &facts,
+                context.format_variables(),
+            );
             let command =
                 inner
                     .engine
@@ -4045,9 +4213,10 @@ impl Shared {
                         .pane(*pane)
                         .is_some_and(|pane| !pane.dead)
                 });
-            let command_context = target
-                .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane))
-                .unwrap_or_else(|| context.clone());
+            let mut command_context = context.clone();
+            if let Some(pane) = target {
+                command_context.retarget_to_pane(&inner.engine.state, pane);
+            }
             inner.engine.set_format_now(unix_timestamp());
             let format_context = inner.engine.format_status_context(
                 command_context.session,
@@ -4059,7 +4228,10 @@ impl Shared {
                 if parsed.command_mode {
                     command_block_body(command).map_or_else(
                         || {
-                            let mut hooks = DaemonFormatHooks::command(&facts);
+                            let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                                &facts,
+                                command_context.format_variables(),
+                            );
                             InsertedCommandSource::String(expand_format_values(
                                 command,
                                 &format_context,
@@ -4071,13 +4243,15 @@ impl Shared {
                 } else if let Some(body) = command_block_body(command) {
                     InsertedCommandSource::Block(body.to_owned())
                 } else {
-                    let variables = parsed
-                        .positional
-                        .iter()
-                        .skip(1)
-                        .enumerate()
-                        .map(|(index, value)| ((index + 1).to_string(), value.clone()))
-                        .collect::<BTreeMap<_, _>>();
+                    let mut variables = command_context.format_variables.clone();
+                    variables.extend(
+                        parsed
+                            .positional
+                            .iter()
+                            .skip(1)
+                            .enumerate()
+                            .map(|(index, value)| ((index + 1).to_string(), value.clone())),
+                    );
                     let mut hooks = DaemonFormatHooks::command_with_variables(&facts, &variables);
                     InsertedCommandSource::Shell(expand_format_values(
                         command,
@@ -4138,8 +4312,20 @@ impl Shared {
                                     &result,
                                 );
                             }
-                            Err(error) => shared
-                                .publish_background_command_error(client, &context, &error, true),
+                            Err(error) => {
+                                if let Some(output) = daemon_error_output(&error) {
+                                    shared.route_background_inserted_output(
+                                        client,
+                                        kind,
+                                        &context,
+                                        "run-shell".to_owned(),
+                                        output,
+                                    );
+                                }
+                                shared.publish_background_command_error(
+                                    client, &context, &error, true,
+                                );
+                            }
                         }
                     })?;
                     Ok(Execution::default())
@@ -4241,9 +4427,10 @@ impl Shared {
                     .resolve_pane(Some(target), context.window, context.pane)
                     .ok()
             });
-            let command_context = target
-                .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane))
-                .unwrap_or_else(|| context.clone());
+            let mut command_context = context.clone();
+            if let Some(pane) = target {
+                command_context.retarget_to_pane(&inner.engine.state, pane);
+            }
             inner.engine.set_format_now(unix_timestamp());
             let format_context = inner.engine.format_status_context(
                 command_context.session,
@@ -4251,7 +4438,10 @@ impl Shared {
                 command_context.pane,
             );
             let facts = format_hook_facts(&inner);
-            let mut hooks = DaemonFormatHooks::command(&facts);
+            let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                &facts,
+                command_context.format_variables(),
+            );
             let condition =
                 expand_format_values(&parsed.positional[0], &format_context, &mut hooks);
             let cwd = job_working_directory(&inner, &command_context, None);
@@ -4304,6 +4494,15 @@ impl Shared {
                             &result.output,
                         ),
                         Err(error) => {
+                            if let Some(output) = daemon_error_output(&error) {
+                                shared.route_background_inserted_output(
+                                    client,
+                                    kind,
+                                    &context,
+                                    "if-shell".to_owned(),
+                                    output,
+                                );
+                            }
                             shared.publish_background_command_error(client, &context, &error, true);
                         }
                     }
@@ -4376,7 +4575,12 @@ impl Shared {
                     result.exit_code = exit_code;
                     break;
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    return Err(prepend_command_output(
+                        std::mem::take(&mut result.output),
+                        error,
+                    ));
+                }
             }
         }
         Ok(result)
@@ -4827,7 +5031,10 @@ impl Shared {
                 }),
                 ..FormatHookFacts::default()
             };
-            let mut hooks = DaemonFormatHooks::command(&facts);
+            let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                &facts,
+                context.format_variables(),
+            );
             output.push(expand_format_values(format, &format_context, &mut hooks));
         }
         Ok(Execution {
@@ -4965,7 +5172,7 @@ impl Shared {
                 let mut inner = self.inner.lock();
                 if let Some(format) = parsed.value('F') {
                     inner.engine.set_format_now(unix_timestamp());
-                    let context = inner.engine.format_status_context(None, None, None);
+                    let format_context = inner.engine.format_status_context(None, None, None);
                     let output = inner
                         .paste_buffers
                         .iter()
@@ -4974,8 +5181,11 @@ impl Shared {
                                 buffer: Some(buffer_format_facts(buffer)),
                                 ..FormatHookFacts::default()
                             };
-                            let mut hooks = DaemonFormatHooks::command(&facts);
-                            expand_format_values(format, &context, &mut hooks)
+                            let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                                &facts,
+                                context.format_variables(),
+                            );
+                            expand_format_values(format, &format_context, &mut hooks)
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
@@ -5287,13 +5497,23 @@ impl Shared {
             && target.is_empty()
             && self.inner.lock().engine.state.sessions.is_empty()
         {
-            self.execute(
-                client,
-                ClientKind::Command,
-                context,
-                &CommandInvocation::new("new-session", ["-A", "-d"]),
-            )
-            .map_err(daemon_server_error)?;
+            let execution = self
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    context,
+                    &CommandInvocation::new("new-session", ["-A", "-d"]),
+                )
+                .map_err(daemon_server_error)?;
+            if !execution.output.is_empty() {
+                self.open_command_output(
+                    client,
+                    context.pane,
+                    "new-session".to_owned(),
+                    &execution.output,
+                )
+                .map_err(daemon_server_error)?;
+            }
         }
         let session = {
             let inner = self.inner.lock();
@@ -5318,11 +5538,11 @@ impl Shared {
             let pane = inner.engine.state.windows[&window].active_pane;
             (window, pane)
         };
-        *context = ExecutionContext {
-            session: Some(session),
-            window: Some(window),
-            pane: Some(pane),
-        };
+        context.retarget(&ExecutionContext::new(
+            Some(session),
+            Some(window),
+            Some(pane),
+        ));
         let snapshot = self.attach(client, session)?;
         Ok((session, snapshot))
     }
@@ -5925,10 +6145,11 @@ impl Shared {
             && self.inner.lock().engine.dead_pane_dismisses_on_key(pane)
         {
             let target = pane.to_string();
-            self.execute(
+            self.execute_gesture(
                 client,
                 kind,
                 context,
+                "dead_pane_dismiss",
                 &CommandInvocation::new("kill-pane", ["-t", target.as_str()]),
             )?;
             return Ok(());
@@ -6338,9 +6559,25 @@ impl Shared {
         gesture: &str,
         command: &CommandInvocation,
     ) -> Result<(), DaemonError> {
-        let Err(error) = self.execute(client, kind, context, command) else {
-            return Ok(());
+        let error = match self.execute(client, kind, context, command) {
+            Ok(execution) => {
+                if kind == ClientKind::Interactive && !execution.output.is_empty() {
+                    self.open_command_output(
+                        client,
+                        context.pane,
+                        command.name.clone(),
+                        &execution.output,
+                    )?;
+                }
+                return Ok(());
+            }
+            Err(error) => error,
         };
+        if kind == ClientKind::Interactive
+            && let Some(output) = daemon_error_output(&error)
+        {
+            self.open_command_output(client, context.pane, command.name.clone(), output)?;
+        }
         log::warn!(
             target: "zz_daemon::diagnostics::input",
             "gesture_command_failed client={client} gesture={gesture} command={} args={:?} error={error}",
@@ -6452,6 +6689,30 @@ impl Shared {
             let execution = match self.execute(client, kind, context, command) {
                 Ok(execution) => execution,
                 Err(error) => {
+                    if let Some(error_output) = daemon_error_output(&error)
+                        && !output_truncated
+                    {
+                        output_truncated = append_command_prompt_output(&mut output, error_output);
+                    }
+                    if output_truncated {
+                        if !output.is_empty() {
+                            output.push('\n');
+                        }
+                        output.push_str(COMMAND_PROMPT_OUTPUT_TRUNCATED);
+                    }
+                    if kind == ClientKind::Interactive && !output.is_empty() {
+                        let title = commands.first().map_or_else(
+                            || "command output".to_owned(),
+                            |command| {
+                                if commands.len() == 1 {
+                                    command.name.clone()
+                                } else {
+                                    "command output".to_owned()
+                                }
+                            },
+                        );
+                        self.open_command_output(client, Some(pane), title, &output)?;
+                    }
                     log::warn!(
                         target: "zz_daemon::diagnostics::input",
                         "key_command_failed client={client} command={} args={:?} error={error}",
@@ -6701,6 +6962,34 @@ impl Shared {
                 }
                 Ok(_) => {}
                 Err(error) => {
+                    if let Some(error_output) = daemon_error_output(&error)
+                        && !output_truncated
+                    {
+                        output_truncated = append_command_prompt_output(&mut output, error_output);
+                    }
+                    if output_truncated {
+                        if !output.is_empty() {
+                            output.push('\n');
+                        }
+                        output.push_str(COMMAND_PROMPT_OUTPUT_TRUNCATED);
+                    }
+                    if !output.is_empty()
+                        && let Err(output_error) = self.open_command_output(
+                            client,
+                            context.pane,
+                            "command output".to_owned(),
+                            &output,
+                        )
+                    {
+                        self.publish_to_client(
+                            client,
+                            EventPayload::ClientMessage {
+                                pane: context.pane,
+                                kind: ClientMessageKind::Error,
+                                text: output_error.to_string(),
+                            },
+                        );
+                    }
                     self.publish_to_client(
                         client,
                         EventPayload::ClientMessage {
@@ -9145,13 +9434,16 @@ impl Shared {
                 }
                 continue;
             }
-            match self.execute_with_mux_source(
-                ClientId(u64::MAX),
-                ClientKind::Command,
-                context,
-                &command,
-                MuxOptionSource::TmuxConfig,
-            ) {
+            match self
+                .execute_with_mux_source(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    context,
+                    &command,
+                    MuxOptionSource::TmuxConfig,
+                )
+                .map_err(discard_command_output)
+            {
                 Ok(_) => {}
                 Err(DaemonError::Server(ServerError::UnsupportedCommand(command))) => {
                     log::warn!(
@@ -12684,6 +12976,32 @@ fn append_inserted_output(output: &mut String, addition: &str) {
     output.push_str(addition);
 }
 
+fn prepend_command_output(mut output: String, error: DaemonError) -> DaemonError {
+    if output.is_empty() {
+        return error;
+    }
+    match error {
+        DaemonError::CommandExit {
+            output: error_output,
+            exit_code,
+        } => {
+            append_inserted_output(&mut output, &error_output);
+            DaemonError::CommandExit { output, exit_code }
+        }
+        DaemonError::CommandFailed {
+            output: error_output,
+            error,
+        } => {
+            append_inserted_output(&mut output, &error_output);
+            DaemonError::CommandFailed { output, error }
+        }
+        error => DaemonError::CommandFailed {
+            output,
+            error: Box::new(error),
+        },
+    }
+}
+
 fn inserted_execution(
     client: ClientId,
     kind: ClientKind,
@@ -12735,8 +13053,27 @@ fn existing_job_working_directory(path: &Path) -> Cow<'_, Path> {
 
 fn daemon_error_text(error: &DaemonError) -> String {
     match error {
+        DaemonError::CommandFailed { error, .. } => daemon_error_text(error),
         DaemonError::Server(ServerError::InvalidCommand(message)) => message.clone(),
         _ => error.to_string(),
+    }
+}
+
+fn discard_command_output(error: DaemonError) -> DaemonError {
+    match error {
+        DaemonError::CommandFailed { error, .. } => discard_command_output(*error),
+        error => error,
+    }
+}
+
+fn daemon_error_output(error: &DaemonError) -> Option<&str> {
+    match error {
+        DaemonError::CommandExit { output, .. } | DaemonError::CommandFailed { output, .. }
+            if !output.is_empty() =>
+        {
+            Some(output)
+        }
+        _ => None,
     }
 }
 
@@ -13496,10 +13833,8 @@ fn handle_connection<S: TransportStream>(
                 } else {
                     inner.engine.state.default_context()
                 };
-                fallback.map(|(session, window, pane)| ExecutionContext {
-                    session: Some(session),
-                    window: Some(window),
-                    pane: Some(pane),
+                fallback.map(|(session, window, pane)| {
+                    ExecutionContext::new(Some(session), Some(window), Some(pane))
                 })
             })
             .unwrap_or_default()
@@ -13596,6 +13931,7 @@ fn handle_connection<S: TransportStream>(
                             error: ServerError::InvalidCommand(
                                 "command client cannot attach".to_owned(),
                             ),
+                            output: String::new(),
                         },
                     ));
                     continue;
@@ -13614,6 +13950,7 @@ fn handle_connection<S: TransportStream>(
                             CommandResponse::Error {
                                 request_id: 0,
                                 error,
+                                output: String::new(),
                             },
                         ));
                     }
@@ -13636,6 +13973,7 @@ fn handle_connection<S: TransportStream>(
                             error: ServerError::InvalidCommand(
                                 "command client cannot send input".to_owned(),
                             ),
+                            output: String::new(),
                         },
                     ));
                     continue;
@@ -13645,6 +13983,7 @@ fn handle_connection<S: TransportStream>(
                         CommandResponse::Error {
                             request_id: 0,
                             error: daemon_server_error(error),
+                            output: String::new(),
                         },
                     ));
                 }
@@ -13697,6 +14036,7 @@ fn handle_connection<S: TransportStream>(
                         CommandResponse::Error {
                             request_id: 0,
                             error,
+                            output: String::new(),
                         },
                     ));
                 }
@@ -13763,6 +14103,7 @@ fn best_effort_protocol_mismatch_reply(stream: &mut impl Write, client: u16) {
             client,
             server: PROTOCOL_VERSION,
         },
+        output: String::new(),
     });
     let mut frame = Vec::new();
     if encode_protocol_message_into(&message, &mut frame).is_ok() {
@@ -13811,6 +14152,7 @@ fn validate_hello(hello: &ClientHello) -> Result<(), DaemonError> {
 fn daemon_server_error(error: DaemonError) -> ServerError {
     match error {
         DaemonError::Server(error) => error,
+        DaemonError::CommandFailed { error, .. } => daemon_server_error(*error),
         DaemonError::CommandExit { exit_code, .. } => {
             ServerError::Internal(format!("command exited with status {exit_code}"))
         }
@@ -14458,6 +14800,7 @@ mod tests {
                     client: stale,
                     server: PROTOCOL_VERSION,
                 },
+                output: String::new(),
             })
         );
         assert!(matches!(
@@ -14498,6 +14841,7 @@ mod tests {
                     client: stale,
                     server: PROTOCOL_VERSION,
                 },
+                output: String::new(),
             })
         );
         assert!(matches!(
@@ -23749,11 +24093,8 @@ bind - split-window -v -c "#{pane_current_path}"
             .attach(second_client, session)
             .expect("attach second client");
 
-        let mut first_context = ExecutionContext {
-            session: Some(session),
-            window: Some(first_window),
-            pane: Some(first_pane),
-        };
+        let mut first_context =
+            ExecutionContext::new(Some(session), Some(first_window), Some(first_pane));
         let mut second_context = first_context.clone();
         let resize = |client, context: &mut ExecutionContext, pane, columns, rows| {
             shared
@@ -24061,11 +24402,8 @@ bind - split-window -v -c "#{pane_current_path}"
             }) if snapshot.focused_window.is_none()
         )));
 
-        let mut command_context = ExecutionContext {
-            session: Some(session),
-            window: Some(second_window),
-            pane: Some(second_pane),
-        };
+        let mut command_context =
+            ExecutionContext::new(Some(session), Some(second_window), Some(second_pane));
         shared
             .execute(
                 ClientId(7),
@@ -24981,6 +25319,528 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn command_hooks_fire_at_the_daemon_boundary_with_formats_and_nohooks() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, first_pane, _) = output_view_session_fixture(&shared, "hooks", "first");
+        let (first_window, second_window) = {
+            let mut inner = shared.inner.lock();
+            let first_window = inner
+                .engine
+                .state
+                .window_for_pane(first_pane)
+                .expect("first window");
+            let (second_window, second_pane) = inner
+                .engine
+                .state
+                .create_window_at(
+                    session,
+                    None,
+                    Some("second".to_owned()),
+                    PaneKind::Terminal,
+                    false,
+                )
+                .expect("second window");
+            inner.terminals.insert(
+                second_pane,
+                Arc::new(TerminalSession::spawn_output_view(
+                    "second fixture".to_owned(),
+                    "second".to_owned(),
+                )),
+            );
+            (first_window, second_window)
+        };
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, first_pane)
+            .expect("hook context");
+        let client = ClientId(7);
+
+        for (name, value) in [
+            (
+                "after-select-window",
+                "display-message '#{hook}|#{hook_arguments}|#{hook_flag_t}|#{window_name}'",
+            ),
+            (
+                "command-error",
+                "display-message '#{hook}|#{hook_arguments}'",
+            ),
+            ("after-list-buffers", "display-message 'daemon=#{hook}'"),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-hook", [name, value]),
+                )
+                .unwrap();
+        }
+        shared.inner.lock().message_log.clear();
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "select-window",
+                    ["-t", second_window.to_string().as_str()],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .message_log
+                .iter()
+                .map(|message| message.text.clone())
+                .collect::<Vec<_>>(),
+            [format!(
+                "after-select-window|-t {second_window}|{second_window}|second"
+            )]
+        );
+
+        shared.inner.lock().message_log.clear();
+        assert!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("select-window", ["-t", "missing"]),
+                )
+                .is_err()
+        );
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .message_log
+                .iter()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            ["command-error|-t missing"]
+        );
+
+        shared.inner.lock().message_log.clear();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("list-buffers", [] as [&str; 0]),
+            )
+            .unwrap();
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .message_log
+                .back()
+                .map(|message| message.text.as_str()),
+            Some("daemon=after-list-buffers")
+        );
+
+        for (args, value) in [
+            (
+                vec!["alert-bell"],
+                "display-message 'immediate=#{hook}:#{hook_arguments}'",
+            ),
+            (
+                vec!["after-select-window"],
+                "set-hook -R alert-bell ignored",
+            ),
+        ] {
+            let mut command_args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
+            command_args.push(value.to_owned());
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-hook", command_args),
+                )
+                .unwrap();
+        }
+        shared.inner.lock().message_log.clear();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("select-window", ["-t", first_window.to_string().as_str()]),
+            )
+            .unwrap();
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .message_log
+                .iter()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            ["immediate=alert-bell:"]
+        );
+
+        for (args, value) in [
+            (
+                vec!["after-set-option"],
+                "display-message nested-after-set-option",
+            ),
+            (
+                vec!["after-select-window"],
+                "set-option @inside yes ; select-window -t missing ; display-message unreachable",
+            ),
+            (
+                vec!["-a", "after-select-window"],
+                "display-message next-index",
+            ),
+        ] {
+            let mut command_args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
+            command_args.push(value.to_owned());
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-hook", command_args),
+                )
+                .unwrap();
+        }
+        shared.inner.lock().message_log.clear();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "select-window",
+                    ["-t", second_window.to_string().as_str()],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .message_log
+                .iter()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "mux command failed: can't find window: missing",
+                "next-index"
+            ]
+        );
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-options", ["-v", "@inside"]),
+                )
+                .unwrap()
+                .output,
+            "yes"
+        );
+    }
+
+    #[test]
+    fn command_hook_output_joins_the_triggering_client_response_in_pin_order() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, first_pane, _) = output_view_session_fixture(&shared, "hook-output", "first");
+        let second_window = {
+            let mut inner = shared.inner.lock();
+            let (window, pane) = inner
+                .engine
+                .state
+                .create_window_at(
+                    session,
+                    None,
+                    Some("second".to_owned()),
+                    PaneKind::Terminal,
+                    false,
+                )
+                .expect("second window");
+            inner.terminals.insert(
+                pane,
+                Arc::new(TerminalSession::spawn_output_view(
+                    "second fixture".to_owned(),
+                    "second".to_owned(),
+                )),
+            );
+            window
+        };
+        let client = ClientId(7);
+        let mut setup_context =
+            ExecutionContext::for_pane(&shared.inner.lock().engine.state, first_pane)
+                .expect("hook setup context");
+        for (name, value) in [
+            ("after-select-window", "display-message -p FIRED-SW"),
+            ("command-error", "display-message -p CMD-ERR"),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut setup_context,
+                    &CommandInvocation::new("set-hook", ["-g", name, value]),
+                )
+                .expect("global hook");
+        }
+
+        let success = shared.execute_command_request(
+            client,
+            ClientKind::Command,
+            &mut ExecutionContext::default(),
+            1,
+            &CommandInvocation::new("select-window", ["-t", second_window.to_string().as_str()]),
+        );
+        assert_eq!(
+            success,
+            CommandResponse::Success {
+                request_id: 1,
+                output: "FIRED-SW".to_owned(),
+                exit_code: 0,
+            }
+        );
+
+        let failure = shared.execute_command_request(
+            client,
+            ClientKind::Command,
+            &mut ExecutionContext::default(),
+            2,
+            &CommandInvocation::new("select-window", ["-t", "missing"]),
+        );
+        assert_eq!(
+            failure,
+            CommandResponse::Error {
+                request_id: 2,
+                error: ServerError::WindowNotFound("missing".to_owned()),
+                output: "CMD-ERR".to_owned(),
+            }
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut setup_context,
+                &CommandInvocation::new("set-buffer", ["-b", "buffer0", "payload"]),
+            )
+            .expect("buffer fixture");
+        for (name, value) in [
+            ("after-list-buffers[1]", "display-message -p IDX-B"),
+            ("after-list-buffers[0]", "display-message -p IDX-A"),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut setup_context,
+                    &CommandInvocation::new("set-hook", ["-g", name, value]),
+                )
+                .expect("indexed hook");
+        }
+        let ordered = shared.execute_command_request(
+            client,
+            ClientKind::Command,
+            &mut ExecutionContext::default(),
+            3,
+            &CommandInvocation::new("list-buffers", ["-F", "OWN-#{buffer_name}"]),
+        );
+        assert_eq!(
+            ordered,
+            CommandResponse::Success {
+                request_id: 3,
+                output: "OWN-buffer0\nIDX-A\nIDX-B".to_owned(),
+                exit_code: 0,
+            }
+        );
+
+        for (name, value) in [
+            ("after-set-option", "display-message -p SETOPT-FIRED"),
+            ("after-display-message", "display-message -p DM-NESTED"),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut setup_context,
+                    &CommandInvocation::new("set-hook", ["-g", name, value]),
+                )
+                .expect("no-hooks fixture");
+        }
+        let no_hooks = shared.execute_command_request(
+            client,
+            ClientKind::Command,
+            &mut ExecutionContext::default(),
+            4,
+            &CommandInvocation::new("set-option", ["-g", "@hook-output", "1"]),
+        );
+        assert_eq!(
+            no_hooks,
+            CommandResponse::Success {
+                request_id: 4,
+                output: "SETOPT-FIRED".to_owned(),
+                exit_code: 0,
+            }
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut setup_context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    ["-g", "alert-bell", "display-message -p R-FIRED"],
+                ),
+            )
+            .expect("run-now fixture");
+        let run_now = shared.execute_command_request(
+            client,
+            ClientKind::Command,
+            &mut ExecutionContext::default(),
+            5,
+            &CommandInvocation::new("set-hook", ["-gR", "alert-bell"]),
+        );
+        assert_eq!(
+            run_now,
+            CommandResponse::Success {
+                request_id: 5,
+                output: "R-FIRED".to_owned(),
+                exit_code: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn command_error_hook_output_opens_only_the_triggering_interactive_client_view() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let observer_mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (observer, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&observer_mailbox),
+        );
+        let (session, pane, _) = output_view_session_fixture(&shared, "hook-interactive", "first");
+        shared
+            .attach(client, session)
+            .expect("attach triggering client");
+        shared.attach(observer, session).expect("attach observer");
+        take_reliable_messages(&mailbox);
+        take_reliable_messages(&observer_mailbox);
+
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("interactive hook context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    ["-g", "command-error", "display-message -p CMD-ERR"],
+                ),
+            )
+            .expect("command-error hook");
+        let response = shared.execute_command_request(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            6,
+            &CommandInvocation::new("select-window", ["-t", "missing"]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Error {
+                request_id: 6,
+                error: ServerError::WindowNotFound("missing".to_owned()),
+                output: "CMD-ERR".to_owned(),
+            }
+        );
+
+        let message = take_command_output_message(&mailbox);
+        let ProtocolMessage::Event(Event {
+            payload:
+                EventPayload::CommandOutput {
+                    pane: output_pane,
+                    viewport: Some(viewport),
+                },
+            ..
+        }) = message
+        else {
+            panic!("expected hook command-output viewport");
+        };
+        assert_eq!(output_pane, pane);
+        assert!(viewport_text(&viewport).contains("CMD-ERR"));
+        assert!(observer_mailbox.state.lock().command_output.is_none());
+        assert!(shared.inner.lock().command_outputs.contains_key(&client));
+        assert!(!shared.inner.lock().command_outputs.contains_key(&observer));
+    }
+
+    #[test]
+    fn configured_new_window_hooks_run_in_order_in_the_created_context() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let mux_config = directory.path().join("mux.conf");
+        fs::write(
+            &mux_config,
+            "set-hook -g after-new-window[2] \"display-message -p 'NW-SECOND=#{window_name}'\"\n\
+             set-hook -g after-new-window[0] \"display-message -p 'NW-FIRST=#{window_name}'\"\n",
+        )
+        .expect("hook config fixture");
+
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .load_config_file(&mux_config, &mut context, 0)
+            .expect("load hook config");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "hook-config", "--", "sleep", "30"],
+                ),
+            )
+            .expect("hook session");
+        let session = context.session.expect("hook session id");
+        shared.inner.lock().message_log.clear();
+
+        let response = shared.execute_command_request(
+            ClientId(7),
+            ClientKind::Command,
+            &mut context,
+            1,
+            &CommandInvocation::new("new-window", ["-d", "-n", "hooked", "--", "sleep", "30"]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 1,
+                output: "NW-FIRST=hooked\nNW-SECOND=hooked".to_owned(),
+                exit_code: 0,
+            }
+        );
+
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-session", ["-t", session.to_string().as_str()]),
+            )
+            .expect("clean up hook session");
+    }
+
+    #[test]
     fn failing_command_logs_its_line_and_then_the_error_message() {
         let shared = Arc::new(Shared::new(1));
         let client = ClientId(7);
@@ -25006,7 +25866,8 @@ bind - split-window -v -c "#{pane_current_path}"
             CommandResponse::Error {
                 request_id: 1,
                 error: ServerError::WindowNotFound(window),
-            } if window == "99"
+                output,
+            } if window == "99" && output.is_empty()
         ));
 
         let inner = shared.inner.lock();

@@ -204,9 +204,16 @@ pub(crate) struct DaemonFormatHooks<'a> {
 
 impl<'a> DaemonFormatHooks<'a> {
     pub(crate) fn command(facts: &'a FormatHookFacts) -> Self {
+        Self::command_with_optional_variables(facts, None)
+    }
+
+    pub(crate) fn command_with_optional_variables(
+        facts: &'a FormatHookFacts,
+        variables: Option<&'a BTreeMap<String, String>>,
+    ) -> Self {
         Self {
             facts,
-            variables: None,
+            variables,
             cache: None,
             touched: None,
             refresh: false,
@@ -218,14 +225,7 @@ impl<'a> DaemonFormatHooks<'a> {
         facts: &'a FormatHookFacts,
         variables: &'a BTreeMap<String, String>,
     ) -> Self {
-        Self {
-            facts,
-            variables: Some(variables),
-            cache: None,
-            touched: None,
-            refresh: false,
-            now: Local::now(),
-        }
+        Self::command_with_optional_variables(facts, Some(variables))
     }
 
     fn status(

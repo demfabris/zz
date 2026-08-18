@@ -1206,6 +1206,7 @@ fn handle_command_response(
         CommandResponse::Error {
             request_id: 0,
             error: ServerError::MissingTarget(target) | ServerError::SessionNotFound(target),
+            ..
         } => match attempt {
             AttachAttempt::Remembered => {
                 *attempt = AttachAttempt::Default;
@@ -1235,6 +1236,7 @@ fn handle_command_response(
         CommandResponse::Error {
             request_id: 0,
             error: ServerError::PaneExited(_) | ServerError::PaneNotAttached(_),
+            ..
         } => Ok(ProtocolOutcome::None),
         CommandResponse::Error { error, .. } => {
             model.client_message = Some(error.to_string());

@@ -10755,9 +10755,11 @@ dependencies = [
  "getrandom 0.4.3",
  "glob",
  "interprocess",
+ "libc",
  "log",
  "parking_lot",
  "rand_core 0.6.4",
+ "regex",
  "russh",
  "rustix 1.1.4",
  "security-framework-sys",
@@ -10779,6 +10781,10 @@ dependencies = [
 name = "zz-mux"
 version = "0.2.0-beta.2"
 dependencies = [
+ "chrono",
+ "glob",
+ "regex",
+ "unicode-width",
  "zz-protocol",
  "zz-terminal",
 ]
@@ -10814,6 +10820,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "thiserror 2.0.20",
+ "url",
 ]
 
 [[package]]

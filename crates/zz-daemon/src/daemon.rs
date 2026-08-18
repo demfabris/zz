@@ -2,6 +2,7 @@ use std::{
     borrow::Cow,
     cmp::Reverse,
     collections::{BTreeMap, BTreeSet, VecDeque},
+    ffi::OsStr,
     fmt::Write as _,
     fs,
     io::{ErrorKind, Read, Seek, SeekFrom, Write},
@@ -16,10 +17,11 @@ use std::{
 };
 
 use parking_lot::{Condvar, Mutex};
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision, KeyEngine,
-    KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, parse_config,
+    KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts, canonical_command,
+    expand_format_values, parse_config,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -63,7 +65,10 @@ use crate::{
     lifecycle::DaemonIdentityGuard,
     paths::{default_mux_config, home_directory, is_default_mux_config},
     shell_process,
-    status::{StatusRenderer, StatusRequest, status_context},
+    status::{
+        BufferFormatFacts, ClientFormatFacts, DaemonFormatHooks, FormatHookFacts,
+        MessageFormatFacts, StatusRenderer, StatusRequest, host_names, status_context,
+    },
     transport::{LocalTransport, Transport, TransportListener, TransportStream},
 };
 
@@ -129,18 +134,139 @@ fn daemon_color_scheme() -> TerminalColorScheme {
     }
 }
 
+fn mode_keys_from_environment(visual: Option<&OsStr>, editor: Option<&OsStr>) -> &'static str {
+    let Some(editor) = visual.or(editor) else {
+        return "emacs";
+    };
+    let editor = editor.to_string_lossy();
+    let basename = editor.rsplit('/').next().unwrap_or(&editor);
+    if basename.contains("vi") {
+        "vi"
+    } else {
+        "emacs"
+    }
+}
+
+fn daemon_environment() -> Vec<(String, String)> {
+    let mut environment = std::env::vars_os()
+        .map(|(name, value)| {
+            (
+                name.to_string_lossy().into_owned(),
+                value.to_string_lossy().into_owned(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    if let Ok(cwd) = std::env::current_dir() {
+        let cwd = environment
+            .get("PWD")
+            .filter(|pwd| !pwd.is_empty())
+            .filter(|pwd| {
+                fs::canonicalize(pwd)
+                    .ok()
+                    .zip(fs::canonicalize(&cwd).ok())
+                    .is_some_and(|(pwd, cwd)| pwd == cwd)
+            })
+            .cloned()
+            .unwrap_or_else(|| cwd.to_string_lossy().into_owned());
+        environment.insert("PWD".to_owned(), cwd);
+    }
+    environment.into_iter().collect()
+}
+
+fn terminal_environment_for_session(
+    engine: &MuxEngine,
+    session: SessionId,
+) -> Result<Vec<(String, Option<String>)>, ServerError> {
+    let mut environment = engine.environment_for_session(session)?;
+    environment.retain(|(name, _)| name != "TERM");
+    Ok(environment)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn terminal_working_directory(terminal: &TerminalSession) -> Option<PathBuf> {
-    let process_id = Pid::from_u32(terminal.foreground_process_id()?);
+    let process_id = terminal.foreground_process_id().filter(|pid| *pid != 0)?;
+    let process_id = Pid::from_u32(process_id);
     let mut system = System::new();
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[process_id]),
-        ProcessRefreshKind::new().with_cwd(UpdateKind::Always),
+        ProcessRefreshKind::new().with_cwd(sysinfo::UpdateKind::Always),
     );
     system
         .process(process_id)
         .and_then(|process| process.cwd())
-        .filter(|path| path.is_dir())
         .map(Path::to_path_buf)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn terminal_working_directory(_terminal: &TerminalSession) -> Option<PathBuf> {
+    None
+}
+
+fn terminal_current_command(terminal: &TerminalSession) -> String {
+    let Some(process_id) = terminal
+        .foreground_process_id()
+        .filter(|pid| *pid != 0)
+        .map(Pid::from_u32)
+    else {
+        return String::new();
+    };
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[process_id]),
+        ProcessRefreshKind::new(),
+    );
+    system
+        .process(process_id)
+        .map(|process| process.name().to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+fn unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn command_log_line(command: &CommandInvocation) -> String {
+    let mut line = canonical_command(&command.name).to_owned();
+    for argument in &command.args {
+        line.push(' ');
+        line.push_str(argument);
+    }
+    line
+}
+
+fn push_server_message(inner: &mut ServerState, text: String) -> u64 {
+    let number = inner.next_message_number;
+    inner.next_message_number = inner.next_message_number.wrapping_add(1);
+    inner.message_log.push_back(ServerMessage {
+        number,
+        time: SystemTime::now(),
+        text,
+    });
+    let limit = inner.engine.message_limit();
+    while inner.message_log.len() > limit {
+        inner.message_log.pop_front();
+    }
+    number
+}
+
+fn daemon_uid() -> String {
+    #[cfg(unix)]
+    {
+        rustix::process::getuid().as_raw().to_string()
+    }
+    #[cfg(not(unix))]
+    {
+        String::new()
+    }
+}
+
+fn daemon_user() -> String {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_default()
 }
 
 fn resolve_appearance(
@@ -1262,6 +1388,9 @@ enum DaemonCommandDispatch {
     DebugMarker,
     Tools,
     Buffer,
+    ListClients,
+    ShowMessages,
+    RefreshClient,
 }
 
 const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
@@ -1286,6 +1415,12 @@ const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
     ("deleteb", DaemonCommandDispatch::Buffer),
     ("paste-buffer", DaemonCommandDispatch::Buffer),
     ("pasteb", DaemonCommandDispatch::Buffer),
+    ("list-clients", DaemonCommandDispatch::ListClients),
+    ("lsc", DaemonCommandDispatch::ListClients),
+    ("show-messages", DaemonCommandDispatch::ShowMessages),
+    ("showmsgs", DaemonCommandDispatch::ShowMessages),
+    ("refresh-client", DaemonCommandDispatch::RefreshClient),
+    ("refresh", DaemonCommandDispatch::RefreshClient),
 ];
 
 fn daemon_command_dispatch(name: &str) -> Option<DaemonCommandDispatch> {
@@ -1523,13 +1658,15 @@ impl Drop for ClientRegistrationGuard<'_> {
 impl Shared {
     #[cfg(test)]
     fn with_appearance(server_id: u64, appearance: Arc<TerminalAppearance>) -> Self {
-        Self::configured(
+        Self::configured_with_boot_environment(
             server_id,
             appearance,
             AppearanceProvenance::default(),
             false,
             std::env::temp_dir().join("zz-test-paste"),
             std::env::temp_dir().join("zz-test.sock"),
+            "emacs",
+            std::iter::empty::<(String, String)>(),
         )
     }
 
@@ -1541,12 +1678,56 @@ impl Shared {
         paste_directory: PathBuf,
         socket_path: PathBuf,
     ) -> Self {
+        let visual = std::env::var_os("VISUAL");
+        let editor = std::env::var_os("EDITOR");
+        Self::configured_with_boot_environment(
+            server_id,
+            appearance,
+            appearance_provenance,
+            load_user_config,
+            paste_directory,
+            socket_path,
+            mode_keys_from_environment(visual.as_deref(), editor.as_deref()),
+            daemon_environment(),
+        )
+    }
+
+    fn configured_with_boot_environment<I, K, V>(
+        server_id: u64,
+        appearance: Arc<TerminalAppearance>,
+        appearance_provenance: AppearanceProvenance,
+        load_user_config: bool,
+        paste_directory: PathBuf,
+        socket_path: PathBuf,
+        default_mode_keys: &str,
+        environment: I,
+    ) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
         let mut state = ServerState {
             active_color_scheme: appearance.color_scheme,
             appearance,
             appearance_provenance,
             ..ServerState::default()
         };
+        state
+            .engine
+            .set_default_mode_keys(default_mode_keys)
+            .expect("daemon mode-keys default is valid");
+        state.engine.seed_global_environment(environment);
+        let (host, host_short) = host_names();
+        state.engine.set_format_server_context(
+            host.clone(),
+            host_short.clone(),
+            socket_path.display().to_string(),
+            unix_timestamp(),
+        );
+        state
+            .engine
+            .set_format_server_identity(std::process::id(), daemon_uid(), daemon_user());
         for option in MuxOptionKey::ALL {
             let value = state.engine.mux_option_value(option);
             state
@@ -1595,15 +1776,6 @@ impl Shared {
             self.load_config_file(&config, &mut context, 0)?;
         }
         self.apply_stored_mux_config_overrides("startup-mux-replay");
-        if self.inner.lock().engine.state.sessions.is_empty() {
-            self.execute(
-                ClientId(u64::MAX),
-                ClientKind::Command,
-                &mut context,
-                &CommandInvocation::new("new-session", ["-s", "0"]),
-            )?;
-        }
-        self.exit_empty_armed.store(true, Ordering::Release);
         // Building the runtime is what warms the adapter cache, so a daemon
         // that has agent panes enabled pays the npx download before the first
         // pane asks for it.
@@ -1614,7 +1786,6 @@ impl Shared {
                 let _ = self.agent_runtime();
             }
         }
-        self.request_shutdown_if_empty(&self.inner.lock());
         Ok(())
     }
 
@@ -1714,9 +1885,11 @@ impl Shared {
 
     fn refresh_status(&self, refresh: bool) {
         let requests = {
-            let inner = self.inner.lock();
+            let mut inner = self.inner.lock();
+            inner.engine.set_format_now(unix_timestamp());
             let formats = inner.engine.status_formats().clone();
             let snapshot = inner.engine.state.snapshot();
+            let facts = format_hook_facts(&inner);
             inner
                 .subscribers
                 .keys()
@@ -1732,6 +1905,7 @@ impl Shared {
                             attached,
                             client_focused_window_for_attachment(&inner, client),
                         ),
+                        facts: facts.clone(),
                     }
                 })
                 .collect::<Vec<_>>()
@@ -1890,6 +2064,7 @@ impl Shared {
         color_scheme: Option<TerminalColorScheme>,
     ) -> (ClientId, ServerHello) {
         let mut inner = self.inner.lock();
+        inner.engine.set_format_now(unix_timestamp());
         let client = ClientId(inner.next_client_id);
         inner.next_client_id = inner.next_client_id.saturating_add(1);
         inner.client_instances.insert(client, client_instance_id);
@@ -1950,6 +2125,7 @@ impl Shared {
                 attached,
                 client_focused_window_for_attachment(&inner, client),
             ),
+            facts: format_hook_facts(&inner),
         };
         drop(inner);
         let mut hello = hello;
@@ -2031,6 +2207,17 @@ impl Shared {
         request_id: u64,
         command: &CommandInvocation,
     ) -> CommandResponse {
+        let client_name = {
+            let mut inner = self.inner.lock();
+            let client_name = inner
+                .client_names
+                .get(&client)
+                .cloned()
+                .unwrap_or_else(|| format!("client-{}", client.0));
+            let command = command_log_line(command);
+            push_server_message(&mut inner, format!("{client_name} command: {command}"));
+            client_name
+        };
         match self.execute(client, kind, context, command) {
             Ok(execution) => {
                 if kind == ClientKind::Interactive
@@ -2056,10 +2243,12 @@ impl Shared {
                     output: execution.output,
                 }
             }
-            Err(error) => CommandResponse::Error {
-                request_id,
-                error: daemon_server_error(error),
-            },
+            Err(error) => {
+                let error = daemon_server_error(error);
+                let mut inner = self.inner.lock();
+                push_server_message(&mut inner, format!("{client_name} message: {error}"));
+                CommandResponse::Error { request_id, error }
+            }
         }
     }
 
@@ -2107,6 +2296,15 @@ impl Shared {
                     DaemonCommandDispatch::Tools => Ok(workspace_tools_catalog()),
                     DaemonCommandDispatch::Buffer => {
                         self.buffer_command(context, &command.name, &command.args)
+                    }
+                    DaemonCommandDispatch::ListClients => {
+                        self.list_clients(context, &command.name, &command.args)
+                    }
+                    DaemonCommandDispatch::ShowMessages => {
+                        self.show_messages(&command.name, &command.args)
+                    }
+                    DaemonCommandDispatch::RefreshClient => {
+                        self.refresh_client(client, kind, &command.name, &command.args)
                     }
                 }
             });
@@ -2198,7 +2396,15 @@ impl Shared {
                     );
                 }
             }
-            let execution = inner.engine.execute(context, command)?;
+            let facts = format_hook_facts(&inner);
+            let mut hooks = DaemonFormatHooks::command(&facts);
+            inner.engine.set_format_now(unix_timestamp());
+            let execution = inner
+                .engine
+                .execute_with_format_hooks(context, command, &mut hooks)?;
+            if !inner.engine.state.sessions.is_empty() {
+                self.exit_empty_armed.store(true, Ordering::Release);
+            }
             let selected_panes = inner
                 .engine
                 .state
@@ -2258,51 +2464,87 @@ impl Shared {
                     }
                 }
             }
+            let resized_windows = focused_windows_before
+                .iter()
+                .filter_map(|((session, attached_client), previous)| {
+                    let state = inner.engine.state.sessions.get(session)?;
+                    let current = client_focused_window(&inner, *attached_client, state);
+                    (*previous != current).then_some([*previous, current])
+                })
+                .flatten()
+                .collect::<BTreeSet<_>>();
+            let resized_panes = panes_for_windows(&inner, &resized_windows);
+            snapshot_changed |= write_back_terminal_geometries(&mut inner, &resized_panes, true);
             for effect in &execution.effects {
                 match effect {
                     MuxEffect::PaneCreated {
                         pane,
                         kind: PaneKindSnapshot::Terminal,
                         inherit_cwd_from,
+                        cwd,
                         command,
                     }
                     | MuxEffect::PaneMaterialized {
                         pane,
                         kind: PaneKindSnapshot::Terminal,
                         inherit_cwd_from,
+                        cwd,
                         command,
                     } => {
                         let history_limit = inner.engine.history_limit_for_pane(*pane)?;
                         let word_separators =
                             WordSeparators::new(inner.engine.word_separators_for_pane(*pane)?);
-                        let working_directory = inherit_cwd_from
-                            .and_then(|source| inner.terminals.get(&source))
-                            .and_then(|terminal| terminal_working_directory(terminal));
+                        let working_directory = match cwd.as_deref().map(PathBuf::from) {
+                            Some(path) if path.is_dir() => Some(path),
+                            Some(_) => std::env::var_os("HOME")
+                                .map(PathBuf::from)
+                                .filter(|path| path.is_dir())
+                                .or_else(|| Some(PathBuf::from("/"))),
+                            None => inherit_cwd_from
+                                .and_then(|source| inner.terminals.get(&source))
+                                .and_then(|terminal| terminal_working_directory(terminal))
+                                .or_else(|| std::env::current_dir().ok()),
+                        };
+                        let start_path = working_directory
+                            .as_deref()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .unwrap_or_default();
                         let appearance = Arc::clone(&inner.appearance);
-                        let mut env = vec![
-                            ("ZZ_PANE".to_owned(), pane.to_string()),
-                            (
-                                "ZZ_SOCKET".to_owned(),
-                                self.socket_path.display().to_string(),
-                            ),
-                        ];
-                        if let Some(session) = inner
+                        let pane_session = inner
                             .engine
                             .state
                             .window_for_pane(*pane)
                             .map(|window| inner.engine.state.windows[&window].session)
-                        {
-                            env.push(("ZZ_SESSION".to_owned(), session.to_string()));
+                            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+                        let mut env =
+                            terminal_environment_for_session(&inner.engine, pane_session)?;
+                        env.extend([
+                            ("ZZ_PANE".to_owned(), Some(pane.to_string())),
+                            (
+                                "ZZ_SOCKET".to_owned(),
+                                Some(self.socket_path.display().to_string()),
+                            ),
+                            ("ZZ_SESSION".to_owned(), Some(pane_session.to_string())),
+                        ]);
+                        if let Some(path) = &working_directory {
+                            env.push(("PWD".to_owned(), Some(path.to_string_lossy().into_owned())));
                         }
+                        let spawn = TerminalSpawn {
+                            working_directory: working_directory.clone(),
+                            command: command.clone(),
+                            terminal_type: Some(
+                                inner.engine.default_terminal_for_spawn().to_owned(),
+                            ),
+                            env,
+                        };
                         let session = Arc::new(TerminalSession::spawn(
                             history_limit,
                             appearance,
-                            TerminalSpawn {
-                                working_directory,
-                                command: command.clone(),
-                                env,
-                            },
+                            spawn.clone(),
                         ));
+                        let current_path = terminal_working_directory(&session)
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .unwrap_or_default();
                         deferred_terminal_commands.push(
                             DeferredTerminalCommand::SetWordSeparators {
                                 terminal: Arc::clone(&session),
@@ -2310,6 +2552,16 @@ impl Shared {
                             },
                         );
                         inner.terminals.insert(*pane, Arc::clone(&session));
+                        inner.terminal_spawns.insert(*pane, spawn);
+                        inner.engine.set_pane_runtime_facts_with_hooks(
+                            *pane,
+                            PaneRuntimeFacts {
+                                current_path,
+                                start_path,
+                                ..PaneRuntimeFacts::default()
+                            },
+                            &mut hooks,
+                        );
                         let attached_clients = inner
                             .engine
                             .state
@@ -2322,6 +2574,125 @@ impl Shared {
                             deferred_terminal_commands.push(DeferredTerminalCommand::AttachView {
                                 terminal: Arc::clone(&session),
                                 view: TerminalViewId(client.0),
+                            });
+                        }
+                        terminals_to_watch.push((*pane, session));
+                    }
+                    MuxEffect::PaneRespawned {
+                        pane,
+                        cwd,
+                        command,
+                        environment,
+                        empty,
+                    } => {
+                        let previous = inner.terminal_spawns.get(pane).cloned().unwrap_or_default();
+                        let history_limit = inner.engine.history_limit_for_pane(*pane)?;
+                        let word_separators =
+                            WordSeparators::new(inner.engine.word_separators_for_pane(*pane)?);
+                        let working_directory = match cwd.as_deref().map(PathBuf::from) {
+                            Some(path) => {
+                                let path = if path.is_absolute() {
+                                    path
+                                } else if let Some(base) = &previous.working_directory {
+                                    base.join(&path)
+                                } else {
+                                    path
+                                };
+                                if path.is_dir() {
+                                    Some(path)
+                                } else {
+                                    std::env::var_os("HOME")
+                                        .map(PathBuf::from)
+                                        .filter(|path| path.is_dir())
+                                        .or_else(|| Some(PathBuf::from("/")))
+                                }
+                            }
+                            None => previous
+                                .working_directory
+                                .clone()
+                                .or_else(|| std::env::current_dir().ok()),
+                        };
+                        let start_path = working_directory
+                            .as_deref()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        let appearance = Arc::clone(&inner.appearance);
+                        let pane_session = inner
+                            .engine
+                            .state
+                            .window_for_pane(*pane)
+                            .map(|window| inner.engine.state.windows[&window].session)
+                            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+                        let mut env =
+                            terminal_environment_for_session(&inner.engine, pane_session)?;
+                        env.extend([
+                            ("ZZ_PANE".to_owned(), Some(pane.to_string())),
+                            (
+                                "ZZ_SOCKET".to_owned(),
+                                Some(self.socket_path.display().to_string()),
+                            ),
+                            ("ZZ_SESSION".to_owned(), Some(pane_session.to_string())),
+                        ]);
+                        env.extend(
+                            environment
+                                .iter()
+                                .map(|(name, value)| (name.clone(), Some(value.clone()))),
+                        );
+                        if let Some(path) = &working_directory {
+                            env.push(("PWD".to_owned(), Some(path.to_string_lossy().into_owned())));
+                        }
+                        let spawn = TerminalSpawn {
+                            working_directory: working_directory.clone(),
+                            command: command.clone().or(previous.command),
+                            terminal_type: Some(
+                                inner.engine.default_terminal_for_spawn().to_owned(),
+                            ),
+                            env,
+                        };
+                        let session = Arc::new(if *empty {
+                            TerminalSession::spawn_empty_with_appearance(history_limit, appearance)
+                        } else {
+                            TerminalSession::spawn(history_limit, appearance, spawn.clone())
+                        });
+                        let current_path = if *empty {
+                            start_path.clone()
+                        } else {
+                            terminal_working_directory(&session)
+                                .map(|path| path.to_string_lossy().into_owned())
+                                .unwrap_or_default()
+                        };
+                        deferred_terminal_commands.push(
+                            DeferredTerminalCommand::SetWordSeparators {
+                                terminal: Arc::clone(&session),
+                                separators: word_separators,
+                            },
+                        );
+                        inner.terminals.insert(*pane, Arc::clone(&session));
+                        inner.terminal_spawns.insert(*pane, spawn);
+                        inner.engine.set_pane_runtime_facts_with_hooks(
+                            *pane,
+                            PaneRuntimeFacts {
+                                current_path,
+                                start_path,
+                                ..PaneRuntimeFacts::default()
+                            },
+                            &mut hooks,
+                        );
+                        let attached_clients = inner
+                            .attached
+                            .get(&pane_session)
+                            .cloned()
+                            .unwrap_or_default();
+                        for client in attached_clients {
+                            deferred_terminal_commands.push(DeferredTerminalCommand::AttachView {
+                                terminal: Arc::clone(&session),
+                                view: TerminalViewId(client.0),
+                            });
+                        }
+                        if let Some((_, geometry)) = terminal_resize_for_pane(&inner, *pane) {
+                            deferred_terminal_commands.push(DeferredTerminalCommand::Resize {
+                                terminal: Arc::clone(&session),
+                                geometry,
                             });
                         }
                         terminals_to_watch.push((*pane, session));
@@ -2405,6 +2776,7 @@ impl Shared {
                         }
                         for pane in panes {
                             inner.terminals.remove(pane);
+                            inner.terminal_spawns.remove(pane);
                             inner.terminal_geometries.remove(pane);
                             inner.paste_uploads.retain(|_, upload| upload.pane != *pane);
                             removed_panes.push(*pane);
@@ -2654,7 +3026,7 @@ impl Shared {
                             .into());
                         }
                         let (source_session, source_window, state) =
-                            build_display_panes_state(&inner.engine.state, *pane, *duration_ms)?;
+                            build_display_panes_state(&inner.engine, *pane, *duration_ms)?;
                         if client_attached_session(&inner, client) != Some(source_session) {
                             return Err(ServerError::PaneNotAttached(*pane).into());
                         }
@@ -2695,11 +3067,17 @@ impl Shared {
                         }
                         direct_events.push(EventPayload::DisplayPanes { state: Some(state) });
                     }
-                    MuxEffect::DisplayMessage { pane, text } => {
-                        direct_events.push(EventPayload::ClientMessage {
+                    MuxEffect::DisplayMessage {
+                        pane,
+                        text,
+                        duration_ms,
+                    } => {
+                        push_server_message(&mut inner, text.clone());
+                        direct_events.push(EventPayload::TimedClientMessage {
                             pane: *pane,
                             kind: ClientMessageKind::Info,
                             text: text.clone(),
+                            duration_ms: *duration_ms,
                         });
                     }
                     MuxEffect::BufferLimitChanged(limit) => {
@@ -2744,6 +3122,19 @@ impl Shared {
                     }
                     MuxEffect::ModeKeysChanged { window } => {
                         retarget_copy_mode_tables(&mut inner, *window);
+                    }
+                    MuxEffect::AggressiveResizeChanged { window } => {
+                        let windows = window.map_or_else(
+                            || inner.engine.state.windows.keys().copied().collect(),
+                            |window| BTreeSet::from([window]),
+                        );
+                        let panes = panes_for_windows(&inner, &windows);
+                        snapshot_changed |=
+                            write_back_terminal_geometries(&mut inner, &panes, false);
+                        for (terminal, geometry) in terminal_resizes_for_panes(&inner, &panes) {
+                            deferred_terminal_commands
+                                .push(DeferredTerminalCommand::Resize { terminal, geometry });
+                        }
                     }
                     MuxEffect::MuxOptionChanged { option } => {
                         let value = inner.engine.mux_option_value(*option);
@@ -3005,7 +3396,7 @@ impl Shared {
         let parsed = parse_capture_pane_args(args)?;
         let (pane, terminal) = {
             let inner = self.inner.lock();
-            let pane = inner.engine.state.resolve_pane(
+            let pane = inner.engine.resolve_pane(
                 parsed.target.as_deref(),
                 context.window,
                 context.pane,
@@ -3070,7 +3461,6 @@ impl Shared {
             let pane =
                 inner
                     .engine
-                    .state
                     .resolve_pane(target.as_deref(), context.window, context.pane)?;
             if !matches!(
                 inner.engine.state.pane(pane).map(|pane| &pane.kind),
@@ -3153,7 +3543,7 @@ impl Shared {
             .to_owned();
         let pane = {
             let inner = self.inner.lock();
-            let pane = inner.engine.state.resolve_pane(
+            let pane = inner.engine.resolve_pane(
                 parsed.target.as_deref(),
                 context.window,
                 context.pane,
@@ -3186,7 +3576,6 @@ impl Shared {
         let inner = self.inner.lock();
         let pane = inner
             .engine
-            .state
             .resolve_pane(target, context.window, context.pane)?;
         match inner.engine.state.pane(pane).map(|pane| &pane.kind) {
             Some(PaneKind::Agent(_)) => Ok(pane),
@@ -3227,6 +3616,160 @@ impl Shared {
             output,
             effects: Vec::new(),
         })
+    }
+
+    fn list_clients(
+        &self,
+        context: &ExecutionContext,
+        name: &str,
+        args: &[String],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_buffer_command_args(name, args, &['F', 't'], &[])?;
+        require_no_positionals(name, &parsed)?;
+        let mut inner = self.inner.lock();
+        let target = parsed
+            .value('t')
+            .map(|target| {
+                inner
+                    .engine
+                    .state
+                    .resolve_session(Some(target), context.session)
+            })
+            .transpose()?;
+        inner.engine.set_format_now(unix_timestamp());
+        let mut clients = inner
+            .attached
+            .iter()
+            .flat_map(|(session, clients)| {
+                clients
+                    .iter()
+                    .copied()
+                    .map(|client| (client, *session))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        clients.sort_by(|(left, _), (right, _)| {
+            let left_name = inner
+                .client_names
+                .get(left)
+                .cloned()
+                .unwrap_or_else(|| format!("device-{}", left.0));
+            let right_name = inner
+                .client_names
+                .get(right)
+                .cloned()
+                .unwrap_or_else(|| format!("device-{}", right.0));
+            left_name.cmp(&right_name).then(left.0.cmp(&right.0))
+        });
+        let format = parsed.value('F').unwrap_or(
+            "#{client_name}: #{session_name} [#{client_width}x#{client_height} #{client_termname}] #{?#{!=:#{client_uid},#{uid}},[user #{?client_user,#{client_user},#{client_uid},}] ,}#{?client_flags,(,}#{client_flags}#{?client_flags,),}",
+        );
+        let mut output = Vec::new();
+        for (line, (client, session_id)) in clients.into_iter().enumerate() {
+            if target.is_some_and(|target| target != session_id) {
+                continue;
+            }
+            let session = inner
+                .engine
+                .state
+                .sessions
+                .get(&session_id)
+                .ok_or_else(|| ServerError::MissingTarget(session_id.to_string()))?;
+            let focused = client_focused_window(&inner, client, session);
+            let format_context =
+                inner
+                    .engine
+                    .format_status_context(Some(session_id), Some(focused), None);
+            let facts = FormatHookFacts {
+                client: Some(ClientFormatFacts {
+                    name: inner
+                        .client_names
+                        .get(&client)
+                        .cloned()
+                        .unwrap_or_else(|| format!("device-{}", client.0)),
+                    session: session.name.clone(),
+                    width: 0,
+                    height: 0,
+                    termname: String::new(),
+                    uid: format_context.uid.clone(),
+                    user: format_context.user.clone(),
+                    flags: String::new(),
+                    theme: inner
+                        .client_color_schemes
+                        .get(&client)
+                        .copied()
+                        .unwrap_or_default()
+                        .as_str()
+                        .to_owned(),
+                    line,
+                }),
+                ..FormatHookFacts::default()
+            };
+            let mut hooks = DaemonFormatHooks::command(&facts);
+            output.push(expand_format_values(format, &format_context, &mut hooks));
+        }
+        Ok(Execution {
+            output: output.join("\n"),
+            effects: Vec::new(),
+        })
+    }
+
+    fn show_messages(&self, name: &str, args: &[String]) -> Result<Execution, DaemonError> {
+        let parsed = parse_buffer_command_args(name, args, &[], &[])?;
+        require_no_positionals(name, &parsed)?;
+        let mut inner = self.inner.lock();
+        inner.engine.set_format_now(unix_timestamp());
+        let context = inner.engine.format_status_context(None, None, None);
+        let output = inner
+            .message_log
+            .iter()
+            .rev()
+            .map(|message| {
+                let facts = FormatHookFacts {
+                    message: Some(MessageFormatFacts {
+                        number: message.number,
+                        text: message.text.clone(),
+                        time: message.time,
+                    }),
+                    ..FormatHookFacts::default()
+                };
+                let mut hooks = DaemonFormatHooks::command(&facts);
+                expand_format_values("#{t/p:message_time}: #{message_text}", &context, &mut hooks)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok(Execution {
+            output,
+            effects: Vec::new(),
+        })
+    }
+
+    fn refresh_client(
+        &self,
+        client: ClientId,
+        _kind: ClientKind,
+        name: &str,
+        args: &[String],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_buffer_command_args(
+            name,
+            args,
+            &['A', 'B', 'C', 'F', 'f', 'r', 't'],
+            &['c', 'D', 'l', 'L', 'R', 'S', 'U'],
+        )?;
+        if parsed.positional.len() > 1 {
+            return Err(ServerError::InvalidCommand(
+                "refresh-client accepts at most one adjustment".to_owned(),
+            )
+            .into());
+        }
+        if client_attached_session(&self.inner.lock(), client).is_none() {
+            return Err(ServerError::InvalidCommand("no current client".to_owned()).into());
+        }
+        Err(
+            ServerError::UnsupportedCommand("refresh-client interactive behavior".to_owned())
+                .into(),
+        )
     }
 
     fn buffer_command(
@@ -3295,9 +3838,30 @@ impl Shared {
                 })
             }
             "list-buffers" | "lsb" => {
-                let parsed = parse_buffer_command_args(name, args, &[], &[])?;
+                let parsed = parse_buffer_command_args(name, args, &['F'], &[])?;
                 require_no_positionals(name, &parsed)?;
-                let inner = self.inner.lock();
+                let mut inner = self.inner.lock();
+                if let Some(format) = parsed.value('F') {
+                    inner.engine.set_format_now(unix_timestamp());
+                    let context = inner.engine.format_status_context(None, None, None);
+                    let output = inner
+                        .paste_buffers
+                        .iter()
+                        .map(|buffer| {
+                            let facts = FormatHookFacts {
+                                buffer: Some(buffer_format_facts(buffer)),
+                                ..FormatHookFacts::default()
+                            };
+                            let mut hooks = DaemonFormatHooks::command(&facts);
+                            expand_format_values(format, &context, &mut hooks)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    return Ok(Execution {
+                        output,
+                        effects: Vec::new(),
+                    });
+                }
                 let now = SystemTime::now();
                 let output = inner
                     .paste_buffers
@@ -3375,7 +3939,7 @@ impl Shared {
                 let parsed =
                     parse_buffer_command_args(name, args, &['b', 's', 't'], &['d', 'p', 'r', 'S'])?;
                 require_no_positionals(name, &parsed)?;
-                let pane = self.inner.lock().engine.state.resolve_pane(
+                let pane = self.inner.lock().engine.resolve_pane(
                     parsed.value('t'),
                     context.window,
                     context.pane,
@@ -3544,6 +4108,7 @@ impl Shared {
         }
         inner.attached.retain(|_, clients| !clients.is_empty());
         inner.attached.entry(session).or_default().insert(client);
+        inner.engine.mark_session_active(session);
         let visible = visible_terminal_panes(&inner, client, session);
         affected_panes.extend(visible.iter().copied());
         inner.visible_terminals.insert(client, visible);
@@ -3554,6 +4119,7 @@ impl Shared {
         }
         let terminals = session_terminals(&inner, session);
         let unfocused_copy_mode_exits = unfocused_copy_sessions(&mut inner);
+        write_back_terminal_geometries(&mut inner, &affected_panes, true);
         let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
         let mut snapshot = inner.engine.state.snapshot();
         let presence = snapshot_presence(&inner);
@@ -3589,10 +4155,24 @@ impl Shared {
     }
 
     fn attach_target(
-        &self,
+        self: &Arc<Self>,
         client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
         target: &str,
     ) -> Result<(SessionId, MuxSnapshot), ServerError> {
+        if kind == ClientKind::Interactive
+            && target.is_empty()
+            && self.inner.lock().engine.state.sessions.is_empty()
+        {
+            self.execute(
+                client,
+                ClientKind::Command,
+                context,
+                &CommandInvocation::new("new-session", ["-A", "-d"]),
+            )
+            .map_err(daemon_server_error)?;
+        }
         let session = {
             let inner = self.inner.lock();
             inner.engine.state.resolve_session(
@@ -3603,6 +4183,23 @@ impl Shared {
                     .default_context()
                     .map(|context| context.0),
             )?
+        };
+        let (window, pane) = {
+            let inner = self.inner.lock();
+            let session_state = inner
+                .engine
+                .state
+                .sessions
+                .get(&session)
+                .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?;
+            let window = session_state.active_window;
+            let pane = inner.engine.state.windows[&window].active_pane;
+            (window, pane)
+        };
+        *context = ExecutionContext {
+            session: Some(session),
+            window: Some(window),
+            pane: Some(pane),
         };
         let snapshot = self.attach(client, session)?;
         Ok((session, snapshot))
@@ -3690,6 +4287,7 @@ impl Shared {
         inner.choose_buffers.remove(&client);
         let _ = take_display_panes(&mut inner, client);
         let command_output = take_command_output(&mut inner, client);
+        write_back_terminal_geometries(&mut inner, &affected_panes, true);
         let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
         drop(inner);
         self.fail_gui_requests_for(client);
@@ -3950,6 +4548,14 @@ impl Shared {
     fn note_terminal_input(&self, client: ClientId, pane: PaneId) {
         let resizes = {
             let mut inner = self.inner.lock();
+            let session = client_is_attached_to_pane(&inner, client, pane)
+                .then(|| inner.engine.state.window_for_pane(pane))
+                .flatten()
+                .and_then(|window| inner.engine.state.windows.get(&window))
+                .map(|window| window.session);
+            if let Some(session) = session {
+                inner.engine.mark_session_active(session);
+            }
             terminal_resizes_after_client_input(&mut inner, client, pane)
         };
         apply_terminal_resizes(resizes);
@@ -4188,6 +4794,18 @@ impl Shared {
             return Ok(());
         }
         if self.input_command_prompt_key(client, kind, context, &input, text_follows) {
+            return Ok(());
+        }
+        if input.action != zz_terminal::KeyAction::Release
+            && self.inner.lock().engine.dead_pane_dismisses_on_key(pane)
+        {
+            let target = pane.to_string();
+            self.execute(
+                client,
+                kind,
+                context,
+                &CommandInvocation::new("kill-pane", ["-t", target.as_str()]),
+            )?;
             return Ok(());
         }
         let key = input_key_name(&input);
@@ -5347,7 +5965,20 @@ impl Shared {
         }
         let mut key_engine = inner.key_engines.remove(&client).unwrap_or_default();
         let table = key_engine.active_table().map(str::to_owned);
-        let decision = key_engine.handle(&inner.engine.keys, key);
+        let (initial_repeat_time_ms, repeat_time_ms) = client_attached_session(&inner, client)
+            .map_or((0, 500), |session| {
+                (
+                    inner.engine.initial_repeat_time_for_session(session),
+                    inner.engine.repeat_time_for_session(session),
+                )
+            });
+        let decision = key_engine.handle_with_repeat_times(
+            &inner.engine.keys,
+            key,
+            Instant::now(),
+            Duration::from_millis(u64::from(repeat_time_ms)),
+            Duration::from_millis(u64::from(initial_repeat_time_ms)),
+        );
         inner.key_engines.insert(client, key_engine);
         if decision != KeyDecision::Pass {
             inner
@@ -5558,14 +6189,7 @@ impl Shared {
                 visible_terminal_panes(&inner, client, session)
                     .into_iter()
                     .filter_map(|pane| {
-                        inner
-                            .terminals
-                            .get(&pane)
-                            .and_then(|terminal| {
-                                terminal
-                                    .latest_viewport_for(view)
-                                    .map(|viewport| (Arc::clone(terminal), viewport))
-                            })
+                        terminal_viewport_for_pane(&inner, pane, view)
                             .map(|(terminal, viewport)| (pane, terminal, (*viewport).clone()))
                     })
                     .collect()
@@ -5639,11 +6263,7 @@ impl Shared {
                 return;
             }
             let view = TerminalViewId(client.0);
-            inner.terminals.get(&pane).and_then(|terminal| {
-                terminal
-                    .latest_viewport_for(view)
-                    .map(|viewport| (Arc::clone(terminal), viewport))
-            })
+            terminal_viewport_for_pane(&inner, pane, view)
         };
         if let Some((terminal, viewport)) = viewport {
             self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport);
@@ -5994,6 +6614,8 @@ impl Shared {
             .spawn(move || {
                 let mut previous = BTreeMap::<TerminalViewId, Arc<TerminalViewport>>::new();
                 let mut previous_title = None::<String>;
+                let mut previous_foreground = None::<Option<u32>>;
+                let mut current_command = String::new();
                 let mut diff_scratch = TerminalDiffScratch::default();
                 while let Ok(event) = events.recv_blocking() {
                     let Some(terminal) = terminal.upgrade() else {
@@ -6007,6 +6629,23 @@ impl Shared {
                             let mut current =
                                 terminal.latest_viewports().into_iter().collect::<Vec<_>>();
                             current.sort_by_key(|(view, _)| view.0);
+                            let runtime_viewport = current.first().map_or_else(
+                                || terminal.latest_viewport(),
+                                |(_, viewport)| Arc::clone(viewport),
+                            );
+                            if !terminal_status_should_close(&runtime_viewport.status) {
+                                let foreground = terminal.foreground_process_id();
+                                if previous_foreground != Some(foreground) {
+                                    current_command = terminal_current_command(&terminal);
+                                    previous_foreground = Some(foreground);
+                                }
+                                shared.synchronize_pane_runtime(
+                                    pane,
+                                    &terminal,
+                                    &runtime_viewport,
+                                    &current_command,
+                                );
+                            }
                             let referenced_images = current
                                 .iter()
                                 .flat_map(|(_, viewport)| {
@@ -6137,8 +6776,18 @@ impl Shared {
     }
 
     fn close_exited_terminal(self: &Arc<Self>, pane: PaneId, terminal: &Arc<TerminalSession>) {
-        let Some(mut context) = ({
-            let inner = self.inner.lock();
+        let status = terminal.latest_viewport().status.clone();
+        let (failed, dead_status, dead_signal) = match status {
+            zz_terminal::SessionStatus::Exited(status) => {
+                let failed = status.code != 0 || status.signal.is_some();
+                let dead_status = status.signal.is_none().then_some(status.code);
+                (failed, dead_status, status.signal.clone())
+            }
+            zz_terminal::SessionStatus::Failed(_) => (true, None, None),
+            zz_terminal::SessionStatus::Starting | zz_terminal::SessionStatus::Running => return,
+        };
+        let Some((mut context, retained, changed)) = ({
+            let mut inner = self.inner.lock();
             if !inner
                 .terminals
                 .get(&pane)
@@ -6146,10 +6795,43 @@ impl Shared {
             {
                 return;
             }
-            ExecutionContext::for_pane(&inner.engine.state, pane)
+            let Some(context) = ExecutionContext::for_pane(&inner.engine.state, pane) else {
+                return;
+            };
+            let retained = inner
+                .engine
+                .retain_exited_pane(pane, failed)
+                .unwrap_or(false);
+            let changed = if retained {
+                let facts = format_hook_facts(&inner);
+                let mut hooks = DaemonFormatHooks::command(&facts);
+                inner
+                    .engine
+                    .mark_pane_dead_with_hooks(
+                        pane,
+                        dead_status,
+                        dead_signal.as_deref(),
+                        &mut hooks,
+                    )
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            Some((context, retained, changed))
         }) else {
             return;
         };
+
+        if retained {
+            log::debug!(
+                target: "zz_daemon::diagnostics::terminal",
+                "terminal worker finished pane={pane}; retaining dead pane"
+            );
+            if changed {
+                self.publish_snapshot();
+            }
+            return;
+        }
 
         log::debug!(
             target: "zz_daemon::diagnostics::terminal",
@@ -6194,6 +6876,57 @@ impl Shared {
                 .state
                 .update_pane_title(pane, title)
                 .unwrap_or(false)
+        };
+        if changed {
+            self.publish_snapshot();
+        }
+    }
+
+    fn synchronize_pane_runtime(
+        &self,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        viewport: &TerminalViewport,
+        current_command: &str,
+    ) {
+        let current_path = terminal_working_directory(terminal)
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let reported_path = viewport.working_directory().unwrap_or_default().to_owned();
+        let pid = terminal.process_id();
+        let tty = terminal
+            .tty()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let changed = {
+            let mut inner = self.inner.lock();
+            if !inner
+                .terminals
+                .get(&pane)
+                .is_some_and(|current| Arc::ptr_eq(current, terminal))
+            {
+                return;
+            }
+            let previous = inner
+                .engine
+                .pane_runtime_facts(pane)
+                .cloned()
+                .unwrap_or_default();
+            let facts = format_hook_facts(&inner);
+            let mut hooks = DaemonFormatHooks::command(&facts);
+            inner.engine.set_pane_runtime_facts_with_hooks(
+                pane,
+                PaneRuntimeFacts {
+                    current_command: current_command.to_owned(),
+                    current_path,
+                    dead_signal: previous.dead_signal,
+                    reported_path,
+                    start_path: previous.start_path,
+                    pid,
+                    tty,
+                },
+                &mut hooks,
+            )
         };
         if changed {
             self.publish_snapshot();
@@ -6333,7 +7066,7 @@ impl Shared {
                 let attached_session = client_attached_session(&inner, client);
                 let active_window = client_focused_window_for_attachment(&inner, client);
                 let rebuilt = build_display_panes_state(
-                    &inner.engine.state,
+                    &inner.engine,
                     overlay.source_pane,
                     overlay.state.duration_ms,
                 );
@@ -6391,14 +7124,7 @@ impl Shared {
                 let newly_visible = next
                     .difference(&previous)
                     .filter_map(|pane| {
-                        inner
-                            .terminals
-                            .get(pane)
-                            .and_then(|terminal| {
-                                terminal
-                                    .latest_viewport_for(view)
-                                    .map(|viewport| (Arc::clone(terminal), viewport))
-                            })
+                        terminal_viewport_for_pane(&inner, *pane, view)
                             .map(|(terminal, viewport)| (*pane, terminal, (*viewport).clone()))
                     })
                     .collect::<Vec<_>>();
@@ -7971,6 +8697,7 @@ struct ServerState {
     client_names: BTreeMap<ClientId, String>,
     client_instances: BTreeMap<ClientId, ClientInstanceId>,
     terminals: BTreeMap<PaneId, Arc<TerminalSession>>,
+    terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,
     command_outputs: BTreeMap<ClientId, CommandOutputSession>,
     subscribers: BTreeMap<ClientId, Arc<OutboundMailbox>>,
     attached: BTreeMap<SessionId, BTreeSet<ClientId>>,
@@ -7990,6 +8717,8 @@ struct ServerState {
     choose_buffers: BTreeMap<ClientId, ChooseBufferSession>,
     display_panes: BTreeMap<ClientId, DisplayPanesSession>,
     command_history: Vec<String>,
+    message_log: VecDeque<ServerMessage>,
+    next_message_number: u64,
     paste_buffers: Vec<PasteBuffer>,
     automatic_paste_buffer_limit: AutomaticPasteBufferLimit,
     active_copy_pipes: usize,
@@ -8116,10 +8845,11 @@ fn take_display_panes(inner: &mut ServerState, client: ClientId) -> Option<Displ
 }
 
 fn build_display_panes_state(
-    state: &MuxState,
+    engine: &MuxEngine,
     source_pane: PaneId,
     duration_ms: u32,
 ) -> Result<(SessionId, WindowId, DisplayPanesState), ServerError> {
+    let state = &engine.state;
     let window_id = state
         .window_for_pane(source_pane)
         .ok_or_else(|| ServerError::MissingTarget(source_pane.to_string()))?;
@@ -8135,10 +8865,11 @@ fn build_display_panes_state(
     }
     let indicators = panes
         .into_iter()
-        .enumerate()
-        .filter(|(_, pane)| window.zoomed_pane.is_none_or(|zoomed| *pane == zoomed))
-        .map(|(index, pane)| {
-            let index = u32::try_from(index).expect("pane indicator count is bounded");
+        .filter(|pane| window.zoomed_pane.is_none_or(|zoomed| *pane == zoomed))
+        .map(|pane| {
+            let index = engine
+                .pane_index(window_id, pane)
+                .expect("window pane has an effective index");
             let select_key = match index {
                 0..=9 => b'0' + u8::try_from(index).expect("digit pane index"),
                 10..=35 => b'a' + u8::try_from(index - 10).expect("letter pane index"),
@@ -8996,6 +9727,13 @@ struct PasteBuffer {
     utf8: bool,
 }
 
+#[derive(Clone, Debug)]
+struct ServerMessage {
+    number: u64,
+    time: SystemTime,
+    text: String,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct PasteBufferPaste<'a> {
     requested_name: Option<&'a str>,
@@ -9762,6 +10500,10 @@ enum DeferredTerminalCommand {
         terminal: Arc<TerminalSession>,
         view: TerminalViewId,
     },
+    Resize {
+        terminal: Arc<TerminalSession>,
+        geometry: TerminalGeometry,
+    },
     ViewAction {
         terminal: Arc<TerminalSession>,
         view: TerminalViewId,
@@ -9781,6 +10523,12 @@ impl DeferredTerminalCommand {
                 separators,
             } => terminal.set_word_separators(separators),
             Self::AttachView { terminal, view } => terminal.attach_view(view),
+            Self::Resize { terminal, geometry } => terminal.resize(
+                geometry.columns,
+                geometry.rows,
+                geometry.cell_width_px,
+                geometry.cell_height_px,
+            ),
             Self::ViewAction {
                 terminal,
                 view,
@@ -9830,6 +10578,23 @@ fn session_terminals(inner: &ServerState, session: SessionId) -> Vec<Arc<Termina
         .flat_map(|window| window.panes.keys())
         .filter_map(|pane| inner.terminals.get(pane).cloned())
         .collect()
+}
+
+fn terminal_viewport_for_pane(
+    inner: &ServerState,
+    pane: PaneId,
+    view: TerminalViewId,
+) -> Option<(Arc<TerminalSession>, Arc<TerminalViewport>)> {
+    let terminal = inner.terminals.get(&pane)?;
+    let viewport = terminal.latest_viewport_for(view).or_else(|| {
+        inner
+            .engine
+            .state
+            .pane(pane)
+            .is_some_and(|pane| pane.dead)
+            .then(|| terminal.latest_viewport())
+    })?;
+    Some((Arc::clone(terminal), viewport))
 }
 
 fn visible_terminal_panes(
@@ -9935,15 +10700,102 @@ fn terminal_geometry_owner(inner: &ServerState, pane: PaneId) -> Option<ClientId
         .map(|(client, _)| *client)
 }
 
+fn aggressive_terminal_geometry(inner: &ServerState, pane: PaneId) -> Option<TerminalGeometry> {
+    let window = inner.engine.state.window_for_pane(pane)?;
+    let window_state = inner.engine.state.windows.get(&window)?;
+    if window_state
+        .zoomed_pane
+        .is_some_and(|zoomed| zoomed != pane)
+    {
+        return None;
+    }
+    let geometries = inner.terminal_geometries.get(&pane)?;
+    let mut candidates = geometries.iter().filter(|(client, _)| {
+        client_focused_window_for_attachment(inner, **client) == Some(window)
+    });
+    let (first_client, first_geometry) = candidates.next()?;
+    let mut owner = (*first_client, *first_geometry);
+    let mut columns = first_geometry.columns;
+    let mut rows = first_geometry.rows;
+    for (client, geometry) in candidates {
+        columns = columns.min(geometry.columns);
+        rows = rows.min(geometry.rows);
+        let current_key = (
+            Reverse(
+                inner
+                    .client_terminal_input_sequences
+                    .get(client)
+                    .copied()
+                    .unwrap_or_default(),
+            ),
+            client.0,
+        );
+        let owner_key = (
+            Reverse(
+                inner
+                    .client_terminal_input_sequences
+                    .get(&owner.0)
+                    .copied()
+                    .unwrap_or_default(),
+            ),
+            owner.0.0,
+        );
+        if current_key < owner_key {
+            owner = (*client, *geometry);
+        }
+    }
+    Some(TerminalGeometry {
+        columns,
+        rows,
+        ..owner.1
+    })
+}
+
 fn terminal_resize_for_pane(
     inner: &ServerState,
     pane: PaneId,
 ) -> Option<(Arc<TerminalSession>, TerminalGeometry)> {
-    let geometries = inner.terminal_geometries.get(&pane)?;
-    let owner = terminal_geometry_owner(inner, pane)?;
-    let geometry = *geometries.get(&owner)?;
+    let window = inner.engine.state.window_for_pane(pane)?;
+    let geometry = if inner.engine.state.window_aggressive_resize(window).ok()? {
+        aggressive_terminal_geometry(inner, pane)?
+    } else {
+        let geometries = inner.terminal_geometries.get(&pane)?;
+        let owner = terminal_geometry_owner(inner, pane)?;
+        *geometries.get(&owner)?
+    };
     let terminal = inner.terminals.get(&pane).cloned()?;
     Some((terminal, geometry))
+}
+
+fn write_back_terminal_geometries(
+    inner: &mut ServerState,
+    panes: &BTreeSet<PaneId>,
+    aggressive_only: bool,
+) -> bool {
+    let measurements = panes
+        .iter()
+        .filter_map(|pane| {
+            let window = inner.engine.state.window_for_pane(*pane)?;
+            if aggressive_only && !inner.engine.state.window_aggressive_resize(window).ok()? {
+                return None;
+            }
+            terminal_resize_for_pane(inner, *pane)
+                .map(|(_, geometry)| (*pane, geometry.columns, geometry.rows))
+        })
+        .collect::<Vec<_>>();
+    measurements
+        .into_iter()
+        .fold(false, |changed, (pane, columns, rows)| {
+            inner.engine.set_pane_geometry(pane, columns, rows) || changed
+        })
+}
+
+fn panes_for_windows(inner: &ServerState, windows: &BTreeSet<WindowId>) -> BTreeSet<PaneId> {
+    windows
+        .iter()
+        .filter_map(|window| inner.engine.state.windows.get(window))
+        .flat_map(|window| window.panes.keys().copied())
+        .collect()
 }
 
 fn terminal_resizes_after_client_input(
@@ -10037,6 +10889,26 @@ fn find_buffer<'a>(inner: &'a ServerState, name: Option<&str>) -> Option<&'a Pas
         .paste_buffers
         .iter()
         .find(|buffer| name.map_or(buffer.automatic, |name| buffer.name == name))
+}
+
+fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
+    BufferFormatFacts {
+        name: buffer.name.clone(),
+        data: Arc::clone(&buffer.data),
+        created: buffer.created,
+    }
+}
+
+fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
+    FormatHookFacts {
+        terminals: Arc::new(inner.terminals.clone()),
+        buffer: inner
+            .paste_buffers
+            .iter()
+            .find(|buffer| buffer.automatic)
+            .map(buffer_format_facts),
+        ..FormatHookFacts::default()
+    }
 }
 
 fn resolve_buffer<'a>(
@@ -10794,15 +11666,16 @@ fn handle_connection<S: TransportStream>(
             .origin
             .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane))
             .or_else(|| {
-                inner
-                    .engine
-                    .state
-                    .default_context()
-                    .map(|(session, window, pane)| ExecutionContext {
-                        session: Some(session),
-                        window: Some(window),
-                        pane: Some(pane),
-                    })
+                let fallback = if hello.kind == ClientKind::Command {
+                    inner.engine.state.most_recent_context()
+                } else {
+                    inner.engine.state.default_context()
+                };
+                fallback.map(|(session, window, pane)| ExecutionContext {
+                    session: Some(session),
+                    window: Some(window),
+                    pane: Some(pane),
+                })
             })
             .unwrap_or_default()
     };
@@ -10841,24 +11714,26 @@ fn handle_connection<S: TransportStream>(
                 );
                 let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
             }
-            ProtocolMessage::Attach { session } => match shared.attach_target(client, &session) {
-                Ok((session, snapshot)) => {
-                    outbound.reset_kitty_images();
-                    outbound.reset_pasted_images();
-                    let _ =
-                        outbound.enqueue_reliable(&ProtocolMessage::Attached { session, snapshot });
-                    shared.send_resync(client, &outbound);
-                    shared.publish_snapshot();
+            ProtocolMessage::Attach { session } => {
+                match shared.attach_target(client, hello.kind, &mut context, &session) {
+                    Ok((session, snapshot)) => {
+                        outbound.reset_kitty_images();
+                        outbound.reset_pasted_images();
+                        let _ = outbound
+                            .enqueue_reliable(&ProtocolMessage::Attached { session, snapshot });
+                        shared.send_resync(client, &outbound);
+                        shared.publish_snapshot();
+                    }
+                    Err(error) => {
+                        let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
+                            CommandResponse::Error {
+                                request_id: 0,
+                                error,
+                            },
+                        ));
+                    }
                 }
-                Err(error) => {
-                    let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
-                        CommandResponse::Error {
-                            request_id: 0,
-                            error,
-                        },
-                    ));
-                }
-            },
+            }
             ProtocolMessage::Detach => {
                 shared.detach(client);
             }
@@ -11153,6 +12028,147 @@ mod tests {
         }
     }
 
+    #[test]
+    fn editor_sniff_matches_the_pin_basename_rule() {
+        for editor in ["vi", "vim", "nvim", "gvim", "/usr/bin/evil"] {
+            assert_eq!(
+                mode_keys_from_environment(None, Some(OsStr::new(editor))),
+                "vi",
+                "{editor}"
+            );
+        }
+        for editor in ["emacsclient", "VI", "/usr/bin/emacs"] {
+            assert_eq!(
+                mode_keys_from_environment(None, Some(OsStr::new(editor))),
+                "emacs",
+                "{editor}"
+            );
+        }
+        assert_eq!(mode_keys_from_environment(None, None), "emacs");
+        assert_eq!(
+            mode_keys_from_environment(Some(OsStr::new("")), Some(OsStr::new("vim"))),
+            "emacs"
+        );
+    }
+
+    #[test]
+    fn configured_engine_receives_boot_defaults_before_initialization() {
+        let shared = Shared::configured_with_boot_environment(
+            1,
+            Arc::new(TerminalAppearance::default()),
+            AppearanceProvenance::default(),
+            false,
+            std::env::temp_dir().join("zz-test-paste"),
+            std::env::temp_dir().join("zz-test.sock"),
+            "vi",
+            [("PHASE4D_BOOT", "seeded")],
+        );
+        let mut inner = shared.inner.lock();
+        assert_eq!(inner.engine.mux_option_value(MuxOptionKey::ModeKeys), "vi");
+        assert_eq!(
+            inner
+                .engine
+                .execute(
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("show-environment", ["-g", "PHASE4D_BOOT"],),
+                )
+                .unwrap()
+                .output,
+            "PHASE4D_BOOT=seeded"
+        );
+    }
+
+    #[test]
+    fn attach_and_attached_key_input_update_session_activity() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(ClientKind::Interactive, None, None, mailbox);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "A"]),
+            )
+            .unwrap();
+        let first = context.session.expect("first session");
+        let first_pane = context.pane.expect("first pane");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "B"]),
+            )
+            .unwrap();
+        let second = context.session.expect("second session");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .most_recent_context()
+                .map(|context| context.0),
+            Some(second)
+        );
+
+        shared.attach(client, first).unwrap();
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .most_recent_context()
+                .map(|context| context.0),
+            Some(first)
+        );
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "C"]),
+            )
+            .unwrap();
+        let third = context.session.expect("third session");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .most_recent_context()
+                .map(|context| context.0),
+            Some(third)
+        );
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::Key {
+                    pane: first_pane,
+                    input: test_key(KeyCode::Character('x'), Modifiers::default(), Some("x")),
+                    text_follows: false,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .most_recent_context()
+                .map(|context| context.0),
+            Some(first)
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn envelope_mismatch_gets_a_legible_reply_before_disconnect() {
@@ -11421,6 +12437,250 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn remain_on_exit_retains_and_respawns_the_same_terminal_pane() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["-g", "remain-on-exit", "on"]),
+            )
+            .expect("enable retained exits");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-s", "dead-fixture", "printf 'ZZ_DEAD_FRAME\\n'; exit 7"],
+                ),
+            )
+            .expect("create exiting terminal pane");
+        let session = context.session.expect("terminal session");
+        let pane = context.pane.expect("terminal pane");
+        let window = context.window.expect("terminal window");
+        let layout = shared.inner.lock().engine.state.windows[&window]
+            .layout
+            .project();
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let inner = shared.inner.lock();
+            if inner
+                .engine
+                .state
+                .pane(pane)
+                .is_some_and(|pane| pane.dead && pane.dead_status == Some(7))
+            {
+                assert!(inner.terminals.contains_key(&pane));
+                break;
+            }
+            drop(inner);
+            assert!(
+                Instant::now() < deadline,
+                "exited terminal did not become retained-dead"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let output = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-p",
+                        "-t",
+                        &pane.to_string(),
+                        "#{pane_id}:#{pane_dead}:#{pane_dead_status}",
+                    ],
+                ),
+            )
+            .expect("read dead facts")
+            .output;
+        assert_eq!(output, format!("{pane}:1:7"));
+
+        let mailbox = OutboundMailbox::new();
+        let (late_client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(late_client, session)
+            .expect("attach after terminal exit");
+        shared.send_resync(late_client, &mailbox);
+        let frozen = {
+            let state = mailbox.state.lock();
+            state
+                .terminals
+                .get(&pane)
+                .map(|pending| pending.encoded.clone())
+                .expect("retained frame queued for late client")
+        };
+        let ProtocolMessage::Event(Event {
+            payload:
+                EventPayload::TerminalViewport {
+                    pane: delivered,
+                    viewport,
+                },
+            ..
+        }) = decode_protocol_frame(&frozen).expect("decode retained frame")
+        else {
+            panic!("late client did not receive a full terminal viewport");
+        };
+        assert_eq!(delivered, pane);
+        assert_eq!(viewport.status, SessionStatus::exited(7, None));
+        assert!(viewport_text(&viewport).contains("ZZ_DEAD_FRAME"));
+
+        let previous = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "respawn-pane",
+                    ["-E", "-t", &pane.to_string(), "sleep 30"],
+                ),
+            )
+            .expect("respawn dead pane empty");
+        let empty = {
+            let inner = shared.inner.lock();
+            let replacement = Arc::clone(&inner.terminals[&pane]);
+            assert!(!Arc::ptr_eq(&previous, &replacement));
+            assert!(!inner.engine.state.pane(pane).unwrap().dead);
+            assert_eq!(inner.engine.state.windows[&window].layout.project(), layout);
+            assert_eq!(replacement.process_id(), None);
+            assert_eq!(replacement.foreground_process_id(), None);
+            assert_eq!(
+                inner.terminal_spawns[&pane].command.as_deref(),
+                Some("sleep 30")
+            );
+            replacement
+        };
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let viewport = empty.latest_viewport_for(TerminalViewId(late_client.0));
+            if viewport.as_ref().is_some_and(|viewport| {
+                matches!(viewport.status, SessionStatus::Running)
+                    && matches!(viewport.mode, TerminalMode::Live)
+            }) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "empty pane did not publish a live viewport"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("respawn-pane", ["-t", &pane.to_string()]),
+            )
+            .expect("respawn empty pane without kill");
+        {
+            let inner = shared.inner.lock();
+            let replacement = &inner.terminals[&pane];
+            assert!(!Arc::ptr_eq(&empty, replacement));
+            assert!(!inner.engine.state.pane(pane).unwrap().dead);
+            assert_eq!(inner.engine.state.windows[&window].layout.project(), layout);
+            assert_eq!(
+                inner.terminal_spawns[&pane].command.as_deref(),
+                Some("sleep 30")
+            );
+        }
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-pane", ["-t", &pane.to_string()]),
+            )
+            .expect("clean up respawned pane");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retained_signal_exit_exposes_the_tmux_signal_name() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["-g", "remain-on-exit", "on"]),
+            )
+            .expect("enable retained exits");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "signal-fixture", "kill -TERM $$"]),
+            )
+            .expect("create signalled terminal pane");
+        let pane = context.pane.expect("terminal pane");
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(pane)
+                .is_some_and(|pane| pane.dead)
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "signalled terminal did not become retained-dead"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "display-message",
+                        [
+                            "-p",
+                            "-t",
+                            &pane.to_string(),
+                            "#{pane_dead}:#{pane_dead_status}:#{pane_dead_signal}",
+                        ],
+                    ),
+                )
+                .expect("read signal facts")
+                .output,
+            "1::term"
+        );
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-pane", ["-t", &pane.to_string()]),
+            )
+            .expect("clean up retained signal pane");
     }
 
     #[test]
@@ -12323,10 +13583,11 @@ mod tests {
                 .any(|message| matches!(
                     message,
                     ProtocolMessage::Event(Event {
-                        payload: EventPayload::ClientMessage {
+                        payload: EventPayload::TimedClientMessage {
                             pane: None,
                             kind: ClientMessageKind::Info,
                             text,
+                            duration_ms: 750,
                         },
                         ..
                     }) if text == "hello client"
@@ -12338,7 +13599,7 @@ mod tests {
                 .all(|message| !matches!(
                     message,
                     ProtocolMessage::Event(Event {
-                        payload: EventPayload::ClientMessage { .. },
+                        payload: EventPayload::TimedClientMessage { .. },
                         ..
                     })
                 ))
@@ -12947,6 +14208,77 @@ mod tests {
     }
 
     #[test]
+    fn buffer_formats_read_named_rows_and_the_top_automatic_buffer() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = {
+            let mut inner = shared.inner.lock();
+            let (_, _, pane) = inner
+                .engine
+                .state
+                .create_session("w")
+                .expect("format target session");
+            ExecutionContext::for_pane(&inner.engine.state, pane).expect("format target pane")
+        };
+        shared
+            .buffer_command(
+                &context,
+                "set-buffer",
+                &["-b", "named", "alpha"].map(str::to_owned),
+            )
+            .expect("set named buffer");
+        let named = shared
+            .buffer_command(
+                &context,
+                "list-buffers",
+                &[
+                    "-F".to_owned(),
+                    "#{buffer_name}|#{buffer_size}|#{buffer_sample}|#{!!:#{buffer_created}}"
+                        .to_owned(),
+                ],
+            )
+            .expect("format named buffer");
+        assert_eq!(named.output, "named|5|alpha|1");
+
+        shared
+            .buffer_command(&context, "set-buffer", &["bravo".to_owned()])
+            .expect("set automatic buffer");
+        let displayed = shared
+            .execute(
+                ClientId(1),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-p",
+                        "#{buffer_name}|#{buffer_size}|#{buffer_sample}|#{!!:#{buffer_created}}",
+                    ],
+                ),
+            )
+            .expect("format automatic buffer");
+        assert_eq!(displayed.output, "buffer0|5|bravo|1");
+
+        let pane = context.pane.expect("format target pane").to_string();
+        let targeted = shared
+            .execute(
+                ClientId(1),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-p",
+                        "-t",
+                        pane.as_str(),
+                        "#{buffer_name}|#{buffer_size}|#{buffer_sample}|#{!!:#{buffer_created}}",
+                    ],
+                ),
+            )
+            .expect("format automatic buffer with a pane target");
+        assert_eq!(targeted.output, "buffer0|5|bravo|1");
+    }
+
+    #[test]
     fn unnamed_buffer_commands_target_the_newest_automatic_buffer() {
         let shared = Shared::new(1);
         let context = ExecutionContext::default();
@@ -13057,6 +14389,86 @@ mod tests {
             .expect("show captured named buffer")
             .output;
         assert!(shown.contains("ZZ_DETACHED_BUFFER_OK"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn seeded_global_environment_and_session_markers_reach_terminal_spawn() {
+        let shared = Arc::new(Shared::new(1));
+        shared.inner.lock().engine.seed_global_environment([
+            ("PHASE4D_SEEDED", "daemon"),
+            ("HIDDENPROBE", "daemonval"),
+            ("TERM", "inherited-term"),
+        ]);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-environment",
+                    ["-g", "-h", "HIDDENPROBE", "newhidden"],
+                ),
+            )
+            .expect("hidden global environment");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "seeded-environment"]),
+            )
+            .expect("session");
+        let pane = context.pane.expect("terminal pane");
+        assert_eq!(
+            shared.inner.lock().terminal_spawns[&pane].terminal_type,
+            Some("tmux-256color".to_owned())
+        );
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-buffer",
+                    [
+                        "printf 'PHASE4D_SEEDED=[%s] DISPLAY=[%s] HP=[%s] TERM=[%s]\\n' \"$PHASE4D_SEEDED\" \"${DISPLAY-unset}\" \"${HIDDENPROBE-}\" \"$TERM\"\n",
+                    ],
+                ),
+            )
+            .expect("shell probe");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("paste-buffer", ["-t", &pane.to_string()]),
+            )
+            .expect("paste shell probe");
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let captured = shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("capture-pane", ["-p", "-t", &pane.to_string()]),
+                )
+                .expect("capture terminal")
+                .output;
+            if captured
+                .contains("PHASE4D_SEEDED=[daemon] DISPLAY=[unset] HP=[] TERM=[tmux-256color]")
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "seeded environment did not reach terminal spawn"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     fn paste_upload_fixture(
@@ -13752,10 +15164,137 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[cfg(unix)]
     #[test]
+    fn terminal_cwd_flag_prefers_a_valid_literal_and_bogus_paths_land_in_home() {
+        let donor_directory = tempfile::tempdir().expect("donor working directory");
+        let donor_physical = donor_directory.path().join("physical");
+        fs::create_dir(&donor_physical).expect("physical donor working directory");
+        let donor_literal = donor_directory.path().join("literal");
+        std::os::unix::fs::symlink(&donor_physical, &donor_literal)
+            .expect("literal donor working directory");
+        let donor_path = donor_physical
+            .canonicalize()
+            .expect("canonical donor working directory");
+        let literal_directory = tempfile::tempdir().expect("literal working directory");
+        let literal_path = literal_directory
+            .path()
+            .canonicalize()
+            .expect("canonical literal working directory");
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-s", "cwd", "-c", donor_literal.to_string_lossy().as_ref()],
+                ),
+            )
+            .expect("session with literal cwd");
+        let donor = context.pane.expect("donor pane");
+        let donor_terminal = Arc::clone(&shared.inner.lock().terminals[&donor]);
+        let wait_for_cwd = |terminal: &TerminalSession, expected: &Path| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if terminal_working_directory(terminal).as_deref() == Some(expected) {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "timed out waiting for terminal cwd; expected={expected:?}, pid={:?}, cwd={:?}",
+                    terminal.foreground_process_id(),
+                    terminal_working_directory(terminal),
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        };
+        wait_for_cwd(&donor_terminal, &donor_path);
+        assert_eq!(
+            shared.inner.lock().terminal_spawns[&donor].working_directory,
+            Some(donor_literal.clone())
+        );
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("display-message", ["-p", "#{pane_start_path}"],),
+                )
+                .expect("literal pane start path")
+                .output,
+            donor_literal.to_string_lossy()
+        );
+        donor_terminal.send_text("printf 'ZZ_LITERAL_PWD=[%s]\\n' \"$PWD\"\n");
+        let expected_pwd = format!("ZZ_LITERAL_PWD=[{}]", donor_literal.display());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let captured = shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("capture-pane", ["-pJ", "-t", &donor.to_string()]),
+                )
+                .expect("capture literal PWD")
+                .output;
+            if captured.contains(&expected_pwd) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "literal PWD did not reach the child; expected={expected_pwd:?}, captured={captured:?}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "split-window",
+                    ["-h", "-c", literal_path.to_string_lossy().as_ref()],
+                ),
+            )
+            .expect("split with valid literal cwd");
+        let literal = context.pane.expect("literal cwd pane");
+        let literal_terminal = Arc::clone(&shared.inner.lock().terminals[&literal]);
+        wait_for_cwd(&literal_terminal, &literal_path);
+
+        let bogus_path = literal_directory.path().join("missing");
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "split-window",
+                    ["-v", "-c", bogus_path.to_string_lossy().as_ref()],
+                ),
+            )
+            .expect("split with bogus literal cwd");
+        let fallback = context.pane.expect("fallback cwd pane");
+        let fallback_terminal = Arc::clone(&shared.inner.lock().terminals[&fallback]);
+        let home_path = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .expect("HOME is set")
+            .canonicalize()
+            .expect("canonical home directory");
+        wait_for_cwd(&fallback_terminal, &home_path);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn terminal_agent_and_editor_panes_inherit_live_working_directory() {
         let directory = tempfile::tempdir().expect("temporary working directory");
-        let expected = directory
-            .path()
+        let physical = directory.path().join("physical");
+        fs::create_dir(&physical).expect("physical working directory");
+        let reported = directory.path().join("reported");
+        std::os::unix::fs::symlink(&physical, &reported).expect("working directory symlink");
+        let expected = physical
             .canonicalize()
             .expect("canonical working directory");
         let shared = Arc::new(Shared::new(1));
@@ -13770,7 +15309,12 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("session");
         let first = context.pane.expect("first pane");
         let source = Arc::clone(&shared.inner.lock().terminals[&first]);
-        source.send_text(format!("cd '{}'\n", expected.display()));
+        let reported_path = reported.to_string_lossy().into_owned();
+        source.send_text(format!(
+            "cd '{}'\nprintf '\\033]7;file://workstation{}\\a'\n",
+            reported.display(),
+            reported_path
+        ));
 
         let wait_for_cwd = |terminal: &TerminalSession| {
             let deadline = Instant::now() + Duration::from_secs(5);
@@ -13788,6 +15332,44 @@ bind - split-window -v -c "#{pane_current_path}"
             }
         };
         wait_for_cwd(&source);
+
+        let expected_path = expected.to_string_lossy().into_owned();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let facts = shared
+                .inner
+                .lock()
+                .engine
+                .pane_runtime_facts(first)
+                .cloned()
+                .unwrap_or_default();
+            if facts.current_path == expected_path && facts.reported_path == reported_path {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for pane path facts; facts={facts:?}",
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        let first_target = first.to_string();
+        let paths = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-p",
+                        "-t",
+                        first_target.as_str(),
+                        "#{pane_current_path}|#{pane_path}",
+                    ],
+                ),
+            )
+            .expect("live pane paths");
+        assert_eq!(paths.output, format!("{expected_path}|{reported_path}"));
 
         shared
             .execute(
@@ -16475,10 +18057,11 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[test]
     fn display_panes_model_uses_pane_order_and_tmux_selection_keys() {
-        let mut state = MuxState::default();
-        let (_, window, source) = state.create_session("work").expect("session");
+        let mut engine = MuxEngine::default();
+        let (_, window, source) = engine.state.create_session("work").expect("session");
         for _ in 1..=36 {
-            state
+            engine
+                .state
                 .split_pane_with(
                     source,
                     zz_protocol::Axis::Horizontal,
@@ -16490,11 +18073,11 @@ bind - split-window -v -c "#{pane_current_path}"
                 )
                 .expect("split pane");
         }
-        let active = state.windows[&window].pane_order()[36];
-        state.select_pane(active).expect("select last pane");
+        let active = engine.state.windows[&window].pane_order()[36];
+        engine.state.select_pane(active).expect("select last pane");
 
         let (_, actual_window, overlay) =
-            build_display_panes_state(&state, active, 1_000).expect("pane indicators");
+            build_display_panes_state(&engine, active, 1_000).expect("pane indicators");
         assert_eq!(actual_window, window);
         assert_eq!(overlay.indicators.len(), 37);
         assert_eq!(overlay.indicators[0].select_key, b'0');
@@ -16503,6 +18086,23 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(overlay.indicators[35].select_key, b'z');
         assert_eq!(overlay.indicators[36].select_key, 0);
         assert!(overlay.indicators[36].active());
+
+        engine
+            .execute(
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-window-option", ["-g", "pane-base-index", "1"]),
+            )
+            .expect("one-based pane indicators");
+        let (_, _, overlay) =
+            build_display_panes_state(&engine, active, 1_000).expect("one-based indicators");
+        assert_eq!(overlay.indicators[0].index, 1);
+        assert_eq!(overlay.indicators[0].select_key, b'1');
+        assert_eq!(overlay.indicators[8].index, 9);
+        assert_eq!(overlay.indicators[8].select_key, b'9');
+        assert_eq!(overlay.indicators[9].index, 10);
+        assert_eq!(overlay.indicators[9].select_key, b'a');
+        assert_eq!(overlay.indicators[35].index, 36);
+        assert_eq!(overlay.indicators[35].select_key, 0);
     }
 
     #[test]
@@ -16530,6 +18130,30 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("split-window", ["-h"]),
             )
             .expect("split pane");
+        let panes = shared.inner.lock().engine.state.windows[&window]
+            .pane_order()
+            .to_vec();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let settled = {
+                let inner = shared.inner.lock();
+                panes.iter().all(|pane| {
+                    inner.engine.pane_runtime_facts(*pane).is_some_and(|facts| {
+                        !facts.current_command.is_empty()
+                            && facts.pid.is_some()
+                            && !facts.tty.is_empty()
+                    })
+                })
+            };
+            if settled {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pane runtime facts did not settle before split resize"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
         let split = {
             let inner = shared.inner.lock();
             let mut splits = Vec::new();
@@ -17852,6 +19476,169 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn aggressive_resize_uses_the_smallest_geometry_for_each_viewed_window() {
+        let shared = Arc::new(Shared::new(1));
+        let (first_client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (second_client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (session, first_pane, _) =
+            output_view_session_fixture(&shared, "aggressive", "first window");
+        let (first_window, second_window, second_pane) = {
+            let mut inner = shared.inner.lock();
+            let first_window = inner
+                .engine
+                .state
+                .window_for_pane(first_pane)
+                .expect("first window");
+            let (second_window, second_pane) = inner
+                .engine
+                .state
+                .create_window_at(
+                    session,
+                    None,
+                    Some("second".to_owned()),
+                    PaneKind::Terminal,
+                    false,
+                )
+                .expect("second window");
+            let terminal = Arc::new(TerminalSession::spawn_output_view(
+                "second window".to_owned(),
+                String::new(),
+            ));
+            inner.terminals.insert(second_pane, terminal);
+            (first_window, second_window, second_pane)
+        };
+        shared
+            .attach(first_client, session)
+            .expect("attach first client");
+        shared
+            .attach(second_client, session)
+            .expect("attach second client");
+
+        let mut first_context = ExecutionContext {
+            session: Some(session),
+            window: Some(first_window),
+            pane: Some(first_pane),
+        };
+        let mut second_context = first_context.clone();
+        let resize = |client, context: &mut ExecutionContext, pane, columns, rows| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::ResizeTerminal {
+                        pane,
+                        columns,
+                        rows,
+                        cell_width_px: 8,
+                        cell_height_px: 16,
+                    },
+                )
+                .expect("record terminal geometry");
+        };
+        resize(first_client, &mut first_context, first_pane, 200, 30);
+        resize(second_client, &mut second_context, first_pane, 100, 60);
+        assert_eq!(
+            shared.inner.lock().engine.pane_geometry(first_pane),
+            Some((200, 30))
+        );
+
+        let effect = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut first_context,
+                &CommandInvocation::new("set-window-option", ["-g", "aggressive-resize", "on"]),
+            )
+            .expect("enable aggressive resize");
+        assert_eq!(
+            effect.effects,
+            vec![
+                MuxEffect::AggressiveResizeChanged { window: None },
+                MuxEffect::SnapshotChanged,
+            ]
+        );
+        assert_eq!(
+            shared.inner.lock().engine.pane_geometry(first_pane),
+            Some((100, 30))
+        );
+        assert_eq!(
+            terminal_resize_for_pane(&shared.inner.lock(), first_pane)
+                .expect("aggressive geometry")
+                .1
+                .columns,
+            100
+        );
+        assert_eq!(
+            terminal_resize_for_pane(&shared.inner.lock(), first_pane)
+                .expect("aggressive geometry")
+                .1
+                .rows,
+            30
+        );
+
+        shared
+            .execute(
+                first_client,
+                ClientKind::Interactive,
+                &mut first_context,
+                &CommandInvocation::new("select-window", ["-t", &second_window.to_string()]),
+            )
+            .expect("first client views the second window");
+        resize(first_client, &mut first_context, second_pane, 160, 50);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.pane_geometry(first_pane), Some((100, 60)));
+            assert_eq!(inner.engine.pane_geometry(second_pane), Some((160, 50)));
+        }
+
+        let mut command_context = first_context.clone();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new("select-window", ["-t", &first_window.to_string()]),
+            )
+            .expect("move every viewer to the first window");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new("select-window", ["-t", &second_window.to_string()]),
+            )
+            .expect("move every viewer to the second window");
+        resize(second_client, &mut second_context, second_pane, 90, 20);
+        assert_eq!(
+            shared.inner.lock().engine.pane_geometry(second_pane),
+            Some((90, 20))
+        );
+
+        shared
+            .execute(
+                first_client,
+                ClientKind::Interactive,
+                &mut first_context,
+                &CommandInvocation::new("select-window", ["-t", &first_window.to_string()]),
+            )
+            .expect("park the larger client on the first window");
+        let inner = shared.inner.lock();
+        assert_eq!(
+            client_focused_window_for_attachment(&inner, first_client),
+            Some(first_window)
+        );
+        assert_eq!(
+            client_focused_window_for_attachment(&inner, second_client),
+            Some(second_window)
+        );
+        assert_eq!(inner.engine.pane_geometry(first_pane), Some((200, 30)));
+        assert_eq!(inner.engine.pane_geometry(second_pane), Some((90, 20)));
+    }
+
+    #[test]
     fn multi_client_window_focus_isolated_stamped_and_falls_back_after_kill() {
         let shared = Arc::new(Shared::new(1));
         let first_mailbox = OutboundMailbox::new();
@@ -18772,6 +20559,365 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn list_clients_uses_attached_registry_name_order_and_session_filtering() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "z"]),
+            )
+            .unwrap();
+        let z = context.session.unwrap();
+        shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "A"]),
+            )
+            .unwrap();
+        let a = context.session.unwrap();
+
+        let (zeta, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("zeta".to_owned()),
+            Some(TerminalColorScheme::Dark),
+            OutboundMailbox::new(),
+        );
+        let (alpha, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("alpha".to_owned()),
+            Some(TerminalColorScheme::Light),
+            OutboundMailbox::new(),
+        );
+        let (_detached, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("ghost".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(zeta, z).unwrap();
+        shared.attach(alpha, a).unwrap();
+
+        let listed = shared
+            .execute(
+                ClientId(91),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("list-clients", [] as [&str; 0]),
+            )
+            .unwrap();
+        assert_eq!(listed.output, "alpha: A [0x0 ] \nzeta: z [0x0 ] ");
+
+        let filtered = shared
+            .execute(
+                ClientId(91),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "lsc",
+                    [
+                        "-t",
+                        "z",
+                        "-F",
+                        "#{line}:#{client_name}:#{session_name}:#{client_width}x#{client_height}:#{client_termname}",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert_eq!(filtered.output, "1:zeta:z:0x0:");
+    }
+
+    #[test]
+    fn show_messages_logs_commands_newest_first_and_bounds_the_ring() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "work"]),
+            )
+            .unwrap();
+
+        let displayed = shared.execute_command_request(
+            client,
+            ClientKind::Command,
+            &mut context,
+            1,
+            &CommandInvocation::new("display-message", ["hello"]),
+        );
+        assert!(matches!(
+            displayed,
+            CommandResponse::Success { output, .. } if output.is_empty()
+        ));
+        let shown = shared.execute_command_request(
+            client,
+            ClientKind::Command,
+            &mut context,
+            2,
+            &CommandInvocation::new("showmsgs", [] as [&str; 0]),
+        );
+        let CommandResponse::Success { output, .. } = shown else {
+            panic!("show-messages should succeed");
+        };
+        let lines = output.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].ends_with(": client-7 command: show-messages"));
+        assert!(lines[1].ends_with(": hello"));
+        assert!(lines[2].ends_with(": client-7 command: display-message hello"));
+        assert!(lines.iter().all(|line| {
+            let bytes = line.as_bytes();
+            bytes.get(2) == Some(&b':') && bytes.get(5) == Some(&b':')
+        }));
+
+        let mut inner = shared.inner.lock();
+        inner.message_log.clear();
+        inner.next_message_number = 0;
+        drop(inner);
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-s", "message-limit", "3"]),
+            )
+            .unwrap();
+        let mut inner = shared.inner.lock();
+        for number in 0..5 {
+            push_server_message(&mut inner, format!("message-{number}"));
+        }
+        assert_eq!(
+            inner
+                .message_log
+                .iter()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            ["message-2", "message-3", "message-4"]
+        );
+        assert_eq!(
+            inner
+                .message_log
+                .iter()
+                .rev()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            ["message-4", "message-3", "message-2"]
+        );
+        inner.message_log.clear();
+        inner.next_message_number = 0;
+        drop(inner);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-su", "message-limit"]),
+            )
+            .unwrap();
+        let mut inner = shared.inner.lock();
+        for number in 0..5 {
+            push_server_message(&mut inner, format!("message-{number}"));
+        }
+        drop(inner);
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-s", "message-limit", "3"]),
+            )
+            .unwrap();
+        let mut inner = shared.inner.lock();
+        assert_eq!(inner.message_log.len(), 5);
+        push_server_message(&mut inner, "message-5".to_owned());
+        assert_eq!(
+            inner
+                .message_log
+                .iter()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            ["message-3", "message-4", "message-5"]
+        );
+    }
+
+    #[test]
+    fn failing_command_logs_its_line_and_then_the_error_message() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "work"]),
+            )
+            .unwrap();
+
+        let response = shared.execute_command_request(
+            client,
+            ClientKind::Command,
+            &mut context,
+            1,
+            &CommandInvocation::new("select-window", ["-t", "99"]),
+        );
+        assert!(matches!(
+            response,
+            CommandResponse::Error {
+                request_id: 1,
+                error: ServerError::WindowNotFound(window),
+            } if window == "99"
+        ));
+
+        let inner = shared.inner.lock();
+        assert_eq!(inner.message_log.len(), 2);
+        assert_eq!(inner.next_message_number, 2);
+        assert_eq!(
+            inner
+                .message_log
+                .iter()
+                .map(|message| message.text.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "client-7 command: select-window -t 99",
+                "client-7 message: can't find window: 99",
+            ]
+        );
+    }
+
+    #[test]
+    fn detached_refresh_client_accepts_the_pin_grammar_then_errors_exactly() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        let error = shared
+            .execute(
+                ClientId(5),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "refresh",
+                    [
+                        "-cDlLRSU",
+                        "-A",
+                        "%0:on",
+                        "-B",
+                        "name:what:format",
+                        "-C",
+                        "80x24",
+                        "-F",
+                        "focused",
+                        "-f",
+                        "focused",
+                        "-r",
+                        "%0:report",
+                        "-t",
+                        "client",
+                        "+1",
+                    ],
+                ),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "no current client"
+        ));
+    }
+
+    #[test]
+    fn move_and_swap_window_publish_topology_snapshots() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("desktop".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "work", "-n", "main"]),
+            )
+            .unwrap();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-window", ["-d", "-n", "other"]),
+            )
+            .unwrap();
+        take_reliable_messages(&mailbox);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("move-window", ["-d", "-s", "work:other", "-t", "work:5"]),
+            )
+            .unwrap();
+        let moved = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Snapshot(snapshot),
+                    ..
+                }) => Some(snapshot),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let moved = moved.last().expect("move publishes a snapshot");
+        assert_eq!(
+            moved.sessions[0]
+                .windows
+                .iter()
+                .map(|window| (window.index, window.name.as_str()))
+                .collect::<Vec<_>>(),
+            [(0, "main"), (5, "other")]
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("swap-window", ["-s", "work:0", "-t", "work:5"]),
+            )
+            .unwrap();
+        let swapped = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Snapshot(snapshot),
+                    ..
+                }) => Some(snapshot),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let swapped = swapped.last().expect("swap publishes a snapshot");
+        assert_eq!(
+            swapped.sessions[0]
+                .windows
+                .iter()
+                .map(|window| (window.index, window.name.as_str()))
+                .collect::<Vec<_>>(),
+            [(0, "other"), (5, "main")]
+        );
+    }
+
+    #[test]
     fn command_error_that_mutates_mux_state_publishes_snapshot() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
@@ -18960,7 +21106,7 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(shared.inner.lock().visible_terminals[&client].is_empty());
 
         let (_, _, display) =
-            build_display_panes_state(&shared.inner.lock().engine.state, browser, 1_000)
+            build_display_panes_state(&shared.inner.lock().engine, browser, 1_000)
                 .expect("zoomed display panes");
         assert_eq!(display.indicators.len(), 1);
         assert_eq!(display.indicators[0].pane, browser);
@@ -19204,11 +21350,14 @@ bind - split-window -v -c "#{pane_current_path}"
             "primary"
         );
 
+        let expected_window_name = shared.inner.lock().engine.state.windows[&window]
+            .name
+            .clone();
         open_binding(&mut context, ",");
         {
             let inner = shared.inner.lock();
             let prompt = &inner.command_prompts[&client];
-            assert_eq!(prompt.input, "0");
+            assert_eq!(prompt.input, expected_window_name);
             assert_eq!(prompt.template.as_deref(), Some("rename-window -- '%%'"));
         }
         replace_and_submit(&mut context, "editor");
@@ -19817,9 +21966,9 @@ bind - split-window -v -c "#{pane_current_path}"
                     text_follows: false,
                 },
             )
-            .expect("unbound key after the prefix is discarded");
+            .expect("unbound key after the repeat window retries root");
         let messages = take_reliable_messages(&mailbox);
-        assert!(!messages.iter().any(browser_key));
+        assert!(messages.iter().any(browser_key));
         assert!(messages.iter().any(|message| prefix_armed(message, false)));
 
         shared
@@ -20654,16 +22803,86 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn killing_the_last_session_requests_shutdown_with_no_interactive_client() {
+    fn initialize_leaves_a_fresh_daemon_empty_alive_and_unarmed() {
         let shared = Arc::new(Shared::new(1));
         shared.initialize(false).expect("initialize daemon state");
+        let mut context = ExecutionContext::default();
+
+        let listing = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("list-sessions", [] as [&str; 0]),
+            )
+            .expect("list an empty daemon");
+        assert_eq!(listing.output, "");
+        assert_eq!(context, ExecutionContext::default());
+        assert!(shared.inner.lock().engine.state.sessions.is_empty());
+        assert!(!shared.exit_empty_armed.load(Ordering::Acquire));
         assert!(!shared.stopping.load(Ordering::Acquire));
+
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        shared.unregister(client);
+        assert!(!shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn first_command_session_uses_zero_ids_and_arms_last_session_shutdown() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        let mut context = ExecutionContext::default();
+
+        let created = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d"]),
+            )
+            .expect("create first command session");
+        assert_eq!(created.output, "");
+        assert_eq!(context.session, Some(SessionId(0)));
+        assert_eq!(context.window, Some(WindowId(0)));
+        assert_eq!(context.pane, Some(PaneId(0)));
+        assert!(shared.exit_empty_armed.load(Ordering::Acquire));
+        for (command, args, expected) in [
+            (
+                "list-sessions",
+                vec!["-F", "#{session_id}:#{session_name}"],
+                "$0:0",
+            ),
+            (
+                "list-windows",
+                vec!["-t", "0", "-F", "#{window_id}:#{window_index}"],
+                "@0:0",
+            ),
+            (
+                "list-panes",
+                vec!["-t", "0:0", "-F", "#{pane_id}:#{pane_index}"],
+                "%0:0",
+            ),
+        ] {
+            assert_eq!(
+                shared
+                    .execute(
+                        ClientId(u64::MAX),
+                        ClientKind::Command,
+                        &mut context,
+                        &CommandInvocation::new(command, args),
+                    )
+                    .expect("read first allocation")
+                    .output,
+                expected
+            );
+        }
 
         shared
             .execute(
                 ClientId(u64::MAX),
                 ClientKind::Command,
-                &mut ExecutionContext::default(),
+                &mut context,
                 &CommandInvocation::new("kill-session", ["-t", "0"]),
             )
             .expect("kill the last session");
@@ -20678,12 +22897,23 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.initialize(false).expect("initialize daemon state");
         let (client, _) =
             shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let mut context = ExecutionContext::default();
+        let (session, snapshot) = shared
+            .attach_target(client, ClientKind::Interactive, &mut context, "")
+            .expect("attach to the lazily created session");
+        assert_eq!(session, SessionId(0));
+        assert_eq!(context.session, Some(SessionId(0)));
+        assert_eq!(context.window, Some(WindowId(0)));
+        assert_eq!(context.pane, Some(PaneId(0)));
+        assert_eq!(snapshot.sessions[0].name, "0");
+        assert_eq!(snapshot.sessions[0].windows[0].id, WindowId(0));
+        assert_eq!(snapshot.sessions[0].windows[0].active_pane, PaneId(0));
 
         shared
             .execute(
                 ClientId(u64::MAX),
                 ClientKind::Command,
-                &mut ExecutionContext::default(),
+                &mut context,
                 &CommandInvocation::new("kill-session", ["-t", "0"]),
             )
             .expect("kill the last session");
@@ -20704,11 +22934,90 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.initialize(false).expect("initialize daemon state");
         let (client, _) =
             shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        shared
+            .attach_target(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                "",
+            )
+            .expect("attach to the lazily created session");
 
         shared.unregister(client);
 
         assert!(!shared.inner.lock().engine.state.sessions.is_empty());
         assert!(!shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn only_default_interactive_attach_materializes_an_empty_daemon() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        let (command, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        let mut command_context = ExecutionContext::default();
+        let command_error = shared
+            .attach_target(command, ClientKind::Command, &mut command_context, "")
+            .expect_err("a command attach must not create a session");
+        assert!(matches!(
+            command_error,
+            ServerError::SessionNotFound(target) if target == "current session"
+        ));
+        assert!(shared.inner.lock().engine.state.sessions.is_empty());
+
+        let (interactive, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let mut interactive_context = ExecutionContext::default();
+        let explicit_error = shared
+            .attach_target(
+                interactive,
+                ClientKind::Interactive,
+                &mut interactive_context,
+                "missing",
+            )
+            .expect_err("an explicit missing target must not create a session");
+        assert!(matches!(
+            explicit_error,
+            ServerError::SessionNotFound(target) if target == "missing"
+        ));
+        assert!(shared.inner.lock().engine.state.sessions.is_empty());
+    }
+
+    #[test]
+    fn concurrent_default_interactive_attaches_share_session_zero() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        let (first, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (second, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let handles = [first, second].map(|client| {
+            let shared = Arc::clone(&shared);
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                let mut context = ExecutionContext::default();
+                barrier.wait();
+                let attached = shared
+                    .attach_target(client, ClientKind::Interactive, &mut context, "")
+                    .expect("attach to the shared lazy session");
+                (attached.0, context)
+            })
+        });
+        barrier.wait();
+        for handle in handles {
+            let (session, context) = handle.join().expect("attach thread");
+            assert_eq!(session, SessionId(0));
+            assert_eq!(context.session, Some(SessionId(0)));
+            assert_eq!(context.window, Some(WindowId(0)));
+            assert_eq!(context.pane, Some(PaneId(0)));
+        }
+        let inner = shared.inner.lock();
+        assert_eq!(inner.engine.state.sessions.len(), 1);
+        assert_eq!(
+            inner.attached.get(&SessionId(0)),
+            Some(&BTreeSet::from([first, second]))
+        );
     }
 
     #[test]

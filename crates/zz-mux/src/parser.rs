@@ -460,6 +460,17 @@ mod tests {
     }
 
     #[test]
+    fn accepts_empty_blocks_and_final_escaped_separators() {
+        let parsed = parse_config("test.conf", r"bind x {}");
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.commands[0].args, ["x", "{}"]);
+
+        let parsed = parse_config("test.conf", r"bind y new-window \;");
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.commands[0].args, ["y", "new-window", ";"]);
+    }
+
+    #[test]
     fn command_blocks_nest_and_span_lines_and_comments() {
         let parsed = parse_config(
             "test.conf",

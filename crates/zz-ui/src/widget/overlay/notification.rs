@@ -52,7 +52,7 @@ pub struct Notification {
     title: Option<SharedString>,
     message: Option<SharedString>,
     content_builder: Option<ContentBuilder>,
-    autohide: bool,
+    autohide: Option<Duration>,
     closing: bool,
 }
 
@@ -66,7 +66,7 @@ impl Notification {
             title: None,
             message: None,
             content_builder: None,
-            autohide: true,
+            autohide: Some(AUTOHIDE_DELAY),
             closing: false,
         }
     }
@@ -116,7 +116,13 @@ impl Notification {
     /// after five seconds.
     #[must_use]
     pub fn autohide(mut self, autohide: bool) -> Self {
-        self.autohide = autohide;
+        self.autohide = autohide.then_some(AUTOHIDE_DELAY);
+        self
+    }
+
+    #[must_use]
+    pub fn autohide_after(mut self, delay: Duration) -> Self {
+        self.autohide = Some(delay);
         self
     }
 
@@ -317,9 +323,9 @@ impl NotificationList {
             _dismissed: dismissed,
         });
 
-        if autohide {
+        if let Some(delay) = autohide {
             cx.spawn_in(window, async move |_, cx| {
-                cx.background_executor().timer(AUTOHIDE_DELAY).await;
+                cx.background_executor().timer(delay).await;
                 let _ = view.update_in(cx, |note, window, cx| note.dismiss(window, cx));
             })
             .detach();

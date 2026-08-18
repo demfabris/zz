@@ -650,6 +650,7 @@ pub(crate) struct CommandOutputModel {
 pub(crate) struct ClientNotification {
     pub(crate) kind: ClientMessageKind,
     pub(crate) text: String,
+    pub(crate) duration_ms: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2252,6 +2253,7 @@ impl MuxClient {
         cx.emit(ClientNotification {
             kind,
             text: text.into(),
+            duration_ms: None,
         });
     }
 
@@ -3419,7 +3421,16 @@ impl MuxClient {
             CoreEvent::CommandResponse(response) => {
                 self.handle_command_response(host, response, cx);
             }
-            CoreEvent::ClientMessage { kind, text, .. } => Self::emit_notification(kind, text, cx),
+            CoreEvent::ClientMessage {
+                kind,
+                text,
+                duration_ms,
+                ..
+            } => cx.emit(ClientNotification {
+                kind,
+                text,
+                duration_ms,
+            }),
             CoreEvent::Clipboard { target, text, .. } => {
                 if !text.is_empty() {
                     let item = ClipboardItem::new_string(text);
@@ -3684,11 +3695,11 @@ impl MuxClient {
         match response {
             CommandResponse::Error {
                 request_id: 0,
-                error: ServerError::MissingTarget(_),
+                error: ServerError::MissingTarget(_) | ServerError::SessionNotFound(_),
             } if self.retry_default_after_missing_session() => {}
             CommandResponse::Error {
                 request_id: 0,
-                error: ServerError::MissingTarget(_),
+                error: ServerError::MissingTarget(_) | ServerError::SessionNotFound(_),
             } if self.core.attached_session().is_none()
                 && self.core.snapshot().sessions.is_empty() =>
             {
@@ -5079,7 +5090,7 @@ mod tests {
                     remote,
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id: 0,
-                        error: ServerError::MissingTarget("9".to_owned()),
+                        error: ServerError::SessionNotFound("9".to_owned()),
                     }),
                     cx,
                 );
@@ -5681,40 +5692,31 @@ mod tests {
             (mux, remote)
         });
 
+        wait_for_mux(cx, &mux, "process-backed remote connection", |mux| {
+            mux.connections.get(&remote).is_some_and(|connection| {
+                connection.state == HostState::Connected && connection.snapshot.is_some()
+            })
+        });
+        cx.update(|cx| {
+            mux.update(cx, |mux, cx| {
+                assert!(mux.attach_to_host_default(remote, cx));
+            });
+        });
         wait_for_mux(
             cx,
             &mux,
-            "process-backed remote connection and snapshot",
+            "lazily created process-backed remote session",
             |mux| {
-                mux.connections.get(&remote).is_some_and(|connection| {
-                    connection.state == HostState::Connected
-                        && connection
-                            .snapshot
-                            .as_ref()
-                            .is_some_and(|snapshot| !snapshot.sessions.is_empty())
-                })
+                mux.attached_host == remote
+                    && mux.core.attached_session().is_some()
+                    && !mux.core.snapshot().sessions.is_empty()
+                    && !mux.viewports.is_empty()
             },
         );
         let (session, session_name) = cx.update(|cx| {
             let mux = mux.read(cx);
-            let session = mux.connections[&remote]
-                .snapshot
-                .as_ref()
-                .unwrap()
-                .sessions
-                .first()
-                .unwrap();
+            let session = mux.core.snapshot().sessions.first().unwrap();
             (session.id, session.name.clone())
-        });
-        cx.update(|cx| {
-            mux.update(cx, |mux, cx| {
-                assert!(mux.attach_to_host(remote, session, cx));
-            });
-        });
-        wait_for_mux(cx, &mux, "first process-backed remote frame", |mux| {
-            mux.attached_host == remote
-                && mux.core.attached_session() == Some(session)
-                && !mux.viewports.is_empty()
         });
         let pane = cx.update(|cx| {
             let mux = mux.read(cx);
@@ -5812,33 +5814,23 @@ mod tests {
             "remote connection and connect-time snapshot",
             |mux| {
                 let connection = mux.connections.get(&remote).unwrap();
-                connection.state == HostState::Connected
-                    && connection
-                        .snapshot
-                        .as_ref()
-                        .is_some_and(|snapshot| !snapshot.sessions.is_empty())
+                connection.state == HostState::Connected && connection.snapshot.is_some()
             },
         );
 
-        let remote_session = cx.update(|cx| {
-            let mux = mux.read(cx);
-            mux.connections[&remote]
-                .snapshot
-                .as_ref()
-                .expect("connect-time remote snapshot")
-                .sessions
-                .first()
-                .expect("remote default session")
-                .id
-        });
-
         cx.update(|cx| {
             mux.update(cx, |mux, cx| {
-                mux.attach_to_host(remote, remote_session, cx);
+                assert!(mux.attach_to_host_default(remote, cx));
             });
         });
         wait_for_mux(cx, &mux, "remote Attached response", |mux| {
-            mux.attached_host == remote && mux.core.attached_session() == Some(remote_session)
+            mux.attached_host == remote && mux.core.attached_session().is_some()
+        });
+        let remote_session = cx.update(|cx| {
+            let mux = mux.read(cx);
+            mux.core
+                .attached_session()
+                .expect("lazily created remote session")
         });
         cx.update(|cx| {
             let mux = mux.read(cx);
@@ -7091,7 +7083,7 @@ mod tests {
                     HostId::LOCAL,
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id: 0,
-                        error: ServerError::MissingTarget(String::new()),
+                        error: ServerError::SessionNotFound(String::new()),
                     }),
                     cx,
                 );
@@ -7263,7 +7255,7 @@ mod tests {
                     HostId::LOCAL,
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id,
-                        error: ServerError::MissingTarget("%2".to_owned()),
+                        error: ServerError::PaneNotFound("%2".to_owned()),
                     }),
                     cx,
                 );
@@ -7278,7 +7270,7 @@ mod tests {
             &*notifications.borrow(),
             &[(
                 ClientMessageKind::Error,
-                "swap-pane: target not found: %2".to_owned(),
+                "swap-pane: can't find pane: %2".to_owned(),
             )]
         );
     }
@@ -7376,7 +7368,7 @@ mod tests {
                     remote,
                     ProtocolMessage::CommandResponse(zz_protocol::CommandResponse::Error {
                         request_id,
-                        error: ServerError::MissingTarget("9".to_owned()),
+                        error: ServerError::SessionNotFound("9".to_owned()),
                     }),
                     cx,
                 );
@@ -7391,7 +7383,7 @@ mod tests {
             &*notifications.borrow(),
             &[(
                 ClientMessageKind::Error,
-                "kill-session: target not found: 9".to_owned(),
+                "kill-session: can't find session: 9".to_owned(),
             )]
         );
     }
@@ -7411,6 +7403,8 @@ mod tests {
             },
             synchronized_input: false,
             bell: false,
+            dead: false,
+            dead_status: None,
         }
     }
 
@@ -7424,6 +7418,7 @@ mod tests {
             id: WindowId(id),
             index: u32::try_from(id).expect("small fixture window id"),
             name: format!("window-{id}"),
+            automatic_rename: true,
             active_pane: panes.keys().next().copied().expect("fixture pane"),
             zoomed_pane: None,
             layout,

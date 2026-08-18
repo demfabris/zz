@@ -1,0 +1,17 @@
+# Session and window target grammar.
+has-session -t ''
+new-window -d -t 'w*' -n wildcard
+new-session -d -s zedbox
+new-window -d -t zed -n prefix-session
+new-window -d -t '=w:' -n exact
+new-window -d -t w -n tail
+select-window -t w:wild
+select-window -t 'w:{end}'
+select-window -t 'w:{start}'
+select-window -t 'w:{last}'
+select-window -t w:^
+select-window -t 'w:!'
+select-window -t w:-
+select-window -t w:+
+select-window -t 'w:tail*'
+select-window -t w:=wildcard

@@ -35,7 +35,9 @@ opt-in `quit-daemon-on-exit` key makes app quit send `kill-server` regardless. S
 
 A GUI process auto-starts a daemon if none is running, then attaches as a client. On Unix the
 spawned daemon gets its own process group (`process_group(0)`), so Ctrl+C or a closing tty
-in the launching terminal never signals the daemon and its sessions. Neither client kind is capped:
+in the launching terminal never signals the daemon and its sessions. The daemon initially has no
+session unless config created one; the GUI's actual empty-target Interactive attach lazily creates
+numeric session `0`. Registration and background fleet connections do not. Neither client kind is capped:
 `ServerState.attached` maps each session to a `BTreeSet<ClientId>`, so a desktop and a laptop watch
 one session together while command-only clients come and go. The rule runs one way only: a client
 attaches to at most one session, and attaching to a second detaches it from the first. See
@@ -60,7 +62,8 @@ speaks the identical envelope over it. Auth, encryption, and host identity are s
 A dead forward starts a roaming loop. The client moves that host to
 `HostState::Reconnecting { attempt }`, leaves the last snapshot and frames on screen, and redials on
 a 1/2/4/8/16/30-second backoff; a successful dial re-attaches the same session, or the default
-session when the daemon no longer has it. The attached host retries until it comes back, while
+session when one exists. An empty replacement daemon lazily creates the next numeric session on
+that fallback attach. The attached host retries until it comes back, while
 background fleet hosts give up after three attempts and keep their typed error state.
 
 `kill-server` never starts a missing daemon, and when an older daemon cannot complete the current

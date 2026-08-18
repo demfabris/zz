@@ -45,8 +45,10 @@ serde_json = { workspace = true, optional = true }
 smol = { workspace = true, optional = true }
 crossbeam-channel = { workspace = true, optional = true }
 interprocess.workspace = true
+libc.workspace = true
 log.workspace = true
 parking_lot.workspace = true
+regex.workspace = true
 smallvec = { workspace = true, optional = true }
 sysinfo.workspace = true
 tempfile.workspace = true

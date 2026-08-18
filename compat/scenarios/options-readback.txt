@@ -1,0 +1,15 @@
+set-option -g base-index 1
+set-option -g @phase4d alpha
+set-option -g @quoted 'one two'
+set-option @phase4d local
+set-environment -g PHASE4D_GLOBAL global
+set-environment PHASE4D_LOCAL local
+out: show-options -g base-index
+out: show-options -g @quoted
+out: show-options -gv @phase4d
+out: show-options -v @phase4d
+out: show-environment -gs PHASE4D_GLOBAL
+out: show-environment -s PHASE4D_LOCAL
+out: show-options -g status-left
+out: show-options -g status-right
+show-options -g status-format[0]

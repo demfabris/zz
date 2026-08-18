@@ -619,6 +619,13 @@ impl AppView {
                     ClientMessageKind::Warning => Notification::warning(event.text.clone()),
                     ClientMessageKind::Error => Notification::error(event.text.clone()),
                 };
+                let notification = match event.duration_ms {
+                    Some(0) => notification.autohide(false),
+                    Some(duration_ms) => {
+                        notification.autohide_after(Duration::from_millis(u64::from(duration_ms)))
+                    }
+                    None => notification,
+                };
                 window.push_notification(notification, cx);
             },
         )
@@ -1912,10 +1919,8 @@ impl AppView {
                 let gap_background = crate::theme::chrome_background(cx);
                 let active = *pane == window.active_pane;
                 let inactive = !active;
-                let synchronized = window
-                    .panes
-                    .get(pane)
-                    .is_some_and(|pane| pane.synchronized_input);
+                let pane_snapshot = window.panes.get(pane);
+                let synchronized = pane_snapshot.is_some_and(|pane| pane.synchronized_input);
                 let pane_content = if let Some((_, output)) = self
                     .command_output
                     .as_ref()
@@ -1975,6 +1980,12 @@ impl AppView {
                     PaneContent::element,
                 );
                 let mut status_tags: Vec<AnyElement> = Vec::new();
+                if let Some(dead) = pane_snapshot.filter(|pane| pane.dead) {
+                    let label = dead
+                        .dead_status
+                        .map_or_else(|| "dead".to_owned(), |status| format!("dead ({status})"));
+                    status_tags.push(pane_waiting_state(label).into_any_element());
+                }
                 if waiting {
                     status_tags
                         .push(pane_waiting_state(format!("waiting for {pane}")).into_any_element());
@@ -2749,6 +2760,7 @@ mod tests {
             id,
             index: u32::try_from(id.0).expect("fixture index"),
             name: id.to_string(),
+            automatic_rename: true,
             active_pane: pane,
             zoomed_pane: None,
             layout: LayoutNode::Pane(pane),
@@ -3128,6 +3140,7 @@ mod tests {
             id: WindowId(0),
             index: 0,
             name: "zz".to_owned(),
+            automatic_rename: true,
             active_pane: terminal,
             zoomed_pane: None,
             layout: LayoutNode::Pane(terminal),
@@ -3139,6 +3152,8 @@ mod tests {
                     kind: PaneKindSnapshot::Terminal,
                     synchronized_input: false,
                     bell: false,
+                    dead: false,
+                    dead_status: None,
                 },
             )]
             .into_iter()
@@ -3171,11 +3186,14 @@ mod tests {
             kind,
             synchronized_input: false,
             bell: false,
+            dead: false,
+            dead_status: None,
         };
         let window = WindowSnapshot {
             id: WindowId(0),
             index: 0,
             name: "zz".to_owned(),
+            automatic_rename: true,
             active_pane: active,
             zoomed_pane: None,
             layout: LayoutNode::Split {
@@ -3769,6 +3787,7 @@ mod tests {
             id: WindowId(5),
             index: 0,
             name: "work".to_owned(),
+            automatic_rename: true,
             active_pane: PaneId(3),
             zoomed_pane: None,
             layout: three_pane_layout(),

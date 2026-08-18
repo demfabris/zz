@@ -254,7 +254,8 @@ near-zero new code and produces the baseline measurements that justify (or kill)
   strict guards, no client-side VT for v1; the shadow remains the upgrade path.
 - ~~Per-client window sizing for M6: per-client layouts, or tmux-style smallest-client-wins?~~
   Answered 2026-07-31: the latest terminal-input-active viewer owns the whole geometry; ties use
-  the lowest `ClientId` . see
+  the lowest `ClientId` by default. The later `aggressive-resize` option explicitly switches each
+  window to componentwise smallest rows and columns among its current viewers. See
   [multi-device attach](/designs/multi-device-attach.md).
 - ~~Scrollback sync depth: how much history syncs eagerly vs pages in on demand?~~ Answered
   2026-07-30: ~2 k-line eager trickle (config knob) plus on-demand paging with prefetch (M2.5).

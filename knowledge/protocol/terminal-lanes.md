@@ -200,8 +200,9 @@ malformed text is still rejected without scanning valid metadata twice per frame
 `validate_viewport` / `validate_patch` further check: cell count matches `columns × rows`; every cell's
 `style_id` and grapheme index resolve; grapheme offsets are monotonic and UTF-8-valid; overlays and the
 cursor stay inside the grid; scrollbar ranges are consistent; hovered URIs contain no control or
-whitespace characters; the working directory (an OSC 7 URI, empty when the shell never reported one)
-contains no control characters. Failures surface as `ProtocolError::InvalidTerminal(..)`.
+whitespace characters; the working directory (a decoded path reported through OSC 7, OSC 9, or OSC
+1337, empty when the shell never reported one) contains no control characters. Failures surface as
+`ProtocolError::InvalidTerminal(..)`.
 
 # Delivery
 

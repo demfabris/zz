@@ -89,6 +89,12 @@ an owner without a report falls through to the next-ranked viewer that has one. 
 and visibility changes recompute the owner, while terminal input recomputes only the panes whose
 owner changed. Columns, rows, and both cell-pixel dimensions always come from that one owner.
 
+That is the default policy. The inherited window option `aggressive-resize` adds an explicit
+exception: when ON, columns and rows are the componentwise minima across clients actually viewing
+that window, while cell-pixel dimensions still come from the newest-input eligible viewer. The
+result flows through the same guarded window-extent write-back. A single viewer behaves exactly like
+the default path.
+
 "Terminal input" means the user reached for *that* terminal: keys, text, paste, non-motion mouse,
 scrolling, selection, search, copy mode. It deliberately excludes focus. Pane focus is shared mux
 state (see the scope table), so one client's focus change is echoed to every other client through

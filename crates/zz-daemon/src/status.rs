@@ -5,14 +5,17 @@ use std::{
     fmt::Write as _,
     io::Read as _,
     process::{Child, Stdio},
-    sync::OnceLock,
+    sync::{Arc, OnceLock},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use chrono::Local;
+use glob::{MatchOptions, Pattern};
+use regex::RegexBuilder;
 use zz_mux::{MuxEngine, StatusContext, StatusFormats, StatusHooks, expand_status};
-use zz_protocol::{Axis, ClientId, MuxSnapshot, SessionId, StatusLine, WindowId};
+use zz_protocol::{ClientId, MuxSnapshot, PaneId, SessionId, StatusLine, WindowId};
+use zz_terminal::{CellWidth, TerminalSession, TerminalViewport};
 
 use crate::shell_process;
 
@@ -30,6 +33,43 @@ pub(crate) struct StatusRequest {
     pub(crate) client: ClientId,
     pub(crate) formats: StatusFormats,
     pub(crate) context: StatusContext,
+    pub(crate) facts: FormatHookFacts,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct FormatHookFacts {
+    pub(crate) terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
+    pub(crate) buffer: Option<BufferFormatFacts>,
+    pub(crate) client: Option<ClientFormatFacts>,
+    pub(crate) message: Option<MessageFormatFacts>,
+}
+
+#[derive(Clone)]
+pub(crate) struct BufferFormatFacts {
+    pub(crate) name: String,
+    pub(crate) data: Arc<[u8]>,
+    pub(crate) created: SystemTime,
+}
+
+#[derive(Clone)]
+pub(crate) struct ClientFormatFacts {
+    pub(crate) name: String,
+    pub(crate) session: String,
+    pub(crate) width: u16,
+    pub(crate) height: u16,
+    pub(crate) termname: String,
+    pub(crate) uid: String,
+    pub(crate) user: String,
+    pub(crate) flags: String,
+    pub(crate) theme: String,
+    pub(crate) line: usize,
+}
+
+#[derive(Clone)]
+pub(crate) struct MessageFormatFacts {
+    pub(crate) number: u64,
+    pub(crate) text: String,
+    pub(crate) time: SystemTime,
 }
 
 impl StatusRenderer {
@@ -73,12 +113,12 @@ pub(crate) fn status_context(
     attached: Option<SessionId>,
     focused_window: Option<WindowId>,
 ) -> StatusContext {
-    let (host, host_short) = host_names();
-    let mut context = StatusContext {
-        host: host.clone(),
-        host_short: host_short.clone(),
-        ..StatusContext::default()
-    };
+    let mut context = engine.format_status_context(attached, focused_window, None);
+    if context.host.is_empty() {
+        let (host, host_short) = host_names();
+        context.host.clone_from(host);
+        context.host_short.clone_from(host_short);
+    }
     let Some(session) = snapshot
         .sessions
         .iter()
@@ -86,60 +126,39 @@ pub(crate) fn status_context(
     else {
         return context;
     };
-    context.session_name.clone_from(&session.name);
-    context.session_windows = session.windows.len();
-
     let focused_window = focused_window
         .filter(|focused| session.windows.iter().any(|window| window.id == *focused))
         .unwrap_or(session.active_window);
-    let Some(window) = session
-        .windows
-        .iter()
-        .find(|window| window.id == focused_window)
-    else {
-        return context;
-    };
-    context.window_index = window.index;
-    context.window_name.clone_from(&window.name);
-    context.window_panes = window.panes.len();
-    context.window_width = engine.window_extent(window.id, Axis::Horizontal);
-    context.window_height = engine.window_extent(window.id, Axis::Vertical);
-    context.window_layout = engine
-        .state
-        .windows
-        .get(&window.id)
-        .map(|window| window.layout.dump())
-        .unwrap_or_default();
-    context.window_active = Some(true);
-    context.window_zoomed = window.zoomed_pane.is_some();
-    context.window_bell = window.panes.values().any(|pane| pane.bell);
-
-    context.pane_index = engine
-        .state
-        .windows
-        .get(&window.id)
-        .and_then(|window| {
-            window
-                .pane_order()
-                .iter()
-                .position(|pane| *pane == window.active_pane)
-        })
-        .and_then(|index| u32::try_from(index).ok())
-        .unwrap_or_default();
-    if let Some(pane) = window.panes.get(&window.active_pane) {
-        context.pane_id = pane.id.to_string();
-        context.pane_title.clone_from(&pane.title);
-        if let Some((columns, rows)) = engine.pane_geometry(pane.id) {
-            context.pane_width = Some(columns);
-            context.pane_height = Some(rows);
-        }
-        context.pane_active = Some(true);
-        context.pane_synchronized = pane.synchronized_input;
+    if context.window_active.is_some() {
+        context.window_active = Some(true);
     }
+    if context.pane_active.is_some() {
+        context.pane_active = Some(true);
+    }
+    context.session_active = Some(true);
+    context.session_attached = session.viewers.len();
+    context.session_many_attached = session.viewers.len() > 1;
+    context.session_attached_list = session
+        .viewers
+        .iter()
+        .map(|viewer| viewer.name.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    let active_viewers = session
+        .viewers
+        .iter()
+        .filter(|viewer| viewer.window == focused_window)
+        .collect::<Vec<_>>();
+    context.window_active_clients = active_viewers.len();
+    context.window_active_clients_list = active_viewers
+        .iter()
+        .map(|viewer| viewer.name.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
     context
 }
 
-fn host_names() -> &'static (String, String) {
+pub(crate) fn host_names() -> &'static (String, String) {
     static HOST: OnceLock<(String, String)> = OnceLock::new();
     HOST.get_or_init(|| {
         let host = sysinfo::System::host_name()
@@ -166,26 +185,81 @@ fn render(
         return StatusLine::default();
     }
     let now = Local::now();
-    let mut hooks = DaemonHooks {
-        cache,
-        touched,
-        refresh,
-        now,
-    };
+    let mut hooks = DaemonFormatHooks::status(&request.facts, cache, touched, refresh, now);
     StatusLine {
         left: expand_status(&request.formats.left, &request.context, &mut hooks),
         right: expand_status(&request.formats.right, &request.context, &mut hooks),
     }
 }
 
-struct DaemonHooks<'a> {
-    cache: &'a mut BTreeMap<String, String>,
-    touched: &'a mut BTreeSet<String>,
+pub(crate) struct DaemonFormatHooks<'a> {
+    facts: &'a FormatHookFacts,
+    cache: Option<&'a mut BTreeMap<String, String>>,
+    touched: Option<&'a mut BTreeSet<String>>,
     refresh: bool,
     now: chrono::DateTime<Local>,
 }
 
-impl StatusHooks for DaemonHooks<'_> {
+impl<'a> DaemonFormatHooks<'a> {
+    pub(crate) fn command(facts: &'a FormatHookFacts) -> Self {
+        Self {
+            facts,
+            cache: None,
+            touched: None,
+            refresh: false,
+            now: Local::now(),
+        }
+    }
+
+    fn status(
+        facts: &'a FormatHookFacts,
+        cache: &'a mut BTreeMap<String, String>,
+        touched: &'a mut BTreeSet<String>,
+        refresh: bool,
+        now: chrono::DateTime<Local>,
+    ) -> Self {
+        Self {
+            facts,
+            cache: Some(cache),
+            touched: Some(touched),
+            refresh,
+            now,
+        }
+    }
+}
+
+impl StatusHooks for DaemonFormatHooks<'_> {
+    /// Byte parity with the pin requires the PLATFORM's strftime: tmux's
+    /// `format_strftime` is plain libc strftime, and libcs disagree about
+    /// unknown `%` sequences (glibc passes them through, BSD eats them), so a
+    /// reimplementation cannot match both. Zero return maps to empty output,
+    /// mirroring format.c's too-long/empty handling. This is the workspace's
+    /// only unsafe block; it exists because matching the platform means
+    /// calling the platform.
+    #[cfg(unix)]
+    #[allow(unsafe_code)]
+    fn strftime(&mut self, literal: &str) -> String {
+        let Ok(format) = std::ffi::CString::new(literal) else {
+            return literal.to_owned();
+        };
+        let time: libc::time_t = TryInto::try_into(self.now.timestamp()).unwrap_or(0);
+        let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
+        if unsafe { libc::localtime_r(&raw const time, &raw mut tm) }.is_null() {
+            return literal.to_owned();
+        }
+        let mut buffer = [0u8; 8192];
+        let written = unsafe {
+            libc::strftime(
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                format.as_ptr(),
+                &raw const tm,
+            )
+        };
+        String::from_utf8_lossy(&buffer[..written]).into_owned()
+    }
+
+    #[cfg(not(unix))]
     fn strftime(&mut self, literal: &str) -> String {
         let Ok(items) = chrono::format::StrftimeItems::new(literal).parse() else {
             return literal.to_owned();
@@ -204,16 +278,195 @@ impl StatusHooks for DaemonHooks<'_> {
     }
 
     fn shell(&mut self, command: &str) -> String {
-        self.touched.insert(command.to_owned());
+        let (Some(cache), Some(touched)) = (self.cache.as_deref_mut(), self.touched.as_deref_mut())
+        else {
+            return String::new();
+        };
+        touched.insert(command.to_owned());
         if !self.refresh
-            && let Some(cached) = self.cache.get(command)
+            && let Some(cached) = cache.get(command)
         {
             return cached.clone();
         }
         let output = run_shell(command);
-        self.cache.insert(command.to_owned(), output.clone());
+        cache.insert(command.to_owned(), output.clone());
         output
     }
+
+    fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+        match name {
+            "buffer_created" => Some(
+                self.facts
+                    .buffer
+                    .as_ref()?
+                    .created
+                    .duration_since(UNIX_EPOCH)
+                    .ok()?
+                    .as_secs()
+                    .to_string(),
+            ),
+            "buffer_full" => Some(buffer_full(&self.facts.buffer.as_ref()?.data)),
+            "buffer_name" => Some(self.facts.buffer.as_ref()?.name.clone()),
+            "buffer_sample" => Some(buffer_sample(&self.facts.buffer.as_ref()?.data)),
+            "buffer_size" => Some(self.facts.buffer.as_ref()?.data.len().to_string()),
+            "client_flags" => Some(self.facts.client.as_ref()?.flags.clone()),
+            "client_height" => Some(self.facts.client.as_ref()?.height.to_string()),
+            "client_name" => Some(self.facts.client.as_ref()?.name.clone()),
+            "client_session" => Some(self.facts.client.as_ref()?.session.clone()),
+            "client_termname" => Some(self.facts.client.as_ref()?.termname.clone()),
+            "client_theme" => Some(self.facts.client.as_ref()?.theme.clone()),
+            "client_uid" => Some(self.facts.client.as_ref()?.uid.clone()),
+            "client_user" => Some(self.facts.client.as_ref()?.user.clone()),
+            "client_width" => Some(self.facts.client.as_ref()?.width.to_string()),
+            "line" => Some(self.facts.client.as_ref()?.line.to_string()),
+            "message_number" => Some(self.facts.message.as_ref()?.number.to_string()),
+            "message_text" => Some(self.facts.message.as_ref()?.text.clone()),
+            "message_time" => Some(
+                self.facts
+                    .message
+                    .as_ref()?
+                    .time
+                    .duration_since(UNIX_EPOCH)
+                    .ok()?
+                    .as_secs()
+                    .to_string(),
+            ),
+            _ => None,
+        }
+    }
+
+    fn pane_search(
+        &mut self,
+        pane: Option<PaneId>,
+        pattern: &str,
+        regex: bool,
+        ignore_case: bool,
+    ) -> usize {
+        let Some(viewport) = pane
+            .and_then(|pane| self.facts.terminals.get(&pane))
+            .map(|terminal| terminal.latest_viewport())
+        else {
+            return 0;
+        };
+        search_viewport(&viewport, pattern, regex, ignore_case)
+    }
+}
+
+fn buffer_full(data: &[u8]) -> String {
+    String::from_utf8_lossy(data).into_owned()
+}
+
+fn buffer_sample(data: &[u8]) -> String {
+    let prefix = &data[..data.len().min(200)];
+    let mut output = String::new();
+    let mut index = 0;
+    while index < prefix.len() {
+        let byte = prefix[index];
+        match byte {
+            b'\n' => output.push_str("\\n"),
+            b'\r' => output.push_str("\\r"),
+            b'\t' => output.push_str("\\t"),
+            b'\x08' => output.push_str("\\b"),
+            b'\x07' => output.push_str("\\a"),
+            b'\x0b' => output.push_str("\\v"),
+            b'\x0c' => output.push_str("\\f"),
+            b'\\' => output.push_str("\\\\"),
+            0 if prefix
+                .get(index + 1)
+                .is_some_and(|next| matches!(*next, b'0'..=b'7')) =>
+            {
+                output.push_str("\\000");
+            }
+            0 => output.push_str("\\0"),
+            0x20..=0x7e => output.push(char::from(byte)),
+            0x80..=0xff => {
+                let valid = match std::str::from_utf8(&prefix[index..]) {
+                    Ok(value) => value,
+                    Err(error) if error.valid_up_to() > 0 => {
+                        std::str::from_utf8(&prefix[index..index + error.valid_up_to()])
+                            .expect("UTF-8 validator identified a valid prefix")
+                    }
+                    Err(_) => {
+                        let _ = write!(&mut output, "\\{byte:03o}");
+                        index += 1;
+                        continue;
+                    }
+                };
+                let character = valid.chars().next().expect("valid UTF-8 is nonempty");
+                output.push(character);
+                index += character.len_utf8();
+                continue;
+            }
+            _ => {
+                let _ = write!(&mut output, "\\{byte:03o}");
+            }
+        }
+        index += 1;
+    }
+    let shortened = data.len() > 200 || output.len() > 200;
+    if output.len() > 200 {
+        let boundary = (0..=200)
+            .rev()
+            .find(|index| output.is_char_boundary(*index))
+            .unwrap_or_default();
+        output.truncate(boundary);
+    }
+    if shortened {
+        output.push_str("...");
+    }
+    output
+}
+
+fn search_viewport(
+    viewport: &TerminalViewport,
+    pattern: &str,
+    regex: bool,
+    ignore_case: bool,
+) -> usize {
+    let regex = regex.then(|| {
+        RegexBuilder::new(pattern)
+            .case_insensitive(ignore_case)
+            .build()
+            .ok()
+    });
+    if matches!(regex, Some(None)) {
+        return 0;
+    }
+    let glob = regex
+        .is_none()
+        .then(|| Pattern::new(&format!("*{pattern}*")).ok());
+    for row in 0..viewport.rows {
+        let mut text = String::with_capacity(usize::from(viewport.columns));
+        for cell in viewport.row(row).unwrap_or_default() {
+            if matches!(cell.width(), CellWidth::SpacerHead | CellWidth::SpacerTail) {
+                continue;
+            }
+            if cell.glyph() == 0 {
+                text.push(' ');
+            } else {
+                viewport.push_glyph(*cell, &mut text);
+            }
+        }
+        let text = text.trim_end_matches(|character: char| character.is_ascii_whitespace());
+        let matched = if let Some(Some(regex)) = &regex {
+            regex.is_match(text)
+        } else if let Some(Some(glob)) = &glob {
+            glob.matches_with(
+                text,
+                MatchOptions {
+                    case_sensitive: !ignore_case,
+                    require_literal_separator: false,
+                    require_literal_leading_dot: false,
+                },
+            )
+        } else {
+            false
+        };
+        if matched {
+            return usize::from(row) + 1;
+        }
+    }
+    0
 }
 
 fn run_shell(command: &str) -> String {
@@ -295,13 +548,16 @@ fn first_line(output: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zz_mux::{PaneKind, SplitSize};
+    use zz_mux::{PaneKind, SplitSize, expand_format_values};
+    use zz_protocol::Axis;
+    use zz_terminal::{SessionStatus, TerminalViewId};
 
     fn request(client: u64, left: &str, right: &str) -> StatusRequest {
         StatusRequest {
             client: ClientId(client),
             formats: StatusFormats {
                 enabled: true,
+                lines: 1,
                 interval: Duration::from_secs(15),
                 left: left.to_owned(),
                 right: right.to_owned(),
@@ -310,6 +566,7 @@ mod tests {
                 session_name: "work".to_owned(),
                 ..StatusContext::default()
             },
+            facts: FormatHookFacts::default(),
         }
     }
 
@@ -344,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    fn status_pane_index_uses_pane_order_when_layout_order_differs() {
+    fn status_pane_index_uses_effective_pane_base_and_pane_order() {
         let mut engine = MuxEngine::default();
         let (session, window, target) = engine.state.create_session("work").unwrap();
         let source = engine
@@ -363,6 +620,15 @@ mod tests {
                 false,
             )
             .unwrap();
+        engine
+            .execute(
+                &mut zz_mux::ExecutionContext::default(),
+                &zz_protocol::CommandInvocation::new(
+                    "set-window-option",
+                    ["-g", "pane-base-index", "1"],
+                ),
+            )
+            .unwrap();
         let snapshot = engine.state.snapshot();
         let mut layout_order = Vec::new();
         snapshot.sessions[0].windows[0]
@@ -372,10 +638,58 @@ mod tests {
         assert_eq!(layout_order, [source, target]);
         assert_eq!(engine.state.windows[&window].pane_order(), [target, source]);
         let context = status_context(&snapshot, &engine, Some(session), Some(window));
-        assert_eq!(context.pane_index, 1);
+        assert_eq!(context.pane_index, 2);
         assert_eq!(
             context.window_layout,
             engine.state.windows[&window].layout.dump()
+        );
+    }
+
+    #[test]
+    fn content_search_reads_visible_terminal_rows() {
+        let pane = PaneId(9);
+        let terminal = Arc::new(TerminalSession::spawn_output_view(
+            "search".to_owned(),
+            "alpha\nbravo\ncharlie".to_owned(),
+        ));
+        terminal.attach_view(TerminalViewId(1));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !matches!(terminal.latest_viewport().status, SessionStatus::Running) {
+            assert!(
+                Instant::now() < deadline,
+                "output view did not become ready"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        let facts = FormatHookFacts {
+            terminals: Arc::new(BTreeMap::from([(pane, terminal)])),
+            buffer: None,
+            ..FormatHookFacts::default()
+        };
+        let context = StatusContext {
+            pane_id: pane.to_string(),
+            ..StatusContext::default()
+        };
+        let mut hooks = DaemonFormatHooks::command(&facts);
+        assert_eq!(
+            expand_format_values(
+                "#{C:bravo}|#{C/i:BRAVO}|#{C/r:^charlie$}|#{C:missing}",
+                &context,
+                &mut hooks,
+            ),
+            "2|2|3|0"
+        );
+    }
+
+    #[test]
+    fn buffer_samples_preserve_utf8_and_escape_control_and_invalid_bytes() {
+        assert_eq!(buffer_sample("α\n\t\\".as_bytes()), "α\\n\\t\\\\");
+        assert_eq!(buffer_sample(&[0xff]), "\\377");
+        assert_eq!(buffer_sample(&[0, b'x', 0, b'7']), "\\0x\\0007");
+        assert_eq!(buffer_full(b"a\0b"), "a\0b");
+        assert_eq!(
+            buffer_sample(&vec![b'x'; 201]),
+            format!("{}...", "x".repeat(200))
         );
     }
 

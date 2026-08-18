@@ -2,6 +2,7 @@ use std::{
     collections::BTreeMap,
     fmt::{self, Write as _},
     ops::Deref,
+    time::{Duration, Instant},
 };
 
 use smallvec::SmallVec;
@@ -535,6 +536,8 @@ pub struct KeyEngine {
     table: Option<String>,
     pending: Option<Vec<CommandInvocation>>,
     repeat_count: Option<u16>,
+    repeat_deadline: Option<Instant>,
+    last_repeat_key: Option<String>,
 }
 
 impl KeyEngine {
@@ -589,7 +592,33 @@ impl KeyEngine {
     }
 
     pub fn handle(&mut self, tables: &KeyTables, key: &str) -> KeyDecision {
+        self.handle_with_repeat_time(tables, key, Instant::now(), Duration::from_millis(500))
+    }
+
+    pub fn handle_with_repeat_time(
+        &mut self,
+        tables: &KeyTables,
+        key: &str,
+        now: Instant,
+        repeat_time: Duration,
+    ) -> KeyDecision {
+        self.handle_with_repeat_times(tables, key, now, repeat_time, Duration::ZERO)
+    }
+
+    pub fn handle_with_repeat_times(
+        &mut self,
+        tables: &KeyTables,
+        key: &str,
+        now: Instant,
+        repeat_time: Duration,
+        initial_repeat_time: Duration,
+    ) -> KeyDecision {
         let key = canonical_key(key);
+        if self.repeat_deadline.is_some_and(|deadline| now >= deadline) {
+            self.table = None;
+            self.repeat_deadline = None;
+            self.last_repeat_key = None;
+        }
         if let Some(decision) = self.take_pending_jump_target(&key) {
             return decision;
         }
@@ -613,15 +642,38 @@ impl KeyEngine {
         }
         if self.table.is_none() && key == tables.prefix {
             self.table = Some("prefix".to_owned());
+            self.repeat_deadline = None;
+            self.last_repeat_key = None;
             return KeyDecision::Prefix;
         }
-        let table = self.table.as_deref().unwrap_or("root");
-        let binding = tables.get(table, &key).or_else(|| tables.get(table, "Any"));
+        let mut table = self.table.clone().unwrap_or_else(|| "root".to_owned());
+        let (mut binding, mut binding_key) = if let Some(binding) = tables.get(&table, &key) {
+            (Some(binding), key.clone())
+        } else {
+            (tables.get(&table, "Any"), "Any".to_owned())
+        };
+        if self.repeat_deadline.is_some() && binding.is_none_or(|binding| !binding.repeat) {
+            self.table = None;
+            self.repeat_deadline = None;
+            self.last_repeat_key = None;
+            if key == tables.prefix {
+                self.table = Some("prefix".to_owned());
+                return KeyDecision::Prefix;
+            }
+            "root".clone_into(&mut table);
+            if let Some(root_binding) = tables.get("root", &key) {
+                binding = Some(root_binding);
+                binding_key.clone_from(&key);
+            } else {
+                binding = tables.get("root", "Any");
+                "Any".clone_into(&mut binding_key);
+            }
+        }
         let Some(binding) = binding else {
             self.repeat_count = None;
             if table == "prefix" {
-                // tmux discards an unbound key after the prefix rather than typing it.
                 self.table = None;
+                self.last_repeat_key = None;
                 return KeyDecision::Ignore;
             }
             return if self.table.is_some() {
@@ -630,8 +682,25 @@ impl KeyEngine {
                 KeyDecision::Pass
             };
         };
-        if table == "prefix" && !binding.repeat {
+        if table == "prefix" && binding.repeat && !repeat_time.is_zero() {
+            let repeat_time = if self.repeat_deadline.is_none()
+                || self.last_repeat_key.as_deref() != Some(binding_key.as_str())
+            {
+                if initial_repeat_time.is_zero() {
+                    repeat_time
+                } else {
+                    initial_repeat_time
+                }
+            } else {
+                repeat_time
+            };
+            self.table = Some(table.clone());
+            self.repeat_deadline = Some(now + repeat_time);
+            self.last_repeat_key = Some(binding_key);
+        } else if table == "prefix" {
             self.table = None;
+            self.repeat_deadline = None;
+            self.last_repeat_key = None;
         }
         let commands = binding.commands.clone();
         self.decide(commands)
@@ -641,6 +710,8 @@ impl KeyEngine {
         self.table = table;
         self.pending = None;
         self.repeat_count = None;
+        self.repeat_deadline = None;
+        self.last_repeat_key = None;
     }
 }
 
@@ -1218,6 +1289,273 @@ mod tests {
     }
 
     #[test]
+    fn repeatable_bindings_refresh_expire_disable_and_retry_root() {
+        let mut tables = KeyTables::default();
+        tables.bind(
+            "root",
+            "c",
+            Binding {
+                commands: vec![CommandInvocation::new("display-message", ["root"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        let start = Instant::now();
+        let repeat_time = Duration::from_millis(100);
+        let mut engine = KeyEngine::default();
+
+        assert_eq!(
+            engine.handle_with_repeat_time(&tables, "C-b", start, repeat_time),
+            KeyDecision::Prefix
+        );
+        assert!(matches!(
+            engine.handle_with_repeat_time(&tables, "Left", start, repeat_time),
+            KeyDecision::Commands(_)
+        ));
+        assert!(matches!(
+            engine.handle_with_repeat_time(
+                &tables,
+                "Right",
+                start + Duration::from_millis(99),
+                repeat_time,
+            ),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(engine.active_table(), Some("prefix"));
+        assert_eq!(
+            engine.handle_with_repeat_time(
+                &tables,
+                "Right",
+                start + Duration::from_millis(200),
+                repeat_time,
+            ),
+            KeyDecision::Pass
+        );
+        assert_eq!(engine.active_table(), None);
+
+        assert_eq!(
+            engine.handle_with_repeat_time(&tables, "C-b", start, repeat_time),
+            KeyDecision::Prefix
+        );
+        assert!(matches!(
+            engine.handle_with_repeat_time(&tables, "Left", start, repeat_time),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(
+            engine.handle_with_repeat_time(&tables, "c", start, repeat_time),
+            KeyDecision::Commands(vec![CommandInvocation::new("display-message", ["root"])])
+        );
+        assert_eq!(engine.active_table(), None);
+
+        assert_eq!(
+            engine.handle_with_repeat_time(&tables, "C-b", start, Duration::ZERO),
+            KeyDecision::Prefix
+        );
+        assert!(matches!(
+            engine.handle_with_repeat_time(&tables, "Left", start, Duration::ZERO),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(engine.active_table(), None);
+        assert_eq!(
+            engine.handle_with_repeat_time(&tables, "Right", start, Duration::ZERO),
+            KeyDecision::Pass
+        );
+    }
+
+    #[test]
+    fn initial_repeat_time_applies_to_first_and_different_repeat_bindings() {
+        let tables = KeyTables::default();
+        let start = Instant::now();
+        let repeat_time = Duration::from_millis(100);
+        let initial_repeat_time = Duration::from_millis(300);
+        let mut engine = KeyEngine::default();
+
+        assert_eq!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "C-b",
+                start,
+                repeat_time,
+                initial_repeat_time,
+            ),
+            KeyDecision::Prefix
+        );
+        assert!(matches!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "Left",
+                start,
+                repeat_time,
+                initial_repeat_time,
+            ),
+            KeyDecision::Commands(_)
+        ));
+        assert!(matches!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "Left",
+                start + Duration::from_millis(299),
+                repeat_time,
+                initial_repeat_time,
+            ),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "Left",
+                start + Duration::from_millis(399),
+                repeat_time,
+                initial_repeat_time,
+            ),
+            KeyDecision::Pass
+        );
+
+        let start = start + Duration::from_secs(1);
+        assert_eq!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "C-b",
+                start,
+                repeat_time,
+                initial_repeat_time,
+            ),
+            KeyDecision::Prefix
+        );
+        assert!(matches!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "Left",
+                start,
+                repeat_time,
+                initial_repeat_time,
+            ),
+            KeyDecision::Commands(_)
+        ));
+        assert!(matches!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "Right",
+                start + Duration::from_millis(50),
+                repeat_time,
+                initial_repeat_time,
+            ),
+            KeyDecision::Commands(_)
+        ));
+        assert!(matches!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "Right",
+                start + Duration::from_millis(349),
+                repeat_time,
+                initial_repeat_time,
+            ),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "Right",
+                start + Duration::from_millis(449),
+                repeat_time,
+                initial_repeat_time,
+            ),
+            KeyDecision::Pass
+        );
+
+        let start = start + Duration::from_secs(1);
+        assert_eq!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "C-b",
+                start,
+                Duration::ZERO,
+                initial_repeat_time,
+            ),
+            KeyDecision::Prefix
+        );
+        assert!(matches!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "Left",
+                start,
+                Duration::ZERO,
+                initial_repeat_time,
+            ),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "Left",
+                start + Duration::from_millis(1),
+                Duration::ZERO,
+                initial_repeat_time,
+            ),
+            KeyDecision::Pass
+        );
+    }
+
+    #[test]
+    fn repeat_any_uses_the_resolved_binding_identity() {
+        let mut tables = KeyTables::default();
+        tables.bind(
+            "prefix",
+            "Any",
+            Binding {
+                commands: vec![CommandInvocation::new("display-message", ["any"])],
+                repeat: true,
+                note: None,
+            },
+        );
+        let start = Instant::now();
+        let repeat_time = Duration::from_millis(100);
+        let initial_repeat_time = Duration::from_millis(300);
+        let mut engine = KeyEngine::default();
+
+        assert_eq!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "C-b",
+                start,
+                repeat_time,
+                initial_repeat_time,
+            ),
+            KeyDecision::Prefix
+        );
+        assert!(matches!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "F13",
+                start,
+                repeat_time,
+                initial_repeat_time,
+            ),
+            KeyDecision::Commands(_)
+        ));
+        assert!(matches!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "F14",
+                start + Duration::from_millis(150),
+                repeat_time,
+                initial_repeat_time,
+            ),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(
+            engine.handle_with_repeat_times(
+                &tables,
+                "F15",
+                start + Duration::from_millis(250),
+                repeat_time,
+                initial_repeat_time,
+            ),
+            KeyDecision::Pass
+        );
+    }
+
+    #[test]
     fn root_and_custom_bindings_work() {
         let mut tables = KeyTables::default();
         tables.bind(
@@ -1382,6 +1720,7 @@ mod tests {
                 KeyDecision::Commands(vec![CommandInvocation::new("send-keys", ["-X", action]),])
             );
         }
+        assert_eq!(engine.active_table(), Some("copy-mode-vi"));
     }
 
     #[test]

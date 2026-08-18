@@ -15,8 +15,8 @@ and resolver; `zz-mux` re-exports it and the daemon remains the runtime authorit
 types cooperate: `KeyTables` is the shared, mutable set of named tables (`prefix`, `root`,
 `copy-mode`, `copy-mode-vi`, `choose-tree`, `choose-buffer`, plus any custom `-T` table) mapping a
 canonical key string to a
-`Binding`; `KeyEngine` is the cheap per-client cursor that tracks whether the prefix has been pressed
-whether a "jump" binding is waiting for its target key, and a vi numeric prefix. `KeyEngine::handle` returns a
+`Binding`; `KeyEngine` is the cheap per-client cursor that tracks whether the prefix has been pressed,
+whether a "jump" binding is waiting for its target key, a repeat deadline, and a vi numeric prefix. `KeyEngine::handle` returns a
 `KeyDecision` telling the daemon to pass the key through to the surface, enter the prefix, ignore it,
 or run a list of `CommandInvocation`s. Defaults are audited against the pinned tmux tables
 (`key-bindings.c`); custom binds come from `bind-key`/`unbind-key` in
@@ -42,7 +42,7 @@ app and the TUI, which contain no chooser key maps at all.
 | --- | --- | --- |
 | `Binding` | `{ commands: Vec<CommandInvocation>, repeat: bool, note: Option<String> }` | What a key runs; `repeat` keeps the prefix table active (tmux `-r`); `note` is a `-N` description. |
 | `KeyTables` | `{ prefix: String, tables: BTreeMap<String, BTreeMap<String, Binding>> }` | Named tables; default `prefix` is `"C-b"`. |
-| `KeyEngine` | `{ table, pending, repeat_count }` | Per-client mode: `None` = root, `Some("prefix")` after prefix, `pending` = awaiting a jump target key, `repeat_count` = buffered vi digits. |
+| `KeyEngine` | `{ table, pending, repeat_count, repeat_deadline }` | Per-client mode: `None` = root, `Some("prefix")` after prefix, `pending` = awaiting a jump target key, `repeat_count` = buffered vi digits, and `repeat_deadline` bounds a repeatable binding sequence. |
 | `KeyDecision` | `Pass` \| `Prefix` \| `Ignore` \| `Commands(Vec<CommandInvocation>)` | Result of one keypress. |
 
 # Root vs prefix tables and default prefix
@@ -55,7 +55,9 @@ key through `canonical_key`). Resolution in `KeyEngine::handle`:
   (goes to the routed pane sinks).
 - In the `prefix` table, a bound key runs its commands; a **non-repeat** binding then drops back to
   root, while a **repeat** (`-r`) binding stays in `prefix` so e.g. `C-b M-Left M-Left` keeps
-  resizing. An unbound prefix key is **discarded** (`Ignore`) and exits prefix mode, matching tmux:
+  resizing. The attached session's effective `repeat-time` sets and refreshes its millisecond
+  deadline. The next key after expiry resolves from root, and zero disables the repeat window. An
+  unbound prefix key is **discarded** (`Ignore`) and exits prefix mode, matching tmux:
   a mistyped sequence never types into the pane.
 - Persistent tables (`copy-mode`, `copy-mode-vi`, or any table set via `switch_table`) consume unbound
   keys as `Ignore` instead of exiting, matching tmux copy-mode behavior. `Any` is honored as a

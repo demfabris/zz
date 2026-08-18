@@ -249,23 +249,30 @@ pub struct TerminalEvents {
 
 struct ForegroundSource {
     #[cfg(unix)]
-    master: filedescriptor::FileDescriptor,
+    master: Arc<parking_lot::Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     shell: Option<u32>,
+    tty: Option<PathBuf>,
 }
 
 impl ForegroundSource {
     fn process_id(&self) -> Option<u32> {
         #[cfg(unix)]
         {
-            rustix::termios::tcgetpgrp(&self.master)
-                .ok()
-                .and_then(|group| u32::try_from(group.as_raw_pid()).ok())
-                .or(self.shell)
+            self.master
+                .lock()
+                .process_group_leader()
+                .and_then(|group| u32::try_from(group).ok())
+                .filter(|process_id| *process_id != 0)
+                .or_else(|| self.shell_process_id())
         }
         #[cfg(not(unix))]
         {
-            self.shell
+            self.shell_process_id()
         }
+    }
+
+    fn shell_process_id(&self) -> Option<u32> {
+        self.shell.filter(|process_id| *process_id != 0)
     }
 }
 
@@ -275,7 +282,7 @@ struct EventQueueState {
     pending_reliable_bytes: AtomicUsize,
     notification_pending: AtomicBool,
     bell_pending: AtomicBool,
-    foreground: RwLock<Option<ForegroundSource>>,
+    foreground: RwLock<Option<Box<ForegroundSource>>>,
 }
 
 impl EventQueueState {
@@ -358,8 +365,9 @@ pub struct TerminalSpawn {
     /// tmux-style shell command run under `sh -c`; the pane closes when it
     /// exits. `None` spawns the interactive default shell.
     pub command: Option<String>,
+    pub terminal_type: Option<String>,
     /// Extra environment (`ZZ_PANE` etc.) layered over the defaults.
-    pub env: Vec<(String, String)>,
+    pub env: Vec<(String, Option<String>)>,
 }
 
 pub struct TerminalSession {
@@ -506,6 +514,36 @@ impl TerminalSession {
         text: String,
         appearance: Arc<TerminalAppearance>,
     ) -> Self {
+        Self::spawn_surface_with_appearance(
+            title,
+            text,
+            appearance,
+            MAX_OUTPUT_VIEW_SCROLLBACK,
+            true,
+        )
+    }
+
+    #[must_use]
+    pub fn spawn_empty_with_appearance(
+        max_scrollback: usize,
+        appearance: Arc<TerminalAppearance>,
+    ) -> Self {
+        Self::spawn_surface_with_appearance(
+            String::new(),
+            String::new(),
+            appearance,
+            max_scrollback.min(MAX_HISTORY_LIMIT),
+            false,
+        )
+    }
+
+    fn spawn_surface_with_appearance(
+        title: String,
+        text: String,
+        appearance: Arc<TerminalAppearance>,
+        max_scrollback: usize,
+        frozen: bool,
+    ) -> Self {
         let (command_tx, command_rx) = command_channel();
         let commands = CommandSender {
             commands: command_tx,
@@ -529,9 +567,21 @@ impl TerminalSession {
 
         let worker_publisher = publisher.clone();
         if let Err(error) = thread::Builder::new()
-            .name("zz-output-view".into())
+            .name(if frozen {
+                "zz-output-view".into()
+            } else {
+                "zz-empty-pane".into()
+            })
             .spawn(move || {
-                output_view_worker(command_rx, worker_publisher, title, text, appearance);
+                output_view_worker(
+                    command_rx,
+                    worker_publisher,
+                    title,
+                    text,
+                    appearance,
+                    max_scrollback,
+                    frozen,
+                );
             })
         {
             publisher.fail(&WorkerError::Thread(error.to_string()));
@@ -541,7 +591,7 @@ impl TerminalSession {
             commands,
             events,
             latest,
-            max_scrollback: MAX_OUTPUT_VIEW_SCROLLBACK,
+            max_scrollback,
             word_separators: RwLock::new(WordSeparators::default()),
         }
     }
@@ -557,6 +607,21 @@ impl TerminalSession {
     #[must_use]
     pub fn foreground_process_id(&self) -> Option<u32> {
         self.events.state.foreground.read().as_ref()?.process_id()
+    }
+
+    #[must_use]
+    pub fn process_id(&self) -> Option<u32> {
+        self.events
+            .state
+            .foreground
+            .read()
+            .as_ref()?
+            .shell_process_id()
+    }
+
+    #[must_use]
+    pub fn tty(&self) -> Option<PathBuf> {
+        self.events.state.foreground.read().as_ref()?.tty.clone()
     }
 
     /// Releases the bell latch so the pane's next BEL raises a fresh event. Until
@@ -2188,7 +2253,7 @@ struct Publisher {
 }
 
 impl Publisher {
-    fn set_foreground_source(&self, source: Option<ForegroundSource>) {
+    fn set_foreground_source(&self, source: Option<Box<ForegroundSource>>) {
         *self.state.foreground.write() = source;
     }
 
@@ -2443,8 +2508,18 @@ fn output_view_worker(
     title: String,
     text: String,
     appearance: Arc<TerminalAppearance>,
+    max_scrollback: usize,
+    frozen: bool,
 ) {
-    if let Err(error) = run_output_view(&command_rx, &publisher, &title, &text, &appearance) {
+    if let Err(error) = run_output_view(
+        &command_rx,
+        &publisher,
+        &title,
+        &text,
+        &appearance,
+        max_scrollback,
+        frozen,
+    ) {
         log::error!("command output view stopped: {error}");
         publisher.fail(&error);
     }
@@ -2566,19 +2641,23 @@ fn run_output_view(
     title: &str,
     text: &str,
     appearance: &TerminalAppearance,
+    max_scrollback: usize,
+    frozen: bool,
 ) -> Result<(), WorkerError> {
     install_kitty_png_decoder();
     let mut geometry = Geometry::default();
     let mut terminal = Terminal::new(TerminalOptions {
         cols: geometry.columns,
         rows: geometry.rows,
-        max_scrollback: MAX_OUTPUT_VIEW_SCROLLBACK,
+        max_scrollback,
     })?;
     let reported_color_scheme = Rc::new(Cell::new(ghostty_color_scheme(appearance.color_scheme)));
     let color_scheme_source = Rc::clone(&reported_color_scheme);
     terminal.on_color_scheme(move |_| Some(color_scheme_source.get()))?;
     apply_terminal_appearance(&mut terminal, appearance)?;
-    write_output_view_content(&mut terminal, title, text);
+    if frozen {
+        write_output_view_content(&mut terminal, title, text);
+    }
 
     let mut render_state = RenderState::new()?;
     let mut row_iterator = RowIterator::new()?;
@@ -2599,11 +2678,21 @@ fn run_output_view(
         crossbeam_channel::select_biased! {
             recv(command_rx) -> message => match message {
                 Ok(Command::AttachView(view_id)) => {
-                    if let Entry::Vacant(entry) = active_views.entry(view_id) {
-                        let state = inactive_views
-                            .remove(&view_id)
-                            .map_or_else(|| output_view_state(&mut terminal).map(Box::new), Ok)?;
-                        entry.insert(state);
+                    if frozen {
+                        if let Entry::Vacant(entry) = active_views.entry(view_id) {
+                            let state = inactive_views
+                                .remove(&view_id)
+                                .map_or_else(|| output_view_state(&mut terminal).map(Box::new), Ok)?;
+                            entry.insert(state);
+                        }
+                    } else {
+                        activate_view(
+                            &mut terminal,
+                            view_id,
+                            &mut active_views,
+                            &mut inactive_views,
+                            &word_separators,
+                        )?;
                     }
                     if let Some(state) = active_views.get_mut(&view_id) {
                         let _ = refresh_view_search(
@@ -2628,8 +2717,18 @@ fn run_output_view(
                     )?;
                 }
                 Ok(Command::DetachView(view_id)) => {
-                    if let Some(state) = active_views.remove(&view_id) {
-                        inactive_views.insert(view_id, state);
+                    if frozen {
+                        if let Some(state) = active_views.remove(&view_id) {
+                            inactive_views.insert(view_id, state);
+                        }
+                    } else {
+                        deactivate_view(
+                            &mut terminal,
+                            view_id,
+                            &mut active_views,
+                            &mut inactive_views,
+                            &word_separators,
+                        )?;
                     }
                     search_worker.cancel(view_id);
                     publish_active_views(
@@ -2647,8 +2746,17 @@ fn run_output_view(
                     )?;
                 }
                 Ok(Command::ReleaseView(view_id)) => {
-                    active_views.remove(&view_id);
-                    inactive_views.remove(&view_id);
+                    if frozen {
+                        active_views.remove(&view_id);
+                        inactive_views.remove(&view_id);
+                    } else {
+                        release_view(
+                            &mut terminal,
+                            view_id,
+                            &mut active_views,
+                            &mut inactive_views,
+                        )?;
+                    }
                     search_worker.forget(view_id);
                     publish_active_views(
                         &mut terminal,
@@ -2673,8 +2781,24 @@ fn run_output_view(
                             geometry.cell_width_px,
                             geometry.cell_height_px,
                         )?;
-                        for view in active_views.values_mut().chain(inactive_views.values_mut()) {
-                            refresh_output_view(&mut terminal, view)?;
+                        for view in inactive_views.values_mut() {
+                            if frozen {
+                                refresh_output_view(&mut terminal, view)?;
+                            } else {
+                                view.invalidate_layout();
+                            }
+                        }
+                        for view in active_views.values_mut() {
+                            if frozen {
+                                refresh_output_view(&mut terminal, view)?;
+                            } else {
+                                view.invalidate_layout();
+                                reconcile_view_screen(
+                                    &mut terminal,
+                                    view,
+                                    &word_separators,
+                                )?;
+                            }
                         }
                         publish_active_views(
                             &mut terminal,
@@ -2733,7 +2857,7 @@ fn run_output_view(
                         &word_separators,
                         &bound_pasted_images,
                     )?;
-                    let closed = state.copy_mode.is_none();
+                    let closed = frozen && state.copy_mode.is_none();
                     match result {
                         ViewActionResult::Snapshot | ViewActionResult::ContentSnapshot if !closed => {
                             publish_active_views(
@@ -2981,6 +3105,7 @@ fn run_terminal(
     let pair = pty_system
         .openpty(geometry.pty_size())
         .map_err(|error| WorkerError::Pty(error.to_string()))?;
+    let tty = pair.master.tty_name();
 
     let mut command = match spawn.command.as_deref() {
         Some(shell_command) => {
@@ -2994,13 +3119,20 @@ fn run_terminal(
         }
         None => crate::shell_integration::default_shell_command(),
     };
-    command.env("TERM", "xterm-256color");
+    command.env(
+        "TERM",
+        spawn.terminal_type.as_deref().unwrap_or("tmux-256color"),
+    );
+    for (key, value) in &spawn.env {
+        if let Some(value) = value {
+            command.env(key, value);
+        } else {
+            command.env_remove(key);
+        }
+    }
     command.env("COLORTERM", "truecolor");
     command.env("TERM_PROGRAM", "zz");
     command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
-    for (key, value) in &spawn.env {
-        command.env(key, value);
-    }
     if let Some(working_directory) = &spawn.working_directory {
         command.cwd(working_directory);
     }
@@ -3034,7 +3166,7 @@ fn run_terminal(
     let wake_rx =
         wake_rx.ok_or_else(|| WorkerError::Pty("terminal wake pipe unavailable".to_owned()))?;
     #[cfg(unix)]
-    let (drain_fd, mut writer, foreground_fd) = {
+    let (drain_fd, mut writer) = {
         let dup = || {
             pair.master
                 .as_raw_fd()
@@ -3043,17 +3175,15 @@ fn run_terminal(
         };
         let drain_fd = dup()?;
         let writer_fd = dup()?;
-        let foreground_fd = dup()?;
         let _ = rustix::io::fcntl_setfd(&drain_fd, rustix::io::FdFlags::CLOEXEC);
         let _ = rustix::io::fcntl_setfd(&writer_fd, rustix::io::FdFlags::CLOEXEC);
-        let _ = rustix::io::fcntl_setfd(&foreground_fd, rustix::io::FdFlags::CLOEXEC);
         rustix::io::ioctl_fionbio(&drain_fd, true).map_err(|errno| {
             WorkerError::Pty(format!(
                 "failed to make the PTY master nonblocking: {errno}"
             ))
         })?;
         let writer: Box<dyn Write + Send> = Box::new(PtyWriter { fd: writer_fd });
-        (drain_fd, writer, foreground_fd)
+        (drain_fd, writer)
     };
     #[cfg(not(unix))]
     let reader = pair
@@ -3065,15 +3195,16 @@ fn run_terminal(
         .master
         .take_writer()
         .map_err(|error| WorkerError::Pty(error.to_string()))?;
-    #[cfg(windows)]
+    #[cfg(not(unix))]
     let mut master = Some(pair.master);
-    #[cfg(not(windows))]
-    let master = Some(pair.master);
-    publisher.set_foreground_source(Some(ForegroundSource {
+    #[cfg(unix)]
+    let master = Arc::new(parking_lot::Mutex::new(pair.master));
+    publisher.set_foreground_source(Some(Box::new(ForegroundSource {
         #[cfg(unix)]
-        master: foreground_fd,
+        master: Arc::clone(&master),
         shell: shell_process_id,
-    }));
+        tty,
+    })));
 
     #[cfg(any(target_os = "linux", not(unix)))]
     let (output_rx, recycle_tx) = {
@@ -3378,6 +3509,12 @@ fn run_terminal(
                         search_refresh_due = None;
                         geometry = next;
                         reported_size.set(geometry.size_report());
+                        #[cfg(unix)]
+                        master
+                            .lock()
+                            .resize(geometry.pty_size())
+                            .map_err(|error| WorkerError::Pty(error.to_string()))?;
+                        #[cfg(not(unix))]
                         if let Some(master) = &master {
                             master
                                 .resize(geometry.pty_size())
@@ -8603,6 +8740,20 @@ fn snapshot<'alloc: 'callbacks, 'callbacks>(
     result
 }
 
+fn reported_working_directory(value: &str) -> Option<String> {
+    if value.is_empty() {
+        return None;
+    }
+    if !value.starts_with("file://") {
+        return Some(value.to_owned());
+    }
+    let mut url = url::Url::parse(value).ok()?;
+    url.set_host(Some("localhost")).ok()?;
+    url.to_file_path()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
 fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     terminal: &Terminal<'alloc, 'callbacks>,
     render_state: &mut RenderState<'alloc>,
@@ -8862,13 +9013,10 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
     }
     let shared_dictionary = dictionary.shared_dictionary();
     let title = terminal.title().unwrap_or("zz");
-    let working_directory = terminal
-        .pwd()
-        .ok()
-        .filter(|working_directory| !working_directory.is_empty());
+    let working_directory = terminal.pwd().ok().and_then(reported_working_directory);
     let presentation = dictionary.shared_presentation(
         title,
-        working_directory,
+        working_directory.as_deref(),
         hover_link.map(|link| link.uri.as_str()),
     );
     let overlays = dictionary.finish_overlays(overlays);
@@ -9123,6 +9271,31 @@ mod tests {
             SessionStatus::Running,
         )
         .expect("snapshot")
+    }
+
+    #[test]
+    fn reported_working_directories_strip_file_hosts_and_decode_paths() {
+        let (uri, expected) = if cfg!(windows) {
+            (
+                "file://workstation/C:/Users/a%20b/%E7%95%8C",
+                "C:\\Users\\a b\\界",
+            )
+        } else {
+            ("file://workstation/tmp/a%20b/%E7%95%8C", "/tmp/a b/界")
+        };
+        assert_eq!(reported_working_directory(uri).as_deref(), Some(expected));
+        if !cfg!(windows) {
+            assert_eq!(
+                reported_working_directory("file://workstation/tmp/a b").as_deref(),
+                Some("/tmp/a b")
+            );
+        }
+        assert_eq!(
+            reported_working_directory("/reported/path").as_deref(),
+            Some("/reported/path")
+        );
+        assert_eq!(reported_working_directory(""), None);
+        assert_eq!(reported_working_directory("file://[invalid"), None);
     }
 
     fn copy_mode_survives_downward_action(
@@ -13693,6 +13866,40 @@ mod tests {
     }
 
     #[test]
+    fn empty_surface_is_live_pty_free_and_ignores_input() {
+        let session = TerminalSession::spawn_empty_with_appearance(
+            64,
+            Arc::new(TerminalAppearance::default()),
+        );
+        let view = TerminalViewId(91);
+        session.attach_view(view);
+
+        let viewport = wait_for_test_viewport(&session, |viewport| {
+            matches!(viewport.mode, TerminalMode::Live)
+                && matches!(viewport.status, SessionStatus::Running)
+        });
+        assert_eq!(viewport.columns, INITIAL_COLUMNS);
+        assert_eq!(viewport.rows, INITIAL_ROWS);
+        assert_eq!(session.process_id(), None);
+        assert_eq!(session.foreground_process_id(), None);
+        assert_eq!(session.tty(), None);
+
+        session.send_text("ZZ_EMPTY_MUST_STAY_BLANK");
+        let capture = session
+            .capture(CaptureOptions::default())
+            .expect("capture empty surface");
+        assert!(!capture.contains("ZZ_EMPTY_MUST_STAY_BLANK"));
+
+        session.resize(23, 7, 8, 18);
+        let viewport = wait_for_test_viewport(&session, |viewport| {
+            viewport.columns == 23
+                && viewport.rows == 7
+                && matches!(viewport.mode, TerminalMode::Live)
+        });
+        assert_eq!(viewport.status, SessionStatus::Running);
+    }
+
+    #[test]
     fn live_appearance_update_preserves_command_output_and_resets_colors() {
         let mut initial = TerminalAppearance {
             background: Color::rgb(0x11, 0x22, 0x33),
@@ -13896,6 +14103,91 @@ mod tests {
         });
         assert!(matches!(viewport.status, SessionStatus::Running));
         assert!(session.foreground_process_id().is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_command_applies_spawn_environment_additions_and_removals() {
+        let session = TerminalSession::spawn(
+            DEFAULT_HISTORY_LIMIT,
+            Arc::new(TerminalAppearance::default()),
+            TerminalSpawn {
+                command: Some(
+                    "read _; printf 'ZZ_PHASE4D_SET=%s\\n' \"$ZZ_PHASE4D_SET\"; if [ \"${ZZ_PHASE4D_REMOVE+x}\" = x ]; then printf 'ZZ_PHASE4D_REMOVE=set\\n'; else printf 'ZZ_PHASE4D_REMOVE=unset\\n'; fi; read _"
+                        .to_owned(),
+                ),
+                env: vec![
+                    ("ZZ_PHASE4D_SET".to_owned(), Some("session".to_owned())),
+                    (
+                        "ZZ_PHASE4D_REMOVE".to_owned(),
+                        Some("daemon".to_owned()),
+                    ),
+                    ("ZZ_PHASE4D_REMOVE".to_owned(), None),
+                ],
+                ..TerminalSpawn::default()
+            },
+        );
+        session.attach_view(TerminalViewId(47));
+        wait_for_test_viewport(&session, |viewport| {
+            matches!(viewport.status, SessionStatus::Running)
+        });
+        session.send_text("ready\n");
+
+        let viewport = wait_for_test_viewport(&session, |viewport| {
+            let mut contents = String::new();
+            for cell in viewport.cells.iter() {
+                viewport.push_glyph(*cell, &mut contents);
+            }
+            contents.contains("ZZ_PHASE4D_REMOVE")
+        });
+        let mut contents = String::new();
+        for cell in viewport.cells.iter() {
+            viewport.push_glyph(*cell, &mut contents);
+        }
+        assert!(contents.contains("ZZ_PHASE4D_SET=session"), "{contents:?}");
+        assert!(contents.contains("ZZ_PHASE4D_REMOVE=unset"), "{contents:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_type_seeds_term_and_spawn_environment_can_override_it() {
+        let capture =
+            |view: u64, terminal_type: Option<&str>, env: Vec<(String, Option<String>)>| {
+                let session = TerminalSession::spawn(
+                    DEFAULT_HISTORY_LIMIT,
+                    Arc::new(TerminalAppearance::default()),
+                    TerminalSpawn {
+                        command: Some("printf 'ZZ_TERM:%s\\n' \"$TERM\"; read _".to_owned()),
+                        terminal_type: terminal_type.map(str::to_owned),
+                        env,
+                        ..TerminalSpawn::default()
+                    },
+                );
+                session.attach_view(TerminalViewId(view));
+                let viewport = wait_for_test_viewport(&session, |viewport| {
+                    let mut contents = String::new();
+                    for cell in viewport.cells.iter() {
+                        viewport.push_glyph(*cell, &mut contents);
+                    }
+                    contents.contains("ZZ_TERM:")
+                });
+                let mut contents = String::new();
+                for cell in viewport.cells.iter() {
+                    viewport.push_glyph(*cell, &mut contents);
+                }
+                contents
+            };
+
+        assert!(capture(47, None, Vec::new()).contains("ZZ_TERM:tmux-256color"));
+        assert!(capture(48, Some("zz-term"), Vec::new()).contains("ZZ_TERM:zz-term"));
+        assert!(
+            capture(
+                49,
+                Some("zz-term"),
+                vec![("TERM".to_owned(), Some("override".to_owned()))]
+            )
+            .contains("ZZ_TERM:override")
+        );
     }
 
     #[cfg(unix)]

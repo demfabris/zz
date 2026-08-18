@@ -54,7 +54,9 @@ use zz_daemon::{
 };
 use zz_daemon::{DaemonError, InteractiveClient};
 #[cfg(not(target_os = "ios"))]
-use zz_protocol::{CommandInvocation, MAX_AGENT_SEND_BYTES, PROTOCOL_VERSION, ServerHello};
+use zz_protocol::{
+    CommandInvocation, MAX_AGENT_SEND_BYTES, PROTOCOL_VERSION, ServerError, ServerHello,
+};
 use zz_terminal::TerminalColorScheme;
 #[cfg(not(target_os = "ios"))]
 use zz_ui::Assets;
@@ -461,7 +463,7 @@ fn run_command_mode(
             Some(ExitCode::SUCCESS)
         }
         Err(error) => {
-            eprintln!("zz: {error}");
+            eprintln!("{}", command_error_message(&error));
             Some(ExitCode::FAILURE)
         }
     }
@@ -512,6 +514,18 @@ fn format_local_daemon_error(error: DaemonError) -> String {
             format!("{error}\nrun 'zz kill-server' to restart it (sessions will be lost)")
         }
         error => error.to_string(),
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn command_error_message(error: &DaemonError) -> String {
+    match error {
+        DaemonError::Server(ServerError::InvalidCommand(message))
+            if message == "no current client" =>
+        {
+            message.clone()
+        }
+        error => format!("zz: {error}"),
     }
 }
 
@@ -1109,8 +1123,8 @@ mod tests {
     use zz_terminal::TerminalColorScheme;
 
     use super::{
-        application_arguments, daemon_is_missing, is_kill_server_command, protocol_version_output,
-        terminal_color_scheme,
+        application_arguments, command_error_message, daemon_is_missing, is_kill_server_command,
+        protocol_version_output, terminal_color_scheme,
     };
     use zz_daemon::DaemonError;
 
@@ -1153,6 +1167,22 @@ mod tests {
         assert!(!daemon_is_missing(&DaemonError::Io(io::Error::from(
             io::ErrorKind::ConnectionReset
         ))));
+    }
+
+    #[test]
+    fn refresh_client_detached_error_has_no_zz_prefix() {
+        assert_eq!(
+            command_error_message(&DaemonError::Server(
+                zz_protocol::ServerError::InvalidCommand("no current client".to_owned())
+            )),
+            "no current client"
+        );
+        assert_eq!(
+            command_error_message(&DaemonError::Server(
+                zz_protocol::ServerError::InvalidCommand("other".to_owned())
+            )),
+            "zz: mux command failed: invalid command: other"
+        );
     }
 
     #[test]

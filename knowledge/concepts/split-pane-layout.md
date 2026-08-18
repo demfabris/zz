@@ -69,11 +69,14 @@ and runs the sibling resize walk, so every committed drag lands on whole cells.
 
 Windows are born at tmux's `default-size` (80x24) or inherit their session's active-window
 extent; `new-session -x/-y` is honored. A drawing client's per-pane measurements update the
-extent through a guarded reconstruction (`MuxEngine::set_pane_geometry`): only the zoomed pane
-counts while zoomed (applied directly), only the active pane otherwise, a one-cell dead-band and
-a repeat memo guarantee a fixed point (the naive per-pane write-back oscillated). Detached
-windows keep their last extent, like tmux. A zoomed pane reports the full window extent to
-formats; the tree underneath is untouched.
+extent through a guarded reconstruction (`MuxEngine::set_pane_geometry`). With
+`aggressive-resize` off, the latest terminal-input viewer supplies the whole measurement. With it
+on, rows and columns are the componentwise minima across clients actually viewing that window;
+windows with no viewer retain their last extent. Selection still feeds the same convergence path:
+only the zoomed pane counts while zoomed (applied directly), only the active pane otherwise, and a
+one-cell dead-band plus repeat memo guarantee a fixed point. The naive per-pane write-back
+oscillated. A zoomed pane reports the full window extent to formats; the tree underneath is
+untouched.
 
 # Invariants (model.rs)
 

@@ -55,8 +55,7 @@ use crate::{
             HostIndicator, MuxTreeHost, MuxTreeModel, MuxTreePaneKind, MuxTreeWindow, TreeNode,
             TreeNodeKind, TreeTarget, activate_nav as activate_sidebar, activation_for_target,
             active_tree_target, expand_path_to, kill_target_command, new_window_command,
-            pane_label, select_window_command, session_initial, session_label,
-            split_picker_command,
+            select_window_command, session_initial, session_label, split_picker_command,
         },
     },
     window::{corners::WindowCorners, drag::window_drag_handle},
@@ -1167,11 +1166,7 @@ impl EventEmitter<SidebarModeChanged> for WorkspaceSidebar {}
 impl EventEmitter<SidebarRouteChanged> for WorkspaceSidebar {}
 
 fn strip_window_label(window: &WindowSnapshot) -> String {
-    let name = window
-        .panes
-        .get(&window.active_pane)
-        .map_or_else(|| window.name.clone(), pane_label);
-    format!("{}:{name}", window.index)
+    format!("{}:{}", window.index, window.name)
 }
 
 #[derive(Clone, Debug)]
@@ -2222,6 +2217,8 @@ mod tests {
             kind: PaneKindSnapshot::Terminal,
             synchronized_input: false,
             bell: false,
+            dead: false,
+            dead_status: None,
         }
     }
 
@@ -2235,6 +2232,8 @@ mod tests {
             )),
             synchronized_input: false,
             bell: false,
+            dead: false,
+            dead_status: None,
         }
     }
 
@@ -2244,6 +2243,7 @@ mod tests {
             id: WindowId(id),
             index,
             name: name.to_owned(),
+            automatic_rename: true,
             active_pane: pane.id,
             zoomed_pane: None,
             layout: LayoutNode::Pane(pane.id),
@@ -2258,6 +2258,7 @@ mod tests {
             id: WindowId(11),
             index: 2,
             name: "work".to_owned(),
+            automatic_rename: true,
             active_pane: browser.id,
             zoomed_pane: None,
             layout: LayoutNode::Split {
@@ -2410,10 +2411,13 @@ mod tests {
     }
 
     #[test]
-    fn strip_window_chips_name_a_window_after_its_active_pane() {
+    fn strip_window_chips_use_the_engine_window_name() {
         let snapshot = snapshot_with_two_panes();
         let window = &snapshot.sessions[0].windows[0];
-        assert_eq!(strip_window_label(window), "2:https://zed.dev");
+        assert_eq!(strip_window_label(window), "2:work");
+        let mut pinned = window.clone();
+        pinned.automatic_rename = false;
+        assert_eq!(strip_window_label(&pinned), "2:work");
         assert_eq!(
             strip_window_label(&mux_window(4, 1, "agents", 9)),
             "1:agents"
@@ -3266,6 +3270,8 @@ mod tests {
             kind: PaneKindSnapshot::Picker,
             synchronized_input: false,
             bell: false,
+            dead: false,
+            dead_status: None,
         };
 
         let projected = MuxTreePane::from_snapshot(&pane);
@@ -3281,6 +3287,8 @@ mod tests {
             kind: PaneKindSnapshot::Agent(zz_protocol::AgentDescriptor::default()),
             synchronized_input: false,
             bell: false,
+            dead: false,
+            dead_status: None,
         };
 
         let projected = MuxTreePane::from_snapshot(&pane);

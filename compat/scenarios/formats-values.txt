@@ -1,0 +1,12 @@
+fmt: #{wrap_flag}|#{cursor_flag}|#{pane_format}|#{window_format}|#{session_format}
+fmt: #{!!:#{pane_current_path}}
+fmt: #{pane_current_path}
+fmt: #{p6:#{l:xy}}|#{e|+|:2,3}|#{e|m|:7,3}|#{e|%|:7,3}|#{a:65}|#{c:red}
+fmt: #{N/w:main}|#{N/s:w}
+fmt: #{S:#{session_name}}|#{W:#{window_name}}|#{P:#{pane_index}}
+fmt: #{C:__zz_phase4c_no_visible_match_7e91__}
+set-buffer -b named alpha
+set-buffer bravo
+fmt: #{buffer_name}|#{buffer_size}|#{buffer_sample}|#{!!:#{buffer_created}}
+new-window -d -t w -c /tmp -n cw
+fmt: #{W:#{window_name}=#{pane_current_path};,}

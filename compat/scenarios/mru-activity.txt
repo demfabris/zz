@@ -1,0 +1,11 @@
+new-session -d -s A
+new-session -d -s B -c /tmp
+list-panes -t A
+rename-window -t A:0 zz1
+set-option -t A base-index 0
+select-window -t A:0
+new-session -d -s probe -c '#{pane_current_path}'
+out: display-message -p -t probe:0 #{pane_current_path}
+out: list-panes -a -F #{session_name}:#{window_index}.#{pane_index}
+out: list-windows -a -F #{session_name}:#{window_index}
+out: list-panes -s -t B -F #{session_name}:#{window_index}.#{pane_index}

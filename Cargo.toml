@@ -51,6 +51,7 @@ gpui = { git = "https://github.com/zed-industries/zed", features = ["profiler"] 
 gpui_platform = { git = "https://github.com/zed-industries/zed", default-features = false, features = ["font-kit", "wayland", "x11"] }
 getrandom = "0.4.3"
 image = "=0.25.10"
+libc = "0.2.189"
 interprocess = "2.4.3"
 libghostty-vt = { version = "=0.2.1", git = "https://github.com/uzaaft/libghostty-rs", rev = "46a9d2ac941ed600cf43c5e6299c8dfd1d3a1ef0", default-features = false }
 log = "0.4.33"

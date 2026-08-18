@@ -14,8 +14,8 @@ use crate::{CellWidth, Color, PackedCell, PackedStyle, TerminalDictionary};
 
 use super::{
     HistorySearchRow, HistorySearchSnapshot, MAX_SEARCH_SNAPSHOT_BYTES, SearchCellOffset,
-    SelectionMode, ViewportDictionary, WorkerError, color, resolve_style_color, style_attributes,
-    underline_style,
+    SelectionMode, ViewportDictionary, WorkerError, color, reported_working_directory,
+    resolve_style_color, style_attributes, underline_style,
 };
 
 const MAX_MODE_REVISION_BYTES: usize = 128 * 1024 * 1024;
@@ -110,7 +110,7 @@ impl ModeRevision {
         let working_directory = terminal
             .pwd()
             .ok()
-            .filter(|working_directory| !working_directory.is_empty())
+            .and_then(reported_working_directory)
             .map(Arc::from);
         let mut render_state = RenderState::new()?;
         let mut row_iterator = RowIterator::new()?;

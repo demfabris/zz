@@ -13,8 +13,11 @@ use crate::layout::{CellLayout, LayoutError, SplitSize};
 
 pub(crate) const DEFAULT_WINDOW_EXTENT: (u16, u16) = (80, 24);
 const SYNCHRONIZE_PANES: u8 = 1 << 0;
+const AUTOMATIC_RENAME: u8 = 1 << 1;
+const AGGRESSIVE_RESIZE: u8 = 1 << 2;
 const LAYOUT_COORDINATE_MAX: u32 = 1_000_000;
 const MAX_AGENT_SESSION_ID_BYTES: usize = 16 * 1024;
+const MAX_WINDOW_INDEX: u32 = i32::MAX.cast_unsigned();
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +110,50 @@ impl InputOptions {
             self.overrides &= !SYNCHRONIZE_PANES;
         }
     }
+
+    const fn automatic_rename(self) -> Option<bool> {
+        if self.overrides & AUTOMATIC_RENAME == 0 {
+            None
+        } else {
+            Some(self.values & AUTOMATIC_RENAME != 0)
+        }
+    }
+
+    fn set_automatic_rename(&mut self, value: Option<bool>) {
+        if let Some(value) = value {
+            self.overrides |= AUTOMATIC_RENAME;
+            if value {
+                self.values |= AUTOMATIC_RENAME;
+            } else {
+                self.values &= !AUTOMATIC_RENAME;
+            }
+        } else {
+            self.values &= !AUTOMATIC_RENAME;
+            self.overrides &= !AUTOMATIC_RENAME;
+        }
+    }
+
+    const fn aggressive_resize(self) -> Option<bool> {
+        if self.overrides & AGGRESSIVE_RESIZE == 0 {
+            None
+        } else {
+            Some(self.values & AGGRESSIVE_RESIZE != 0)
+        }
+    }
+
+    fn set_aggressive_resize(&mut self, value: Option<bool>) {
+        if let Some(value) = value {
+            self.overrides |= AGGRESSIVE_RESIZE;
+            if value {
+                self.values |= AGGRESSIVE_RESIZE;
+            } else {
+                self.values &= !AGGRESSIVE_RESIZE;
+            }
+        } else {
+            self.values &= !AGGRESSIVE_RESIZE;
+            self.overrides &= !AGGRESSIVE_RESIZE;
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -160,6 +207,9 @@ pub struct Pane {
     pub kind: PaneKind,
     /// A BEL rang here and nobody has been back since.
     pub bell: bool,
+    pub dead: bool,
+    pub dead_status: Option<u32>,
+    pub(crate) empty: bool,
     input_options: InputOptions,
 }
 
@@ -185,9 +235,23 @@ pub struct Window {
 pub struct Session {
     pub id: SessionId,
     pub name: String,
+    pub created: Option<i64>,
     pub windows: Vec<WindowId>,
     pub active_window: WindowId,
     last_window: Option<WindowId>,
+}
+
+#[derive(Clone, Copy)]
+struct WindowTargetResolution {
+    session: SessionId,
+    window: Option<WindowId>,
+    index: Option<u32>,
+}
+
+#[derive(Clone, Copy)]
+struct WindowInSessionResolution {
+    window: Option<WindowId>,
+    index: u32,
 }
 
 impl Session {
@@ -241,6 +305,10 @@ impl Window {
     pub fn pane_order(&self) -> &[PaneId] {
         &self.pane_order
     }
+
+    pub(crate) fn last_pane(&self) -> Option<PaneId> {
+        self.last_panes.first().copied()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -250,6 +318,7 @@ pub struct MuxState {
     next_window_id: u64,
     next_pane_id: u64,
     next_split_id: u64,
+    last_active_session: Option<SessionId>,
     input_options: InputOptions,
     pub sessions: BTreeMap<SessionId, Session>,
     pub windows: BTreeMap<WindowId, Window>,
@@ -259,6 +328,10 @@ impl MuxState {
     #[must_use]
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    pub(crate) const fn next_session_id(&self) -> SessionId {
+        SessionId(self.next_session_id)
     }
 
     pub fn create_session(
@@ -272,6 +345,15 @@ impl MuxState {
         &mut self,
         name: impl Into<String>,
         extent: (u16, u16),
+    ) -> Result<(SessionId, WindowId, PaneId), ServerError> {
+        self.create_session_with_extent_at(name, extent, 0)
+    }
+
+    pub(crate) fn create_session_with_extent_at(
+        &mut self,
+        name: impl Into<String>,
+        extent: (u16, u16),
+        index: u32,
     ) -> Result<(SessionId, WindowId, PaneId), ServerError> {
         let name = name.into();
         if self.sessions.values().any(|session| session.name == name) {
@@ -287,13 +369,16 @@ impl MuxState {
             title: "terminal".to_owned(),
             kind: PaneKind::Terminal,
             bell: false,
+            dead: false,
+            dead_status: None,
+            empty: false,
             input_options: InputOptions::default(),
         };
         let window = Window {
             id: window_id,
             session: session_id,
-            index: 0,
-            name: "0".to_owned(),
+            index,
+            name: index.to_string(),
             active_pane: pane_id,
             zoomed_pane: None,
             layout: CellLayout::new(pane_id, extent.0, extent.1),
@@ -311,11 +396,13 @@ impl MuxState {
             Session {
                 id: session_id,
                 name,
+                created: None,
                 windows: vec![window_id],
                 active_window: window_id,
                 last_window: None,
             },
         );
+        self.last_active_session = Some(session_id);
         self.bump_generation();
         Ok((session_id, window_id, pane_id))
     }
@@ -367,10 +454,22 @@ impl MuxState {
         kind: PaneKind,
         activate: bool,
     ) -> Result<(WindowId, PaneId), ServerError> {
+        self.create_window_at_with_base_index(session, index, name, kind, activate, 0)
+    }
+
+    pub(crate) fn create_window_at_with_base_index(
+        &mut self,
+        session: SessionId,
+        index: Option<u32>,
+        name: Option<String>,
+        kind: PaneKind,
+        activate: bool,
+        base_index: u32,
+    ) -> Result<(WindowId, PaneId), ServerError> {
         let extent = self
             .session_active_window_extent(session)
             .unwrap_or(DEFAULT_WINDOW_EXTENT);
-        let index = self.claim_window_index(session, index)?;
+        let index = self.claim_window_index(session, index, base_index)?;
         let window_id = self.allocate_window_id();
         let pane_id = self.allocate_pane_id();
         let pane = Pane {
@@ -378,6 +477,9 @@ impl MuxState {
             title: pane_title(&kind),
             kind,
             bell: false,
+            dead: false,
+            dead_status: None,
+            empty: false,
             input_options: InputOptions::default(),
         };
         let window = Window {
@@ -421,9 +523,10 @@ impl MuxState {
         &self,
         session: SessionId,
         index: Option<u32>,
+        base_index: u32,
     ) -> Result<u32, ServerError> {
         let Some(index) = index else {
-            return self.next_window_index(session);
+            return self.next_window_index(session, base_index);
         };
         if self.window_at_index(session, index).is_some() {
             return Err(ServerError::InvalidCommand(format!(
@@ -525,6 +628,275 @@ impl MuxState {
         Ok(())
     }
 
+    pub fn move_window(
+        &mut self,
+        source: WindowId,
+        destination_session: SessionId,
+        destination_index: u32,
+        kill: bool,
+        select: bool,
+    ) -> Result<Vec<PaneId>, ServerError> {
+        let source_session = self
+            .windows
+            .get(&source)
+            .ok_or_else(|| ServerError::MissingTarget(source.to_string()))?
+            .session;
+        let source_index = self.windows[&source].index;
+        let source_was_active = self.sessions[&source_session].active_window == source;
+        if !self.sessions.contains_key(&destination_session) {
+            return Err(ServerError::MissingTarget(destination_session.to_string()));
+        }
+        let occupant = self.window_at_index(destination_session, destination_index);
+        if occupant == Some(source) {
+            return Err(ServerError::InvalidCommand(format!(
+                "same index: {destination_index}"
+            )));
+        }
+        if occupant.is_some() && !kill {
+            return Err(ServerError::InvalidCommand(format!(
+                "index in use: {destination_index}"
+            )));
+        }
+
+        let force_select = occupant
+            .is_some_and(|occupant| self.sessions[&destination_session].active_window == occupant);
+        let mut removed_panes = Vec::new();
+        if let Some(occupant) = occupant {
+            let removed = self
+                .windows
+                .remove(&occupant)
+                .expect("destination occupant exists");
+            removed_panes.extend(removed.pane_order);
+            self.sessions
+                .get_mut(&destination_session)
+                .expect("destination session exists")
+                .forget_window(occupant);
+        }
+
+        let source_fallback = if source_was_active {
+            let session = &self.sessions[&source_session];
+            session
+                .last_window()
+                .filter(|window| *window != source && session.windows.contains(window))
+                .or_else(|| {
+                    let candidates = session
+                        .windows
+                        .iter()
+                        .copied()
+                        .filter_map(|window| {
+                            if window == source {
+                                (source_session == destination_session)
+                                    .then_some((window, destination_index))
+                            } else {
+                                Some((window, self.windows[&window].index))
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    candidates
+                        .iter()
+                        .filter(|(_, index)| *index < source_index)
+                        .max_by_key(|(_, index)| *index)
+                        .or_else(|| candidates.iter().max_by_key(|(_, index)| *index))
+                        .map(|(window, _)| *window)
+                })
+        } else {
+            None
+        };
+        if source_session != destination_session {
+            let source_state = self
+                .sessions
+                .get_mut(&source_session)
+                .expect("source session exists");
+            source_state.forget_window(source);
+            if let Some(fallback) = source_fallback {
+                source_state.active_window = fallback;
+                source_state.last_window = None;
+            }
+        }
+        {
+            let window = self.windows.get_mut(&source).expect("source window exists");
+            window.session = destination_session;
+            window.index = destination_index;
+        }
+        if source_session != destination_session {
+            self.sessions
+                .get_mut(&destination_session)
+                .expect("destination session exists")
+                .windows
+                .push(source);
+        }
+
+        let destination_was_empty = self.sessions[&destination_session].windows.len() == 1
+            && self.sessions[&destination_session].windows[0] == source;
+        if destination_was_empty {
+            let destination = self
+                .sessions
+                .get_mut(&destination_session)
+                .expect("destination session exists");
+            destination.active_window = source;
+            destination.last_window = None;
+            self.clear_window_bells(source);
+        } else if select || force_select {
+            self.activate_window(destination_session, source);
+        } else if source_session == destination_session
+            && source_was_active
+            && let Some(fallback) = source_fallback
+        {
+            let session = self
+                .sessions
+                .get_mut(&source_session)
+                .expect("source session exists");
+            session.active_window = fallback;
+            session.last_window = None;
+            self.clear_window_bells(fallback);
+        }
+
+        if source_session != destination_session {
+            let source_empty = self.sessions[&source_session].windows.is_empty();
+            if source_empty {
+                self.sessions.remove(&source_session);
+            } else if let Some(fallback) = source_fallback {
+                self.clear_window_bells(fallback);
+            }
+        }
+        self.sort_session_windows(destination_session);
+        if source_session != destination_session && self.sessions.contains_key(&source_session) {
+            self.sort_session_windows(source_session);
+        }
+        self.bump_generation();
+        Ok(removed_panes)
+    }
+
+    pub fn swap_windows(
+        &mut self,
+        source: WindowId,
+        target: WindowId,
+        select_destination: bool,
+    ) -> Result<(), ServerError> {
+        if source == target {
+            return Ok(());
+        }
+        let source_state = self
+            .windows
+            .get(&source)
+            .ok_or_else(|| ServerError::MissingTarget(source.to_string()))?;
+        let target_state = self
+            .windows
+            .get(&target)
+            .ok_or_else(|| ServerError::MissingTarget(target.to_string()))?;
+        let source_session = source_state.session;
+        let source_index = source_state.index;
+        let target_session = target_state.session;
+        let target_index = target_state.index;
+
+        if source_session == target_session {
+            let session = self
+                .sessions
+                .get_mut(&source_session)
+                .expect("window session exists");
+            session.active_window = swap_window_id(session.active_window, source, target);
+            session.last_window = session
+                .last_window
+                .map(|window| swap_window_id(window, source, target));
+        } else {
+            let source_state = self
+                .sessions
+                .get_mut(&source_session)
+                .expect("source session exists");
+            for window in &mut source_state.windows {
+                if *window == source {
+                    *window = target;
+                }
+            }
+            if source_state.active_window == source {
+                source_state.active_window = target;
+            }
+            if source_state.last_window == Some(source) {
+                source_state.last_window = Some(target);
+            }
+
+            let target_state = self
+                .sessions
+                .get_mut(&target_session)
+                .expect("target session exists");
+            for window in &mut target_state.windows {
+                if *window == target {
+                    *window = source;
+                }
+            }
+            if target_state.active_window == target {
+                target_state.active_window = source;
+            }
+            if target_state.last_window == Some(target) {
+                target_state.last_window = Some(source);
+            }
+        }
+
+        {
+            let source_state = self.windows.get_mut(&source).expect("source window exists");
+            source_state.session = target_session;
+            source_state.index = target_index;
+        }
+        {
+            let target_state = self.windows.get_mut(&target).expect("target window exists");
+            target_state.session = source_session;
+            target_state.index = source_index;
+        }
+        self.sort_session_windows(source_session);
+        if source_session != target_session {
+            self.sort_session_windows(target_session);
+        }
+        if select_destination {
+            self.activate_window(target_session, source);
+            if source_session != target_session {
+                self.activate_window(source_session, target);
+            }
+        }
+        self.bump_generation();
+        Ok(())
+    }
+
+    pub fn renumber_windows(
+        &mut self,
+        session: SessionId,
+        base_index: u32,
+    ) -> Result<(), ServerError> {
+        let mut windows = self
+            .sessions
+            .get(&session)
+            .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?
+            .windows
+            .clone();
+        windows.sort_by_key(|window| self.windows.get(window).map(|window| window.index));
+        validate_window_index_run(base_index, windows.len())?;
+
+        let mut assignments = Vec::with_capacity(windows.len());
+        for (position, window) in windows.iter().copied().enumerate() {
+            let index = base_index
+                .checked_add(u32::try_from(position).expect("validated window count fits u32"))
+                .expect("validated window index run fits u32");
+            assignments.push((window, index));
+        }
+
+        let changed = assignments
+            .iter()
+            .any(|(window, index)| self.windows[window].index != *index);
+        for (window, index) in assignments {
+            self.windows
+                .get_mut(&window)
+                .expect("renumbered window exists")
+                .index = index;
+        }
+        self.sessions
+            .get_mut(&session)
+            .expect("renumbered session exists")
+            .windows = windows;
+        if changed {
+            self.bump_generation();
+        }
+        Ok(())
+    }
+
     fn sort_session_windows(&mut self, session: SessionId) {
         let Some(state) = self.sessions.get(&session) else {
             return;
@@ -573,7 +945,8 @@ impl MuxState {
         let window_id = self
             .window_for_pane(target)
             .ok_or_else(|| ServerError::MissingTarget(target.to_string()))?;
-        let pane_id = self.allocate_pane_id();
+        let pane_id = PaneId(self.next_pane_id);
+        let next_pane_id = &mut self.next_pane_id;
         let next_split_id = &mut self.next_split_id;
         let mut ids = || {
             let id = SplitId(*next_split_id);
@@ -593,6 +966,7 @@ impl MuxState {
                 &mut ids,
             )
             .map_err(|error| split_layout_error(error, target))?;
+        *next_pane_id = (*next_pane_id).saturating_add(1);
         window.panes.insert(
             pane_id,
             Pane {
@@ -600,6 +974,9 @@ impl MuxState {
                 title: pane_title(&kind),
                 kind,
                 bell: false,
+                dead: false,
+                dead_status: None,
+                empty: false,
                 input_options: InputOptions::default(),
             },
         );
@@ -694,6 +1071,23 @@ impl MuxState {
         Ok(())
     }
 
+    pub fn validate_renumber_capacity(
+        &self,
+        session: SessionId,
+        base_index: u32,
+        removed_windows: usize,
+    ) -> Result<(), ServerError> {
+        let count = self
+            .sessions
+            .get(&session)
+            .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?
+            .windows
+            .len()
+            .checked_sub(removed_windows)
+            .ok_or_else(|| ServerError::Internal("invalid removed window count".to_owned()))?;
+        validate_window_index_run(base_index, count)
+    }
+
     fn activate_window(&mut self, session: SessionId, window: WindowId) -> bool {
         let changed = self
             .sessions
@@ -714,25 +1108,23 @@ impl MuxState {
     }
 
     pub fn select_pane(&mut self, pane: PaneId) -> Result<(), ServerError> {
-        self.select_pane_with_zoom(pane, false)
+        self.select_pane_with_zoom(pane, false).map(|_| ())
     }
 
     pub fn select_pane_with_zoom(
         &mut self,
         pane: PaneId,
         preserve_zoom: bool,
-    ) -> Result<(), ServerError> {
+    ) -> Result<bool, ServerError> {
         let window_id = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-        let session_id = self.windows[&window_id].session;
         let window = self.windows.get_mut(&window_id).expect("window exists");
         let pane_changed = activate_window_pane(window, pane, preserve_zoom);
-        let window_changed = self.activate_window(session_id, window_id);
-        if pane_changed || window_changed {
+        if pane_changed {
             self.bump_generation();
         }
-        Ok(())
+        Ok(pane_changed)
     }
 
     pub fn toggle_zoom(&mut self, pane: PaneId) -> Result<(), ServerError> {
@@ -917,14 +1309,26 @@ impl MuxState {
     }
 
     pub fn restore_previous_layout(&mut self, window: WindowId) -> Result<(), ServerError> {
+        let has_previous = self
+            .windows
+            .get(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?
+            .previous_layout
+            .is_some();
+        if !has_previous {
+            let window = self.windows.get_mut(&window).expect("window was resolved");
+            window.previous_layout = Some(Box::new(window.layout.clone()));
+            return Ok(());
+        }
         let (pane_order, split_count) = {
             let window_state = self
                 .windows
                 .get(&window)
                 .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
-            let previous = window_state.previous_layout.as_deref().ok_or_else(|| {
-                ServerError::InvalidCommand(format!("window {window} has no previous layout"))
-            })?;
+            let previous = window_state
+                .previous_layout
+                .as_deref()
+                .expect("previous layout was checked");
             if previous.pane_count() != window_state.pane_order.len() {
                 return Err(ServerError::InvalidCommand(format!(
                     "window {window} previous layout no longer matches its panes"
@@ -1287,6 +1691,104 @@ impl MuxState {
         self.input_options.synchronize_panes().unwrap_or(false)
     }
 
+    #[must_use]
+    pub fn global_automatic_rename(&self) -> bool {
+        self.input_options.automatic_rename().unwrap_or(true)
+    }
+
+    pub fn set_global_automatic_rename(&mut self, value: Option<bool>) {
+        if self.input_options.automatic_rename() != value {
+            self.input_options.set_automatic_rename(value);
+            self.bump_generation();
+        }
+    }
+
+    #[must_use]
+    pub fn global_aggressive_resize(&self) -> bool {
+        self.input_options.aggressive_resize().unwrap_or(false)
+    }
+
+    pub fn set_global_aggressive_resize(&mut self, value: Option<bool>) {
+        if self.input_options.aggressive_resize() != value {
+            self.input_options.set_aggressive_resize(value);
+            self.bump_generation();
+        }
+    }
+
+    pub fn window_aggressive_resize(&self, window: WindowId) -> Result<bool, ServerError> {
+        let window = self
+            .windows
+            .get(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+        Ok(window
+            .input_options
+            .aggressive_resize()
+            .unwrap_or_else(|| self.global_aggressive_resize()))
+    }
+
+    pub fn window_aggressive_resize_override(
+        &self,
+        window: WindowId,
+    ) -> Result<Option<bool>, ServerError> {
+        self.windows
+            .get(&window)
+            .map(|window| window.input_options.aggressive_resize())
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))
+    }
+
+    pub fn set_window_aggressive_resize(
+        &mut self,
+        window: WindowId,
+        value: Option<bool>,
+    ) -> Result<(), ServerError> {
+        let window = self
+            .windows
+            .get_mut(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+        if window.input_options.aggressive_resize() != value {
+            window.input_options.set_aggressive_resize(value);
+            self.bump_generation();
+        }
+        Ok(())
+    }
+
+    pub fn window_automatic_rename(&self, window: WindowId) -> Result<bool, ServerError> {
+        let window = self
+            .windows
+            .get(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+        Ok(window
+            .input_options
+            .automatic_rename()
+            .unwrap_or_else(|| self.global_automatic_rename()))
+    }
+
+    pub fn window_automatic_rename_override(
+        &self,
+        window: WindowId,
+    ) -> Result<Option<bool>, ServerError> {
+        self.windows
+            .get(&window)
+            .map(|window| window.input_options.automatic_rename())
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))
+    }
+
+    pub fn set_window_automatic_rename(
+        &mut self,
+        window: WindowId,
+        value: Option<bool>,
+    ) -> Result<(), ServerError> {
+        let window = self
+            .windows
+            .get_mut(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+        if window.input_options.automatic_rename() != value {
+            window.input_options.set_automatic_rename(value);
+            self.bump_generation();
+        }
+        Ok(())
+    }
+
     pub fn set_global_synchronize_panes(&mut self, value: bool) {
         if self.global_synchronize_panes() != value {
             self.input_options.set_synchronize_panes(Some(value));
@@ -1423,26 +1925,56 @@ impl MuxState {
         })
     }
 
+    /// Sessions in tmux's listing order: the pin keeps them in an RB tree
+    /// keyed by strcmp on the name, so every session enumeration a script can
+    /// observe is name-sorted, not creation-sorted.
+    #[must_use]
+    pub fn sessions_by_name(&self) -> Vec<&Session> {
+        let mut sessions = self.sessions.values().collect::<Vec<_>>();
+        sessions.sort_by(|left, right| left.name.as_bytes().cmp(right.name.as_bytes()));
+        sessions
+    }
+
+    #[must_use]
+    pub fn most_recent_context(&self) -> Option<(SessionId, WindowId, PaneId)> {
+        self.last_active_session
+            .and_then(|session| self.sessions.get(&session))
+            .and_then(|session| {
+                let window = self.windows.get(&session.active_window)?;
+                Some((session.id, window.id, window.active_pane))
+            })
+            .or_else(|| self.default_context())
+    }
+
+    pub(crate) fn mark_session_active(&mut self, session: SessionId) {
+        if self.sessions.contains_key(&session) {
+            self.last_active_session = Some(session);
+        }
+    }
+
     pub fn resolve_session(
         &self,
         target: Option<&str>,
         current: Option<SessionId>,
     ) -> Result<SessionId, ServerError> {
-        let Some(target) = target else {
+        let Some(target) = target.filter(|target| !target.is_empty()) else {
             return current
                 .filter(|session| self.sessions.contains_key(session))
                 .or_else(|| self.sessions.keys().next().copied())
-                .ok_or_else(|| ServerError::MissingTarget("current session".to_owned()));
+                .ok_or_else(|| ServerError::SessionNotFound("current session".to_owned()));
         };
+        let (target, exact) = target
+            .strip_prefix('=')
+            .map_or((target, false), |target| (target, true));
         if target.starts_with('$') {
             let id = target
                 .parse::<SessionId>()
-                .map_err(|_| ServerError::InvalidTarget(target.to_owned()))?;
+                .map_err(|_| ServerError::SessionNotFound(target.to_owned()))?;
             return self
                 .sessions
                 .contains_key(&id)
                 .then_some(id)
-                .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
+                .ok_or_else(|| ServerError::SessionNotFound(target.to_owned()));
         }
         if let Some(session) = self
             .sessions
@@ -1452,25 +1984,27 @@ impl MuxState {
         {
             return Ok(session);
         }
-        let mut prefixed = self
-            .sessions
-            .values()
-            .filter(|session| session.name.starts_with(target))
-            .collect::<Vec<_>>();
-        match prefixed.as_slice() {
-            [] => Err(ServerError::MissingTarget(target.to_owned())),
-            [session] => Ok(session.id),
-            _ => {
-                prefixed.sort_unstable_by(|left, right| left.name.cmp(&right.name));
-                let names = prefixed
-                    .iter()
-                    .map(|session| session.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                Err(ServerError::AmbiguousTarget(format!(
-                    "{target} matches {names}"
-                )))
-            }
+        if exact {
+            return Err(ServerError::SessionNotFound(target.to_owned()));
+        }
+        match unique_candidate(
+            self.sessions
+                .values()
+                .filter(|session| session.name.starts_with(target))
+                .map(|session| session.id),
+        ) {
+            Ok(Some(session)) => return Ok(session),
+            Err(()) => return Err(ServerError::SessionNotFound(target.to_owned())),
+            Ok(None) => {}
+        }
+        match unique_candidate(
+            self.sessions
+                .values()
+                .filter(|session| fnmatch(target, &session.name))
+                .map(|session| session.id),
+        ) {
+            Ok(Some(session)) => Ok(session),
+            Ok(None) | Err(()) => Err(ServerError::SessionNotFound(target.to_owned())),
         }
     }
 
@@ -1480,13 +2014,32 @@ impl MuxState {
         current_session: Option<SessionId>,
         current_window: Option<WindowId>,
     ) -> Result<WindowId, ServerError> {
+        self.resolve_window_with_pane_index(
+            target,
+            current_session,
+            current_window,
+            &|window, index| {
+                let index = usize::try_from(index).ok()?;
+                self.windows.get(&window)?.pane_order().get(index).copied()
+            },
+        )
+    }
+
+    pub(crate) fn resolve_window_with_pane_index(
+        &self,
+        target: Option<&str>,
+        current_session: Option<SessionId>,
+        current_window: Option<WindowId>,
+        pane_at_index: &impl Fn(WindowId, u32) -> Option<PaneId>,
+    ) -> Result<WindowId, ServerError> {
         if let Some(target) = target
             && target.starts_with('%')
         {
-            let pane = self.resolve_pane(Some(target), current_window, None)?;
+            let pane =
+                self.resolve_pane_with_index(Some(target), current_window, None, pane_at_index)?;
             return self
                 .window_for_pane(pane)
-                .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
+                .ok_or_else(|| ServerError::PaneNotFound(target.to_owned()));
         }
         match self.resolve_window_core(target, current_session, current_window) {
             Ok(window) => Ok(window),
@@ -1498,10 +2051,14 @@ impl MuxState {
                 if !window_target.contains('.') {
                     return Err(error);
                 }
-                let Ok(pane) = self.resolve_pane(Some(target), current_window, None) else {
-                    return Err(error);
-                };
-                self.window_for_pane(pane).ok_or(error)
+                let pane = self.resolve_pane_with_index(
+                    Some(target),
+                    current_window,
+                    None,
+                    pane_at_index,
+                )?;
+                self.window_for_pane(pane)
+                    .ok_or_else(|| ServerError::PaneNotFound(target.to_owned()))
             }
         }
     }
@@ -1512,106 +2069,235 @@ impl MuxState {
         current_session: Option<SessionId>,
         current_window: Option<WindowId>,
     ) -> Result<WindowId, ServerError> {
-        let target = match target {
-            Some("") | None => {
-                if let Some(window) =
-                    current_window.filter(|window| self.windows.contains_key(window))
-                {
-                    return Ok(window);
-                }
-                let session = self.resolve_session(None, current_session)?;
-                return self
-                    .sessions
-                    .get(&session)
-                    .map(|session| session.active_window)
-                    .ok_or_else(|| ServerError::MissingTarget(session.to_string()));
-            }
-            Some(target) => target,
-        };
-        if target.starts_with('@') {
-            let id = target
-                .parse::<WindowId>()
-                .map_err(|_| ServerError::InvalidTarget(target.to_owned()))?;
-            return self
-                .windows
-                .contains_key(&id)
-                .then_some(id)
-                .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
-        }
-        let (session_target, window_target) = target
-            .split_once(':')
-            .map_or((None, target), |(session, window)| (Some(session), window));
+        self.resolve_window_target_core(target, current_session, current_window, false)?
+            .window
+            .ok_or_else(|| ServerError::WindowNotFound(target.unwrap_or_default().to_owned()))
+    }
+
+    pub(crate) fn resolve_window_index_target(
+        &self,
+        target: Option<&str>,
+        current_session: Option<SessionId>,
+        current_window: Option<WindowId>,
+    ) -> Result<(SessionId, Option<u32>), ServerError> {
+        let resolved =
+            self.resolve_window_target_core(target, current_session, current_window, true)?;
+        Ok((resolved.session, resolved.index))
+    }
+
+    fn resolve_window_target_core(
+        &self,
+        target: Option<&str>,
+        current_session: Option<SessionId>,
+        current_window: Option<WindowId>,
+        index_mode: bool,
+    ) -> Result<WindowTargetResolution, ServerError> {
         let current_session = current_session
             .filter(|session| self.sessions.contains_key(session))
             .or_else(|| {
                 current_window
                     .and_then(|window| self.windows.get(&window).map(|window| window.session))
             });
+        let Some(target) = target.filter(|target| !target.is_empty()) else {
+            let window = current_window.filter(|window| self.windows.contains_key(window));
+            let session = window
+                .map(|window| self.windows[&window].session)
+                .map_or_else(|| self.resolve_session(None, current_session), Ok)?;
+            let window = window.unwrap_or(self.sessions[&session].active_window);
+            return Ok(WindowTargetResolution {
+                session,
+                window: Some(window),
+                index: (!index_mode).then_some(self.windows[&window].index),
+            });
+        };
+        if target.starts_with('$') && !target.contains([':', '.']) {
+            let session = self.resolve_session(Some(target), current_session)?;
+            return Ok(WindowTargetResolution {
+                session,
+                window: Some(self.sessions[&session].active_window),
+                index: None,
+            });
+        }
+        if target.starts_with('@') {
+            let window = target
+                .parse::<WindowId>()
+                .ok()
+                .filter(|window| self.windows.contains_key(window))
+                .ok_or_else(|| ServerError::WindowNotFound(target.to_owned()))?;
+            let state = &self.windows[&window];
+            return Ok(WindowTargetResolution {
+                session: state.session,
+                window: Some(window),
+                index: Some(state.index),
+            });
+        }
+        let (session_target, window_target) = target
+            .split_once(':')
+            .map_or((None, target), |(session, window)| (Some(session), window));
         let session = match session_target {
             Some("") | None => self.resolve_session(None, current_session)?,
             Some(session) => self.resolve_session(Some(session), current_session)?,
         };
         if window_target.is_empty() {
-            return self
-                .sessions
-                .get(&session)
-                .map(|session| session.active_window)
-                .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
+            return Ok(WindowTargetResolution {
+                session,
+                window: Some(self.sessions[&session].active_window),
+                index: None,
+            });
         }
-        let window = self.resolve_window_in_session(window_target, session, target);
-        if session_target.is_some() || window.is_ok() {
-            return window;
+        let window_error = match self.resolve_window_in_session(window_target, session, index_mode)
+        {
+            Ok(window) => {
+                return Ok(WindowTargetResolution {
+                    session,
+                    window: window.window,
+                    index: Some(window.index),
+                });
+            }
+            Err(error) => error,
+        };
+        if session_target.is_some() {
+            return Err(window_error);
         }
-        match self.resolve_session(Some(target), current_session) {
-            Ok(session) => self
-                .sessions
-                .get(&session)
-                .map(|session| session.active_window)
-                .ok_or_else(|| ServerError::MissingTarget(target.to_owned())),
-            Err(ServerError::MissingTarget(_)) => window,
-            Err(error) => Err(error),
+        let (fallback, _) = normalize_window_target(window_target);
+        if let Ok(session) = self.resolve_session(Some(fallback), current_session) {
+            return Ok(WindowTargetResolution {
+                session,
+                window: Some(self.sessions[&session].active_window),
+                index: None,
+            });
         }
+        Err(window_error)
     }
 
     fn resolve_window_in_session(
         &self,
         target: &str,
         session: SessionId,
-        original_target: &str,
-    ) -> Result<WindowId, ServerError> {
+        index_mode: bool,
+    ) -> Result<WindowInSessionResolution, ServerError> {
         let state = self
             .sessions
             .get(&session)
-            .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?;
+            .ok_or_else(|| ServerError::SessionNotFound(session.to_string()))?;
+        let (target, exact) = normalize_window_target(target);
+        let not_found = || ServerError::WindowNotFound(target.to_owned());
         if target.starts_with('@') {
-            let id = target
+            let window = target
                 .parse::<WindowId>()
-                .map_err(|_| ServerError::InvalidTarget(original_target.to_owned()))?;
-            return self
-                .windows
-                .get(&id)
-                .is_some_and(|window| window.session == session)
-                .then_some(id)
-                .ok_or_else(|| ServerError::MissingTarget(original_target.to_owned()));
-        }
-        if let Ok(index) = target.parse::<u32>() {
-            return unique_match(
-                original_target,
-                state.windows.iter().copied().filter(|window| {
+                .ok()
+                .filter(|window| {
                     self.windows
                         .get(window)
-                        .is_some_and(|window| window.index == index)
-                }),
-            );
+                        .is_some_and(|window| window.session == session)
+                })
+                .ok_or_else(not_found)?;
+            return Ok(WindowInSessionResolution {
+                window: Some(window),
+                index: self.windows[&window].index,
+            });
         }
-        unique_match(
-            original_target,
-            state.windows.iter().copied().filter(|window| {
-                self.windows
-                    .get(window)
-                    .is_some_and(|window| window.name == target)
+        if !exact && let Some((forward, offset)) = parse_offset(target) {
+            if index_mode {
+                let current = self.windows[&state.active_window].index;
+                let index = if forward {
+                    current.checked_add(offset)
+                } else {
+                    current.checked_sub(offset)
+                }
+                .filter(|index| *index <= MAX_WINDOW_INDEX)
+                .ok_or_else(not_found)?;
+                return Ok(WindowInSessionResolution {
+                    window: self.window_at_index(session, index),
+                    index,
+                });
+            }
+            let current = state
+                .windows
+                .iter()
+                .position(|window| *window == state.active_window)
+                .ok_or_else(not_found)?;
+            let count = state.windows.len();
+            if count == 0 {
+                return Err(not_found());
+            }
+            let offset = usize::try_from(offset).map_err(|_| not_found())? % count;
+            let position = if forward {
+                (current + offset) % count
+            } else {
+                (current + count - offset) % count
+            };
+            let window = state.windows[position];
+            return Ok(WindowInSessionResolution {
+                window: Some(window),
+                index: self.windows[&window].index,
+            });
+        }
+        if !exact {
+            let special = match target {
+                "!" => state.last_window(),
+                "^" => state.windows.first().copied(),
+                "$" => state.windows.last().copied(),
+                _ => None,
+            };
+            if matches!(target, "!" | "^" | "$") {
+                let window = special.ok_or_else(not_found)?;
+                return Ok(WindowInSessionResolution {
+                    window: Some(window),
+                    index: self.windows[&window].index,
+                });
+            }
+        }
+        if let Ok(index) = target.parse::<u32>()
+            && index <= MAX_WINDOW_INDEX
+        {
+            let window = self.window_at_index(session, index);
+            if window.is_some() || index_mode {
+                return Ok(WindowInSessionResolution { window, index });
+            }
+        }
+        match unique_candidate(state.windows.iter().copied().filter(|window| {
+            self.windows
+                .get(window)
+                .is_some_and(|window| window.name == target)
+        })) {
+            Ok(Some(window)) => {
+                return Ok(WindowInSessionResolution {
+                    window: Some(window),
+                    index: self.windows[&window].index,
+                });
+            }
+            Err(()) => return Err(not_found()),
+            Ok(None) => {}
+        }
+        if exact {
+            return Err(not_found());
+        }
+        match unique_candidate(state.windows.iter().copied().filter(|window| {
+            self.windows
+                .get(window)
+                .is_some_and(|window| window.name.starts_with(target))
+        })) {
+            Ok(Some(window)) => {
+                return Ok(WindowInSessionResolution {
+                    window: Some(window),
+                    index: self.windows[&window].index,
+                });
+            }
+            Err(()) => return Err(not_found()),
+            Ok(None) => {}
+        }
+        match unique_candidate(state.windows.iter().copied().filter(|window| {
+            self.windows
+                .get(window)
+                .is_some_and(|window| fnmatch(target, &window.name))
+        })) {
+            Ok(Some(window)) => Ok(WindowInSessionResolution {
+                window: Some(window),
+                index: self.windows[&window].index,
             }),
-        )
+            Ok(None) | Err(()) => Err(not_found()),
+        }
     }
 
     pub fn resolve_pane(
@@ -1620,7 +2306,20 @@ impl MuxState {
         current_window: Option<WindowId>,
         current_pane: Option<PaneId>,
     ) -> Result<PaneId, ServerError> {
-        let Some(target) = target else {
+        self.resolve_pane_with_index(target, current_window, current_pane, &|window, index| {
+            let index = usize::try_from(index).ok()?;
+            self.windows.get(&window)?.pane_order().get(index).copied()
+        })
+    }
+
+    pub(crate) fn resolve_pane_with_index(
+        &self,
+        target: Option<&str>,
+        current_window: Option<WindowId>,
+        current_pane: Option<PaneId>,
+        pane_at_index: &impl Fn(WindowId, u32) -> Option<PaneId>,
+    ) -> Result<PaneId, ServerError> {
+        let Some(target) = target.filter(|target| !target.is_empty()) else {
             if let Some(pane) = current_pane
                 && self.window_for_pane(pane).is_some()
             {
@@ -1632,17 +2331,17 @@ impl MuxState {
                     self.default_context()
                         .and_then(|(_, window, _)| self.windows.get(&window))
                 })
-                .ok_or_else(|| ServerError::MissingTarget("current pane".to_owned()))?;
+                .ok_or_else(|| ServerError::PaneNotFound("current pane".to_owned()))?;
             return Ok(window.active_pane);
         };
         if target.starts_with('%') {
             let id = target
                 .parse::<PaneId>()
-                .map_err(|_| ServerError::InvalidTarget(target.to_owned()))?;
+                .map_err(|_| ServerError::PaneNotFound(target.to_owned()))?;
             return self
                 .window_for_pane(id)
                 .map(|_| id)
-                .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
+                .ok_or_else(|| ServerError::PaneNotFound(target.to_owned()));
         }
 
         let current_window = current_pane
@@ -1650,55 +2349,82 @@ impl MuxState {
             .or_else(|| current_window.filter(|window| self.windows.contains_key(window)));
         let current_session = current_window
             .and_then(|window| self.windows.get(&window).map(|window| window.session));
-        let pane_error = if let Ok(index) = target.parse::<u32>() {
-            let window = self.resolve_window_core(None, current_session, current_window)?;
-            match self.resolve_pane_index(target, window, index) {
-                Ok(pane) => return Ok(pane),
-                Err(error) => error,
-            }
-        } else {
-            ServerError::InvalidTarget(target.to_owned())
-        };
+        let pane_target = normalize_pane_target(target);
+        let pane_error = ServerError::PaneNotFound(pane_target.to_owned());
 
-        let Some((window_target, pane_index)) = target.rsplit_once('.') else {
+        let Some((window_target, pane_target)) = target.split_once('.') else {
+            if !target.contains(':') {
+                let window = self.resolve_window_core(None, current_session, current_window)?;
+                if let Ok(pane) = self.resolve_pane_in_window(target, window, pane_at_index) {
+                    return Ok(pane);
+                }
+            }
             let window =
                 match self.resolve_window_core(Some(target), current_session, current_window) {
                     Ok(window) => window,
-                    Err(ServerError::MissingTarget(_)) if !target.contains(':') => {
-                        return Err(pane_error);
-                    }
+                    Err(_) if !target.contains(':') => return Err(pane_error),
                     Err(error) => return Err(error),
                 };
             return self
                 .windows
                 .get(&window)
                 .map(|window| window.active_pane)
-                .ok_or_else(|| ServerError::MissingTarget(target.to_owned()));
+                .ok_or_else(|| ServerError::WindowNotFound(target.to_owned()));
         };
-        let index = pane_index
-            .parse::<u32>()
-            .map_err(|_| ServerError::InvalidTarget(target.to_owned()))?;
         let window = if window_target.is_empty() {
             self.resolve_window_core(None, current_session, current_window)?
         } else {
             self.resolve_window_core(Some(window_target), current_session, current_window)?
         };
-        self.resolve_pane_index(target, window, index)
+        if pane_target.is_empty() {
+            return Ok(self.windows[&window].active_pane);
+        }
+        self.resolve_pane_in_window(pane_target, window, pane_at_index)
     }
 
-    fn resolve_pane_index(
+    fn resolve_pane_in_window(
         &self,
         target: &str,
         window: WindowId,
-        index: u32,
+        pane_at_index: &impl Fn(WindowId, u32) -> Option<PaneId>,
     ) -> Result<PaneId, ServerError> {
-        let index =
-            usize::try_from(index).map_err(|_| ServerError::MissingTarget(target.to_owned()))?;
-        self.windows
+        let target = normalize_pane_target(target);
+        let not_found = || ServerError::PaneNotFound(target.to_owned());
+        let state = self
+            .windows
             .get(&window)
-            .and_then(|window| window.pane_order().get(index))
-            .copied()
-            .ok_or_else(|| ServerError::MissingTarget(target.to_owned()))
+            .ok_or_else(|| ServerError::WindowNotFound(window.to_string()))?;
+        if target.starts_with('%') {
+            let pane = target.parse::<PaneId>().map_err(|_| not_found())?;
+            return state
+                .panes
+                .contains_key(&pane)
+                .then_some(pane)
+                .ok_or_else(not_found);
+        }
+        if target == "!" {
+            return state.last_panes.first().copied().ok_or_else(not_found);
+        }
+        if let Some((forward, offset)) = parse_offset(target) {
+            let current = state
+                .pane_order
+                .iter()
+                .position(|pane| *pane == state.active_pane)
+                .ok_or_else(not_found)?;
+            let count = state.pane_order.len();
+            if count == 0 {
+                return Err(not_found());
+            }
+            let offset = usize::try_from(offset).map_err(|_| not_found())? % count;
+            let position = if forward {
+                (current + offset) % count
+            } else {
+                (current + count - offset) % count
+            };
+            return Ok(state.pane_order[position]);
+        }
+        let index = target.parse::<u32>().map_err(|_| not_found())?;
+        pane_at_index(window, index).ok_or_else(not_found)
     }
 
     #[must_use]
@@ -1712,6 +2438,52 @@ impl MuxState {
         self.windows
             .values_mut()
             .find_map(|window| window.panes.get_mut(&pane))
+    }
+
+    pub fn mark_pane_dead(
+        &mut self,
+        pane: PaneId,
+        status: Option<u32>,
+    ) -> Result<bool, ServerError> {
+        let pane = self
+            .pane_mut(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        if pane.dead && pane.dead_status == status && !pane.empty {
+            return Ok(false);
+        }
+        pane.dead = true;
+        pane.dead_status = status;
+        pane.empty = false;
+        self.bump_generation();
+        Ok(true)
+    }
+
+    pub fn revive_pane(&mut self, pane: PaneId) -> Result<bool, ServerError> {
+        let pane = self
+            .pane_mut(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        if !pane.dead && pane.dead_status.is_none() && !pane.empty {
+            return Ok(false);
+        }
+        pane.dead = false;
+        pane.dead_status = None;
+        pane.empty = false;
+        self.bump_generation();
+        Ok(true)
+    }
+
+    pub fn mark_pane_empty(&mut self, pane: PaneId) -> Result<bool, ServerError> {
+        let pane = self
+            .pane_mut(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        if !pane.dead && pane.dead_status.is_none() && pane.empty {
+            return Ok(false);
+        }
+        pane.dead = false;
+        pane.dead_status = None;
+        pane.empty = true;
+        self.bump_generation();
+        Ok(true)
     }
 
     #[must_use]
@@ -1983,6 +2755,25 @@ impl MuxState {
         name: Option<String>,
         detached: bool,
     ) -> Result<WindowId, ServerError> {
+        self.break_pane_with_base_index(
+            pane,
+            destination_session,
+            destination_index,
+            name,
+            detached,
+            0,
+        )
+    }
+
+    pub(crate) fn break_pane_with_base_index(
+        &mut self,
+        pane: PaneId,
+        destination_session: SessionId,
+        destination_index: Option<u32>,
+        name: Option<String>,
+        detached: bool,
+        base_index: u32,
+    ) -> Result<WindowId, ServerError> {
         let source_window = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
@@ -1990,7 +2781,7 @@ impl MuxState {
             return Err(ServerError::MissingTarget(destination_session.to_string()));
         }
         let source_session = self.windows[&source_window].session;
-        let index = self.claim_window_index(destination_session, destination_index)?;
+        let index = self.claim_window_index(destination_session, destination_index, base_index)?;
         if self.windows[&source_window].panes.len() == 1 {
             if source_session == destination_session {
                 let window = self
@@ -2314,6 +3105,10 @@ impl MuxState {
             id: window.id,
             index: window.index,
             name: window.name.clone(),
+            automatic_rename: window
+                .input_options
+                .automatic_rename()
+                .unwrap_or_else(|| self.global_automatic_rename()),
             active_pane: window.active_pane,
             zoomed_pane: window.zoomed_pane,
             layout: window.layout.project(),
@@ -2332,6 +3127,8 @@ impl MuxState {
                                 .synchronize_panes()
                                 .unwrap_or(synchronized),
                             bell: pane.bell,
+                            dead: pane.dead,
+                            dead_status: pane.dead_status,
                         },
                     )
                 })
@@ -2402,7 +3199,16 @@ impl MuxState {
         Ok(())
     }
 
-    fn next_window_index(&self, session: SessionId) -> Result<u32, ServerError> {
+    pub(crate) fn next_window_index(
+        &self,
+        session: SessionId,
+        base_index: u32,
+    ) -> Result<u32, ServerError> {
+        if base_index > MAX_WINDOW_INDEX {
+            return Err(ServerError::InvalidCommand(
+                "no free window index".to_owned(),
+            ));
+        }
         let session = self
             .sessions
             .get(&session)
@@ -2412,9 +3218,10 @@ impl MuxState {
             .iter()
             .map(|window| self.windows[window].index)
             .collect::<BTreeSet<_>>();
-        Ok((0..=u32::MAX)
+        (base_index..=MAX_WINDOW_INDEX)
+            .chain(0..base_index)
             .find(|index| !used.contains(index))
-            .unwrap_or(u32::MAX))
+            .ok_or_else(|| ServerError::InvalidCommand("no free window index".to_owned()))
     }
 
     fn allocate_session_id(&mut self) -> SessionId {
@@ -2443,6 +3250,16 @@ impl MuxState {
 
     pub(crate) fn bump_generation(&mut self) {
         self.generation = self.generation.saturating_add(1);
+    }
+}
+
+fn swap_window_id(value: WindowId, source: WindowId, target: WindowId) -> WindowId {
+    if value == source {
+        target
+    } else if value == target {
+        source
+    } else {
+        value
     }
 }
 
@@ -2485,19 +3302,214 @@ fn divider_layout_error(error: LayoutError, split: SplitId) -> ServerError {
     }
 }
 
-fn unique_match<T: Copy>(
-    target: &str,
-    candidates: impl IntoIterator<Item = T>,
-) -> Result<T, ServerError> {
+fn unique_candidate<T: Copy>(candidates: impl IntoIterator<Item = T>) -> Result<Option<T>, ()> {
     let mut candidates = candidates.into_iter();
-    let first = candidates
-        .next()
-        .ok_or_else(|| ServerError::MissingTarget(target.to_owned()))?;
-    if candidates.next().is_some() {
-        Err(ServerError::AmbiguousTarget(target.to_owned()))
-    } else {
-        Ok(first)
+    let first = candidates.next();
+    if first.is_some() && candidates.next().is_some() {
+        return Err(());
     }
+    Ok(first)
+}
+
+fn validate_window_index_run(base_index: u32, count: usize) -> Result<(), ServerError> {
+    let last_offset = u32::try_from(count.saturating_sub(1))
+        .ok()
+        .filter(|offset| {
+            base_index
+                .checked_add(*offset)
+                .is_some_and(|last| last <= MAX_WINDOW_INDEX)
+        });
+    if base_index > MAX_WINDOW_INDEX || (count != 0 && last_offset.is_none()) {
+        return Err(ServerError::InvalidCommand(
+            "no free window index".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_window_target(target: &str) -> (&str, bool) {
+    let (target, exact) = target
+        .strip_prefix('=')
+        .map_or((target, false), |target| (target, true));
+    let target = match target {
+        "{start}" => "^",
+        "{last}" => "!",
+        "{end}" => "$",
+        "{next}" => "+",
+        "{previous}" => "-",
+        _ => target,
+    };
+    (target, exact)
+}
+
+fn normalize_pane_target(target: &str) -> &str {
+    match target {
+        "{last}" => "!",
+        "{next}" => "+",
+        "{previous}" => "-",
+        "{top}" => "top",
+        "{bottom}" => "bottom",
+        "{left}" => "left",
+        "{right}" => "right",
+        "{top-left}" => "top-left",
+        "{top-right}" => "top-right",
+        "{bottom-left}" => "bottom-left",
+        "{bottom-right}" => "bottom-right",
+        _ => target,
+    }
+}
+
+fn parse_offset(target: &str) -> Option<(bool, u32)> {
+    let (forward, offset) = match target.as_bytes().first() {
+        Some(b'+') => (true, &target[1..]),
+        Some(b'-') => (false, &target[1..]),
+        _ => return None,
+    };
+    let offset = if offset.is_empty() {
+        1
+    } else {
+        offset.parse::<u32>().ok()?
+    };
+    (1..=MAX_WINDOW_INDEX)
+        .contains(&offset)
+        .then_some((forward, offset))
+}
+
+#[derive(Clone)]
+enum GlobToken {
+    AnySequence,
+    AnyCharacter,
+    Literal(char),
+    Class {
+        negated: bool,
+        ranges: Vec<(char, char)>,
+    },
+}
+
+#[derive(Clone, Copy)]
+struct GlobClassCharacter {
+    value: char,
+    escaped: bool,
+}
+
+fn fnmatch(pattern: &str, value: &str) -> bool {
+    let Some(tokens) = glob_tokens(pattern) else {
+        return false;
+    };
+    let value = value.chars().collect::<Vec<_>>();
+    let mut matched = vec![false; value.len() + 1];
+    matched[0] = true;
+    for token in tokens {
+        let mut next = vec![false; value.len() + 1];
+        match token {
+            GlobToken::AnySequence => {
+                next[0] = matched[0];
+                for index in 1..=value.len() {
+                    next[index] = matched[index] || next[index - 1];
+                }
+            }
+            GlobToken::AnyCharacter => {
+                next[1..].copy_from_slice(&matched[..value.len()]);
+            }
+            GlobToken::Literal(expected) => {
+                for (index, character) in value.iter().copied().enumerate() {
+                    next[index + 1] = matched[index] && character == expected;
+                }
+            }
+            GlobToken::Class { negated, ranges } => {
+                for (index, character) in value.iter().copied().enumerate() {
+                    let contains = ranges
+                        .iter()
+                        .any(|(start, end)| *start <= character && character <= *end);
+                    next[index + 1] = matched[index] && contains != negated;
+                }
+            }
+        }
+        matched = next;
+    }
+    matched[value.len()]
+}
+
+fn glob_tokens(pattern: &str) -> Option<Vec<GlobToken>> {
+    let characters = pattern.chars().collect::<Vec<_>>();
+    let mut tokens = Vec::new();
+    let mut index = 0;
+    while index < characters.len() {
+        match characters[index] {
+            '*' => {
+                if !matches!(tokens.last(), Some(GlobToken::AnySequence)) {
+                    tokens.push(GlobToken::AnySequence);
+                }
+                index += 1;
+            }
+            '?' => {
+                tokens.push(GlobToken::AnyCharacter);
+                index += 1;
+            }
+            '\\' => {
+                index += 1;
+                let character = characters.get(index).copied()?;
+                tokens.push(GlobToken::Literal(character));
+                index += 1;
+            }
+            '[' => {
+                if let Some((token, next)) = glob_class(&characters, index + 1) {
+                    tokens.push(token);
+                    index = next;
+                } else {
+                    tokens.push(GlobToken::Literal('['));
+                    index += 1;
+                }
+            }
+            character => {
+                tokens.push(GlobToken::Literal(character));
+                index += 1;
+            }
+        }
+    }
+    Some(tokens)
+}
+
+fn glob_class(characters: &[char], mut index: usize) -> Option<(GlobToken, usize)> {
+    let negated = matches!(characters.get(index), Some('!' | '^'));
+    if negated {
+        index += 1;
+    }
+    let mut members: Vec<GlobClassCharacter> = Vec::new();
+    while index < characters.len() {
+        let character = characters[index];
+        if character == ']' && !members.is_empty() {
+            let mut ranges = Vec::new();
+            let mut member = 0;
+            while member < members.len() {
+                if member + 2 < members.len()
+                    && members[member + 1].value == '-'
+                    && !members[member + 1].escaped
+                {
+                    ranges.push((members[member].value, members[member + 2].value));
+                    member += 3;
+                } else {
+                    ranges.push((members[member].value, members[member].value));
+                    member += 1;
+                }
+            }
+            return Some((GlobToken::Class { negated, ranges }, index + 1));
+        }
+        if character == '\\' {
+            index += 1;
+            members.push(GlobClassCharacter {
+                value: characters.get(index).copied()?,
+                escaped: true,
+            });
+        } else {
+            members.push(GlobClassCharacter {
+                value: character,
+                escaped: false,
+            });
+        }
+        index += 1;
+    }
+    None
 }
 
 /// Pure client-side predictor for `swap-pane` on a wire [`LayoutNode`].
@@ -3167,7 +4179,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_split_keeps_the_cell_tree_and_divider_allocator_unchanged() {
+    fn failed_split_keeps_the_cell_tree_and_allocators_unchanged() {
         let mut state = MuxState::default();
         let (_, window, first) = state.create_session("main").unwrap();
         let narrow = state
@@ -3182,6 +4194,7 @@ mod tests {
             )
             .unwrap();
         let layout = state.windows[&window].layout.clone();
+        let next_pane_id = state.next_pane_id;
         let next_split_id = state.next_split_id;
         let generation = state.generation();
 
@@ -3193,8 +4206,13 @@ mod tests {
         );
         assert_eq!(state.windows[&window].layout, layout);
         assert_eq!(state.windows[&window].panes.len(), 2);
+        assert_eq!(state.next_pane_id, next_pane_id);
         assert_eq!(state.next_split_id, next_split_id);
         assert_eq!(state.generation(), generation);
+        let next = state
+            .split_pane(first, Axis::Horizontal, PaneKind::Terminal)
+            .unwrap();
+        assert_eq!(next, PaneId(next_pane_id));
         assert!(state.validate().is_ok());
     }
 
@@ -3247,12 +4265,37 @@ mod tests {
     }
 
     #[test]
-    fn session_names_resolve_by_exact_match_then_unique_prefix() {
+    fn fnmatch_uses_tmux_flags_zero_metacharacters() {
+        assert!(fnmatch("w[oa]rk", "work"));
+        assert!(fnmatch("w[!x]rk", "work"));
+        assert!(fnmatch("file?", "file1"));
+        assert!(fnmatch("**/name", "path/to/name"));
+        assert!(fnmatch(r"literal\*", "literal*"));
+        assert!(!fnmatch("w[a-c]rk", "work"));
+        assert!(!fnmatch("file?", "file10"));
+    }
+
+    #[test]
+    fn session_targets_follow_id_exact_prefix_and_fnmatch_passes() {
         let mut state = MuxState::default();
         let (work, ..) = state.create_session("work").unwrap();
         let (workshop, ..) = state.create_session("workshop").unwrap();
         let (other, ..) = state.create_session("other").unwrap();
+        let (slash, ..) = state.create_session("path/name").unwrap();
 
+        assert_eq!(state.resolve_session(Some(""), Some(work)).unwrap(), work);
+        assert_eq!(
+            state
+                .resolve_session(Some(&work.to_string()), Some(other))
+                .unwrap(),
+            work
+        );
+        assert_eq!(
+            state
+                .resolve_session(Some(&format!("={work}")), Some(other))
+                .unwrap(),
+            work
+        );
         assert_eq!(
             state.resolve_session(Some("work"), None).unwrap(),
             work,
@@ -3267,15 +4310,129 @@ mod tests {
             workshop
         );
         assert_eq!(state.resolve_session(Some("o"), None).unwrap(), other);
+        assert_eq!(state.resolve_session(Some("oth?r"), None).unwrap(), other);
+        assert_eq!(state.resolve_session(Some("path/*"), None).unwrap(), slash);
 
         let ambiguous = state.resolve_session(Some("wor"), None).unwrap_err();
         assert!(
-            matches!(&ambiguous, ServerError::AmbiguousTarget(message)
-                if message == "wor matches work, workshop"),
+            matches!(&ambiguous, ServerError::SessionNotFound(target) if target == "wor"),
             "{ambiguous:?}"
         );
+        let ambiguous = state.resolve_session(Some("work*"), None).unwrap_err();
+        assert!(matches!(ambiguous, ServerError::SessionNotFound(target) if target == "work*"));
+        let exact_only = state.resolve_session(Some("=works"), None).unwrap_err();
+        assert!(matches!(exact_only, ServerError::SessionNotFound(target) if target == "works"));
         let missing = state.resolve_session(Some("nope"), None).unwrap_err();
-        assert!(matches!(missing, ServerError::MissingTarget(target) if target == "nope"));
+        assert!(matches!(missing, ServerError::SessionNotFound(target) if target == "nope"));
+        let malformed = state.resolve_session(Some("$nope"), None).unwrap_err();
+        assert!(matches!(malformed, ServerError::SessionNotFound(target) if target == "$nope"));
+    }
+
+    #[test]
+    fn window_targets_follow_tokens_indexes_names_prefixes_and_fnmatch() {
+        let mut state = MuxState::default();
+        let (session, first, _) = state.create_session("work").unwrap();
+        state.rename_window(first, "root").unwrap();
+        let (alpha, _) = state
+            .create_window(session, Some("alpha".to_owned()), PaneKind::Terminal)
+            .unwrap();
+        let (alpine, _) = state
+            .create_window(session, Some("alpine".to_owned()), PaneKind::Terminal)
+            .unwrap();
+        let (caret, _) = state
+            .create_window(session, Some("^".to_owned()), PaneKind::Terminal)
+            .unwrap();
+        state.set_window_index(caret, 9).unwrap();
+        state.set_window_index(alpine, 7).unwrap();
+        state.set_window_index(alpha, 3).unwrap();
+        state.select_window(session, first).unwrap();
+
+        for target in ["^", "{start}"] {
+            assert_eq!(
+                state
+                    .resolve_window(Some(target), Some(session), Some(first))
+                    .unwrap(),
+                first
+            );
+        }
+        for target in ["work:$", "{end}", "!", "{last}"] {
+            assert_eq!(
+                state
+                    .resolve_window(Some(target), Some(session), Some(first))
+                    .unwrap(),
+                caret
+            );
+        }
+        for (target, expected) in [
+            ("+", alpha),
+            ("{next}", alpha),
+            ("+2", alpine),
+            ("-", caret),
+            ("{previous}", caret),
+            ("-2", alpine),
+            ("7", alpine),
+            ("alph", alpha),
+            ("a*ha", alpha),
+            ("=^", caret),
+            ("={start}", caret),
+        ] {
+            assert_eq!(
+                state
+                    .resolve_window(Some(target), Some(session), Some(first))
+                    .unwrap(),
+                expected,
+                "{target}"
+            );
+        }
+        assert_eq!(
+            state
+                .resolve_window(Some(&caret.to_string()), Some(session), Some(first))
+                .unwrap(),
+            caret
+        );
+        assert_eq!(
+            state
+                .resolve_window_index_target(Some("+5"), Some(session), Some(first))
+                .unwrap(),
+            (session, Some(5))
+        );
+        assert_eq!(
+            state
+                .resolve_window_index_target(Some("alph"), Some(session), Some(first))
+                .unwrap(),
+            (session, Some(3))
+        );
+
+        for target in ["alp", "a*"] {
+            assert!(matches!(
+                state.resolve_window(Some(target), Some(session), Some(first)),
+                Err(ServerError::WindowNotFound(component)) if component == target
+            ));
+        }
+        assert!(matches!(
+            state.resolve_window(Some("work:=missing"), Some(session), Some(first)),
+            Err(ServerError::WindowNotFound(component)) if component == "missing"
+        ));
+
+        let (fallback, fallback_window, _) = state.create_session("fallback").unwrap();
+        assert_eq!(
+            state
+                .resolve_window(Some("=fallback"), Some(session), Some(first))
+                .unwrap(),
+            fallback_window
+        );
+        assert_eq!(
+            state
+                .resolve_window(Some(&fallback.to_string()), Some(session), Some(first))
+                .unwrap(),
+            fallback_window
+        );
+
+        let (lonely, lonely_window, _) = state.create_session("lonely").unwrap();
+        assert!(matches!(
+            state.resolve_window(Some("lonely:{last}"), Some(lonely), Some(lonely_window)),
+            Err(ServerError::WindowNotFound(component)) if component == "!"
+        ));
     }
 
     #[test]
@@ -3391,7 +4548,7 @@ mod tests {
         }
         assert!(matches!(
             state.resolve_pane(Some("a:b.9"), Some(second_window), Some(second_pane)),
-            Err(ServerError::MissingTarget(target)) if target == "a:b.9"
+            Err(ServerError::PaneNotFound(target)) if target == "9"
         ));
     }
 
@@ -3419,7 +4576,7 @@ mod tests {
         );
         assert!(matches!(
             state.resolve_window(Some("a:shell.9"), Some(session), Some(first_window)),
-            Err(ServerError::MissingTarget(_))
+            Err(ServerError::PaneNotFound(target)) if target == "9"
         ));
     }
 
@@ -3431,11 +4588,11 @@ mod tests {
 
         assert!(matches!(
             state.resolve_window(Some(&target), Some(session), Some(window)),
-            Err(ServerError::MissingTarget(_) | ServerError::InvalidTarget(_))
+            Err(ServerError::WindowNotFound(_))
         ));
         assert!(matches!(
             state.resolve_pane(Some(&target), Some(window), Some(pane)),
-            Err(ServerError::MissingTarget(_) | ServerError::InvalidTarget(_))
+            Err(ServerError::WindowNotFound(_))
         ));
     }
 

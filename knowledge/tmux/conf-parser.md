@@ -65,6 +65,10 @@ Only tokenization lives here. What the resulting commands *mean* (supported name
 changes, and mux commands). Unsupported directives parse fine here and are rejected/skipped downstream
 with a source-span diagnostic.
 
+For `bind-key`, one balanced `{ … }` argument is reparsed as a command list. An empty `{}` is a
+valid empty list. Outside a block, an escaped `\;` separates bound commands; one final separator is
+discarded, while leading and doubled separators still report an empty command.
+
 # Schema
 
 `ConfigDiagnostic` cases emitted directly by the lexer:

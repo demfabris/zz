@@ -137,17 +137,23 @@ See [split-pane layout](/concepts/split-pane-layout.md) for the shipped architec
   bugs (two-pane main-* presets, mixed-parent `-E` spread) are refused and documented in
   [the divergence matrix](/tmux/divergences.md) with `known/` harness scenarios.
 
-## Phase 4 — the grind (~2–3 months, parallelizable)
+## Phase 4 — the grind (shipped 2026-08-17: six waves, each reviewed to CONFIRMED-CLOSED)
 
-| Work | Scope | Estimate |
+Running wave-by-wave on [PR #6](https://github.com/demfabris/zz/pull/6) (`feat/tmux-grind`),
+same loop as phases 0–3: settled plan → codex → full gates → adversarial pin review → close.
+
+| Work | Scope | Status |
 | --- | --- | --- |
-| `base-index` / `pane-base-index` / `renumber-windows` | index arithmetic everywhere — first | with options below |
-| Remaining options | tmux has **180** named options at the pin (zz: 12 tmux names). Most are table rows; `mouse`, `escape-time`, `default-terminal`, `aggressive-resize`, `automatic-rename`, `remain-on-exit` are behavior. `remain-on-exit` lands before `respawn-*` (which is a no-op without it) | 4–5 weeks |
-| Full formats engine | tmux's **198** `format.c` variables + ~29 modifier chars (zz: 16 variables, `?`/`=`, `#S`-style aliases) | 2–3 weeks |
-| Styles (`#[…]`, `*-style`) | meaningful on the TUI surface; GUI maps to theme | 2 weeks |
-| The gap commands | the 16 buildable ones (18 in the matrix minus `link-`/`unlink-window`, decision 3), plus `start-server` as a no-op (TPM's bootstrap runs `tmux start-server\; show-environment`; config sourcing already skips it, the CLI errors today) and basic `refresh-client` | 3 weeks |
-| Target grammar | session `-t` fnmatch (`work*`), `=name` exact-match, empty `-t` = current; empty `{}` and trailing `\;` acceptance | 1 week |
-| `source-file -F`/`-n`/`-v` | format-expanded paths, parse-only, verbose printing — deferred from phase 1 | days |
+| `base-index` / `pane-base-index` / `renumber-windows` | index arithmetic everywhere, plus the pin's full 248-entry option table routing every tmux name by declared scope (`setw -g base-index 1` works) | **shipped 2026-08-17** (wave 4a) |
+| Target grammar | the full cmd-find pass order (fnmatch, `=`-exact, unique prefix, `{start}`/`{end}`/`{last}`/`^`/`$`/`!`/`+`/`-`), empty targets, tmux's exact `can't find …` error strings, cross-window `select-pane` focus semantics | **shipped 2026-08-17** (wave 4b) |
+| Full formats engine | the 198-name registry, every scalar modifier + `S`/`W`/`P` loops + `e` math + `C` search, the daemon runtime-facts feed (proc cwd, pid, tty; OSC 7 → `pane_path`), `-c` as a format consumer with spawn.c's chdir chain, the `fmt:` differential channel | **shipped 2026-08-17** (wave 4c, four review rounds) |
+| Options readback | `show-options`/`show-window-options` with the pin's quoting, `@user` options as pure storage (TPM), `set-`/`show-environment` + PTY env injection, the `out:` differential channel. The review round added: MRU session activity aligned to the pin (create/attach/key-input only — detached CLI traffic never bumps it), the `VISUAL`/`EDITOR` → `mode-keys` boot sniff, indexed `name[idx]` spellings, global-environ seeding + `update-environment` markers, name-sorted `list-sessions` (the `#{S:}` loop deliberately stays creation-ordered like the pin's), and harness env scrubbing (`TMUX_PANE`/`EDITOR` leak both poisoned local probes) | **shipped 2026-08-17** (wave 4d, one review round, CONFIRMED-CLOSED) |
+| The gap commands | `move-window`/`swap-window` full flag surface, `find-window`, `list-clients`/`list-commands` (honest subset, usage strings show zz's accepted flags), `show-messages` (newest-first log, live `message-limit`, failing commands log both `command:` and `message:` lines), `start-server`, `refresh-client`, `list-windows -a` / `list-panes -a`/`-s` name-ordered (resurrect's save path). The range also carried the strftime-parity fix: display-message runs the pin's whole-string-per-level libc strftime (the workspace's only `unsafe` block), `%` accepted as modulo — root cause of the Linux-only CI divergence | **shipped 2026-08-17** (wave 4e, two review rounds, CONFIRMED-CLOSED) |
+| Behavior options, semantics half | `mouse`, `escape-time`, `automatic-rename`, `automatic-rename-format`, `remain-on-exit`, `default-terminal`, `display-time`, and `repeat-time` typed storage/readback; active-pane tab-label gating and explicit-name pinning; retained dead facts plus stable-id `respawn-pane`/`respawn-window`; TERM, message/overlay timeout, and repeat-window consumers. `mouse` and `escape-time` stay storage-only for phase 8. The review round caught two falsified claims (a renamer that never fired; default-terminal correct in readback but not AT the default — the ledger's default-path hazard) and both are fixed and pin-verified; defaults come from the PIN BUILD's -DTMUX_MOUSE/-DTMUX_TERM, protocol v59, and the macOS zero-pgid panic behind the oldest flaky CI test died in validation | **shipped 2026-08-17** (wave 4f-1, one review round, CONFIRMED-CLOSED) |
+| Behavior options, sizing/boot half | `aggressive-resize` stored at global-window/window scope; ON selects componentwise smallest rows and columns from clients actually viewing each window, while the existing zoom gate, active-pane writer, one-cell dead-band, and repeat memo remain unchanged (verified by positive control; seeded convergence sims pass on real sockets). Lazy-create boot parity: fresh daemons empty+unarmed, session 0 on the first default Interactive attach, ids aligned with tmux from the first `new-session` — the harness prologue's auto-session kill is gone and the GEO id-stripping is DELETED, so raw layout checksums and leaf pane ids byte-compare against the pin across all 25 scenarios | **shipped 2026-08-17** (wave 4f-2, one review round, CONFIRMED-CLOSED — phase 4 complete) |
+| Daemon boot parity | CLI-spawned daemons boot empty; the first CLI `new-session` takes name `0` and ids `$0`/`@0`/`%0`, while an empty-target Interactive attach lazily materializes that next numeric session. The harness no longer kills zz session `0` in its prologue and now compares raw layout checksums and leaf ids | **shipped 2026-08-17** (wave 4f-2, phase 4 closed) |
+| Styles (`#[…]`, `*-style`) | meaningful on the TUI surface; GUI maps to theme | later |
+| `source-file -F`/`-n`/`-v` | format-expanded paths, parse-only, verbose printing — deferred from phase 1 | later |
 
 `switch-client` is **not** mechanical: a pane script's `switch-client` must retarget some
 *other* Interactive client's attachment, and the only pane→client seam today is
@@ -252,6 +258,97 @@ TUI client, or a Command→Interactive upgrade). Shares the client-seam work wit
 - Speaking tmux's private client-server socket protocol — decision 4. iTerm2 does not need
   it (phase 6).
 - Fleet broadcast (`--all`) — unchanged from the superset roadmap: composition over features.
+
+# The 100% ledger — consciously parked
+
+Everything below was seen, weighed, and deliberately not done during phase 4. This is the
+checklist for a future 100%-compat assessment: each row is either an accepted divergence to
+re-confirm, a deferred mechanic with an owner phase, or an open question. The operational
+divergence matrix ([divergences](/tmux/divergences.md)) carries the per-command detail;
+this list is the campaign-level index of it plus the items that never got a matrix row.
+
+**Accepted divergences (documented, revisit only deliberately):**
+
+- The CLI error prefix: zz says `zz: mux command failed: …` around tmux's exact message
+  text everywhere except `refresh-client`'s bare `no current client`. rc always matches.
+- `history-limit` default stays 10000 (pin: 2000) — product choice, fenced by a drift test
+  whose allowlist is exactly this one name.
+- `list-commands` is the honest implemented subset, and usage strings show zz's accepted
+  flags rather than the pin's verbatim strings (4e review decision: never advertise a flag
+  that errors).
+- Default (no `-F`) listing line formats (`list-panes`/`list-windows`/`list-sessions`)
+  keep zz's own shapes; the harness and scripts compare through `-F`.
+- Non-UTF-8 argv: pin VIS-octal-escapes (`a\377b`), zz replacement-chars (U+FFFD) —
+  `to_string_lossy` at the CLI boundary; OsString plumbing judged not worth it.
+- `update-environment` markers at session create source from the daemon's environment, not
+  the attaching client's (the wire carries no client environ); diverges when the daemon
+  outlives the shell that started it.
+- Two upstream layout bugs refused rather than reproduced (two-pane `main-*` preset,
+  mixed-parent `-E` spread) — `known/` scenarios pin them.
+- Grouped sessions / linked windows / socket interop / fleet broadcast — the permanent
+  out-of-scope list above; resurrect's grouped-session restore errors loudly by design.
+
+**Deferred mechanics (owner in parentheses):**
+
+- Array options as a category (`status-format[N]`, `command-alias`, `terminal-features`):
+  indexed spellings parse and answer silently; storage/rendering unimplemented (styles
+  wave / TUI phases).
+- Styles (`#[…]`, `*-style` options) and `source-file -F/-n/-v` (marked *later* in the
+  phase-4 table; styles are TUI-meaningful).
+- `#()` job bodies: both sides strftime the whole string first (pinned by test), but the
+  pin also format-expands `#{…}` *inside* the body before running it; zz hands the shell
+  hook the body raw (phase 5/6 — status-seam surface).
+- `#{S:}` loop ordering follows the pin's global sort criteria default (index); if zz ever
+  grows choose-tree sort commands, the loop default must track the mutable criteria
+  (choose-tree work).
+- Positional-arity validation is unguarded and the daemon buffer family hand-rolls its
+  parsing (phase-0 leftovers); `move-pane -p` is zz-lax.
+- `switch-client` and the TTY attach contract ride the client-seam design (phase 8);
+  control mode is phase 6; `tmux -V`/`$TMUX` shape is phase 7.
+- Exec family, hooks bus, popups/menus (phase 5) — see that section's tiering.
+
+- Spawn argv semantics: the pin execs multi-word command argv directly
+  (spawn.c:481-499 — argc>1 → execvp, argc==1 → /bin/sh -c); zz always joins into
+  `sh -c`, so metachars/`$VAR`/globs get shell interpretation tmux never gives them
+  (phase 5 — the exec family owns spawn semantics). Reviewer verdict: fix before
+  any full-compat claim.
+- Build-define-derived option defaults: the pin build's Makefile overrides source
+  fallbacks (`-DTMUX_MOUSE=1`, `-DTMUX_TERM=tmux-256color` — both now matched), and
+  three unimplemented options carry the same hazard when they land: `editor`
+  (platform `_PATH_VI`), `default-shell` (runtime-resolved to the invoking user's
+  shell, NOT the compile-time default), `lock-command` (`TMUX_LOCK_CMD`). Defaults
+  must be probed from the pin binary or resolved at runtime, never transcribed from
+  tmux.h.
+- The default-path hazard (named by the 4f-1 review): aligning a default *constant*
+  is not wiring the default *path* — any option whose effect flows through an
+  `Option<T>` that is `None` at default can read back correctly while behaving
+  divergently. When implementing an option, test the effect AT the default, not
+  only after an explicit set.
+
+- Wire discipline (from the v59 audit): postcard structs serialize positionally, so
+  struct fields must be APPENDED, never inserted — v59's `WindowSnapshot::automatic_rename`
+  went in mid-struct and is safe only because every frame's envelope version-gates
+  before deserialization (framing.rs). Two future changes would turn that into silent
+  corruption: version negotiation accepting N−1, or any frame path skipping the
+  envelope check. Keep the gate strict; append from now on.
+
+**Open questions (investigate before declaring 100%):**
+
+- The lazy-create two-client WIRE race: the in-process concurrent-attach test covers
+  the Shared-level interleaving (which per-connection handler threads share), but a
+  literal two-InteractiveClients-over-sockets race was never constructed (reviewer:
+  CANNOT-VERIFY). Low risk; probe before the full-compat claim.
+
+- The zz-client simulator hang: one 93-minute wedge in `Simulation::boot` (blocking socket
+  read, daemon silent) under full-workspace load; passes solo, immediate rerun green. Four
+  structural suspects cleared; the per-command trail's added lock contention is the
+  surviving hypothesis. PLAUSIBLE, unreproduced.
+- The three documented load-flaky `zz-daemon` tests (`terminal_process_exit_…` and
+  friends) still fail under full-workspace parallel load on CI occasionally — flake, not
+  behavior, but noise in every assessment.
+- macOS-vs-glibc strftime quirks are now load-bearing (the daemon calls libc strftime —
+  the workspace's only `unsafe` block): any future platform (musl, Windows) needs its own
+  parity probe of unknown-`%` handling.
 
 # Risks
 

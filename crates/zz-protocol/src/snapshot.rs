@@ -363,6 +363,8 @@ pub struct PaneSnapshot {
     pub synchronized_input: bool,
     /// A BEL rang here and nobody has visited since. Latched until the pane is read.
     pub bell: bool,
+    pub dead: bool,
+    pub dead_status: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -370,6 +372,7 @@ pub struct WindowSnapshot {
     pub id: WindowId,
     pub index: u32,
     pub name: String,
+    pub automatic_rename: bool,
     pub active_pane: PaneId,
     pub zoomed_pane: Option<PaneId>,
     pub layout: LayoutNode,
@@ -439,6 +442,7 @@ mod tests {
             id,
             index: u32::try_from(id.0).expect("fixture index"),
             name: id.to_string(),
+            automatic_rename: true,
             active_pane: pane,
             zoomed_pane: None,
             layout: LayoutNode::Pane(pane),

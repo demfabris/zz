@@ -35,16 +35,20 @@ because they need client or message state. The daemon also implements 8 uncatalo
 `capture-pane` and `set-`/`show-`/`list-`/`load-`/`save-`/`delete-`/`paste-buffer`. That leaves 24
 of tmux's ~92 commands absent, in three deliberate groups.
 
-## Refused — config must never execute programs (10)
+## Exec commands (doctrine revised by phase 5, 2026-08-18)
 
-The command catalog is the security boundary: a sourced config can only invoke cataloged
-commands, so these are reported and skipped, never run. See the roadmap's never-list for the
-doctrine.
+The old "config must never execute programs" doctrine died with phase 5's verified
+facts: `#()` and creation-command positionals already spawned `/bin/sh` ungated, so
+gating only the exec commands was theater. The user's own `mux.conf` is trusted like
+`.bashrc`; the consent gate moves to the foreign-config *import flow*. `run-shell` /
+`run` and `if-shell` / `if` now execute for real (wave 5a-2, `9f55f87`) with
+pin-parity semantics — see the drop-in plan's phase-5 section for the accepted
+divergences (overlay output routing, no `$TMUX` in job env, job cap backstop).
+
+Still unimplemented and skipped from config:
 
 | Command | What it does in tmux |
 | --- | --- |
-| `run-shell` | Runs any shell command from config/bindings — the bootstrap for every tmux plugin (TPM). |
-| `if-shell` | Shell test picks between two commands. Parse-and-skip for import compat. |
 | `set-hook` / `show-hooks` | Run commands automatically on server events. |
 | `wait-for` | Lets shell scripts block until another script signals. |
 | `pipe-pane` | Streams pane output into a shell command. |
@@ -155,8 +159,6 @@ inside a generic “unsupported formats” claim.
 | `pane_mode` | Native pane mode is not projected as tmux's mode name. | **silent** |
 | `pane_pb_state` | Terminal progress-bar state is not mirrored into mux facts. | **silent** |
 | `pane_search_string` | Native per-view search text is not mirrored into mux facts. | **silent** |
-| `pane_start_command` | The original spawn command is not retained in the pane format record. | **silent** |
-| `pane_start_command_list` | The original spawn argv is not retained in the pane format record. | **silent** |
 | `pane_tabs` | Terminal tab stops are not mirrored into mux facts. | **silent** |
 | `session_activity` | No activity timestamp is exposed; `S/t` still sorts by creation time. The daemon separately tracks only the most-recent session needed for targetless Command-client context. | **silent** |
 | `session_group` | Session groups are unsupported, so no group name exists. | **silent** |

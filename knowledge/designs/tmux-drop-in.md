@@ -160,9 +160,37 @@ same loop as phases 0–3: settled plan → codex → full gates → adversarial
 `ClientHello.origin`, sent by Command clients only. It rides the same client-seam work as
 phase 8.
 
-## Phase 5 — the exec family (~3 weeks)
+## Phase 5 — the exec family (in progress; wave 5a shipped 2026-08-18)
 
-Three tiers, not one:
+Shipped so far, each reviewed to CONFIRMED-CLOSED against the pin:
+
+- **Wave 5a-1** (`26c86d0`) — spawn argv parity: argc>=2 execs the argv directly
+  (PATH search, no shell), argc==1 runs `default-shell -c`, argc==0 keeps zz's
+  integrated login-shell path. `default-shell` is runtime-resolved at boot
+  ($SHELL → passwd → /bin/sh), checkshell-validated at set time (`not a suitable
+  shell:`), and reverts to `/bin/sh` on global unset; `default-command` wired at
+  the spawn seam; `pane_start_command`/`pane_start_command_list` render with
+  byte-exact `args_escape` / single-quote-per-element parity (52/52 adversarial
+  quoting rows identical); respawn reuses creation-time argv AND shell; direct
+  spawn failure dies status 1; dead panes serve their frozen frame to
+  capture-pane.
+- **Wave 5a-2** (`9f55f87`) — `run-shell`/`run` and `if-shell`/`if` execute for
+  real: daemon job machinery (always `/bin/sh -c`, stdin = the output pipe, no
+  timeout, own process group), foreground blocks the CLI with exit-code
+  propagation (protocol v61: append-only `exit_code` on CommandResponse::Success),
+  `'cmd' returned N` / `terminated by signal N` message shapes, four-sink output
+  routing (resolved `-t` → pane overlay; CANFAIL fallback → client sink;
+  session-less client → stdout; `-b` → MRU pane overlay), `-C` command insertion
+  (expanded, no numeric vars, foreground waits through it), `-E`, `-d` strtod
+  semantics (`''`→0, hex accepted, `invalid delay time:` on garbage, delay before
+  empty-args check), `-c` verbatim with silent HOME fallback and verbatim child
+  PWD, numeric `#{1}..#{n}` only on the non-`-C` string, `if-shell -F` first-byte
+  truthiness, branches never expanded, brace blocks via the binding path,
+  config-phase execution blocks boot with output dropped. The stray `-s` flag is
+  accepted-and-ignored like the pin.
+
+Still to build (tiering below): wait-for + pipe-pane (wave 5b, in flight), the
+hooks bus, popups/menus/confirm-before/lock. Original tiering:
 
 - `run-shell`, `if-shell`, `wait-for`, `pipe-pane` — genuinely `sh -c` + effects (~1 week).
   `if-shell` is already parsed and kept (only `%if` is skipped at parse time); the upgrade is
@@ -307,11 +335,29 @@ this list is the campaign-level index of it plus the items that never got a matr
   control mode is phase 6; `tmux -V`/`$TMUX` shape is phase 7.
 - Exec family, hooks bus, popups/menus (phase 5) — see that section's tiering.
 
-- Spawn argv semantics: the pin execs multi-word command argv directly
-  (spawn.c:481-499 — argc>1 → execvp, argc==1 → /bin/sh -c); zz always joins into
-  `sh -c`, so metachars/`$VAR`/globs get shell interpretation tmux never gives them
-  (phase 5 — the exec family owns spawn semantics). Reviewer verdict: fix before
-  any full-compat claim.
+- ~~Spawn argv semantics~~ CLOSED by wave 5a-1 (`26c86d0`): argc>=2 direct exec,
+  argc==1 default-shell `-c`, both pin-verified. Residual accepted divergences:
+  argv0 for argc==1 is the full shell path, not the basename (portable-pty cannot
+  override argv0); argc==0 DOES get the pin's `-basename` login argv0 via
+  portable-pty default-prog, EXCEPT when shell integration rewrites the builder
+  (bash at the default `detect` setting — pre-existing, not a 5a regression);
+  argc>=2 exec failure is detected pre-fork but surfaces as the pin's death class
+  (pane_dead=1, status 1).
+- Exec-family job divergences (wave 5a-2, reviewer-CONFIRMED, accepted): `-t`
+  pane output goes to zz's command-output overlay, not view-mode-in-the-pane, and
+  is dropped when no interactive subscriber exists; `-b` no-`-t` output routes to
+  the MRU session's active pane overlay; job environment inherits the daemon env —
+  no session-environ merge and NO `$TMUX` variable (the single most likely
+  tpm-breaker; phase 7 owns the `$TMUX` shape); shell jobs are capped (a runaway
+  backstop the pin does not have — raised from 16 in the 5b fix round; over-cap
+  `-b` jobs fail with a background message like the pin's job_run failure);
+  Interactive clients cannot park on blocking `wait-for` (they get the pin's
+  clientless error; zz's GUI multiplexes one connection — scripts are faithful).
+- Error-text surface: zz wraps stderr in `zz: mux command failed:` (+
+  `invalid command:`/`unsupported command:` nouns vs the pin's bare
+  `bad value:`/`unknown command:`; usage-text arity errors vs too-few/too-many) —
+  the whole class is phase 7's "error-output shapes matched where scripts grep
+  them" item; exit-code classes already match everywhere probed.
 - Build-define-derived option defaults: the pin build's Makefile overrides source
   fallbacks (`-DTMUX_MOUSE=1`, `-DTMUX_TERM=tmux-256color` — both now matched), and
   three unimplemented options carry the same hazard when they land: `editor`

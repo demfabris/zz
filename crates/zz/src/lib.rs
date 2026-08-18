@@ -56,6 +56,7 @@ use zz_daemon::{DaemonError, InteractiveClient};
 #[cfg(not(target_os = "ios"))]
 use zz_protocol::{
     CommandInvocation, MAX_AGENT_SEND_BYTES, PROTOCOL_VERSION, ServerError, ServerHello,
+    canonical_command,
 };
 use zz_terminal::TerminalColorScheme;
 #[cfg(not(target_os = "ios"))]
@@ -119,7 +120,7 @@ fn run_startup(socket_path: PathBuf) -> Startup {
     };
     let ApplicationArguments {
         socket_path,
-        socket_overridden,
+        socket_source,
         host,
         remaining,
         mux_config_files,
@@ -135,7 +136,7 @@ fn run_startup(socket_path: PathBuf) -> Startup {
     match run_command_mode(
         remaining,
         &socket_path,
-        socket_overridden,
+        socket_source,
         host.as_deref(),
         &mux_config_files,
         no_start_server,
@@ -281,7 +282,7 @@ fn macos_cef_framework_is_available() -> bool {
 #[derive(Debug, PartialEq, Eq)]
 struct ApplicationArguments {
     socket_path: PathBuf,
-    socket_overridden: bool,
+    socket_source: SocketSelectionSource,
     host: Option<String>,
     remaining: Vec<String>,
     mux_config_files: Vec<PathBuf>,
@@ -303,6 +304,21 @@ enum ApplicationArgumentError {
 enum SocketSelection {
     Path(PathBuf),
     Label(String),
+}
+
+#[cfg(not(target_os = "ios"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SocketSelectionSource {
+    Default,
+    Path,
+    Label,
+}
+
+#[cfg(not(target_os = "ios"))]
+impl SocketSelectionSource {
+    fn is_overridden(self) -> bool {
+        self != Self::Default
+    }
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -397,7 +413,7 @@ fn application_arguments(
                     'h' => {
                         return Ok(ApplicationArguments {
                             socket_path: default_path,
-                            socket_overridden: false,
+                            socket_source: SocketSelectionSource::Default,
                             host: None,
                             remaining: Vec::new(),
                             mux_config_files: Vec::new(),
@@ -425,7 +441,7 @@ fn application_arguments(
                     'V' => {
                         return Ok(ApplicationArguments {
                             socket_path: default_path,
-                            socket_overridden: false,
+                            socket_source: SocketSelectionSource::Default,
                             host: None,
                             remaining: Vec::new(),
                             mux_config_files: Vec::new(),
@@ -463,8 +479,12 @@ fn application_arguments(
             "-D foreground server mode is not supported; use `zz daemon`".to_owned(),
         ));
     }
-    let socket_overridden = socket_selection.is_some();
-    if socket_overridden && host.is_some() {
+    let socket_source = match &socket_selection {
+        Some(SocketSelection::Path(_)) => SocketSelectionSource::Path,
+        Some(SocketSelection::Label(_)) => SocketSelectionSource::Label,
+        None => SocketSelectionSource::Default,
+    };
+    if socket_source.is_overridden() && host.is_some() {
         return Err(ApplicationArgumentError::Message(
             "--host cannot be used together with a socket selector".to_owned(),
         ));
@@ -479,7 +499,7 @@ fn application_arguments(
     };
     Ok(ApplicationArguments {
         socket_path,
-        socket_overridden,
+        socket_source,
         host,
         remaining,
         mux_config_files,
@@ -592,7 +612,7 @@ fn tmux_label_socket_path(
 fn run_command_mode(
     arguments: Vec<String>,
     socket_path: &Path,
-    socket_overridden: bool,
+    socket_source: SocketSelectionSource,
     host: Option<&str>,
     mux_config_files: &[PathBuf],
     no_start_server: bool,
@@ -602,6 +622,7 @@ fn run_command_mode(
     if let Some(shell_command) = shell_command {
         return Some(run_tmux_shell_command(
             socket_path,
+            socket_source,
             host,
             mux_config_files,
             no_start_server,
@@ -623,7 +644,7 @@ fn run_command_mode(
     }
     if command == "protocol-version" {
         return Some(
-            match protocol_version_output(args, host, socket_overridden) {
+            match protocol_version_output(args, host, socket_source.is_overridden()) {
                 Ok(version) => {
                     println!("{version}");
                     ExitCode::SUCCESS
@@ -740,16 +761,21 @@ fn run_command_mode(
         }
     }
 
+    let start_server = !no_start_server && tmux_command_starts_server(&command);
+    if let Some(error) = tmux_label_creation_error(socket_path, socket_source, start_server) {
+        eprintln!("{error}");
+        return Some(ExitCode::FAILURE);
+    }
     let mut client = match host.map_or_else(
         || {
-            connect_command_client(socket_path, mux_config_files, no_start_server)
-                .map_err(format_local_daemon_error)
+            connect_command_client(socket_path, mux_config_files, start_server)
+                .map_err(|error| format_local_command_error(socket_path, error))
         },
-        connect_host_command_client,
+        |host| connect_host_command_client(host).map_err(|error| format!("zz: {error}")),
     ) {
         Ok(client) => client,
         Err(error) => {
-            eprintln!("zz: {error}");
+            eprintln!("{error}");
             return Some(ExitCode::FAILURE);
         }
     };
@@ -782,22 +808,28 @@ fn run_command_mode(
 #[cfg(not(target_os = "ios"))]
 fn run_tmux_shell_command(
     socket_path: &Path,
+    socket_source: SocketSelectionSource,
     host: Option<&str>,
     mux_config_files: &[PathBuf],
     no_start_server: bool,
     shell_command: &str,
     login_shell: bool,
 ) -> ExitCode {
+    let start_server = !no_start_server;
+    if let Some(error) = tmux_label_creation_error(socket_path, socket_source, start_server) {
+        eprintln!("{error}");
+        return ExitCode::FAILURE;
+    }
     let mut client = match host.map_or_else(
         || {
-            connect_command_client(socket_path, mux_config_files, no_start_server)
-                .map_err(format_local_daemon_error)
+            connect_command_client(socket_path, mux_config_files, start_server)
+                .map_err(|error| format_local_command_error(socket_path, error))
         },
-        connect_host_command_client,
+        |host| connect_host_command_client(host).map_err(|error| format!("zz: {error}")),
     ) {
         Ok(client) => client,
         Err(error) => {
-            eprintln!("zz: {error}");
+            eprintln!("{error}");
             return ExitCode::FAILURE;
         }
     };
@@ -872,6 +904,49 @@ fn is_version_command(command: &str) -> bool {
 }
 
 #[cfg(not(target_os = "ios"))]
+fn tmux_command_starts_server(command: &str) -> bool {
+    matches!(
+        canonical_command(command),
+        "attach-session" | "list-commands" | "list-keys" | "new-session" | "start-server"
+    )
+}
+
+#[cfg(not(target_os = "ios"))]
+fn tmux_label_creation_error(
+    path: &Path,
+    socket_source: SocketSelectionSource,
+    start_server: bool,
+) -> Option<String> {
+    if socket_source != SocketSelectionSource::Label || !start_server {
+        return None;
+    }
+    let parent = path.parent()?;
+    match std::fs::metadata(parent) {
+        Ok(metadata) if metadata.is_dir() => None,
+        Ok(_) => Some(format!(
+            "error creating {} (Not a directory)",
+            path.display()
+        )),
+        Err(error) => Some(format!(
+            "error creating {} ({})",
+            path.display(),
+            os_error_text(&error)
+        )),
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn os_error_text(error: &io::Error) -> String {
+    let message = error.to_string();
+    error.raw_os_error().map_or(message.clone(), |code| {
+        message
+            .strip_suffix(&format!(" (os error {code})"))
+            .unwrap_or(&message)
+            .to_owned()
+    })
+}
+
+#[cfg(not(target_os = "ios"))]
 fn protocol_version_output(
     mut args: impl Iterator<Item = String>,
     host: Option<&str>,
@@ -890,6 +965,21 @@ fn format_local_daemon_error(error: DaemonError) -> String {
             format!("{error}\nrun 'zz kill-server' to restart it (sessions will be lost)")
         }
         error => error.to_string(),
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn format_local_command_error(path: &Path, error: DaemonError) -> String {
+    match error {
+        DaemonError::Io(error) if error.kind() == ErrorKind::ConnectionRefused => {
+            format!("no server running on {}", path.display())
+        }
+        DaemonError::Io(error) => format!(
+            "error connecting to {} ({})",
+            path.display(),
+            os_error_text(&error)
+        ),
+        error => format!("zz: {}", format_local_daemon_error(error)),
     }
 }
 
@@ -932,7 +1022,7 @@ fn run_kill_server(path: &Path, args: impl IntoIterator<Item = String>) -> ExitC
             Err(error) => error,
         },
         Err(error) if daemon_is_missing(&error) => {
-            eprintln!("zz: no daemon is running at {}", path.display());
+            eprintln!("{}", format_local_command_error(path, error));
             return ExitCode::FAILURE;
         }
         Err(error) => error,
@@ -1063,9 +1153,9 @@ fn connect_or_spawn_daemon<T>(
 fn connect_command_client(
     path: &Path,
     mux_config_files: &[PathBuf],
-    no_start_server: bool,
+    start_server: bool,
 ) -> Result<CommandClient, DaemonError> {
-    if no_start_server {
+    if !start_server {
         return CommandClient::connect(path);
     }
     connect_or_spawn_daemon(
@@ -1529,7 +1619,7 @@ mod tests {
     use super::{
         ApplicationArgumentError, TMUX_USAGE, TMUX_VERSION_OUTPUT, application_arguments,
         command_error_message, daemon_is_missing, inherited_socket_path, is_kill_server_command,
-        protocol_version_output, terminal_color_scheme,
+        protocol_version_output, terminal_color_scheme, tmux_command_starts_server,
     };
     #[cfg(unix)]
     use super::{tmux_label_socket_path, tmux_socket_root};
@@ -1541,6 +1631,36 @@ mod tests {
         assert!(is_kill_server_command("--kill-server"));
         assert!(!is_kill_server_command("kill-session"));
         assert!(!is_kill_server_command("--kill-session"));
+    }
+
+    #[test]
+    fn tmux_start_server_policy_matches_the_pin() {
+        for command in [
+            "attach-session",
+            "attach",
+            "list-commands",
+            "lscm",
+            "list-keys",
+            "lsk",
+            "new-session",
+            "new",
+            "start-server",
+            "start",
+        ] {
+            assert!(tmux_command_starts_server(command), "{command}");
+        }
+        for command in [
+            "list-sessions",
+            "ls",
+            "list-panes",
+            "show-options",
+            "has-session",
+            "source-file",
+            "source",
+            "kill-server",
+        ] {
+            assert!(!tmux_command_starts_server(command), "{command}");
+        }
     }
 
     #[test]
@@ -1692,7 +1812,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(parsed.socket_path, PathBuf::from("/tmp/tmux.sock"));
-        assert!(parsed.socket_overridden);
+        assert!(parsed.socket_source.is_overridden());
         assert!(parsed.no_start_server);
         assert!(parsed.login_shell);
         assert_eq!(

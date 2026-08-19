@@ -3084,8 +3084,9 @@ impl Shared {
             },
             Err(DaemonError::CommandFailed { output, error }) => {
                 let error = daemon_server_error(*error);
+                let message = server_error_text(&error);
                 let mut inner = self.inner.lock();
-                push_server_message(&mut inner, format!("{client_name} message: {error}"));
+                push_server_message(&mut inner, format!("{client_name} message: {message}"));
                 CommandResponse::Error {
                     request_id,
                     error,
@@ -3094,8 +3095,9 @@ impl Shared {
             }
             Err(error) => {
                 let error = daemon_server_error(error);
+                let message = server_error_text(&error);
                 let mut inner = self.inner.lock();
-                push_server_message(&mut inner, format!("{client_name} message: {error}"));
+                push_server_message(&mut inner, format!("{client_name} message: {message}"));
                 CommandResponse::Error {
                     request_id,
                     error,
@@ -4584,7 +4586,7 @@ impl Shared {
                         continue;
                     }
                     self.apply_stored_mux_config_overrides("source-file-replay");
-                    if let Some(summary) = report.summary() {
+                    if let Some(summary) = report.message() {
                         self.publish_to_client(
                             client,
                             EventPayload::ClientMessage {
@@ -12269,7 +12271,7 @@ impl Shared {
                 diagnostic.column,
                 diagnostic.message
             );
-            report.note_invalid(&diagnostic.message);
+            report.note_invalid_at(&diagnostic.source, diagnostic.line, &diagnostic.message);
         }
         for command in parsed.commands {
             if command.name == "reload-config" {
@@ -12306,7 +12308,7 @@ impl Shared {
                             "{}: ignoring invalid tmux command: {message}",
                             path.display()
                         );
-                        report.note_invalid(&message);
+                        report.note_invalid_command(&command, &message);
                         continue;
                     }
                     Err(error) => {
@@ -12321,7 +12323,10 @@ impl Shared {
                 for (source, quiet) in source_effects {
                     if source == "-" {
                         log::warn!("source-file from standard input is not supported");
-                        report.note_invalid("source-file from standard input is not supported");
+                        report.note_invalid_command(
+                            &command,
+                            "source-file from standard input is not supported",
+                        );
                         continue;
                     }
                     let source = expand_relative(path, &source);
@@ -12372,7 +12377,7 @@ impl Shared {
                         "{}: ignoring invalid tmux command: {message}",
                         path.display()
                     );
-                    report.note_invalid(&message);
+                    report.note_invalid_command(&command, &message);
                 }
                 Err(DaemonError::Server(error)) => {
                     log::warn!("{}: ignoring tmux command error: {error}", path.display());
@@ -13008,6 +13013,24 @@ impl ConfigLoadReport {
         if !self.invalid.iter().any(|existing| existing == message) {
             self.invalid.push(message.to_owned());
         }
+    }
+
+    fn note_invalid_at(&mut self, source: &str, line: u32, message: &str) {
+        self.note_invalid(&format!("{source}:{line}: {message}"));
+    }
+
+    fn note_invalid_command(&mut self, command: &CommandInvocation, message: &str) {
+        match &command.source {
+            Some(source) => self.note_invalid_at(&source.source, source.line, message),
+            None => self.note_invalid(message),
+        }
+    }
+
+    fn message(&self) -> Option<String> {
+        if self.skipped_count == 0 && self.invalid_count == 1 {
+            return self.invalid.first().cloned();
+        }
+        self.summary()
     }
 
     fn summary(&self) -> Option<String> {
@@ -16621,8 +16644,15 @@ fn existing_job_working_directory(path: &Path) -> Cow<'_, Path> {
 fn daemon_error_text(error: &DaemonError) -> String {
     match error {
         DaemonError::CommandFailed { error, .. } => daemon_error_text(error),
-        DaemonError::Server(ServerError::InvalidCommand(message)) => message.clone(),
-        _ => error.to_string(),
+        DaemonError::Server(error) => server_error_text(error),
+        error => error.to_string(),
+    }
+}
+
+fn server_error_text(error: &ServerError) -> String {
+    match error {
+        ServerError::InvalidCommand(message) => message.clone(),
+        error => error.to_string(),
     }
 }
 
@@ -21946,6 +21976,28 @@ mod tests {
                 }) if text.contains("run-shell") || text.contains("unsupported tmux command")
             )
         }));
+    }
+
+    #[test]
+    fn config_report_keeps_top_level_unknown_command_source_line() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let mux_config = directory.path().join("mux.conf");
+        fs::write(&mux_config, "wibble\n").expect("mux config fixture");
+        let shared = Arc::new(Shared::new(52));
+        let mut context = ExecutionContext::default();
+        let mut report = ConfigLoadReport::default();
+
+        shared
+            .load_config_file_with_report(&mux_config, &mut context, 0, &mut report)
+            .expect("load invalid config");
+
+        assert_eq!(
+            report.message(),
+            Some(format!(
+                "{}:1: unknown command: wibble",
+                mux_config.display()
+            ))
+        );
     }
 
     #[test]
@@ -32817,10 +32869,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 .iter()
                 .map(|message| message.text.as_str())
                 .collect::<Vec<_>>(),
-            [
-                "mux command failed: can't find window: missing",
-                "next-index"
-            ]
+            ["can't find window: missing", "next-index"]
         );
         assert_eq!(
             shared
@@ -33896,7 +33945,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn failing_command_logs_its_line_and_then_the_error_message() {
+    fn failing_commands_log_pin_shaped_message_and_command_pairs() {
         let shared = Arc::new(Shared::new(1));
         let client = ClientId(7);
         let mut context = ExecutionContext::default();
@@ -33925,9 +33974,41 @@ bind - split-window -v -c "#{pane_current_path}"
             } if window == "99" && output.is_empty()
         ));
 
+        let response = shared.execute_command_request(
+            client,
+            ClientKind::Command,
+            &mut context,
+            2,
+            &CommandInvocation::new("wibble", [] as [&str; 0]),
+        );
+        assert!(matches!(
+            response,
+            CommandResponse::Error {
+                request_id: 2,
+                error: ServerError::InvalidCommand(message),
+                output,
+            } if message == "unknown command: wibble" && output.is_empty()
+        ));
+
+        let response = shared.execute_command_request(
+            client,
+            ClientKind::Command,
+            &mut context,
+            3,
+            &CommandInvocation::new("new-pane", [] as [&str; 0]),
+        );
+        assert!(matches!(
+            response,
+            CommandResponse::Error {
+                request_id: 3,
+                error: ServerError::UnsupportedCommand(message),
+                output,
+            } if message == "new-pane" && output.is_empty()
+        ));
+
         let inner = shared.inner.lock();
-        assert_eq!(inner.message_log.len(), 2);
-        assert_eq!(inner.next_message_number, 2);
+        assert_eq!(inner.message_log.len(), 6);
+        assert_eq!(inner.next_message_number, 6);
         assert_eq!(
             inner
                 .message_log
@@ -33937,8 +34018,27 @@ bind - split-window -v -c "#{pane_current_path}"
             [
                 "device-7 command: select-window -t 99",
                 "device-7 message: can't find window: 99",
+                "device-7 command: wibble",
+                "device-7 message: unknown command: wibble",
+                "device-7 command: new-pane",
+                "device-7 message: unsupported command: new-pane",
             ]
         );
+        drop(inner);
+
+        let output = shared.show_messages("show-messages", &[]).unwrap().output;
+        let lines = output.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 6);
+        assert!(lines[0].ends_with(": device-7 message: unsupported command: new-pane"));
+        assert!(lines[1].ends_with(": device-7 command: new-pane"));
+        assert!(lines[2].ends_with(": device-7 message: unknown command: wibble"));
+        assert!(lines[3].ends_with(": device-7 command: wibble"));
+        assert!(lines[4].ends_with(": device-7 message: can't find window: 99"));
+        assert!(lines[5].ends_with(": device-7 command: select-window -t 99"));
+        assert!(lines.iter().all(|line| {
+            let bytes = line.as_bytes();
+            bytes.get(2) == Some(&b':') && bytes.get(5) == Some(&b':')
+        }));
     }
 
     #[cfg(unix)]

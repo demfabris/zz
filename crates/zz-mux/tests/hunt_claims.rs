@@ -1638,7 +1638,7 @@ fn set_dash_o_keeps_an_already_set_option() {
         .unwrap_err();
     assert!(
         matches!(&error, ServerError::InvalidCommand(message)
-            if message == "option is already set: prefix"),
+            if message == "already set: prefix"),
         "{error:?}"
     );
     engine

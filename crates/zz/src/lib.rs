@@ -785,7 +785,7 @@ fn run_command_mode(
         return Some(match zz_tui::run(request) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
-                eprintln!("zz attach: {error}");
+                eprintln!("{error}");
                 ExitCode::FAILURE
             }
         });
@@ -1131,12 +1131,16 @@ fn print_command_output(mut output: String) {
 fn command_error_message(error: &DaemonError) -> String {
     match error {
         DaemonError::CommandFailed { error, .. } => command_error_message(error),
-        DaemonError::Server(ServerError::InvalidCommand(message))
-            if message == "no current client" =>
-        {
-            message.clone()
-        }
+        DaemonError::Server(error) => server_error_message(error),
         error => format!("zz: {error}"),
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn server_error_message(error: &ServerError) -> String {
+    match error {
+        ServerError::InvalidCommand(message) => message.clone(),
+        error => error.to_string(),
     }
 }
 
@@ -1872,7 +1876,7 @@ mod tests {
             command_error_message(&DaemonError::Server(
                 zz_protocol::ServerError::InvalidCommand("other".to_owned())
             )),
-            "zz: mux command failed: invalid command: other"
+            "other"
         );
     }
 

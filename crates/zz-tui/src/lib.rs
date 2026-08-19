@@ -146,7 +146,7 @@ pub fn run<'a>(request: impl Into<RunRequest<'a>>) -> Result<(), Error> {
     )?;
     resolve_attach_target(&initial, options.session.as_deref())?;
     if !interactive {
-        return Err(Error::message("attach requires an interactive terminal"));
+        return Err(Error::message("open terminal failed: not a terminal"));
     }
     app::run(
         initial,

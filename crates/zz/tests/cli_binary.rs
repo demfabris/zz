@@ -235,10 +235,7 @@ mod daemon_autostart {
             let output = fixture.run(&[command, "-t", "named"]);
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stdout.is_empty());
-            assert_eq!(
-                output.stderr,
-                b"zz attach: attach requires an interactive terminal\n"
-            );
+            assert_eq!(output.stderr, b"open terminal failed: not a terminal\n");
         }
     }
 
@@ -254,7 +251,7 @@ mod daemon_autostart {
             let output = fixture.run(&[command, "-t", "bogus"]);
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stdout.is_empty());
-            assert_eq!(output.stderr, b"zz attach: can't find session: bogus\n");
+            assert_eq!(output.stderr, b"can't find session: bogus\n");
         }
     }
 
@@ -269,7 +266,7 @@ mod daemon_autostart {
         let output = fixture.run(&["attach"]);
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
-        assert_eq!(output.stderr, b"zz attach: no sessions\n");
+        assert_eq!(output.stderr, b"no sessions\n");
         assert!(fixture.socket.exists());
 
         let started = fixture.run(&["show-environment", "-g", "started"]);
@@ -293,7 +290,10 @@ mod daemon_autostart {
             let error = zz_mux::MuxEngine::default()
                 .execute(&mut zz_mux::ExecutionContext::default(), &invocation)
                 .expect_err("engine rejects the unsupported attach option");
-            let expected = format!("zz: mux command failed: {error}\n");
+            let expected = match &error {
+                zz_protocol::ServerError::InvalidCommand(message) => format!("{message}\n"),
+                error => format!("{error}\n"),
+            };
             for command in ["attach", "attach-session"] {
                 let output = fixture
                     .command()
@@ -305,6 +305,88 @@ mod daemon_autostart {
                 assert!(output.stdout.is_empty());
                 assert_eq!(output.stderr, expected.as_bytes());
             }
+        }
+    }
+
+    #[test]
+    fn option_value_errors_match_pinned_tmux_stderr() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "error-shapes"]);
+        assert_eq!(created.status.code(), Some(0));
+        let cases: &[(&[&str], &str)] = &[
+            (
+                &["set", "-g", "display-time", "-5"],
+                "value is too small: -5",
+            ),
+            (
+                &["set", "-g", "display-time", "abc"],
+                "value is invalid: abc",
+            ),
+            (&["set", "-g", "display-time"], "empty value"),
+            (&["set", "-g", "@novalue"], "empty value"),
+            (
+                &["set", "-g", "status-keys", "bogus"],
+                "unknown value: bogus",
+            ),
+            (&["set", "-g", "focus-events", "maybe"], "bad value: maybe"),
+            (&["set", "-g", "status-bg", "xxxyyy"], "bad colour: xxxyyy"),
+            (
+                &["set", "-g", "status-style", "bg=xxxyyy"],
+                "invalid style: bg=xxxyyy",
+            ),
+            (&["set", "-g", "prefix", "boguskey"], "bad key: boguskey"),
+            (
+                &["set", "-g", "default-shell", "/not/a/shell"],
+                "not a suitable shell: /not/a/shell",
+            ),
+            (
+                &["set", "-g", "default-client-command", "if -x {"],
+                "syntax error",
+            ),
+        ];
+        for (arguments, expected) in cases {
+            let output = fixture.run(arguments);
+            assert_eq!(output.status.code(), Some(1), "{arguments:?}");
+            assert!(output.stdout.is_empty(), "{arguments:?}");
+            assert_eq!(
+                output.stderr,
+                format!("{expected}\n").as_bytes(),
+                "{arguments:?}"
+            );
+        }
+
+        let first = fixture.run(&["set", "-g", "@once", "first"]);
+        assert_eq!(first.status.code(), Some(0));
+        assert!(first.stdout.is_empty());
+        assert!(first.stderr.is_empty());
+        let duplicate = fixture.run(&["set", "-go", "@once", "second"]);
+        assert_eq!(duplicate.status.code(), Some(1));
+        assert!(duplicate.stdout.is_empty());
+        assert_eq!(duplicate.stderr, b"already set: @once\n");
+    }
+
+    #[test]
+    fn target_and_unknown_command_errors_match_pinned_tmux_stderr() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "error-shapes"]);
+        assert_eq!(created.status.code(), Some(0));
+        for (arguments, expected) in [
+            (
+                &["kill-session", "-t", "bogus"] as &[&str],
+                b"can't find session: bogus\n" as &[u8],
+            ),
+            (&["wibble"], b"unknown command: wibble\n"),
+        ] {
+            let output = fixture.run(arguments);
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stdout.is_empty());
+            assert_eq!(output.stderr, expected);
         }
     }
 
@@ -743,6 +825,40 @@ mod daemon_autostart {
                 true,
             );
             assert_attached_startup(&stream.outside, "parse-error");
+        }
+
+        #[test]
+        fn control_config_error_keeps_the_source_line_and_inner_message() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let source = fixture._directory.path().join("config-error.conf");
+            std::fs::write(&source, "wibble\n").expect("write invalid config");
+            let input = format!("source-file {}\n\n", source.display());
+            let output = fixture.run_with_stdin(
+                &["-C", "new-session", "-s", "config-error"],
+                input.as_bytes(),
+            );
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 2);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert!(stream.outside.contains(&format!(
+                "%config-error {}:1: unknown command: wibble",
+                source.display()
+            )));
+            assert_attached_startup(
+                &stream
+                    .outside
+                    .iter()
+                    .filter(|line| !line.starts_with("%config-error "))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                "config-error",
+            );
         }
 
         #[test]

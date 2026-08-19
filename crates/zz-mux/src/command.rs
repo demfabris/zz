@@ -1600,7 +1600,15 @@ impl MuxEngine {
                 parse_command_options("kill-server", &command.args)?;
                 Execution::effect(MuxEffect::KillServer)
             }
-            _ => return Err(ServerError::UnsupportedCommand(command.name.clone())),
+            _ if CommandSpec::UNIMPLEMENTED_TMUX_COMMANDS.contains(&name) => {
+                return Err(ServerError::UnsupportedCommand(command.name.clone()));
+            }
+            _ => {
+                return Err(ServerError::InvalidCommand(format!(
+                    "unknown command: {}",
+                    command.name
+                )));
+            }
         };
 
         self.retain_pane_start_commands(&execution.effects);
@@ -4549,6 +4557,7 @@ impl MuxEngine {
             return Ok(Execution::default());
         }
         if table_option.default.is_none() && parsed.index.is_none() {
+            validate_unimplemented_option_value(table_option.name, value)?;
             return Err(ServerError::UnsupportedCommand(format!(
                 "set-option {}",
                 table_option.name
@@ -5678,6 +5687,9 @@ impl MuxEngine {
                         ServerError::InvalidCommand("set-option prefix needs a value".to_owned())
                     })?
                 };
+                if !valid_option_key(value) {
+                    return Err(ServerError::InvalidCommand(format!("bad key: {value}")));
+                }
                 self.keys.set_prefix(value);
                 MuxOptionKey::Prefix
             }
@@ -6807,9 +6819,7 @@ impl MuxEngine {
             default
         } else {
             parse_index_option(
-                value.ok_or_else(|| {
-                    ServerError::InvalidCommand(format!("set-option {option} needs a value"))
-                })?,
+                value.ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?,
                 maximum,
             )?
         };
@@ -7529,9 +7539,44 @@ fn already_set_or_quiet(options: &Options, option: &str) -> Result<Execution, Se
         Ok(Execution::default())
     } else {
         Err(ServerError::InvalidCommand(format!(
-            "option is already set: {option}"
+            "already set: {option}"
         )))
     }
+}
+
+fn validate_unimplemented_option_value(
+    option: &str,
+    value: Option<&str>,
+) -> Result<(), ServerError> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    match option {
+        "status-keys" if !matches!(value, "emacs" | "vi") => Err(ServerError::InvalidCommand(
+            format!("unknown value: {value}"),
+        )),
+        "focus-events" => parse_tmux_flag_value(Some(value), false).map(|_| ()),
+        "status-bg" if parse_tmux_colour(value).is_none() => {
+            Err(ServerError::InvalidCommand(format!("bad colour: {value}")))
+        }
+        "status-style" if !valid_style(value) => Err(ServerError::InvalidCommand(format!(
+            "invalid style: {value}"
+        ))),
+        "default-client-command"
+            if !crate::parse_config("<set-option>", value)
+                .diagnostics
+                .is_empty() =>
+        {
+            Err(ServerError::InvalidCommand("syntax error".to_owned()))
+        }
+        _ => Ok(()),
+    }
+}
+
+fn valid_option_key(value: &str) -> bool {
+    matches!(key_token(value), KeyToken::Named(_))
+        || value.chars().count() == 1
+        || value.eq_ignore_ascii_case("none")
 }
 
 #[derive(Debug, Default)]
@@ -8533,6 +8578,88 @@ mod tests {
             .join("target")
             .join("zz-mux-tests")
             .join(name)
+    }
+
+    #[test]
+    fn unknown_and_unimplemented_commands_keep_distinct_error_classes() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("wibble", &[]))
+                .unwrap_err(),
+            ServerError::InvalidCommand("unknown command: wibble".to_owned())
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("new-pane", &[]))
+                .unwrap_err(),
+            ServerError::UnsupportedCommand("new-pane".to_owned())
+        );
+    }
+
+    #[test]
+    fn option_value_error_text_matches_the_pinned_matrix() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "error-shapes"]),
+            )
+            .unwrap();
+        let mut hooks = CommandHooks::new(0);
+        let mut valid_shell = |shell: &str| shell != "/not/a/shell";
+        for (arguments, expected) in [
+            (
+                &["-g", "display-time", "-5"] as &[&str],
+                "value is too small: -5",
+            ),
+            (&["-g", "display-time", "abc"], "value is invalid: abc"),
+            (&["-g", "display-time"], "empty value"),
+            (&["-g", "@novalue"], "empty value"),
+            (&["-g", "status-keys", "bogus"], "unknown value: bogus"),
+            (&["-g", "focus-events", "maybe"], "bad value: maybe"),
+            (&["-g", "status-bg", "xxxyyy"], "bad colour: xxxyyy"),
+            (
+                &["-g", "status-style", "bg=xxxyyy"],
+                "invalid style: bg=xxxyyy",
+            ),
+            (&["-g", "prefix", "boguskey"], "bad key: boguskey"),
+            (
+                &["-g", "default-shell", "/not/a/shell"],
+                "not a suitable shell: /not/a/shell",
+            ),
+            (&["-g", "default-client-command", "if -x {"], "syntax error"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute_with_shell_validator(
+                        &mut context,
+                        &command("set-option", arguments),
+                        &mut hooks,
+                        &mut valid_shell,
+                    )
+                    .unwrap_err(),
+                ServerError::InvalidCommand(expected.to_owned()),
+                "{arguments:?}"
+            );
+        }
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "@once", "first"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-option", &["-go", "@once", "second"]),
+                )
+                .unwrap_err(),
+            ServerError::InvalidCommand("already set: @once".to_owned())
+        );
     }
 
     #[test]
@@ -16995,7 +17122,7 @@ mod tests {
                 &command("set-option", &["-o", "popup-style", "bg=green"])
             ),
             Err(ServerError::InvalidCommand(message))
-                if message == "option is already set: popup-style"
+                if message == "already set: popup-style"
         ));
         assert_eq!(
             engine.popup_options_for_window(window).unwrap().style,

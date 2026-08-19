@@ -653,6 +653,10 @@ fn is_config_message(text: &str) -> bool {
         || text.starts_with("no such file: ")
         || text.contains(" invalid line")
         || text.starts_with("invalid line")
+        || text
+            .split_once(": ")
+            .and_then(|(location, _)| location.rsplit_once(':'))
+            .is_some_and(|(_, line)| line.parse::<u32>().is_ok())
 }
 
 fn response_request_id(response: &CommandResponse) -> u64 {
@@ -907,8 +911,7 @@ impl<W: Write> ControlWriter<W> {
             CommandResponse::Error { error, output, .. } => {
                 self.payload(&output)?;
                 match error {
-                    ServerError::InvalidCommand(message)
-                    | ServerError::UnsupportedCommand(message) => self.write_line(&message)?,
+                    ServerError::InvalidCommand(message) => self.write_line(&message)?,
                     error => self.write_line(&error.to_string())?,
                 }
                 self.end(frame, true)?;
@@ -1150,7 +1153,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             writer.output,
-            b"%begin 17 1 0\none\ntwo\n%end 17 1 0\n%begin 18 2 1\nhook\n\ncan't find session: gone\n%error 18 2 1\n%begin 19 3 1\nunknown command: bogus-command\n%error 19 3 1\n%begin 20 4 1\nnew-pane\n%error 20 4 1\n"
+            b"%begin 17 1 0\none\ntwo\n%end 17 1 0\n%begin 18 2 1\nhook\n\ncan't find session: gone\n%error 18 2 1\n%begin 19 3 1\nunknown command: bogus-command\n%error 19 3 1\n%begin 20 4 1\nunsupported command: new-pane\n%error 20 4 1\n"
         );
     }
 
@@ -1409,6 +1412,16 @@ mod tests {
             render_message("a\\b\t\n\r\u{7}\u{1b}é"),
             b"a\\b\t\n\\r\\a\\033\xc3\xa9"
         );
+    }
+
+    #[test]
+    fn config_messages_include_the_source_line_shape() {
+        assert!(is_config_message(
+            "/tmp/mux.conf:1: unknown command: wibble"
+        ));
+        assert!(!is_config_message(
+            "device-7 message: unknown command: wibble"
+        ));
     }
 
     #[test]

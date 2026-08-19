@@ -473,7 +473,12 @@ pane visibility). The harness (phase 2) does not wait for this.
   implemented faithfully even while the kill trigger stays divergent;
   pause must gate queue ENTRY, not drain), then 6d sizing/subscriptions.
 
-## Phase 7 — the binary surface (~1 week)
+## Phase 7 — the binary surface (~1 week) — **PHASE COMPLETE 2026-08-18**
+
+Closed by 7a (argv surface, `$TMUX` shape, `-V`), 7b (error-output shapes), and 7d
+(the alias smoke suite, `e45f0dd`). The only phase-7 residue is the optional 7c
+appendix: arity/flag rejection wording, the `usage:` fallback, and the
+`MissingTarget` inner texts — all ledgered, none script-facing.
 
 - tmux argv on the zz binary: `-L` (name → socket path), `-S`, `-f`, `-2`, `-u`, plus `-C`/
   `-CC` (front-end from phase 6) and `-V`.
@@ -518,6 +523,18 @@ pane visibility). The harness (phase 2) does not wait for this.
   The corpus pins TPM, tmux-sensible, vim-tmux-navigator, tmux-yank, tmux-resurrect,
   tmux-continuum, and tmux-fpp. Oh My Tmux remains gated on `%if` evaluation and is not part of
   this wave.
+
+  The corpus forced three capability fixes on first contact, each hit by a real config
+  (all reviewer-swept against the pin): **command prefix resolution** — the pin's
+  `cmd_find` contract (exact alias wins, unique prefix over the alphabetical table
+  resolves, `ambiguous command: <name>, could be: <list>` byte-exact) implemented across
+  engine and daemon dispatch, because tmux-sensible and tmux-continuum call
+  `tmux show-option` (a prefix, not an alias) everywhere; **the argv word grammar** —
+  `cmd_parse_from_arguments`' trailing-`;` rule (word-trailing `;` splits, `\;` keeps a
+  literal, empty segments drop) shared between the CLI chain and bind payloads, because
+  tpm's `start-server\;` reaches argv as an attached `start-server;`; and **parse-time
+  `~` expansion** for unquoted and just-inside-double-quote leading tildes, because
+  stored bindings are `list-keys`-visible and the pin stores absolute paths.
 
 ## Phase 8 — the attach contract (gated on the TUI design)
 

@@ -4,7 +4,7 @@ title: libghostty-vt embedding
 description: How zz-terminal embeds libghostty-vt v0.2.1 over a pinned Ghostty Zig 0.16 snapshot, including terminal color-query replies and single-worker-thread ownership.
 resource: crates/zz-terminal/src/session.rs
 tags: [libghostty, ghostty, vt, zig, worker-thread, mode-revision, kitty-graphics]
-timestamp: 2026-08-10T14:50:30-03:00
+timestamp: 2026-08-19T11:49:46-03:00
 ---
 
 # Overview
@@ -15,7 +15,8 @@ exactly, with `default-features = false`, because crates.io v0.2.0 ignores OSC d
 The `-vt` crate is a safe Rust binding over `libghostty-vt-sys`. Until the wrapper publishes its own
 Zig 0.16 pin, the workspace replaces only that sys crate with the local snapshot documented in
 `third_party/rust/libghostty-vt-sys/UPSTREAM.md`; it statically builds Ghostty commit
-`7aa9591746ffa4d2eee458960c76554352832595`. The repository pins **Zig 0.16.0** in `.zigversion`,
+`20c3eae04dee606349eb21e2dd0293b203d47179`, which includes the upstream correction that makes the
+custom `memset` match the C ABI. The repository pins **Zig 0.16.0** in `.zigversion`,
 `mise.toml`, and CI so every native rebuild uses the required compiler. `zz-terminal` enables the
 wrapper's `kitty-graphics` feature and leaves the other defaults off. `session.rs` uses
 `Terminal::kitty_graphics`, `Terminal::set_kitty_image_storage_limit`, `PlacementIterator`, and the

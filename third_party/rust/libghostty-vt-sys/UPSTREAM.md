@@ -6,16 +6,18 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 
 - Upstream crate version: `0.2.1`
 - Upstream Ghostty pin: `a887df42c56f6de86c0fe6da9c4eeca37931e083`
-- Local Ghostty pin: `7aa9591746ffa4d2eee458960c76554352832595`
+- Local Ghostty pin: `20c3eae04dee606349eb21e2dd0293b203d47179`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
 - Local override: the workspace patches the git-sourced `libghostty-vt-sys` package to this
   directory while leaving the safe `libghostty-vt` crate on its upstream v0.2.1 release commit.
 
 ## Local delta
 
-Ghostty commit `7aa9591` is the upstream Zig 0.16.0 migration. The build-script pin is updated to
-that commit, the checked-in Rust bindings are regenerated from its `include/ghostty/vt.h`, and the
-local `cargo:rerun-if-changed` path names this snapshot's own `build.rs`.
+Ghostty commit `7aa9591` is the upstream Zig 0.16.0 migration. The local pin advances through
+`20c3eae`, which fixes the custom `memset` C ABI by accepting an `int` fill value and explicitly
+truncating it to the low byte. The public libghostty-vt header is unchanged across that range, so the
+checked-in Rust bindings remain those generated from the Zig 0.16 migration. The local
+`cargo:rerun-if-changed` path names this snapshot's own `build.rs`.
 
 The migrated C API changes the Kitty temporary-file medium option from a boolean to a restricted
 directory string. zz builds `libghostty-vt` with `default-features = false`, so the v0.2.1 safe

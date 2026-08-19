@@ -4,7 +4,7 @@ use std::process::Command;
 
 /// Pinned ghostty commit. Update this to pull a newer version.
 const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
-const GHOSTTY_COMMIT: &str = "7aa9591746ffa4d2eee458960c76554352832595";
+const GHOSTTY_COMMIT: &str = "20c3eae04dee606349eb21e2dd0293b203d47179";
 
 #[derive(Clone, Copy)]
 enum LinkMode {
@@ -301,7 +301,11 @@ fn emit_include_metadata(include_paths: &[PathBuf]) {
 /// `ReleaseSmall`).
 ///
 /// Defaults to `ReleaseFast` for optimized builds. If `DEBUG` is `true` (as cargo sets for the
-/// `dev` profile), `Debug` mode is used. Otherwise, if `OPT_LEVEL` is `s` or `z`, `ReleaseSmall`
+/// `dev` profile), `ReleaseSafe` is used: it keeps Zig's runtime safety checks (the terminal
+/// integrity assertions) while avoiding an unoptimized per-byte VT state machine, which parses
+/// roughly 6x slower and blows the daemon's 2s command budgets under test load. Anyone actually
+/// debugging the VT engine can still get an unoptimized build with
+/// `LIBGHOSTTY_VT_SYS_OPTIMIZE=Debug`. Otherwise, if `OPT_LEVEL` is `s` or `z`, `ReleaseSmall`
 /// is used.
 fn zig_optimize_mode() -> &'static str {
     if let Ok(override_mode) = env::var("LIBGHOSTTY_VT_SYS_OPTIMIZE") {
@@ -317,7 +321,7 @@ fn zig_optimize_mode() -> &'static str {
     }
 
     if env::var("DEBUG").as_deref() == Ok("true") {
-        return "Debug";
+        return "ReleaseSafe";
     }
 
     match env::var("OPT_LEVEL").as_deref() {

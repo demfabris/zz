@@ -2,7 +2,7 @@
 
 Raw FFI bindings for libghostty-vt.
 
-This zz-maintained snapshot builds Ghostty `7aa9591746ffa4d2eee458960c76554352832595` with Zig 0.16.0.
+This zz-maintained snapshot builds Ghostty `20c3eae04dee606349eb21e2dd0293b203d47179` with Zig 0.16.0.
 
 - Fetches and builds `libghostty-vt.a` from ghostty sources via Zig by default.
 - Exposes checked-in generated bindings in `src/bindings.rs`.
@@ -20,4 +20,3 @@ This zz-maintained snapshot builds Ghostty `7aa9591746ffa4d2eee458960c7655435283
   `libghostty-vt-static` pkg-config module instead.
 - libghostty-vt is pre-1.0, so these bindings do not guarantee compatibility
   with arbitrary installed C API revisions.
-

@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-08-19
+* **Update**: Advanced the pinned Ghostty Zig 0.16 snapshot to 20c3eae, which corrects the custom memset C ABI, and made ReleaseSafe the Rust dev-profile default to restore VT throughput without corrupting hash tables.
+
 ## 2026-08-17
 * **Update**: Fixed the audit's confirmed input and containment defects. PTY writes no longer stall resize or shutdown, protocol v60 cancels armed prefixes before dialogs, inverse Ctrl/Alt binds now match live input, and FFI connect wakes HELLO. Git refresh now coalesces, copy-pipe kills process groups, DPAPI plaintext is wiped, AppKit state restores on unwind, and BSD wake pipes drain fully.
 * **Update**: Revalidated the 2026-08-17 codebase audit at 758dac0, corrected qualified and overstated claims, and recorded the scoped remediation now under test.

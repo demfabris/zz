@@ -1,0 +1,10 @@
+# Pin starts history-limit at zz's deliberate 10000 default so sensible leaves
+# it unchanged on both sides. Both sides keep the pin's escape-time default of
+# 10, so sensible's changed-from-500 guard skips the update identically.
+tmux-only: set-option -g history-limit 10000
+expect-warn: zz skipped 2 unsupported tmux commands: set-option status-keys, set-option focus-events
+conf: fixtures/sensible.conf
+out: show-options -sv escape-time
+out: show-options -gv display-time
+out: show-options -gv status-interval
+out: show-options -gv history-limit

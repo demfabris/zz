@@ -12,6 +12,7 @@ REPO_DIR="$(cd -- "$COMPAT_DIR/.." && pwd)"
 SCENARIOS_DIR="$COMPAT_DIR/scenarios"
 RESULTS_DIR="$COMPAT_DIR/results"
 FETCH_TMUX="$COMPAT_DIR/fetch-tmux.sh"
+FETCH_CORPUS="$COMPAT_DIR/fetch-corpus.sh"
 DIFF_SCENARIO="$COMPAT_DIR/diff-scenario.sh"
 
 STRICT_GEOMETRY=0
@@ -64,7 +65,9 @@ resolve_scenario() {
     "$SCENARIOS_DIR/$name" \
     "$SCENARIOS_DIR/$name.txt" \
     "$SCENARIOS_DIR/known/$name" \
-    "$SCENARIOS_DIR/known/$name.txt"; do
+    "$SCENARIOS_DIR/known/$name.txt" \
+    "$SCENARIOS_DIR/smoke/$name" \
+    "$SCENARIOS_DIR/smoke/$name.txt"; do
     if [ -f "$candidate" ]; then
       canonical_file "$candidate"
       return 0
@@ -82,10 +85,39 @@ if [ "${#requested[@]}" -gt 0 ]; then
   done
 else
   shopt -s nullglob
-  scenarios=("$SCENARIOS_DIR"/*.txt "$SCENARIOS_DIR"/known/*.txt)
+  scenarios=(
+    "$SCENARIOS_DIR"/*.txt
+    "$SCENARIOS_DIR"/known/*.txt
+    "$SCENARIOS_DIR"/smoke/*.txt
+  )
   shopt -u nullglob
 fi
 [ "${#scenarios[@]}" -gt 0 ] || die "no scenarios found under $SCENARIOS_DIR"
+
+needs_corpus=0
+for scenario in "${scenarios[@]}"; do
+  case "$scenario" in
+  "$SCENARIOS_DIR/smoke/"*) needs_corpus=1 ;;
+  esac
+done
+
+corpus_available=1
+corpus_skip_reason=""
+if [ "$needs_corpus" -eq 1 ]; then
+  log "checking pinned plugin corpus"
+  if corpus_dir="$("$FETCH_CORPUS")"; then
+    export ZZ_COMPAT_CORPUS="$corpus_dir"
+  else
+    corpus_rc=$?
+    if [ "$corpus_rc" -eq 3 ]; then
+      corpus_available=0
+      corpus_skip_reason="plugin corpus unavailable"
+      warn "$corpus_skip_reason; smoke scenarios will be reported as SKIP"
+    else
+      die "fetch-corpus.sh failed with exit $corpus_rc"
+    fi
+  fi
+fi
 
 log "building zz"
 (
@@ -110,8 +142,8 @@ trap cleanup_summary EXIT
 
 {
   printf '# tmux compatibility summary\n\n'
-  printf '| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? |\n'
-  printf '| --- | ---: | :---: | ---: | :---: | :---: |\n'
+  printf '| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |\n'
+  printf '| --- | ---: | :---: | ---: | :---: | :---: | :---: |\n'
 } >"$SUMMARY_TMP"
 
 failed=0
@@ -121,6 +153,24 @@ for scenario in "${scenarios[@]}"; do
   *) scenario_relative="$(basename -- "$scenario")" ;;
   esac
   scenario_name="${scenario_relative%.txt}"
+
+  if [ "$corpus_available" -eq 0 ]; then
+    case "$scenario_relative" in
+    smoke/*)
+      log "SKIP $scenario_name ($corpus_skip_reason)"
+      mkdir -p "$(dirname -- "$RESULTS_DIR/$scenario_name.log")"
+      {
+        printf '# Scenario: %s\n' "$scenario_name"
+        printf 'SKIP: %s\n' "$corpus_skip_reason"
+        printf 'SUMMARY status=skip steps=0 topo_divergences=0 geo_divergences=0 fmt_divergences=0 out_divergences=0 warn_divergences=0\n'
+      } >"$RESULTS_DIR/$scenario_name.log"
+      printf '| %s | 0 | SKIP | 0 | SKIP | SKIP | SKIP: corpus unavailable |\n' \
+        "$scenario_name" >>"$SUMMARY_TMP"
+      continue
+      ;;
+    esac
+  fi
+
   log "running $scenario_name"
 
   diff_args=()
@@ -146,11 +196,13 @@ for scenario in "${scenarios[@]}"; do
   geo_divergences="?"
   fmt_clean="?"
   out_clean="?"
+  warn_clean="n/a"
   if [ -n "$metadata" ]; then
     read -r -a metadata_tokens <<<"$metadata"
     topo_count=""
     fmt_count=""
     out_count=""
+    warn_count=""
     for token in "${metadata_tokens[@]}"; do
       case "$token" in
       steps=*) steps="${token#steps=}" ;;
@@ -158,6 +210,7 @@ for scenario in "${scenarios[@]}"; do
       geo_divergences=*) geo_divergences="${token#geo_divergences=}" ;;
       fmt_divergences=*) fmt_count="${token#fmt_divergences=}" ;;
       out_divergences=*) out_count="${token#out_divergences=}" ;;
+      warn_divergences=*) warn_count="${token#warn_divergences=}" ;;
       esac
     done
     if [ "$topo_count" = "0" ]; then
@@ -175,11 +228,16 @@ for scenario in "${scenarios[@]}"; do
     elif [ -n "$out_count" ]; then
       out_clean="no"
     fi
+    if [ "$warn_count" = "0" ]; then
+      warn_clean="yes"
+    elif [ -n "$warn_count" ]; then
+      warn_clean="no"
+    fi
   fi
 
-  printf '| %s | %s | %s | %s | %s | %s |\n' \
+  printf '| %s | %s | %s | %s | %s | %s | %s |\n' \
     "$scenario_name" "$steps" "$topo_clean" "$geo_divergences" "$fmt_clean" \
-    "$out_clean" >>"$SUMMARY_TMP"
+    "$out_clean" "$warn_clean" >>"$SUMMARY_TMP"
 
   expected=0
   case "$scenario_relative" in
@@ -187,7 +245,7 @@ for scenario in "${scenarios[@]}"; do
   esac
 
   if [ "$scenario_rc" -eq 1 ] && [ "$expected" -eq 1 ] && [ "$fmt_count" = "0" ] &&
-    [ "$out_count" = "0" ]; then
+    [ "$out_count" = "0" ] && [ "${warn_count:-0}" = "0" ]; then
     warn "$scenario_name has its expected documented divergence"
   elif [ "$scenario_rc" -ne 0 ]; then
     warn "$scenario_name failed; see $log_file"

@@ -10,8 +10,8 @@ use std::{
 
 use zz_daemon::InteractiveClient;
 use zz_protocol::{
-    COMMAND_SPECS, CommandInvocation, CommandResponse, CommandSpec, DAEMON_COMMAND_SPECS,
-    EventPayload, MuxSnapshot, ProtocolMessage, ServerError, SessionId, WindowId,
+    CommandInvocation, CommandResponse, EventPayload, MuxSnapshot, ProtocolMessage, ServerError,
+    SessionId, WindowId,
 };
 
 use super::{
@@ -653,6 +653,7 @@ fn is_config_message(text: &str) -> bool {
         || text.starts_with("no such file: ")
         || text.contains(" invalid line")
         || text.starts_with("invalid line")
+        || (text.starts_with("skipped ") && text.contains("unsupported tmux command"))
         || text
             .split_once(": ")
             .and_then(|(location, _)| location.rsplit_once(':'))
@@ -816,12 +817,11 @@ fn parse_line(line: &str) -> ParsedLine {
 }
 
 fn unknown_command(name: &str) -> Option<String> {
-    let known = COMMAND_SPECS
-        .iter()
-        .chain(DAEMON_COMMAND_SPECS)
-        .any(|spec| spec.name == name || spec.aliases.contains(&name))
-        || CommandSpec::UNIMPLEMENTED_TMUX_COMMANDS.contains(&name);
-    (!known).then(|| format!("unknown command: {name}"))
+    match zz_protocol::resolve_command(name) {
+        zz_protocol::CommandResolution::Unknown => Some(format!("unknown command: {name}")),
+        zz_protocol::CommandResolution::Ambiguous(message) => Some(message),
+        _ => None,
+    }
 }
 
 fn unix_timestamp() -> u64 {
@@ -1419,8 +1419,20 @@ mod tests {
         assert!(is_config_message(
             "/tmp/mux.conf:1: unknown command: wibble"
         ));
+        assert!(is_config_message(
+            "skipped 1 unsupported tmux command: focus-events"
+        ));
+        assert!(is_config_message(
+            "skipped 2 unsupported tmux commands: focus-events, status-keys"
+        ));
         assert!(!is_config_message(
             "device-7 message: unknown command: wibble"
+        ));
+        assert!(!is_config_message(
+            "skipped 2 deprecated options: focus-events, status-keys"
+        ));
+        assert!(!is_config_message(
+            "prefix skipped 2 unsupported tmux commands: focus-events, status-keys"
         ));
     }
 

@@ -1,0 +1,6 @@
+# TPM initializes through the tmux PATH shim and its argv-level ';' probe.
+conf: fixtures/tpm-init.conf
+keys: prefix I
+keys: prefix U
+keys: prefix M-u
+out: show-environment -g TMUX_PLUGIN_MANAGER_PATH

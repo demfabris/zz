@@ -1,0 +1,3 @@
+conf: fixtures/yank.conf
+keys: copy-mode-vi y
+keys: copy-mode-vi Enter

@@ -84,7 +84,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 const GPUI_SOURCE: &str = env!("ZZ_GPUI_SOURCE");
 
 #[cfg(not(target_os = "ios"))]
-const TMUX_VERSION_OUTPUT: &str = "tmux 3.8-zz";
+const TMUX_VERSION_OUTPUT: &str = zz_protocol::CommandSpec::TMUX_VERSION_OUTPUT;
 #[cfg(not(target_os = "ios"))]
 const TMUX_USAGE: &str = concat!(
     "usage: zz [-2CDhlNuVv] [-c shell-command] [-f file] [-L socket-name]\n",
@@ -175,7 +175,7 @@ fn run_startup(socket_path: PathBuf) -> Startup {
         ));
     }
     match run_command_mode(
-        remaining,
+        &remaining,
         &socket_path,
         socket_source,
         host.as_deref(),
@@ -650,7 +650,7 @@ fn tmux_label_socket_path(
 
 #[cfg(not(target_os = "ios"))]
 fn run_command_mode(
-    arguments: Vec<String>,
+    arguments: &[String],
     socket_path: &Path,
     socket_source: SocketSelectionSource,
     host: Option<&str>,
@@ -670,21 +670,26 @@ fn run_command_mode(
             login_shell,
         ));
     }
-    let mut args = arguments.into_iter();
-    let Some(command) = args.next() else {
+    let mut commands = split_command_chain(arguments).into_iter();
+    let Some(mut invocation) = commands.next() else {
         if host.is_some() {
             eprintln!("zz: --host requires a command");
             return Some(ExitCode::FAILURE);
         }
         return None;
     };
+    let command = invocation.name.clone();
     if is_version_command(&command) {
         println!("zz {}", env!("CARGO_PKG_VERSION"));
         return Some(ExitCode::SUCCESS);
     }
     if command == "protocol-version" {
         return Some(
-            match protocol_version_output(args, host, socket_source.is_overridden()) {
+            match protocol_version_output(
+                invocation.args.into_iter(),
+                host,
+                socket_source.is_overridden(),
+            ) {
                 Ok(version) => {
                     println!("{version}");
                     ExitCode::SUCCESS
@@ -725,7 +730,7 @@ fn run_command_mode(
     }
 
     if command == "fleet" {
-        return Some(match fleet::run(args) {
+        return Some(match fleet::run(invocation.args) {
             Ok(output) => {
                 if !output.is_empty() {
                     println!("{output}");
@@ -740,11 +745,11 @@ fn run_command_mode(
     }
 
     if is_kill_server_command(&command) && host.is_none() {
-        return Some(run_kill_server(socket_path, args));
+        return Some(run_kill_server(socket_path, invocation.args));
     }
 
     if canonical_command(&command) == "attach-session" {
-        let options = match parse_native_attach_arguments(args) {
+        let options = match parse_native_attach_arguments(invocation.args) {
             Ok(options) => options,
             Err(NativeAttachArgumentError::Usage) => {
                 eprintln!("{NATIVE_ATTACH_USAGE}");
@@ -791,14 +796,13 @@ fn run_command_mode(
         });
     }
 
-    let mut args = args.collect::<Vec<_>>();
-    if command == "agent-send" && zz_daemon::agent_send_reads_stdin(&args) {
+    if command == "agent-send" && zz_daemon::agent_send_reads_stdin(&invocation.args) {
         match read_stdin_payload() {
             Ok(payload) => {
-                if !args.iter().any(|argument| argument == "--") {
-                    args.push("--".to_owned());
+                if !invocation.args.iter().any(|argument| argument == "--") {
+                    invocation.args.push("--".to_owned());
                 }
-                args.push(payload);
+                invocation.args.push(payload);
             }
             Err(error) => {
                 eprintln!("zz: {error}");
@@ -831,16 +835,15 @@ fn run_command_mode(
             return Some(ExitCode::FAILURE);
         }
     };
-    let command = if host.is_some() && command == "--kill-server" {
-        "kill-server".to_owned()
-    } else {
-        command
-    };
-    match client.execute(CommandInvocation::new(command, args)) {
-        Ok(output) => {
-            print_command_output(output);
-            Some(ExitCode::SUCCESS)
-        }
+    if host.is_some() && invocation.name == "--kill-server" {
+        "kill-server".clone_into(&mut invocation.name);
+    }
+    match execute_command_chain(
+        std::iter::once(invocation).chain(commands),
+        |command| client.execute(command),
+        print_command_output,
+    ) {
+        Ok(()) => Some(ExitCode::SUCCESS),
         Err(DaemonError::CommandExit { output, exit_code }) => {
             print_command_output(output);
             Some(ExitCode::from(exit_code))
@@ -855,6 +858,30 @@ fn run_command_mode(
             Some(ExitCode::FAILURE)
         }
     }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn split_command_chain(arguments: &[String]) -> Vec<CommandInvocation> {
+    zz_protocol::split_command_words(arguments.iter().cloned())
+        .into_iter()
+        .filter_map(|words| {
+            let mut words = words.into_iter();
+            let name = words.next()?;
+            Some(CommandInvocation::new(name, words))
+        })
+        .collect()
+}
+
+#[cfg(not(target_os = "ios"))]
+fn execute_command_chain<E>(
+    commands: impl IntoIterator<Item = CommandInvocation>,
+    mut execute: impl FnMut(CommandInvocation) -> Result<String, E>,
+    mut output: impl FnMut(String),
+) -> Result<(), E> {
+    for command in commands {
+        output(execute(command)?);
+    }
+    Ok(())
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1763,9 +1790,9 @@ mod tests {
 
     use super::{
         ApplicationArgumentError, TMUX_USAGE, TMUX_VERSION_OUTPUT, application_arguments,
-        command_error_message, daemon_is_missing, inherited_socket_path, is_kill_server_command,
-        parse_native_attach_arguments, protocol_version_output, terminal_color_scheme,
-        tmux_command_starts_server,
+        command_error_message, daemon_is_missing, execute_command_chain, inherited_socket_path,
+        is_kill_server_command, parse_native_attach_arguments, protocol_version_output,
+        split_command_chain, terminal_color_scheme, tmux_command_starts_server,
     };
     #[cfg(unix)]
     use super::{tmux_label_socket_path, tmux_socket_root};
@@ -1829,6 +1856,57 @@ mod tests {
             parse_native_attach_arguments(["-t", "one", "two"].map(str::to_owned)),
             Err(super::NativeAttachArgumentError::Usage)
         ));
+    }
+
+    #[test]
+    fn bare_semicolons_split_commands_and_escaped_semicolons_stay_arguments() {
+        let commands = split_command_chain(
+            &[
+                "start-server;",
+                "show-environment",
+                "-g",
+                "TMUX_PLUGIN_MANAGER_PATH",
+                ";",
+                "display-message",
+                r"a\;",
+                r"\;",
+            ]
+            .map(str::to_owned),
+        );
+        assert_eq!(
+            commands,
+            [
+                zz_protocol::CommandInvocation::new("start-server", std::iter::empty::<&str>()),
+                zz_protocol::CommandInvocation::new(
+                    "show-environment",
+                    ["-g", "TMUX_PLUGIN_MANAGER_PATH"]
+                ),
+                zz_protocol::CommandInvocation::new("display-message", ["a;", ";"])
+            ]
+        );
+    }
+
+    #[test]
+    fn command_chains_preserve_output_and_abort_on_the_first_error() {
+        let commands =
+            split_command_chain(&["first", ";", "fail", ";", "never"].map(str::to_owned));
+        let mut seen = Vec::new();
+        let mut output = Vec::new();
+        let result = execute_command_chain(
+            commands,
+            |command| {
+                seen.push(command.name.clone());
+                match command.name.as_str() {
+                    "first" => Ok("first output\n".to_owned()),
+                    "fail" => Err(17_u8),
+                    _ => panic!("command after the failure executed"),
+                }
+            },
+            |text| output.push(text),
+        );
+        assert_eq!(result, Err(17));
+        assert_eq!(seen, ["first", "fail"]);
+        assert_eq!(output, ["first output\n"]);
     }
 
     #[test]
@@ -1902,13 +1980,19 @@ mod tests {
 
     #[test]
     fn socket_flag_overrides_the_environment_resolved_path() {
+        let inherited = inherited_socket_path(
+            PathBuf::from("/tmp/zz-env.sock"),
+            true,
+            Some(std::ffi::OsStr::new("/tmp/tmux-env.sock,123,4")),
+        );
+        assert_eq!(inherited, PathBuf::from("/tmp/zz-env.sock"));
         let parsed = application_arguments(
             [
                 "--socket".to_owned(),
                 "/tmp/forwarded.sock".to_owned(),
                 "list-sessions".to_owned(),
             ],
-            PathBuf::from("/tmp/default.sock"),
+            inherited,
         )
         .unwrap();
         assert_eq!(parsed.socket_path, PathBuf::from("/tmp/forwarded.sock"));

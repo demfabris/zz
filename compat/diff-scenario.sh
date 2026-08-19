@@ -7,7 +7,9 @@ set +B
 COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SCENARIOS_DIR="$COMPAT_DIR/scenarios"
 RESULTS_DIR="$COMPAT_DIR/results"
+DEFAULT_CORPUS_DIR="$COMPAT_DIR/.cache/plugins"
 STRICT_GEOMETRY=0
+HARNESS_PATH="$PATH"
 
 if [ "${1:-}" = "--strict-geometry" ]; then
   STRICT_GEOMETRY=1
@@ -44,6 +46,13 @@ esac
 scenario_name="${scenario_relative%.txt}"
 safe_name="${scenario_name//\//-}"
 safe_name="${safe_name//[^[:alnum:]_.-]/-}"
+SMOKE_MODE=0
+case "$scenario_relative" in
+smoke/*) SMOKE_MODE=1 ;;
+esac
+if grep -Eq '^[[:space:]]*shim:[[:space:]]*$' "$SCENARIO_FILE"; then
+  SMOKE_MODE=1
+fi
 
 LOG_FILE="$RESULTS_DIR/$scenario_name.log"
 mkdir -p "$RESULTS_DIR" "$(dirname -- "$LOG_FILE")"
@@ -57,8 +66,16 @@ TMUX_SOCKET_NAME="zzc-$$"
 DAEMON_STDOUT="$SCRATCH_DIR/zz-daemon.stdout"
 DAEMON_STDERR="$SCRATCH_DIR/zz-daemon.stderr"
 ZZ_PID=""
+CORPUS_DIR="${ZZ_COMPAT_CORPUS:-$DEFAULT_CORPUS_DIR}"
+ZZ_SHIM_DIR="$SCRATCH_DIR/zz/bin"
+TMUX_SHIM_DIR="$SCRATCH_DIR/tmux/bin"
+STAGED_CONF="$ZZ_HOME/.tmux.conf"
+EXPECTED_ZZ_WARNINGS="$SCRATCH_DIR/expected.zz.warnings"
+EXPECTED_TMUX_WARNINGS="$SCRATCH_DIR/expected.tmux.warnings"
 
 mkdir -p "$ZZ_HOME" "$ZZ_CONFIG_HOME"
+: >"$EXPECTED_ZZ_WARNINGS"
+: >"$EXPECTED_TMUX_WARNINGS"
 
 die() {
   printf 'HARNESS ERROR: %s\n' "$*" >>"$LOG_FILE"
@@ -72,16 +89,50 @@ die() {
 # Running the harness from a shell that carries any of those would leak the
 # developer's context into the scratch servers, so both sides run scrubbed.
 zz_command() {
-  env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
-    -u EDITOR -u VISUAL \
-    HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
-    "$ZZ_BIN" --socket "$ZZ_SOCKET" "$@"
+  if [ "$SMOKE_MODE" -eq 1 ]; then
+    env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+      -u EDITOR -u VISUAL \
+      HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
+      PATH="$ZZ_SHIM_DIR:$(dirname -- "$ZZ_BIN"):$(dirname -- "$TMUX_BIN"):$HARNESS_PATH" \
+      ZZ_SMOKE_CANARY="zz-side-only" ZZ_SMOKE_ZZ_BIN="$ZZ_BIN" \
+      ZZ_SMOKE_ZZ_SOCKET="$ZZ_SOCKET" \
+      "$ZZ_BIN" --socket "$ZZ_SOCKET" "$@"
+  else
+    env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+      -u EDITOR -u VISUAL \
+      HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
+      "$ZZ_BIN" --socket "$ZZ_SOCKET" "$@"
+  fi
 }
 
 tmux_command() {
-  env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
-    -u EDITOR -u VISUAL \
-    "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" "$@"
+  if [ "$SMOKE_MODE" -eq 1 ]; then
+    env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+      -u EDITOR -u VISUAL \
+      HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
+      PATH="$TMUX_SHIM_DIR:$(dirname -- "$TMUX_BIN"):$(dirname -- "$ZZ_BIN"):$HARNESS_PATH" \
+      ZZ_SMOKE_CANARY="tmux-side-only" ZZ_SMOKE_TMUX_BIN="$TMUX_BIN" \
+      ZZ_SMOKE_TMUX_LABEL="$TMUX_SOCKET_NAME" \
+      "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" "$@"
+  else
+    env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+      -u EDITOR -u VISUAL \
+      "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" "$@"
+  fi
+}
+
+tmux_start_command() {
+  if [ "$SMOKE_MODE" -eq 1 ]; then
+    env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+      -u EDITOR -u VISUAL \
+      HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
+      PATH="$TMUX_SHIM_DIR:$(dirname -- "$TMUX_BIN"):$(dirname -- "$ZZ_BIN"):$HARNESS_PATH" \
+      ZZ_SMOKE_CANARY="tmux-side-only" ZZ_SMOKE_TMUX_BIN="$TMUX_BIN" \
+      ZZ_SMOKE_TMUX_LABEL="$TMUX_SOCKET_NAME" \
+      "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" -f /dev/null "$@"
+  else
+    "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" -f /dev/null "$@"
+  fi
 }
 
 side_command() {
@@ -127,6 +178,125 @@ append_stream() {
   else
     printf '    <empty>\n' >>"$LOG_FILE"
   fi
+}
+
+prepare_smoke() {
+  local plugin
+  local plugins=(
+    tpm tmux-sensible vim-tmux-navigator tmux-yank tmux-resurrect
+    tmux-continuum tmux-fpp
+  )
+
+  [ -d "$CORPUS_DIR" ] || die "smoke corpus is missing: $CORPUS_DIR"
+  CORPUS_DIR="$(cd -- "$CORPUS_DIR" && pwd)"
+  mkdir -p "$ZZ_SHIM_DIR" "$TMUX_SHIM_DIR" "$ZZ_HOME/.tmux/plugins" \
+    "$ZZ_HOME/.tmux/bin"
+  for plugin in "${plugins[@]}"; do
+    [ -d "$CORPUS_DIR/$plugin/.git" ] ||
+      die "smoke corpus is missing $CORPUS_DIR/$plugin"
+    ln -s "$CORPUS_DIR/$plugin" "$ZZ_HOME/.tmux/plugins/$plugin"
+  done
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'export ZZ_SMOKE_CANARY=zz-wrapper-only' \
+    'export ZZ_SOCKET=/tmp/zz-smoke-wrong.sock' \
+    'export TMUX=/tmp/zz-smoke-wrong.sock,0,-1' \
+    "exec \"\$ZZ_SMOKE_ZZ_BIN\" --socket \"\$ZZ_SMOKE_ZZ_SOCKET\" \"\$@\"" \
+    >"$ZZ_SHIM_DIR/tmux"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'export ZZ_SMOKE_CANARY=tmux-wrapper-only' \
+    'export ZZ_SOCKET=/tmp/tmux-smoke-wrong.sock' \
+    'export TMUX=/tmp/tmux-smoke-wrong.sock,0,-1' \
+    "exec \"\$ZZ_SMOKE_TMUX_BIN\" -L \"\$ZZ_SMOKE_TMUX_LABEL\" \"\$@\"" \
+    >"$TMUX_SHIM_DIR/tmux"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$ZZ_HOME/.tmux/bin/apply-theme"
+  chmod +x "$ZZ_SHIM_DIR/tmux" "$TMUX_SHIM_DIR/tmux" \
+    "$ZZ_HOME/.tmux/bin/apply-theme"
+}
+
+stage_smoke_conf() {
+  local argument="$1"
+  local source
+
+  case "$argument" in
+  /*) source="$argument" ;;
+  *) source="$(dirname -- "$SCENARIO_FILE")/$argument" ;;
+  esac
+  [ -f "$source" ] || die "smoke config not found: $source"
+  if grep -q 'ZZ_SMOKE_CANARY' "$source"; then
+    die "smoke config must not depend on ZZ_SMOKE_CANARY: $source"
+  fi
+  cp -- "$source" "$STAGED_CONF"
+}
+
+extract_config_warnings() {
+  local source="$1"
+  local destination="$2"
+  sed -n '/^%config-error /p' "$source" | LC_ALL=C sort -u >"$destination"
+}
+
+# Empty %begin/%end pairs are collapsed: the pin frames every config line as
+# its own block through a control client's source-file while zz runs the whole
+# file in one block (ledgered framing divergence). %error pairs are kept — an
+# empty %error body is the pin's exec-time config-failure signal.
+normalize_control_stdout() {
+  local source="$1"
+  local destination="$2"
+  sed -E \
+    -e '/^%config-error /d' \
+    -e 's/^%begin [0-9]+ [0-9]+ ([0-9]+)$/%begin TIME NUMBER \1/' \
+    -e 's/^%(end|error) [0-9]+ [0-9]+ ([0-9]+)$/%\1 TIME NUMBER \2/' \
+    "$source" |
+    awk '
+      {
+        if (held != "") {
+          if ($0 ~ /^%end TIME NUMBER /) { held = ""; next }
+          print held
+          held = ""
+        }
+        if ($0 ~ /^%begin TIME NUMBER /) { held = $0; next }
+        print
+      }
+      END { if (held != "") print held }
+    ' >"$destination"
+}
+
+control_terminator() {
+  awk '/^%(end|error) [0-9]+ [0-9]+ [0-9]+$/ { value = $1 } END { print value }' "$1"
+}
+
+extract_key_binding() {
+  local source="$1"
+  local destination="$2"
+  local table="$3"
+  local key="$4"
+
+  awk -F '|' -v table="$table" -v key="$key" \
+    '$1 == table && $2 == key { print }' "$source" >"$destination"
+  [ "$(wc -l <"$destination" | tr -d '[:space:]')" = "1" ]
+}
+
+compare_expected() {
+  local label="$1"
+  local step="$2"
+  local expected="$3"
+  local actual="$4"
+  local diff_file="$SCRATCH_DIR/$safe_name-$step-$label.diff"
+  local rc
+
+  if diff -u --label "expected $label step $step" --label "actual $label step $step" \
+    "$expected" "$actual" >"$diff_file"; then
+    printf '%s: clean\n' "$label" >>"$LOG_FILE"
+    return 0
+  else
+    rc=$?
+  fi
+  [ "$rc" -eq 1 ] || die "diff failed while checking $label at step $step"
+  printf '%s: mismatch\n' "$label" >>"$LOG_FILE"
+  cat "$diff_file" >>"$LOG_FILE"
+  return 1
 }
 
 run_setup() {
@@ -291,6 +461,37 @@ compare_snapshot() {
   fi
 } >>"$LOG_FILE"
 
+if [ "$SMOKE_MODE" -eq 1 ]; then
+  while IFS= read -r raw_line || [ -n "$raw_line" ]; do
+    raw_line="${raw_line%$'\r'}"
+    line="${raw_line#"${raw_line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    case "$line" in
+    expect-warn:*)
+      warning="${line#expect-warn:}"
+      warning="${warning#"${warning%%[![:space:]]*}"}"
+      side="${warning%%[[:space:]]*}"
+      warning="${warning#"$side"}"
+      warning="${warning#"${warning%%[![:space:]]*}"}"
+      [ -n "$warning" ] || die "expect-warn needs SIDE and warning text: $line"
+      case "$side" in
+      zz) printf '%%config-error %s\n' "$warning" >>"$EXPECTED_ZZ_WARNINGS" ;;
+      tmux) printf '%%config-error %s\n' "$warning" >>"$EXPECTED_TMUX_WARNINGS" ;;
+      *) die "expect-warn side must be zz or tmux: $line" ;;
+      esac
+      ;;
+    shim:)
+      ;;
+    shim:*)
+      die "shim does not accept a value: $line"
+      ;;
+    esac
+  done <"$SCENARIO_FILE"
+  LC_ALL=C sort -u -o "$EXPECTED_ZZ_WARNINGS" "$EXPECTED_ZZ_WARNINGS"
+  LC_ALL=C sort -u -o "$EXPECTED_TMUX_WARNINGS" "$EXPECTED_TMUX_WARNINGS"
+  prepare_smoke
+fi
+
 zz_command daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
 ZZ_PID=$!
 
@@ -321,8 +522,8 @@ run_setup zz "zz rename-window -t w:0 main" rename-window -t w:0 main ||
 
 tmux_setup_stdout="$SCRATCH_DIR/tmux-setup.stdout"
 tmux_setup_stderr="$SCRATCH_DIR/tmux-setup.stderr"
-if ! "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" -f /dev/null \
-  new-session -d -s w >"$tmux_setup_stdout" 2>"$tmux_setup_stderr"; then
+if ! tmux_start_command new-session -d -s w \
+  >"$tmux_setup_stdout" 2>"$tmux_setup_stderr"; then
   append_stream "tmux setup stdout:" "$tmux_setup_stdout"
   append_stream "tmux setup stderr:" "$tmux_setup_stderr"
   die "could not create tmux scenario session"
@@ -335,6 +536,7 @@ topo_divergences=0
 geo_divergences=0
 fmt_divergences=0
 out_divergences=0
+warn_divergences=0
 
 while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   raw_line="${raw_line%$'\r'}"
@@ -347,8 +549,25 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   run_tmux=1
   is_fmt=0
   is_out=0
+  is_conf=0
+  is_keys=0
+  key_table=""
+  key_name=""
   command_text="$line"
   case "$line" in
+  shim:* | expect-warn:*)
+    continue
+    ;;
+  conf:*)
+    [ "$SMOKE_MODE" -eq 1 ] || die "conf is only valid in a smoke scenario"
+    is_conf=1
+    command_text="${line#conf:}"
+    ;;
+  keys:*)
+    [ "$SMOKE_MODE" -eq 1 ] || die "keys is only valid in a smoke scenario"
+    is_keys=1
+    command_text="${line#keys:}"
+    ;;
   fmt:*)
     is_fmt=1
     command_text="${line#fmt:}"
@@ -368,14 +587,26 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   esac
   command_text="${command_text#"${command_text%%[![:space:]]*}"}"
   command_text="${command_text%"${command_text##*[![:space:]]}"}"
-  if [ "$is_fmt" -eq 0 ] && [ "$is_out" -eq 0 ] &&
+  if [ "$is_fmt" -eq 0 ] && [ "$is_out" -eq 0 ] && [ "$is_conf" -eq 0 ] &&
+    [ "$is_keys" -eq 0 ] &&
     [[ "$command_text" == fmt:* || "$command_text" == out:* ]]; then
     die "query lines must run on both sides: $line"
   fi
   [ -n "$command_text" ] || die "empty command after side prefix: $line"
 
   command_args=()
-  if [ "$is_fmt" -eq 1 ] || [ "$is_out" -eq 1 ]; then
+  if [ "$is_conf" -eq 1 ]; then
+    stage_smoke_conf "$command_text"
+    command_args=(-C source-file "$STAGED_CONF")
+  elif [ "$is_keys" -eq 1 ]; then
+    read -r key_table key_name extra <<<"$command_text"
+    [ -n "$key_table" ] && [ -n "$key_name" ] && [ -z "${extra:-}" ] ||
+      die "keys needs exactly a table and key: $line"
+    command_args=(
+      list-keys -T "$key_table" -F
+      '#{key_table}|#{key_string}|#{key_repeat}|#{key_command}'
+    )
+  elif [ "$is_fmt" -eq 1 ] || [ "$is_out" -eq 1 ]; then
     case "$command_text" in
     *'$'* | *'`'* | *"'"* | *'"'* | *'#('*)
       die "unsupported content in query line: $command_text"
@@ -403,6 +634,8 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   geo_step_diverged=0
   fmt_step_diverged=0
   out_step_diverged=0
+  warn_step_diverged=0
+  key_extract_failed=0
   zz_stdout="$SCRATCH_DIR/step-$steps.zz.stdout"
   zz_stderr="$SCRATCH_DIR/step-$steps.zz.stderr"
   tmux_stdout="$SCRATCH_DIR/step-$steps.tmux.stdout"
@@ -430,6 +663,19 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
     fi
   else
     tmux_rc=-1
+  fi
+
+  if [ "$is_keys" -eq 1 ]; then
+    zz_key_raw="$SCRATCH_DIR/step-$steps.zz.keys.raw"
+    tmux_key_raw="$SCRATCH_DIR/step-$steps.tmux.keys.raw"
+    mv "$zz_stdout" "$zz_key_raw"
+    mv "$tmux_stdout" "$tmux_key_raw"
+    if ! extract_key_binding "$zz_key_raw" "$zz_stdout" "$key_table" "$key_name"; then
+      key_extract_failed=1
+    fi
+    if ! extract_key_binding "$tmux_key_raw" "$tmux_stdout" "$key_table" "$key_name"; then
+      key_extract_failed=1
+    fi
   fi
 
   {
@@ -481,6 +727,52 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
     fi
   else
     printf 'COMMAND EXIT-CLASS: side-specific setup\n' >>"$LOG_FILE"
+  fi
+
+  if [ "$SMOKE_MODE" -eq 1 ]; then
+    if [ "$is_conf" -eq 1 ]; then
+      zz_warnings="$SCRATCH_DIR/step-$steps.zz.warnings"
+      tmux_warnings="$SCRATCH_DIR/step-$steps.tmux.warnings"
+      extract_config_warnings "$zz_stdout" "$zz_warnings"
+      extract_config_warnings "$tmux_stdout" "$tmux_warnings"
+      if ! compare_expected "WARN zz" "$steps" "$EXPECTED_ZZ_WARNINGS" "$zz_warnings"; then
+        warn_step_diverged=1
+      fi
+      if ! compare_expected "WARN tmux" "$steps" "$EXPECTED_TMUX_WARNINGS" "$tmux_warnings"; then
+        warn_step_diverged=1
+      fi
+
+      zz_terminator="$(control_terminator "$zz_stdout")"
+      tmux_terminator="$(control_terminator "$tmux_stdout")"
+      if [ "$zz_terminator" = "%end" ] && [ "$tmux_terminator" = "%end" ]; then
+        printf 'WARN terminator: clean (%%end / %%end)\n' >>"$LOG_FILE"
+      else
+        printf 'WARN terminator: mismatch (zz=%s tmux=%s expected=%%end)\n' \
+          "${zz_terminator:-missing}" "${tmux_terminator:-missing}" >>"$LOG_FILE"
+        warn_step_diverged=1
+      fi
+
+      zz_smoke_stdout="$SCRATCH_DIR/step-$steps.zz.smoke-stdout"
+      tmux_smoke_stdout="$SCRATCH_DIR/step-$steps.tmux.smoke-stdout"
+      normalize_control_stdout "$zz_stdout" "$zz_smoke_stdout"
+      normalize_control_stdout "$tmux_stdout" "$tmux_smoke_stdout"
+      if ! compare_snapshot "SMOKE STDOUT" "$steps" \
+        "$zz_smoke_stdout" "$tmux_smoke_stdout"; then
+        warn_step_diverged=1
+      fi
+    elif [ "$is_fmt" -eq 0 ] && [ "$is_out" -eq 0 ]; then
+      if ! compare_snapshot "SMOKE STDOUT" "$steps" "$zz_stdout" "$tmux_stdout"; then
+        warn_step_diverged=1
+      fi
+    fi
+    if ! compare_snapshot "SMOKE STDERR" "$steps" "$zz_stderr" "$tmux_stderr"; then
+      warn_step_diverged=1
+    fi
+    if [ "$key_extract_failed" -eq 1 ]; then
+      printf 'SMOKE KEY: expected exactly one %s|%s binding on each side\n' \
+        "$key_table" "$key_name" >>"$LOG_FILE"
+      warn_step_diverged=1
+    fi
   fi
 
   zz_topo="$SCRATCH_DIR/step-$steps.zz.topo"
@@ -543,17 +835,20 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   if [ "$out_step_diverged" -eq 1 ]; then
     out_divergences=$((out_divergences + 1))
   fi
+  if [ "$warn_step_diverged" -eq 1 ]; then
+    warn_divergences=$((warn_divergences + 1))
+  fi
 done <"$SCENARIO_FILE"
 
 [ "$steps" -gt 0 ] || die "scenario contains no commands: $SCENARIO_FILE"
 
-printf '\nSUMMARY steps=%d topo_divergences=%d geo_divergences=%d fmt_divergences=%d out_divergences=%d\n' \
+printf '\nSUMMARY steps=%d topo_divergences=%d geo_divergences=%d fmt_divergences=%d out_divergences=%d warn_divergences=%d\n' \
   "$steps" "$topo_divergences" "$geo_divergences" "$fmt_divergences" \
-  "$out_divergences" >>"$LOG_FILE"
+  "$out_divergences" "$warn_divergences" >>"$LOG_FILE"
 
-printf '%s: %d step(s), %d TOPO divergence(s), %d GEO divergence(s), %d FMT divergence(s), %d OUT divergence(s)\n' \
+printf '%s: %d step(s), %d TOPO divergence(s), %d GEO divergence(s), %d FMT divergence(s), %d OUT divergence(s), %d WARN divergence(s)\n' \
   "$scenario_name" "$steps" "$topo_divergences" "$geo_divergences" "$fmt_divergences" \
-  "$out_divergences"
+  "$out_divergences" "$warn_divergences"
 
 if [ "$topo_divergences" -gt 0 ]; then
   exit 1
@@ -565,5 +860,8 @@ if [ "$fmt_divergences" -gt 0 ]; then
   exit 1
 fi
 if [ "$out_divergences" -gt 0 ]; then
+  exit 1
+fi
+if [ "$warn_divergences" -gt 0 ]; then
   exit 1
 fi

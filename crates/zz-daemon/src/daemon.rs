@@ -1552,7 +1552,7 @@ fn close_outbound_too_far_behind(state: &mut OutboundState) {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DaemonCommandDispatch {
     CapturePane,
     RunShell,
@@ -1625,6 +1625,7 @@ const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
 ];
 
 fn daemon_command_dispatch(name: &str) -> Option<DaemonCommandDispatch> {
+    let name = canonical_command(name);
     DAEMON_COMMAND_DISPATCHES
         .iter()
         .find_map(|(candidate, dispatch)| (*candidate == name).then_some(*dispatch))
@@ -3203,10 +3204,11 @@ impl Shared {
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
     ) -> Result<Execution, DaemonError> {
+        let canonical = canonical_command(&command.name);
         let preempted = zz_mux::CommandSpec::DAEMON_COMMAND_NAMES
-            .contains(&command.name.as_str())
+            .contains(&canonical)
             .then(|| {
-                match daemon_command_dispatch(&command.name)
+                match daemon_command_dispatch(canonical)
                     .expect("daemon command catalog and dispatch must agree")
                 {
                     DaemonCommandDispatch::CapturePane => self.capture_pane(context, &command.args),
@@ -3228,16 +3230,16 @@ impl Shared {
                     }
                     DaemonCommandDispatch::Tools => Ok(workspace_tools_catalog()),
                     DaemonCommandDispatch::Buffer => {
-                        self.buffer_command(context, &command.name, &command.args)
+                        self.buffer_command(context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::ListClients => {
-                        self.list_clients(context, &command.name, &command.args)
+                        self.list_clients(context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::ShowMessages => {
-                        self.show_messages(&command.name, &command.args)
+                        self.show_messages(canonical, &command.args)
                     }
                     DaemonCommandDispatch::RefreshClient => {
-                        self.refresh_client(client, kind, &command.name, &command.args)
+                        self.refresh_client(client, kind, canonical, &command.args)
                     }
                     DaemonCommandDispatch::WaitFor => self.wait_for(client, kind, &command.args),
                     DaemonCommandDispatch::PipePane => self.pipe_pane(context, &command.args),
@@ -3250,12 +3252,9 @@ impl Shared {
                     DaemonCommandDispatch::ConfirmBefore => {
                         self.confirm_before(client, kind, context, &command.args)
                     }
-                    DaemonCommandDispatch::Lock => self.lock_command(
-                        client,
-                        context,
-                        canonical_command(&command.name),
-                        &command.args,
-                    ),
+                    DaemonCommandDispatch::Lock => {
+                        self.lock_command(client, context, canonical, &command.args)
+                    }
                 }
             });
         if let Some(result) = preempted {
@@ -22683,6 +22682,16 @@ mod tests {
         assert_eq!(names, dispatches);
         for name in ["new-session", "capture-pane-extra"] {
             assert!(daemon_command_dispatch(name).is_none());
+        }
+        for (prefix, dispatch) in [
+            ("capture-pan", DaemonCommandDispatch::CapturePane),
+            ("run-sh", DaemonCommandDispatch::RunShell),
+            ("if-sh", DaemonCommandDispatch::IfShell),
+            ("list-buf", DaemonCommandDispatch::Buffer),
+            ("pipe-pa", DaemonCommandDispatch::PipePane),
+            ("display-pop", DaemonCommandDispatch::DisplayPopup),
+        ] {
+            assert_eq!(daemon_command_dispatch(prefix), Some(dispatch), "{prefix}");
         }
     }
 

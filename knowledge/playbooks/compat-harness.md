@@ -51,10 +51,14 @@ makes exact-geometry diffing possible.
 
 FMT and OUT differences fail in both modes. `--strict-geometry` changes only GEO handling.
 
+Smoke scenarios under `compat/scenarios/smoke/` are part of the default corpus. They require the
+pinned plugin cache from `compat/fetch-corpus.sh`; when it is absent or cannot be fetched, the run
+prints a visible SKIP for each affected scenario. A skipped smoke is never reported as a pass.
+
 # Reading results
 
 The runner writes `compat/results/summary.md`. Each row gives the number of executed steps,
-TOPO, FMT, and OUT status, plus the number of steps that produced a GEO difference.
+TOPO, FMT, OUT, and WARN status, plus the number of steps that produced a GEO difference.
 
 Open `compat/results/<scenario>.log` for the command status and per-step unified diffs:
 
@@ -71,6 +75,10 @@ Open `compat/results/<scenario>.log` for the command status and per-step unified
   invocations must exit zero. A matching error still fails the FMT step.
 - `OUT` compares stdout from any shared query command prefixed with `out:` byte for byte. Both
   commands must exit zero; matching failures still fail the OUT step.
+- `WARN` is the smoke-only config channel. It checks each side's expected `%config-error` lines
+  and independently checks whether the `source-file` control block ended with `%end` or `%error`.
+  The pin does not emit `%config-error` for every execution-time config failure, so both signals
+  are required.
 
 The log captures each step's stdout and stderr. The runner ignores stdout for ordinary command
 lines; `fmt:` and `out:` lines enter their respective stdout comparisons.
@@ -103,6 +111,32 @@ Put values requiring spaces into an earlier ordinary setup command, then query t
 
 After each line, the harness runs the query trio. Scenario files should contain state changes plus
 explicit `fmt:` or `out:` assertions, not ordinary `list-*` assertions whose stdout is ignored.
+
+## Adding a smoke scenario
+
+Add smoke configs and fixtures under `compat/scenarios/smoke/`. The smoke class boots both daemons
+with a scratch HOME and prepends a generated executable `tmux` wrapper to PATH. The pin wrapper
+executes the reference binary with `-L <label>`; the zz wrapper executes `zz --socket <path>`.
+This makes literal `tmux` calls inside plugins hit the intended server on both sides.
+
+The smoke directives are:
+
+- `conf: <path>` stages and sources a config after linking cached plugins into
+  `~/.tmux/plugins/<name>`.
+- `expect-warn: zz <text>` and `expect-warn: tmux <text>` pin each side's
+  `%config-error` set. Do not cross-diff skip summaries: they intentionally have no pin analogue.
+  The harness separately requires the current tier-1 config loads to finish with `%end` on both
+  sides and fails if either source-file block ends with `%error`.
+- `keys: <table> <key>` compares only that binding through
+  `list-keys -F '#{key_table}|#{key_string}|#{key_repeat}|#{key_command}'`. Stock tables differ,
+  so whole-table comparison is invalid.
+- Existing `out:` and `fmt:` directives remain available for option, environment, and format
+  readback.
+
+Capture stdout and stderr separately for every smoke command. Merging them with `2>&1` introduces
+pipe-buffering order artifacts. The harness exports `ZZ_SMOKE_CANARY` into both daemon environments;
+scenarios must never read it, which keeps the known clean-environment divergence from becoming an
+implicit dependency.
 
 Traps that produce false divergences:
 
@@ -140,8 +174,9 @@ than this corpus.
 | --- | --- |
 | `compat/run.sh` | Builds both binaries, selects scenarios, and writes the summary |
 | `compat/fetch-tmux.sh` | Acquires and verifies the pinned tmux binary |
-| `compat/diff-scenario.sh` | Runs one scenario and emits per-step TOPO, GEO, FMT, and OUT diffs |
-| `compat/scenarios/` | Holds the shared and known-divergence corpora |
+| `compat/fetch-corpus.sh` | Acquires and verifies the pinned plugin corpus |
+| `compat/diff-scenario.sh` | Runs one scenario and emits per-step TOPO, GEO, FMT, OUT, and WARN diffs |
+| `compat/scenarios/` | Holds the shared, smoke, and known-divergence corpora |
 
 # Related
 

@@ -833,6 +833,37 @@ impl CommandInvocation {
     }
 }
 
+/// tmux's `cmd_parse_from_arguments` word grammar: a word's trailing
+/// unescaped `;` ends a command (a bare `;` word ends one with no argument),
+/// while a trailing `\;` keeps a literal `;` in the word.
+#[must_use]
+pub fn split_command_words(words: impl IntoIterator<Item = String>) -> Vec<Vec<String>> {
+    let mut commands = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    for mut word in words {
+        let mut end = false;
+        if word.ends_with(';') {
+            word.pop();
+            if word.ends_with('\\') {
+                word.pop();
+                word.push(';');
+            } else {
+                end = true;
+            }
+        }
+        if !end || !word.is_empty() {
+            current.push(word);
+        }
+        if end && !current.is_empty() {
+            commands.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        commands.push(current);
+    }
+    commands
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandRequest {
     pub request_id: u64,

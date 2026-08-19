@@ -1,0 +1,11 @@
+# Headless command clients cannot inject a root-table keypress. The final
+# if-shell therefore spot-checks the installed binding's non-vim payload after
+# making the right pane active; keys: separately checks the binding itself.
+conf: fixtures/vim-tmux-navigator.conf
+keys: root C-h
+keys: root C-j
+keys: root C-k
+keys: root C-l
+split-window -h -t w:0
+select-pane -t w:0.1
+if-shell false 'send-keys C-h' 'select-pane -L'

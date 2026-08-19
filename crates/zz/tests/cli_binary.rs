@@ -954,6 +954,7 @@ mod daemon_autostart {
                 .outside
                 .iter()
                 .filter(|line| !line.starts_with("%output ") && line.as_str() != "%exit")
+                .skip_while(|line| line.starts_with("%window-renamed @0 "))
                 .collect::<Vec<_>>();
             assert!(notifications[0].starts_with("%window-add @"));
             assert_eq!(notifications[1], "%sessions-changed");

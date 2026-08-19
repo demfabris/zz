@@ -115,6 +115,7 @@ pub struct CommandSpec {
 
 impl CommandSpec {
     pub const DAEMON_COMMAND_NAMES: &'static [&'static str] = crate::catalog::DAEMON_COMMAND_NAMES;
+    pub const TMUX_VERSION_OUTPUT: &'static str = "tmux 3.8-zz";
     pub const UNIMPLEMENTED_TMUX_COMMANDS: &'static [&'static str] =
         crate::catalog::UNIMPLEMENTED_TMUX_COMMANDS;
 
@@ -1282,9 +1283,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "display-message",
         aliases: &["display"],
         description: "Display or print a formatted message",
-        usage: "[-p] [-t target-pane] [message]",
+        usage: "[-p] [-F format] [-t target-pane] [message]",
         options: &[
             CommandOptionSpec::flag("-p", "print the message"),
+            CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::unsupported_flag("-a"),
             CommandOptionSpec::unsupported_flag("-C"),
@@ -1293,7 +1295,6 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::unsupported_flag("-l"),
             CommandOptionSpec::unsupported_flag("-I"),
             CommandOptionSpec::unsupported_flag("-N"),
-            CommandOptionSpec::unsupported_value("-F"),
             CommandOptionSpec::unsupported_flag("-v"),
         ],
         positionals: &[],
@@ -1370,12 +1371,12 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "list-keys",
         aliases: &["lsk"],
         description: "List key bindings",
-        usage: "[-T key-table]",
+        usage: "[-F format] [-T key-table]",
         options: &[
+            CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::value("-T", KeyTable, "key table"),
             CommandOptionSpec::unsupported_flag("-1"),
             CommandOptionSpec::unsupported_flag("-a"),
-            CommandOptionSpec::unsupported_value("-F"),
             CommandOptionSpec::unsupported_flag("-N"),
             CommandOptionSpec::unsupported_value("-O"),
             CommandOptionSpec::unsupported_value("-P"),
@@ -1581,13 +1582,105 @@ pub fn command_spec(name: &str) -> Option<&'static CommandSpec> {
 /// Resolve a known alias while preserving unknown input for structured errors.
 #[must_use]
 pub fn canonical_command(command: &str) -> &str {
-    command_spec(command)
-        .or_else(|| {
-            DAEMON_COMMAND_SPECS
+    match resolve_command(command) {
+        CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => name,
+        CommandResolution::Ambiguous(_) | CommandResolution::Unknown => command,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandResolution {
+    Canonical(&'static str),
+    Unimplemented(&'static str),
+    Ambiguous(String),
+    Unknown,
+}
+
+/// tmux's `cmd_find` contract: an exact alias match wins outright, otherwise
+/// the name is matched as a prefix over the alphabetical command table — a
+/// unique prefix resolves, several matches are ambiguous, none is unknown.
+#[must_use]
+pub fn resolve_command(command: &str) -> CommandResolution {
+    if command.is_empty() {
+        return CommandResolution::Unknown;
+    }
+    let mut found: Option<(&'static str, bool)> = None;
+    let mut ambiguous = false;
+    for (name, aliases, implemented) in command_table() {
+        if aliases.contains(&command) {
+            return resolved(name, implemented);
+        }
+        if !name.starts_with(command) {
+            continue;
+        }
+        if found.is_some() {
+            ambiguous = true;
+        }
+        found = Some((name, implemented));
+        if name == command {
+            return resolved(name, implemented);
+        }
+    }
+    if ambiguous {
+        let matches = command_table()
+            .filter(|(name, _, _)| name.starts_with(command))
+            .map(|(name, _, _)| name)
+            .collect::<Vec<_>>()
+            .join(", ");
+        return CommandResolution::Ambiguous(format!(
+            "ambiguous command: {command}, could be: {matches}"
+        ));
+    }
+    match found {
+        Some((name, implemented)) => resolved(name, implemented),
+        None => CommandResolution::Unknown,
+    }
+}
+
+fn resolved(name: &'static str, implemented: bool) -> CommandResolution {
+    if implemented {
+        CommandResolution::Canonical(name)
+    } else {
+        CommandResolution::Unimplemented(name)
+    }
+}
+
+static UNIMPLEMENTED_TMUX_COMMAND_TABLE: &[(&str, &[&str])] = &[
+    ("choose-client", &[]),
+    ("clear-prompt-history", &["clearphist"]),
+    ("clock-mode", &[]),
+    ("customize-mode", &[]),
+    ("link-window", &["linkw"]),
+    ("new-pane", &["newp"]),
+    ("resize-window", &["resizew"]),
+    ("server-access", &[]),
+    ("show-prompt-history", &["showphist"]),
+    ("suspend-client", &["suspendc"]),
+    ("switch-client", &["switchc"]),
+    ("switch-mode", &[]),
+    ("unlink-window", &["unlinkw"]),
+];
+
+fn command_table() -> impl Iterator<Item = (&'static str, &'static [&'static str], bool)> {
+    static TABLE: std::sync::OnceLock<Vec<(&'static str, &'static [&'static str], bool)>> =
+        std::sync::OnceLock::new();
+    TABLE
+        .get_or_init(|| {
+            let mut entries: Vec<(&'static str, &'static [&'static str], bool)> = COMMAND_SPECS
                 .iter()
-                .find(|spec| spec.name == command || spec.aliases.contains(&command))
+                .chain(DAEMON_COMMAND_SPECS)
+                .map(|spec| (spec.name, spec.aliases, true))
+                .chain(
+                    UNIMPLEMENTED_TMUX_COMMAND_TABLE
+                        .iter()
+                        .map(|(name, aliases)| (*name, *aliases, false)),
+                )
+                .collect();
+            entries.sort_unstable_by_key(|(name, _, _)| *name);
+            entries
         })
-        .map_or(command, |spec| spec.name)
+        .iter()
+        .copied()
 }
 
 #[cfg(test)]
@@ -1595,6 +1688,56 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use super::*;
+
+    #[test]
+    fn unimplemented_table_matches_the_flat_list() {
+        let mut flat: Vec<&str> = UNIMPLEMENTED_TMUX_COMMANDS.to_vec();
+        flat.sort_unstable();
+        let mut structured: Vec<&str> = UNIMPLEMENTED_TMUX_COMMAND_TABLE
+            .iter()
+            .flat_map(|(name, aliases)| std::iter::once(*name).chain(aliases.iter().copied()))
+            .collect();
+        structured.sort_unstable();
+        assert_eq!(flat, structured);
+    }
+
+    #[test]
+    fn command_resolution_follows_the_pin_contract() {
+        assert_eq!(
+            resolve_command("show-option"),
+            CommandResolution::Canonical("show-options")
+        );
+        assert_eq!(
+            resolve_command("show-options"),
+            CommandResolution::Canonical("show-options")
+        );
+        assert_eq!(
+            resolve_command("kill-s"),
+            CommandResolution::Ambiguous(
+                "ambiguous command: kill-s, could be: kill-server, kill-session".to_owned()
+            )
+        );
+        assert_eq!(
+            resolve_command("switch-c"),
+            CommandResolution::Unimplemented("switch-client")
+        );
+        assert_eq!(
+            resolve_command("switchc"),
+            CommandResolution::Unimplemented("switch-client")
+        );
+        assert_eq!(
+            resolve_command("capture-pan"),
+            CommandResolution::Canonical("capture-pane")
+        );
+        assert_eq!(
+            resolve_command("list-buf"),
+            CommandResolution::Canonical("list-buffers")
+        );
+        assert_eq!(resolve_command("wibble"), CommandResolution::Unknown);
+        assert_eq!(resolve_command(""), CommandResolution::Unknown);
+        assert_eq!(canonical_command("show-option"), "show-options");
+        assert_eq!(canonical_command("kill-s"), "kill-s");
+    }
 
     fn usage_options(usage: &str) -> BTreeMap<char, bool> {
         let mut options = BTreeMap::new();

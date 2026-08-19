@@ -495,8 +495,29 @@ pane visibility). The harness (phase 2) does not wait for this.
   greps. Deferred to a 7c-if-wanted: `command <name>:` arity/flag shapes and the
   `usage:` fallback (need per-command arity metadata), the ~24 remaining
   `needs a value` sites, key-string strictness.
-- An alias smoke suite: a corpus of real-world `tmux.conf` files and scripts run under
-  `alias tmux=zz`, asserting zero warnings and matching behavior.
+- **SHIPPED 2026-08-18 (wave 7d):** the alias smoke suite runs real plugin configs through
+  PATH-carried `tmux` exec shims against zz and the pin. The harness stages a scratch HOME,
+  sources each config through control mode, compares stdout and stderr independently, checks
+  per-key `list-keys -F` facts, and requires both warning signals: the `%config-error` line set
+  and the source-file block's `%end`/`%error` terminator. "Zero warnings" therefore means no
+  invalid config causes and no skipped-command summary; skip-only summaries became visible in
+  control mode in this wave. A missing plugin cache is a visible SKIP, never a pass.
+
+  | Scenario | Scope |
+  | --- | --- |
+  | `tpm-init` | TPM bootstrap, plugin environment, and install/update bindings |
+  | `sensible` | Supported option application plus the two pinned unsupported-option skips |
+  | `vim-tmux-navigator` | Root navigation bindings and a non-vim focus move |
+  | `yank` | Copy-mode-vi yank bindings |
+  | `resurrect-init` | Save/restore bindings; the restore flow remains out of scope |
+  | `continuum-init` | Bootstrap through `display-message -p -F` |
+  | `fpp-init` | Binding and note registration; pane runtime remains out of scope |
+  | `own-conf` | Frozen first-party `~/.tmux.conf` snapshot and exact skip summary |
+  | `fixture-conf` | The in-tree parser fixture promoted to an end-to-end smoke |
+
+  The corpus pins TPM, tmux-sensible, vim-tmux-navigator, tmux-yank, tmux-resurrect,
+  tmux-continuum, and tmux-fpp. Oh My Tmux remains gated on `%if` evaluation and is not part of
+  this wave.
 
 ## Phase 8 — the attach contract (gated on the TUI design)
 
@@ -606,9 +627,9 @@ this list is the campaign-level index of it plus the items that never got a matr
 - Exec-family job divergences (wave 5a-2, reviewer-CONFIRMED, accepted): `-t`
   pane output goes to zz's command-output overlay, not view-mode-in-the-pane, and
   is dropped when no interactive subscriber exists; `-b` no-`-t` output routes to
-  the MRU session's active pane overlay; job environment inherits the daemon env —
-  no session-environ merge and NO `$TMUX` variable (the single most likely
-  tpm-breaker; phase 7 owns the `$TMUX` shape); shell jobs are capped (a runaway
+  the MRU session's active pane overlay; jobs receive `$TMUX` without `$TMUX_PANE`,
+  but inherit the daemon environment instead of the pin's clean global/session overlay
+  and do not synthesize the TERM family; shell jobs are capped (a runaway
   backstop the pin does not have — raised from 16 in the 5b fix round; over-cap
   `-b` jobs fail with a background message like the pin's job_run failure);
   Interactive clients cannot park on blocking `wait-for` (they get the pin's

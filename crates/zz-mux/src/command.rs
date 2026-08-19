@@ -9,9 +9,9 @@ use zz_protocol::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, COMMAND_SPECS, ChooseTreeKind,
     CommandInvocation, CommandSpec, DAEMON_COMMAND_SPECS, DEFAULT_AGENT_AUTO_APPROVE,
     DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE,
-    EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, PaneId,
-    PaneKindSnapshot, PopupBorderLines, ServerError, SessionId, TerminalUiCommand, WindowId,
-    normalize_browser_profile_name,
+    CommandResolution, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES,
+    MuxOptionKey, PaneId, PaneKindSnapshot, PopupBorderLines, ServerError, SessionId,
+    TerminalUiCommand, WindowId, normalize_browser_profile_name, resolve_command,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, DEFAULT_HISTORY_LIMIT,
@@ -284,6 +284,14 @@ struct ListCommandHooks<'a, H> {
     spec: &'a CommandSpec,
 }
 
+struct ListKeyHooks<'a, H> {
+    inner: &'a mut H,
+    table: &'a str,
+    key: &'a str,
+    binding: &'a Binding,
+    prefix: &'a str,
+}
+
 impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
     fn strftime(&mut self, literal: &str) -> String {
         self.inner.strftime(literal)
@@ -305,6 +313,38 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
                     .to_owned(),
             ),
             "command_list_usage" => Some(self.spec.usage.to_owned()),
+            _ => self.inner.variable(name, context),
+        }
+    }
+
+    fn pane_search(
+        &mut self,
+        pane: Option<PaneId>,
+        pattern: &str,
+        regex: bool,
+        ignore_case: bool,
+    ) -> usize {
+        self.inner.pane_search(pane, pattern, regex, ignore_case)
+    }
+}
+
+impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
+    fn strftime(&mut self, literal: &str) -> String {
+        self.inner.strftime(literal)
+    }
+
+    fn shell(&mut self, command: &str) -> String {
+        self.inner.shell(command)
+    }
+
+    fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        match name {
+            "key_repeat" => Some(if self.binding.repeat { "1" } else { "0" }.to_owned()),
+            "key_note" => Some(self.binding.note.clone().unwrap_or_default()),
+            "key_prefix" => Some(self.prefix.to_owned()),
+            "key_table" => Some(self.table.to_owned()),
+            "key_string" => Some(self.key.to_owned()),
+            "key_command" => Some(format_key_command(self.binding)),
             _ => self.inner.variable(name, context),
         }
     }
@@ -1566,7 +1606,7 @@ impl MuxEngine {
             "clear-history" => self.clear_history(context, &command.args)?,
             "bind-key" => self.bind_key(&command.args)?,
             "unbind-key" => self.unbind_key(&command.args)?,
-            "list-keys" => self.list_keys(&command.args)?,
+            "list-keys" => self.list_keys(context, &command.args, hooks)?,
             "list-commands" => self.list_commands(context, &command.args, hooks)?,
             "set-hook" => self.set_hook(context, &command.args, hooks, default_shell_is_valid)?,
             "show-hooks" => self.show_hooks(context, &command.args, hooks)?,
@@ -1600,14 +1640,17 @@ impl MuxEngine {
                 parse_command_options("kill-server", &command.args)?;
                 Execution::effect(MuxEffect::KillServer)
             }
-            _ if CommandSpec::UNIMPLEMENTED_TMUX_COMMANDS.contains(&name) => {
-                return Err(ServerError::UnsupportedCommand(command.name.clone()));
-            }
             _ => {
-                return Err(ServerError::InvalidCommand(format!(
-                    "unknown command: {}",
-                    command.name
-                )));
+                return Err(match resolve_command(&command.name) {
+                    CommandResolution::Unimplemented(name) => {
+                        ServerError::UnsupportedCommand(name.to_owned())
+                    }
+                    CommandResolution::Ambiguous(message) => ServerError::InvalidCommand(message),
+                    _ => ServerError::InvalidCommand(format!(
+                        "unknown command: {}",
+                        command.name
+                    )),
+                });
             }
         };
 
@@ -3962,8 +4005,16 @@ impl MuxEngine {
                 format_type: FormatType::Pane,
             });
         let format = if positional.is_empty() {
-            DEFAULT_DISPLAY_MESSAGE.to_owned()
+            options
+                .value("-F")
+                .unwrap_or(DEFAULT_DISPLAY_MESSAGE)
+                .to_owned()
         } else {
+            if options.value("-F").is_some() {
+                return Err(ServerError::InvalidCommand(
+                    "only one of -F or argument must be given".to_owned(),
+                ));
+            }
             positional.join(" ")
         };
         let text = expand_format_time_with_hooks(&format, self, format_context, hooks);
@@ -4038,7 +4089,12 @@ impl MuxEngine {
         Ok(Execution::default())
     }
 
-    fn list_keys(&self, args: &[String]) -> Result<Execution, ServerError> {
+    fn list_keys(
+        &self,
+        context: &ExecutionContext,
+        args: &[String],
+        hooks: &mut impl StatusHooks,
+    ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-keys", args)?;
         if let Some(argument) = positional.first() {
             return Err(ServerError::UnsupportedCommand(format!(
@@ -4053,21 +4109,49 @@ impl MuxEngine {
                 "table {table} doesn't exist"
             )));
         }
-        let output = self
-            .keys
-            .list(options.value("-T"))
-            .map(|(table, key, binding)| {
-                let commands = binding
-                    .commands
-                    .iter()
-                    .map(format_command)
-                    .collect::<Vec<_>>()
-                    .join(" \\; ");
-                let repeat = if binding.repeat { " -r" } else { "" };
-                format!("bind-key{repeat} -T {table} {key} {commands}")
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        let output = if let Some(format) = options.value("-F") {
+            let mut output = Vec::new();
+            for (table, key, binding) in self.keys.list(options.value("-T")) {
+                let mut item_hooks = ListKeyHooks {
+                    inner: &mut *hooks,
+                    table,
+                    key,
+                    binding,
+                    prefix: self.keys.prefix(),
+                };
+                let line = expand_format_with_hooks(
+                    format,
+                    self,
+                    FormatContext {
+                        session: context.session,
+                        window: context.window,
+                        pane: context.pane,
+                        active_session: context.session,
+                        format_type: FormatType::None,
+                    },
+                    &mut item_hooks,
+                );
+                if !line.is_empty() {
+                    output.push(line);
+                }
+            }
+            output.join("\n")
+        } else {
+            self.keys
+                .list(options.value("-T"))
+                .map(|(table, key, binding)| {
+                    let commands = binding
+                        .commands
+                        .iter()
+                        .map(format_command)
+                        .collect::<Vec<_>>()
+                        .join(" \\; ");
+                    let repeat = if binding.repeat { " -r" } else { "" };
+                    format!("bind-key{repeat} -T {table} {key} {commands}")
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         Ok(Execution::output(output))
     }
 
@@ -4084,6 +4168,7 @@ impl MuxEngine {
             ));
         }
         let listed_spec = |name: &str| {
+            let name = canonical_command(name);
             command_spec(name).or_else(|| {
                 DAEMON_COMMAND_SPECS
                     .iter()
@@ -8265,20 +8350,17 @@ fn bound_commands(tail: &[String]) -> Result<Vec<CommandInvocation>, ServerError
             .map(|command| CommandInvocation::new(command.name, command.args))
             .collect::<Vec<_>>()
     } else {
-        let mut commands = Vec::new();
-        let mut segments = tail.split(|argument| argument == ";").peekable();
-        while let Some(segment) = segments.next() {
-            let Some((command, command_args)) = segment.split_first() else {
-                if segments.peek().is_none() && !commands.is_empty() {
-                    break;
-                }
-                return Err(ServerError::InvalidCommand(
-                    "bind-key command chain contains an empty command".to_owned(),
-                ));
-            };
-            commands.push(CommandInvocation::new(
-                command,
-                command_args.iter().cloned(),
+        let commands = zz_protocol::split_command_words(tail.iter().cloned())
+            .into_iter()
+            .filter_map(|words| {
+                let mut words = words.into_iter();
+                let name = words.next()?;
+                Some(CommandInvocation::new(name, words))
+            })
+            .collect::<Vec<_>>();
+        if commands.is_empty() {
+            return Err(ServerError::InvalidCommand(
+                "bind-key command chain contains an empty command".to_owned(),
             ));
         }
         commands
@@ -8366,9 +8448,12 @@ fn validate_bound_command(command: &CommandInvocation, owner: &str) -> Result<()
     if CommandSpec::UNIMPLEMENTED_TMUX_COMMANDS.contains(&name) {
         return Err(ServerError::UnsupportedCommand(format!("{owner} {name}")));
     }
-    Err(ServerError::InvalidCommand(format!(
-        "unknown command: {name}"
-    )))
+    match resolve_command(&command.name) {
+        CommandResolution::Ambiguous(message) => Err(ServerError::InvalidCommand(message)),
+        _ => Err(ServerError::InvalidCommand(format!(
+            "unknown command: {name}"
+        ))),
+    }
 }
 
 fn format_command(command: &CommandInvocation) -> String {
@@ -8377,6 +8462,21 @@ fn format_command(command: &CommandInvocation) -> String {
         .map(format_command_argument)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn format_key_command(binding: &Binding) -> String {
+    binding
+        .commands
+        .iter()
+        .map(|command| {
+            std::iter::once(canonical_command(&command.name))
+                .chain(command.args.iter().map(String::as_str))
+                .map(tmux_args_escape)
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join(" \\; ")
 }
 
 fn format_command_argument(argument: &str) -> String {
@@ -10322,6 +10422,35 @@ mod tests {
     }
 
     #[test]
+    fn display_message_format_option_selects_the_print_template() {
+        let mut engine = MuxEngine::default();
+        engine.set_format_server_context("tower.local", "tower", "/tmp/zz.sock", 40);
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("display-message", &["-p", "-F", "#{start_time}|#{version}"]),
+                )
+                .unwrap()
+                .output,
+            "40|3.8-zz"
+        );
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("display-message", &["-p", "-F", "#{start_time}", "message"]),
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "only one of -F or argument must be given"
+        ));
+    }
+
+    #[test]
     fn daemon_format_facts_feed_runtime_values_and_session_time() {
         let mut engine = MuxEngine::default();
         engine.set_format_server_context("tower.local", "tower", "/tmp/zz.sock", 40);
@@ -11905,11 +12034,18 @@ mod tests {
             &["x", ";", "new-window"][..],
             &["x", "new-window", ";", ";", "new-window"][..],
         ] {
-            assert!(matches!(
-                engine.execute(&mut context, &command("bind-key", args)),
-                Err(ServerError::InvalidCommand(message)) if message.contains("empty command")
-            ));
+            engine
+                .execute(&mut context, &command("bind-key", args))
+                .expect("empty chain segments are dropped like the pin");
         }
+        assert!(
+            engine
+                .execute(&mut context, &command("list-keys", &["-T", "prefix"]))
+                .unwrap()
+                .output
+                .lines()
+                .any(|line| line == "bind-key -T prefix x new-window \\; new-window")
+        );
         engine
             .execute(
                 &mut context,
@@ -11929,6 +12065,88 @@ mod tests {
         assert_eq!(
             engine.keys.get("prefix", "p").expect("binding").commands,
             [CommandInvocation::new("pipe-pane", ["cat"])]
+        );
+    }
+
+    #[test]
+    fn list_keys_format_expands_the_pinned_per_binding_facts() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "bind-key",
+                    &[
+                        "-r",
+                        "-T",
+                        "phase7d",
+                        "-N",
+                        "sample note",
+                        "\"",
+                        "split-window",
+                        "-h",
+                    ],
+                ),
+            )
+            .unwrap();
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-keys",
+                        &[
+                            "-T",
+                            "phase7d",
+                            "-F",
+                            "#{key_repeat}|#{key_note}|#{key_prefix}|#{key_table}|#{key_string}|#{key_command}|#{key_has_repeat}|#{key_string_width}|#{key_table_width}",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "1|sample note|C-b|phase7d|\"|split-window -h|||"
+        );
+    }
+
+    #[test]
+    fn list_keys_key_command_uses_the_pinned_escaped_command_shape() {
+        let mut engine = MuxEngine::default();
+        engine.keys.bind(
+            "phase7d",
+            "X",
+            Binding {
+                commands: vec![
+                    CommandInvocation::new(
+                        "new-pane",
+                        ["-E", "-X", "0", "-Y", "0", "-x", "75%", "-y", "30%"],
+                    ),
+                    CommandInvocation::new("move-pane", ["-P", "bottom-centre"]),
+                ],
+                repeat: false,
+                note: None,
+            },
+        );
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut ExecutionContext::default(),
+                    &command(
+                        "list-keys",
+                        &[
+                            "-T",
+                            "phase7d",
+                            "-F",
+                            "#{key_repeat}|#{key_note}|#{key_prefix}|#{key_table}|#{key_string}|#{key_command}",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "0||C-b|phase7d|X|new-pane -E -X 0 -Y 0 -x \"75%\" -y \"30%\" \\; move-pane -P bottom-centre"
         );
     }
 

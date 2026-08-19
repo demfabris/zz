@@ -68,6 +68,19 @@ implementation. That is a research-and-port task, unlike the mechanical version 
    Then run `compat/run.sh` end to end. A behavior change in the new pin shows up as scenario
    divergences; either port the change (step 3) or record it in
    [the divergence matrix](/tmux/divergences.md) and `compat/scenarios/known/` before landing.
+   The alias-smoke corpus is independently pinned. When a plugin reference moves, update the
+   commit in both `compat/fetch-corpus.sh` and `third_party/tmux-plugin-corpus/UPSTREAM.md`, refresh
+   that plugin's retained license, then run its smoke scenario. The current set moves together as:
+
+   | Plugin | Pinned commit |
+   | --- | --- |
+   | TPM | `e261deb1b47614eed3400089ce7197dc68acc4eb` |
+   | tmux-sensible | `25cb91f42d020f675bb0a2ce3fbd3a5d96119efa` |
+   | vim-tmux-navigator | `e41c431a0c7b7388ae7ba341f01a0d217eb3a432` |
+   | tmux-yank | `acfd36e4fcba99f8310a7dfb432111c242fe7392` |
+   | tmux-resurrect | `cff343cf9e81983d3da0c8562b01616f12e8d548` |
+   | tmux-continuum | `0698e8f4b17d6454c71bf5212895ec055c578da0` |
+   | tmux-fpp | `878302f228ee14f0fa59717f63743d396b327a21` |
 7. **Refresh the retained license.** The upstream tmux license kept beside `UPSTREAM.md` for
    provenance should match the newly pinned commit's license terms (rarely changes, but check).
 8. **Commit the commit-hash bump, any list-of-files changes, the ported Rust changes, and their
@@ -81,6 +94,8 @@ implementation. That is a research-and-port task, unlike the mechanical version 
 | `crates/zz-mux/src/**` | The Rust reimplementation being verified against upstream behavior |
 | `crates/zz-protocol/src/catalog.rs` | The supported command surface to manually re-check, mirrored in [tmux command set](/tmux/commands.md) |
 | `compat/fetch-tmux.sh` | Builds the pinned reference binary; carries `TMUX_COMMIT`/`TMUX_VERSION` |
+| `compat/fetch-corpus.sh` | Fetches and verifies the seven pinned plugin commits used by smoke scenarios |
+| `third_party/tmux-plugin-corpus/UPSTREAM.md` | Records plugin provenance, pins, and reference-only status |
 | `.github/workflows/ci.yml` | Caches the reference build under a key containing the pin hash |
 
 # Related

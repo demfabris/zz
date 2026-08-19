@@ -187,7 +187,14 @@ fn render(
         return StatusLine::default();
     }
     let now = Local::now();
-    let mut hooks = DaemonFormatHooks::status(&request.facts, cache, touched, refresh, now);
+    let mut hooks = DaemonFormatHooks::status(
+        &request.facts,
+        &request.context,
+        cache,
+        touched,
+        refresh,
+        now,
+    );
     StatusLine {
         left: expand_status(&request.formats.left, &request.context, &mut hooks),
         right: expand_status(&request.formats.right, &request.context, &mut hooks),
@@ -196,6 +203,7 @@ fn render(
 
 pub(crate) struct DaemonFormatHooks<'a> {
     facts: &'a FormatHookFacts,
+    status_context: Option<&'a StatusContext>,
     variables: Option<&'a BTreeMap<String, String>>,
     cache: Option<&'a mut BTreeMap<String, String>>,
     touched: Option<&'a mut BTreeSet<String>>,
@@ -214,6 +222,7 @@ impl<'a> DaemonFormatHooks<'a> {
     ) -> Self {
         Self {
             facts,
+            status_context: None,
             variables,
             cache: None,
             touched: None,
@@ -231,6 +240,7 @@ impl<'a> DaemonFormatHooks<'a> {
 
     fn status(
         facts: &'a FormatHookFacts,
+        context: &'a StatusContext,
         cache: &'a mut BTreeMap<String, String>,
         touched: &'a mut BTreeSet<String>,
         refresh: bool,
@@ -238,6 +248,7 @@ impl<'a> DaemonFormatHooks<'a> {
     ) -> Self {
         Self {
             facts,
+            status_context: Some(context),
             variables: None,
             cache: Some(cache),
             touched: Some(touched),
@@ -307,7 +318,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         {
             return cached.clone();
         }
-        let output = run_shell(command);
+        let output = run_shell(command, self.status_context);
         cache.insert(command.to_owned(), output.clone());
         output
     }
@@ -527,8 +538,24 @@ fn search_viewport(
     0
 }
 
-fn run_shell(command: &str) -> String {
+fn run_shell(command: &str, context: Option<&StatusContext>) -> String {
     let mut process = shell_process(command);
+    if let Some(context) = context {
+        let requested_cwd = std::path::Path::new(&context.pane_current_path);
+        let cwd = if requested_cwd.is_dir() {
+            requested_cwd.to_path_buf()
+        } else {
+            std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir())
+        };
+        process
+            .current_dir(&cwd)
+            .env("PWD", cwd.as_os_str())
+            .env(
+                "TMUX",
+                format!("{},{},-1", context.socket_path, std::process::id()),
+            )
+            .env_remove("TMUX_PANE");
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
@@ -777,6 +804,35 @@ mod tests {
         assert_eq!(ticked[0].1.left, "second");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn status_commands_receive_tmux_and_working_directory_without_tmux_pane() {
+        let directory = tempfile::Builder::new()
+            .prefix("zz-status-environment-")
+            .tempdir_in(".")
+            .expect("the working directory is created");
+        let socket = "/tmp/zz-status-environment.sock";
+        let mut status_request = request(1, "#(echo \"$TMUX|$PWD|${TMUX_PANE-unset}\")", "");
+        status_request.context.socket_path = socket.to_owned();
+        status_request.context.pane_current_path = directory
+            .path()
+            .canonicalize()
+            .expect("the working directory resolves")
+            .to_string_lossy()
+            .into_owned();
+
+        let status = StatusRenderer::default().render_initial(&status_request);
+
+        assert_eq!(
+            status.left,
+            format!(
+                "{socket},{},-1|{}|unset",
+                std::process::id(),
+                status_request.context.pane_current_path
+            )
+        );
+    }
+
     #[test]
     fn a_tick_forgets_commands_no_format_names_any_more() {
         let mut renderer = StatusRenderer::default();
@@ -815,7 +871,7 @@ mod tests {
         let command = "ping -n 31 127.0.0.1";
 
         let started = Instant::now();
-        assert_eq!(run_shell(command), "");
+        assert_eq!(run_shell(command, None), "");
         assert!(
             started.elapsed() < SHELL_TIMEOUT * 3,
             "the timeout, not the command, bounds the render"

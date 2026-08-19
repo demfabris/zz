@@ -24,7 +24,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `bench/` — terminal throughput benchmark harness
 - `site/` — zzmux.sh landing page and docs (Astro)
 - `examples/ui-showcase` — wasm/WebGPU showcase of zz-ui, excluded from the workspace
-- `third_party/` — vendored crates
+- `third_party/` — vendored crates and pinned reference material
 - `packaging/` — Arch package, AUR/cask templates
 
 ## Knowledge bundle

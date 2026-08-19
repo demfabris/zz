@@ -4,7 +4,7 @@ use chrono::{Datelike as _, Local, TimeZone as _};
 use glob::{MatchOptions, Pattern};
 use regex::{Captures, RegexBuilder};
 use unicode_width::UnicodeWidthChar as _;
-use zz_protocol::{MAX_STATUS_TEXT_BYTES, PaneId, SessionId, WindowId};
+use zz_protocol::{CommandSpec, MAX_STATUS_TEXT_BYTES, PaneId, SessionId, WindowId};
 use zz_terminal::parse_x11_color;
 
 use crate::{MuxEngine, PaneKind, layout::CellLayout};
@@ -796,7 +796,10 @@ impl MuxEngine {
                 .filter(|time| *time != 0),
             uid: self.format_uid().to_owned(),
             user: self.format_user().to_owned(),
-            version: env!("CARGO_PKG_VERSION").to_owned(),
+            version: CommandSpec::TMUX_VERSION_OUTPUT
+                .strip_prefix("tmux ")
+                .expect("tmux version output prefix")
+                .to_owned(),
             format_now: i64::try_from(self.format_now())
                 .ok()
                 .filter(|time| *time != 0),

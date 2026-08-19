@@ -107,8 +107,30 @@ pub fn parse_config(source: impl Into<String>, input: &str) -> ParsedConfig {
     let mut command_line = 1_u32;
     let mut command_column = 1_u32;
 
-    for character in input.chars() {
-        column = column.saturating_add(1);
+    let mut characters = input.chars();
+    let mut reprocess: Option<char> = None;
+    let mut tilde: Option<String> = None;
+    let mut tilde_after_quote = false;
+    loop {
+        let character = if let Some(character) = reprocess.take() {
+            character
+        } else {
+            let Some(character) = characters.next() else {
+                break;
+            };
+            column = column.saturating_add(1);
+            character
+        };
+        if let Some(name) = tilde.as_mut() {
+            if matches!(character, '/' | ' ' | '\t' | '\n' | '"' | '\'') {
+                let name = tilde.take().unwrap_or_default();
+                expand_tilde(&mut word, &name);
+                reprocess = Some(character);
+            } else {
+                name.push(character);
+            }
+            continue;
+        }
         if let Some(state) = block.as_mut() {
             word.push(character);
             if character == '\n' {
@@ -142,6 +164,7 @@ pub fn parse_config(source: impl Into<String>, input: &str) -> ParsedConfig {
         }
         if escaped {
             escaped = false;
+            tilde_after_quote = false;
             if character == '\n' {
                 line = line.saturating_add(1);
                 column = 0;
@@ -167,7 +190,12 @@ pub fn parse_config(source: impl Into<String>, input: &str) -> ParsedConfig {
         match quote {
             Quote::Single if character == '\'' => quote = Quote::None,
             Quote::Double if character == '"' => quote = Quote::None,
+            Quote::Double if character == '~' && tilde_after_quote => {
+                tilde_after_quote = false;
+                tilde = Some(String::new());
+            }
             Quote::Single | Quote::Double => {
+                tilde_after_quote = false;
                 word.push(character);
                 if character == '\n' {
                     line = line.saturating_add(1);
@@ -190,6 +218,7 @@ pub fn parse_config(source: impl Into<String>, input: &str) -> ParsedConfig {
                     }
                     word_started = true;
                     quote = Quote::Double;
+                    tilde_after_quote = true;
                 }
                 '#' if !word_started => in_comment = true,
                 '{' if !word_started => {
@@ -218,6 +247,14 @@ pub fn parse_config(source: impl Into<String>, input: &str) -> ParsedConfig {
                     command_line = line;
                     command_column = column.saturating_add(1);
                 }
+                '~' if !word_started => {
+                    if words.is_empty() {
+                        command_line = line;
+                        command_column = column;
+                    }
+                    word_started = true;
+                    tilde = Some(String::new());
+                }
                 value if value.is_whitespace() => {
                     finish_word(&mut word, &mut word_started, &mut words);
                 }
@@ -231,6 +268,9 @@ pub fn parse_config(source: impl Into<String>, input: &str) -> ParsedConfig {
                 }
             },
         }
+    }
+    if let Some(name) = tilde.take() {
+        expand_tilde(&mut word, &name);
     }
     if let Some(state) = block {
         parsed.diagnostics.push(ConfigDiagnostic {
@@ -329,6 +369,18 @@ fn conditional_diagnostic(
     }
 }
 
+fn expand_tilde(word: &mut String, name: &str) {
+    if name.is_empty()
+        && let Ok(home) = std::env::var("HOME")
+        && !home.is_empty()
+    {
+        word.push_str(&home);
+        return;
+    }
+    word.push('~');
+    word.push_str(name);
+}
+
 fn finish_word(word: &mut String, word_started: &mut bool, words: &mut Vec<String>) {
     if *word_started {
         words.push(std::mem::take(word));
@@ -364,6 +416,23 @@ fn finish_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expands_leading_tildes_like_the_pin() {
+        let home = std::env::var("HOME").expect("test environment has HOME");
+        let parsed = parse_config(
+            "<test>",
+            "run-shell ~/bin/x \"~/quoted\" '~/literal' \\~/escaped ~name/x ~",
+        );
+        assert!(parsed.diagnostics.is_empty());
+        let command = &parsed.commands[0];
+        assert_eq!(command.args[0], format!("{home}/bin/x"));
+        assert_eq!(command.args[1], format!("{home}/quoted"));
+        assert_eq!(command.args[2], "~/literal");
+        assert_eq!(command.args[3], "~/escaped");
+        assert_eq!(command.args[4], "~name/x");
+        assert_eq!(command.args[5], home);
+    }
 
     #[test]
     fn parses_tmux_style_words_quotes_comments_and_lists() {

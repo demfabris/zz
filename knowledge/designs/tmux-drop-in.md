@@ -743,6 +743,74 @@ this list is the campaign-level index of it plus the items that never got a matr
   the workspace's only `unsafe` block): any future platform (musl, Windows) needs its own
   parity probe of unknown-`%` handling.
 
+# The options residue — three lanes (decided 2026-08-19)
+
+The 2026-08-19 full inventory: 38 of the pin's 180 named options are implemented, 142 are
+recognized-but-unimplemented, 7 of 8 array options have no storage, and `set-option
+<hook-name>` plus indexed array spellings **silently succeed doing nothing** (the
+`is_array` early return) — a silent no-op, worse than the loud skip. Every missing option
+now belongs to exactly one lane:
+
+**Lane 1 — GUI-effect (~48; implement, wired to real behavior).** The status-bar family
+rendered in the collapsed-sidebar titlebar strip, which is already a proto-status-bar
+(session badge = `status-left`'s `[#S]`, tab row = window list, right corner = the default
+left+right concatenated): `status-style/-bg/-fg/-justify`, `status-left/right-style/-length`,
+the eight `window-status-*` formats/styles and `-separator` — content renders literal
+`#[…]` styles (user content, like terminal cells; the strip's frame stays theme chrome),
+tabs stay interactive widgets fed format-expanded labels. All nine alert options
+(`monitor-*`, `*-action`, `visual-*`) on the shipped bell plumbing. Titles (`set-titles`,
+`set-titles-string`, `allow-rename`, `allow-set-title`). Terminal engine: `focus-events`
+(behavior already unconditionally on — store the flag and gate), `alternate-screen`,
+`scroll-on-clear`, `cursor-style/-colour` (bridge to the existing appearance config), and
+`allow-passthrough` (see the hazard below). Keys and prompt: `prefix2`, `key-table`,
+`prefix-timeout`, `status-keys`, `wrap-search`, `prompt-history-limit`, `history-file`.
+Layout: `main-pane-width/height`, `other-pane-width/height`, `tiled-layout-max-columns`
+(today five hardcoded constants in `layout.rs`), `window-size`, `default-size`. Overlays:
+`display-panes-time/-format`, `remain-on-exit-format`. Shared: `command-alias[]`.
+Maintainer decisions folded in: `pane-border-style`/`pane-active-border-style` HONOR
+explicitly-set colors over the theme (attributes beyond color ignored, one divergence
+row); `window-style`/`window-active-style` (inactive-pane dimming) and the
+`mode-style`/`copy-mode-*-style` selection/match/mark styles ALL render in the GUI
+terminal renderer — content styling, no chrome-doctrine conflict. Lifecycle flags
+(`exit-empty`, `exit-unattached`, `destroy-unattached`, `detach-on-destroy`) are honored
+when a config EXPLICITLY sets them; defaults keep zz's persistent-daemon behavior. Note
+the daemon already carries the machinery: `should_shutdown_if_empty` = armed ∧ zero
+sessions ∧ zero subscribers — wiring `exit-empty` means exposing that switch, and the
+"attached client keeps the daemon alive" guard stays as a documented divergence. The
+Settings → Advanced `QuitDaemonOnExit` key is a DIFFERENT trigger (app quit, not
+sessions-drained); both axes coexist, the settings description should cross-reference.
+`detach-on-destroy` still rides the phase-8 client seam.
+
+**Lane 2 — store-only (~40; accept + store silently, divergence row each, the TUI
+consumes later).** `terminal-features[]`, `terminal-overrides[]`, `extended-keys(-format)`,
+`backspace`, `user-keys[]`, `xterm-keys`, `input-buffer-size`, `get-clipboard`,
+`codepoint-widths[]`, `variation-selector-always-wide`, `status-format[]`,
+`status-position` (the titlebar bar is top-only), `message-line`, `message-style`,
+`message-command-style`, `message-format` (toasts and the command prompt keep zz's design
+language — the popup/menu precedent), `fill-character`, `pane-border-lines/-indicators`,
+`pane-scrollbars*` (4), `pane-colours[]`, `clock-mode-*`, `prompt-cursor-*` (4),
+`assume-paste-time`, `editor`, `default-client-command`, `session-status-*`,
+`pane-status-*`, `window-pane-*-status-format`, the `copy-mode-line-number*` family.
+Landing this lane also REPLACES the silent no-ops with real storage — arrays store and
+read back, `set-option <hook-name>` routes to the hook table.
+
+**Lane 3 — N/A-native, documented.** `tree-mode-*` (native choosers, rationale exists),
+and the 21 pin-3.6 theme-palette options (`theme`, `dark-theme-*`, `light-theme-*`) —
+zero corpus/real-world hits; parked entirely until demand exists.
+
+**Hazard (correctness, not compat):** the 2026-08-19 launcher wave sets `$TMUX` in the
+exact tmux shape, so tmux-aware programs now WRAP passthrough sequences in
+`\ePtmux;…\e\\` expecting an unwrap. zz's VT speaks kitty graphics natively but does not
+unwrap the DCS envelope — inline images from tmux-aware programs may have regressed the
+moment `$TMUX` appeared. `allow-passthrough` (Lane 1) is the unwrap path; probe early.
+
+**Grammar gaps (orthogonal, scheduled before any options wave):** `$VAR`/`${VAR}`
+expansion in config words (silently wrong values today, no diagnostic), the full
+double-quote escape set (`\e` currently becomes a literal `e` — silent corruption),
+`%hidden`, bare `NAME=value` environment lines (storage exists, spellings don't), and
+`%if`/`%elif`/`%else` evaluation (the format engine and `if_shell_truthy` exist,
+unwired at parse time; gates Oh My Tmux joining the smoke corpus).
+
 # Risks
 
 - `tmux -V` gating: any answer is a small lie; plugins may exercise version-specific paths.

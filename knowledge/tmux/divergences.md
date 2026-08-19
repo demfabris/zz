@@ -197,7 +197,7 @@ inside a generic “unsupported formats” claim.
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
 | `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
-# Options: 25 of 180
+# Options: 38 of 180
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin.
 Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-panes`,
@@ -205,7 +205,12 @@ Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-pan
 `status-interval`, `status-left`, `status-right`, `base-index`, `pane-base-index`, and
 `renumber-windows`, plus `mouse`, `escape-time`, `automatic-rename`,
 `automatic-rename-format`, `remain-on-exit`, `default-terminal`, `display-time`, `repeat-time`, and
-`aggressive-resize`. The index trio follows tmux's session/window inheritance, allocation,
+`aggressive-resize`, plus the later arrivals `initial-repeat-time`, `lock-after-time`,
+`lock-command`, `default-command`, `default-shell`, `update-environment`, `menu-style`,
+`menu-selected-style`, `menu-border-style`, `menu-border-lines`, `popup-style`,
+`popup-border-style`, and `popup-border-lines`. The remaining 142 are lane-assigned in the
+drop-in plan's "options residue" section (GUI-effect / store-only / N-A-native).
+The index trio follows tmux's session/window inheritance, allocation,
 targeting, format, and close-triggered renumbering behavior. (`set-option` also accepts six
 zz-native names — the agent/editor/history-trickle keys — which don't count toward tmux
 coverage.) `show-options` and `show-window-options` expose implemented values with tmux's exact

@@ -10,7 +10,7 @@ tags:
 - layout
 - control-mode
 - roadmap
-timestamp: 2026-08-18T00:00:00Z
+timestamp: 2026-08-19T00:00:00Z
 ---
 
 # Overview
@@ -655,11 +655,12 @@ this list is the campaign-level index of it plus the items that never got a matr
   leads the screen transiently under flood (bounded by the 4MiB backlog,
   exactly convergent — harmless for pipe-pane, but phase-6 `%output` consumers
   that correlate output against concurrently-queried screen state will see the
-  output lead where tmux keeps them in lockstep); VT parser throughput is the
-  largest pin-adjacent gap (debug-build measurement: 8MB un-piped flood 93s vs
-  the pin's 1s — it is the direct cause of the mid-flood capture-pane timeout
-  and the copy_pipe_timeout load-flake; deserves its own wave, not more
-  per-test margin raising).
+  output lead where tmux keeps them in lockstep); the VT-parser-throughput gap
+  this row flagged got its wave and CLOSED 2026-08-19: the 93s-vs-1s flood delta
+  was the Zig `Debug` build of the vendored engine (dev builds now compile it
+  `ReleaseSafe`, and a 1ms wall-time bound caps each drain turn), so the
+  mid-flood capture-pane timeout class is gone — see the load-flake entry below
+  and `knowledge/terminal/pty-drain.md`.
 - Error-text surface: the grep-facing classes CLOSED by wave 7b (2026-08-18) —
   bare pin-exact stderr for option-value/target/unknown-command errors (twelve
   regress strings byte-verified), `already set:` respelled to the pin,

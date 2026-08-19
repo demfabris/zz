@@ -555,6 +555,7 @@ impl Daemon {
         accept_result?;
         shared.request_shutdown();
         shared.publish(EventPayload::ServerStopping);
+        shared.drain_subscribers_for_shutdown(Duration::from_secs(2));
         // The adapter children are told to close and joined before the socket
         // goes; what refuses to settle is the acp crate's problem, not ours.
         #[cfg(feature = "agent")]
@@ -747,6 +748,7 @@ struct OutboundState {
     recycled_capacity: usize,
     queued_bytes: usize,
     closed: bool,
+    writer_finished: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1399,6 +1401,30 @@ impl OutboundMailbox {
         close_outbound(&mut state);
         drop(state);
         self.ready.notify_all();
+    }
+
+    fn close_after_flush(&self) {
+        let mut state = self.state.lock();
+        state.closed = true;
+        drop(state);
+        self.ready.notify_all();
+    }
+
+    fn mark_writer_finished(&self) {
+        let mut state = self.state.lock();
+        state.writer_finished = true;
+        drop(state);
+        self.ready.notify_all();
+    }
+
+    fn wait_writer_finished(&self, deadline: Instant) -> bool {
+        let mut state = self.state.lock();
+        while !state.writer_finished {
+            if self.ready.wait_until(&mut state, deadline).timed_out() {
+                return state.writer_finished;
+            }
+        }
+        true
     }
 
     fn queued_reliable(&self) -> Option<(usize, usize)> {
@@ -2536,6 +2562,26 @@ impl Shared {
         ready_rx
             .recv()
             .map_err(|error| DaemonError::Thread(error.to_string()))
+    }
+
+    /// Bounded wait for every subscriber's writer to flush its queue to the
+    /// socket before the process exits, so a stopping server's final events
+    /// (the `kill-server` response, `ServerStopping`) reach clients instead
+    /// of dying in mailboxes — the contract tmux calls `control_all_done`.
+    fn drain_subscribers_for_shutdown(&self, timeout: Duration) {
+        let mailboxes = {
+            let inner = self.inner.lock();
+            inner.subscribers.values().cloned().collect::<Vec<_>>()
+        };
+        let deadline = Instant::now() + timeout;
+        for mailbox in &mailboxes {
+            mailbox.close_after_flush();
+        }
+        for mailbox in &mailboxes {
+            if !mailbox.wait_writer_finished(deadline) {
+                log::warn!("shutdown proceeding before a client writer drained");
+            }
+        }
     }
 
     fn request_shutdown(&self) {
@@ -18478,6 +18524,7 @@ fn write_outbound(stream: &mut impl TransportStream, outbound: &OutboundMailbox)
         outbound.recycle_frame(frame);
     }
     let _ = stream.shutdown();
+    outbound.mark_writer_finished();
 }
 
 fn validate_hello(hello: &ClientHello) -> Result<(), DaemonError> {

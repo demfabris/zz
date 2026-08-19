@@ -718,9 +718,15 @@ this list is the campaign-level index of it plus the items that never got a matr
   job-control warning). Fixed with the self-match-proof `printf 'ZZ_HANDOFF_%s\n' READY`
   idiom (the sibling burst test already used it — that's why it never flaked), `set +m`,
   and eval stderr silenced; 10/10 clean under the double-suite load that failed 7/8
-  before. The daemon's tap handoff was verified byte-exact. Residual occasional
-  load-flakes (pre-existing): `copy_pipe_timeout…`, `kill_server_reaps…`,
-  `history_request…`, `default_shell_rejects…`, and a `control_new_session…`
+  before. The daemon's tap handoff was verified byte-exact. The cli_binary control-mode
+  exit-code-1 flakes (three sightings incl. two CI runs) were a real defect hunted the
+  same day: nothing waited for connection writer threads before the stopping daemon's
+  process exit, so the `kill-server` response and `ServerStopping` could die unflushed in
+  mailboxes and the `-C` client saw a raw disconnect (exit 1). Fixed with a bounded
+  post-`ServerStopping` drain (`drain_subscribers_for_shutdown`, tmux's `control_all_done`
+  contract). Residual occasional load-flakes (pre-existing, pass solo):
+  `copy_pipe_timeout…` (pgid-recycle EPERM), `kill_server_reaps…`, `history_request…`,
+  `default_shell_rejects…`, and a `control_new_session…` startup-rename-transient
   event-ordering assert — all under double-suite load only.
 - macOS-vs-glibc strftime quirks are now load-bearing (the daemon calls libc strftime —
   the workspace's only `unsafe` block): any future platform (musl, Windows) needs its own

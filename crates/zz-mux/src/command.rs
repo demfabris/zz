@@ -7,11 +7,11 @@ use std::{
 
 use zz_protocol::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, COMMAND_SPECS, ChooseTreeKind,
-    CommandInvocation, CommandSpec, DAEMON_COMMAND_SPECS, DEFAULT_AGENT_AUTO_APPROVE,
-    DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE,
-    CommandResolution, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES,
-    MuxOptionKey, PaneId, PaneKindSnapshot, PopupBorderLines, ServerError, SessionId,
-    TerminalUiCommand, WindowId, normalize_browser_profile_name, resolve_command,
+    CommandInvocation, CommandResolution, CommandSpec, DAEMON_COMMAND_SPECS,
+    DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
+    DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES,
+    MAX_GUI_TEXT_BYTES, MuxOptionKey, PaneId, PaneKindSnapshot, PopupBorderLines, ServerError,
+    SessionId, TerminalUiCommand, WindowId, normalize_browser_profile_name, resolve_command,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, DEFAULT_HISTORY_LIMIT,
@@ -1646,10 +1646,7 @@ impl MuxEngine {
                         ServerError::UnsupportedCommand(name.to_owned())
                     }
                     CommandResolution::Ambiguous(message) => ServerError::InvalidCommand(message),
-                    _ => ServerError::InvalidCommand(format!(
-                        "unknown command: {}",
-                        command.name
-                    )),
+                    _ => ServerError::InvalidCommand(format!("unknown command: {}", command.name)),
                 });
             }
         };

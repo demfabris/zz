@@ -23044,7 +23044,7 @@ mod tests {
             |viewport| matches!(viewport.status, SessionStatus::Running),
         );
         assert!(terminal.send_raw_input(Arc::from(
-            b"stty raw -echo; printf 'ZZ_PIPE_%s\\n' READY; IFS= read -r command; eval \"$command\"; IFS= read -r _\n"
+            b"stty raw -echo; set +m; printf 'ZZ_PIPE_%s\\n' READY; IFS= read -r command; eval \"$command\" 2>/dev/null; IFS= read -r _\n"
                 .as_slice()
         )));
         let ready_deadline = Instant::now() + Duration::from_secs(10);
@@ -23162,7 +23162,7 @@ mod tests {
             |viewport| matches!(viewport.status, SessionStatus::Running),
         );
         assert!(terminal.send_raw_input(Arc::from(
-            b"stty raw -echo; printf 'ZZ_HANDOFF_READY\\n'; IFS= read -r command; eval \"$command\"; IFS= read -r _\n"
+            b"stty raw -echo; set +m; printf 'ZZ_HANDOFF_%s\\n' READY; IFS= read -r command; eval \"$command\" 2>/dev/null; IFS= read -r _\n"
                 .as_slice()
         )));
         let ready_deadline = Instant::now() + Duration::from_secs(10);
@@ -23234,8 +23234,20 @@ mod tests {
         let mut expected = pattern.repeat(payload_bytes.div_ceil(pattern.len()));
         expected.truncate(payload_bytes);
         expected.extend_from_slice(b"ENDMARK\n");
-        assert_eq!(captured.len(), expected.len());
-        assert_eq!(captured, expected);
+        if captured != expected {
+            let common = captured
+                .iter()
+                .zip(expected.iter())
+                .take_while(|(a, b)| a == b)
+                .count();
+            let window_end = (common + 256).min(captured.len());
+            panic!(
+                "pipe handoff mismatch: captured={} expected={} first_divergence={common} window={:?}",
+                captured.len(),
+                expected.len(),
+                String::from_utf8_lossy(&captured[common.saturating_sub(48)..window_end]),
+            );
+        }
 
         shared.request_shutdown();
     }

@@ -710,13 +710,18 @@ this list is the campaign-level index of it plus the items that never got a matr
   Dev builds now default to `ReleaseSafe`, a 1ms wall-time bound caps each drain turn
   regardless of parse rate, the silent control-tap arm timeout now logs and retries once,
   and the pipe-rearm timeout logs before tearing down — see
-  `knowledge/terminal/pty-drain.md`. Residual, pre-existing (A/B'd against the same tree
-  without the wave's code): under heavy parallel load (two suites concurrently) the
-  daemon suite still flakes — most often `pipe_pane_has_no_gap…` with a byte-DUPLICATION
-  signature (the pipe file gains tens-to-hundreds of extra bytes around the
-  control-attach tap handoff), occasionally `copy_pipe_timeout…`, `kill_server_reaps…`,
-  `history_request…`, and a `control_new_session…` event-ordering assert. The
-  duplication is a real seam bug awaiting its own hunt, not test noise.
+  `knowledge/terminal/pty-drain.md`. The `pipe_pane_has_no_gap…` "extra bytes" flake that
+  dominated under load was hunted same-day and was a TEST bug, not a daemon bug: the
+  readiness gate matched `ZZ_HANDOFF_READY` inside the echoed setup command itself, so
+  under load the pipe opened before `stty raw -echo` ran and the tap faithfully captured
+  echo noise (plus, separately, bash's `child setpgid … Operation not permitted`
+  job-control warning). Fixed with the self-match-proof `printf 'ZZ_HANDOFF_%s\n' READY`
+  idiom (the sibling burst test already used it — that's why it never flaked), `set +m`,
+  and eval stderr silenced; 10/10 clean under the double-suite load that failed 7/8
+  before. The daemon's tap handoff was verified byte-exact. Residual occasional
+  load-flakes (pre-existing): `copy_pipe_timeout…`, `kill_server_reaps…`,
+  `history_request…`, `default_shell_rejects…`, and a `control_new_session…`
+  event-ordering assert — all under double-suite load only.
 - macOS-vs-glibc strftime quirks are now load-bearing (the daemon calls libc strftime —
   the workspace's only `unsafe` block): any future platform (musl, Windows) needs its own
   parity probe of unknown-`%` handling.

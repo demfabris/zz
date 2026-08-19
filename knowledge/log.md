@@ -3,6 +3,7 @@
 ## 2026-08-19
 * **Update**: Advanced the pinned Ghostty Zig 0.16 snapshot to 20c3eae, which corrects the custom memset C ABI, and made ReleaseSafe the Rust dev-profile default to restore VT throughput without corrupting hash tables.
 * **Update**: Bounded each macOS PTY drain turn to 1ms of wall time so actor command budgets hold at any parse rate, added gated per-publish vt_write throughput diagnostics, and gave the silent control-tap and pipe-rearm timeout paths warnings plus a one-shot fresh-token retry. `bench/README.md` now exists; the pty-drain page records the Zig optimize-mode trap.
+* **Fix**: The pipe-pane handoff test's load flake was its own readiness gate matching the marker inside the echoed setup command, opening the pipe before echo was off; both pipe tests now use the self-match-proof `printf '…_%s' READY` idiom, disable job control, and silence eval stderr. The daemon tap handoff was verified byte-exact in the process.
 
 ## 2026-08-17
 * **Update**: Fixed the audit's confirmed input and containment defects. PTY writes no longer stall resize or shutdown, protocol v60 cancels armed prefixes before dialogs, inverse Ctrl/Alt binds now match live input, and FFI connect wakes HELLO. Git refresh now coalesces, copy-pipe kills process groups, DPAPI plaintext is wiped, AppKit state restores on unwind, and BSD wake pipes drain fully.

@@ -394,6 +394,35 @@ pane visibility). The harness (phase 2) does not wait for this.
   the pin adds a flags-0 block per after-hook; no `default-client-command`
   option (new-session hardcoded, the pin's default).
 
+- **Wave 6b** (`cbb34a2`, stamped `0dc46aa`, CONFIRMED-CLOSED 2026-08-18) —
+  notifications + layout strings + basic %output. Protocol v66:
+  `EventPayload::HookEvent {name, variables}` (tag 40) exposes the 5c hook
+  bus to Control subscribers only, `PaneOutput {pane, bytes}` (tag 41), a
+  typed overflow exit (tag 39), and `WindowSnapshot` gained trailing
+  `layout_dump`/`visible_layout_dump` (tmux layout strings, checksummed).
+  Daemon: paste-buffer-changed/deleted seams added; a daemon-owned
+  raw-output multiplexer owns the pane tap and feeds BOTH pipe-pane and
+  Control subscribers — ownership transfers (rearm), never evicts; verified
+  live in both orders (pipe-then-control and control-then-pipe). Front-end:
+  the full notification inventory rendered through the block-deferral seam
+  (one FIFO for notifications AND %output → nothing ever interleaves into
+  an open block, arrival order preserved), %output with the pin's exact
+  escaping (\NNN for 0x00-0x1F + backslash, 8-bit raw — byte-identical
+  concatenated streams), %message, %config-error, `%exit too far behind` on
+  the overflow disconnect. window-unlinked ALWAYS renders
+  %unlinked-window-close (the pin's deferred callback runs post-unlink, so
+  plain %window-close is unreachable without linked windows — probe-caught,
+  reviewer-verified against control-notify.c). Live two-client mutation
+  probe: notification streams line-identical INCLUDING ordering, modulo the
+  ledgered automatic-rename class (the pin's 500ms sniffer emits transient
+  `tmux`/`kernel_task` names; zz single-fires the settled name). Ledgered:
+  the A5 overflow trigger divergence (count/size vs the pin's 5-minute age
+  model — same %exit text, different trigger); the tap handoff is
+  replace-then-rearm, not atomic (flood-test in 6c); startup notification
+  ordering verified empirically, not proven structurally (re-probe if
+  publish ordering changes); client-name spellings in %client-* lines
+  unverified vs the pin's c->name.
+
 - **Waves 6c + 6d** (`0e5ea00` + `4e69882` + `ed7d3c5`, combined
   CONFIRMED-CLOSED 2026-08-18 — closes phase 6) — flow control, sizing,
   subscriptions. 6c: protocol v67 (PaneOutputState/PaneOutputAged/
@@ -442,38 +471,8 @@ pane visibility). The harness (phase 2) does not wait for this.
   default_shell_rejects join the load-flake set (VT-throughput root
   cause). Hardware smoke pending (maintainer): zz -CC under REAL iTerm2 —
   attach, pane content, window sizing via -C, detach.
-  notifications + layout strings + basic %output. Protocol v66:
-  `EventPayload::HookEvent {name, variables}` (tag 40) exposes the 5c hook
-  bus to Control subscribers only, `PaneOutput {pane, bytes}` (tag 41), a
-  typed overflow exit (tag 39), and `WindowSnapshot` gained trailing
-  `layout_dump`/`visible_layout_dump` (tmux layout strings, checksummed).
-  Daemon: paste-buffer-changed/deleted seams added; a daemon-owned
-  raw-output multiplexer owns the pane tap and feeds BOTH pipe-pane and
-  Control subscribers — ownership transfers (rearm), never evicts; verified
-  live in both orders (pipe-then-control and control-then-pipe). Front-end:
-  the full notification inventory rendered through the block-deferral seam
-  (one FIFO for notifications AND %output → nothing ever interleaves into
-  an open block, arrival order preserved), %output with the pin's exact
-  escaping (\NNN for 0x00-0x1F + backslash, 8-bit raw — byte-identical
-  concatenated streams), %message, %config-error, `%exit too far behind` on
-  the overflow disconnect. window-unlinked ALWAYS renders
-  %unlinked-window-close (the pin's deferred callback runs post-unlink, so
-  plain %window-close is unreachable without linked windows — probe-caught,
-  reviewer-verified against control-notify.c). Live two-client mutation
-  probe: notification streams line-identical INCLUDING ordering, modulo the
-  ledgered automatic-rename class (the pin's 500ms sniffer emits transient
-  `tmux`/`kernel_task` names; zz single-fires the settled name). Ledgered:
-  the A5 overflow trigger divergence (count/size vs the pin's 5-minute age
-  model — same %exit text, different trigger); the tap handoff is
-  replace-then-rearm, not atomic (flood-test in 6c); startup notification
-  ordering verified empirically, not proven structurally (re-probe if
-  publish ordering changes); client-name spellings in %client-* lines
-  unverified vs the pin's c->name. NEXT: 6c = -A pane states +
-  no-output/pause-after flags + the pin's pacing constants (pacing
-  implemented faithfully even while the kill trigger stays divergent;
-  pause must gate queue ENTRY, not drain), then 6d sizing/subscriptions.
 
-## Phase 7 — the binary surface (~1 week) — **PHASE COMPLETE 2026-08-18**
+## Phase 7 — the binary surface — **PHASE COMPLETE 2026-08-18**
 
 Closed by 7a (argv surface, `$TMUX` shape, `-V`), 7b (error-output shapes), and 7d
 (the alias smoke suite, `e45f0dd`). The only phase-7 residue is the optional 7c
@@ -536,22 +535,33 @@ appendix: arity/flag rejection wording, the `usage:` fallback, and the
   `~` expansion** for unquoted and just-inside-double-quote leading tildes, because
   stored bindings are `list-keys`-visible and the pin stores absolute paths.
 
-## Phase 8 — the attach contract (gated on the TUI design)
+## Phase 8 — the attach contract (rows 1, 3, 4 closed; row 2 — the new-session client seam — remains)
 
-The four invocations the alias lives on (rows 3-4 largely closed by 7a,
-2026-08-18):
+The four invocations the alias lives on (rows 3-4 largely closed by 7a
+2026-08-18, row 1 by the launcher wave 2026-08-19):
 
 | Invocation | tmux | zz today |
 | --- | --- | --- |
-| `tmux` | new session + attach this TTY | boots the GUI, no TTY/headless check |
+| `tmux` | new session + attach this TTY | CLOSED 2026-08-19 — the installed launcher rewrites bare argv to `attach`: TUI on a TTY, lazy first-session create. A re-invocation attaches to the live session where tmux would stack a new one (deliberate); the GUI moved behind the exact verb `zz app` |
 | `tmux new -s foo` | create **and** attach this process | creates, exits — the daemon applies `MuxEffect::Attach` only for Interactive clients |
 | `tmux attach -t foo` | attach this TTY | works — full `-t`/`-d` grammar, TUI attach on a TTY, engine-identical `can't find session:` headless (7a) |
 | `tmux attach` | attach, starting the server if needed | works — autostarts the daemon (CMD_STARTSERVER), `no sessions` on an empty server, TTY check last (7a) |
 
-Needs: TUI-as-default on a TTY (the [TUI client](/designs/tui-client.md) design's open
-rungs — this is why the phase is gated, not estimated), `attach -t`/flag parsing,
-daemon-spawn on attach, and a story for `new-session` attaching the calling process (run the
-TUI client, or a Command→Interactive upgrade). Shares the client-seam work with
+The 2026-08-19 launcher wave closed row 1 and the alias boundary around it: bare `zz`
+rewrites to `attach` (TUI, per the [TUI client](/designs/tui-client.md) design), the GUI
+lives behind the exact verb `zz app` (Launch Services carries the caller's cwd via
+`ZZ_APP_STARTUP_DIRECTORY`), `$TMUX` without `ZZ_SOCKET` is refused instead of dialed as a
+zz endpoint (decision 4's boundary made loud), and startup config re-enters through a
+private `tmux` PATH shim gated by the `ZZ_STARTUP_REENTRY` capability so `run-shell`/
+`if-shell`/TPM lines work while the daemon is still sourcing its config. Linux packages
+ship the CLI launcher as `cli`, `/usr/bin/zz` points at it, and the desktop entry runs
+`zz app`.
+
+Still needed (row 2): a story for `new-session` attaching the calling process — run the TUI
+client, or a Command→Interactive upgrade; the daemon applies `MuxEffect::Attach` only to
+Interactive/Control clients — plus the no-tty `new-session` divergence deferred from 7a
+(pin: `open terminal failed: not a terminal` rc 1; zz: detached create rc 0) and
+`mouse`/`escape-time` consumption in the TUI. Shares the client-seam work with
 `switch-client` (phase 4).
 
 # Acceptance

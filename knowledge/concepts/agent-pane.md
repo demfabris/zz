@@ -24,7 +24,7 @@ JSON blob with a byte cap, which the client deserializes into the shape its redu
 
 | Layer | Representation | Responsibility |
 | --- | --- | --- |
-| protocol | `PaneKindSnapshot::Agent(AgentDescriptor)` | Versioned pane identity plus `provider`, `cwd`, and opaque ACP `session_id`; introduced across v22–v32. The live wire version is `PROTOCOL_VERSION` (60) |
+| protocol | `PaneKindSnapshot::Agent(AgentDescriptor)` | Versioned pane identity plus `provider`, `cwd`, and opaque ACP `session_id`; introduced across v22–v32. The live wire version is `PROTOCOL_VERSION` (68) |
 | mux | `PaneKind::Agent(AgentDescriptor)` | Stable layout leaf, targeting, titles, and validated restore-metadata updates |
 | server | one ACP adapter child per pane, on its own thread | Spawns and owns the child (`zz-daemon/src/agent/host.rs`), auto-approves permissions, queues mid-turn prompts, captures bounded worktree summaries, journals standard session updates, adopts the session ID the adapter returns, and coalesces the stream onto a per-pane outbound lane (`fanout.rs`) |
 | app | shared `Entity<AgentController>` | Reduces the daemon's stream into a flat transcript, tracks the per-pane replay cursor, restores selector preferences, normalizes pasted attachments, and turns user gestures into `AgentRequest` sends |

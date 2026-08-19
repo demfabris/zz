@@ -26,7 +26,7 @@ runs on the daemon's machine, which is the correct machine).
 
 # Ownership shift
 
-| Concern | Before (v52) | Current (v60) |
+| Concern | Before (v52) | Current (v68) |
 | --- | --- | --- |
 | Adapter child, stdio, ACP session | GUI (`AgentController` runtime tasks) | daemon `agent::host`, one thread per pane |
 | Auto-approve, queued prompts, stderr tail, session ops | GUI runtime half | daemon `agent::host` |

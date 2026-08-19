@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v60)
+title: zz wire protocol (v68)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-08-17T00:00:00-03:00
+timestamp: 2026-08-19T00:00:00-03:00
 ---
 
 # Overview
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 60`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 68`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (60) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (68) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -76,7 +76,7 @@ fields in declaration order.
 | `ClientHello(ClientHello)` | `protocol_version: u16`, `client_instance_id: ClientInstanceId`, `kind: ClientKind`, `device_name: Option<String>` (≤256 B), `capabilities: Vec<String>`, `color_scheme: Option<TerminalColorScheme>`, `origin: Option<PaneId>` | Client → daemon handshake. The process-stable instance ID owns recoverable Agent drafts across reconnects; `device_name` labels this device in presence and eviction notices; `$ZZ_PANE` supplies `origin`, so an untargeted CLI command resolves against its invoking pane |
 | `ServerHello(ServerHello)` | `protocol_version: u16`, `server_id: u64`, `client_id: ClientId`, `client_instance_id: ClientInstanceId`, `capabilities: Vec<String>` (≤64 entries, ≤256 B each), `appearance: TerminalAppearance`, `appearance_provenance: AppearanceProvenance`, `mux_options: MuxOptions`, `status: StatusLine`, `key_tables: Vec<KeyTableSnapshot>` | Daemon → client handshake reply; echoes the accepted process identity, while every key table (root, prefix, copy-mode, copy-mode-vi, custom) lets clients label key hints and render binding help and capabilities describe optional behavior |
 | `CommandRequest(CommandRequest)` | `request_id: u64`, `command: CommandInvocation` | tmux-style command from any client |
-| `CommandResponse(CommandResponse)` | `Success { request_id, output }` / `Error { request_id, error: ServerError }` | Command result |
+| `CommandResponse(CommandResponse)` | `Success { request_id, output, exit_code }` / `Error { request_id, error: ServerError, output }` | Command result. A client prints either output field before it reports an error or returns the exit code |
 | `Attach { session: String }` | target string | Interactive attach request. An empty target lazily creates the next numeric session when the daemon has none; explicit missing targets and Command-kind attaches do not create. A session holds a set of attached clients, so a second device never collides with the first |
 | `Attached { session: SessionId, snapshot: MuxSnapshot }` | resolved id + full state | Attach acknowledgement |
 | `Detach` | . | Interactive detach; drops the sending client's attachment and leaves every other viewer attached. The connection stays open, and the client remains a subscriber that can send another `Attach` |
@@ -113,8 +113,10 @@ must be nonempty and fit `MAX_GUI_TEXT_BYTES`; a switch carries at most
 Windows client can carry a Unix daemon path and vice versa; the receiving daemon enforces local
 absoluteness before the adapter sees it. Rejections surface as `ProtocolError::InvalidAgentPayload`.
 
-`ClientKind`: `Interactive | Command`. `ClientMessageKind` (typed notifications introduced in v17):
-`Info | Success | Warning | Error`.
+`ClientKind`: `Interactive | Command | Control`. `Control` (appended at v65) is a control-mode
+(`-C`/`-CC`) client: it subscribes to the session like an Interactive client but renders the
+tmux CC text protocol on its own stdio instead of a UI. `ClientMessageKind` (typed notifications
+introduced in v17): `Info | Success | Warning | Error`.
 
 ## `InputMessage` variants
 
@@ -132,6 +134,9 @@ absoluteness before the adapter sees it. Rejections surface as `ProtocolError::I
 | `CommandPrompt` | `action: CommandPromptAction::{Update, Submit, Close}` |
 | `ResizeSplit` | `window: WindowId`, `split: SplitId`, `ratio_basis_points: u16` (fixed-point over `SPLIT_RATIO_BASIS = 10_000`) |
 | `CancelPrefix` | `request_id: u64`; retire an armed one-shot prefix table without forwarding a key to the pane |
+| `Popup` | `action: PopupAction::{Text(String), Key { input, text_follows }, TerminalView(TerminalViewAction), Close}`; input and view control for the client's open `display-popup` |
+| `Menu` | `action: MenuAction::{Choose(u32), Cancel}`; drives the client's open `display-menu` |
+| `Confirm` | `action: ConfirmAction::Reply(bool)`; answers the client's open `confirm-before` prompt |
 
 Every `Key`/`Text` resolves the per-client `KeyEngine` against the live key tables first; `Pass`
 reaches the synchronized Terminal/Browser sinks (Picker and Agent source panes have no sink and
@@ -187,6 +192,19 @@ listing uses request ID zero; the daemon carries its requester out of band.
 v59 appends `TimedClientMessage { pane, kind: ClientMessageKind, text, duration_ms: u32 }` after
 the agent payloads. v60 appends `PrefixCancelled { request_id }`; older enum tags keep their wire
 values.
+
+The overlay and control-mode waves append ten more, in tag order: `Popup { state: Option<PopupState> }`,
+`Menu { state: Option<MenuState> }`, and `Confirm { state: Option<ConfirmState> }` (v63/v64) carry the
+full overlay state on every change, `None` meaning closed; `ControlExit { reason }` (v66) tells a
+control-mode client why the daemon is ending the conversation (its front-end renders `%exit <reason>`);
+`HookEvent { name, variables }` (v66) is the hook-bus notification feed — the daemon sends the event
+name plus its format variables and the control front-end alone knows the `%`-line spellings;
+`PaneOutput { pane, bytes }` (v66) is the raw pane-output tap (the same tap `pipe-pane` uses) that
+becomes `%output`; `PaneOutputState { pane, paused }` and `PaneOutputAged { pane, age_ms, bytes }`
+(v67) carry flow-control pause/resume and age-stamped output for `%extended-output`;
+`ControlFlags { wait_exit, pause_after_ms, no_output }` (v67) echoes the client's
+`refresh-client -f` flags; and `SubscriptionChanged { name, session, window, window_index, pane, value }`
+(v68) reports a `refresh-client -B` format subscription's value change.
 
 The three payloads `TerminalViewport`, `TerminalPatch`, and `CommandOutput { viewport: Some(..) }` are
 diverted to the [Terminal lane](/protocol/terminal-lanes.md) by `encode_protocol_message`; all other
@@ -339,9 +357,27 @@ unbounded `#()` script off the wire.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 60`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 68`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v68 appends `EventPayload::SubscriptionChanged`, closing the control-mode surface:
+  `refresh-client -B` subscriptions report format-value changes, and sized (`-C`) control clients
+  participate in window sizing like any attached client.
+- v67 appends `EventPayload::PaneOutputState`, `PaneOutputAged`, and `ControlFlags` — `%output`
+  flow control: pause/continue per pane, age-stamped `%extended-output`, and the
+  `refresh-client -f` flag echo.
+- v66 appends `EventPayload::ControlExit`, `HookEvent`, and `PaneOutput`. Hook-bus notifications
+  and the raw pane-output tap reach the wire; the control-mode front-end renders every `%`-line
+  from these, so the daemon never learns CC text shapes.
+- v65 appends `ClientKind::Control` for `-C`/`-CC` clients.
+- v64 appends `InputMessage::Menu`/`Confirm` and `EventPayload::Menu`/`Confirm` for
+  `display-menu` and `confirm-before`.
+- v63 appends `InputMessage::Popup` and `EventPayload::Popup` for `display-popup`: a popup is a
+  real pane floated above the client, with its own input routing.
+- v62 appends `output` to `CommandResponse::Error`. Command-error hook output now reaches the
+  requester before the client prints the original command error.
+- v61 appends `exit_code` to `CommandResponse::Success`, so foreground shell commands can return
+  output and a nonzero status in one response.
 - v60 appends `InputMessage::CancelPrefix { request_id }` and
   `EventPayload::PrefixCancelled { request_id }`. The pair gives dialogs an ordered cancellation
   barrier before they return keyboard ownership to the workspace.
@@ -393,20 +429,20 @@ unbounded `#()` script off the wire.
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 60, client_instance_id: ClientInstanceId(1), kind: Interactive,
+`ClientHello { protocol_version: 68, client_instance_id: ClientInstanceId(1), kind: Interactive,
 device_name: None, capabilities: [], color_scheme: Some(Dark), origin: None }` is 17 bytes on the
 wire: an 8-byte envelope over a 9-byte postcard payload.
 
 ```text
 byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15 16
-      0d 00 00 00  00     00      3c 00         00 3c 01 00 00 00 01 01 00
+      0d 00 00 00  00     00      44 00         00 44 01 00 00 00 01 01 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 13  Control        (= 60)
+      length = 13  Control        (= 68)
 ```
 
 - **length `13`** = `ENVELOPE_BYTES` (4) + payload (9); it counts the four envelope bytes, not itself.
-- **payload** `00 3c 01 00 00 00 01 01 00`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x3c` (= 60), `client_instance_id` as varint `01`, `kind`
+- **payload** `00 44 01 00 00 00 01 01 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x44` (= 68), `client_instance_id` as varint `01`, `kind`
   variant `0` (`Interactive`), `device_name` as the `Option::None` tag `00`, `capabilities` as the
   sequence length `00`, `Option::Some` tag `01`, `TerminalColorScheme` variant `1` (`Dark`), then
   `origin` as `Option::None` (`00`). Postcard
@@ -438,9 +474,9 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 60, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
+client → ClientHello { protocol_version: 68, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
                        capabilities: [], color_scheme: Some(Dark), origin: None }
-server → ServerHello { protocol_version: 60, server_id, client_id: c11, client_instance_id: i1,
+server → ServerHello { protocol_version: 68, server_id, client_id: c11, client_instance_id: i1,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],

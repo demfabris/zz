@@ -90,6 +90,10 @@ const PTY_BUFFER_POOL_SIZE: usize = 4;
 const PTY_BUFFER_POOL_SIZE: usize = 8;
 #[cfg(all(unix, not(target_os = "linux")))]
 const PTY_DRAIN_TURN_BYTES: usize = 256 * 1024;
+/// Wall-time bound on a single drain turn so the actor lane stays responsive even when the
+/// parser runs far below the byte bound's assumed rate (e.g. an unoptimized VT build).
+#[cfg(all(unix, not(target_os = "linux")))]
+const PTY_DRAIN_TURN_TIME: Duration = Duration::from_millis(1);
 #[cfg(unix)]
 const PTY_BRIDGE_THRESHOLD_BYTES: usize = 1024;
 /// Nonblocking read retries bridging a saturated producer's kernel queue refill.
@@ -132,6 +136,36 @@ fn diagnostic_timer() -> Option<Instant> {
 
 fn diagnostic_elapsed_us(started: Option<Instant>) -> u128 {
     started.map_or(0, |started| started.elapsed().as_micros())
+}
+
+#[derive(Default)]
+struct VtWriteDiagnostics {
+    bytes: usize,
+    calls: u32,
+    micros: u128,
+}
+
+impl VtWriteDiagnostics {
+    fn record(&mut self, bytes: usize, started: Option<Instant>) {
+        if started.is_some() && bytes > 0 {
+            self.bytes = self.bytes.saturating_add(bytes);
+            self.calls = self.calls.saturating_add(1);
+            self.micros = self.micros.saturating_add(diagnostic_elapsed_us(started));
+        }
+    }
+
+    fn emit(&mut self) {
+        if self.calls > 0 {
+            log::trace!(
+                target: "zz_terminal::diagnostics::vt",
+                "vt_write parsed_bytes={} calls={} elapsed_us={}",
+                self.bytes,
+                self.calls,
+                self.micros,
+            );
+            *self = Self::default();
+        }
+    }
 }
 
 #[repr(u8)]
@@ -3822,6 +3856,7 @@ fn run_terminal(
     let mut search_refresh_due = None::<Instant>;
     let mut last_content_publish = Instant::now();
     let mut output_pending = false;
+    let mut vt_diagnostics = VtWriteDiagnostics::default();
     let mut raw_output_tap = None;
     let mut raw_output_parse_backlog = VecDeque::<(Arc<[u8]>, usize)>::new();
     let mut raw_output_parse_backlog_bytes = 0_usize;
@@ -3917,6 +3952,7 @@ fn run_terminal(
             )?;
             last_content_publish = Instant::now();
             output_pending = false;
+            vt_diagnostics.emit();
         }
         for token in pasted_image_bindings.expire(Instant::now()) {
             publisher.pending_paste_expired(token)?;
@@ -4570,6 +4606,7 @@ fn run_terminal(
             Wake::PtyReadable => {
                 let mut burst = 0_usize;
                 let mut spins = 0_u32;
+                let turn_started = Instant::now();
                 loop {
                     match rustix::io::read(&drain_fd, &mut read_buffer[..]) {
                         Ok(0) => {
@@ -4593,13 +4630,16 @@ fn run_terminal(
                                     raw_output_parse_backlog_bytes.saturating_add(bytes.len());
                                 raw_output_parse_backlog.push_back((bytes, 0));
                             } else {
+                                let started = diagnostic_timer();
                                 terminal.vt_write(&read_buffer[..length]);
+                                vt_diagnostics.record(length, started);
                                 output_pending = true;
                             }
                             burst += length;
                             spins = 0;
                             if burst >= PTY_DRAIN_TURN_BYTES
                                 || raw_output_parse_backlog_bytes >= RAW_OUTPUT_PARSE_BACKLOG_BYTES
+                                || turn_started.elapsed() >= PTY_DRAIN_TURN_TIME
                             {
                                 break;
                             }
@@ -4641,6 +4681,7 @@ fn run_terminal(
                                 raw_output_parse_backlog.push_back((bytes, 0));
                                 let _ = recycle_tx.try_send(buffer);
                             } else {
+                                let started = diagnostic_timer();
                                 closed_tap = closed_tap.or_else(|| {
                                     consume_pty_output(
                                         &mut terminal,
@@ -4650,6 +4691,7 @@ fn run_terminal(
                                         &recycle_tx,
                                     )
                                 });
+                                vt_diagnostics.record(length, started);
                                 consumed_output = true;
                             }
                         });
@@ -4668,11 +4710,17 @@ fn run_terminal(
                 }
             }
             Wake::Deadline => {
+                let started = diagnostic_timer();
+                let backlog_before = raw_output_parse_backlog_bytes;
                 output_pending |= drain_raw_output_parse_backlog(
                     &mut terminal,
                     &mut raw_output_parse_backlog,
                     &mut raw_output_parse_backlog_bytes,
                     &mut raw_output_parse_buffer,
+                );
+                vt_diagnostics.record(
+                    backlog_before.saturating_sub(raw_output_parse_backlog_bytes),
+                    started,
                 );
             }
         }

@@ -42,10 +42,10 @@ use zz_protocol::{
 };
 use zz_terminal::{
     AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance, CaptureBoundary,
-    CaptureOptions, ClipboardTarget, LastCommandCapture, PasteBufferAction, TerminalAppearance,
-    TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch, TerminalEvent, TerminalMode,
-    TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport, WordSeparators,
-    apply_appearance_overrides, prepare_paste_buffer,
+    CaptureOptions, ClipboardTarget, LastCommandCapture, PasteBufferAction, RawOutputTapError,
+    TerminalAppearance, TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch,
+    TerminalEvent, TerminalMode, TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId,
+    TerminalViewport, WordSeparators, apply_appearance_overrides, prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -5024,9 +5024,13 @@ impl Shared {
                 inner.control_output_taps.contains_key(&pane),
             )
         };
-        if !valid || multiplexed || terminal.arm_raw_output_tap(token, output).is_ok() {
+        if !valid || multiplexed {
             return;
         }
+        let Err(error) = terminal.arm_raw_output_tap(token, output) else {
+            return;
+        };
+        log::warn!("could not rearm pipe tap for {pane}, stopping the pipe: {error}");
         let pipe = {
             let mut inner = self.inner.lock();
             inner
@@ -5123,15 +5127,30 @@ impl Shared {
     }
 
     fn start_control_output_tap(self: &Arc<Self>, pane: PaneId, terminal: &Arc<TerminalSession>) {
-        let (output, receiver) = TerminalSession::raw_output_tap_channel();
-        let token = {
-            let mut inner = self.inner.lock();
+        let next_token = |daemon: &Self| {
+            let mut inner = daemon.inner.lock();
             inner.next_pipe_token = inner.next_pipe_token.wrapping_add(1).max(1);
             inner.next_pipe_token
         };
-        if terminal.arm_raw_output_tap(token, output).is_err() {
-            return;
-        }
+        let (output, receiver) = TerminalSession::raw_output_tap_channel();
+        let mut token = next_token(self);
+        let receiver = match terminal.arm_raw_output_tap(token, output) {
+            Ok(()) => receiver,
+            Err(RawOutputTapError::TimedOut) => {
+                log::warn!("control output tap arm timed out for {pane}, retrying once");
+                let (output, retry_receiver) = TerminalSession::raw_output_tap_channel();
+                token = next_token(self);
+                if let Err(error) = terminal.arm_raw_output_tap(token, output) {
+                    log::warn!("control output tap arm failed for {pane}: {error}");
+                    return;
+                }
+                retry_receiver
+            }
+            Err(error) => {
+                log::warn!("control output tap arm failed for {pane}: {error}");
+                return;
+            }
+        };
         let stop = Arc::new(AtomicBool::new(false));
         let weak = Arc::downgrade(self);
         let worker_stop = Arc::clone(&stop);

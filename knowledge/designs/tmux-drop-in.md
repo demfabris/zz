@@ -705,9 +705,18 @@ this list is the campaign-level index of it plus the items that never got a matr
   read, daemon silent) under full-workspace load; passes solo, immediate rerun green. Four
   structural suspects cleared; the per-command trail's added lock contention is the
   surviving hypothesis. PLAUSIBLE, unreproduced.
-- The three documented load-flaky `zz-daemon` tests (`terminal_process_exit_…` and
-  friends) still fail under full-workspace parallel load on CI occasionally — flake, not
-  behavior, but noise in every assessment.
+- The VT-throughput flake root cause is fixed (2026-08-19): dev/test builds compiled the
+  VT engine at Zig `Debug` (~6x slower parse), blowing the 2s command budgets under load.
+  Dev builds now default to `ReleaseSafe`, a 1ms wall-time bound caps each drain turn
+  regardless of parse rate, the silent control-tap arm timeout now logs and retries once,
+  and the pipe-rearm timeout logs before tearing down — see
+  `knowledge/terminal/pty-drain.md`. Residual, pre-existing (A/B'd against the same tree
+  without the wave's code): under heavy parallel load (two suites concurrently) the
+  daemon suite still flakes — most often `pipe_pane_has_no_gap…` with a byte-DUPLICATION
+  signature (the pipe file gains tens-to-hundreds of extra bytes around the
+  control-attach tap handoff), occasionally `copy_pipe_timeout…`, `kill_server_reaps…`,
+  `history_request…`, and a `control_new_session…` event-ordering assert. The
+  duplication is a real seam bug awaiting its own hunt, not test noise.
 - macOS-vs-glibc strftime quirks are now load-bearing (the daemon calls libc strftime —
   the workspace's only `unsafe` block): any future platform (musl, Windows) needs its own
   parity probe of unknown-`%` handling.

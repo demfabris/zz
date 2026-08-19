@@ -4,7 +4,7 @@ title: PTY drain topology (the IO fast path)
 description: How macOS keeps its tuned inline PTY actor while Linux overlaps a bounded gather stage with VT parsing; includes the probe and benchmark results behind each platform choice.
 resource: crates/zz-terminal/src/session.rs
 tags: [pty, throughput, drain, spin-bridge, poll, benchmark, session]
-timestamp: 2026-08-06T00:00:00Z
+timestamp: 2026-08-19T00:00:00Z
 ---
 
 # Overview
@@ -189,6 +189,7 @@ The drain turn itself:
 ```rust
 let mut burst = 0_usize;
 let mut spins = 0_u32;
+let turn_started = Instant::now();
 loop {
     match rustix::io::read(&drain_fd, &mut read_buffer[..]) {
         Ok(0) => { reader_eof = true; break; }
@@ -197,7 +198,8 @@ loop {
             output_pending = true;
             burst += length;
             spins = 0;
-            if burst >= PTY_DRAIN_TURN_BYTES { break; }   // service commands
+            if burst >= PTY_DRAIN_TURN_BYTES             // service commands
+                || turn_started.elapsed() >= PTY_DRAIN_TURN_TIME { break; }
         }
         Err(rustix::io::Errno::INTR) => {}
         Err(rustix::io::Errno::AGAIN) => {
@@ -214,8 +216,15 @@ loop {
 
 The two guards are the whole latency story: an interactive echo (burst < 1 KiB) hits the
 first `EAGAIN` and falls straight back to the poll sleep . an idle pane burns nothing .
-while a saturated stream stays hot. The turn budget (`PTY_DRAIN_TURN_BYTES`, 256 KiB
-≈ 0.8 ms) bounds how long commands can wait mid-flood.
+while a saturated stream stays hot. The turn budget is bounded twice: in bytes
+(`PTY_DRAIN_TURN_BYTES`, 256 KiB ≈ 0.8 ms at the release bench's ~320 MB/s cat-ascii
+rate) and, since 2026-08-19, in wall time (`PTY_DRAIN_TURN_TIME`, 1 ms). The byte bound
+is the fast-path break; the time bound is what the actor's 2 s command budgets actually
+assume, and it holds even when the parser runs far below the byte bound's assumed rate —
+under loaded parallel test runs with a Zig `Debug` VT build, a single 256 KiB turn was
+observed stretching to ~2.8 s (that figure is the dev-profile daemon test environment
+under CPU contention, not the release bench), blowing every capture timeout behind it
+before the time bound existed.
 
 ## The macOS sleep and wake pipe (`wait_for_wake`, `ActorWake`)
 
@@ -265,7 +274,14 @@ if output_pending
 
 Interactive output still publishes immediately (elapsed is ≥ 16 ms when a pane was quiet);
 a flood pays for effects flushes, view reconciliation, and the snapshot **once per frame
-instead of once per kilobyte**. The trade: terminal query replies (DA/DSR) batch up to
+instead of once per kilobyte**. The gate is also where parse-rate visibility lives: each
+drain site accumulates bytes and elapsed µs into a `VtWriteDiagnostics` local (armed only
+when `zz_terminal::diagnostics` is at trace, a relaxed atomic check per read) and the gate
+emits one `vt_write parsed_bytes= calls= elapsed_us=` line per publish under the
+`zz_terminal::diagnostics::vt` target — the only measurement of `vt_write` itself. Note
+the arming gate is the parent target, which also arms the per-read raw-byte dump under
+`zz_terminal::diagnostics::pty`; to time the parser without drowning in byte dumps, use
+`zz_terminal::diagnostics=trace,zz_terminal::diagnostics::pty=warn`. The trade: terminal query replies (DA/DSR) batch up to
 16 ms mid-flood when the writer is ready; the actor holds replies while prior bytes drain.
 The search-refresh debounce runs from the same deadline sweep. Child status arrives as an event from the per-session
 `zz-child-wait` thread parked in `wait()`, so an idle actor sleeps `IDLE_SLEEP` (1 hour)
@@ -311,7 +327,26 @@ kernel reads and lets the actor use its core for parsing.
   macOS inline path. Linux uses `PTY_GATHER_BRIDGE_SPIN_MAX = 16`; changing one must not
   move the other platform onto the same topology.
 * **Do not add per-read logging or FFI work.** The macOS path pays it per 1 KiB exchange,
-  and the Linux gather thread must remain cheaper than the parser it overlaps.
+  and the Linux gather thread must remain cheaper than the parser it overlaps. The
+  `VtWriteDiagnostics` accumulation is the allowed exception: off, it costs one relaxed
+  atomic load per read; on, everything still buffers into a local and logs once per 16 ms
+  publish.
+* **The Zig optimize mode of the VT engine dominates every number here.**
+  `libghostty-vt-sys`'s build script checks Cargo's `DEBUG` env before `OPT_LEVEL`, so
+  until 2026-08-19 every dev/test build silently compiled the parser at Zig `Debug` —
+  roughly 6x slower, which is what caused the daemon's load-flake set (pipe throughput
+  1.36 → 7.75 MB/s when A/B'd against `ReleaseSafe`). Dev builds now default to
+  `ReleaseSafe` (safety checks kept, optimizer on); release stays `ReleaseFast` via
+  `OPT_LEVEL`; `LIBGHOSTTY_VT_SYS_OPTIMIZE` overrides everything for anyone actually
+  debugging Zig code. Do not benchmark, profile, or chase timing flakes without first
+  confirming which mode the archive was built at. One more scar: the `ReleaseSafe`
+  archive built from Ghostty pin `7aa9591` interposed a `memset` whose C ABI was wrong
+  (it took the fill as a byte, not an `int` truncated to its low byte), which corrupted
+  Rust hash tables in any statically linked binary — deterministic infinite probe loops
+  in plain `HashMap::insert`. The pin now sits at the upstream fix (`20c3eae`); if a
+  future pin bump resurrects inexplicable hangs in pure-Rust map code, suspect the
+  archive's exported libc symbols first. (The 6x parse factor is the research estimate;
+  the daemon's own end-to-end pipe test measured 5.7x.)
 * **Keep the Linux ring bounded and ordered.** The actor must parse every data batch before
   EOF, return buffers after `vt_write`, and stop draining when all four buffers are in flight.
 * **The unicode fixture solicits thousands of DA responses**; their shell echo floods the

@@ -58,7 +58,7 @@ sha256sums_aarch64=('00000000000000000000000000000000000000000000000000000000000
 package() {
     install -d "$pkgdir/usr"
     cp -a --no-preserve=ownership "$srcdir/zz-$pkgver-linux-$CARCH/usr/." "$pkgdir/usr/"
-    chmod 0755 "$pkgdir/usr/lib/zz/zz" "$pkgdir/usr/lib/zz/chrome-sandbox"
+    chmod 0755 "$pkgdir/usr/lib/zz/zz" "$pkgdir/usr/lib/zz/cli" "$pkgdir/usr/lib/zz/chrome-sandbox"
     # The tarball ships its licenses under the app name.
     ln -s zz "$pkgdir/usr/share/licenses/$pkgname"
 }

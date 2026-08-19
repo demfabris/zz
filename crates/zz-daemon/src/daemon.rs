@@ -132,6 +132,8 @@ const MAX_CONCURRENT_PASTE_UPLOADS: usize = 2;
 const PASTE_UPLOAD_RETENTION: usize = 8;
 const MAX_PASTED_IMAGES_PER_PANE: usize = 8;
 const MAX_PASTED_IMAGE_BYTES_PER_PANE: usize = 24 * 1024 * 1024;
+#[cfg(unix)]
+static TMUX_SHIM_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 fn terminal_status_should_close(status: &zz_terminal::SessionStatus) -> bool {
     matches!(
@@ -519,7 +521,10 @@ impl Daemon {
         listener: T::Listener,
         socket_guards: (SocketGuard, DaemonIdentityGuard),
         endpoint: impl std::fmt::Display,
-    ) -> Result<(), DaemonError> {
+    ) -> Result<(), DaemonError>
+    where
+        T::Listener: Send + 'static,
+    {
         let color_scheme = daemon_color_scheme();
         let load = AppearanceLoad::defaults_for(color_scheme);
         log_appearance_load("startup", &load);
@@ -532,23 +537,44 @@ impl Daemon {
             paste_upload_directory(&self.socket_path),
             self.socket_path.clone(),
         ));
-        shared.initialize_with_mux_config_files(
-            self.load_user_config,
-            self.mux_config_files.as_deref(),
-        )?;
-        shared.start_diagnostic_sampler()?;
-        shared.start_status_sampler()?;
-        shared.log_diagnostic_snapshot("startup");
+        #[cfg(unix)]
+        shared.install_tmux_shim()?;
+        shared.begin_startup();
         #[cfg(unix)]
         let _signal_guard = DaemonSignalGuard::install(&shared)?;
-        log::info!("zz daemon listening at {endpoint}");
-
-        let accept_result = accept_connections::<T>(&listener, &shared);
-        // The endpoint must go before the slow teardown below: a bound
-        // listener keeps accepting connects into the kernel backlog it will
-        // never serve, wedging any `kill-server; new-session` sequence.
-        drop(listener);
+        let accept_shared = Arc::clone(&shared);
+        let accept_thread = thread::Builder::new()
+            .name("zz-daemon-accept".to_owned())
+            .spawn(move || {
+                let result = accept_connections::<T>(&listener, &accept_shared);
+                drop(listener);
+                if result.is_err() {
+                    accept_shared.request_shutdown();
+                }
+                result
+            })
+            .map_err(|error| DaemonError::Thread(error.to_string()))?;
+        let startup_result = (|| {
+            shared.initialize_with_mux_config_files(
+                self.load_user_config,
+                self.mux_config_files.as_deref(),
+            )?;
+            shared.start_diagnostic_sampler()?;
+            shared.start_status_sampler()?;
+            shared.log_diagnostic_snapshot("startup");
+            log::info!("zz daemon listening at {endpoint}");
+            Ok::<(), DaemonError>(())
+        })();
+        if startup_result.is_ok() {
+            shared.finish_startup();
+        } else {
+            shared.request_shutdown();
+        }
+        let accept_result = accept_thread
+            .join()
+            .map_err(|_| DaemonError::Thread("daemon accept thread panicked".to_owned()))?;
         drop(socket_guards);
+        startup_result?;
         if accept_result.is_err() {
             shared.request_shutdown();
         }
@@ -668,6 +694,57 @@ impl SocketGuard {
 impl Drop for SocketGuard {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(unix)]
+struct TmuxShimGuard {
+    directory: PathBuf,
+    executable: PathBuf,
+}
+
+#[cfg(unix)]
+impl TmuxShimGuard {
+    fn install(executable: PathBuf) -> std::io::Result<Self> {
+        use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
+
+        let directory = loop {
+            let sequence = TMUX_SHIM_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let directory = std::env::temp_dir()
+                .join(format!("zz-tmux-shim-{}-{sequence}", std::process::id()));
+            let mut builder = fs::DirBuilder::new();
+            builder.mode(0o700);
+            match builder.create(&directory) {
+                Ok(()) => break directory,
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
+        };
+        let path = directory.join("tmux");
+        let result = (|| {
+            let mut options = fs::OpenOptions::new();
+            options.create_new(true).write(true).mode(0o700);
+            let mut file = options.open(&path)?;
+            file.write_all(b"#!/bin/sh\nexec \"$ZZ_TMUX_EXECUTABLE\" \"$@\"\n")?;
+            file.flush()
+        })();
+        if let Err(error) = result {
+            let _ = fs::remove_file(path);
+            let _ = fs::remove_dir(&directory);
+            return Err(error);
+        }
+        Ok(Self {
+            directory,
+            executable,
+        })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for TmuxShimGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(self.directory.join("tmux"));
+        let _ = fs::remove_dir(&self.directory);
     }
 }
 
@@ -1675,11 +1752,15 @@ struct Shared {
     display_panes_deadline_rx:
         Mutex<Option<crossbeam_channel::Receiver<DisplayPanesDeadlineCommand>>>,
     stopping: AtomicBool,
+    startup_ready: Mutex<bool>,
+    startup_changed: Condvar,
     exit_empty_armed: AtomicBool,
     server_id: u64,
     load_user_config: bool,
     paste_directory: PathBuf,
     socket_path: PathBuf,
+    #[cfg(unix)]
+    tmux_shim: Mutex<Option<TmuxShimGuard>>,
 }
 
 #[derive(Clone)]
@@ -2328,6 +2409,19 @@ impl Drop for ClientRegistrationGuard {
 }
 
 impl Shared {
+    #[cfg(unix)]
+    fn install_tmux_shim(&self) -> Result<(), DaemonError> {
+        let executable = std::env::var_os(crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE)
+            .map(PathBuf::from)
+            .map_or_else(std::env::current_exe, Ok)?;
+        let shim = TmuxShimGuard::install(executable)?;
+        self.status
+            .lock()
+            .set_tmux_shim(shim.directory.clone(), shim.executable.clone());
+        *self.tmux_shim.lock() = Some(shim);
+        Ok(())
+    }
+
     #[cfg(test)]
     fn with_appearance(server_id: u64, appearance: Arc<TerminalAppearance>) -> Self {
         Self::configured_with_boot_environment(
@@ -2435,12 +2529,33 @@ impl Shared {
             display_panes_deadline_tx,
             display_panes_deadline_rx: Mutex::new(Some(display_panes_deadline_rx)),
             stopping: AtomicBool::new(false),
+            startup_ready: Mutex::new(true),
+            startup_changed: Condvar::new(),
             exit_empty_armed: AtomicBool::new(false),
             server_id,
             load_user_config,
             paste_directory,
             socket_path,
+            #[cfg(unix)]
+            tmux_shim: Mutex::new(None),
         }
+    }
+
+    fn begin_startup(&self) {
+        *self.startup_ready.lock() = false;
+    }
+
+    fn finish_startup(&self) {
+        *self.startup_ready.lock() = true;
+        self.startup_changed.notify_all();
+    }
+
+    fn wait_for_startup(&self) -> bool {
+        let mut ready = self.startup_ready.lock();
+        while !*ready && !self.stopping.load(Ordering::Acquire) {
+            self.startup_changed.wait(&mut ready);
+        }
+        *ready
     }
 
     #[cfg(test)]
@@ -2585,9 +2700,10 @@ impl Shared {
     }
 
     fn request_shutdown(&self) {
+        self.stopping.store(true, Ordering::Release);
+        self.startup_changed.notify_all();
         let (wakes, pipes, output_taps, shell_jobs, popups, menu_waiters, confirm_waiters) = {
             let mut inner = self.inner.lock();
-            self.stopping.store(true, Ordering::Release);
             let wakes = take_all_wait_wakes(&mut inner.wait_channels);
             let pipes = std::mem::take(&mut inner.pane_pipes)
                 .into_values()
@@ -6037,6 +6153,15 @@ impl Shared {
             ServerError::InvalidCommand(format!("failed to run command: {command}"))
         })?;
         let failed_command = command.clone();
+        let zz_socket = self.socket_path.clone();
+        let startup_reentry = (!*self.startup_ready.lock()).then(|| self.server_id.to_string());
+        #[cfg(unix)]
+        let (tmux_shim, zz_executable) = self.tmux_shim.lock().as_ref().map_or_else(
+            || (None, None),
+            |shim| (Some(shim.directory.clone()), Some(shim.executable.clone())),
+        );
+        #[cfg(not(unix))]
+        let (tmux_shim, zz_executable) = (None::<PathBuf>, None::<PathBuf>);
         thread::Builder::new()
             .name("zz-run-shell".to_owned())
             .spawn(move || {
@@ -6045,6 +6170,10 @@ impl Shared {
                     &command,
                     &cwd,
                     &tmux,
+                    &zz_socket,
+                    startup_reentry.as_deref(),
+                    tmux_shim.as_deref(),
+                    zz_executable.as_deref(),
                     show_stderr,
                     &permit.process,
                     &permit.shared.stopping,
@@ -15434,6 +15563,10 @@ fn run_shell_job(
     command: &str,
     cwd: &Path,
     tmux: &str,
+    zz_socket: &Path,
+    startup_reentry: Option<&str>,
+    tmux_shim: Option<&Path>,
+    zz_executable: Option<&Path>,
     show_stderr: bool,
     job_process: &Mutex<Option<Child>>,
     stopping: &AtomicBool,
@@ -15454,9 +15587,14 @@ fn run_shell_job(
         .current_dir(&cwd)
         .env("PWD", cwd.as_os_str())
         .env("TMUX", tmux)
+        .env("ZZ_SOCKET", zz_socket)
         .env_remove("TMUX_PANE")
         .stdin(Stdio::from(stdin))
         .stdout(Stdio::from(stdout));
+    if let Some(startup_reentry) = startup_reentry {
+        process.env(crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, startup_reentry);
+    }
+    crate::configure_tmux_shim(&mut process, tmux_shim, zz_executable);
     if show_stderr {
         let stderr = OwnedFd::from(child_socket.try_clone().map_err(|_| ())?);
         process.stderr(Stdio::from(stderr));
@@ -15484,6 +15622,10 @@ fn run_shell_job(
     command: &str,
     cwd: &Path,
     tmux: &str,
+    zz_socket: &Path,
+    startup_reentry: Option<&str>,
+    tmux_shim: Option<&Path>,
+    zz_executable: Option<&Path>,
     show_stderr: bool,
     job_process: &Mutex<Option<Child>>,
     stopping: &AtomicBool,
@@ -15494,6 +15636,7 @@ fn run_shell_job(
         .current_dir(&cwd)
         .env("PWD", cwd.as_os_str())
         .env("TMUX", tmux)
+        .env("ZZ_SOCKET", zz_socket)
         .env_remove("TMUX_PANE")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -15502,6 +15645,10 @@ fn run_shell_job(
         } else {
             Stdio::null()
         });
+    if let Some(startup_reentry) = startup_reentry {
+        process.env(crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, startup_reentry);
+    }
+    crate::configure_tmux_shim(&mut process, tmux_shim, zz_executable);
     let mut child = process.spawn().map_err(|_| ())?;
     let _stdin = child.stdin.take();
     let Some(mut stdout) = child.stdout.take() else {
@@ -18151,6 +18298,16 @@ fn handle_connection<S: TransportStream>(
             hello.protocol_version,
         );
         return Err(error);
+    }
+    let startup_reentry_capability = format!(
+        "{}{}",
+        crate::STARTUP_REENTRY_CAPABILITY_PREFIX,
+        shared.server_id
+    );
+    let startup_reentry = hello.kind == ClientKind::Command
+        && hello.capabilities.contains(&startup_reentry_capability);
+    if !startup_reentry && !shared.wait_for_startup() {
+        return Ok(());
     }
 
     let outbound = OutboundMailbox::new();
@@ -23797,7 +23954,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn shell_jobs_receive_tmux_without_tmux_pane() {
+    fn shell_jobs_receive_both_socket_contracts_without_tmux_pane() {
         let shared = Arc::new(Shared::new(1));
         let client = ClientId(7);
         let mut context = ExecutionContext::default();
@@ -23811,11 +23968,11 @@ mod tests {
                 &mut context,
                 &CommandInvocation::new(
                     "run-shell",
-                    ["printf '%s|%s' \"$TMUX\" \"${TMUX_PANE-unset}\""],
+                    ["printf '%s|%s|%s' \"$TMUX\" \"$ZZ_SOCKET\" \"${TMUX_PANE-unset}\""],
                 ),
             )
             .expect("sessionless shell job");
-        assert_eq!(output.output, format!("{socket},{pid},-1|unset"));
+        assert_eq!(output.output, format!("{socket},{pid},-1|{socket}|unset"));
 
         shared
             .execute(
@@ -23837,11 +23994,11 @@ mod tests {
                 &mut context,
                 &CommandInvocation::new(
                     "run-shell",
-                    ["printf '%s|%s' \"$TMUX\" \"${TMUX_PANE-unset}\""],
+                    ["printf '%s|%s|%s' \"$TMUX\" \"$ZZ_SOCKET\" \"${TMUX_PANE-unset}\""],
                 ),
             )
             .expect("session shell job");
-        assert_eq!(output.output, format!("{expected}|unset"));
+        assert_eq!(output.output, format!("{expected}|{socket}|unset"));
 
         let output = shared
             .execute(
@@ -23851,7 +24008,9 @@ mod tests {
                 &CommandInvocation::new(
                     "if-shell",
                     [
-                        format!("test \"$TMUX\" = '{expected}' && test -z \"${{TMUX_PANE+x}}\""),
+                        format!(
+                            "test \"$TMUX\" = '{expected}' && test \"$ZZ_SOCKET\" = '{socket}' && test -z \"${{TMUX_PANE+x}}\""
+                        ),
                         "display-message -p yes".to_owned(),
                         "display-message -p no".to_owned(),
                     ],
@@ -23868,6 +24027,39 @@ mod tests {
                 &CommandInvocation::new("kill-session", ["-t", "tmux-job-environment"]),
             )
             .expect("remove job session");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_jobs_resolve_literal_tmux_through_the_private_zz_shim() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().expect("temporary shim executable");
+        let executable = directory.path().join("fake-zz");
+        fs::write(
+            &executable,
+            b"#!/bin/sh\nprintf '%s|%s|%s' \"$1\" \"$2\" \"$ZZ_SOCKET\"\n",
+        )
+        .expect("write fake zz executable");
+        let mut permissions = fs::metadata(&executable)
+            .expect("fake executable metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&executable, permissions).expect("make fake zz executable runnable");
+
+        let shared = Arc::new(Shared::new(1));
+        *shared.tmux_shim.lock() =
+            Some(TmuxShimGuard::install(executable).expect("install tmux shim"));
+        let socket = shared.socket_path.display().to_string();
+        let output = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("run-shell", ["tmux one 'two three'"]),
+            )
+            .expect("run literal tmux through shim");
+        assert_eq!(output.output, format!("one|two three|{socket}"));
     }
 
     #[cfg(unix)]

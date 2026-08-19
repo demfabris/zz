@@ -4,7 +4,7 @@ title: Building and verifying a platform CEF bundle
 description: Step-by-step use of cargo xtask and release recipes to assemble, sign, notarize, and validate platform CEF bundles.
 resource: crates/zz-xtask/src/main.rs
 tags: [cef, xtask, bundle, playbook, sha1, codesign, pacman, deb, apparmor, profiling, dsym, homebrew, release]
-timestamp: 2026-08-13T00:00:00Z
+timestamp: 2026-08-19T00:00:00Z
 ---
 
 # Overview
@@ -29,15 +29,15 @@ distribution workflow on top: Developer ID signing from the inside out, DMG pack
 Apple notarization through a Keychain profile, ticket stapling, Gatekeeper assessment, and a final
 SHA-256 checksum.
 
-The macOS bundle also carries `Contents/MacOS/cli`, the launcher every `zz` on `PATH` points at.
+The macOS bundle carries `Contents/MacOS/cli`, the launcher every `zz` on `PATH` points at.
 macOS resolves an app bundle from the path the executable was launched with and does not follow
 symlinks doing it, so a symlink straight to `Contents/MacOS/zz` starts zz with no `Info.plist` .
 no bundle identifier, no icon, and none of the usage descriptions the browser pane's camera and
 microphone prompts require. Rust's `current_exe` has the same shape of problem on macOS, which
-would additionally send the CEF framework lookup beside the symlink. The launcher canonicalizes its
-own path and execs the neighbouring `zz`, keeping one process, the same stdio and working
-directory, and the bundle identity. Linux needs none of this: `/proc/self/exe` is already resolved,
-so the Pacman package's `/usr/bin/zz` may point straight at the real executable.
+would additionally send the CEF framework lookup beside the symlink. Linux ships the same launcher
+as `/usr/lib/zz/cli`. On both platforms bare `zz` enters terminal attach, `zz app` opens the GUI,
+and tmux-shaped commands exec the neighbouring `zz`. The Linux launcher exists for that command
+split; `/proc/self/exe` already handles symlink resolution there.
 
 # Examples
 
@@ -125,7 +125,8 @@ artifact without GitHub's extra ZIP layer:
 
 The binary-only archives expose Cargo's release outputs for inspection and integration work. For
 normal launches, use the AppImage on Linux and drag `zz.app` from the DMG to Applications on macOS.
-The AppImage's `AppRun` keeps the full validated CEF directory together under `usr/lib/zz`, supplies
+The AppImage's `AppRun` keeps the full validated CEF directory together under `usr/lib/zz`, routes
+`usr/bin/zz` through the bundled `cli` launcher, supplies
 desktop metadata and the complete hicolor icon set from `assets/linux/hicolor`, and points the
 dynamic loader at the adjacent CEF libraries. CI pins
 `appimagetool` 1.9.1 plus type-2 runtime `20251108`, verifies both official SHA-256 values for the
@@ -169,15 +170,16 @@ What `bundle-cef` does, in order:
    [running zz](/playbooks/running-zz.md) for why a stable path matters).
 4. **CEF C++ wrapper build** . `libcef_dll_wrapper` is configured with CMake (3.21+) and built with
    Ninja, per [prerequisites](/playbooks/prerequisites.md).
-5. **Bundle assembly** . Linux uses upstream `bundle` after building the binary itself; Windows
+5. **Bundle assembly** . Linux builds `zz` plus `zz_cli`, uses the upstream bundler for the main
+   executable, and copies the launcher into the bundle as `cli`; Windows
    builds `zz.dll` and lays the flat bundle out around CEF's `bootstrap.exe` (copied in as
    `zz.exe`), then writes zz's icon and a per-monitor-v2 manifest into that executable's
    resources; macOS discovers Cargo's actual
    `zz`/`zz_helper`/`zz_cli` artifact paths for the selected profile and calls the public macOS
    `bundle` API. The platform backend copies CEF runtime, resources, locales, and helper/bootstrap
-   artifacts into `--output` (default `dist/zz`). The upstream bundler knows nothing about the
-   `PATH` launcher, so `install_macos_cli_launcher` copies `zz_cli` in afterwards as
-   `Contents/MacOS/cli` . before signing, since it is Mach-O code the bundle signature must cover.
+   artifacts into `--output` (default `dist/zz`). The upstream bundlers know nothing about the
+   `PATH` launcher, so xtask copies it after their assembly step. macOS places it at
+   `Contents/MacOS/cli` before signing because the bundle signature covers that Mach-O file.
 6. **macOS profiling symbols** . the named `profiling` Cargo profile inherits release optimization
    while retaining full DWARF. `install_macos_debug_symbols` copies `zz.dSYM` and
    `zz_helper.dSYM` beside `dist/zz-profile/zz.app` and requires each copied symbol bundle's
@@ -242,7 +244,7 @@ What `bundle-cef` does, in order:
 | `third_party/cef/ARTIFACTS.md` | Reviewable mirror of the archive name + SHA-1 fetched from CEF's index per Rust target |
 | `third_party/cef/LICENSE.txt` | Installed into every bundle as `CEF_LICENSE.txt` |
 | `Cargo.toml` | `cef = "=151.2.0"` workspace pin that `download-cef` resolves |
-| `crates/zz/src/bin/zz_cli.rs` | The `PATH` launcher bundled as `Contents/MacOS/cli`, with the macOS bundle-identity reasoning |
+| `crates/zz/src/bin/zz_cli.rs` | The macOS and Linux `PATH` launcher; maps bare launch to attach and reserves `zz app` for the GUI |
 | `.github/workflows/ci.yml` | Exercises `bundle-cef` on `ubuntu-24.04`, `macos-15`, `windows-2025` |
 | `.github/workflows/release.yml` | Tag-driven macOS, Linux, and Windows publication; prerelease channel gating |
 | `release.toml` + `scripts/release.sh` | Dry-run-first workspace SemVer bump, one release commit, annotated tag, and push |

@@ -57,7 +57,7 @@ _icon_assets="$startdir/../../assets/linux/hicolor"
 package() {
     local required
     for required in \
-        zz libcef.so icudtl.dat resources.pak locales/en-US.pak chrome-sandbox \
+        zz cli libcef.so icudtl.dat resources.pak locales/en-US.pak chrome-sandbox \
         CREDITS.html CEF_LICENSE.txt; do
         if [[ ! -s "$_bundle_dir/$required" ]]; then
             printf 'error: Linux CEF bundle file is missing or empty: %s\n' "$required" >&2
@@ -82,8 +82,8 @@ package() {
 
     install -d "$pkgdir/usr/bin" "$pkgdir/usr/lib/zz"
     cp -a --no-preserve=ownership "$_bundle_dir/." "$pkgdir/usr/lib/zz/"
-    chmod 0755 "$pkgdir/usr/lib/zz/zz" "$pkgdir/usr/lib/zz/chrome-sandbox"
-    ln -s ../lib/zz/zz "$pkgdir/usr/bin/zz"
+    chmod 0755 "$pkgdir/usr/lib/zz/zz" "$pkgdir/usr/lib/zz/cli" "$pkgdir/usr/lib/zz/chrome-sandbox"
+    ln -s ../lib/zz/cli "$pkgdir/usr/bin/zz"
 
     install -Dm0644 "$_linux_assets/zz.desktop" \
         "$pkgdir/usr/share/applications/zz.desktop"

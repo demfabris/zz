@@ -4,6 +4,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Write as _,
     io::Read as _,
+    path::PathBuf,
     process::{Child, Stdio},
     sync::{Arc, OnceLock},
     thread,
@@ -17,7 +18,7 @@ use zz_mux::{MuxEngine, StatusContext, StatusFormats, StatusHooks, expand_status
 use zz_protocol::{ClientId, MuxSnapshot, PaneId, SessionId, StatusLine, WindowId};
 use zz_terminal::{CellWidth, TerminalSession, TerminalViewport};
 
-use crate::shell_process;
+use crate::{configure_tmux_shim, shell_process};
 
 const SHELL_TIMEOUT: Duration = Duration::from_secs(2);
 const SHELL_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -27,6 +28,8 @@ const MAX_SHELL_OUTPUT_BYTES: u64 = 4 * 1024;
 pub(crate) struct StatusRenderer {
     shell_cache: BTreeMap<String, String>,
     published: BTreeMap<ClientId, StatusLine>,
+    tmux_shim: Option<PathBuf>,
+    zz_executable: Option<PathBuf>,
 }
 
 pub(crate) struct StatusRequest {
@@ -83,7 +86,14 @@ impl StatusRenderer {
         let mut touched = BTreeSet::new();
         let mut changed = Vec::new();
         for request in requests {
-            let status = render(&mut self.shell_cache, &mut touched, request, refresh);
+            let status = render(
+                &mut self.shell_cache,
+                &mut touched,
+                request,
+                refresh,
+                self.tmux_shim.as_deref(),
+                self.zz_executable.as_deref(),
+            );
             if self.published.get(&request.client) == Some(&status) {
                 continue;
             }
@@ -99,13 +109,25 @@ impl StatusRenderer {
 
     pub(crate) fn render_initial(&mut self, request: &StatusRequest) -> StatusLine {
         let mut touched = BTreeSet::new();
-        let status = render(&mut self.shell_cache, &mut touched, request, false);
+        let status = render(
+            &mut self.shell_cache,
+            &mut touched,
+            request,
+            false,
+            self.tmux_shim.as_deref(),
+            self.zz_executable.as_deref(),
+        );
         self.published.insert(request.client, status.clone());
         status
     }
 
     pub(crate) fn forget(&mut self, client: ClientId) {
         self.published.remove(&client);
+    }
+
+    pub(crate) fn set_tmux_shim(&mut self, directory: PathBuf, executable: PathBuf) {
+        self.tmux_shim = Some(directory);
+        self.zz_executable = Some(executable);
     }
 }
 
@@ -182,6 +204,8 @@ fn render(
     touched: &mut BTreeSet<String>,
     request: &StatusRequest,
     refresh: bool,
+    tmux_shim: Option<&std::path::Path>,
+    zz_executable: Option<&std::path::Path>,
 ) -> StatusLine {
     if !request.formats.enabled {
         return StatusLine::default();
@@ -194,6 +218,8 @@ fn render(
         touched,
         refresh,
         now,
+        tmux_shim,
+        zz_executable,
     );
     StatusLine {
         left: expand_status(&request.formats.left, &request.context, &mut hooks),
@@ -209,6 +235,8 @@ pub(crate) struct DaemonFormatHooks<'a> {
     touched: Option<&'a mut BTreeSet<String>>,
     refresh: bool,
     now: chrono::DateTime<Local>,
+    tmux_shim: Option<&'a std::path::Path>,
+    zz_executable: Option<&'a std::path::Path>,
 }
 
 impl<'a> DaemonFormatHooks<'a> {
@@ -228,6 +256,8 @@ impl<'a> DaemonFormatHooks<'a> {
             touched: None,
             refresh: false,
             now: Local::now(),
+            tmux_shim: None,
+            zz_executable: None,
         }
     }
 
@@ -245,6 +275,8 @@ impl<'a> DaemonFormatHooks<'a> {
         touched: &'a mut BTreeSet<String>,
         refresh: bool,
         now: chrono::DateTime<Local>,
+        tmux_shim: Option<&'a std::path::Path>,
+        zz_executable: Option<&'a std::path::Path>,
     ) -> Self {
         Self {
             facts,
@@ -254,6 +286,8 @@ impl<'a> DaemonFormatHooks<'a> {
             touched: Some(touched),
             refresh,
             now,
+            tmux_shim,
+            zz_executable,
         }
     }
 }
@@ -318,7 +352,12 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         {
             return cached.clone();
         }
-        let output = run_shell(command, self.status_context);
+        let output = run_shell(
+            command,
+            self.status_context,
+            self.tmux_shim,
+            self.zz_executable,
+        );
         cache.insert(command.to_owned(), output.clone());
         output
     }
@@ -538,7 +577,12 @@ fn search_viewport(
     0
 }
 
-fn run_shell(command: &str, context: Option<&StatusContext>) -> String {
+fn run_shell(
+    command: &str,
+    context: Option<&StatusContext>,
+    tmux_shim: Option<&std::path::Path>,
+    zz_executable: Option<&std::path::Path>,
+) -> String {
     let mut process = shell_process(command);
     if let Some(context) = context {
         let requested_cwd = std::path::Path::new(&context.pane_current_path);
@@ -554,8 +598,10 @@ fn run_shell(command: &str, context: Option<&StatusContext>) -> String {
                 "TMUX",
                 format!("{},{},-1", context.socket_path, std::process::id()),
             )
+            .env("ZZ_SOCKET", &context.socket_path)
             .env_remove("TMUX_PANE");
     }
+    configure_tmux_shim(&mut process, tmux_shim, zz_executable);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
@@ -812,7 +858,11 @@ mod tests {
             .tempdir_in(".")
             .expect("the working directory is created");
         let socket = "/tmp/zz-status-environment.sock";
-        let mut status_request = request(1, "#(echo \"$TMUX|$PWD|${TMUX_PANE-unset}\")", "");
+        let mut status_request = request(
+            1,
+            "#(echo \"$TMUX|$ZZ_SOCKET|$PWD|${TMUX_PANE-unset}\")",
+            "",
+        );
         status_request.context.socket_path = socket.to_owned();
         status_request.context.pane_current_path = directory
             .path()
@@ -826,10 +876,49 @@ mod tests {
         assert_eq!(
             status.left,
             format!(
-                "{socket},{},-1|{}|unset",
+                "{socket},{},-1|{socket}|{}|unset",
                 std::process::id(),
                 status_request.context.pane_current_path
             )
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn status_commands_resolve_literal_tmux_through_the_private_zz_shim() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().expect("temporary status shim");
+        let executable = directory.path().join("fake-zz");
+        std::fs::write(
+            &executable,
+            b"#!/bin/sh\nprintf '%s|%s' \"$1\" \"$ZZ_SOCKET\"\n",
+        )
+        .expect("write fake zz executable");
+        let shim = directory.path().join("shim");
+        std::fs::create_dir(&shim).expect("create shim directory");
+        std::fs::write(
+            shim.join("tmux"),
+            b"#!/bin/sh\nexec \"$ZZ_TMUX_EXECUTABLE\" \"$@\"\n",
+        )
+        .expect("write tmux shim");
+        for path in [&executable, &shim.join("tmux")] {
+            let mut permissions = std::fs::metadata(path)
+                .expect("shim metadata")
+                .permissions();
+            permissions.set_mode(0o700);
+            std::fs::set_permissions(path, permissions).expect("make shim runnable");
+        }
+
+        let socket = "/tmp/zz-status-shim.sock";
+        let mut status_request = request(1, "#(tmux status)", "");
+        status_request.context.socket_path = socket.to_owned();
+        let mut renderer = StatusRenderer::default();
+        renderer.set_tmux_shim(shim, executable);
+
+        assert_eq!(
+            renderer.render_initial(&status_request).left,
+            format!("status|{socket}")
         );
     }
 
@@ -871,7 +960,7 @@ mod tests {
         let command = "ping -n 31 127.0.0.1";
 
         let started = Instant::now();
-        assert_eq!(run_shell(command, None), "");
+        assert_eq!(run_shell(command, None, None, None), "");
         assert!(
             started.elapsed() < SHELL_TIMEOUT * 3,
             "the timeout, not the command, bounds the render"

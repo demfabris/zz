@@ -34,6 +34,7 @@ listing="$(tar -tzf "$output")"
 for entry in \
     "$name/usr/bin/zz" \
     "$name/usr/lib/zz/zz" \
+    "$name/usr/lib/zz/cli" \
     "$name/usr/lib/zz/libcef.so" \
     "$name/usr/share/applications/zz.desktop" \
     "$name/usr/share/licenses/zz/LICENSE-MIT"; do

@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     io,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     thread,
     time::Duration,
@@ -100,11 +100,18 @@ const TERMINAL_FONT_SIZE_STEP_POINTS: f32 = 1.0;
 const MIN_TERMINAL_FONT_SIZE_POINTS: f32 = 1.0;
 const MAX_TERMINAL_FONT_SIZE_POINTS: f32 = 256.0;
 
-fn new_session_commands(host: HostId, capabilities: &[String]) -> Vec<CommandInvocation> {
+fn new_session_commands(
+    host: HostId,
+    capabilities: &[String],
+    working_directory: Option<&Path>,
+) -> Vec<CommandInvocation> {
     if host != HostId::LOCAL {
         return vec![CommandInvocation::new("new-session", ["-d"])];
     }
-    let mut commands = vec![CommandInvocation::new("new-session", [] as [&str; 0])];
+    let arguments = working_directory.map_or_else(Vec::new, |directory| {
+        vec!["-c".to_owned(), directory.to_string_lossy().into_owned()]
+    });
+    let mut commands = vec![CommandInvocation::new("new-session", arguments)];
     if !capabilities
         .iter()
         .any(|capability| capability == NEW_SESSION_ATTACH_CAPABILITY)
@@ -1110,7 +1117,14 @@ impl MuxClient {
         self.ingest_server_hello(client.server_hello().clone(), cx);
         let client = Arc::new(client);
         crate::config::register_config_override_client(&client, false, cx);
-        client.attach("").map_err(|error| error.to_string())?;
+        match std::env::current_dir()
+            .ok()
+            .filter(|directory| directory.is_dir())
+        {
+            Some(directory) => client.attach_default_in(&directory),
+            None => client.attach(""),
+        }
+        .map_err(|error| error.to_string())?;
         let connection = HostConnection::connected(client, HostId::LOCAL, cx)
             .map_err(|error| error.to_string())?;
         self.connections.insert(HostId::LOCAL, connection);
@@ -2516,7 +2530,19 @@ impl MuxClient {
             .fake_client
             .as_ref()
             .map_or(capabilities, |client| client.hello.capabilities.as_slice());
-        for command in new_session_commands(host, capabilities) {
+        let snapshot = if host == self.attached_host && !self.attached_snapshot_pending {
+            Some(self.core.snapshot().as_ref())
+        } else {
+            connection.snapshot.as_deref()
+        };
+        let working_directory = (host == HostId::LOCAL
+            && snapshot.is_some_and(|snapshot| snapshot.sessions.is_empty()))
+        .then(std::env::current_dir)
+        .transpose()
+        .ok()
+        .flatten()
+        .filter(|directory| directory.is_dir());
+        for command in new_session_commands(host, capabilities, working_directory.as_deref()) {
             self.execute_on_host(host, command);
         }
     }
@@ -7146,15 +7172,34 @@ mod tests {
     #[test]
     fn new_session_falls_back_to_an_explicit_attach_for_older_daemons() {
         assert_eq!(
-            new_session_commands(HostId::LOCAL, &[]),
+            new_session_commands(HostId::LOCAL, &[], None),
             vec![
                 CommandInvocation::new("new-session", [] as [&str; 0]),
                 CommandInvocation::new("attach-session", [] as [&str; 0]),
             ]
         );
         assert_eq!(
-            new_session_commands(HostId::LOCAL, &[NEW_SESSION_ATTACH_CAPABILITY.to_owned()]),
+            new_session_commands(
+                HostId::LOCAL,
+                &[NEW_SESSION_ATTACH_CAPABILITY.to_owned()],
+                None,
+            ),
             vec![CommandInvocation::new("new-session", [] as [&str; 0],)]
+        );
+    }
+
+    #[test]
+    fn new_local_session_can_start_in_the_gui_working_directory() {
+        assert_eq!(
+            new_session_commands(
+                HostId::LOCAL,
+                &[NEW_SESSION_ATTACH_CAPABILITY.to_owned()],
+                Some(Path::new("/tmp/a project")),
+            ),
+            vec![CommandInvocation::new(
+                "new-session",
+                ["-c", "/tmp/a project"],
+            )]
         );
     }
 
@@ -7181,10 +7226,14 @@ mod tests {
                 (local_client, remote_client)
             });
 
+            let working_directory = std::env::current_dir()
+                .expect("test working directory")
+                .to_string_lossy()
+                .into_owned();
             assert_eq!(
                 local_client.commands.borrow().as_slice(),
                 [
-                    CommandInvocation::new("new-session", [] as [&str; 0]),
+                    CommandInvocation::new("new-session", ["-c".to_owned(), working_directory],),
                     CommandInvocation::new("attach-session", [] as [&str; 0]),
                 ]
             );

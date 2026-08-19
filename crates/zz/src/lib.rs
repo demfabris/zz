@@ -93,6 +93,12 @@ const TMUX_USAGE: &str = concat!(
 #[cfg(not(target_os = "ios"))]
 const NATIVE_ATTACH_USAGE: &str =
     "zz: usage: zz [--host <name>] attach [--restart-daemon] [session]";
+#[cfg(not(target_os = "ios"))]
+const NATIVE_APP_USAGE: &str = "zz: usage: zz app";
+#[cfg(not(target_os = "ios"))]
+const FOREIGN_TMUX_ERROR: &str = "zz: TMUX is set but ZZ_SOCKET is not; refusing to treat a tmux server as zz\nUse `zz app` to open the GUI, or pass `-S` / set `ZZ_SOCKET` to target a zz daemon.";
+#[cfg(not(target_os = "ios"))]
+const APP_STARTUP_DIRECTORY_ENV: &str = "ZZ_APP_STARTUP_DIRECTORY";
 
 #[cfg(not(target_os = "ios"))]
 enum Startup {
@@ -124,11 +130,6 @@ struct TmuxLabelCreationError {
 #[cfg(not(target_os = "ios"))]
 fn run_startup(socket_path: PathBuf) -> Startup {
     diagnostics::init();
-    let socket_path = inherited_socket_path(
-        socket_path,
-        std::env::var_os("ZZ_SOCKET").is_some(),
-        std::env::var_os("TMUX").as_deref(),
-    );
     let arguments = match application_arguments(diagnostics::application_args(), socket_path) {
         Ok(arguments) => arguments,
         Err(ApplicationArgumentError::Message(error)) => {
@@ -156,6 +157,11 @@ fn run_startup(socket_path: PathBuf) -> Startup {
         login_shell,
         early_output,
     } = arguments;
+    let implicit_tmux_conflict = implicit_tmux_endpoint_conflict(
+        socket_source,
+        std::env::var_os("ZZ_SOCKET").as_deref(),
+        std::env::var_os("TMUX").as_deref(),
+    );
     if let Some(output) = early_output {
         println!("{output}");
         return Startup::Exit(ExitCode::SUCCESS);
@@ -163,6 +169,10 @@ fn run_startup(socket_path: PathBuf) -> Startup {
     if control_mode != 0 && shell_command.is_none() {
         if host.is_some() {
             eprintln!("zz: --host is not supported with control mode");
+            return Startup::Exit(ExitCode::FAILURE);
+        }
+        if implicit_tmux_conflict {
+            eprintln!("{FOREIGN_TMUX_ERROR}");
             return Startup::Exit(ExitCode::FAILURE);
         }
         return Startup::Exit(control_mode::run(
@@ -174,7 +184,7 @@ fn run_startup(socket_path: PathBuf) -> Startup {
             remaining,
         ));
     }
-    match run_command_mode(
+    if let Some(exit) = run_command_mode(
         &remaining,
         &socket_path,
         socket_source,
@@ -183,9 +193,55 @@ fn run_startup(socket_path: PathBuf) -> Startup {
         no_start_server,
         shell_command.as_deref(),
         login_shell,
+        implicit_tmux_conflict,
     ) {
-        Some(exit) => Startup::Exit(exit),
-        None => Startup::Application(socket_path),
+        Startup::Exit(exit)
+    } else {
+        configure_application_working_directory();
+        Startup::Application(socket_path)
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn application_working_directory(
+    launched: Option<&Path>,
+    current: Option<&Path>,
+    home: Option<&Path>,
+    home_from_root: bool,
+) -> Option<PathBuf> {
+    launched
+        .filter(|directory| directory.is_dir())
+        .or_else(|| {
+            current.filter(|directory| {
+                directory.is_dir() && (!home_from_root || *directory != Path::new("/"))
+            })
+        })
+        .or_else(|| home.filter(|directory| directory.is_dir()))
+        .or_else(|| current.filter(|directory| directory.is_dir()))
+        .map(Path::to_owned)
+}
+
+#[cfg(not(target_os = "ios"))]
+fn configure_application_working_directory() {
+    let launched = std::env::var_os(APP_STARTUP_DIRECTORY_ENV).map(PathBuf::from);
+    let current = std::env::current_dir().ok();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let selected = application_working_directory(
+        launched.as_deref(),
+        current.as_deref(),
+        home.as_deref(),
+        cfg!(target_os = "macos"),
+    );
+    let Some(selected) = selected.filter(|selected| current.as_deref() != Some(selected.as_path()))
+    else {
+        return;
+    };
+    if let Err(error) = std::env::set_current_dir(&selected) {
+        log::warn!(
+            target: "zz::diagnostics::process",
+            "could not use application working directory path={} error={error}",
+            selected.display(),
+        );
     }
 }
 
@@ -551,41 +607,14 @@ fn application_arguments(
 }
 
 #[cfg(not(target_os = "ios"))]
-fn inherited_socket_path(
-    default_path: PathBuf,
-    zz_socket_is_set: bool,
+fn implicit_tmux_endpoint_conflict(
+    socket_source: SocketSelectionSource,
+    zz_socket: Option<&std::ffi::OsStr>,
     tmux: Option<&std::ffi::OsStr>,
-) -> PathBuf {
-    if zz_socket_is_set {
-        return default_path;
-    }
-    tmux_environment_socket_path(tmux).unwrap_or(default_path)
-}
-
-#[cfg(all(not(target_os = "ios"), unix))]
-fn tmux_environment_socket_path(tmux: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
-    use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
-
-    let value = tmux?.as_bytes();
-    if value.is_empty() || value[0] == b',' {
-        return None;
-    }
-    let end = value
-        .iter()
-        .position(|byte| *byte == b',')
-        .unwrap_or(value.len());
-    Some(PathBuf::from(std::ffi::OsString::from_vec(
-        value[..end].to_vec(),
-    )))
-}
-
-#[cfg(all(not(target_os = "ios"), not(unix)))]
-fn tmux_environment_socket_path(tmux: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
-    let value = tmux?.to_string_lossy();
-    if value.is_empty() || value.starts_with(',') {
-        return None;
-    }
-    Some(PathBuf::from(value.split(',').next()?))
+) -> bool {
+    socket_source == SocketSelectionSource::Default
+        && zz_socket.is_none_or(std::ffi::OsStr::is_empty)
+        && tmux.is_some_and(|value| !value.is_empty())
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -658,8 +687,13 @@ fn run_command_mode(
     no_start_server: bool,
     shell_command: Option<&str>,
     login_shell: bool,
+    implicit_tmux_conflict: bool,
 ) -> Option<ExitCode> {
     if let Some(shell_command) = shell_command {
+        if implicit_tmux_conflict && host.is_none() {
+            eprintln!("{FOREIGN_TMUX_ERROR}");
+            return Some(ExitCode::FAILURE);
+        }
         return Some(run_tmux_shell_command(
             socket_path,
             socket_source,
@@ -679,6 +713,13 @@ fn run_command_mode(
         return None;
     };
     let command = invocation.name.clone();
+    if command == "app" {
+        if host.is_some() || !invocation.args.is_empty() || commands.next().is_some() {
+            eprintln!("{NATIVE_APP_USAGE}");
+            return Some(ExitCode::FAILURE);
+        }
+        return None;
+    }
     if is_version_command(&command) {
         println!("zz {}", env!("CARGO_PKG_VERSION"));
         return Some(ExitCode::SUCCESS);
@@ -742,6 +783,11 @@ fn run_command_mode(
                 ExitCode::FAILURE
             }
         });
+    }
+
+    if implicit_tmux_conflict && host.is_none() {
+        eprintln!("{FOREIGN_TMUX_ERROR}");
+        return Some(ExitCode::FAILURE);
     }
 
     if is_kill_server_command(&command) && host.is_none() {
@@ -1224,7 +1270,10 @@ fn spawn_daemon(
     mux_config_files: &[PathBuf],
 ) -> Result<(), DaemonError> {
     let executable = std::env::current_exe()?;
-    let mut command = Command::new(executable);
+    let mut command = Command::new(&executable);
+    command
+        .env("ZZ_TMUX_EXECUTABLE", &executable)
+        .env_remove(APP_STARTUP_DIRECTORY_ENV);
     command.arg(diagnostics::SOCKET_ARGUMENT).arg(path);
     for config in mux_config_files {
         command.arg("-f").arg(config);
@@ -1783,15 +1832,19 @@ fn tui_browser_provider() -> Option<Box<dyn zz_tui::browser::BrowserFrameProvide
 
 #[cfg(test)]
 mod tests {
-    use std::{io, path::PathBuf};
+    use std::{
+        io,
+        path::{Path, PathBuf},
+    };
 
     use gpui::WindowAppearance;
     use zz_terminal::TerminalColorScheme;
 
     use super::{
         ApplicationArgumentError, TMUX_USAGE, TMUX_VERSION_OUTPUT, application_arguments,
-        command_error_message, daemon_is_missing, execute_command_chain, inherited_socket_path,
-        is_kill_server_command, parse_native_attach_arguments, protocol_version_output,
+        application_working_directory, command_error_message, daemon_is_missing,
+        execute_command_chain, implicit_tmux_endpoint_conflict, is_kill_server_command,
+        parse_native_attach_arguments, protocol_version_output, run_command_mode,
         split_command_chain, terminal_color_scheme, tmux_command_starts_server,
     };
     #[cfg(unix)]
@@ -1804,6 +1857,48 @@ mod tests {
         assert!(is_kill_server_command("--kill-server"));
         assert!(!is_kill_server_command("kill-session"));
         assert!(!is_kill_server_command("--kill-session"));
+    }
+
+    #[test]
+    fn app_is_an_exact_native_gui_verb_even_inside_tmux() {
+        assert!(
+            run_command_mode(
+                &["app".to_owned()],
+                std::path::Path::new("/tmp/zz.sock"),
+                super::SocketSelectionSource::Default,
+                None,
+                &[],
+                false,
+                None,
+                false,
+                true,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn app_working_directory_prefers_the_launcher_and_uses_home_for_launch_services() {
+        let home = tempfile::tempdir().expect("temporary home");
+        let project = tempfile::tempdir().expect("temporary project");
+
+        assert_eq!(
+            application_working_directory(
+                Some(project.path()),
+                Some(Path::new("/")),
+                Some(home.path()),
+                true,
+            ),
+            Some(project.path().to_owned())
+        );
+        assert_eq!(
+            application_working_directory(None, Some(Path::new("/")), Some(home.path()), true),
+            Some(home.path().to_owned())
+        );
+        assert_eq!(
+            application_working_directory(None, Some(project.path()), Some(home.path()), true),
+            Some(project.path().to_owned())
+        );
     }
 
     #[test]
@@ -1980,19 +2075,13 @@ mod tests {
 
     #[test]
     fn socket_flag_overrides_the_environment_resolved_path() {
-        let inherited = inherited_socket_path(
-            PathBuf::from("/tmp/zz-env.sock"),
-            true,
-            Some(std::ffi::OsStr::new("/tmp/tmux-env.sock,123,4")),
-        );
-        assert_eq!(inherited, PathBuf::from("/tmp/zz-env.sock"));
         let parsed = application_arguments(
             [
                 "--socket".to_owned(),
                 "/tmp/forwarded.sock".to_owned(),
                 "list-sessions".to_owned(),
             ],
-            inherited,
+            PathBuf::from("/tmp/zz-env.sock"),
         )
         .unwrap();
         assert_eq!(parsed.socket_path, PathBuf::from("/tmp/forwarded.sock"));
@@ -2010,22 +2099,28 @@ mod tests {
     }
 
     #[test]
-    fn tmux_environment_supplies_the_socket_without_a_zz_override() {
-        let default = PathBuf::from("default.sock");
+    fn tmux_environment_never_becomes_an_implicit_zz_endpoint() {
         let tmux = std::ffi::OsStr::new("tmux.sock,123,4");
-        assert_eq!(
-            inherited_socket_path(default.clone(), false, Some(tmux)),
-            PathBuf::from("tmux.sock")
-        );
-        assert_eq!(
-            inherited_socket_path(default.clone(), true, Some(tmux)),
-            default
-        );
-        assert_eq!(
-            inherited_socket_path(default.clone(), false, Some(std::ffi::OsStr::new(",123,4"))),
-            default
-        );
-        assert_eq!(inherited_socket_path(default.clone(), false, None), default);
+        assert!(implicit_tmux_endpoint_conflict(
+            super::SocketSelectionSource::Default,
+            None,
+            Some(tmux),
+        ));
+        assert!(!implicit_tmux_endpoint_conflict(
+            super::SocketSelectionSource::Default,
+            Some(std::ffi::OsStr::new("/tmp/zz.sock")),
+            Some(tmux),
+        ));
+        assert!(!implicit_tmux_endpoint_conflict(
+            super::SocketSelectionSource::Path,
+            None,
+            Some(tmux),
+        ));
+        assert!(!implicit_tmux_endpoint_conflict(
+            super::SocketSelectionSource::Default,
+            None,
+            None,
+        ));
     }
 
     #[test]

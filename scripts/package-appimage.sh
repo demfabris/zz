@@ -63,6 +63,7 @@ mkdir "$verify_dir"
     "$output" --appimage-extract >/dev/null
     [[ -x squashfs-root/AppRun ]]
     [[ -x squashfs-root/usr/lib/zz/zz ]]
+    [[ -x squashfs-root/usr/lib/zz/cli ]]
     [[ -L squashfs-root/usr/bin/zz ]]
     [[ -s squashfs-root/usr/lib/zz/libcef.so ]]
     [[ -L squashfs-root/zz.desktop ]]

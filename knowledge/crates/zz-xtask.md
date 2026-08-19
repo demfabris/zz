@@ -4,7 +4,7 @@ title: zz-xtask crate
 description: Workspace build task that assembles and validates desktop CEF bundles across Linux, macOS, and Windows.
 resource: crates/zz-xtask/src/main.rs
 tags: [xtask, cef, build-tooling, cli, bundling, profiling, dsym]
-timestamp: 2026-08-12T00:00:00Z
+timestamp: 2026-08-19T00:00:00Z
 ---
 
 # Overview
@@ -35,7 +35,7 @@ Subcommands are parsed by `run()` and `parse_bundle_options()` in `crates/zz-xta
 
 | OS | Backend called | Notes |
 | --- | --- | --- |
-| Linux | `cef::build_util::linux::bundle` | `--release` supported |
+| Linux | Cargo JSON artifact discovery + `cef::build_util::linux::bundle` | Builds the `zz` executable and its `zz_cli` launcher; `--release` supported |
 | Windows | local `bundle_windows` (not the upstream `win::build_bundle`) | `--release` supported |
 | macOS | Cargo JSON artifact discovery + `cef::build_util::mac::bundle` | Debug, `--release`, and named Cargo profiles are supported; the `profiling` profile forces native Ghostty to production `ReleaseFast`, then copies and UUID-validates app/helper dSYMs before the normal inside-out signing and verification |
 
@@ -43,9 +43,9 @@ Required files checked by `platform_bundle_files` (also `crates/zz-xtask/src/mai
 
 | OS | Required files (relative to bundle root) |
 | --- | --- |
-| Linux | executable, `libcef.so`, `icudtl.dat`, `resources.pak`, `locales/en-US.pak`, `chrome-sandbox`, `CREDITS.html`, `CEF_LICENSE.txt` |
+| Linux | executable, `cli`, `libcef.so`, `icudtl.dat`, `resources.pak`, `locales/en-US.pak`, `chrome-sandbox`, `CREDITS.html`, `CEF_LICENSE.txt` |
 | Windows | executable (plus its icon group at resource id 1 and a `PerMonitorV2` manifest), `zz.dll`, `libcef.dll`, `chrome_elf.dll`, `v8_context_snapshot.bin`, `icudtl.dat`, `resources.pak`, `chrome_100_percent.pak`, `chrome_200_percent.pak`, `locales/en-US.pak`, `CREDITS.html`, `CEF_LICENSE.txt` |
-| macOS | Main app `Info.plist` + executable; framework executable, `Info.plist`, core `.pak` files, `icudtl.dat`, and `en.lproj/locale.pak`; `Info.plist` + executable for the generic, GPU, Renderer, Plugin, and Alerts helper apps; root CEF credits + license notices |
+| macOS | Main app `Info.plist` + executable + `cli` launcher; framework executable, `Info.plist`, core `.pak` files, `icudtl.dat`, and `en.lproj/locale.pak`; `Info.plist` + executable for the generic, GPU, Renderer, Plugin, and Alerts helper apps; root CEF credits + license notices |
 
 `bundle_root(executable)` differs by OS: the executable's parent directory on Linux/Windows, or
 `<app>/Contents/Resources` on macOS.

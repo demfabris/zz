@@ -21,11 +21,12 @@ icon_root="$REPO_ROOT/assets/linux/hicolor"
 bundle_dir="$(cd "$bundle_dir" && pwd)"
 
 for required in \
-    zz libcef.so icudtl.dat resources.pak locales/en-US.pak chrome-sandbox \
+    zz cli libcef.so icudtl.dat resources.pak locales/en-US.pak chrome-sandbox \
     CREDITS.html CEF_LICENSE.txt; do
     [[ -s "$bundle_dir/$required" ]] || die "CEF bundle file is missing or empty: $required"
 done
 [[ -x "$bundle_dir/zz" ]] || die "CEF bundle executable is not executable: $bundle_dir/zz"
+[[ -x "$bundle_dir/cli" ]] || die "CLI launcher is not executable: $bundle_dir/cli"
 [[ -s "$icon_root/scalable/apps/zz.svg" ]] || die "scalable Linux icon is missing or empty"
 for size in 16 24 32 48 64 128 256 512; do
     [[ -s "$icon_root/${size}x${size}/apps/zz.png" ]] \
@@ -40,7 +41,7 @@ install -d \
     "$dest/usr/share/licenses/zz"
 
 cp -a "$bundle_dir/." "$dest/usr/lib/zz/"
-ln -s ../lib/zz/zz "$dest/usr/bin/zz"
+ln -s ../lib/zz/cli "$dest/usr/bin/zz"
 install -m 644 "$REPO_ROOT/packaging/linux/zz.desktop" \
     "$dest/usr/share/applications/zz.desktop"
 cp -a "$icon_root/." "$dest/usr/share/icons/hicolor/"

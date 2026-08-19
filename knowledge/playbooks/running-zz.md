@@ -4,7 +4,7 @@ title: Building and running zz
 description: How to build and run the zz GPUI client and its daemon, what the first build downloads, and how to exercise the browser pane with the loopback fixture.
 resource: crates/zz/src/lib.rs
 tags: [running, cargo, cef-download, daemon, browser-fixture, pacman, profiling, instruments]
-timestamp: 2026-08-10T14:50:30-03:00
+timestamp: 2026-08-19T00:00:00Z
 ---
 
 # Overview
@@ -23,6 +23,9 @@ equivalent.
 Start zz. It connects to an already-running daemon, or starts one automatically:
 
 ```sh
+# Installed macOS or Linux package
+zz app
+
 # Linux
 cargo run -p zz
 
@@ -34,6 +37,20 @@ open dist/zz/zz.app
 cargo xtask bundle-cef --release --output dist/zz
 dist\zz\zz.exe
 ```
+
+The installed macOS and Linux `zz` command is the tmux-compatible launcher. Bare `zz` enters the
+raw-terminal attach client, which makes `alias tmux=zz` work for tmux commands and terminal attach.
+Use `zz app` when you want a new GUI process. Direct bundle launches and `cargo run -p zz` keep the
+no-argument GUI behavior used by development tools and platform launchers.
+
+`zz app` starts the first session in the directory where you ran the command. A Dock or Finder
+launch starts it in your home directory. The GUI includes that path when it creates a session, so
+the first terminal does not inherit the process directory of an empty daemon started earlier.
+
+`ZZ_SOCKET` owns daemon routing. `TMUX` carries compatibility metadata inside a pane or plugin job;
+zz refuses to parse a real tmux socket from it. An explicit `-S`, `-L`, or `--socket` still selects
+a zz endpoint. Daemon shell jobs export the exact `ZZ_SOCKET` and prepend a private `tmux` shim to
+their `PATH`, so config and plugin scripts can keep invoking the tmux command name.
 
 A daemon started by a CLI query can remain empty. The GUI's first default Interactive attach
 materializes numeric session `0` only when no session exists, so CLI-first allocation keeps tmux's
@@ -78,8 +95,8 @@ SHA-1, while `MACOS_LOCAL_SIGN_IDENTITY=-` forces ad-hoc signing. Public release
 separate Developer ID/notarization step.
 
 On Arch Linux, package that release bundle with `just pacman-package`, or build and install it in
-one step with `just pacman-install`. The installed `/usr/bin/zz` symlink resolves into the complete
-CEF runtime under `/usr/lib/zz`. On Debian and Ubuntu the pair is `just deb-package` (emitting
+one step with `just pacman-install`. The installed `/usr/bin/zz` symlink resolves to the `cli`
+launcher beside the complete CEF runtime under `/usr/lib/zz`. On Debian and Ubuntu the pair is `just deb-package` (emitting
 `dist/zz-linux.deb`) and `just deb-install`, which installs it through `apt` so the computed
 dependencies resolve. The deb also installs `/etc/apparmor.d/zz`; without that profile, Ubuntu
 24.04+ denies the user namespace the browser panes' zygote needs.
@@ -92,7 +109,8 @@ survive the swap; it serves the previous build until restarted. Local signing ke
 `dev.zz.app` identity, so TCC grants persist across installs. The script also puts `zz` on `PATH`
 the way the Homebrew cask does: a symlink to the bundle's `cli` launcher (never the real binary,
 which would run bundle-less) in the first writable `PATH` directory of `/opt/homebrew/bin` then
-`/usr/local/bin`, leaving any foreign `zz` untouched.
+`/usr/local/bin`, leaving any foreign `zz` untouched. Run `zz app` through that launcher to open the
+GUI; bare `zz` enters terminal attach.
 
 The recipe writes `dist/zz-dev/zz.app`. Its debug CEF runtime uses Chromium's mock keychain so
 local rebuilds do not repeatedly prompt for Chromium Safe Storage; release bundles continue using

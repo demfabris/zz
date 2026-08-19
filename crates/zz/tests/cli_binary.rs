@@ -31,6 +31,23 @@ fn unknown_tmux_flag_uses_tmux_usage_shape() {
 }
 
 #[cfg(unix)]
+#[test]
+fn tmux_without_a_zz_socket_fails_before_dialing_a_foreign_server() {
+    let output = Command::new(env!("CARGO_BIN_EXE_zz"))
+        .env("TMUX", "/tmp/real-tmux.sock,123,0")
+        .env_remove("ZZ_SOCKET")
+        .arg("list-sessions")
+        .output()
+        .expect("run zz inside a foreign tmux environment");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        output.stderr,
+        b"zz: TMUX is set but ZZ_SOCKET is not; refusing to treat a tmux server as zz\nUse `zz app` to open the GUI, or pass `-S` / set `ZZ_SOCKET` to target a zz daemon.\n"
+    );
+}
+
+#[cfg(unix)]
 mod daemon_autostart {
     use std::{
         ffi::OsString,
@@ -221,6 +238,83 @@ mod daemon_autostart {
         assert_eq!(listed.status.code(), Some(0));
         assert_eq!(listed.stdout, b"autostart\n");
         assert!(listed.stderr.is_empty());
+    }
+
+    #[test]
+    fn startup_config_reenters_through_the_private_tmux_shim() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        std::fs::write(
+            &fixture.config,
+            b"run-shell \"tmux set-option -g @boot-shim ready\"\nset-option -g @after-shim loaded\n",
+        )
+        .expect("write reentrant startup config");
+
+        let created = fixture.run(&["new-session", "-d", "-s", "shim"]);
+        assert_eq!(
+            created.status.code(),
+            Some(0),
+            "stderr: {}",
+            String::from_utf8_lossy(&created.stderr)
+        );
+        let values = fixture.run(&[
+            "show-options",
+            "-gqv",
+            "@boot-shim",
+            ";",
+            "show-options",
+            "-gqv",
+            "@after-shim",
+        ]);
+        assert_eq!(values.status.code(), Some(0));
+        assert_eq!(values.stdout, b"ready\nloaded\n");
+        assert!(values.stderr.is_empty());
+    }
+
+    #[test]
+    fn gui_style_default_attach_uses_its_working_directory_with_an_empty_daemon() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let started = fixture.run(&["start-server"]);
+        assert_eq!(
+            started.status.code(),
+            Some(0),
+            "stderr: {}",
+            String::from_utf8_lossy(&started.stderr)
+        );
+        let working_directory = tempfile::Builder::new()
+            .prefix("zz app cwd ")
+            .tempdir_in("/tmp")
+            .expect("temporary app working directory");
+        let client = zz_daemon::InteractiveClient::connect(&fixture.socket)
+            .expect("connect GUI-style interactive client");
+        client
+            .attach_default_in(working_directory.path())
+            .expect("attach from app working directory");
+        let expected = std::fs::canonicalize(working_directory.path())
+            .expect("canonical app working directory");
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let panes = fixture.run(&["list-panes", "-a", "-F", "#{pane_current_path}"]);
+            if panes.status.success()
+                && panes.stdout == format!("{}\n", expected.display()).as_bytes()
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pane cwd never matched {}; stdout={} stderr={}",
+                expected.display(),
+                String::from_utf8_lossy(&panes.stdout),
+                String::from_utf8_lossy(&panes.stderr),
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 
     #[test]

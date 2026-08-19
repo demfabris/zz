@@ -8,6 +8,10 @@ zz is tmux, ghostty and gpui love triangle
 
 ![zz](assets/screenshot.png)
 
+## Is it any good?
+
+Yes.
+
 ### In math notation:
 
 > **zz := gpui(tmux ∪ ghostty)**

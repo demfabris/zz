@@ -362,6 +362,24 @@ impl InteractiveClient {
         })
     }
 
+    pub fn attach_default_in(&self, working_directory: &Path) -> Result<(), DaemonError> {
+        if working_directory.is_absolute() && working_directory.is_dir() {
+            self.send(&ProtocolMessage::CommandRequest(CommandRequest {
+                request_id: 0,
+                command: CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-A".to_owned(),
+                        "-d".to_owned(),
+                        "-c".to_owned(),
+                        working_directory.to_string_lossy().into_owned(),
+                    ],
+                ),
+            }))?;
+        }
+        self.attach("")
+    }
+
     pub fn attach_session(
         &self,
         session: impl Into<String>,
@@ -713,12 +731,27 @@ fn connect_stream<S: TransportStream>(
     let started = diagnostic_timer();
     let mut reader = ProtocolReceiver::new(stream.try_clone()?);
     let mut writer = ProtocolSender::new(stream);
+    let capabilities = if kind == ClientKind::Command {
+        std::env::var(crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE)
+            .ok()
+            .filter(|token| !token.is_empty())
+            .map(|token| {
+                vec![format!(
+                    "{}{}",
+                    crate::STARTUP_REENTRY_CAPABILITY_PREFIX,
+                    token
+                )]
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     writer.send(&ProtocolMessage::ClientHello(ClientHello {
         protocol_version: PROTOCOL_VERSION,
         client_instance_id: client_instance_id(),
         kind,
         device_name,
-        capabilities: Vec::new(),
+        capabilities,
         color_scheme,
         origin: (send_origin && kind == ClientKind::Command)
             .then(|| std::env::var("ZZ_PANE").ok())

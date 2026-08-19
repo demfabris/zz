@@ -146,6 +146,7 @@ listing="$(dpkg-deb -c "$output" | awk '{ print $6 }')"
 for entry in \
     ./usr/bin/zz \
     ./usr/lib/zz/zz \
+    ./usr/lib/zz/cli \
     ./usr/lib/zz/libcef.so \
     ./usr/lib/zz/chrome-sandbox \
     ./usr/share/applications/zz.desktop \

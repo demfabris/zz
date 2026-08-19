@@ -4,7 +4,7 @@ title: Process & threading model
 description: How zz splits work across the persistent daemon, GUI and CLI clients, CEF subprocesses, ACP agents, and per-PTY worker threads.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [architecture, process-model, daemon, threading, ipc]
-timestamp: 2026-08-14T00:00:00Z
+timestamp: 2026-08-19T00:00:00Z
 ---
 
 # Overview
@@ -33,16 +33,23 @@ subscriber and lets the empty daemon exit; live sessions keep it alive across ap
 opt-in `quit-daemon-on-exit` key makes app quit send `kill-server` regardless. See
 [session persistence](/concepts/session-persistence.md).
 
-A GUI process auto-starts a daemon if none is running, then attaches as a client. On Unix the
-spawned daemon gets its own process group (`process_group(0)`), so Ctrl+C or a closing tty
-in the launching terminal never signals the daemon and its sessions. The daemon initially has no
-session unless config created one; the GUI's actual empty-target Interactive attach lazily creates
-numeric session `0`. Registration and background fleet connections do not. Neither client kind is capped:
+A GUI process auto-starts a daemon if none is running, then attaches as a client. The installed
+launcher reserves `zz app` for this path; bare `zz` uses the tmux-compatible terminal attach path.
+On Unix the spawned daemon gets its own session, so Ctrl+C or a closing tty in the launching
+terminal never signals the daemon and its sessions. The daemon initially has no session unless
+config created one; the GUI's actual empty-target Interactive attach lazily creates numeric session
+`0`. Registration and background fleet connections do not. Neither client kind is capped:
 `ServerState.attached` maps each session to a `BTreeSet<ClientId>`, so a desktop and a laptop watch
 one session together while command-only clients come and go. The rule runs one way only: a client
 attaches to at most one session, and attaching to a second detaches it from the first. See
 [session persistence](/concepts/session-persistence.md) for attach, detach, eviction, and the state
 each client owns alone.
+
+The daemon starts its accept loop before it loads startup config. Normal GUI, Control, and Command
+clients wait at the handshake until config finishes. A shell job that the starting daemon owns gets
+a one-daemon re-entry token, `ZZ_SOCKET`, and a private `tmux` shim on its `PATH`. Foreground
+`run-shell` and `if-shell` config entries can call `tmux` back into zz without deadlocking or exposing
+half-loaded config to other clients.
 
 # IPC transport
 
@@ -58,6 +65,11 @@ That is the only binding the daemon has. A remote host adds no third one: the cl
 `ssh -N -L` child, which forwards the remote daemon's own socket to a local scratch path, and then
 speaks the identical envelope over it. Auth, encryption, and host identity are ssh's problem. See
 [wire protocol](/protocol/wire-protocol.md) and [fleet attach](/designs/fleet-attach.md).
+
+`ZZ_SOCKET` selects a zz endpoint. `TMUX` remains tmux-compatible session metadata for programs
+inside panes and plugin jobs; zz does not treat its socket field as a transport address. A
+tmux-compatible CLI command that sees `TMUX` without `ZZ_SOCKET` exits with a targeted error instead
+of sending the zz protocol to a real tmux server.
 
 A dead forward starts a roaming loop. The client moves that host to
 `HostState::Reconnecting { attempt }`, leaves the last snapshot and frames on screen, and redials on

@@ -11,6 +11,10 @@ use std::{
 use thiserror::Error;
 use zz_protocol::{ProtocolError, ServerError};
 
+const STARTUP_REENTRY_CAPABILITY_PREFIX: &str = "zz-startup-reentry=";
+const STARTUP_REENTRY_ENVIRONMENT_VARIABLE: &str = "ZZ_STARTUP_REENTRY";
+const TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE: &str = "ZZ_TMUX_EXECUTABLE";
+
 // iOS uses the in-process russh tunnel, leaving the spawned-ssh and askpass halves unreachable.
 #[cfg(feature = "agent")]
 mod agent;
@@ -94,6 +98,23 @@ fn incompatible_daemon_message(daemon: Option<u16>, client: u16) -> String {
         }
         None => format!("the running zz daemon is older than this zz (protocol v{client})"),
     }
+}
+
+#[cfg(feature = "daemon")]
+fn configure_tmux_shim(
+    process: &mut Command,
+    tmux_shim: Option<&Path>,
+    zz_executable: Option<&Path>,
+) {
+    let (Some(tmux_shim), Some(zz_executable)) = (tmux_shim, zz_executable) else {
+        return;
+    };
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let paths = std::iter::once(tmux_shim.to_path_buf()).chain(std::env::split_paths(&inherited));
+    if let Ok(path) = std::env::join_paths(paths) {
+        process.env("PATH", path);
+    }
+    process.env(TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE, zz_executable);
 }
 
 /// Classify a failed local handshake as a stale daemon when the wire error or guarded identity

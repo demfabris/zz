@@ -1,12 +1,11 @@
 use std::{env, error::Error, fs, path::PathBuf, process::ExitCode};
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::collections::HashMap;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::path::Path;
 #[cfg(target_os = "macos")]
-use std::{
-    collections::{BTreeSet, HashMap},
-    io,
-};
+use std::{collections::BTreeSet, io};
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use std::{
     ffi::OsString,
@@ -18,6 +17,10 @@ use std::{
 use cargo_metadata::Message;
 
 const APP_NAME: &str = "zz";
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const CLI_NAME: &str = "zz_cli";
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const CLI_BUNDLE_NAME: &str = "cli";
 #[cfg(target_os = "macos")]
 const BUNDLE_SHORT_VERSION_KEY: &str = "CFBundleShortVersionString";
 #[cfg(target_os = "macos")]
@@ -30,10 +33,6 @@ const GHOSTTY_OPTIMIZE_ENV: &str = "LIBGHOSTTY_VT_SYS_OPTIMIZE";
 const GHOSTTY_RELEASE_FAST: &str = "ReleaseFast";
 #[cfg(target_os = "macos")]
 const MACOS_HELPER_NAME: &str = "zz_helper";
-#[cfg(target_os = "macos")]
-const MACOS_CLI_NAME: &str = "zz_cli";
-#[cfg(target_os = "macos")]
-const MACOS_CLI_BUNDLE_NAME: &str = "cli";
 #[cfg(target_os = "macos")]
 const MACOS_HELPER_SUFFIXES: [&str; 5] = [
     "Helper",
@@ -206,12 +205,17 @@ fn bundle_cef(args: &[String]) -> Result<(), Box<dyn Error>> {
             .profile
             .release_flag()
             .ok_or("named Cargo profiles are currently supported only for macOS CEF bundles")?;
-        let target_path = build_linux_binary(release, options.features.as_deref())?;
+        let target_path = build_linux_binaries(release, options.features.as_deref())?;
         let previous = options.output.join(APP_NAME);
         if previous.exists() {
             fs::remove_file(&previous)?;
         }
-        cef::build_util::linux::bundle(&options.output, &target_path, APP_NAME)?
+        let executable = cef::build_util::linux::bundle(&options.output, &target_path, APP_NAME)?;
+        fs::copy(
+            target_path.join(CLI_NAME),
+            options.output.join(CLI_BUNDLE_NAME),
+        )?;
+        executable
     };
 
     #[cfg(target_os = "windows")]
@@ -321,8 +325,8 @@ fn merged_features(cli: Option<&str>) -> Option<OsString> {
 }
 
 #[cfg(target_os = "linux")]
-fn build_linux_binary(release: bool, features: Option<&str>) -> Result<PathBuf, Box<dyn Error>> {
-    println!("Building {APP_NAME}...");
+fn build_linux_binaries(release: bool, features: Option<&str>) -> Result<PathBuf, Box<dyn Error>> {
+    println!("Building {APP_NAME} and {CLI_NAME}...");
     let mut command = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
     command.arg("build");
     if release {
@@ -336,30 +340,41 @@ fn build_linux_binary(release: bool, features: Option<&str>) -> Result<PathBuf, 
             "--message-format=json-render-diagnostics",
             "--bin",
             APP_NAME,
+            "--bin",
+            CLI_NAME,
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
 
     let mut child = command.spawn()?;
     let stdout = child.stdout.take().ok_or("cargo stdout is unavailable")?;
-    let mut executable = None;
+    let mut executables = HashMap::new();
     for message in Message::parse_stream(BufReader::new(stdout)) {
         if let Message::CompilerArtifact(artifact) = message?
-            && artifact.target.name == APP_NAME
+            && matches!(artifact.target.name.as_str(), APP_NAME | CLI_NAME)
             && let Some(path) = artifact.executable
         {
-            executable = Some(path.into_std_path_buf());
+            executables.insert(artifact.target.name, path.into_std_path_buf());
         }
     }
     let status = child.wait()?;
     if !status.success() {
         return Err(format!("cargo build failed with {status}").into());
     }
-    let executable = executable.ok_or("cargo did not emit the zz executable")?;
-    Ok(executable
+    let executable = executables
+        .remove(APP_NAME)
+        .ok_or("cargo did not emit the zz executable")?;
+    let target_path = executable
         .parent()
         .ok_or("zz executable has no parent directory")?
-        .to_owned())
+        .to_owned();
+    let cli = executables
+        .remove(CLI_NAME)
+        .ok_or("cargo did not emit the zz CLI launcher")?;
+    if cli.parent() != Some(target_path.as_path()) {
+        return Err("zz and its CLI launcher were emitted into different directories".into());
+    }
+    Ok(target_path)
 }
 
 #[cfg(target_os = "windows")]
@@ -532,7 +547,7 @@ fn build_macos_bundle(
             version: product_version(env!("CARGO_PKG_VERSION")).parse()?,
         },
     )?;
-    fs::copy(target_path.join(MACOS_CLI_NAME), macos_cli_launcher(&app))?;
+    fs::copy(target_path.join(CLI_NAME), macos_cli_launcher(&app))?;
     if profile.is_named(PROFILING_PROFILE) {
         install_macos_debug_symbols(output, &target_path)?;
     }
@@ -585,7 +600,7 @@ fn is_valid_apple_build_version(version: &str) -> bool {
 
 #[cfg(target_os = "macos")]
 fn macos_cli_launcher(app: &Path) -> PathBuf {
-    app.join("Contents/MacOS").join(MACOS_CLI_BUNDLE_NAME)
+    app.join("Contents/MacOS").join(CLI_BUNDLE_NAME)
 }
 
 #[cfg(target_os = "macos")]
@@ -593,7 +608,7 @@ fn build_macos_binaries(
     profile: &BuildProfile,
     features: Option<&str>,
 ) -> Result<PathBuf, Box<dyn Error>> {
-    println!("Building {APP_NAME}, {MACOS_HELPER_NAME}, and {MACOS_CLI_NAME}...");
+    println!("Building {APP_NAME}, {MACOS_HELPER_NAME}, and {CLI_NAME}...");
     let mut command = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
     command.arg("build");
     profile.configure_cargo(&mut command);
@@ -612,7 +627,7 @@ fn build_macos_binaries(
             "--bin",
             MACOS_HELPER_NAME,
             "--bin",
-            MACOS_CLI_NAME,
+            CLI_NAME,
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
@@ -624,7 +639,7 @@ fn build_macos_binaries(
         if let Message::CompilerArtifact(artifact) = message?
             && matches!(
                 artifact.target.name.as_str(),
-                APP_NAME | MACOS_HELPER_NAME | MACOS_CLI_NAME
+                APP_NAME | MACOS_HELPER_NAME | CLI_NAME
             )
             && let Some(executable) = artifact.executable
         {
@@ -643,7 +658,7 @@ fn build_macos_binaries(
     let target_path = app
         .parent()
         .ok_or("zz executable has no parent directory")?;
-    for name in [MACOS_HELPER_NAME, MACOS_CLI_NAME] {
+    for name in [MACOS_HELPER_NAME, CLI_NAME] {
         let executable = executables
             .remove(name)
             .ok_or_else(|| format!("cargo did not emit the {name} executable"))?;
@@ -1093,6 +1108,7 @@ fn platform_bundle_files(executable: &std::path::Path) -> Vec<PathBuf> {
         root.join("chrome-sandbox"),
         root.join("CREDITS.html"),
         root.join("CEF_LICENSE.txt"),
+        root.join(CLI_BUNDLE_NAME),
     ]
 }
 

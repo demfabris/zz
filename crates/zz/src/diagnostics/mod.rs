@@ -676,6 +676,10 @@ fn process_role(arguments: &[OsString]) -> String {
     {
         return "daemon".to_owned();
     }
+    let app_arguments = application_arguments(arguments).collect::<Vec<_>>();
+    if app_arguments.as_slice() == [OsStr::new("app")] {
+        return "app".to_owned();
+    }
     if application_arguments(arguments).any(|argument| argument == OsStr::new("attach"))
         && std::io::IsTerminal::is_terminal(&std::io::stdout())
     {
@@ -1003,6 +1007,7 @@ mod tests {
             "daemon"
         );
         assert_eq!(process_role(&arguments(&["zz", "--verbose"])), "app");
+        assert_eq!(process_role(&arguments(&["zz", "app"])), "app");
         assert_eq!(
             process_role(&arguments(&["zz", "--type=renderer", "--verbose"])),
             "cef-renderer"

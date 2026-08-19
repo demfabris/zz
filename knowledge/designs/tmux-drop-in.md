@@ -483,7 +483,18 @@ pane visibility). The harness (phase 2) does not wait for this.
 - `tmux -V` answers `tmux 3.8-zz`: the pin `d77c9dc6` is `next-3.8` (`AC_INIT([tmux],
   next-3.8)`), not 3.5. TPM's version check digit-strips either to `38`; handle other
   version-gating fallout case by case.
-- Exit codes and error-output shapes matched where scripts grep them.
+- Exit codes and error-output shapes matched where scripts grep them. **SHIPPED
+  2026-08-18** (wave 7b, `b350414`): the CLI renders the pin's bare stderr — the
+  `ServerError` render is lifted from control mode with an `InvalidCommand`-only strip
+  (`UnsupportedCommand` keeps its `unsupported command:` noun on every surface, a
+  reviewer-caught over-strip). All twelve `regress/options-values.sh` strings plus
+  `can't find session/window/pane:` and `unknown command:` byte-match the pin (live
+  probe 27/27 with positive control); no-tty attach says `open terminal failed: not a
+  terminal`; show-messages records pin-shaped `message:`/`command:` pairs; config
+  errors compose `%config-error <file>:<line>: <text>` exactly as the pin regress
+  greps. Deferred to a 7c-if-wanted: `command <name>:` arity/flag shapes and the
+  `usage:` fallback (need per-command arity metadata), the ~24 remaining
+  `needs a value` sites, key-string strictness.
 - An alias smoke suite: a corpus of real-world `tmux.conf` files and scripts run under
   `alias tmux=zz`, asserting zero warnings and matching behavior.
 
@@ -543,11 +554,11 @@ this list is the campaign-level index of it plus the items that never got a matr
 
 **Accepted divergences (documented, revisit only deliberately):**
 
-- The CLI error prefix: zz says `zz: mux command failed: …` around tmux's exact message
-  text everywhere except `refresh-client`'s bare `no current client`. rc always matches.
-  The native attach path carries a second shape in the same class: `zz attach: …`
-  around the exact engine text (`can't find session: X`, `no sessions`). Both fold
-  into phase 7's error-shape pass.
+- The CLI error prefix: CLOSED by wave 7b (2026-08-18) — both wrapper shapes
+  (`zz: mux command failed: …` and `zz attach: …`) are gone; stderr is the pin's bare
+  text. Deliberate residue: `unsupported command: <name>` for catalogued-but-
+  unimplemented commands/options (zz-only condition, legible on CLI and CC alike), and
+  `zz: ` retained for zz-only daemon errors (handshake, protocol mismatch).
 - `history-limit` default stays 10000 (pin: 2000) — product choice, fenced by a drift test
   whose allowlist is exactly this one name.
 - `list-commands` is the honest implemented subset, and usage strings show zz's accepted
@@ -611,11 +622,15 @@ this list is the campaign-level index of it plus the items that never got a matr
   the pin's 1s — it is the direct cause of the mid-flood capture-pane timeout
   and the copy_pipe_timeout load-flake; deserves its own wave, not more
   per-test margin raising).
-- Error-text surface: zz wraps stderr in `zz: mux command failed:` (+
-  `invalid command:`/`unsupported command:` nouns vs the pin's bare
-  `bad value:`/`unknown command:`; usage-text arity errors vs too-few/too-many) —
-  the whole class is phase 7's "error-output shapes matched where scripts grep
-  them" item; exit-code classes already match everywhere probed.
+- Error-text surface: the grep-facing classes CLOSED by wave 7b (2026-08-18) —
+  bare pin-exact stderr for option-value/target/unknown-command errors (twelve
+  regress strings byte-verified), `already set:` respelled to the pin,
+  no-tty attach = `open terminal failed: not a terminal`. Still zz-shaped by
+  sequencing, not oversight: arity/flag rejections (`command <name>: too
+  few/too many arguments`, `unknown flag -X`, `-X expects an argument`), the
+  per-command `usage:` fallback, ~24 `needs a value` sites. Companion ledger
+  rows live in the divergence matrix: the command prefix-matching capability
+  gap, and `set prefix` silently accepting unresolvable C-/M- keys.
 - Wave-5d-2 ledger (reviewer-CONFIRMED, non-blocking): `SocketGuard`'s drop
   unlink is unconditional — it cannot distinguish its own socket from a
   successor daemon's at the same path. The early guard drop moved the unlink

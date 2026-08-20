@@ -20,12 +20,17 @@ use zz_terminal::{
 };
 
 use crate::{
-    Binding, KeyTables, LayoutPreset, MuxState, PaneDirection, PaneKind, SplitPlacement,
-    SplitSize as LayoutSplitSize, StatusContext, StatusFormats, StatusOption, WindowStatusFormats,
-    WindowStatusOption, canonical_command, command_spec,
+    BellAction, Binding, KeyTables, LayoutPreset, MuxState, PaneDirection, PaneKind, PresetOptions,
+    SplitPlacement, SplitSize as LayoutSplitSize, StatusContext, StatusFormats, StatusOption,
+    VisualBell, WindowSize, WindowStatusFormats, WindowStatusOption, canonical_command,
+    command_spec,
     formats::{
         CommandHooks, FormatContext, FormatType, StatusHooks, expand_format_time_with_hooks,
         expand_format_with_hooks, format_true, parse_tmux_colour,
+    },
+    honest_knobs::{
+        PaneOption, PaneOptions, ServerOption, ServerOptions, SessionOption, SessionOptions,
+        WindowOption, WindowOptions,
     },
     layout::PANE_MAXIMUM,
     model::DEFAULT_WINDOW_EXTENT,
@@ -235,6 +240,9 @@ pub enum MuxEffect {
         window: Option<WindowId>,
     },
     AggressiveResizeChanged {
+        window: Option<WindowId>,
+    },
+    WindowSizeChanged {
         window: Option<WindowId>,
     },
     MuxOptionChanged {
@@ -629,6 +637,14 @@ pub struct MuxEngine {
     session_status_options: BTreeMap<SessionId, BTreeMap<StatusOption, String>>,
     window_status: WindowStatusFormats,
     window_status_options: BTreeMap<WindowId, BTreeMap<WindowStatusOption, String>>,
+    server_options: ServerOptions,
+    global_session_options: SessionOptions,
+    session_options: BTreeMap<SessionId, BTreeMap<SessionOption, String>>,
+    global_window_options: WindowOptions,
+    window_options: BTreeMap<WindowId, BTreeMap<WindowOption, String>>,
+    global_pane_options: PaneOptions,
+    window_pane_options: BTreeMap<WindowId, BTreeMap<PaneOption, String>>,
+    pane_options: BTreeMap<PaneId, BTreeMap<PaneOption, String>>,
     format_host: String,
     format_host_short: String,
     format_pid: u32,
@@ -785,6 +801,14 @@ impl Default for MuxEngine {
             session_status_options: BTreeMap::new(),
             window_status: WindowStatusFormats::default(),
             window_status_options: BTreeMap::new(),
+            server_options: ServerOptions::default(),
+            global_session_options: SessionOptions::default(),
+            session_options: BTreeMap::new(),
+            global_window_options: WindowOptions::default(),
+            window_options: BTreeMap::new(),
+            global_pane_options: PaneOptions::default(),
+            window_pane_options: BTreeMap::new(),
+            pane_options: BTreeMap::new(),
             format_host: String::new(),
             format_host_short: String::new(),
             format_pid: 0,
@@ -926,6 +950,131 @@ impl MuxEngine {
             }
         }
         formats
+    }
+
+    #[must_use]
+    pub const fn focus_events(&self) -> bool {
+        self.server_options.focus_events
+    }
+
+    #[must_use]
+    pub const fn history_file(&self) -> &str {
+        self.server_options.history_file.as_str()
+    }
+
+    #[must_use]
+    pub const fn prefix_timeout_ms(&self) -> u32 {
+        self.server_options.prefix_timeout_ms
+    }
+
+    #[must_use]
+    pub const fn prompt_history_limit(&self) -> usize {
+        self.server_options.prompt_history_limit
+    }
+
+    #[must_use]
+    fn session_knobs(&self, session: SessionId) -> SessionOptions {
+        let mut values = self.global_session_options.clone();
+        if let Some(overrides) = self.session_options.get(&session) {
+            for (option, value) in overrides {
+                values
+                    .set_command(*option, Some(value))
+                    .expect("stored session option was validated");
+            }
+        }
+        values
+    }
+
+    #[must_use]
+    pub fn bell_action_for_session(&self, session: SessionId) -> BellAction {
+        self.session_knobs(session).bell_action
+    }
+
+    #[must_use]
+    pub fn visual_bell_for_session(&self, session: SessionId) -> VisualBell {
+        self.session_knobs(session).visual_bell
+    }
+
+    #[must_use]
+    pub fn key_table_for_session(&self, session: SessionId) -> String {
+        let table = self.session_knobs(session).key_table;
+        if table.is_empty() {
+            "root".to_owned()
+        } else {
+            table
+        }
+    }
+
+    #[must_use]
+    pub fn display_panes_time_for_session(&self, session: SessionId) -> u32 {
+        self.session_knobs(session).display_panes_time_ms
+    }
+
+    #[must_use]
+    pub fn global_default_size(&self) -> &str {
+        self.global_session_options.default_size.as_str()
+    }
+
+    #[must_use]
+    fn window_knobs(&self, window: WindowId) -> WindowOptions {
+        let mut values = self.global_window_options.clone();
+        if let Some(overrides) = self.window_options.get(&window) {
+            for (option, value) in overrides {
+                values
+                    .set_command(*option, Some(value))
+                    .expect("stored window option was validated");
+            }
+        }
+        values
+    }
+
+    #[must_use]
+    pub fn preset_options_for_window(&self, window: WindowId) -> PresetOptions {
+        self.window_knobs(window).preset
+    }
+
+    #[must_use]
+    pub fn window_size(&self, window: WindowId) -> WindowSize {
+        self.window_knobs(window).window_size
+    }
+
+    #[must_use]
+    fn pane_knobs(&self, pane: PaneId) -> PaneOptions {
+        let mut values = self.global_pane_options.clone();
+        if let Some(window) = self.state.window_for_pane(pane)
+            && let Some(overrides) = self.window_pane_options.get(&window)
+        {
+            for (option, value) in overrides {
+                values
+                    .set_command(*option, Some(value))
+                    .expect("stored window-pane option was validated");
+            }
+        }
+        if let Some(overrides) = self.pane_options.get(&pane) {
+            for (option, value) in overrides {
+                values
+                    .set_command(*option, Some(value))
+                    .expect("stored pane option was validated");
+            }
+        }
+        values
+    }
+
+    #[must_use]
+    pub fn allow_set_title(&self, pane: PaneId) -> bool {
+        self.pane_knobs(pane).allow_set_title
+    }
+
+    fn pane_knobs_for_window(&self, window: WindowId) -> PaneOptions {
+        let mut values = self.global_pane_options.clone();
+        if let Some(overrides) = self.window_pane_options.get(&window) {
+            for (option, value) in overrides {
+                values
+                    .set_command(*option, Some(value))
+                    .expect("stored window-pane option was validated");
+            }
+        }
+        values
     }
 
     pub fn set_format_server_context(
@@ -1483,7 +1632,8 @@ impl MuxEngine {
                 .is_ok_and(|value| value == RemainOnExit::Key)
     }
 
-    fn display_time_for_session(&self, session: SessionId) -> u32 {
+    #[must_use]
+    pub fn display_time_for_session(&self, session: SessionId) -> u32 {
         self.session_display_time_ms
             .get(&session)
             .copied()
@@ -1799,6 +1949,8 @@ impl MuxEngine {
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_repeat_time_ms
             .retain(|session, _| self.state.sessions.contains_key(session));
+        self.session_options
+            .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_default_commands
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_default_shells
@@ -1817,9 +1969,15 @@ impl MuxEngine {
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.window_user_options
             .retain(|window, _| self.state.windows.contains_key(window));
+        self.window_options
+            .retain(|window, _| self.state.windows.contains_key(window));
+        self.window_pane_options
+            .retain(|window, _| self.state.windows.contains_key(window));
         self.window_hooks
             .retain(|window, _| self.state.windows.contains_key(window));
         self.pane_user_options
+            .retain(|pane, _| self.state.pane(*pane).is_some());
+        self.pane_options
             .retain(|pane, _| self.state.pane(*pane).is_some());
         self.pane_hooks
             .retain(|pane, _| self.state.pane(*pane).is_some());
@@ -1886,7 +2044,7 @@ impl MuxEngine {
         let name = options
             .value("-s")
             .map_or_else(|| next_session_name(&self.state), str::to_owned);
-        let extent = initial_window_extent(&options)?;
+        let extent = initial_window_extent(&options, self.global_default_size())?;
         let base_index = self.global_base_index;
         let (session, window, pane) = self
             .state
@@ -3587,11 +3745,12 @@ impl MuxEngine {
         {
             self.state.bump_generation();
         }
+        let preset_options = self.preset_options_for_window(window);
 
         if command == "next-layout" || options.has("-n") {
-            self.state.cycle_layout(window, 1)?;
+            self.state.cycle_layout(window, 1, &preset_options)?;
         } else if command == "previous-layout" || options.has("-p") {
-            self.state.cycle_layout(window, -1)?;
+            self.state.cycle_layout(window, -1, &preset_options)?;
         } else if options.has("-E") {
             self.state.spread_layout(pane)?;
         } else if options.has("-o") {
@@ -3603,12 +3762,12 @@ impl MuxEngine {
             self.state.restore_previous_layout(window)?;
         } else if let Some(name) = positional.first() {
             if let Some(preset) = parse_layout_preset(name)? {
-                self.state.select_layout(window, preset)?;
+                self.state.select_layout(window, preset, &preset_options)?;
             } else {
                 self.state.select_layout_string(window, name)?;
             }
         } else if let Some(last) = self.state.last_layout(window)? {
-            self.state.select_layout(window, last)?;
+            self.state.select_layout(window, last, &preset_options)?;
         }
         Ok(Execution::default())
     }
@@ -4158,7 +4317,14 @@ impl MuxEngine {
         }
         let pane = self.resolve_pane(None, context.window, context.pane)?;
         let duration_ms = options.value("-d").map_or_else(
-            || self.display_time_for_pane(pane),
+            || {
+                let window = self
+                    .state
+                    .window_for_pane(pane)
+                    .expect("display-panes pane was resolved");
+                let session = self.state.windows[&window].session;
+                Ok(self.display_panes_time_for_session(session))
+            },
             |value| {
                 value.parse::<u32>().map_err(|_| {
                     ServerError::InvalidCommand(format!(
@@ -4756,6 +4922,10 @@ impl MuxEngine {
         if table_option.default.is_none()
             && StatusOption::from_name(table_option.name).is_none()
             && WindowStatusOption::from_name(table_option.name).is_none()
+            && ServerOption::from_name(table_option.name).is_none()
+            && SessionOption::from_name(table_option.name).is_none()
+            && WindowOption::from_name(table_option.name).is_none()
+            && PaneOption::from_name(table_option.name).is_none()
             && parsed.index.is_none()
         {
             validate_unimplemented_option_value(table_option.name, value)?;
@@ -4823,6 +4993,18 @@ impl MuxEngine {
             }
             option if let Some(option) = WindowStatusOption::from_name(option) => {
                 self.set_window_status_option(option, value, &options, target)
+            }
+            option if let Some(option) = ServerOption::from_name(option) => {
+                self.set_server_option(option, value, &options, target)
+            }
+            option if let Some(option) = SessionOption::from_name(option) => {
+                self.set_session_option(option, value, &options, target)
+            }
+            option if let Some(option) = WindowOption::from_name(option) => {
+                self.set_window_option(option, value, &options, target)
+            }
+            option if let Some(option) = PaneOption::from_name(option) => {
+                self.set_pane_option(option, value, &options, target)
             }
             option => unreachable!("implemented option {option} has a setter"),
         }
@@ -4925,7 +5107,7 @@ impl MuxEngine {
                     );
                 }
             }
-            return Ok(Execution::output(lines.join("\n")));
+            return Ok(Execution::output(shown_options_output(&lines)));
         };
 
         let parsed = match parse_tmux_option(argument) {
@@ -4949,7 +5131,7 @@ impl MuxEngine {
                 let mut lines = Vec::new();
                 let name = indexed_option_name(parsed.name, parsed.index.as_deref());
                 push_shown_option(&mut lines, &name, value, true, inherited, value_only);
-                return Ok(Execution::output(lines.remove(0)));
+                return Ok(Execution::output(shown_options_output(&lines)));
             }
             if options.has("-q") {
                 return Ok(Execution::default());
@@ -4963,7 +5145,7 @@ impl MuxEngine {
             let mut lines = Vec::new();
             let name = indexed_option_name(parsed.name, parsed.index.as_deref());
             push_shown_option(&mut lines, &name, &value, is_string, false, value_only);
-            return Ok(Execution::output(lines.remove(0)));
+            return Ok(Execution::output(shown_options_output(&lines)));
         }
         let option = match match_tmux_option(parsed.name) {
             Ok(Some(option)) => option,
@@ -5006,7 +5188,7 @@ impl MuxEngine {
             inherited,
             value_only,
         );
-        Ok(Execution::output(lines.remove(0)))
+        Ok(Execution::output(shown_options_output(&lines)))
     }
 
     fn set_environment(
@@ -5231,6 +5413,14 @@ impl MuxEngine {
                 .or_else(|| option.default.map(|default| default.value().to_owned()))
                 .map(|value| (value, false)),
             TmuxOptionTarget::Session(session) => match option.name {
+                name if SessionOption::from_name(name).is_some() => {
+                    let option = SessionOption::from_name(name).expect("guarded session option");
+                    self.session_options
+                        .get(&session)
+                        .and_then(|values| values.get(&option))
+                        .map(|value| (value.clone(), false))
+                        .or_else(inherited)
+                }
                 name if StatusOption::from_name(name).is_some() => {
                     let option = StatusOption::from_name(name).expect("guarded status option");
                     self.session_status_options
@@ -5312,6 +5502,22 @@ impl MuxEngine {
                 _ => inherited(),
             },
             TmuxOptionTarget::Window(window) => match option.name {
+                name if WindowOption::from_name(name).is_some() => {
+                    let option = WindowOption::from_name(name).expect("guarded window option");
+                    self.window_options
+                        .get(&window)
+                        .and_then(|values| values.get(&option))
+                        .map(|value| (value.clone(), false))
+                        .or_else(inherited)
+                }
+                name if PaneOption::from_name(name).is_some() => {
+                    let option = PaneOption::from_name(name).expect("guarded pane option");
+                    self.window_pane_options
+                        .get(&window)
+                        .and_then(|values| values.get(&option))
+                        .map(|value| (value.clone(), false))
+                        .or_else(inherited)
+                }
                 name if WindowStatusOption::from_name(name).is_some() => {
                     let option =
                         WindowStatusOption::from_name(name).expect("guarded window status option");
@@ -5384,6 +5590,16 @@ impl MuxEngine {
                 _ => inherited(),
             },
             TmuxOptionTarget::Pane(pane) => match option.name {
+                name if PaneOption::from_name(name).is_some() => {
+                    let option = PaneOption::from_name(name).expect("guarded pane option");
+                    self.pane_options
+                        .get(&pane)
+                        .and_then(|values| values.get(&option))
+                        .map(|value| (value.clone(), false))
+                        .or_else(|| {
+                            include_inherited.then(|| (self.pane_knobs(pane).value(option), true))
+                        })
+                }
                 "remain-on-exit" => self
                     .pane_remain_on_exit
                     .get(&pane)
@@ -5424,6 +5640,18 @@ impl MuxEngine {
     }
 
     fn global_tmux_option_value(&self, name: &str) -> Option<String> {
+        if let Some(option) = ServerOption::from_name(name) {
+            return Some(self.server_options.value(option));
+        }
+        if let Some(option) = SessionOption::from_name(name) {
+            return Some(self.global_session_options.value(option));
+        }
+        if let Some(option) = WindowOption::from_name(name) {
+            return Some(self.global_window_options.value(option));
+        }
+        if let Some(option) = PaneOption::from_name(name) {
+            return Some(self.global_pane_options.value(option));
+        }
         if let Some(option) = StatusOption::from_name(name) {
             return Some(self.status.value(option));
         }
@@ -6501,6 +6729,205 @@ impl MuxEngine {
         }
     }
 
+    fn set_server_option(
+        &mut self,
+        option: ServerOption,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        assert_eq!(target, TmuxOptionTarget::Server);
+        let unset = option_is_unset(options);
+        if options.has("-o") && !unset {
+            return already_set_or_quiet(options, option.as_str());
+        }
+        if unset {
+            self.server_options.reset(option);
+            return Ok(Execution::default());
+        }
+        let appended = (options.has("-a") && option.is_string())
+            .then(|| value.map(|value| format!("{}{value}", self.server_options.value(option))))
+            .flatten();
+        self.server_options
+            .set_command(option, appended.as_deref().or(value))
+            .map_err(ServerError::InvalidCommand)?;
+        Ok(Execution::default())
+    }
+
+    fn set_session_option(
+        &mut self,
+        option: SessionOption,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        let session = match target {
+            TmuxOptionTarget::GlobalSession => None,
+            TmuxOptionTarget::Session(session) => Some(session),
+            _ => unreachable!("session options have session scope"),
+        };
+        let locally_set = session.is_none_or(|session| {
+            self.session_options
+                .get(&session)
+                .is_some_and(|values| values.contains_key(&option))
+        });
+        if options.has("-o") && !unset && locally_set {
+            return already_set_or_quiet(options, option.as_str());
+        }
+        if unset {
+            if let Some(session) = session {
+                remove_option_override(&mut self.session_options, session, option);
+            } else {
+                self.global_session_options.reset(option);
+            }
+            return Ok(Execution::default());
+        }
+        let previous = session.map_or_else(
+            || self.global_session_options.clone(),
+            |session| self.session_knobs(session),
+        );
+        let appended = (options.has("-a") && option.is_string() && locally_set)
+            .then(|| value.map(|value| format!("{}{value}", previous.value(option))))
+            .flatten();
+        let mut next = previous;
+        next.set_command(option, appended.as_deref().or(value))
+            .map_err(ServerError::InvalidCommand)?;
+        if let Some(session) = session {
+            self.session_options
+                .entry(session)
+                .or_default()
+                .insert(option, next.value(option));
+        } else {
+            self.global_session_options = next;
+        }
+        Ok(Execution::default())
+    }
+
+    fn set_window_option(
+        &mut self,
+        option: WindowOption,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        let window = match target {
+            TmuxOptionTarget::GlobalWindow => None,
+            TmuxOptionTarget::Window(window) => Some(window),
+            _ => unreachable!("window options have window scope"),
+        };
+        let locally_set = window.is_none_or(|window| {
+            self.window_options
+                .get(&window)
+                .is_some_and(|values| values.contains_key(&option))
+        });
+        if options.has("-o") && !unset && locally_set {
+            return already_set_or_quiet(options, option.as_str());
+        }
+        let previous = window.map_or_else(
+            || self.global_window_options.clone(),
+            |window| self.window_knobs(window),
+        );
+        if unset {
+            if let Some(window) = window {
+                remove_option_override(&mut self.window_options, window, option);
+            } else {
+                self.global_window_options.reset(option);
+            }
+        } else {
+            let appended = (options.has("-a") && option.is_string() && locally_set)
+                .then(|| value.map(|value| format!("{}{value}", previous.value(option))))
+                .flatten();
+            let mut next = previous.clone();
+            next.set_command(option, appended.as_deref().or(value))
+                .map_err(ServerError::InvalidCommand)?;
+            if let Some(window) = window {
+                self.window_options
+                    .entry(window)
+                    .or_default()
+                    .insert(option, next.value(option));
+            } else {
+                self.global_window_options = next;
+            }
+        }
+        let next = window.map_or_else(
+            || self.global_window_options.clone(),
+            |window| self.window_knobs(window),
+        );
+        if option == WindowOption::WindowSize && next != previous {
+            Ok(Execution::effect(MuxEffect::WindowSizeChanged { window }))
+        } else {
+            Ok(Execution::default())
+        }
+    }
+
+    fn set_pane_option(
+        &mut self,
+        option: PaneOption,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        let locally_set = match target {
+            TmuxOptionTarget::GlobalWindow => true,
+            TmuxOptionTarget::Window(window) => self
+                .window_pane_options
+                .get(&window)
+                .is_some_and(|values| values.contains_key(&option)),
+            TmuxOptionTarget::Pane(pane) => self
+                .pane_options
+                .get(&pane)
+                .is_some_and(|values| values.contains_key(&option)),
+            _ => unreachable!("pane options have window-pane scope"),
+        };
+        if options.has("-o") && !unset && locally_set {
+            return already_set_or_quiet(options, option.as_str());
+        }
+        let previous = match target {
+            TmuxOptionTarget::GlobalWindow => self.global_pane_options.clone(),
+            TmuxOptionTarget::Window(window) => self.pane_knobs_for_window(window),
+            TmuxOptionTarget::Pane(pane) => self.pane_knobs(pane),
+            _ => unreachable!("pane options have window-pane scope"),
+        };
+        if unset {
+            match target {
+                TmuxOptionTarget::GlobalWindow => {
+                    self.global_pane_options.reset(option);
+                }
+                TmuxOptionTarget::Window(window) => {
+                    remove_option_override(&mut self.window_pane_options, window, option);
+                }
+                TmuxOptionTarget::Pane(pane) => {
+                    remove_option_override(&mut self.pane_options, pane, option);
+                }
+                _ => unreachable!("pane options have window-pane scope"),
+            }
+        } else {
+            let mut next = previous;
+            next.set_command(option, value)
+                .map_err(ServerError::InvalidCommand)?;
+            match target {
+                TmuxOptionTarget::GlobalWindow => self.global_pane_options = next,
+                TmuxOptionTarget::Window(window) => {
+                    self.window_pane_options
+                        .entry(window)
+                        .or_default()
+                        .insert(option, next.value(option));
+                }
+                TmuxOptionTarget::Pane(pane) => {
+                    self.pane_options
+                        .entry(pane)
+                        .or_default()
+                        .insert(option, next.value(option));
+                }
+                _ => unreachable!("pane options have window-pane scope"),
+            }
+        }
+        Ok(Execution::default())
+    }
+
     fn set_word_separators(
         &mut self,
         value: Option<&str>,
@@ -7309,10 +7736,27 @@ fn option_scope_matches_target(scope: TmuxOptionScope, target: TmuxOptionTarget)
     )
 }
 
+fn remove_option_override<K: Copy + Ord, O: Copy + Ord>(
+    values: &mut BTreeMap<K, BTreeMap<O, String>>,
+    target: K,
+    option: O,
+) {
+    if let Some(options) = values.get_mut(&target) {
+        options.remove(&option);
+        if options.is_empty() {
+            values.remove(&target);
+        }
+    }
+}
+
 fn tmux_option_is_implemented(option: TmuxOption) -> bool {
     option.default.is_some()
         || StatusOption::from_name(option.name).is_some()
         || WindowStatusOption::from_name(option.name).is_some()
+        || ServerOption::from_name(option.name).is_some()
+        || SessionOption::from_name(option.name).is_some()
+        || WindowOption::from_name(option.name).is_some()
+        || PaneOption::from_name(option.name).is_some()
 }
 
 fn tmux_option_value_is_string(option: TmuxOption) -> bool {
@@ -7321,6 +7765,9 @@ fn tmux_option_value_is_string(option: TmuxOption) -> bool {
         .is_some_and(super::tmux_options::TmuxOptionDefault::is_string)
         || StatusOption::from_name(option.name).is_some_and(StatusOption::is_string)
         || WindowStatusOption::from_name(option.name).is_some()
+        || ServerOption::from_name(option.name).is_some_and(ServerOption::is_string)
+        || SessionOption::from_name(option.name).is_some_and(SessionOption::is_string)
+        || WindowOption::from_name(option.name).is_some_and(WindowOption::is_string)
 }
 
 fn push_shown_option(
@@ -7346,6 +7793,14 @@ fn push_shown_option(
         value.to_owned()
     };
     lines.push(format!("{name} {value}"));
+}
+
+fn shown_options_output(lines: &[String]) -> String {
+    let mut output = lines.join("\n");
+    if lines.last().is_some_and(String::is_empty) {
+        output.push('\n');
+    }
+    output
 }
 
 fn indexed_option_name(name: &str, index: Option<&str>) -> String {
@@ -7718,11 +8173,31 @@ fn split_size(options: &Options) -> Option<SplitSize<'_>> {
     )
 }
 
-fn initial_window_extent(options: &Options) -> Result<(u16, u16), ServerError> {
+fn initial_window_extent(options: &Options, default_size: &str) -> Result<(u16, u16), ServerError> {
+    let default = parse_default_size(default_size).unwrap_or(DEFAULT_WINDOW_EXTENT);
     Ok((
-        initial_window_dimension(options, "-x", DEFAULT_WINDOW_EXTENT.0)?,
-        initial_window_dimension(options, "-y", DEFAULT_WINDOW_EXTENT.1)?,
+        initial_window_dimension(options, "-x", default.0)?,
+        initial_window_dimension(options, "-y", default.1)?,
     ))
+}
+
+fn parse_default_size(value: &str) -> Option<(u16, u16)> {
+    let (width, rest) = parse_unsigned_prefix(value)?;
+    let (height, _) = parse_unsigned_prefix(rest.strip_prefix('x')?)?;
+    let clamp = |dimension: u64| {
+        u16::try_from(dimension.clamp(1, 10_000)).expect("default size is clamped")
+    };
+    Some((clamp(width), clamp(height)))
+}
+
+fn parse_unsigned_prefix(value: &str) -> Option<(u64, &str)> {
+    let end = value.bytes().take_while(u8::is_ascii_digit).count();
+    (end != 0).then(|| {
+        (
+            value[..end].parse::<u64>().unwrap_or(u64::MAX),
+            &value[end..],
+        )
+    })
 }
 
 fn initial_window_dimension(
@@ -7802,7 +8277,6 @@ fn validate_unimplemented_option_value(
         "status-keys" if !matches!(value, "emacs" | "vi") => Err(ServerError::InvalidCommand(
             format!("unknown value: {value}"),
         )),
-        "focus-events" => parse_tmux_flag_value(Some(value), false).map(|_| ()),
         "status-bg" if parse_tmux_colour(value).is_none() => {
             Err(ServerError::InvalidCommand(format!("bad colour: {value}")))
         }
@@ -9161,6 +9635,57 @@ mod tests {
 
         let window = context.window.unwrap();
         assert_eq!(engine.state.windows[&window].layout.extent(), (200, 50));
+    }
+
+    #[test]
+    fn detached_new_session_uses_default_size_with_per_dimension_overrides() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "default-size", "132x43"]),
+            )
+            .unwrap();
+        engine
+            .execute(&mut context, &command("new-session", &["-d", "-s", "wide"]))
+            .unwrap();
+        assert_eq!(
+            engine.state.windows[&context.window.unwrap()]
+                .layout
+                .extent(),
+            (132, 43)
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "tall", "-x", "90"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.state.windows[&context.window.unwrap()]
+                .layout
+                .extent(),
+            (90, 43)
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "default-size", "0x20000tail"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "clamped"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.state.windows[&context.window.unwrap()]
+                .layout
+                .extent(),
+            (1, 10_000)
+        );
     }
 
     #[test]
@@ -13890,6 +14415,152 @@ mod tests {
     }
 
     #[test]
+    fn honest_knob_families_store_inherit_read_back_and_reject_pin_values() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+        let window = context.window.unwrap();
+        let pane = context.pane.unwrap();
+
+        for (args, expected) in [
+            (vec!["-sv", "focus-events"], "off"),
+            (vec!["-sv", "history-file"], "\n"),
+            (vec!["-sv", "prefix-timeout"], "0"),
+            (vec!["-sv", "prompt-history-limit"], "100"),
+            (vec!["-gv", "bell-action"], "any"),
+            (vec!["-gv", "default-size"], "80x24"),
+            (vec!["-gv", "display-panes-time"], "1000"),
+            (vec!["-gv", "key-table"], "root"),
+            (vec!["-gv", "visual-bell"], "off"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", &args))
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-s", "history-file"]),
+                )
+                .unwrap()
+                .output,
+            "history-file ''"
+        );
+        for (name, expected) in [
+            ("main-pane-height", "24"),
+            ("main-pane-width", "80"),
+            ("other-pane-height", "0"),
+            ("other-pane-width", "0"),
+            ("tiled-layout-max-columns", "0"),
+            ("window-size", "latest"),
+            ("allow-rename", "off"),
+            ("allow-set-title", "on"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &command("show-window-options", &["-gv", name]),
+                    )
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
+
+        for args in [
+            &["-s", "focus-events", "on"] as &[&str],
+            &["-s", "history-file", "/tmp/history"],
+            &["-s", "prefix-timeout", "250"],
+            &["-s", "prompt-history-limit", "3"],
+            &["bell-action", "other"],
+            &["default-size", "132x43"],
+            &["display-panes-time", "1400"],
+            &["key-table", "custom"],
+            &["visual-bell", "both"],
+        ] {
+            engine
+                .execute(&mut context, &command("set-option", args))
+                .unwrap();
+        }
+        for args in [
+            &["main-pane-height", "40%"] as &[&str],
+            &["main-pane-width", "120"],
+            &["other-pane-height", "8"],
+            &["other-pane-width", "12%"],
+            &["tiled-layout-max-columns", "2"],
+            &["window-size", "largest"],
+        ] {
+            engine
+                .execute(&mut context, &command("set-window-option", args))
+                .unwrap();
+        }
+        for args in [
+            &["-p", "allow-rename", "on"] as &[&str],
+            &["-p", "allow-set-title", "off"],
+        ] {
+            engine
+                .execute(&mut context, &command("set-option", args))
+                .unwrap();
+        }
+
+        assert!(engine.focus_events());
+        assert_eq!(engine.history_file(), "/tmp/history");
+        assert_eq!(engine.prefix_timeout_ms(), 250);
+        assert_eq!(engine.prompt_history_limit(), 3);
+        assert_eq!(engine.bell_action_for_session(session), BellAction::Other);
+        assert_eq!(engine.visual_bell_for_session(session), VisualBell::Both);
+        assert_eq!(engine.key_table_for_session(session), "custom");
+        assert_eq!(engine.display_panes_time_for_session(session), 1400);
+        assert_eq!(engine.window_size(window), WindowSize::Largest);
+        assert!(!engine.allow_set_title(pane));
+        assert_eq!(
+            engine.preset_options_for_window(window).main_pane_height,
+            "40%"
+        );
+
+        for (args, expected) in [
+            (vec!["-s", "focus-events", "maybe"], "bad value: maybe"),
+            (vec!["-s", "prefix-timeout"], "empty value"),
+            (
+                vec!["-s", "prompt-history-limit", "-1"],
+                "value is too small: -1",
+            ),
+            (vec!["-g", "bell-action", "maybe"], "unknown value: maybe"),
+            (vec!["-g", "default-size", "bad"], "value is invalid: bad"),
+            (
+                vec!["-g", "display-panes-time", "0"],
+                "value is too small: 0",
+            ),
+            (vec!["-g", "visual-bell", "maybe"], "unknown value: maybe"),
+            (
+                vec!["-gw", "tiled-layout-max-columns", "65536"],
+                "value is too large: 65536",
+            ),
+            (vec!["-gw", "window-size", "maybe"], "unknown value: maybe"),
+            (vec!["-gp", "allow-set-title", "maybe"], "bad value: maybe"),
+        ] {
+            assert!(matches!(
+                engine.execute(&mut context, &command("set-option", &args)),
+                Err(ServerError::InvalidCommand(message)) if message == expected
+            ));
+        }
+
+        engine
+            .execute(&mut context, &command("set-option", &["-u", "key-table"]))
+            .unwrap();
+        assert_eq!(engine.key_table_for_session(session), "root");
+    }
+
+    #[test]
     fn explicit_window_names_pin_automatic_rename_off() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -16061,7 +16732,7 @@ mod tests {
         let pane = context.pane.unwrap();
 
         for (name, args, duration_ms) in [
-            ("display-panes", Vec::new(), 750),
+            ("display-panes", Vec::new(), 1_000),
             ("displayp", vec!["-b", "-d2500"], 2_500),
             ("display-panes", vec!["-d", "0"], 0),
         ] {
@@ -16084,7 +16755,7 @@ mod tests {
                 .effects,
             vec![MuxEffect::DisplayPanes {
                 pane,
-                duration_ms: 1200,
+                duration_ms: 1_000,
             }]
         );
         assert!(matches!(
@@ -16095,6 +16766,22 @@ mod tests {
                 .as_slice(),
             [MuxEffect::DisplayMessage { text, duration_ms: 1200, .. }] if text == "hello"
         ));
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["display-panes-time", "1200"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("display-panes", &[]))
+                .unwrap()
+                .effects,
+            vec![MuxEffect::DisplayPanes {
+                pane,
+                duration_ms: 1200,
+            }]
+        );
 
         assert!(matches!(
             engine.execute(&mut context, &command("display-panes", &["-N"])),

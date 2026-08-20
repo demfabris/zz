@@ -1,0 +1,17 @@
+set-option -s focus-events maybe
+set-option -s history-file
+set-option -s prefix-timeout nope
+set-option -s prompt-history-limit nope
+set-option -g bell-action maybe
+set-option -g default-size nope
+set-option -g display-panes-time 0
+set-option -g key-table
+set-option -g visual-bell maybe
+set-window-option -g main-pane-height
+set-window-option -g main-pane-width
+set-window-option -g other-pane-height
+set-window-option -g other-pane-width
+set-window-option -g tiled-layout-max-columns 65536
+set-window-option -g window-size maybe
+set-window-option -g allow-rename maybe
+set-window-option -g allow-set-title maybe

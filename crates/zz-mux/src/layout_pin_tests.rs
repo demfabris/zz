@@ -159,7 +159,8 @@ impl Replay {
             *next_split_id += 1;
             id
         };
-        self.layout.apply_preset(preset, &panes, &mut ids);
+        self.layout
+            .apply_preset(preset, &panes, &crate::PresetOptions::default(), &mut ids);
     }
 
     fn resize_window(&mut self, words: &[&str]) {

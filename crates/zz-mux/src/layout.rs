@@ -7,7 +7,7 @@ use std::{
 
 use zz_protocol::{Axis, LayoutNode, PaneId, SplitId};
 
-use crate::model::LayoutPreset;
+use crate::{PresetOptions, model::LayoutPreset};
 
 pub(crate) const PANE_MINIMUM: u16 = 1;
 pub(crate) const PANE_MAXIMUM: u16 = 10_000;
@@ -549,6 +549,7 @@ impl CellLayout {
         &mut self,
         preset: LayoutPreset,
         panes: &[PaneId],
+        options: &PresetOptions,
         ids: &mut dyn FnMut() -> SplitId,
     ) {
         if panes.is_empty() {
@@ -564,11 +565,15 @@ impl CellLayout {
         self.root = match preset {
             LayoutPreset::EvenHorizontal => even_layout(Axis::Horizontal, sx, sy, panes, ids),
             LayoutPreset::EvenVertical => even_layout(Axis::Vertical, sx, sy, panes, ids),
-            LayoutPreset::MainHorizontal => main_horizontal(sx, sy, panes, false, ids),
-            LayoutPreset::MainHorizontalMirrored => main_horizontal(sx, sy, panes, true, ids),
-            LayoutPreset::MainVertical => main_vertical(sx, sy, panes, false, ids),
-            LayoutPreset::MainVerticalMirrored => main_vertical(sx, sy, panes, true, ids),
-            LayoutPreset::Tiled => tiled_layout(sx, sy, panes, ids),
+            LayoutPreset::MainHorizontal => main_horizontal(sx, sy, panes, false, options, ids),
+            LayoutPreset::MainHorizontalMirrored => {
+                main_horizontal(sx, sy, panes, true, options, ids)
+            }
+            LayoutPreset::MainVertical => main_vertical(sx, sy, panes, false, options, ids),
+            LayoutPreset::MainVerticalMirrored => main_vertical(sx, sy, panes, true, options, ids),
+            LayoutPreset::Tiled => {
+                tiled_layout(sx, sy, panes, options.tiled_layout_max_columns, ids)
+            }
         };
         fix_offsets(&mut self.root);
         self.debug_validate();
@@ -1534,11 +1539,12 @@ fn main_horizontal(
     sy: u16,
     panes: &[PaneId],
     mirrored: bool,
+    options: &PresetOptions,
     ids: &mut dyn FnMut() -> SplitId,
 ) -> CellNode {
     let others = panes.len() - 1;
     let available = sy.saturating_sub(1);
-    let mut main = 24_u16;
+    let mut main = layout_option_cells(&options.main_pane_height, available).unwrap_or(24);
     let other;
     if main.saturating_add(PANE_MINIMUM) >= available {
         main = if available <= PANE_MINIMUM * 2 {
@@ -1548,7 +1554,15 @@ fn main_horizontal(
         };
         other = PANE_MINIMUM;
     } else {
-        other = available - main;
+        let configured_other = layout_option_cells(&options.other_pane_height, available);
+        if configured_other
+            .is_none_or(|other| other == 0 || other > available || available - other < main)
+        {
+            other = available - main;
+        } else {
+            other = configured_other.expect("other pane height was checked");
+            main = available - other;
+        }
     }
     let minimum_width =
         u16::try_from(others.saturating_mul(2).saturating_sub(1)).unwrap_or(u16::MAX);
@@ -1612,11 +1626,12 @@ fn main_vertical(
     sy: u16,
     panes: &[PaneId],
     mirrored: bool,
+    options: &PresetOptions,
     ids: &mut dyn FnMut() -> SplitId,
 ) -> CellNode {
     let others = panes.len() - 1;
     let available = sx.saturating_sub(1);
-    let mut main = 80_u16;
+    let mut main = layout_option_cells(&options.main_pane_width, available).unwrap_or(80);
     let other;
     if main.saturating_add(PANE_MINIMUM) >= available {
         main = if available <= PANE_MINIMUM * 2 {
@@ -1626,7 +1641,15 @@ fn main_vertical(
         };
         other = PANE_MINIMUM;
     } else {
-        other = available - main;
+        let configured_other = layout_option_cells(&options.other_pane_width, available);
+        if configured_other
+            .is_none_or(|other| other == 0 || other > available || available - other < main)
+        {
+            other = available - main;
+        } else {
+            other = configured_other.expect("other pane width was checked");
+            main = available - other;
+        }
     }
     let minimum_height =
         u16::try_from(others.saturating_mul(2).saturating_sub(1)).unwrap_or(u16::MAX);
@@ -1685,13 +1708,19 @@ fn main_vertical(
     }
 }
 
-fn tiled_layout(sx: u16, sy: u16, panes: &[PaneId], ids: &mut dyn FnMut() -> SplitId) -> CellNode {
+fn tiled_layout(
+    sx: u16,
+    sy: u16,
+    panes: &[PaneId],
+    max_columns: u16,
+    ids: &mut dyn FnMut() -> SplitId,
+) -> CellNode {
     let count = panes.len();
     let mut rows = 1_usize;
     let mut columns = 1_usize;
     while rows * columns < count {
         rows += 1;
-        if rows * columns < count {
+        if rows * columns < count && (max_columns == 0 || columns < usize::from(max_columns)) {
             columns += 1;
         }
     }
@@ -1766,6 +1795,19 @@ fn tiled_layout(sx: u16, sy: u16, panes: &[PaneId], ids: &mut dyn FnMut() -> Spl
         },
         children: row_children,
     }
+}
+
+fn layout_option_cells(value: &str, available: u16) -> Option<u16> {
+    let cells = if let Some(percentage) = value.strip_suffix('%') {
+        let percentage = percentage.parse::<u16>().ok()?;
+        if percentage > 1000 {
+            return None;
+        }
+        u32::from(available) * u32::from(percentage) / 100
+    } else {
+        value.parse::<u32>().ok()?
+    };
+    (cells <= u32::from(available)).then(|| u16::try_from(cells).expect("cells fit available"))
 }
 
 fn fix_offsets(root: &mut CellNode) {
@@ -2653,7 +2695,7 @@ mod tests {
         for (index, preset) in LayoutPreset::ALL.into_iter().enumerate() {
             let mut three = CellLayout::new(PaneId(0), 80, 24);
             let mut ids = allocator(1);
-            three.apply_preset(preset, &panes3, &mut ids);
+            three.apply_preset(preset, &panes3, &PresetOptions::default(), &mut ids);
             assert_eq!(
                 sizes(&three, &panes3),
                 expected3[index],
@@ -2663,9 +2705,40 @@ mod tests {
 
             let mut five = CellLayout::new(PaneId(0), 80, 24);
             let mut ids = allocator(1);
-            five.apply_preset(preset, &panes5, &mut ids);
+            five.apply_preset(preset, &panes5, &PresetOptions::default(), &mut ids);
             assert_eq!(sizes(&five, &panes5), expected5[index], "{}", preset.name());
         }
+    }
+
+    #[test]
+    fn preset_options_resolve_percentages_other_sizes_and_tiled_caps_at_apply_time() {
+        let panes = [PaneId(0), PaneId(1), PaneId(2)];
+        let mut layout = CellLayout::new(PaneId(0), 80, 24);
+        let mut ids = allocator(1);
+        let options = PresetOptions {
+            main_pane_height: "50%".to_owned(),
+            ..PresetOptions::default()
+        };
+        layout.apply_preset(LayoutPreset::MainHorizontal, &panes, &options, &mut ids);
+        assert_eq!(sizes(&layout, &panes), [(80, 11), (40, 12), (39, 12)]);
+
+        let mut ids = allocator(10);
+        let options = PresetOptions {
+            main_pane_height: "50%".to_owned(),
+            other_pane_height: "5".to_owned(),
+            ..PresetOptions::default()
+        };
+        layout.apply_preset(LayoutPreset::MainHorizontal, &panes, &options, &mut ids);
+        assert_eq!(sizes(&layout, &panes), [(80, 18), (40, 5), (39, 5)]);
+
+        let panes = [PaneId(0), PaneId(1), PaneId(2), PaneId(3), PaneId(4)];
+        let mut ids = allocator(20);
+        let options = PresetOptions {
+            tiled_layout_max_columns: 1,
+            ..PresetOptions::default()
+        };
+        layout.apply_preset(LayoutPreset::Tiled, &panes, &options, &mut ids);
+        assert_eq!(sizes(&layout, &panes), [(80, 4); 5]);
     }
 
     #[test]
@@ -2696,7 +2769,7 @@ mod tests {
         for (preset, expected_sizes, expected_order) in cases {
             let mut layout = CellLayout::new(PaneId(0), 80, 24);
             let mut ids = allocator(1);
-            layout.apply_preset(preset, &panes, &mut ids);
+            layout.apply_preset(preset, &panes, &PresetOptions::default(), &mut ids);
             assert_eq!(sizes(&layout, &panes), expected_sizes, "{}", preset.name());
             assert_eq!(layout.panes_in_order(), expected_order, "{}", preset.name());
         }

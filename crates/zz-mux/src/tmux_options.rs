@@ -402,16 +402,27 @@ fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
     Some(match name {
         "default-terminal" => TmuxOptionDefault::String("tmux-256color"),
         "escape-time" => TmuxOptionDefault::Scalar("10"),
-        "base-index" | "initial-repeat-time" | "lock-after-time" | "pane-base-index" => {
-            TmuxOptionDefault::Scalar("0")
-        }
+        "prompt-history-limit" => TmuxOptionDefault::Scalar("100"),
+        "base-index"
+        | "initial-repeat-time"
+        | "lock-after-time"
+        | "pane-base-index"
+        | "prefix-timeout"
+        | "tiled-layout-max-columns" => TmuxOptionDefault::Scalar("0"),
+        "bell-action" => TmuxOptionDefault::Scalar("any"),
         "buffer-limit" => TmuxOptionDefault::Scalar("50"),
-        "copy-command" | "default-command" => TmuxOptionDefault::String(""),
+        "copy-command" | "default-command" | "history-file" => TmuxOptionDefault::String(""),
+        "default-size" => TmuxOptionDefault::String("80x24"),
         "default-shell" => TmuxOptionDefault::String("/bin/sh"),
+        "display-panes-time" | "message-limit" => TmuxOptionDefault::Scalar("1000"),
         "history-limit" => TmuxOptionDefault::Scalar("2000"),
         "display-time" => TmuxOptionDefault::Scalar("750"),
-        "message-limit" => TmuxOptionDefault::Scalar("1000"),
+        "key-table" => TmuxOptionDefault::String("root"),
         "mode-keys" => TmuxOptionDefault::Scalar("emacs"),
+        "main-pane-height" => TmuxOptionDefault::String("24"),
+        "main-pane-width" => TmuxOptionDefault::String("80"),
+        "other-pane-height" | "other-pane-width" => TmuxOptionDefault::String("0"),
+        "window-size" => TmuxOptionDefault::Scalar("latest"),
         "lock-command" => TmuxOptionDefault::String("lock -np"),
         "menu-border-lines" | "popup-border-lines" => TmuxOptionDefault::Scalar("single"),
         "menu-border-style" | "popup-border-style" => {
@@ -419,13 +430,16 @@ fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
         }
         "menu-selected-style" => TmuxOptionDefault::String("bg=themeyellow,fg=themeblack"),
         "menu-style" | "popup-style" => TmuxOptionDefault::String("bg=themedarkgrey,fg=themewhite"),
-        "aggressive-resize" | "renumber-windows" | "synchronize-panes" | "remain-on-exit" => {
+        "aggressive-resize" | "allow-rename" | "focus-events" | "renumber-windows"
+        | "synchronize-panes" | "remain-on-exit" | "visual-bell" => {
             TmuxOptionDefault::Scalar("off")
         }
         "prefix" => TmuxOptionDefault::Scalar("C-b"),
         "repeat-time" => TmuxOptionDefault::Scalar("500"),
         "set-clipboard" => TmuxOptionDefault::Scalar("external"),
-        "status" | "automatic-rename" | "mouse" => TmuxOptionDefault::Scalar("on"),
+        "allow-set-title" | "status" | "automatic-rename" | "mouse" => {
+            TmuxOptionDefault::Scalar("on")
+        }
         "status-interval" => TmuxOptionDefault::Scalar("15"),
         "status-left" => TmuxOptionDefault::String(STATUS_LEFT_DEFAULT),
         "status-right" => TmuxOptionDefault::String(STATUS_RIGHT_DEFAULT),
@@ -610,14 +624,22 @@ mod tests {
                     TmuxOptionDefault::String("tmux-256color")
                 ),
                 ("escape-time", TmuxOptionDefault::Scalar("10")),
+                ("focus-events", TmuxOptionDefault::Scalar("off")),
+                ("history-file", TmuxOptionDefault::String("")),
                 ("message-limit", TmuxOptionDefault::Scalar("1000")),
+                ("prefix-timeout", TmuxOptionDefault::Scalar("0")),
+                ("prompt-history-limit", TmuxOptionDefault::Scalar("100")),
                 ("set-clipboard", TmuxOptionDefault::Scalar("external")),
                 ("base-index", TmuxOptionDefault::Scalar("0")),
+                ("bell-action", TmuxOptionDefault::Scalar("any")),
                 ("default-command", TmuxOptionDefault::String("")),
                 ("default-shell", TmuxOptionDefault::String("/bin/sh")),
+                ("default-size", TmuxOptionDefault::String("80x24")),
+                ("display-panes-time", TmuxOptionDefault::Scalar("1000")),
                 ("display-time", TmuxOptionDefault::Scalar("750")),
                 ("history-limit", TmuxOptionDefault::Scalar("2000")),
                 ("initial-repeat-time", TmuxOptionDefault::Scalar("0")),
+                ("key-table", TmuxOptionDefault::String("root")),
                 ("lock-after-time", TmuxOptionDefault::Scalar("0")),
                 ("lock-command", TmuxOptionDefault::String("lock -np")),
                 ("mouse", TmuxOptionDefault::Scalar("on")),
@@ -646,6 +668,7 @@ mod tests {
                     "update-environment",
                     TmuxOptionDefault::Array(UPDATE_ENVIRONMENT_DEFAULT),
                 ),
+                ("visual-bell", TmuxOptionDefault::Scalar("off")),
                 (
                     "word-separators",
                     TmuxOptionDefault::String("!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"),
@@ -658,6 +681,8 @@ mod tests {
                         "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}"
                     ),
                 ),
+                ("main-pane-height", TmuxOptionDefault::String("24")),
+                ("main-pane-width", TmuxOptionDefault::String("80")),
                 ("menu-border-lines", TmuxOptionDefault::Scalar("single")),
                 (
                     "menu-border-style",
@@ -672,8 +697,14 @@ mod tests {
                     TmuxOptionDefault::String("bg=themedarkgrey,fg=themewhite"),
                 ),
                 ("mode-keys", TmuxOptionDefault::Scalar("emacs")),
+                ("other-pane-height", TmuxOptionDefault::String("0")),
+                ("other-pane-width", TmuxOptionDefault::String("0")),
                 ("pane-base-index", TmuxOptionDefault::Scalar("0")),
                 ("popup-border-lines", TmuxOptionDefault::Scalar("single")),
+                ("tiled-layout-max-columns", TmuxOptionDefault::Scalar("0"),),
+                ("window-size", TmuxOptionDefault::Scalar("latest")),
+                ("allow-rename", TmuxOptionDefault::Scalar("off")),
+                ("allow-set-title", TmuxOptionDefault::Scalar("on")),
                 ("remain-on-exit", TmuxOptionDefault::Scalar("off")),
                 ("synchronize-panes", TmuxOptionDefault::Scalar("off")),
             ]

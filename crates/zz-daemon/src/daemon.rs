@@ -21,7 +21,7 @@ use parking_lot::{Condvar, Mutex};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     CellLayout, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision,
-    KeyEngine, KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts,
+    KeyEngine, KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts, WindowSize,
     canonical_command, command_block_body, display_width, expand_format_values, expand_status,
     hook_format_variables, if_shell_truthy,
 };
@@ -113,7 +113,6 @@ const CONTROL_MAXIMUM_AGE: Duration = Duration::from_mins(5);
 const CONTROL_PENDING_CHUNKS_PER_PANE: usize = 4;
 const GUI_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CONTEXT_PATH_BYTES: usize = 4 * 1024;
-const MAX_COMMAND_PROMPT_HISTORY: usize = 100;
 const MAX_COMMAND_PROMPT_HISTORY_SNAPSHOT_ITEMS: usize = 20;
 const MAX_COMMAND_PROMPT_HISTORY_SNAPSHOT_BYTES: usize = 32 * 1024;
 const MAX_COMMAND_PROMPT_OUTPUT_BYTES: usize = 1024 * 1024;
@@ -2586,6 +2585,15 @@ impl Shared {
             }
         }
         self.apply_stored_mux_config_overrides("startup-mux-replay");
+        let history_settings = {
+            let inner = self.inner.lock();
+            prompt_history_path(inner.engine.history_file())
+                .map(|path| (path, inner.engine.prompt_history_limit()))
+        };
+        if let Some((path, limit)) = history_settings {
+            let history = load_command_prompt_history(&path, limit);
+            self.inner.lock().command_history = history;
+        }
         // Building the runtime is what warms the adapter cache, so a daemon
         // that has agent panes enabled pays the npx download before the first
         // pane asks for it.
@@ -4462,7 +4470,8 @@ impl Shared {
                     MuxEffect::ModeKeysChanged { window } => {
                         retarget_copy_mode_tables(&mut inner, *window);
                     }
-                    MuxEffect::AggressiveResizeChanged { window } => {
+                    MuxEffect::AggressiveResizeChanged { window }
+                    | MuxEffect::WindowSizeChanged { window } => {
                         let windows = window.map_or_else(
                             || inner.engine.state.windows.keys().copied().collect(),
                             |window| BTreeSet::from([window]),
@@ -8259,13 +8268,19 @@ impl Shared {
                             if !client_is_attached_to_pane(&inner, client, pane) {
                                 return Err(ServerError::PaneNotAttached(pane).into());
                             }
-                            Some(
-                                inner
-                                    .terminals
-                                    .get(&pane)
-                                    .cloned()
-                                    .ok_or(ServerError::PaneExited(pane))?,
-                            )
+                            if matches!(action, zz_terminal::TerminalViewAction::Focus(_))
+                                && !inner.engine.focus_events()
+                            {
+                                None
+                            } else {
+                                Some(
+                                    inner
+                                        .terminals
+                                        .get(&pane)
+                                        .cloned()
+                                        .ok_or(ServerError::PaneExited(pane))?,
+                                )
+                            }
                         }
                     };
                     if let Some(terminal) = terminal {
@@ -9553,14 +9568,6 @@ impl Shared {
                 }
                 PromptKeyAction::Close => (Some(None), None, false),
                 PromptKeyAction::Submit => {
-                    if !prompt.input.is_empty()
-                        && inner.command_history.last() != Some(&prompt.input)
-                    {
-                        inner.command_history.push(prompt.input.clone());
-                        if inner.command_history.len() > MAX_COMMAND_PROMPT_HISTORY {
-                            inner.command_history.remove(0);
-                        }
-                    }
                     let submission = (!prompt.input.is_empty() || prompt.template.is_some())
                         .then_some(CommandPromptSubmission {
                             input: prompt.input,
@@ -9573,6 +9580,9 @@ impl Shared {
 
         if let Some(state) = event {
             self.publish_to_client(client, EventPayload::CommandPrompt { state });
+        }
+        if let Some(submission) = &submission {
+            self.record_command_history(&submission.input);
         }
         if limit_exceeded {
             self.publish_to_client(
@@ -9629,14 +9639,6 @@ impl Shared {
                     };
                     let cursor = u32::try_from(input.chars().count()).unwrap_or(u32::MAX);
                     prompt.replace_input(input, cursor)?;
-                    if !prompt.input.is_empty()
-                        && inner.command_history.last() != Some(&prompt.input)
-                    {
-                        inner.command_history.push(prompt.input.clone());
-                        if inner.command_history.len() > MAX_COMMAND_PROMPT_HISTORY {
-                            inner.command_history.remove(0);
-                        }
-                    }
                     (!prompt.input.is_empty() || prompt.template.is_some()).then_some(
                         CommandPromptSubmission {
                             input: prompt.input,
@@ -9644,6 +9646,9 @@ impl Shared {
                         },
                     )
                 };
+                if let Some(submission) = &submission {
+                    self.record_command_history(&submission.input);
+                }
                 self.publish_to_client(client, EventPayload::CommandPrompt { state: None });
                 if let Some(submission) = submission {
                     self.submit_command_prompt(client, kind, context, &submission);
@@ -9656,6 +9661,24 @@ impl Shared {
             }
         }
         Ok(())
+    }
+
+    fn record_command_history(&self, input: &str) {
+        if input.is_empty() {
+            return;
+        }
+        let save = {
+            let mut inner = self.inner.lock();
+            let limit = inner.engine.prompt_history_limit();
+            if !add_command_prompt_history(&mut inner.command_history, input, limit) {
+                return;
+            }
+            prompt_history_path(inner.engine.history_file())
+                .map(|path| (path, inner.command_history.clone()))
+        };
+        if let Some((path, history)) = save {
+            save_command_prompt_history(&path, &history);
+        }
     }
 
     fn submit_command_prompt(
@@ -10142,19 +10165,25 @@ impl Shared {
         }
         let mut key_engine = inner.key_engines.remove(&client).unwrap_or_default();
         let table = key_engine.active_table().map(str::to_owned);
-        let (initial_repeat_time_ms, repeat_time_ms) = client_attached_session(&inner, client)
-            .map_or((0, 500), |session| {
-                (
-                    inner.engine.initial_repeat_time_for_session(session),
-                    inner.engine.repeat_time_for_session(session),
-                )
-            });
+        let prefix_timeout_ms = inner.engine.prefix_timeout_ms();
+        let (initial_repeat_time_ms, repeat_time_ms, root_table) = client_attached_session(
+            &inner, client,
+        )
+        .map_or((0, 500, "root".to_owned()), |session| {
+            (
+                inner.engine.initial_repeat_time_for_session(session),
+                inner.engine.repeat_time_for_session(session),
+                inner.engine.key_table_for_session(session),
+            )
+        });
         let decision = key_engine.handle_with_repeat_times(
             &inner.engine.keys,
             key,
             Instant::now(),
             Duration::from_millis(u64::from(repeat_time_ms)),
             Duration::from_millis(u64::from(initial_repeat_time_ms)),
+            Duration::from_millis(u64::from(prefix_timeout_ms)),
+            &root_table,
         );
         inner.key_engines.insert(client, key_engine);
         if decision != KeyDecision::Pass {
@@ -10169,7 +10198,7 @@ impl Shared {
             log::info!(
                 target: "zz_daemon::diagnostics::input",
                 "key_decision client={client} key={key} table={} decision={decision:?}",
-                table.as_deref().unwrap_or("root")
+                table.as_deref().unwrap_or(&root_table)
             );
         }
         decision
@@ -11373,6 +11402,9 @@ impl Shared {
             {
                 return;
             }
+            if !inner.engine.allow_set_title(pane) {
+                return;
+            }
             let changed = inner
                 .engine
                 .state
@@ -11937,18 +11969,86 @@ impl Shared {
     }
 
     fn raise_pane_bell(self: &Arc<Self>, pane: PaneId) {
-        let event = {
+        let (snapshot_changed, clear_terminal, hook, notifications) = {
             let mut inner = self.inner.lock();
-            let raised = inner.engine.state.set_pane_bell(pane, true);
-            raised.then(|| {
+            let Some(window) = inner.engine.state.window_for_pane(pane) else {
+                return;
+            };
+            let Some(window_state) = inner.engine.state.windows.get(&window) else {
+                return;
+            };
+            let session = window_state.session;
+            let window_index = window_state.index;
+            let current = inner.engine.state.sessions[&session].active_window == window;
+            let attached = inner
+                .attached
+                .get(&session)
+                .is_some_and(|clients| !clients.is_empty());
+            let suppressed = current && attached;
+            let snapshot_changed = if suppressed {
+                false
+            } else {
+                inner.engine.state.set_pane_bell(pane, true)
+            };
+            let clear_terminal = suppressed
+                .then(|| inner.terminals.get(&pane).cloned())
+                .flatten();
+            let action = inner.engine.bell_action_for_session(session);
+            let hook = action.applies(current).then(|| {
                 let snapshot = MuxHookSnapshot::capture(&inner.engine);
                 PendingHookEvent::pane("alert-bell", pane, &snapshot.panes[&pane], &snapshot)
-            })
+            });
+            let visual = inner.engine.visual_bell_for_session(session);
+            let duration_ms = inner.engine.display_time_for_session(session);
+            let notifications = inner
+                .attached
+                .get(&session)
+                .into_iter()
+                .flatten()
+                .filter(|client| {
+                    inner.client_kinds.get(*client) != Some(&ClientKind::Control)
+                        && inner.subscribers.contains_key(*client)
+                })
+                .filter_map(|client| {
+                    let session_state = &inner.engine.state.sessions[&session];
+                    let current = client_focused_window(&inner, *client, session_state) == window;
+                    action.applies(current).then(|| {
+                        let mut events = Vec::with_capacity(2);
+                        if visual.rings() {
+                            events.push(EventPayload::Bell { pane });
+                        }
+                        if visual.shows_message() {
+                            let text = if current {
+                                "Bell in current window".to_owned()
+                            } else {
+                                format!("Bell in window {window_index}")
+                            };
+                            events.push(EventPayload::TimedClientMessage {
+                                pane: Some(pane),
+                                kind: ClientMessageKind::Info,
+                                text,
+                                duration_ms,
+                            });
+                        }
+                        (*client, events)
+                    })
+                })
+                .collect::<Vec<_>>();
+            (snapshot_changed, clear_terminal, hook, notifications)
         };
-        if let Some(event) = event {
+        if snapshot_changed {
             self.publish_snapshot();
-            self.publish(EventPayload::Bell { pane });
-            self.run_event_hooks(vec![event]);
+        }
+        for (client, events) in notifications {
+            for event in events {
+                self.publish_to_client(client, event);
+            }
+        }
+        if let Some(terminal) = clear_terminal {
+            terminal.clear_bell();
+        }
+        if let Some(hook) = hook {
+            self.run_event_hooks(vec![hook]);
         }
     }
 
@@ -16460,7 +16560,17 @@ fn client_terminal_geometry(
     })
 }
 
+#[cfg(test)]
 fn aggressive_terminal_geometry(inner: &ServerState, pane: PaneId) -> Option<TerminalGeometry> {
+    terminal_geometry_for_mode(inner, pane, true, WindowSize::Smallest)
+}
+
+fn terminal_geometry_for_mode(
+    inner: &ServerState,
+    pane: PaneId,
+    aggressive: bool,
+    mode: WindowSize,
+) -> Option<TerminalGeometry> {
     let window = inner.engine.state.window_for_pane(pane)?;
     let window_state = inner.engine.state.windows.get(&window)?;
     if window_state
@@ -16470,42 +16580,50 @@ fn aggressive_terminal_geometry(inner: &ServerState, pane: PaneId) -> Option<Ter
         return None;
     }
     let session = window_state.session;
-    let mut candidates = inner.attached.get(&session)?.iter().filter_map(|client| {
-        if client_focused_window_for_attachment(inner, *client) == Some(window) {
+    let candidates = inner
+        .attached
+        .get(&session)?
+        .iter()
+        .filter(|client| {
+            if aggressive {
+                client_focused_window_for_attachment(inner, **client) == Some(window)
+            } else {
+                inner.client_kinds.get(*client) == Some(&ClientKind::Control)
+                    || inner
+                        .visible_terminals
+                        .get(*client)
+                        .is_some_and(|visible| visible.contains(&pane))
+            }
+        })
+        .filter_map(|client| {
             client_terminal_geometry(inner, *client, pane).map(|geometry| (*client, geometry))
-        } else {
-            None
-        }
-    });
-    let (first_client, first_geometry) = candidates.next()?;
-    let mut owner = (first_client, first_geometry);
-    let mut columns = first_geometry.columns;
-    let mut rows = first_geometry.rows;
-    for (client, geometry) in candidates {
-        columns = columns.min(geometry.columns);
-        rows = rows.min(geometry.rows);
-        let current_key = (
+        })
+        .collect::<Vec<_>>();
+    let owner = candidates.iter().min_by_key(|(client, _)| {
+        (
             Reverse(
                 inner
                     .client_terminal_input_sequences
-                    .get(&client)
+                    .get(client)
                     .copied()
                     .unwrap_or_default(),
             ),
             client.0,
-        );
-        let owner_key = (
-            Reverse(
-                inner
-                    .client_terminal_input_sequences
-                    .get(&owner.0)
-                    .copied()
-                    .unwrap_or_default(),
-            ),
-            owner.0.0,
-        );
-        if current_key < owner_key {
-            owner = (client, geometry);
+        )
+    })?;
+    if matches!(mode, WindowSize::Latest | WindowSize::Manual) {
+        return Some(owner.1);
+    }
+    let first_geometry = candidates.first()?.1;
+    let mut columns = first_geometry.columns;
+    let mut rows = first_geometry.rows;
+    for (_, geometry) in &candidates[1..] {
+        if mode == WindowSize::Largest {
+            columns = columns.max(geometry.columns);
+            rows = rows.max(geometry.rows);
+        } else {
+            columns = columns.min(geometry.columns);
+            rows = rows.min(geometry.rows);
         }
     }
     Some(TerminalGeometry {
@@ -16520,12 +16638,9 @@ fn terminal_resize_for_pane(
     pane: PaneId,
 ) -> Option<(Arc<TerminalSession>, TerminalGeometry)> {
     let window = inner.engine.state.window_for_pane(pane)?;
-    let geometry = if inner.engine.state.window_aggressive_resize(window).ok()? {
-        aggressive_terminal_geometry(inner, pane)?
-    } else {
-        let owner = terminal_geometry_owner(inner, pane)?;
-        client_terminal_geometry(inner, owner, pane)?
-    };
+    let aggressive = inner.engine.state.window_aggressive_resize(window).ok()?;
+    let mode = inner.engine.window_size(window);
+    let geometry = terminal_geometry_for_mode(inner, pane, aggressive, mode)?;
     let terminal = inner.terminals.get(&pane).cloned()?;
     Some((terminal, geometry))
 }
@@ -18881,6 +18996,54 @@ fn expand_path(path: &str) -> PathBuf {
         return home_directory().map_or_else(|| PathBuf::from(path), |home| home.join(rest));
     }
     PathBuf::from(path)
+}
+
+fn prompt_history_path(path: &str) -> Option<PathBuf> {
+    if path.is_empty() {
+        None
+    } else if Path::new(path).is_absolute() {
+        Some(PathBuf::from(path))
+    } else {
+        path.strip_prefix("~/")
+            .and_then(|rest| home_directory().map(|home| home.join(rest)))
+    }
+}
+
+fn load_command_prompt_history(path: &Path, limit: usize) -> Vec<String> {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let mut history = Vec::new();
+    for line in contents.split('\n').filter(|line| !line.is_empty()) {
+        if let Some(command) = line.strip_prefix("command:") {
+            add_command_prompt_history(&mut history, command, limit);
+        } else if !line.starts_with("search:") {
+            add_command_prompt_history(&mut history, line, limit);
+        }
+    }
+    history
+}
+
+fn add_command_prompt_history(history: &mut Vec<String>, input: &str, limit: usize) -> bool {
+    let added = history.last().is_none_or(|entry| entry != input);
+    if added {
+        history.push(input.to_owned());
+    }
+    let removed = history.len().saturating_sub(limit);
+    if history.len() > limit {
+        history.drain(..removed);
+    }
+    removed != 0 || (added && limit != 0)
+}
+
+fn save_command_prompt_history(path: &Path, history: &[String]) {
+    let mut contents = String::new();
+    for entry in history {
+        let _ = writeln!(contents, "command:{entry}");
+    }
+    if let Err(error) = fs::write(path, contents) {
+        log::debug!("failed to save prompt history {}: {error}", path.display());
+    }
 }
 
 #[derive(Default)]
@@ -28933,6 +29096,39 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn prompt_history_limit_file_format_and_legacy_loading_match_the_pin() {
+        let mut history = Vec::new();
+        assert!(add_command_prompt_history(&mut history, "one", 2));
+        assert!(add_command_prompt_history(&mut history, "two", 2));
+        assert!(!add_command_prompt_history(&mut history, "two", 2));
+        assert!(add_command_prompt_history(&mut history, "three", 2));
+        assert_eq!(history, ["two", "three"]);
+        assert!(add_command_prompt_history(&mut history, "three", 1));
+        assert_eq!(history, ["three"]);
+        assert!(add_command_prompt_history(&mut history, "ignored", 0));
+        assert!(history.is_empty());
+
+        let directory = tempfile::tempdir().expect("prompt history directory");
+        let path = directory.path().join("history");
+        save_command_prompt_history(&path, &["alpha".to_owned(), "beta".to_owned()]);
+        assert_eq!(
+            fs::read_to_string(&path).expect("saved prompt history"),
+            "command:alpha\ncommand:beta\n"
+        );
+        fs::write(
+            &path,
+            "command:one\nsearch:skip\nlegacy:raw\nplain\ncommand:one\n",
+        )
+        .expect("legacy prompt history");
+        assert_eq!(
+            load_command_prompt_history(&path, 3),
+            ["legacy:raw", "plain", "one"]
+        );
+        assert!(prompt_history_path("relative/history").is_none());
+        assert_eq!(prompt_history_path(path.to_str().unwrap()), Some(path));
+    }
+
+    #[test]
     fn command_prompt_editor_preserves_unicode_boundaries_and_history_drafts() {
         let mut prompt = CommandPrompt::new(":".to_owned(), "α beta".to_owned(), None);
         assert_eq!(prompt.state(&[]).cursor, 6);
@@ -30998,7 +31194,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn aggressive_resize_uses_the_smallest_geometry_for_each_viewed_window() {
+    fn window_size_and_aggressive_resize_compose_for_each_viewed_window() {
         let shared = Arc::new(Shared::new(1));
         let (first_client, _) =
             shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
@@ -31062,6 +31258,40 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(
             shared.inner.lock().engine.pane_geometry(first_pane),
             Some((200, 30))
+        );
+        {
+            let inner = shared.inner.lock();
+            let geometry = |mode| {
+                let geometry = terminal_geometry_for_mode(&inner, first_pane, false, mode)
+                    .expect("window-size geometry");
+                (geometry.columns, geometry.rows)
+            };
+            assert_eq!(geometry(WindowSize::Latest), (200, 30));
+            assert_eq!(geometry(WindowSize::Manual), (200, 30));
+            assert_eq!(geometry(WindowSize::Largest), (200, 60));
+            assert_eq!(geometry(WindowSize::Smallest), (100, 30));
+            assert_eq!(
+                terminal_geometry_for_mode(&inner, first_pane, true, WindowSize::Largest)
+                    .map(|geometry| (geometry.columns, geometry.rows)),
+                Some((200, 60))
+            );
+        }
+
+        let window_size_effect = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut first_context,
+                &CommandInvocation::new("set-window-option", ["-g", "window-size", "smallest"]),
+            )
+            .expect("select smallest window size");
+        assert_eq!(
+            window_size_effect.effects,
+            vec![MuxEffect::WindowSizeChanged { window: None }]
+        );
+        assert_eq!(
+            shared.inner.lock().engine.pane_geometry(first_pane),
+            Some((100, 30))
         );
 
         let effect = shared
@@ -34149,6 +34379,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 "renamed=manual",
                 &format!("title={pane}:{window}"),
                 &format!("bell={pane}"),
+                &format!("bell={pane}"),
             ]
         );
     }
@@ -36433,7 +36664,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-window", ["-h"]),
+                &CommandInvocation::new("new-window", [] as [&str; 0]),
             )
             .expect("second terminal");
         let second = context.pane.expect("second terminal");
@@ -36443,15 +36674,20 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("select-pane", ["-t", &first.to_string()]),
+                &CommandInvocation::new("select-window", ["-t", ":0"]),
             )
-            .expect("select the first terminal");
+            .expect("select the first window");
         take_reliable_messages(mailbox);
         (client, context, first, second)
     }
 
     fn pane_bell(messages: &[ProtocolMessage], pane: PaneId) -> bool {
-        latest_reliable_snapshot(messages).sessions[0].windows[0].panes[&pane].bell
+        latest_reliable_snapshot(messages).sessions[0]
+            .windows
+            .iter()
+            .find_map(|window| window.panes.get(&pane))
+            .expect("snapshot pane")
+            .bell
     }
 
     fn bell_events(messages: &[ProtocolMessage]) -> Vec<PaneId> {
@@ -36467,12 +36703,32 @@ bind - split-window -v -c "#{pane_current_path}"
             .collect()
     }
 
+    fn bell_messages(messages: &[ProtocolMessage]) -> Vec<(Option<PaneId>, String, u32)> {
+        messages
+            .iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::TimedClientMessage {
+                            pane,
+                            kind: ClientMessageKind::Info,
+                            text,
+                            duration_ms,
+                        },
+                    ..
+                }) => Some((*pane, text.clone(), *duration_ms)),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[cfg(unix)]
     fn ring_terminal_and_wait_for_bell(
         shared: &Arc<Shared>,
         mailbox: &OutboundMailbox,
         pane: PaneId,
         terminal: &Arc<TerminalSession>,
+        expect_flag: bool,
     ) {
         terminal.send_text("printf '\\007'\n");
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -36486,7 +36742,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 .state
                 .pane(pane)
                 .is_some_and(|pane| pane.bell);
-            if saw_edge && state_belled {
+            if saw_edge && state_belled == expect_flag {
                 return;
             }
             assert!(Instant::now() < deadline, "bell did not publish");
@@ -36512,13 +36768,13 @@ bind - split-window -v -c "#{pane_current_path}"
         let messages = take_reliable_messages(&mailbox);
         let background_messages = take_reliable_messages(&background_mailbox);
         assert_eq!(bell_events(&messages), vec![second]);
-        assert_eq!(bell_events(&background_messages), vec![second]);
+        assert!(bell_events(&background_messages).is_empty());
         assert!(pane_bell(&messages, second));
         assert!(pane_bell(&background_messages, second));
         assert!(!pane_bell(&messages, first));
 
         shared.raise_pane_bell(second);
-        assert!(bell_events(&take_reliable_messages(&mailbox)).is_empty());
+        assert_eq!(bell_events(&take_reliable_messages(&mailbox)), vec![second]);
 
         shared
             .input(
@@ -36532,8 +36788,13 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("type into the quiet pane");
         assert!(
-            shared.inner.lock().engine.state.windows[&context.window.expect("window")].panes
-                [&second]
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(second)
+                .expect("second pane")
                 .bell
         );
 
@@ -36555,10 +36816,153 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn selecting_a_belled_pane_clears_it() {
+    fn bell_action_and_visual_bell_fan_out_per_interactive_client() {
+        let shared = Arc::new(Shared::new(1));
+        let first_mailbox = OutboundMailbox::new();
+        let (first_client, mut context, _first, second) = belled_session(&shared, &first_mailbox);
+        let session = context.session.expect("session");
+        let (second_window, second_index) = {
+            let inner = shared.inner.lock();
+            let window = inner
+                .engine
+                .state
+                .window_for_pane(second)
+                .expect("second window");
+            (window, inner.engine.state.windows[&window].index)
+        };
+        let second_mailbox = OutboundMailbox::new();
+        let control_mailbox = OutboundMailbox::new();
+        let (second_client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&second_mailbox),
+        );
+        let (control_client, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        shared
+            .attach(second_client, session)
+            .expect("attach second client");
+        shared
+            .attach(control_client, session)
+            .expect("attach control client");
+        {
+            let mut inner = shared.inner.lock();
+            inner.focused_windows.insert(second_client, second_window);
+            inner.focused_windows.insert(control_client, second_window);
+        }
+        take_reliable_messages(&first_mailbox);
+        take_reliable_messages(&second_mailbox);
+        take_reliable_messages(&control_mailbox);
+
+        for (name, value) in [("bell-action", "other"), ("visual-bell", "both")] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-option", ["-g", name, value]),
+                )
+                .expect("configure bell option");
+        }
+        take_reliable_messages(&first_mailbox);
+        take_reliable_messages(&second_mailbox);
+        take_reliable_messages(&control_mailbox);
+        shared.raise_pane_bell(second);
+        let first = take_reliable_messages(&first_mailbox);
+        assert_eq!(bell_events(&first), vec![second]);
+        assert_eq!(
+            bell_messages(&first),
+            vec![(Some(second), format!("Bell in window {second_index}"), 750,)]
+        );
+        let second_messages = take_reliable_messages(&second_mailbox);
+        assert!(bell_events(&second_messages).is_empty());
+        assert!(bell_messages(&second_messages).is_empty());
+        let control_messages = take_reliable_messages(&control_mailbox);
+        assert!(bell_events(&control_messages).is_empty());
+        assert!(bell_messages(&control_messages).is_empty());
+
+        for (name, value) in [("bell-action", "current"), ("visual-bell", "on")] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-option", ["-g", name, value]),
+                )
+                .expect("reconfigure bell option");
+        }
+        take_reliable_messages(&first_mailbox);
+        take_reliable_messages(&second_mailbox);
+        take_reliable_messages(&control_mailbox);
+        shared.raise_pane_bell(second);
+        let first_messages = take_reliable_messages(&first_mailbox);
+        assert!(bell_events(&first_messages).is_empty());
+        assert!(bell_messages(&first_messages).is_empty());
+        let second_messages = take_reliable_messages(&second_mailbox);
+        assert!(bell_events(&second_messages).is_empty());
+        assert_eq!(
+            bell_messages(&second_messages),
+            vec![(Some(second), "Bell in current window".to_owned(), 750)]
+        );
+        let control_messages = take_reliable_messages(&control_mailbox);
+        assert!(bell_events(&control_messages).is_empty());
+        assert!(bell_messages(&control_messages).is_empty());
+        assert_eq!(
+            client_focused_window_for_attachment(&shared.inner.lock(), first_client),
+            context.window
+        );
+    }
+
+    #[test]
+    fn allow_set_title_gates_terminal_title_synchronization() {
+        let shared = Arc::new(Shared::new(1));
+        let (_, pane, terminal) = output_view_session_fixture(&shared, "title-gate", "first");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("title context");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-p", "-t", &pane.to_string(), "allow-set-title", "off"],
+                ),
+            )
+            .expect("disable terminal titles");
+        shared.synchronize_pane_title(pane, &terminal, "blocked title");
+        assert_ne!(
+            shared.inner.lock().engine.state.pane(pane).unwrap().title,
+            "blocked title"
+        );
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-p", "-t", &pane.to_string(), "allow-set-title", "on"],
+                ),
+            )
+            .expect("enable terminal titles");
+        shared.synchronize_pane_title(pane, &terminal, "allowed title");
+        assert_eq!(
+            shared.inner.lock().engine.state.pane(pane).unwrap().title,
+            "allowed title"
+        );
+    }
+
+    #[test]
+    fn selecting_a_belled_window_clears_it() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
-        let (client, mut context, first, second) = belled_session(&shared, &mailbox);
+        let (client, mut context, _first, second) = belled_session(&shared, &mailbox);
 
         shared.raise_pane_bell(second);
         assert!(pane_bell(&take_reliable_messages(&mailbox), second));
@@ -36568,12 +36972,17 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("select-pane", ["-t", &first.to_string()]),
+                &CommandInvocation::new("select-window", ["-t", ":0"]),
             )
-            .expect("reselect the active pane");
+            .expect("reselect the active window");
         assert!(
-            shared.inner.lock().engine.state.windows[&context.window.expect("window")].panes
-                [&second]
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(second)
+                .expect("second pane")
                 .bell
         );
 
@@ -36582,9 +36991,9 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("select-pane", ["-t", &second.to_string()]),
+                &CommandInvocation::new("select-window", ["-t", ":1"]),
             )
-            .expect("select the belled pane");
+            .expect("select the belled window");
         assert!(!pane_bell(&take_reliable_messages(&mailbox), second));
     }
 
@@ -36635,7 +37044,7 @@ bind - split-window -v -c "#{pane_current_path}"
         );
         take_reliable_messages(&mailbox);
 
-        ring_terminal_and_wait_for_bell(&shared, &mailbox, alert_pane, &terminal);
+        ring_terminal_and_wait_for_bell(&shared, &mailbox, alert_pane, &terminal, true);
 
         shared
             .execute(
@@ -36662,7 +37071,7 @@ bind - split-window -v -c "#{pane_current_path}"
         }
         take_reliable_messages(&mailbox);
 
-        ring_terminal_and_wait_for_bell(&shared, &mailbox, alert_pane, &terminal);
+        ring_terminal_and_wait_for_bell(&shared, &mailbox, alert_pane, &terminal, false);
     }
 
     #[cfg(unix)]
@@ -36685,7 +37094,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let pane = context.pane.expect("pane");
         let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
         take_reliable_messages(&mailbox);
-        ring_terminal_and_wait_for_bell(&shared, &mailbox, pane, &terminal);
+        ring_terminal_and_wait_for_bell(&shared, &mailbox, pane, &terminal, false);
 
         shared
             .execute(
@@ -36706,7 +37115,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 .bell
         );
         take_reliable_messages(&mailbox);
-        ring_terminal_and_wait_for_bell(&shared, &mailbox, pane, &terminal);
+        ring_terminal_and_wait_for_bell(&shared, &mailbox, pane, &terminal, false);
     }
 
     #[test]

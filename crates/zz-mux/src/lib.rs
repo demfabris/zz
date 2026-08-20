@@ -4,6 +4,7 @@
 
 mod command;
 mod formats;
+mod honest_knobs;
 mod layout;
 #[cfg(test)]
 mod layout_pin_tests;
@@ -19,6 +20,7 @@ pub use command::{
     hook_format_variables, if_shell_truthy,
 };
 pub use formats::{TmuxColour, display_width, indexed_colour_rgb, parse_tmux_colour};
+pub use honest_knobs::{BellAction, PresetOptions, VisualBell, WindowSize};
 pub use layout::{CellLayout, SplitSize};
 pub use model::{
     LayoutPreset, MuxState, Pane, PaneDirection, PaneKind, Session, SplitPlacement, Window,

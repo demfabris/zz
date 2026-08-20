@@ -9,7 +9,10 @@ use zz_protocol::{
     SessionId, SessionSnapshot, SplitId, WindowId, WindowSnapshot, normalize_browser_profile_name,
 };
 
-use crate::layout::{CellLayout, LayoutError, SplitSize};
+use crate::{
+    PresetOptions,
+    layout::{CellLayout, LayoutError, SplitSize},
+};
 
 pub(crate) const DEFAULT_WINDOW_EXTENT: (u16, u16) = (80, 24);
 const SYNCHRONIZE_PANES: u8 = 1 << 0;
@@ -1217,6 +1220,7 @@ impl MuxState {
         &mut self,
         window: WindowId,
         preset: LayoutPreset,
+        options: &PresetOptions,
     ) -> Result<(), ServerError> {
         let panes = self
             .windows
@@ -1233,7 +1237,9 @@ impl MuxState {
 
         let window = self.windows.get_mut(&window).expect("window was resolved");
         let previous = window.layout.clone();
-        window.layout.apply_preset(preset, &panes, &mut ids);
+        window
+            .layout
+            .apply_preset(preset, &panes, options, &mut ids);
         let split_ids_exhausted = split_ids.next().is_none();
         debug_assert!(split_ids_exhausted, "preset consumes one split ID per edge");
         window.previous_layout = Some(Box::new(previous));
@@ -1293,6 +1299,7 @@ impl MuxState {
         &mut self,
         window: WindowId,
         offset: isize,
+        options: &PresetOptions,
     ) -> Result<LayoutPreset, ServerError> {
         let last = self
             .windows
@@ -1304,7 +1311,7 @@ impl MuxState {
             None if offset < 0 => LayoutPreset::Tiled,
             None => LayoutPreset::EvenHorizontal,
         };
-        self.select_layout(window, preset)?;
+        self.select_layout(window, preset, options)?;
         Ok(preset)
     }
 
@@ -4727,7 +4734,9 @@ mod tests {
                 [(39, 7), (40, 7), (39, 7), (40, 7), (80, 8)],
             ),
         ] {
-            state.select_layout(window, preset).unwrap();
+            state
+                .select_layout(window, preset, &PresetOptions::default())
+                .unwrap();
             let arranged = &state.windows[&window];
             assert_eq!(arranged.panes, panes);
             assert_eq!(arranged.zoomed_pane, None);
@@ -4752,10 +4761,18 @@ mod tests {
         }
 
         state
-            .select_layout(window, LayoutPreset::MainHorizontal)
+            .select_layout(
+                window,
+                LayoutPreset::MainHorizontal,
+                &PresetOptions::default(),
+            )
             .unwrap();
         state
-            .select_layout(window, LayoutPreset::MainVerticalMirrored)
+            .select_layout(
+                window,
+                LayoutPreset::MainVerticalMirrored,
+                &PresetOptions::default(),
+            )
             .unwrap();
 
         state.swap_panes(first, target, true, false).unwrap();
@@ -4773,7 +4790,9 @@ mod tests {
         ));
 
         let tiled_order = state.windows[&window].pane_order.clone();
-        state.select_layout(window, LayoutPreset::Tiled).unwrap();
+        state
+            .select_layout(window, LayoutPreset::Tiled, &PresetOptions::default())
+            .unwrap();
         assert_eq!(
             tiled_order
                 .iter()
@@ -4874,7 +4893,9 @@ mod tests {
         let mut retired_splits = layout_splits(&original);
 
         assert_eq!(
-            state.cycle_layout(window, 1).unwrap(),
+            state
+                .cycle_layout(window, 1, &PresetOptions::default())
+                .unwrap(),
             LayoutPreset::EvenHorizontal
         );
         let even = state.windows[&window].layout.clone();
@@ -4913,12 +4934,21 @@ mod tests {
             [(26, 24), (26, 24), (26, 24)]
         );
 
-        state.select_layout(window, LayoutPreset::Tiled).unwrap();
+        state
+            .select_layout(window, LayoutPreset::Tiled, &PresetOptions::default())
+            .unwrap();
         assert_eq!(
-            state.cycle_layout(window, 1).unwrap(),
+            state
+                .cycle_layout(window, 1, &PresetOptions::default())
+                .unwrap(),
             LayoutPreset::EvenHorizontal
         );
-        assert_eq!(state.cycle_layout(window, -1).unwrap(), LayoutPreset::Tiled);
+        assert_eq!(
+            state
+                .cycle_layout(window, -1, &PresetOptions::default())
+                .unwrap(),
+            LayoutPreset::Tiled
+        );
         let fourth = state
             .split_pane(third, Axis::Vertical, PaneKind::Terminal)
             .unwrap();
@@ -5070,7 +5100,11 @@ mod tests {
             .split_pane(first, Axis::Vertical, PaneKind::Terminal)
             .unwrap();
         state
-            .select_layout(window, LayoutPreset::MainHorizontalMirrored)
+            .select_layout(
+                window,
+                LayoutPreset::MainHorizontalMirrored,
+                &PresetOptions::default(),
+            )
             .unwrap();
         state.select_pane(third).unwrap();
         state.toggle_zoom(third).unwrap();
@@ -5325,7 +5359,11 @@ mod tests {
         assert_eq!(state.windows[&target_window].session, target_session);
         assert_eq!(state.windows[&target_window].pane_order, [target, moving]);
         state
-            .select_layout(target_window, LayoutPreset::MainHorizontal)
+            .select_layout(
+                target_window,
+                LayoutPreset::MainHorizontal,
+                &PresetOptions::default(),
+            )
             .unwrap();
         assert!(matches!(
             state.windows[&target_window].layout.project(),

@@ -1,10 +1,10 @@
 ---
 type: Reference
 title: tmux divergence matrix
-description: "Every known divergence from tmux at the pinned reference commit: the 24 missing commands and why, behavioral gaps on the implemented surface, the 25-of-180 options coverage, and the protocol-level differences."
+description: "Every known divergence from tmux at the pinned reference commit: the 24 missing commands and why, behavioral gaps on the implemented surface, the options coverage (all 180 store, 78 behave), and the protocol-level differences."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
-timestamp: 2026-08-18T00:00:00-03:00
+timestamp: 2026-08-20T00:00:00-03:00
 ---
 
 # Overview
@@ -197,9 +197,17 @@ inside a generic “unsupported formats” claim.
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
 | `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
-# Options: 78 of 180
+# Options: all 180 store, 78 behave
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin.
+Since the 2026-08-20 Lane-2 sweep **every one of the 180 stores** with the pin's exact
+default, type validation, scope, inheritance, `-a`/`-u`/toggle semantics, and listing
+shape, so bare `show-options -s`/`-g`/`-gw` byte-match the pin and a real `tmux.conf`
+imports with **zero skipped lines**. The seven array options gained real indexed
+storage (separator, hole reuse, `name[N]`, `-u name[N]` vs `-u name`) and
+`set-option <hook-name>` now writes the same store as `set-hook` — the two paths that
+used to silently succeed while doing nothing. The count below tracks options whose
+values also drive BEHAVIOR; the rest are honest storage awaiting their wave.
 Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-panes`,
 `word-separators`, `buffer-limit`, `message-limit`, `set-clipboard`, `copy-command`, `status`,
 `status-interval`, `status-left`, `status-right`, `base-index`, `pane-base-index`, and

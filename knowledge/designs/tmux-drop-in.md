@@ -787,6 +787,27 @@ underscore, last/current style washes, styled halves in BOTH chrome modes with
 padding preserved, default `[#S]` beside the badge (accepted duplication — UX call
 open), `#[reverse]` on status halves, empty-vs-blank status halves.
 
+**Honest-knobs wave C1 SHIPPED 2026-08-20 (17 more options; 72/180):** `focus-events`
+(delivery gated at the daemon funnel — pin default OFF is a user-visible change: apps
+stop receiving focus events until `set -g focus-events on`), `bell-action` +
+`visual-bell` on the pin's alerts.c model (flag-vs-hook-vs-ring-vs-message gating,
+per-client current-window evaluation at fan-out, control clients skipped, byte-exact
+message text), `key-table`/`prefix-timeout` in the shared key engine (custom tables
+dispatch; timeout disarms lazily on the next key — documented edge),
+`prompt-history-limit` + `history-file` (saves on submission vs the pin's
+at-shutdown — durability divergence), `display-panes-time` (closes the display-time
+reuse divergence), the five layout knobs as percentage-aware strings resolved at
+apply time (pin else-chains ported; 48 golden fixtures untouched), `default-size`
+(detached new-session, 1..10000 clamps), `window-size` latest|largest|smallest with
+`manual` stored-as-latest (no `resize-window` yet) — and the aggressive-resize
+COMPOSITION now matches resize.c: ON is a candidate filter, window-size aggregates;
+ON no longer forces smallest — and `allow-set-title` gating OSC 0/2 adoption
+(`allow-rename` storage-only, no ESC-k scanner). `list-keys -T <nonexistent>` now
+errors byte-exactly like the pin (a zz-invented exemption for key-table-named tables
+was removed). Ledgered: bare `list-keys` flags-column padding (key-string wave),
+sensible/own-conf skip counts dropped to 1 and 6. Guards: four C1 differential
+scenarios (defaults/errors/layout/readback, all live-probed).
+
 **Lane 1 — GUI-effect (~48; implement, wired to real behavior).** The status-bar family
 rendered in the collapsed-sidebar titlebar strip, which is already a proto-status-bar
 (session badge = `status-left`'s `[#S]`, tab row = window list, right corner = the default

@@ -109,8 +109,8 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | `show-options` on unimplemented names | Catalogued scalar options without zz storage have no invented value and print nothing, including under `-A`. Bare and indexed array spellings use the same empty-success path. Implemented scalars and every stored `@` user option retain normal scope and inheritance readback. | **silent**, honest omission |
 | `mouse` / `escape-time` | Both options have typed storage, pin defaults, inheritance, unset, and readback. The desktop GUI does not consume either value; their input semantics belong to the phase-8 TUI attach surface. | **silent**, deliberate |
 | `automatic-rename` / `automatic-rename-format` | `automatic-rename` gates the desktop's active-pane-derived tab label, and explicit `rename-window`, `new-window -n`, or the first-window name pins a window-local `off`. zz does not mutate `Window.name` every 500 ms, so `#{window_name}` remains the explicit model name, and the stored format string is not evaluated by the presentation-only renamer. | **silent**, bounded |
-| `aggressive-resize` | The inherited window flag is stored with the pin-build default `off`. ON takes the componentwise smallest rows and columns reported by clients actually viewing that window; one viewer is therefore a no-op. Cell-pixel dimensions come from the latest-input eligible viewer. The pin instead uses the flag to filter candidates before applying its separate `window-size` policy. zz does not implement `window-size`, so ON fixes the policy to `smallest`, while OFF retains zz's latest-terminal-input owner. | **silent**, bounded |
-| `display-time` | Status-message toasts consume the configured milliseconds. zz also uses it as the omitted `display-panes -d` duration; the pin uses the separate `display-panes-time` option. A zero toast remains until manual dismissal, while tmux dismisses its zero-duration status message on a key. | **silent**, deliberate |
+| `aggressive-resize` + `window-size` | Since 2026-08-20 both compose like the pin (`resize.c:366-376`): `aggressive-resize` is a candidate FILTER (ON = clients focused on the window; OFF = zz's viewer set, a per-client-focus stand-in for the pin's linked-window `session_has`), and `window-size` is the AGGREGATION policy — `latest` (default) picks the most-recent-input owner, `largest`/`smallest` aggregate componentwise. ON no longer forces `smallest`; configs relying on that must also set `window-size smallest`. `manual` is stored but behaves as `latest` until `resize-window` exists. | **silent**, bounded |
+| `display-time` | Status-message toasts consume the configured milliseconds. Since 2026-08-20 the omitted `display-panes -d` duration comes from `display-panes-time` like the pin (the old reuse divergence is closed). A zero toast remains until manual dismissal, while tmux dismisses its zero-duration status message on a key. | **silent**, deliberate |
 | `respawn-pane` / `respawn-window` | Dead panes revive with stable pane identity; `respawn-window` keeps its first pane and removes the rest. `-k`, `-c`, repeated `-e NAME=VALUE`, and stored command/cwd reuse are implemented. The pin's `-E` empty-environment flag is cataloged but rejected. | loud for `-E` |
 | Array options | zz parses tmux's `name[index]` grammar but stores and renders none of the pin's 76 array options. Bare and indexed set/show requests succeed with no output. Indexed `@` or table scalars follow tmux: set returns `not an array`, while show reads the scalar through the indexed spelling. | **silent**, honest omission |
 | `history-limit` default | zz keeps 10,000 lines for its product default; the pin keeps 2,000. `show-options -g history-limit` prints the effective 10,000 value. | **silent**, deliberate |
@@ -197,7 +197,7 @@ inside a generic “unsupported formats” claim.
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
 | `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
-# Options: 55 of 180
+# Options: 72 of 180
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin.
 Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-panes`,
@@ -212,9 +212,15 @@ Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-pan
 `status-style`, `status-bg`, `status-fg`, `status-justify` (stored), `status-position`
 (stored), `status-left-style`, `status-right-style`, `status-left-length`,
 `status-right-length`, and the eight `window-status-*` format/style/separator options —
-all with pin-probed defaults, `#{`-deferred style validation, and comma-joined `-a`. The
-remaining 125 are lane-assigned in the drop-in plan's "options residue" section
-(GUI-effect / store-only / N-A-native).
+all with pin-probed defaults, `#{`-deferred style validation, and comma-joined `-a`, plus
+the honest-knobs C1 seventeen (2026-08-20): `focus-events`, `bell-action`, `visual-bell`,
+`key-table`, `prefix-timeout`, `prompt-history-limit`, `history-file`,
+`display-panes-time`, `main-pane-width/height`, `other-pane-width/height`,
+`tiled-layout-max-columns`, `default-size`, `window-size`, `allow-set-title`, and
+`allow-rename` (storage-only — no ESC-k scanner). The remaining 108 are lane-assigned
+in the drop-in plan's "options residue" section (GUI-effect / store-only / N-A-native).
+Bare `list-keys` output lacks the pin's flags-column padding (`bind-key  -T` two-space
+form) — ledgered for the key-string wave.
 The index trio follows tmux's session/window inheritance, allocation,
 targeting, format, and close-triggered renumbering behavior. (`set-option` also accepts six
 zz-native names — the agent/editor/history-trickle keys — which don't count toward tmux

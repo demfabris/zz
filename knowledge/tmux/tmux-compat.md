@@ -59,7 +59,9 @@ shell code. Concretely:
   terminal panes, with the CLI resolving untargeted commands against the invoking pane the way
   `$TMUX_PANE` does and originless Command clients falling back to the most-recent session),
   `[shell-command]` positionals on `new-session`/`new-window`/`split-window`, `last-window`,
-  cell-accurate `resize-pane`, and `%if` blocks skipped-with-diagnostic instead of executed; the
+  cell-accurate `resize-pane`, and (since the 2026-08-19 grammar wave) the pin's config
+  grammar — `$VAR`/`${VAR}` expansion, the full escape set, `NAME=value`/`%hidden`
+  assignments, and evaluated `%if`/`%elif`/`%else` conditionals; the
   scriptability layer (`-F` formats, `display-message`, compound targets) is tracked in the
   [tmux superset roadmap](/designs/tmux-superset-roadmap.md).
 - **Out of scope as shipped** (this list describes current behavior; the 2026-08-16

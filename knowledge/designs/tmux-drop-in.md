@@ -798,18 +798,41 @@ read back, `set-option <hook-name>` routes to the hook table.
 and the 21 pin-3.6 theme-palette options (`theme`, `dark-theme-*`, `light-theme-*`) —
 zero corpus/real-world hits; parked entirely until demand exists.
 
-**Hazard (correctness, not compat):** the 2026-08-19 launcher wave sets `$TMUX` in the
-exact tmux shape, so tmux-aware programs now WRAP passthrough sequences in
-`\ePtmux;…\e\\` expecting an unwrap. zz's VT speaks kitty graphics natively but does not
-unwrap the DCS envelope — inline images from tmux-aware programs may have regressed the
-moment `$TMUX` appeared. `allow-passthrough` (Lane 1) is the unwrap path; probe early.
+**Hazard (correctness, not compat — probed 2026-08-19):** since 7a put the exact
+`$TMUX` shape and `TERM=tmux-256color` in panes, tmux-aware programs (image.nvim,
+kitty icat and friends) WRAP passthrough sequences in `\ePtmux;…\e\\`. zz-terminal has
+zero unwrap code, so the VT consumes the DCS silently. That MATCHES stock tmux's
+`allow-passthrough off` default — but it is a regression against pre-7a zz, where the
+same programs saw no `$TMUX`, emitted raw kitty sequences, and images worked; and the
+opt-in is impossible because `allow-passthrough` is unimplemented and refuses to set.
+Fix = Lane 1 `allow-passthrough` (on|off|all per the pin): store the option, and on a
+`tmux;`-prefixed DCS with the option enabled, un-double the escaped ESCs and refeed the
+payload through the VT parser.
 
-**Grammar gaps (orthogonal, scheduled before any options wave):** `$VAR`/`${VAR}`
-expansion in config words (silently wrong values today, no diagnostic), the full
-double-quote escape set (`\e` currently becomes a literal `e` — silent corruption),
-`%hidden`, bare `NAME=value` environment lines (storage exists, spellings don't), and
-`%if`/`%elif`/`%else` evaluation (the format engine and `if_shell_truthy` exist,
-unwired at parse time; gates Oh My Tmux joining the smoke corpus).
+**Grammar wave — SHIPPED 2026-08-19 (codex implement → adversarial review → two fix
+rounds; reviewer seat moved to grok-4.6 xhigh mid-wave, verdict MERGE-READY):** the
+pin's config grammar landed whole — `$VAR`/`${VAR}` expansion (charset, `${9}` vs `$9`,
+`\$`, undefined→empty), the full escape set (`\NNN`/`\u`/`\U`/singles, invalid forms
+error byte-exact), `NAME=value` + `%hidden` assignments (applied at parse time BEFORE
+the file's commands, visible same-line, SURVIVING a parse abort — all pin-probed), and
+`%if`/`%elif`/`%else`/`%endif` EVALUATION (engine format expansion at server/global
+scope, `FORMAT_NOJOBS` — `#()` renders empty and never spawns, pin `format_true`,
+same-line + nested forms, balanced-through-whitespace `#{…}` conditions). Whole-file
+abort on the first diagnostic with the pin's `syntax error` strings. The five re-parse
+sites (bind `{}` bodies, set-hook, if-shell, confirm-before, command-prompt) expand
+against the LIVE engine global environment (hidden included). Guards: 25 parser unit
+tests, daemon readback regressions, and the 15-step `smoke/config-grammar` harness
+scenario byte-diffed against the pin. Ledgered divergences: control-mode stdin keeps
+`$VAR` LITERAL (pin expands server-side; non-expanding entry point, test-pinned);
+re-parse sites expand at bind/execution time vs the pin's config-tokenization time
+(comment at `bound_commands`); `\377`→U+00FF and `\000`-retained vs the pin's raw
+byte/NUL-truncation (String storage, test-pinned); the pin's `%elif`/`%else`
+assignment-leak quirk is NOT reproduced (zz keeps single-branch assignment scope);
+`%if c ; cmd ; %endif` is zz-lax (pin rejects the `;`). Oh My Tmux can now join the
+smoke corpus (was gated on `%if`). NEW TICKET exposed with a live repro: zz's
+`source-file` swallows parse diagnostics and exits 0 where the pin prints
+`path:line: message` rc 1 / `%config-error` — pre-existing, documented asymmetrically
+in the config-grammar scenario's warn expectations.
 
 # Risks
 

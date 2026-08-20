@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux drop-in plan
 description: "The alias-tmux=zz plan: 100% of tmux's command grammar, options, formats, and geometry on tmux names, zz power moved to superset verbs, exec commands behind an import-time consent gate — nine phases ending at the TTY attach contract, one permanent skip (linked windows), one explicit non-goal (real-tmux socket interop)."
-status: Approved
+status: Shipped — all nine phases complete 2026-08-20; residue and remaining waves listed under "Where this stands"
 tags:
 - tmux
 - compatibility
@@ -10,7 +10,7 @@ tags:
 - layout
 - control-mode
 - roadmap
-timestamp: 2026-08-19T00:00:00Z
+timestamp: 2026-08-20T00:00:00Z
 ---
 
 # Overview
@@ -32,7 +32,7 @@ The target splits in two:
   query, target, and kill sessions work, TPM and resurrect-class plugins run. This is the bulk
   of the alias and none of it needs a TTY-attaching client.
 - **Full drop-in** (phase 8): bare `tmux`, `tmux new -s foo`, and `tmux attach` attach the
-  calling terminal. Gated on the [TUI client](/designs/tui-client.md) design's open rungs.
+  calling terminal, via the [TUI client](/designs/tui-client.md). **Closed 2026-08-20.**
 
 **Decisions (2026-08-16, fabrico):**
 
@@ -45,6 +45,56 @@ The target splits in two:
    single "100% minus" item. One window belongs to one session; the rejection stays loud.
 4. Interop with a real tmux binary over its private socket protocol is a non-goal. The alias
    means zz handles tmux's argv everywhere; it never speaks tmux's client-server wire format.
+
+# Where this stands (2026-08-20)
+
+**All nine phases are shipped. Both halves of the target are met:** a tmux config or script
+cannot tell zz from tmux, and a human typing `tmux new -s foo` lands inside the session.
+
+| Phase | State |
+| --- | --- |
+| 0 — the floor | shipped 2026-08-16 |
+| 1 — superset rework + stock-binding blockers | shipped 2026-08-16 |
+| 2 — the differential harness | shipped 2026-08-16 |
+| 3 — cell-authoritative layout | shipped 2026-08-17 |
+| 4 — the grind (six waves) | shipped 2026-08-17 |
+| 5 — the exec family | complete 2026-08-18 |
+| 6 — control mode (`-C`/`-CC`) | complete 2026-08-18 |
+| 7 — the binary surface | complete 2026-08-18 |
+| 8 — the attach contract (all four rows) | **closed 2026-08-20** |
+
+Acceptance, measured rather than asserted: the differential corpus runs byte-clean against
+pinned tmux `d77c9dc6` across ~40 scenarios; a real user `tmux.conf` and tmux-sensible
+import with **zero skipped lines**; TPM installs end-to-end under a PATH shim; twelve
+strings from the pin's own regress suite match byte-exact; and the attach contract was
+verified live on a pty (`new -s x \; split-window -h` → alt screen, panes `0` and `1` on
+both binaries).
+
+**Options: all 180 of the pin's named options store; 78 also behave.** The remaining ~102
+are honest storage — they accept, validate, scope, inherit, and read back exactly like the
+pin, and each carries a divergence row saying so. Nothing silently succeeds doing nothing
+any more.
+
+**What is genuinely left**, in the order it matters:
+
+1. **`switch-client`** — the last consumer of the client seam phase 8 opened. Unlike
+   `new-session`, it must retarget *another* client. Its own wave.
+2. **Behavior for stored knobs (the C3 batch)** — monitor/activity flags, the `set-titles`
+   pair, `prefix2`, `display-panes-format`, `remain-on-exit-format`, and parse-time
+   `command-alias` resolution. One protocol bump (v70) covers the lot; held pending
+   fabrico's hardware smoke.
+3. **Ledgered attach-surface residue** — `-x -`/`-y -` using the client's size, the
+   nested-tty check, the `[exited]`/`[detached]` client-exit notices, and `source-file`
+   swallowing diagnostics. All in the [divergence matrix](/tmux/divergences.md).
+4. **Optional waves** — the 7c error-wording appendix, key-string parity (including
+   `list-keys` padding), and adding Oh My Tmux to the smoke corpus (unblocked since `%if`
+   evaluation landed).
+5. **Parked by decision** — `status-keys` vi prompt (half-vi is worse than none), linked
+   windows and session groups (decision 3), real-tmux socket interop (decision 4).
+
+Hardware-pending items that need fabrico rather than code: the wave-B status-bar visual
+smoke, a live `allow-passthrough` image smoke, the DCS-filter bench A/B, and an iTerm2
+`-CC` run.
 
 # Phases
 
@@ -157,8 +207,9 @@ same loop as phases 0–3: settled plan → codex → full gates → adversarial
 
 `switch-client` is **not** mechanical: a pane script's `switch-client` must retarget some
 *other* Interactive client's attachment, and the only pane→client seam today is
-`ClientHello.origin`, sent by Command clients only. It rides the same client-seam work as
-phase 8.
+`ClientHello.origin`, sent by Command clients only. Phase 8 opened that seam on 2026-08-20
+but never needed to retarget a second client, so `switch-client` still owns the harder half
+and keeps its own wave.
 
 ## Phase 5 — the exec family (COMPLETE 2026-08-18)
 
@@ -320,10 +371,13 @@ full style_parse token set (align/fill/us/list/range/push-default/
 pop-default families; `range=session`/`hyperlink` rejected like the pin);
 `-L <notadir>/x` says `error connecting to` (connect-first ordering). The
 `zz attach: ` stderr prefix is a second wrapper-class shape (rc +
-post-prefix text exact) — phase-7 error-shape scope. Deferred to phase 8
-with the attach contract: no-tty `new-session` divergence (pin: `open
-terminal failed: not a terminal` rc 1; zz: detached create rc 0) and the
-pty-gated nested-session refusal probe. Accepted wart adopted: `-L
+post-prefix text exact) — phase-7 error-shape scope. Two items were
+deferred to phase 8 with the attach contract: the no-tty `new-session`
+divergence (pin: `open terminal failed: not a terminal` rc 1; zz: detached
+create rc 0), CLOSED 2026-08-20; and the pty-gated nested-session refusal
+probe, which stayed open and is now ledgered in the divergence matrix (it
+needs the client's tty compared against this server's pane ttys — `$TMUX`
+alone is the wrong signal). Accepted wart adopted: `-L
 <nested/label> new-session` prints `error creating <path>` and exits 0 like
 the pin.
 
@@ -669,8 +723,9 @@ this list is the campaign-level index of it plus the items that never got a matr
   (choose-tree work).
 - Positional-arity validation is unguarded and the daemon buffer family hand-rolls its
   parsing (phase-0 leftovers); `move-pane -p` is zz-lax.
-- `switch-client` and the TTY attach contract ride the client-seam design (phase 8);
-  control mode is phase 6; `tmux -V`/`$TMUX` shape is phase 7.
+- The TTY attach contract closed 2026-08-20 (phase 8); `switch-client` still rides the
+  client seam and is the only thing left on it. Control mode is phase 6; `tmux -V`/`$TMUX`
+  shape is phase 7.
 - Exec family, hooks bus, popups/menus (phase 5) — see that section's tiering.
 
 - ~~Spawn argv semantics~~ CLOSED by wave 5a-1 (`26c86d0`): argc>=2 direct exec,
@@ -854,6 +909,19 @@ half yields to an explicit zz `cursor-blink` config — ledgered).
 `alternate-screen`/`scroll-on-clear` store-only. Hardware-pending: bench A/B for
 the filter; a live image.nvim/kitty-icat smoke with `allow-passthrough on`.
 
+**Lane-2 sweep SHIPPED 2026-08-20 — every option in the table now has a home (180/180
+store, 78 behave):** the remaining ~90 names gained pin-exact defaults, validation, scope,
+inheritance, and listing shapes; the seven array options gained real indexed storage with
+the pin's separators, hole-reuse, and `name[N]`/`-u name[N]` semantics; and `set-option
+<hook-name>` writes the hook table instead of silently succeeding. Both silent-success
+paths are dead. Bare `show-options -s`/`-g`/`-gw` byte-match the pin, and both smoke
+configs — including a real user `tmux.conf` — import with **zero skipped lines**, which is
+the phase-8 acceptance criterion for configs. The wave also flushed out two latent bugs
+from earlier waves (`popup-style`/`popup-border-style` were session-scoped where the pin
+makes them window-scoped, resolved from the target session's current window) and one in
+the harness itself (`diff-scenario.sh` leaked the developer's `EDITOR`/`VISUAL` into the
+pin server on non-smoke runs, which had been read as a zz divergence).
+
 **Lane 1 — GUI-effect (~48; implement, wired to real behavior).** The status-bar family
 rendered in the collapsed-sidebar titlebar strip, which is already a proto-status-bar
 (session badge = `status-left`'s `[#S]`, tab row = window list, right corner = the default
@@ -945,8 +1013,10 @@ in the config-grammar scenario's warn expectations.
 - Formats/styles are tmux's largest maintenance surface; the pinned-commit discipline
   (verify against `d77c9dc6`, never guess) is what keeps the grind honest.
 - The Interactive/Command client split is load-bearing (attach effects apply only to
-  Interactive clients); `switch-client` and phase 8 both cut into that seam — do the seam
-  design once, not twice.
+  Interactive clients); `switch-client` and phase 8 both cut into that seam. Phase 8 cut
+  first (2026-08-20) and the seam held: the three-state `ClientTerminal` on the execution
+  context plus a `client-terminal-v1` capability token, no connection upgrade and no
+  protocol bump. `switch-client` should extend that, not invent a second mechanism.
 - Consent scope: trusting the user's own config matches tmux and current zz behavior, but it
   means an imported-then-edited config never re-prompts; acceptable, worth stating.
 

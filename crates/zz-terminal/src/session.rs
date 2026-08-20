@@ -129,6 +129,191 @@ const MAX_VIEWPORT_GRAPHEME_BYTES: usize = 16 * 1024 * 1024;
 const MIN_STYLE_COMPACTION_LIMIT: usize = 4 * 1024;
 const MIN_GRAPHEME_COMPACTION_LIMIT: usize = 16 * 1024;
 const MIN_GRAPHEME_BYTE_COMPACTION_LIMIT: usize = 1024 * 1024;
+const TMUX_PASSTHROUGH_PREFIX: &[u8] = b"\x1bPtmux;";
+const MAX_TMUX_PASSTHROUGH_PAYLOAD_BYTES: usize = 1024 * 1024;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum AllowPassthrough {
+    #[default]
+    Off,
+    All,
+}
+
+impl AllowPassthrough {
+    const fn unwraps(self) -> bool {
+        matches!(self, Self::All)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum PassthroughState {
+    #[default]
+    Ground,
+    Prefix(usize),
+    Payload {
+        escape: bool,
+    },
+    Discard {
+        escape: bool,
+    },
+}
+
+#[derive(Default)]
+struct PassthroughFilter {
+    mode: AllowPassthrough,
+    state: PassthroughState,
+    payload: Vec<u8>,
+}
+
+impl PassthroughFilter {
+    fn set_mode(&mut self, mode: AllowPassthrough) {
+        self.mode = mode;
+    }
+
+    #[inline]
+    fn start_payload(&mut self) {
+        self.state = PassthroughState::Payload { escape: false };
+    }
+
+    #[inline]
+    fn append_payload(&mut self, bytes: &[u8]) -> bool {
+        if bytes.len() > MAX_TMUX_PASSTHROUGH_PAYLOAD_BYTES.saturating_sub(self.payload.len()) {
+            self.payload = Vec::new();
+            false
+        } else {
+            self.payload.extend_from_slice(bytes);
+            true
+        }
+    }
+
+    #[inline]
+    fn write(&mut self, mut bytes: &[u8], mut sink: impl FnMut(&[u8])) -> usize {
+        let mut written = 0;
+        loop {
+            match self.state {
+                PassthroughState::Ground => {
+                    let Some(escape) = find_escape(bytes) else {
+                        if !bytes.is_empty() {
+                            sink(bytes);
+                            written += bytes.len();
+                        }
+                        return written;
+                    };
+                    if escape > 0 {
+                        sink(&bytes[..escape]);
+                        written += escape;
+                        bytes = &bytes[escape..];
+                    }
+
+                    let matched = common_prefix(bytes, TMUX_PASSTHROUGH_PREFIX);
+                    if matched == TMUX_PASSTHROUGH_PREFIX.len() {
+                        self.start_payload();
+                        bytes = &bytes[matched..];
+                    } else if matched == bytes.len() {
+                        self.state = PassthroughState::Prefix(matched);
+                        return written;
+                    } else {
+                        let next = find_escape(&bytes[1..]).map_or(bytes.len(), |next| next + 1);
+                        sink(&bytes[..next]);
+                        written += next;
+                        bytes = &bytes[next..];
+                    }
+                }
+                PassthroughState::Prefix(matched) => {
+                    let remaining = &TMUX_PASSTHROUGH_PREFIX[matched..];
+                    let continued = common_prefix(bytes, remaining);
+                    if continued == remaining.len() {
+                        self.start_payload();
+                        bytes = &bytes[continued..];
+                    } else if continued == bytes.len() {
+                        self.state = PassthroughState::Prefix(matched + continued);
+                        return written;
+                    } else {
+                        sink(&TMUX_PASSTHROUGH_PREFIX[..matched]);
+                        written += matched;
+                        self.state = PassthroughState::Ground;
+                    }
+                }
+                PassthroughState::Payload { escape: false } => {
+                    let Some(escape) = find_escape(bytes) else {
+                        if !self.append_payload(bytes) {
+                            self.state = PassthroughState::Discard { escape: false };
+                        }
+                        return written;
+                    };
+                    self.state = if self.append_payload(&bytes[..escape]) {
+                        PassthroughState::Payload { escape: true }
+                    } else {
+                        PassthroughState::Discard { escape: true }
+                    };
+                    bytes = &bytes[escape + 1..];
+                }
+                PassthroughState::Payload { escape: true } => {
+                    let Some((&next, remaining)) = bytes.split_first() else {
+                        return written;
+                    };
+                    match next {
+                        0x1b => {
+                            self.state = if self.append_payload(&[0x1b]) {
+                                PassthroughState::Payload { escape: false }
+                            } else {
+                                PassthroughState::Discard { escape: false }
+                            };
+                            bytes = remaining;
+                        }
+                        b'\\' => {
+                            if self.mode.unwraps() && !self.payload.is_empty() {
+                                sink(&self.payload);
+                                written += self.payload.len();
+                            }
+                            self.payload.clear();
+                            self.state = PassthroughState::Ground;
+                            bytes = remaining;
+                        }
+                        _ => {
+                            self.state = if self.append_payload(&[next]) {
+                                PassthroughState::Payload { escape: false }
+                            } else {
+                                PassthroughState::Discard { escape: false }
+                            };
+                            bytes = remaining;
+                        }
+                    }
+                }
+                PassthroughState::Discard { escape: false } => {
+                    let Some(escape) = find_escape(bytes) else {
+                        return written;
+                    };
+                    self.state = PassthroughState::Discard { escape: true };
+                    bytes = &bytes[escape + 1..];
+                }
+                PassthroughState::Discard { escape: true } => {
+                    let Some((&next, remaining)) = bytes.split_first() else {
+                        return written;
+                    };
+                    if next == b'\\' {
+                        self.state = PassthroughState::Ground;
+                    } else {
+                        self.state = PassthroughState::Discard { escape: false };
+                    }
+                    bytes = remaining;
+                }
+            }
+        }
+    }
+}
+
+#[inline]
+fn find_escape(bytes: &[u8]) -> Option<usize> {
+    bytes.iter().position(|byte| *byte == 0x1b)
+}
+
+fn common_prefix(left: &[u8], right: &[u8]) -> usize {
+    left.iter()
+        .zip(right)
+        .take_while(|(left, right)| left == right)
+        .count()
+}
 
 fn diagnostic_timer() -> Option<Instant> {
     log::log_enabled!(target: "zz_terminal::diagnostics", log::Level::Trace).then(Instant::now)
@@ -767,6 +952,19 @@ impl TerminalSession {
         self.send_command(Command::SetAppearance(appearance));
     }
 
+    pub fn set_allow_passthrough(&self, enabled: bool) {
+        // The daemon folds tmux `on` into `all` because this worker has no pane-visibility signal.
+        self.send_command(Command::SetAllowPassthrough(if enabled {
+            AllowPassthrough::All
+        } else {
+            AllowPassthrough::Off
+        }));
+    }
+
+    pub fn set_wrap_search(&self, enabled: bool) {
+        self.send_command(Command::SetWrapSearch(enabled));
+    }
+
     #[must_use]
     pub fn word_separators(&self) -> WordSeparators {
         self.word_separators.read().clone()
@@ -1300,6 +1498,8 @@ enum Command {
     Resize(Geometry),
     SetWordSeparators(Box<WordSeparators>),
     SetAppearance(Arc<TerminalAppearance>),
+    SetAllowPassthrough(AllowPassthrough),
+    SetWrapSearch(bool),
     AttachView(TerminalViewId),
     DetachView(TerminalViewId),
     ReleaseView(TerminalViewId),
@@ -1345,6 +1545,8 @@ impl Command {
             Self::Resize(_) => "resize",
             Self::SetWordSeparators(_) => "set-word-separators",
             Self::SetAppearance(_) => "set-appearance",
+            Self::SetAllowPassthrough(_) => "set-allow-passthrough",
+            Self::SetWrapSearch(_) => "set-wrap-search",
             Self::AttachView(_) => "attach-view",
             Self::DetachView(_) => "detach-view",
             Self::ReleaseView(_) => "release-view",
@@ -3138,6 +3340,7 @@ fn run_output_view(
     let mut input_bytes = Vec::with_capacity(LINK_URI_SCRATCH_BYTES);
     let mut writer: Box<dyn Write + Send> = Box::new(std::io::sink());
     let mut word_separators = WordSeparators::default();
+    let mut wrap_search = true;
     let mut active_views = ActiveTerminalViews::new();
     let mut inactive_views = InactiveTerminalViews::new();
     let bound_pasted_images = HashSet::new();
@@ -3289,6 +3492,9 @@ fn run_output_view(
                 Ok(Command::SetWordSeparators(next)) => {
                     word_separators = *next;
                 }
+                Ok(Command::SetWrapSearch(next)) => {
+                    wrap_search = next;
+                }
                 Ok(Command::SetAppearance(next)) => {
                     reported_color_scheme.set(ghostty_color_scheme(next.color_scheme));
                     apply_terminal_appearance(&mut terminal, &next)?;
@@ -3325,6 +3531,7 @@ fn run_output_view(
                         &mut mouse_event,
                         &mut input_bytes,
                         &mut search_worker,
+                        wrap_search,
                         &word_separators,
                         &bound_pasted_images,
                     )?;
@@ -3414,9 +3621,10 @@ fn run_output_view(
                 Ok(
                     Command::Text { .. }
                     | Command::Key { .. }
-                    | Command::PastePreparedBytes { .. }
-                    | Command::RawInput(_)
-                    | Command::PendingPasteOpened { .. }
+                        | Command::PastePreparedBytes { .. }
+                        | Command::RawInput(_)
+                        | Command::SetAllowPassthrough(_)
+                        | Command::PendingPasteOpened { .. }
                     | Command::UnbindPastedImage { .. },
                 ) => {}
                 Ok(Command::ArmRawOutputTap { reply, .. }) => {
@@ -3839,6 +4047,8 @@ fn run_terminal(
     let mut mouse_event = mouse::Event::new()?;
     let mut input_bytes = Vec::with_capacity(LINK_URI_SCRATCH_BYTES);
     let mut word_separators = WordSeparators::default();
+    let mut wrap_search = true;
+    let mut passthrough = PassthroughFilter::default();
     let mut active_views = ActiveTerminalViews::new();
     let mut inactive_views = InactiveTerminalViews::new();
     let mut generations = ViewportGenerations::new()?;
@@ -4244,6 +4454,12 @@ fn run_terminal(
                         )?;
                     }
                 }
+                Command::SetAllowPassthrough(next) => {
+                    passthrough.set_mode(next);
+                }
+                Command::SetWrapSearch(next) => {
+                    wrap_search = next;
+                }
                 Command::SetAppearance(next) => {
                     reported_color_scheme.set(ghostty_color_scheme(next.color_scheme));
                     apply_terminal_appearance(&mut terminal, &next)?;
@@ -4368,6 +4584,7 @@ fn run_terminal(
                                 &mut mouse_event,
                                 &mut input_bytes,
                                 &mut search_worker,
+                                wrap_search,
                                 &word_separators,
                                 pasted_image_bindings.bound_numbers(),
                             )?
@@ -4631,9 +4848,13 @@ fn run_terminal(
                                 raw_output_parse_backlog.push_back((bytes, 0));
                             } else {
                                 let started = diagnostic_timer();
-                                terminal.vt_write(&read_buffer[..length]);
-                                vt_diagnostics.record(length, started);
-                                output_pending = true;
+                                let parsed = feed_pty_output(
+                                    &mut terminal,
+                                    &mut passthrough,
+                                    &read_buffer[..length],
+                                );
+                                vt_diagnostics.record(parsed, started);
+                                output_pending |= parsed > 0;
                             }
                             burst += length;
                             spins = 0;
@@ -4682,17 +4903,17 @@ fn run_terminal(
                                 let _ = recycle_tx.try_send(buffer);
                             } else {
                                 let started = diagnostic_timer();
-                                closed_tap = closed_tap.or_else(|| {
-                                    consume_pty_output(
-                                        &mut terminal,
-                                        &mut raw_output_tap,
-                                        buffer,
-                                        length,
-                                        &recycle_tx,
-                                    )
-                                });
-                                vt_diagnostics.record(length, started);
-                                consumed_output = true;
+                                let (closed, parsed) = consume_pty_output(
+                                    &mut terminal,
+                                    &mut passthrough,
+                                    &mut raw_output_tap,
+                                    buffer,
+                                    length,
+                                    &recycle_tx,
+                                );
+                                closed_tap = closed_tap.or(closed);
+                                vt_diagnostics.record(parsed, started);
+                                consumed_output |= parsed > 0;
                             }
                         });
                     if let Some(token) = closed_tap {
@@ -4711,17 +4932,15 @@ fn run_terminal(
             }
             Wake::Deadline => {
                 let started = diagnostic_timer();
-                let backlog_before = raw_output_parse_backlog_bytes;
-                output_pending |= drain_raw_output_parse_backlog(
+                let parsed = drain_raw_output_parse_backlog(
                     &mut terminal,
+                    &mut passthrough,
                     &mut raw_output_parse_backlog,
                     &mut raw_output_parse_backlog_bytes,
                     &mut raw_output_parse_buffer,
                 );
-                vt_diagnostics.record(
-                    backlog_before.saturating_sub(raw_output_parse_backlog_bytes),
-                    started,
-                );
+                output_pending |= parsed > 0;
+                vt_diagnostics.record(parsed, started);
             }
         }
 
@@ -4739,16 +4958,18 @@ fn run_terminal(
             let had_output = {
                 let mut had_output = false;
                 while let Ok(ReaderMessage::Data { buffer, length }) = output_rx.try_recv() {
-                    if let Some(token) = consume_pty_output(
+                    let (closed, parsed) = consume_pty_output(
                         &mut terminal,
+                        &mut passthrough,
                         &mut raw_output_tap,
                         buffer,
                         length,
                         &recycle_tx,
-                    ) {
+                    );
+                    if let Some(token) = closed {
                         publisher.raw_output_tap_closed(token)?;
                     }
-                    had_output = true;
+                    had_output |= parsed > 0;
                 }
                 had_output
             };
@@ -5173,6 +5394,7 @@ fn apply_view_action(
     mouse_event: &mut mouse::Event<'_>,
     input_bytes: &mut Vec<u8>,
     search_worker: &mut SearchWorker,
+    wrap_search: bool,
     word_separators: &WordSeparators,
     bound_pasted_images: &HashSet<u32>,
 ) -> Result<ViewActionResult, WorkerError> {
@@ -5423,7 +5645,7 @@ fn apply_view_action(
                 .as_ref()
                 .is_none_or(|search| search.query.direction == SearchDirection::Forward);
             let direction = if forward ^ reverse { 1 } else { -1 };
-            step_search(search, direction);
+            step_search(search, direction, wrap_search);
             sync_copy_cursor_to_search(copy_mode, search.as_deref());
             reveal_search_for_view(terminal, copy_mode.as_deref(), search.as_deref())?;
             Ok(ViewActionResult::Snapshot)
@@ -5529,13 +5751,13 @@ fn apply_view_action(
             Ok(ViewActionResult::OverlaySnapshot)
         }
         TerminalViewAction::SearchNext => {
-            step_search(search, 1);
+            step_search(search, 1, wrap_search);
             sync_copy_cursor_to_search(copy_mode, search.as_deref());
             reveal_search_for_view(terminal, copy_mode.as_deref(), search.as_deref())?;
             Ok(ViewActionResult::Snapshot)
         }
         TerminalViewAction::SearchPrevious => {
-            step_search(search, -1);
+            step_search(search, -1, wrap_search);
             sync_copy_cursor_to_search(copy_mode, search.as_deref());
             reveal_search_for_view(terminal, copy_mode.as_deref(), search.as_deref())?;
             Ok(ViewActionResult::Snapshot)
@@ -8792,7 +9014,7 @@ fn append_history_row(
     Ok(())
 }
 
-fn step_search(search: &mut SearchSlot, direction: isize) {
+fn step_search(search: &mut SearchSlot, direction: isize, wrap: bool) {
     let Some(search) = search.as_mut() else {
         return;
     };
@@ -8802,7 +9024,11 @@ fn step_search(search: &mut SearchSlot, direction: isize) {
     }
     let len = isize::try_from(search.matches.len()).unwrap_or(isize::MAX);
     let current = isize::try_from(search.current.unwrap_or(0)).unwrap_or(0);
-    let next = (current + direction).rem_euclid(len);
+    let next = if wrap {
+        current.saturating_add(direction).rem_euclid(len)
+    } else {
+        current.saturating_add(direction).clamp(0, len - 1)
+    };
     search.current = usize::try_from(next).ok();
 }
 
@@ -9456,11 +9682,12 @@ fn read_pty(
 #[cfg(any(target_os = "linux", not(unix)))]
 fn consume_pty_output(
     terminal: &mut Terminal<'_, '_>,
+    passthrough: &mut PassthroughFilter,
     raw_output_tap: &mut Option<(u64, Sender<Arc<[u8]>>)>,
     buffer: Vec<u8>,
     length: usize,
     recycled: &Sender<Vec<u8>>,
-) -> Option<u64> {
+) -> (Option<u64>, usize) {
     log::trace!(
         target: "zz_terminal::diagnostics::pty",
         "read length={length} bytes={:?} text={:?}",
@@ -9468,9 +9695,9 @@ fn consume_pty_output(
         String::from_utf8_lossy(&buffer[..length]),
     );
     let closed_tap = tap_raw_output(raw_output_tap, &buffer[..length]);
-    terminal.vt_write(&buffer[..length]);
+    let parsed = feed_pty_output(terminal, passthrough, &buffer[..length]);
     let _ = recycled.try_send(buffer);
-    closed_tap
+    (closed_tap, parsed)
 }
 
 #[cfg(any(target_os = "linux", not(unix), test))]
@@ -9494,10 +9721,11 @@ fn tap_raw_output_arc(
 
 fn drain_raw_output_parse_backlog(
     terminal: &mut Terminal<'_, '_>,
+    passthrough: &mut PassthroughFilter,
     backlog: &mut VecDeque<(Arc<[u8]>, usize)>,
     backlog_bytes: &mut usize,
     buffer: &mut Vec<u8>,
-) -> bool {
+) -> usize {
     buffer.clear();
     while buffer.len() < RAW_OUTPUT_PARSE_TURN_BYTES {
         let Some((bytes, offset)) = backlog.front_mut() else {
@@ -9515,11 +9743,18 @@ fn drain_raw_output_parse_backlog(
         }
     }
     if buffer.is_empty() {
-        false
+        0
     } else {
-        terminal.vt_write(buffer);
-        true
+        feed_pty_output(terminal, passthrough, buffer)
     }
+}
+
+fn feed_pty_output(
+    terminal: &mut Terminal<'_, '_>,
+    passthrough: &mut PassthroughFilter,
+    bytes: &[u8],
+) -> usize {
+    passthrough.write(bytes, |unwrapped| terminal.vt_write(unwrapped))
 }
 
 #[cfg(any(target_os = "linux", not(unix), test))]
@@ -10333,6 +10568,156 @@ fn resolve_style_color(value: StyleColor, palette: &[RgbColor; 256]) -> Option<C
 mod tests {
     use super::*;
     use crate::DEFAULT_HISTORY_LIMIT;
+
+    fn filter_passthrough(mode: AllowPassthrough, chunks: &[&[u8]]) -> Vec<u8> {
+        let mut filter = PassthroughFilter::default();
+        filter.set_mode(mode);
+        let mut output = Vec::new();
+        for chunk in chunks {
+            filter.write(chunk, |bytes| output.extend_from_slice(bytes));
+        }
+        output
+    }
+
+    #[test]
+    fn passthrough_fast_path_is_one_borrowed_write_without_allocation() {
+        let input = b"ordinary terminal output without escapes";
+        let mut filter = PassthroughFilter::default();
+        let mut calls = 0;
+        let written = filter.write(input, |output| {
+            calls += 1;
+            assert!(std::ptr::eq(output.as_ptr(), input.as_ptr()));
+        });
+        assert_eq!(written, input.len());
+        assert_eq!(calls, 1);
+        assert_eq!(filter.payload.capacity(), 0);
+        assert_eq!(filter.state, PassthroughState::Ground);
+    }
+
+    #[test]
+    fn tmux_passthrough_unwraps_split_kitty_bytes_once() {
+        let output = filter_passthrough(
+            AllowPassthrough::All,
+            &[
+                b"\x1bPt",
+                b"mux;\x1b\x1b_Ga=T,f=24,s=1,v=1,i=42;/wAA\x1b",
+                b"\x1b\\\x1b\\",
+            ],
+        );
+        assert_eq!(output, b"\x1b_Ga=T,f=24,s=1,v=1,i=42;/wAA\x1b\\");
+    }
+
+    #[test]
+    fn tmux_passthrough_off_consumes_the_complete_wrapper() {
+        let output = filter_passthrough(
+            AllowPassthrough::Off,
+            &[b"before\x1bPtm", b"ux;hidden\x1b", b"\\after"],
+        );
+        assert_eq!(output, b"beforeafter");
+    }
+
+    #[test]
+    fn tmux_passthrough_un_doubles_payload_escapes() {
+        let output = filter_passthrough(
+            AllowPassthrough::All,
+            &[b"\x1bPtmux;one\x1b", b"\x1b[31mtwo\x1b\\"],
+        );
+        assert_eq!(output, b"one\x1b[31mtwo");
+    }
+
+    #[test]
+    fn tmux_passthrough_drops_a_single_dcs_escape_byte() {
+        let output =
+            filter_passthrough(AllowPassthrough::All, &[b"\x1bPtmux;one\x1b[31mtwo\x1b\\"]);
+        assert_eq!(output, b"one[31mtwo");
+    }
+
+    #[test]
+    fn oversized_tmux_passthrough_is_discarded_bounded_and_released() {
+        for (name, mode) in [
+            ("off", AllowPassthrough::Off),
+            ("on", AllowPassthrough::All),
+            ("all", AllowPassthrough::All),
+        ] {
+            let mut filter = PassthroughFilter::default();
+            filter.set_mode(mode);
+            let mut output = Vec::new();
+            filter.write(TMUX_PASSTHROUGH_PREFIX, |bytes| {
+                output.extend_from_slice(bytes);
+            });
+            let payload = vec![b'x'; MAX_TMUX_PASSTHROUGH_PAYLOAD_BYTES];
+            filter.write(&payload, |bytes| output.extend_from_slice(bytes));
+            assert_eq!(filter.payload.len(), MAX_TMUX_PASSTHROUGH_PAYLOAD_BYTES);
+            filter.write(b"y", |bytes| output.extend_from_slice(bytes));
+            assert!(
+                matches!(filter.state, PassthroughState::Discard { .. }),
+                "{name}"
+            );
+            assert_eq!(filter.payload.capacity(), 0, "{name}");
+            filter.write(b"still hidden", |bytes| output.extend_from_slice(bytes));
+            assert!(output.is_empty(), "{name}");
+            filter.write(b"\x1b\\after", |bytes| output.extend_from_slice(bytes));
+            assert_eq!(output, b"after", "{name}");
+            assert_eq!(filter.state, PassthroughState::Ground, "{name}");
+            assert_eq!(filter.payload.capacity(), 0, "{name}");
+        }
+    }
+
+    #[test]
+    fn non_tmux_sixel_and_control_dcs_pass_through_in_every_effective_mode() {
+        for input in [
+            b"\x1bPq#0;2;0;0;0~\x1b\\".as_slice(),
+            b"\x1bP1000pbegin %1 1 0\x1b\\".as_slice(),
+        ] {
+            for (name, mode) in [
+                ("off", AllowPassthrough::Off),
+                ("on", AllowPassthrough::All),
+                ("all", AllowPassthrough::All),
+            ] {
+                assert_eq!(filter_passthrough(mode, &[input]), input, "{name}");
+                for split in 0..=input.len() {
+                    assert_eq!(
+                        filter_passthrough(mode, &[&input[..split], &input[split..]]),
+                        input,
+                        "{name} split={split}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn search_stepping_clamps_when_wrapping_is_disabled() {
+        let matches = vec![
+            SearchMatch {
+                row: 0,
+                start: 0,
+                end: 1,
+            },
+            SearchMatch {
+                row: 1,
+                start: 0,
+                end: 1,
+            },
+            SearchMatch {
+                row: 2,
+                start: 0,
+                end: 1,
+            },
+        ];
+        let mut search = Some(Box::new(SearchState {
+            matches,
+            current: Some(2),
+            ..SearchState::default()
+        }));
+
+        step_search(&mut search, 1, false);
+        assert_eq!(search.as_ref().and_then(|search| search.current), Some(2));
+        step_search(&mut search, -4, false);
+        assert_eq!(search.as_ref().and_then(|search| search.current), Some(0));
+        step_search(&mut search, -1, true);
+        assert_eq!(search.as_ref().and_then(|search| search.current), Some(2));
+    }
 
     fn snapshot_fixture(terminal: &Terminal<'_, '_>) -> TerminalViewport {
         let mut render_state = RenderState::new().expect("render state");

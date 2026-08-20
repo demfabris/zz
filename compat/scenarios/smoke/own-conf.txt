@@ -1,6 +1,6 @@
 # Array options are accepted as retained compatibility data even though zz does
 # not consume them yet; the warning assertion covers only loud skips.
-expect-warn: zz skipped 6 unsupported tmux commands: set-option detach-on-destroy, set-option extended-keys, set-option status-keys, set-option allow-passthrough, set-option set-titles, set-option set-titles-string
+expect-warn: zz skipped 5 unsupported tmux commands: set-option detach-on-destroy, set-option extended-keys, set-option status-keys, set-option set-titles, set-option set-titles-string
 conf: fixtures/own.conf
 keys: root M-Tab
 keys: prefix b

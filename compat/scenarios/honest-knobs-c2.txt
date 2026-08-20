@@ -1,0 +1,27 @@
+out: show-window-options -gv wrap-search
+out: show-window-options -gv allow-passthrough
+out: show-window-options -gv alternate-screen
+out: show-window-options -gv cursor-colour
+out: show-window-options -gv cursor-style
+out: show-window-options -gv scroll-on-clear
+set-window-option -g wrap-search off
+set-window-option -g allow-passthrough on
+out: show-window-options -gv allow-passthrough
+set-window-option -g allow-passthrough all
+out: show-window-options -gv allow-passthrough
+set-window-option -g alternate-screen off
+set-window-option -g cursor-colour "sky blue"
+set-window-option -g cursor-style blinking-bar
+set-window-option -g scroll-on-clear off
+out: show-window-options -gv wrap-search
+out: show-window-options -gv alternate-screen
+out: show-window-options -gv cursor-colour
+out: show-window-options -gv cursor-style
+out: show-window-options -gv scroll-on-clear
+set-window-option -g wrap-search maybe
+set-window-option -g allow-passthrough maybe
+set-window-option -g alternate-screen maybe
+set-window-option -g cursor-colour not-a-colour
+set-window-option -g cursor-colour
+set-window-option -g cursor-style Blinking-Bar
+set-window-option -g scroll-on-clear maybe

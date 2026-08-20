@@ -411,7 +411,9 @@ fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
         | "tiled-layout-max-columns" => TmuxOptionDefault::Scalar("0"),
         "bell-action" => TmuxOptionDefault::Scalar("any"),
         "buffer-limit" => TmuxOptionDefault::Scalar("50"),
-        "copy-command" | "default-command" | "history-file" => TmuxOptionDefault::String(""),
+        "copy-command" | "cursor-colour" | "default-command" | "history-file" => {
+            TmuxOptionDefault::String("")
+        }
         "default-size" => TmuxOptionDefault::String("80x24"),
         "default-shell" => TmuxOptionDefault::String("/bin/sh"),
         "display-panes-time" | "message-limit" => TmuxOptionDefault::Scalar("1000"),
@@ -430,16 +432,16 @@ fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
         }
         "menu-selected-style" => TmuxOptionDefault::String("bg=themeyellow,fg=themeblack"),
         "menu-style" | "popup-style" => TmuxOptionDefault::String("bg=themedarkgrey,fg=themewhite"),
-        "aggressive-resize" | "allow-rename" | "focus-events" | "renumber-windows"
-        | "synchronize-panes" | "remain-on-exit" | "visual-bell" => {
+        "aggressive-resize" | "allow-passthrough" | "allow-rename" | "focus-events"
+        | "renumber-windows" | "synchronize-panes" | "remain-on-exit" | "visual-bell" => {
             TmuxOptionDefault::Scalar("off")
         }
+        "cursor-style" => TmuxOptionDefault::Scalar("default"),
         "prefix" => TmuxOptionDefault::Scalar("C-b"),
         "repeat-time" => TmuxOptionDefault::Scalar("500"),
         "set-clipboard" => TmuxOptionDefault::Scalar("external"),
-        "allow-set-title" | "status" | "automatic-rename" | "mouse" => {
-            TmuxOptionDefault::Scalar("on")
-        }
+        "allow-set-title" | "alternate-screen" | "scroll-on-clear" | "status"
+        | "automatic-rename" | "mouse" | "wrap-search" => TmuxOptionDefault::Scalar("on"),
         "status-interval" => TmuxOptionDefault::Scalar("15"),
         "status-left" => TmuxOptionDefault::String(STATUS_LEFT_DEFAULT),
         "status-right" => TmuxOptionDefault::String(STATUS_RIGHT_DEFAULT),
@@ -703,9 +705,15 @@ mod tests {
                 ("popup-border-lines", TmuxOptionDefault::Scalar("single")),
                 ("tiled-layout-max-columns", TmuxOptionDefault::Scalar("0"),),
                 ("window-size", TmuxOptionDefault::Scalar("latest")),
+                ("wrap-search", TmuxOptionDefault::Scalar("on")),
+                ("allow-passthrough", TmuxOptionDefault::Scalar("off")),
                 ("allow-rename", TmuxOptionDefault::Scalar("off")),
                 ("allow-set-title", TmuxOptionDefault::Scalar("on")),
+                ("alternate-screen", TmuxOptionDefault::Scalar("on")),
+                ("cursor-colour", TmuxOptionDefault::String("")),
+                ("cursor-style", TmuxOptionDefault::Scalar("default")),
                 ("remain-on-exit", TmuxOptionDefault::Scalar("off")),
+                ("scroll-on-clear", TmuxOptionDefault::Scalar("on")),
                 ("synchronize-panes", TmuxOptionDefault::Scalar("off")),
             ]
         );

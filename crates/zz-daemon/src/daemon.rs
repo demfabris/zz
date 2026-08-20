@@ -21,9 +21,9 @@ use parking_lot::{Condvar, Mutex};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     CellLayout, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision,
-    KeyEngine, KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts, WindowSize,
-    canonical_command, command_block_body, display_width, expand_format_values, expand_status,
-    hook_format_variables, if_shell_truthy,
+    KeyEngine, KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts, TmuxColour,
+    WindowSize, canonical_command, command_block_body, display_width, expand_format_values,
+    expand_status, hook_format_variables, if_shell_truthy, parse_tmux_colour,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -43,10 +43,11 @@ use zz_protocol::{
 };
 use zz_terminal::{
     AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance, CaptureBoundary,
-    CaptureOptions, ClipboardTarget, LastCommandCapture, PasteBufferAction, RawOutputTapError,
-    TerminalAppearance, TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch,
-    TerminalEvent, TerminalMode, TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId,
-    TerminalViewport, WordSeparators, apply_appearance_overrides, prepare_paste_buffer,
+    CaptureOptions, ClipboardTarget, Color, CursorBlinkPolicy, CursorStyle, LastCommandCapture,
+    PasteBufferAction, RawOutputTapError, TerminalAppearance, TerminalCaptureError,
+    TerminalColorScheme, TerminalDiffScratch, TerminalEvent, TerminalMode, TerminalSession,
+    TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport, WordSeparators,
+    apply_appearance_overrides, parse_x11_color, prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -396,6 +397,124 @@ fn resolve_appearance(
     entries: &[ConfigOverrideEntry],
 ) -> AppearanceLoad {
     apply_appearance_overrides(AppearanceLoad::defaults_for(color_scheme), entries)
+}
+
+const CURSOR_STYLE_OVERRIDES: [(&str, Option<(CursorStyle, CursorBlinkPolicy)>); 7] = [
+    ("default", None),
+    (
+        "blinking-block",
+        Some((CursorStyle::Block, CursorBlinkPolicy::On)),
+    ),
+    ("block", Some((CursorStyle::Block, CursorBlinkPolicy::Off))),
+    (
+        "blinking-underline",
+        Some((CursorStyle::Underline, CursorBlinkPolicy::On)),
+    ),
+    (
+        "underline",
+        Some((CursorStyle::Underline, CursorBlinkPolicy::Off)),
+    ),
+    (
+        "blinking-bar",
+        Some((CursorStyle::Bar, CursorBlinkPolicy::On)),
+    ),
+    ("bar", Some((CursorStyle::Bar, CursorBlinkPolicy::Off))),
+];
+
+struct ResolvedTerminalWorkerOptions {
+    appearance: Arc<TerminalAppearance>,
+    allow_passthrough: bool,
+    wrap_search: bool,
+}
+
+fn terminal_worker_options(
+    engine: &MuxEngine,
+    base_appearance: &Arc<TerminalAppearance>,
+    pane: PaneId,
+) -> Result<ResolvedTerminalWorkerOptions, ServerError> {
+    let options = engine.terminal_worker_options_for_pane(pane)?;
+    Ok(ResolvedTerminalWorkerOptions {
+        appearance: pane_terminal_appearance(
+            base_appearance,
+            options.cursor_style,
+            &options.cursor_colour,
+        ),
+        allow_passthrough: options.allow_passthrough,
+        wrap_search: options.wrap_search,
+    })
+}
+
+fn pane_terminal_appearance(
+    base: &Arc<TerminalAppearance>,
+    cursor_style: &str,
+    cursor_colour: &str,
+) -> Arc<TerminalAppearance> {
+    let cursor_style = CURSOR_STYLE_OVERRIDES
+        .iter()
+        .find_map(|(candidate, mapped)| (*candidate == cursor_style).then_some(*mapped))
+        .flatten();
+    let resolved_color = pane_cursor_color(base, cursor_colour);
+    if cursor_style.is_none() && resolved_color.is_none() {
+        return Arc::clone(base);
+    }
+    let mut appearance = (**base).clone();
+    if let Some((style, blink)) = cursor_style {
+        appearance.cursor_style = style;
+        appearance.cursor_blink_policy = blink;
+    }
+    if let Some(color) = resolved_color {
+        appearance.cursor_color = color;
+    }
+    Arc::new(appearance)
+}
+
+fn pane_cursor_color(appearance: &TerminalAppearance, value: &str) -> Option<Color> {
+    if let Some(color) = parse_x11_color(value)
+        && value.chars().any(char::is_whitespace)
+    {
+        return Some(color);
+    }
+    let colour = parse_tmux_colour(value)?;
+    match colour {
+        TmuxColour::Basic(index) | TmuxColour::Indexed(index) => appearance
+            .palette
+            .as_array()
+            .get(usize::from(index))
+            .copied(),
+        TmuxColour::Rgb(value) => Some(Color::rgb(
+            u8::try_from((value >> 16) & 0xff).expect("red component is one byte"),
+            u8::try_from((value >> 8) & 0xff).expect("green component is one byte"),
+            u8::try_from(value & 0xff).expect("blue component is one byte"),
+        )),
+        TmuxColour::Theme(index) => [0, 7, 7, 0, 2, 3, 1, 4, 6, 5]
+            .get(usize::from(index))
+            .and_then(|index| appearance.palette.as_array().get(*index))
+            .copied(),
+        TmuxColour::Default | TmuxColour::Terminal => None,
+    }
+}
+
+fn terminal_appearance_updates(
+    inner: &ServerState,
+) -> Vec<(Arc<TerminalSession>, Arc<TerminalAppearance>)> {
+    let mut updates = Vec::with_capacity(inner.terminals.len() + inner.command_outputs.len());
+    for (pane, terminal) in &inner.terminals {
+        let appearance = terminal_worker_options(&inner.engine, &inner.appearance, *pane)
+            .map_or_else(
+                |_| Arc::clone(&inner.appearance),
+                |options| options.appearance,
+            );
+        updates.push((Arc::clone(terminal), appearance));
+    }
+    for output in inner.command_outputs.values() {
+        let appearance = terminal_worker_options(&inner.engine, &inner.appearance, output.pane)
+            .map_or_else(
+                |_| Arc::clone(&inner.appearance),
+                |options| options.appearance,
+            );
+        updates.push((Arc::clone(&output.terminal), appearance));
+    }
+    updates
 }
 
 fn log_appearance_load(reason: &str, load: &AppearanceLoad) {
@@ -1759,6 +1878,8 @@ struct Shared {
     load_user_config: bool,
     paste_directory: PathBuf,
     socket_path: PathBuf,
+    #[cfg(test)]
+    delivered_wrap_search_commands: Mutex<Vec<bool>>,
     #[cfg(unix)]
     tmux_shim: Mutex<Option<TmuxShimGuard>>,
 }
@@ -2536,6 +2657,8 @@ impl Shared {
             load_user_config,
             paste_directory,
             socket_path,
+            #[cfg(test)]
+            delivered_wrap_search_commands: Mutex::new(Vec::new()),
             #[cfg(unix)]
             tmux_shim: Mutex::new(None),
         }
@@ -3798,7 +3921,9 @@ impl Shared {
                             .as_deref()
                             .map(|path| path.to_string_lossy().into_owned())
                             .unwrap_or_default();
-                        let appearance = Arc::clone(&inner.appearance);
+                        let terminal_options =
+                            terminal_worker_options(&inner.engine, &inner.appearance, *pane)?;
+                        let appearance = Arc::clone(&terminal_options.appearance);
                         let pane_session = inner
                             .engine
                             .state
@@ -3860,6 +3985,16 @@ impl Shared {
                                 separators: word_separators,
                             },
                         );
+                        deferred_terminal_commands.push(
+                            DeferredTerminalCommand::SetAllowPassthrough {
+                                terminal: Arc::clone(&session),
+                                enabled: terminal_options.allow_passthrough,
+                            },
+                        );
+                        deferred_terminal_commands.push(DeferredTerminalCommand::SetWrapSearch {
+                            terminal: Arc::clone(&session),
+                            enabled: terminal_options.wrap_search,
+                        });
                         inner.terminals.insert(*pane, Arc::clone(&session));
                         inner.terminal_spawns.insert(*pane, spawn);
                         inner.engine.set_pane_runtime_facts_with_hooks(
@@ -3925,7 +4060,9 @@ impl Shared {
                             .as_deref()
                             .map(|path| path.to_string_lossy().into_owned())
                             .unwrap_or_default();
-                        let appearance = Arc::clone(&inner.appearance);
+                        let terminal_options =
+                            terminal_worker_options(&inner.engine, &inner.appearance, *pane)?;
+                        let appearance = Arc::clone(&terminal_options.appearance);
                         let pane_session = inner
                             .engine
                             .state
@@ -3992,6 +4129,16 @@ impl Shared {
                                 separators: word_separators,
                             },
                         );
+                        deferred_terminal_commands.push(
+                            DeferredTerminalCommand::SetAllowPassthrough {
+                                terminal: Arc::clone(&session),
+                                enabled: terminal_options.allow_passthrough,
+                            },
+                        );
+                        deferred_terminal_commands.push(DeferredTerminalCommand::SetWrapSearch {
+                            terminal: Arc::clone(&session),
+                            enabled: terminal_options.wrap_search,
+                        });
                         inner.terminals.insert(*pane, Arc::clone(&session));
                         inner.terminal_spawns.insert(*pane, spawn);
                         inner.engine.set_pane_runtime_facts_with_hooks(
@@ -4126,6 +4273,8 @@ impl Shared {
                     }
                     MuxEffect::PaneRelocated { pane, from, to } => {
                         if let Some(terminal) = inner.terminals.get(pane).cloned() {
+                            let terminal_options =
+                                terminal_worker_options(&inner.engine, &inner.appearance, *pane)?;
                             deferred_terminal_commands.push(
                                 DeferredTerminalCommand::SetWordSeparators {
                                     terminal: Arc::clone(&terminal),
@@ -4134,11 +4283,49 @@ impl Shared {
                                     ),
                                 },
                             );
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetAllowPassthrough {
+                                    terminal: Arc::clone(&terminal),
+                                    enabled: terminal_options.allow_passthrough,
+                                },
+                            );
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetWrapSearch {
+                                    terminal: Arc::clone(&terminal),
+                                    enabled: terminal_options.wrap_search,
+                                },
+                            );
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetAppearance {
+                                    terminal: Arc::clone(&terminal),
+                                    appearance: terminal_options.appearance,
+                                },
+                            );
                             relocated_terminal_views.push((
                                 terminal,
                                 inner.attached.get(from).cloned().unwrap_or_default(),
                                 inner.attached.get(to).cloned().unwrap_or_default(),
                             ));
+                        }
+                        for output in inner
+                            .command_outputs
+                            .values()
+                            .filter(|output| output.pane == *pane)
+                        {
+                            let terminal_options =
+                                terminal_worker_options(&inner.engine, &inner.appearance, *pane)?;
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetWrapSearch {
+                                    terminal: Arc::clone(&output.terminal),
+                                    enabled: terminal_options.wrap_search,
+                                },
+                            );
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetAppearance {
+                                    terminal: Arc::clone(&output.terminal),
+                                    appearance: terminal_options.appearance,
+                                },
+                            );
                         }
                     }
                     MuxEffect::SendKeys { pane, keys } => {
@@ -4467,6 +4654,66 @@ impl Shared {
                             );
                         }
                     }
+                    MuxEffect::TerminalKnobsChanged { window, pane } => {
+                        for (candidate, terminal) in &inner.terminals {
+                            if pane.is_some_and(|pane| pane != *candidate)
+                                || window.is_some_and(|window| {
+                                    inner.engine.state.window_for_pane(*candidate) != Some(window)
+                                })
+                            {
+                                continue;
+                            }
+                            let terminal_options = terminal_worker_options(
+                                &inner.engine,
+                                &inner.appearance,
+                                *candidate,
+                            )?;
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetAllowPassthrough {
+                                    terminal: Arc::clone(terminal),
+                                    enabled: terminal_options.allow_passthrough,
+                                },
+                            );
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetWrapSearch {
+                                    terminal: Arc::clone(terminal),
+                                    enabled: terminal_options.wrap_search,
+                                },
+                            );
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetAppearance {
+                                    terminal: Arc::clone(terminal),
+                                    appearance: terminal_options.appearance,
+                                },
+                            );
+                        }
+                        for output in inner.command_outputs.values() {
+                            if pane.is_some_and(|pane| pane != output.pane)
+                                || window.is_some_and(|window| {
+                                    inner.engine.state.window_for_pane(output.pane) != Some(window)
+                                })
+                            {
+                                continue;
+                            }
+                            let terminal_options = terminal_worker_options(
+                                &inner.engine,
+                                &inner.appearance,
+                                output.pane,
+                            )?;
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetWrapSearch {
+                                    terminal: Arc::clone(&output.terminal),
+                                    enabled: terminal_options.wrap_search,
+                                },
+                            );
+                            deferred_terminal_commands.push(
+                                DeferredTerminalCommand::SetAppearance {
+                                    terminal: Arc::clone(&output.terminal),
+                                    appearance: terminal_options.appearance,
+                                },
+                            );
+                        }
+                    }
                     MuxEffect::ModeKeysChanged { window } => {
                         retarget_copy_mode_tables(&mut inner, *window);
                     }
@@ -4605,7 +4852,13 @@ impl Shared {
         self.refresh_control_output_taps();
 
         for command in deferred_terminal_commands {
+            #[cfg(test)]
+            let wrap_search = command.wrap_search();
             command.run();
+            #[cfg(test)]
+            if let Some(enabled) = wrap_search {
+                self.delivered_wrap_search_commands.lock().push(enabled);
+            }
         }
         for terminal in cleared_bells {
             terminal.clear_bell();
@@ -10589,22 +10842,8 @@ impl Shared {
         }
         self.close_popup(client, true);
         let text = bounded_command_output(text);
-        let appearance = Arc::clone(&self.inner.lock().appearance);
-        let terminal = Arc::new(TerminalSession::spawn_output_view_with_appearance(
-            title, text, appearance,
-        ));
-        let view = TerminalViewId(client.0);
-
-        let (
-            pane,
-            replaced,
-            choose_tree_closed,
-            choose_buffer_closed,
-            display_panes_closed,
-            command_prompt_closed,
-            word_separators,
-        ) = {
-            let mut inner = self.inner.lock();
+        let (pane, word_separators, terminal_options) = {
+            let inner = self.inner.lock();
             if !inner.subscribers.contains_key(&client) {
                 return Err(ServerError::InvalidCommand(
                     "command output requires an interactive client".to_owned(),
@@ -10615,7 +10854,37 @@ impl Shared {
                 .filter(|pane| inner.engine.state.window_for_pane(*pane).is_some())
                 .or_else(|| client_context_pane(&inner, client))
                 .ok_or_else(|| ServerError::MissingTarget("current pane".to_owned()))?;
-            let word_separators = WordSeparators::new(inner.engine.word_separators_for_pane(pane)?);
+            (
+                pane,
+                WordSeparators::new(inner.engine.word_separators_for_pane(pane)?),
+                terminal_worker_options(&inner.engine, &inner.appearance, pane)?,
+            )
+        };
+        let terminal = Arc::new(TerminalSession::spawn_output_view_with_appearance(
+            title,
+            text,
+            Arc::clone(&terminal_options.appearance),
+        ));
+        terminal.set_wrap_search(terminal_options.wrap_search);
+        let view = TerminalViewId(client.0);
+
+        let (
+            replaced,
+            choose_tree_closed,
+            choose_buffer_closed,
+            display_panes_closed,
+            command_prompt_closed,
+        ) = {
+            let mut inner = self.inner.lock();
+            if !inner.subscribers.contains_key(&client) {
+                return Err(ServerError::InvalidCommand(
+                    "command output requires an interactive client".to_owned(),
+                )
+                .into());
+            }
+            if inner.engine.state.window_for_pane(pane).is_none() {
+                return Err(ServerError::MissingTarget(pane.to_string()).into());
+            }
             let choose_tree_closed = inner.choose_trees.remove(&client).is_some();
             let choose_buffer_closed = inner.choose_buffers.remove(&client).is_some();
             let display_panes_closed = take_display_panes(&mut inner, client).is_some();
@@ -10647,13 +10916,11 @@ impl Shared {
                 },
             );
             (
-                pane,
                 replaced,
                 choose_tree_closed,
                 choose_buffer_closed,
                 display_panes_closed,
                 command_prompt_closed,
-                word_separators,
             )
         };
 
@@ -12278,17 +12545,7 @@ impl Shared {
                 inner.appearance = Arc::clone(&appearance);
                 inner.appearance_provenance.clone_from(&provenance);
                 let terminals = if changed {
-                    inner
-                        .terminals
-                        .values()
-                        .chain(
-                            inner
-                                .command_outputs
-                                .values()
-                                .map(|output| &output.terminal),
-                        )
-                        .cloned()
-                        .collect::<Vec<_>>()
+                    terminal_appearance_updates(&inner)
                 } else {
                     Vec::new()
                 };
@@ -12300,8 +12557,8 @@ impl Shared {
                 appearance_entries.len(),
             );
             if changed {
-                for terminal in terminals {
-                    terminal.set_appearance(Arc::clone(&appearance));
+                for (terminal, pane_appearance) in terminals {
+                    terminal.set_appearance(pane_appearance);
                 }
                 self.publish(EventPayload::AppearanceChanged {
                     appearance: Box::new((*appearance).clone()),
@@ -12435,20 +12692,10 @@ impl Shared {
             }
             inner.appearance = Arc::clone(&appearance);
             inner.appearance_provenance.clone_from(&provenance);
-            inner
-                .terminals
-                .values()
-                .chain(
-                    inner
-                        .command_outputs
-                        .values()
-                        .map(|output| &output.terminal),
-                )
-                .cloned()
-                .collect::<Vec<_>>()
+            terminal_appearance_updates(&inner)
         };
-        for terminal in terminals {
-            terminal.set_appearance(Arc::clone(&appearance));
+        for (terminal, pane_appearance) in terminals {
+            terminal.set_appearance(pane_appearance);
         }
         self.publish(EventPayload::AppearanceChanged {
             appearance: Box::new((*appearance).clone()),
@@ -12505,20 +12752,10 @@ impl Shared {
             inner.active_color_scheme = color_scheme;
             inner.appearance = Arc::clone(&appearance);
             inner.appearance_provenance.clone_from(&provenance);
-            inner
-                .terminals
-                .values()
-                .chain(
-                    inner
-                        .command_outputs
-                        .values()
-                        .map(|output| &output.terminal),
-                )
-                .cloned()
-                .collect::<Vec<_>>()
+            terminal_appearance_updates(&inner)
         };
-        for terminal in terminals {
-            terminal.set_appearance(Arc::clone(&appearance));
+        for (terminal, pane_appearance) in terminals {
+            terminal.set_appearance(pane_appearance);
         }
         self.publish(EventPayload::AppearanceChanged {
             appearance: Box::new((*appearance).clone()),
@@ -16324,6 +16561,18 @@ enum DeferredTerminalCommand {
         terminal: Arc<TerminalSession>,
         separators: WordSeparators,
     },
+    SetAllowPassthrough {
+        terminal: Arc<TerminalSession>,
+        enabled: bool,
+    },
+    SetWrapSearch {
+        terminal: Arc<TerminalSession>,
+        enabled: bool,
+    },
+    SetAppearance {
+        terminal: Arc<TerminalSession>,
+        appearance: Arc<TerminalAppearance>,
+    },
     AttachView {
         terminal: Arc<TerminalSession>,
         view: TerminalViewId,
@@ -16344,12 +16593,28 @@ enum DeferredTerminalCommand {
 }
 
 impl DeferredTerminalCommand {
+    #[cfg(test)]
+    const fn wrap_search(&self) -> Option<bool> {
+        match self {
+            Self::SetWrapSearch { enabled, .. } => Some(*enabled),
+            _ => None,
+        }
+    }
+
     fn run(self) {
         match self {
             Self::SetWordSeparators {
                 terminal,
                 separators,
             } => terminal.set_word_separators(separators),
+            Self::SetAllowPassthrough { terminal, enabled } => {
+                terminal.set_allow_passthrough(enabled);
+            }
+            Self::SetWrapSearch { terminal, enabled } => terminal.set_wrap_search(enabled),
+            Self::SetAppearance {
+                terminal,
+                appearance,
+            } => terminal.set_appearance(appearance),
             Self::AttachView { terminal, view } => terminal.attach_view(view),
             Self::Resize { terminal, geometry } => terminal.resize(
                 geometry.columns,
@@ -20741,6 +21006,37 @@ mod tests {
     }
 
     #[test]
+    fn pane_cursor_options_clone_only_for_concrete_overrides() {
+        let base = Arc::new(TerminalAppearance::default());
+        assert!(Arc::ptr_eq(
+            &pane_terminal_appearance(&base, "default", ""),
+            &base
+        ));
+
+        for (cursor_style, expected_style, expected_blink) in [
+            ("blinking-block", CursorStyle::Block, CursorBlinkPolicy::On),
+            ("block", CursorStyle::Block, CursorBlinkPolicy::Off),
+            (
+                "blinking-underline",
+                CursorStyle::Underline,
+                CursorBlinkPolicy::On,
+            ),
+            ("underline", CursorStyle::Underline, CursorBlinkPolicy::Off),
+            ("blinking-bar", CursorStyle::Bar, CursorBlinkPolicy::On),
+            ("bar", CursorStyle::Bar, CursorBlinkPolicy::Off),
+        ] {
+            let appearance = pane_terminal_appearance(&base, cursor_style, "");
+            assert_eq!(appearance.cursor_style, expected_style);
+            assert_eq!(appearance.cursor_blink_policy, expected_blink);
+        }
+
+        let indexed = pane_terminal_appearance(&base, "default", "colour42");
+        assert_eq!(indexed.cursor_color, base.palette.as_array()[42]);
+        let x11 = pane_terminal_appearance(&base, "default", "sky blue");
+        assert_eq!(x11.cursor_color, Color::rgb(135, 206, 235));
+    }
+
+    #[test]
     fn custom_appearance_reaches_hello_and_both_terminal_actor_kinds() {
         let appearance = TerminalAppearance {
             font_families: vec!["Review Fixture Mono".to_owned()],
@@ -22871,6 +23167,66 @@ mod tests {
             .expect("runtime prefix");
         assert_eq!(runtime.value, "C-z");
         assert_eq!(runtime.source, MuxOptionSource::RuntimeCommand);
+    }
+
+    #[test]
+    fn same_session_join_delivers_destination_wrap_search_to_the_worker() {
+        let shared = Arc::new(Shared::new(53));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(3),
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "work", "-n", "source"]),
+            )
+            .expect("source window");
+        let source = context.pane.expect("source pane");
+        let source_window = context.window.expect("source window");
+        shared
+            .execute(
+                ClientId(3),
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-t", &source_window.to_string(), "wrap-search", "off"],
+                ),
+            )
+            .expect("disable source wrapping");
+        shared
+            .execute(
+                ClientId(3),
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-window", ["-n", "destination"]),
+            )
+            .expect("destination window");
+        let target = context.pane.expect("target pane");
+        shared.delivered_wrap_search_commands.lock().clear();
+
+        shared
+            .execute(
+                ClientId(3),
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "join-pane",
+                    ["-d", "-s", &source.to_string(), "-t", &target.to_string()],
+                ),
+            )
+            .expect("join into destination window");
+
+        assert!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .terminal_worker_options_for_pane(source)
+                .expect("joined pane options")
+                .wrap_search
+        );
+        assert_eq!(*shared.delivered_wrap_search_commands.lock(), [true]);
     }
 
     #[test]

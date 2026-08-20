@@ -80,6 +80,72 @@ pub enum WindowSize {
     Latest,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum AllowPassthrough {
+    #[default]
+    Off,
+    On,
+    All,
+}
+
+impl AllowPassthrough {
+    #[must_use]
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::On => "on",
+            Self::All => "all",
+        }
+    }
+
+    const fn toggled(self) -> Self {
+        match self {
+            Self::Off => Self::On,
+            Self::On => Self::Off,
+            Self::All => Self::All,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PaneCursorStyle {
+    #[default]
+    Default,
+    BlinkingBlock,
+    Block,
+    BlinkingUnderline,
+    Underline,
+    BlinkingBar,
+    Bar,
+}
+
+impl PaneCursorStyle {
+    #[must_use]
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::BlinkingBlock => "blinking-block",
+            Self::Block => "block",
+            Self::BlinkingUnderline => "blinking-underline",
+            Self::Underline => "underline",
+            Self::BlinkingBar => "blinking-bar",
+            Self::Bar => "bar",
+        }
+    }
+
+    const fn toggled(self) -> Self {
+        match self {
+            Self::Default => Self::BlinkingBlock,
+            Self::BlinkingBlock => Self::Default,
+            Self::Block
+            | Self::BlinkingUnderline
+            | Self::Underline
+            | Self::BlinkingBar
+            | Self::Bar => self,
+        }
+    }
+}
+
 impl WindowSize {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -356,6 +422,7 @@ pub(crate) enum WindowOption {
     OtherPaneWidth,
     TiledLayoutMaxColumns,
     WindowSize,
+    WrapSearch,
 }
 
 impl WindowOption {
@@ -367,6 +434,7 @@ impl WindowOption {
             "other-pane-width" => Self::OtherPaneWidth,
             "tiled-layout-max-columns" => Self::TiledLayoutMaxColumns,
             "window-size" => Self::WindowSize,
+            "wrap-search" => Self::WrapSearch,
             _ => return None,
         })
     }
@@ -379,6 +447,7 @@ impl WindowOption {
             Self::OtherPaneWidth => "other-pane-width",
             Self::TiledLayoutMaxColumns => "tiled-layout-max-columns",
             Self::WindowSize => "window-size",
+            Self::WrapSearch => "wrap-search",
         }
     }
 
@@ -397,6 +466,7 @@ impl WindowOption {
 pub(crate) struct WindowOptions {
     pub(crate) preset: PresetOptions,
     pub(crate) window_size: WindowSize,
+    pub(crate) wrap_search: bool,
 }
 
 impl Default for WindowOptions {
@@ -404,6 +474,7 @@ impl Default for WindowOptions {
         Self {
             preset: PresetOptions::default(),
             window_size: WindowSize::Latest,
+            wrap_search: true,
         }
     }
 }
@@ -417,6 +488,7 @@ impl WindowOptions {
             WindowOption::OtherPaneWidth => self.preset.other_pane_width.clone(),
             WindowOption::TiledLayoutMaxColumns => self.preset.tiled_layout_max_columns.to_string(),
             WindowOption::WindowSize => self.window_size.as_str().to_owned(),
+            WindowOption::WrapSearch => flag(self.wrap_search).to_owned(),
         }
     }
 
@@ -444,6 +516,7 @@ impl WindowOptions {
                 defaults.preset.tiled_layout_max_columns,
             ),
             WindowOption::WindowSize => replace(&mut self.window_size, defaults.window_size),
+            WindowOption::WrapSearch => replace(&mut self.wrap_search, defaults.wrap_search),
         }
     }
 
@@ -474,63 +547,118 @@ impl WindowOptions {
                 let next = parse_window_size(value, self.window_size)?;
                 Ok(replace(&mut self.window_size, next))
             }
+            WindowOption::WrapSearch => {
+                let next = parse_flag(value, self.wrap_search)?;
+                Ok(replace(&mut self.wrap_search, next))
+            }
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum PaneOption {
+    AllowPassthrough,
     AllowRename,
     AllowSetTitle,
+    AlternateScreen,
+    CursorColour,
+    CursorStyle,
+    ScrollOnClear,
 }
 
 impl PaneOption {
     pub(crate) fn from_name(name: &str) -> Option<Self> {
         Some(match name {
+            "allow-passthrough" => Self::AllowPassthrough,
             "allow-rename" => Self::AllowRename,
             "allow-set-title" => Self::AllowSetTitle,
+            "alternate-screen" => Self::AlternateScreen,
+            "cursor-colour" => Self::CursorColour,
+            "cursor-style" => Self::CursorStyle,
+            "scroll-on-clear" => Self::ScrollOnClear,
             _ => return None,
         })
     }
 
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
+            Self::AllowPassthrough => "allow-passthrough",
             Self::AllowRename => "allow-rename",
             Self::AllowSetTitle => "allow-set-title",
+            Self::AlternateScreen => "alternate-screen",
+            Self::CursorColour => "cursor-colour",
+            Self::CursorStyle => "cursor-style",
+            Self::ScrollOnClear => "scroll-on-clear",
         }
+    }
+
+    pub(crate) const fn is_string(self) -> bool {
+        matches!(self, Self::CursorColour)
+    }
+
+    pub(crate) const fn updates_terminal_worker(self) -> bool {
+        matches!(
+            self,
+            Self::AllowPassthrough | Self::CursorColour | Self::CursorStyle
+        )
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PaneOptions {
+    pub(crate) allow_passthrough: AllowPassthrough,
     pub(crate) allow_rename: bool,
     pub(crate) allow_set_title: bool,
+    pub(crate) alternate_screen: bool,
+    pub(crate) cursor_colour: String,
+    pub(crate) cursor_style: PaneCursorStyle,
+    pub(crate) scroll_on_clear: bool,
 }
 
 impl Default for PaneOptions {
     fn default() -> Self {
         Self {
+            allow_passthrough: AllowPassthrough::Off,
             allow_rename: false,
             allow_set_title: true,
+            alternate_screen: true,
+            cursor_colour: String::new(),
+            cursor_style: PaneCursorStyle::Default,
+            scroll_on_clear: true,
         }
     }
 }
 
 impl PaneOptions {
     pub(crate) fn value(&self, option: PaneOption) -> String {
-        flag(match option {
-            PaneOption::AllowRename => self.allow_rename,
-            PaneOption::AllowSetTitle => self.allow_set_title,
-        })
-        .to_owned()
+        match option {
+            PaneOption::AllowPassthrough => self.allow_passthrough.as_str().to_owned(),
+            PaneOption::AllowRename => flag(self.allow_rename).to_owned(),
+            PaneOption::AllowSetTitle => flag(self.allow_set_title).to_owned(),
+            PaneOption::AlternateScreen => flag(self.alternate_screen).to_owned(),
+            PaneOption::CursorColour => self.cursor_colour.clone(),
+            PaneOption::CursorStyle => self.cursor_style.as_str().to_owned(),
+            PaneOption::ScrollOnClear => flag(self.scroll_on_clear).to_owned(),
+        }
     }
 
     pub(crate) fn reset(&mut self, option: PaneOption) -> bool {
         let defaults = Self::default();
         match option {
+            PaneOption::AllowPassthrough => {
+                replace(&mut self.allow_passthrough, defaults.allow_passthrough)
+            }
             PaneOption::AllowRename => replace(&mut self.allow_rename, defaults.allow_rename),
             PaneOption::AllowSetTitle => {
                 replace(&mut self.allow_set_title, defaults.allow_set_title)
+            }
+            PaneOption::AlternateScreen => {
+                replace(&mut self.alternate_screen, defaults.alternate_screen)
+            }
+            PaneOption::CursorColour => replace(&mut self.cursor_colour, defaults.cursor_colour),
+            PaneOption::CursorStyle => replace(&mut self.cursor_style, defaults.cursor_style),
+            PaneOption::ScrollOnClear => {
+                replace(&mut self.scroll_on_clear, defaults.scroll_on_clear)
             }
         }
     }
@@ -540,15 +668,36 @@ impl PaneOptions {
         option: PaneOption,
         value: Option<&str>,
     ) -> Result<bool, String> {
-        let current = match option {
-            PaneOption::AllowRename => self.allow_rename,
-            PaneOption::AllowSetTitle => self.allow_set_title,
-        };
-        let next = parse_flag(value, current)?;
-        Ok(match option {
-            PaneOption::AllowRename => replace(&mut self.allow_rename, next),
-            PaneOption::AllowSetTitle => replace(&mut self.allow_set_title, next),
-        })
+        match option {
+            PaneOption::AllowPassthrough => {
+                let next = parse_allow_passthrough(value, self.allow_passthrough)?;
+                Ok(replace(&mut self.allow_passthrough, next))
+            }
+            PaneOption::AllowRename => {
+                let next = parse_flag(value, self.allow_rename)?;
+                Ok(replace(&mut self.allow_rename, next))
+            }
+            PaneOption::AllowSetTitle => {
+                let next = parse_flag(value, self.allow_set_title)?;
+                Ok(replace(&mut self.allow_set_title, next))
+            }
+            PaneOption::AlternateScreen => {
+                let next = parse_flag(value, self.alternate_screen)?;
+                Ok(replace(&mut self.alternate_screen, next))
+            }
+            PaneOption::CursorColour => {
+                let next = parse_cursor_colour(value)?;
+                Ok(replace(&mut self.cursor_colour, next))
+            }
+            PaneOption::CursorStyle => {
+                let next = parse_pane_cursor_style(value, self.cursor_style)?;
+                Ok(replace(&mut self.cursor_style, next))
+            }
+            PaneOption::ScrollOnClear => {
+                let next = parse_flag(value, self.scroll_on_clear)?;
+                Ok(replace(&mut self.scroll_on_clear, next))
+            }
+        }
     }
 }
 
@@ -652,6 +801,53 @@ fn parse_window_size(value: Option<&str>, current: WindowSize) -> Result<WindowS
     }
 }
 
+fn parse_allow_passthrough(
+    value: Option<&str>,
+    current: AllowPassthrough,
+) -> Result<AllowPassthrough, String> {
+    let Some(value) = value else {
+        return Ok(current.toggled());
+    };
+    match value {
+        "off" => Ok(AllowPassthrough::Off),
+        "on" => Ok(AllowPassthrough::On),
+        "all" => Ok(AllowPassthrough::All),
+        _ => Err(format!("unknown value: {value}")),
+    }
+}
+
+fn parse_pane_cursor_style(
+    value: Option<&str>,
+    current: PaneCursorStyle,
+) -> Result<PaneCursorStyle, String> {
+    let Some(value) = value else {
+        return Ok(current.toggled());
+    };
+    match value {
+        "default" => Ok(PaneCursorStyle::Default),
+        "blinking-block" => Ok(PaneCursorStyle::BlinkingBlock),
+        "block" => Ok(PaneCursorStyle::Block),
+        "blinking-underline" => Ok(PaneCursorStyle::BlinkingUnderline),
+        "underline" => Ok(PaneCursorStyle::Underline),
+        "blinking-bar" => Ok(PaneCursorStyle::BlinkingBar),
+        "bar" => Ok(PaneCursorStyle::Bar),
+        _ => Err(format!("unknown value: {value}")),
+    }
+}
+
+fn parse_cursor_colour(value: Option<&str>) -> Result<String, String> {
+    let value = required_string(value)?;
+    if value.is_empty()
+        || value.contains("#{")
+        || parse_tmux_colour(&value).is_some()
+        || parse_x11_color(&value).is_some()
+    {
+        Ok(value)
+    } else {
+        Err(format!("invalid colour: {value}"))
+    }
+}
+
 fn default_size_pattern(value: &str) -> bool {
     value.as_bytes().first().is_some_and(u8::is_ascii_digit)
         && value
@@ -664,3 +860,5 @@ fn default_size_pattern(value: &str) -> bool {
                     .is_some_and(u8::is_ascii_digit)
             })
 }
+use crate::formats::parse_tmux_colour;
+use zz_terminal::parse_x11_color;

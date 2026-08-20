@@ -29,8 +29,8 @@ use crate::{
         expand_format_with_hooks, format_true, parse_tmux_colour,
     },
     honest_knobs::{
-        PaneOption, PaneOptions, ServerOption, ServerOptions, SessionOption, SessionOptions,
-        WindowOption, WindowOptions,
+        AllowPassthrough, PaneOption, PaneOptions, ServerOption, ServerOptions, SessionOption,
+        SessionOptions, WindowOption, WindowOptions,
     },
     layout::PANE_MAXIMUM,
     model::DEFAULT_WINDOW_EXTENT,
@@ -244,6 +244,10 @@ pub enum MuxEffect {
     },
     WindowSizeChanged {
         window: Option<WindowId>,
+    },
+    TerminalKnobsChanged {
+        window: Option<WindowId>,
+        pane: Option<PaneId>,
     },
     MuxOptionChanged {
         option: MuxOptionKey,
@@ -671,6 +675,14 @@ pub struct PaneRuntimeFacts {
     pub tty: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TerminalWorkerOptions {
+    pub allow_passthrough: bool,
+    pub wrap_search: bool,
+    pub cursor_style: &'static str,
+    pub cursor_colour: String,
+}
+
 /// What an agent pane's daemon-owned adapter is started with.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AgentOptions {
@@ -1063,6 +1075,23 @@ impl MuxEngine {
     #[must_use]
     pub fn allow_set_title(&self, pane: PaneId) -> bool {
         self.pane_knobs(pane).allow_set_title
+    }
+
+    pub fn terminal_worker_options_for_pane(
+        &self,
+        pane: PaneId,
+    ) -> Result<TerminalWorkerOptions, ServerError> {
+        let window = self
+            .state
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let pane_options = self.pane_knobs(pane);
+        Ok(TerminalWorkerOptions {
+            allow_passthrough: pane_options.allow_passthrough != AllowPassthrough::Off,
+            wrap_search: self.window_knobs(window).wrap_search,
+            cursor_style: pane_options.cursor_style.as_str(),
+            cursor_colour: pane_options.cursor_colour,
+        })
     }
 
     fn pane_knobs_for_window(&self, window: WindowId) -> PaneOptions {
@@ -2744,7 +2773,16 @@ impl MuxEngine {
         if !removed.is_empty() {
             effects.push(MuxEffect::PanesRemoved(removed));
         }
-        if source_session != destination_session {
+        if source_session == destination_session {
+            effects.extend(
+                source_panes
+                    .into_iter()
+                    .map(|pane| MuxEffect::TerminalKnobsChanged {
+                        window: None,
+                        pane: Some(pane),
+                    }),
+            );
+        } else {
             effects.extend(
                 source_panes
                     .into_iter()
@@ -2780,7 +2818,14 @@ impl MuxEngine {
         self.state.swap_windows(source, target, options.has("-d"))?;
 
         let mut effects = Vec::new();
-        if source_session != target_session {
+        if source_session == target_session {
+            effects.extend(source_panes.into_iter().chain(target_panes).map(|pane| {
+                MuxEffect::TerminalKnobsChanged {
+                    window: None,
+                    pane: Some(pane),
+                }
+            }));
+        } else {
             effects.extend(
                 source_panes
                     .into_iter()
@@ -3028,6 +3073,11 @@ impl MuxEngine {
                 from: source_session,
                 to: destination_session,
             });
+        } else if source_window != window {
+            execution.effects.push(MuxEffect::TerminalKnobsChanged {
+                window: None,
+                pane: Some(source),
+            });
         }
         debug_assert_eq!(self.state.window_for_pane(source), Some(window));
         Ok(execution)
@@ -3116,6 +3166,11 @@ impl MuxEngine {
                 pane: source,
                 from: source_session,
                 to: target_session,
+            });
+        } else if source_window != target_window {
+            execution.effects.push(MuxEffect::TerminalKnobsChanged {
+                window: None,
+                pane: Some(source),
             });
         }
         Ok(execution)
@@ -3466,6 +3521,17 @@ impl MuxEngine {
                     pane: target,
                     from: target_session,
                     to: source_session,
+                },
+            ]);
+        } else if source_window != target_window {
+            execution.effects.extend([
+                MuxEffect::TerminalKnobsChanged {
+                    window: None,
+                    pane: Some(source),
+                },
+                MuxEffect::TerminalKnobsChanged {
+                    window: None,
+                    pane: Some(target),
                 },
             ]);
         }
@@ -6855,10 +6921,18 @@ impl MuxEngine {
             || self.global_window_options.clone(),
             |window| self.window_knobs(window),
         );
-        if option == WindowOption::WindowSize && next != previous {
-            Ok(Execution::effect(MuxEffect::WindowSizeChanged { window }))
-        } else {
-            Ok(Execution::default())
+        if next == previous {
+            return Ok(Execution::default());
+        }
+        match option {
+            WindowOption::WindowSize => {
+                Ok(Execution::effect(MuxEffect::WindowSizeChanged { window }))
+            }
+            WindowOption::WrapSearch => Ok(Execution::effect(MuxEffect::TerminalKnobsChanged {
+                window,
+                pane: None,
+            })),
+            _ => Ok(Execution::default()),
         }
     }
 
@@ -6905,8 +6979,11 @@ impl MuxEngine {
                 _ => unreachable!("pane options have window-pane scope"),
             }
         } else {
-            let mut next = previous;
-            next.set_command(option, value)
+            let appended = (options.has("-a") && option.is_string() && locally_set)
+                .then(|| value.map(|value| format!("{}{value}", previous.value(option))))
+                .flatten();
+            let mut next = previous.clone();
+            next.set_command(option, appended.as_deref().or(value))
                 .map_err(ServerError::InvalidCommand)?;
             match target {
                 TmuxOptionTarget::GlobalWindow => self.global_pane_options = next,
@@ -6925,7 +7002,25 @@ impl MuxEngine {
                 _ => unreachable!("pane options have window-pane scope"),
             }
         }
-        Ok(Execution::default())
+        let next = match target {
+            TmuxOptionTarget::GlobalWindow => self.global_pane_options.clone(),
+            TmuxOptionTarget::Window(window) => self.pane_knobs_for_window(window),
+            TmuxOptionTarget::Pane(pane) => self.pane_knobs(pane),
+            _ => unreachable!("pane options have window-pane scope"),
+        };
+        if next == previous || !option.updates_terminal_worker() {
+            return Ok(Execution::default());
+        }
+        let (window, pane) = match target {
+            TmuxOptionTarget::GlobalWindow => (None, None),
+            TmuxOptionTarget::Window(window) => (Some(window), None),
+            TmuxOptionTarget::Pane(pane) => (None, Some(pane)),
+            _ => unreachable!("pane options have window-pane scope"),
+        };
+        Ok(Execution::effect(MuxEffect::TerminalKnobsChanged {
+            window,
+            pane,
+        }))
     }
 
     fn set_word_separators(
@@ -7768,6 +7863,7 @@ fn tmux_option_value_is_string(option: TmuxOption) -> bool {
         || ServerOption::from_name(option.name).is_some_and(ServerOption::is_string)
         || SessionOption::from_name(option.name).is_some_and(SessionOption::is_string)
         || WindowOption::from_name(option.name).is_some_and(WindowOption::is_string)
+        || PaneOption::from_name(option.name).is_some_and(PaneOption::is_string)
 }
 
 fn push_shown_option(
@@ -14354,6 +14450,88 @@ mod tests {
             "failed"
         );
 
+        for expected in ["on", "off"] {
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-window-option", &["-g", "allow-passthrough"]),
+                )
+                .unwrap();
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &command("show-window-options", &["-gv", "allow-passthrough"],),
+                    )
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-g", "allow-passthrough", "all"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-g", "allow-passthrough"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-window-options", &["-gv", "allow-passthrough"],),
+                )
+                .unwrap()
+                .output,
+            "all"
+        );
+
+        for expected in ["blinking-block", "default"] {
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-window-option", &["-g", "cursor-style"]),
+                )
+                .unwrap();
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &command("show-window-options", &["-gv", "cursor-style"]),
+                    )
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-g", "cursor-style", "bar"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-g", "cursor-style"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-window-options", &["-gv", "cursor-style"]),
+                )
+                .unwrap()
+                .output,
+            "bar"
+        );
+
         for expected in ["off", "external"] {
             engine
                 .execute(
@@ -14461,8 +14639,14 @@ mod tests {
             ("other-pane-width", "0"),
             ("tiled-layout-max-columns", "0"),
             ("window-size", "latest"),
+            ("wrap-search", "on"),
+            ("allow-passthrough", "off"),
             ("allow-rename", "off"),
             ("allow-set-title", "on"),
+            ("alternate-screen", "on"),
+            ("cursor-colour", "\n"),
+            ("cursor-style", "default"),
+            ("scroll-on-clear", "on"),
         ] {
             assert_eq!(
                 engine
@@ -14498,14 +14682,20 @@ mod tests {
             &["other-pane-width", "12%"],
             &["tiled-layout-max-columns", "2"],
             &["window-size", "largest"],
+            &["wrap-search", "off"],
         ] {
             engine
                 .execute(&mut context, &command("set-window-option", args))
                 .unwrap();
         }
         for args in [
+            &["-p", "allow-passthrough", "all"] as &[&str],
             &["-p", "allow-rename", "on"] as &[&str],
             &["-p", "allow-set-title", "off"],
+            &["-p", "alternate-screen", "off"],
+            &["-p", "cursor-colour", "sky blue"],
+            &["-p", "cursor-style", "blinking-underline"],
+            &["-p", "scroll-on-clear", "off"],
         ] {
             engine
                 .execute(&mut context, &command("set-option", args))
@@ -14522,6 +14712,15 @@ mod tests {
         assert_eq!(engine.display_panes_time_for_session(session), 1400);
         assert_eq!(engine.window_size(window), WindowSize::Largest);
         assert!(!engine.allow_set_title(pane));
+        assert_eq!(
+            engine.terminal_worker_options_for_pane(pane).unwrap(),
+            TerminalWorkerOptions {
+                allow_passthrough: true,
+                wrap_search: false,
+                cursor_style: "blinking-underline",
+                cursor_colour: "sky blue".to_owned(),
+            }
+        );
         assert_eq!(
             engine.preset_options_for_window(window).main_pane_height,
             "40%"
@@ -14546,7 +14745,23 @@ mod tests {
                 "value is too large: 65536",
             ),
             (vec!["-gw", "window-size", "maybe"], "unknown value: maybe"),
+            (vec!["-gw", "wrap-search", "maybe"], "bad value: maybe"),
+            (
+                vec!["-gp", "allow-passthrough", "maybe"],
+                "unknown value: maybe",
+            ),
             (vec!["-gp", "allow-set-title", "maybe"], "bad value: maybe"),
+            (vec!["-gp", "alternate-screen", "maybe"], "bad value: maybe"),
+            (
+                vec!["-gp", "cursor-colour", "not-a-colour"],
+                "invalid colour: not-a-colour",
+            ),
+            (vec!["-gp", "cursor-colour"], "empty value"),
+            (
+                vec!["-gp", "cursor-style", "Blinking-Bar"],
+                "unknown value: Blinking-Bar",
+            ),
+            (vec!["-gp", "scroll-on-clear", "maybe"], "bad value: maybe"),
         ] {
             assert!(matches!(
                 engine.execute(&mut context, &command("set-option", &args)),
@@ -14558,6 +14773,187 @@ mod tests {
             .execute(&mut context, &command("set-option", &["-u", "key-table"]))
             .unwrap();
         assert_eq!(engine.key_table_for_session(session), "root");
+    }
+
+    #[test]
+    fn terminal_knob_effects_preserve_global_window_and_pane_scope() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let window = context.window.unwrap();
+        let pane = context.pane.unwrap();
+
+        let window_effect = engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["wrap-search", "off"]),
+            )
+            .unwrap();
+        assert_eq!(
+            window_effect.effects,
+            vec![MuxEffect::TerminalKnobsChanged {
+                window: Some(window),
+                pane: None,
+            }]
+        );
+
+        let pane_effect = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-p", "cursor-style", "bar"]),
+            )
+            .unwrap();
+        assert_eq!(
+            pane_effect.effects,
+            vec![MuxEffect::TerminalKnobsChanged {
+                window: None,
+                pane: Some(pane),
+            }]
+        );
+
+        let global_effect = engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-g", "allow-passthrough", "all"]),
+            )
+            .unwrap();
+        assert_eq!(
+            global_effect.effects,
+            vec![MuxEffect::TerminalKnobsChanged {
+                window: None,
+                pane: None,
+            }]
+        );
+
+        for name in ["alternate-screen", "scroll-on-clear"] {
+            let store_only = engine
+                .execute(
+                    &mut context,
+                    &command("set-window-option", &["-g", name, "off"]),
+                )
+                .unwrap();
+            assert!(store_only.effects.is_empty());
+        }
+    }
+
+    #[test]
+    fn same_session_reparenting_refreshes_terminal_worker_knobs() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-s", "work", "-n", "source"]),
+            )
+            .unwrap();
+        let moving = context.pane.unwrap();
+        let source_window = context.window.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-window-option",
+                    &["-t", &source_window.to_string(), "wrap-search", "off"],
+                ),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-p", "-t", &moving.to_string(), "cursor-style", "bar"],
+                ),
+            )
+            .unwrap();
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "destination"]))
+            .unwrap();
+        let target = context.pane.unwrap();
+        let destination_window = context.window.unwrap();
+
+        let joined = engine
+            .execute(
+                &mut context,
+                &command(
+                    "join-pane",
+                    &["-d", "-s", &moving.to_string(), "-t", &target.to_string()],
+                ),
+            )
+            .unwrap();
+        assert!(joined.effects.contains(&MuxEffect::TerminalKnobsChanged {
+            window: None,
+            pane: Some(moving),
+        }));
+        let joined_options = engine.terminal_worker_options_for_pane(moving).unwrap();
+        assert!(joined_options.wrap_search);
+        assert_eq!(joined_options.cursor_style, "bar");
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-window-option",
+                    &["-t", &destination_window.to_string(), "wrap-search", "off"],
+                ),
+            )
+            .unwrap();
+        let broken = engine
+            .execute(
+                &mut context,
+                &command("break-pane", &["-d", "-s", &moving.to_string()]),
+            )
+            .unwrap();
+        assert!(broken.effects.contains(&MuxEffect::TerminalKnobsChanged {
+            window: None,
+            pane: Some(moving),
+        }));
+        let broken_window = engine.state.window_for_pane(moving).unwrap();
+        let broken_options = engine.terminal_worker_options_for_pane(moving).unwrap();
+        assert!(broken_options.wrap_search);
+        assert_eq!(broken_options.cursor_style, "bar");
+
+        let swapped = engine
+            .execute(
+                &mut context,
+                &command(
+                    "swap-pane",
+                    &["-d", "-s", &moving.to_string(), "-t", &target.to_string()],
+                ),
+            )
+            .unwrap();
+        for pane in [moving, target] {
+            assert!(swapped.effects.contains(&MuxEffect::TerminalKnobsChanged {
+                window: None,
+                pane: Some(pane),
+            }));
+        }
+        assert_eq!(
+            engine.state.window_for_pane(moving),
+            Some(destination_window)
+        );
+        assert_eq!(engine.state.window_for_pane(target), Some(broken_window));
+        assert!(
+            !engine
+                .terminal_worker_options_for_pane(moving)
+                .unwrap()
+                .wrap_search
+        );
+        assert!(
+            engine
+                .terminal_worker_options_for_pane(target)
+                .unwrap()
+                .wrap_search
+        );
+        assert_eq!(
+            engine
+                .terminal_worker_options_for_pane(moving)
+                .unwrap()
+                .cursor_style,
+            "bar"
+        );
     }
 
     #[test]

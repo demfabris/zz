@@ -197,7 +197,7 @@ inside a generic “unsupported formats” claim.
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
 | `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
-# Options: 72 of 180
+# Options: 78 of 180
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin.
 Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-panes`,
@@ -217,8 +217,15 @@ the honest-knobs C1 seventeen (2026-08-20): `focus-events`, `bell-action`, `visu
 `key-table`, `prefix-timeout`, `prompt-history-limit`, `history-file`,
 `display-panes-time`, `main-pane-width/height`, `other-pane-width/height`,
 `tiled-layout-max-columns`, `default-size`, `window-size`, `allow-set-title`, and
-`allow-rename` (storage-only — no ESC-k scanner). The remaining 108 are lane-assigned
-in the drop-in plan's "options residue" section (GUI-effect / store-only / N-A-native).
+`allow-rename` (storage-only — no ESC-k scanner), plus the C2 terminal-worker six
+(2026-08-20): `wrap-search`, `allow-passthrough` (`on` behaves as `all` — the worker
+lacks visibility state; payloads cap at 1 MiB then discard-until-ST; nested
+`\ePtmux;` is not recursively unwrapped; unwrap targets the pane VT, correct for
+zz-native kitty/sixel), `cursor-style`/`cursor-colour` (per-pane appearance clones;
+a zz-config `cursor-blink` override still outranks the pane option's blink half), and
+`alternate-screen`/`scroll-on-clear` (store-only — enforcement would need lossy byte
+rewrites). The remaining 102 are lane-assigned in the drop-in plan's "options residue"
+section (GUI-effect / store-only / N-A-native).
 Bare `list-keys` output lacks the pin's flags-column padding (`bind-key  -T` two-space
 form) — ledgered for the key-string wave.
 The index trio follows tmux's session/window inheritance, allocation,

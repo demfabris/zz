@@ -808,6 +808,22 @@ was removed). Ledgered: bare `list-keys` flags-column padding (key-string wave),
 sensible/own-conf skip counts dropped to 1 and 6. Guards: four C1 differential
 scenarios (defaults/errors/layout/readback, all live-probed).
 
+**Honest-knobs wave C2 SHIPPED 2026-08-20 (terminal-worker knobs; 78/180) — closes
+the passthrough hazard:** a shared chunk-boundary-safe DCS filter ahead of all three
+PTY→VT feed sites unwraps `\ePtmux;…\e\\` (ESC un-doubling per input.c) when
+`allow-passthrough` allows — `off` consumes like stock tmux, `on` behaves as `all`
+(worker lacks visibility state; ledgered), payloads cap at 1 MiB (input-buffer-size
+default) then discard-until-ST, non-tmux DCS (sixel, zz's own `\eP1000p` control
+framing) passes untouched (split-at-every-byte regression tests), and the no-escape
+fast path stays one-scan zero-copy (live bench A/B pending — needs real windows).
+`wrap-search off` clamps at the ends like the pin; window moves now push worker
+knobs intra-session too (`TerminalKnobsChanged` on join/break/swap — PaneRelocated
+only ever fired cross-session, reviewer-caught). `cursor-style`/`cursor-colour`
+bridge to per-pane appearance clones (DECSCUSR still outranks until reset; blink
+half yields to an explicit zz `cursor-blink` config — ledgered).
+`alternate-screen`/`scroll-on-clear` store-only. Hardware-pending: bench A/B for
+the filter; a live image.nvim/kitty-icat smoke with `allow-passthrough on`.
+
 **Lane 1 — GUI-effect (~48; implement, wired to real behavior).** The status-bar family
 rendered in the collapsed-sidebar titlebar strip, which is already a proto-status-bar
 (session badge = `status-left`'s `[#S]`, tab row = window list, right corner = the default

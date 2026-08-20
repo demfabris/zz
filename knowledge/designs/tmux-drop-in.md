@@ -768,6 +768,25 @@ unused until wave B, unknown `range=` carried as `Other`, status-justify/-positi
 status 2..5 stored-not-honored (titlebar is top, single-line, tabs own the centre).
 own-conf's skip warning dropped 9 → 8 (`status-position` now stores).
 
+**Wave B SHIPPED 2026-08-20 (GUI titlebar consumption; visual smoke PENDING —
+maintainer):** the daemon pre-styles each `status_label` with the pin's overlay chain
+(current-unless-exactly-`default` or base, then last-style, then bell-style —
+additive `style_parse` tokens in one marker, probe-matched), the styled-run builder
+maps `parse_styled_segments` onto gpui highlight runs (byte-range math UTF-8-safe,
+reverse swaps resolved colors, dim fades, theme slots via the `tmux_style_colour`
+conventions), both status surfaces (titlebar strip + expanded-sidebar footer) render
+literal styles with NO trimming, and tab pills consume labels while keeping widget
+chrome — an EXPLICIT `bg=` lifts into a subtle pill tint that inherits hover;
+reverse-synthesized backgrounds stay on the glyph runs (the default bell `reverse`
+renders as an inverted readable label, reviewer-caught blocker). Ledgered: empty-TEXT
+labels fall back to `index:name` (pin renders empty — deliberate), unclosed `#[` in
+a window name drops the tail (same class as the pin's draw stop), curly underscore
+renders non-wavy, STRIP pill constants duplicated from zz-ui (fork discipline).
+Hardware smoke pending (maintainer): bell-tab invert readable + hover, current-tab
+underscore, last/current style washes, styled halves in BOTH chrome modes with
+padding preserved, default `[#S]` beside the badge (accepted duplication — UX call
+open), `#[reverse]` on status halves, empty-vs-blank status halves.
+
 **Lane 1 — GUI-effect (~48; implement, wired to real behavior).** The status-bar family
 rendered in the collapsed-sidebar titlebar strip, which is already a proto-status-bar
 (session badge = `status-left`'s `[#S]`, tab row = window list, right corner = the default

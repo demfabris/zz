@@ -1,6 +1,7 @@
 # Update Log
 
 ## 2026-08-20
+* **Update**: The GUI titlebar consumes the status-line family. The daemon pre-styles every window label with the pin's overlay chain (current-or-base, then last, then bell styles), a shared builder turns styled segments into gpui highlight runs (reverse stays on the glyph runs so default bell tabs invert readably; only explicit backgrounds tint the pill, and the tint inherits hover), and both the collapsed-strip and expanded-sidebar status surfaces render literal tmux styles without trimming. Tabs keep their interactive pill chrome with format-expanded labels. Visual smoke on hardware is pending.
 * **Update**: The tmux status-line option family landed engine/daemon/wire-side — 17 options (`status-style`/`-bg`/`-fg`/`-justify`/`-position`, the side style/length pairs, and the eight `window-status-*` names) with pin-probed defaults, real `parse_style`/`parse_styled_segments` types replacing the boolean validator, `#{`-bearing style values deferring validation and `-a` joining styles with commas like the pin. Format expansion preserves `#[…]` markers while expanding `#{…}`/`#()` inside them, the status renderer wraps each half in the pin's default-stack order and left-trims both halves to the length budgets, and every window ships a daemon-expanded `window-status-format` label in `WindowSnapshot.status_label`. Protocol v69; status halves may now carry 4 KiB. A 72-step differential scenario pins defaults, mutation, rejection texts, and listings against real tmux. GUI titlebar rendering is the next wave.
 
 ## 2026-08-19

@@ -153,8 +153,9 @@ Two format rules preserve the status renderer's contract:
   `status-*-length` display-width budgets, and ships raw marker-bearing strings; the whole
   status/window-status option family (17 options) stores with pin-exact defaults, `#{`-bearing
   style values deferring validation and `-a` appending with commas like the pin. Per-window
-  expanded labels ride `WindowSnapshot.status_label` (protocol v69). The sidebar still renders
-  its muted-foreground text until the GUI titlebar wave consumes the markers.
+  expanded labels ride `WindowSnapshot.status_label` (protocol v69). Since the same day's wave B, both GUI status surfaces
+  (collapsed titlebar strip and expanded-sidebar footer) parse the markers into styled
+  gpui runs, and window tabs consume the pre-styled `status_label`.
 
 # When the status re-renders
 

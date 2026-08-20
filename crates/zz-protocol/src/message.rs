@@ -16,6 +16,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 /// mismatch instead of negotiating down.
 pub const PROTOCOL_VERSION: u16 = 69;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
+pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
 pub const MAX_CHOOSE_TREE_QUERY_BYTES: usize = 4 * 1024;
@@ -655,6 +656,10 @@ pub struct ClientHello {
     pub origin: Option<PaneId>,
 }
 
+impl ClientHello {
+    pub const CLIENT_TERMINAL_CAPABILITY: &'static str = CLIENT_TERMINAL_CAPABILITY;
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ServerHello {
     pub protocol_version: u16,
@@ -913,6 +918,16 @@ pub enum ServerError {
     WindowNotFound(String),
     #[error("can't find pane: {0}")]
     PaneNotFound(String),
+}
+
+impl ServerError {
+    #[must_use]
+    pub fn tmux_message(&self) -> String {
+        match self {
+            Self::InvalidCommand(message) => message.clone(),
+            error => error.to_string(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1933,6 +1948,18 @@ mod tests {
         cell_height: u32,
         modifiers: Modifiers,
         force_selection: bool,
+    }
+
+    #[test]
+    fn server_error_tmux_message_strips_only_invalid_command_prefixes() {
+        assert_eq!(
+            super::ServerError::InvalidCommand("width too small".to_owned()).tmux_message(),
+            "width too small"
+        );
+        assert_eq!(
+            super::ServerError::SessionNotFound("missing".to_owned()).tmux_message(),
+            "can't find session: missing"
+        );
     }
 
     #[test]

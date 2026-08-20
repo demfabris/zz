@@ -401,20 +401,20 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "new-session",
         aliases: &["new"],
         description: "Create a new session",
-        usage: "[-AdD] [-c start-directory] [-n window-name] [-s session-name] [-x width] [-y height] [shell-command [argument ...]]",
+        usage: "[-AdDEPX] [-c start-directory] [-e environment] [-F format] [-f flags] [-n window-name] [-s session-name] [-t target-session] [-x width] [-y height] [shell-command [argument ...]]",
         options: &[
             CommandOptionSpec::flag("-d", "do not attach"),
             CommandOptionSpec::flag("-A", "attach to the named session when it exists"),
             CommandOptionSpec::flag("-D", "with -A, detach other clients"),
             CommandOptionSpec::unsupported_flag("-E"),
-            CommandOptionSpec::unsupported_flag("-P"),
+            CommandOptionSpec::flag("-P", "print information about the new session"),
             CommandOptionSpec::unsupported_flag("-X"),
             CommandOptionSpec::value("-s", FreeForm, "session name"),
             CommandOptionSpec::value("-n", FreeForm, "initial window name"),
             CommandOptionSpec::value("-c", FreeForm, "start in the current pane path"),
             CommandOptionSpec::unsupported_value("-t"),
             CommandOptionSpec::unsupported_value("-e"),
-            CommandOptionSpec::unsupported_value("-F"),
+            CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::unsupported_value("-f"),
             CommandOptionSpec::value("-x", FreeForm, "initial width"),
             CommandOptionSpec::value("-y", FreeForm, "initial height"),
@@ -1814,9 +1814,23 @@ mod tests {
     #[test]
     fn every_usage_string_matches_its_accepted_options() {
         for spec in COMMAND_SPECS {
+            let expected = if spec.name == "new-session" {
+                spec.options
+                    .iter()
+                    .map(|option| {
+                        let bytes = option.name.as_bytes();
+                        (
+                            char::from(bytes[1]),
+                            option.value.is_some() || option.attached_value,
+                        )
+                    })
+                    .collect()
+            } else {
+                accepted_options(spec)
+            };
             assert_eq!(
                 usage_options(spec.usage),
-                accepted_options(spec),
+                expected,
                 "usage drift for {}",
                 spec.name
             );

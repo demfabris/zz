@@ -51,9 +51,12 @@ fn tmux_without_a_zz_socket_fails_before_dialing_a_foreign_server() {
 mod daemon_autostart {
     use std::{
         ffi::OsString,
-        io::Write as _,
+        fs::File,
+        io::{self, Read as _, Write as _},
+        os::fd::FromRawFd as _,
         path::{Path, PathBuf},
         process::{Child, ChildStdin, Command, Output, Stdio},
+        sync::mpsc,
         thread,
         time::{Duration, Instant},
     };
@@ -170,6 +173,31 @@ mod daemon_autostart {
         }
     }
 
+    #[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
+    fn open_pty() -> io::Result<(File, File)> {
+        let mut master = -1;
+        let mut slave = -1;
+        let mut size = libc::winsize {
+            ws_row: 24,
+            ws_col: 80,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        if unsafe {
+            libc::openpty(
+                &raw mut master,
+                &raw mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &raw mut size,
+            )
+        } == -1
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(unsafe { (File::from_raw_fd(master), File::from_raw_fd(slave)) })
+    }
+
     fn assert_missing(output: &Output, expected: &[u8]) {
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
@@ -237,6 +265,444 @@ mod daemon_autostart {
         let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
         assert_eq!(listed.status.code(), Some(0));
         assert_eq!(listed.stdout, b"autostart\n");
+        assert!(listed.stderr.is_empty());
+    }
+
+    #[test]
+    fn startup_config_new_session_is_forced_detached() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        std::fs::write(
+            &fixture.config,
+            b"new-session -s fromconfig\nnew-session -A -s fromconfig\nattach-session -t bogus\nnew-session -d -s after-clientless-attach\nnew-session -d -s configured-extra\nif-shell -F 1 'new-session -s fromconditional'\n",
+        )
+        .expect("write new-session startup config");
+
+        let created = fixture.run(&["new-session", "-d", "-s", "command-extra"]);
+        assert_eq!(created.status.code(), Some(0));
+        assert!(created.stdout.is_empty());
+        assert!(created.stderr.is_empty());
+
+        let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(listed.status.code(), Some(0));
+        assert_eq!(
+            listed.stdout,
+            b"after-clientless-attach\ncommand-extra\nconfigured-extra\nfromconditional\nfromconfig\n"
+        );
+        assert!(listed.stderr.is_empty());
+    }
+
+    #[test]
+    fn event_and_command_hooks_create_sessions_without_a_client_terminal() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        std::fs::write(
+            &fixture.config,
+            b"set-hook -g session-created 'new-session -s fromevent'\nset-hook -g after-new-session 'new-session -s fromcommand'\n",
+        )
+        .expect("write clientless hook config");
+
+        let created = fixture.run(&["new-session", "-d", "-s", "base"]);
+        assert_eq!(created.status.code(), Some(0));
+        assert!(created.stdout.is_empty());
+        assert!(created.stderr.is_empty());
+
+        let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(listed.status.code(), Some(0));
+        assert_eq!(listed.stdout, b"base\nfromcommand\nfromevent\n");
+        assert!(listed.stderr.is_empty());
+    }
+
+    #[test]
+    fn runtime_config_commands_keep_the_command_client_terminal_state() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let started = fixture.run(&["start-server"]);
+        assert_eq!(started.status.code(), Some(0));
+        let runtime_config = fixture.config.with_file_name("runtime.conf");
+        std::fs::write(&runtime_config, b"new-session -s sourced\n")
+            .expect("write runtime source config");
+
+        let _ = fixture.run(&[
+            "source-file",
+            runtime_config.to_str().expect("UTF-8 runtime config path"),
+        ]);
+
+        let conditional = fixture.run(&["if-shell", "-F", "1", "new-session -s conditional"]);
+        assert_eq!(conditional.status.code(), Some(1));
+        assert_eq!(
+            conditional.stderr,
+            b"open terminal failed: not a terminal\n"
+        );
+
+        let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(listed.status.code(), Some(0));
+        assert!(listed.stdout.is_empty());
+        assert!(listed.stderr.is_empty());
+    }
+
+    #[test]
+    fn detached_new_session_accepts_dash_dimensions() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+
+        let created = fixture.run(&["new-session", "-d", "-s", "dash-size", "-x", "-", "-y", "-"]);
+        assert_eq!(created.status.code(), Some(0));
+        assert!(created.stdout.is_empty());
+        assert!(created.stderr.is_empty());
+
+        let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(listed.status.code(), Some(0));
+        assert_eq!(listed.stdout, b"dash-size\n");
+        assert!(listed.stderr.is_empty());
+    }
+
+    #[test]
+    fn headless_attaching_new_session_fails_without_creating_the_session() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+
+        let created = fixture.run(&["new-session", "-s", "headless"]);
+        assert_eq!(created.status.code(), Some(1));
+        assert!(created.stdout.is_empty());
+        assert_eq!(created.stderr, b"open terminal failed: not a terminal\n");
+
+        let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(listed.status.code(), Some(0));
+        assert!(listed.stdout.is_empty());
+        assert!(listed.stderr.is_empty());
+    }
+
+    #[test]
+    fn tty_new_session_error_is_bare_and_does_not_start_the_browser() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let Ok((mut master, slave)) = open_pty() else {
+            return;
+        };
+        rustix::io::ioctl_fionbio(&master, true).expect("set pty master nonblocking");
+        let stdin = slave.try_clone().expect("clone pty stdin");
+        let mut child = fixture
+            .command()
+            .args(["new-session", "-s", "tty-width", "-x", "0"])
+            .stdin(Stdio::from(stdin))
+            .stdout(Stdio::from(slave))
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn TTY new-session error");
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut stdout = Vec::new();
+        let status = loop {
+            let mut buffer = [0_u8; 4096];
+            match master.read(&mut buffer) {
+                Ok(0) => {}
+                Ok(count) => stdout.extend_from_slice(&buffer[..count]),
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                Err(_) => {}
+            }
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) => {}
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    drop(master);
+                    panic!("poll TTY new-session error: {error}");
+                }
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                drop(master);
+                panic!("TTY new-session error did not exit before deadline");
+            }
+            thread::sleep(Duration::from_millis(5));
+        };
+        drop(master);
+        let mut stderr = Vec::new();
+        child
+            .stderr
+            .take()
+            .expect("piped TTY error stderr")
+            .read_to_end(&mut stderr)
+            .expect("read TTY error stderr");
+
+        assert_eq!(status.code(), Some(1));
+        assert!(stdout.is_empty());
+        assert_eq!(stderr, b"width too small\n");
+
+        let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(listed.status.code(), Some(0));
+        assert!(listed.stdout.is_empty());
+        assert!(listed.stderr.is_empty());
+    }
+
+    #[test]
+    fn duplicate_new_session_error_is_exact_and_precedes_the_terminal_check() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+
+        let first = fixture.run(&["new-session", "-d", "-s", "dup"]);
+        assert_eq!(first.status.code(), Some(0));
+
+        let detached_duplicate = fixture.run(&["new-session", "-d", "-s", "dup"]);
+        assert_eq!(detached_duplicate.status.code(), Some(1));
+        assert!(detached_duplicate.stdout.is_empty());
+        assert_eq!(detached_duplicate.stderr, b"duplicate session: dup\n");
+
+        let attaching_duplicate = fixture.run(&["new-session", "-s", "dup"]);
+        assert_eq!(attaching_duplicate.status.code(), Some(1));
+        assert!(attaching_duplicate.stdout.is_empty());
+        assert_eq!(attaching_duplicate.stderr, b"duplicate session: dup\n");
+    }
+
+    #[test]
+    fn headless_dash_a_ignores_detach_for_existing_but_not_new_sessions() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+
+        let existing = fixture.run(&["new-session", "-d", "-s", "existing"]);
+        assert_eq!(existing.status.code(), Some(0));
+
+        let attaching = fixture.run(&["new-session", "-A", "-d", "-s", "existing"]);
+        assert_eq!(attaching.status.code(), Some(1));
+        assert!(attaching.stdout.is_empty());
+        assert_eq!(attaching.stderr, b"open terminal failed: not a terminal\n");
+
+        let fresh = fixture.run(&["new-session", "-A", "-d", "-s", "fresh"]);
+        assert_eq!(fresh.status.code(), Some(0));
+        assert!(fresh.stdout.is_empty());
+        assert!(fresh.stderr.is_empty());
+
+        let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(listed.status.code(), Some(0));
+        assert_eq!(listed.stdout, b"existing\nfresh\n");
+        assert!(listed.stderr.is_empty());
+    }
+
+    #[test]
+    fn detached_new_session_prints_default_and_custom_formats() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+
+        let default = fixture.run(&["new-session", "-P", "-d", "-s", "printed"]);
+        assert_eq!(default.status.code(), Some(0));
+        assert_eq!(default.stdout, b"printed:\n");
+        assert!(default.stderr.is_empty());
+
+        let formatted = fixture.run(&[
+            "new-session",
+            "-P",
+            "-d",
+            "-F",
+            "#{session_name}/#{window_index}",
+            "-s",
+            "formatted",
+        ]);
+        assert_eq!(formatted.status.code(), Some(0));
+        assert_eq!(formatted.stdout, b"formatted/0\n");
+        assert!(formatted.stderr.is_empty());
+    }
+
+    #[test]
+    fn attaching_new_session_later_in_a_chain_enters_the_alternate_screen() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let Ok((mut master, slave)) = open_pty() else {
+            return;
+        };
+        let stdin = slave.try_clone().expect("clone pty stdin");
+        let stdout = slave.try_clone().expect("clone pty stdout");
+        let mut command = fixture.command();
+        command
+            .args([
+                "new-session",
+                "-d",
+                "-s",
+                "chain-before",
+                ";",
+                "new-session",
+                "-s",
+                "pty-attached",
+                ";",
+                "split-window",
+                "-h",
+            ])
+            .stdin(Stdio::from(stdin))
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(slave));
+        let mut child = command.spawn().expect("spawn attaching new-session");
+
+        let (bytes_sender, bytes_receiver) = mpsc::channel();
+        let (stop_sender, stop_receiver) = mpsc::channel();
+        let (reader_done_sender, reader_done_receiver) = mpsc::channel();
+        rustix::io::ioctl_fionbio(&master, true).expect("set pty master nonblocking");
+        let reader = thread::spawn(move || {
+            let mut buffer = [0_u8; 4096];
+            loop {
+                match master.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        if bytes_sender.send(buffer[..count].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                    Err(_) => break,
+                }
+                if stop_receiver.try_recv().is_ok() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+            drop(master);
+            let _ = reader_done_sender.send(());
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut captured = Vec::new();
+        let mut early_status = None;
+        let entered_alternate_screen = loop {
+            if captured
+                .windows(b"\x1b[?1049h".len())
+                .any(|window| window == b"\x1b[?1049h")
+            {
+                break true;
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+            if let Some(status) = child.try_wait().expect("poll attaching new-session") {
+                early_status = Some(status);
+                break false;
+            }
+            match bytes_receiver.recv_timeout(Duration::from_millis(20)) {
+                Ok(bytes) => captured.extend_from_slice(&bytes),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break false,
+            }
+        };
+
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = stop_sender.send(());
+        reader_done_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("pty reader stopped before deadline");
+        reader.join().expect("join pty reader");
+
+        assert!(
+            entered_alternate_screen,
+            "child exited early={early_status:?}; pty output={}",
+            String::from_utf8_lossy(&captured),
+        );
+        let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(listed.status.code(), Some(0));
+        assert_eq!(listed.stdout, b"chain-before\npty-attached\n");
+        assert!(listed.stderr.is_empty());
+        let panes = fixture.run(&["list-panes", "-t", "pty-attached", "-F", "#{pane_index}"]);
+        assert_eq!(panes.status.code(), Some(0));
+        assert_eq!(panes.stdout, b"0\n1\n");
+        assert!(panes.stderr.is_empty());
+    }
+
+    #[test]
+    fn chain_error_after_attachment_is_rendered_inside_the_tui() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let Ok((mut master, slave)) = open_pty() else {
+            return;
+        };
+        rustix::io::ioctl_fionbio(&master, true).expect("set pty master nonblocking");
+        let stdin = slave.try_clone().expect("clone pty stdin");
+        let stdout = slave.try_clone().expect("clone pty stdout");
+        let mut child = fixture
+            .command()
+            .args([
+                "new-session",
+                "-s",
+                "pty-error",
+                ";",
+                "split-window",
+                "-t",
+                ":99",
+            ])
+            .stdin(Stdio::from(stdin))
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(slave))
+            .spawn()
+            .expect("spawn attaching chain error");
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut captured = Vec::new();
+        let mut early_status = None;
+        let rendered_error = loop {
+            let mut buffer = [0_u8; 4096];
+            match master.read(&mut buffer) {
+                Ok(0) => {}
+                Ok(count) => captured.extend_from_slice(&buffer[..count]),
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                Err(_) => {}
+            }
+            let alternate_screen = captured
+                .windows(b"\x1b[?1049h".len())
+                .any(|window| window == b"\x1b[?1049h");
+            let error_text = captured
+                .windows(b"can't find win".len())
+                .any(|window| window == b"can't find win");
+            if alternate_screen && error_text {
+                break true;
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    early_status = Some(status);
+                    break false;
+                }
+                Ok(None) => {}
+                Err(_) => break false,
+            }
+            thread::sleep(Duration::from_millis(5));
+        };
+        let still_running = matches!(child.try_wait(), Ok(None));
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(master);
+
+        assert!(
+            rendered_error,
+            "child exited early={early_status:?}; pty output={}",
+            String::from_utf8_lossy(&captured),
+        );
+        assert!(still_running, "TUI exited after rendering the chain error");
+        let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(listed.status.code(), Some(0));
+        assert_eq!(listed.stdout, b"pty-error\n");
         assert!(listed.stderr.is_empty());
     }
 
@@ -384,10 +850,7 @@ mod daemon_autostart {
             let error = zz_mux::MuxEngine::default()
                 .execute(&mut zz_mux::ExecutionContext::default(), &invocation)
                 .expect_err("engine rejects the unsupported attach option");
-            let expected = match &error {
-                zz_protocol::ServerError::InvalidCommand(message) => format!("{message}\n"),
-                error => format!("{error}\n"),
-            };
+            let expected = format!("{}\n", error.tmux_message());
             for command in ["attach", "attach-session"] {
                 let output = fixture
                     .command()

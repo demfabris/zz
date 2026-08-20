@@ -60,8 +60,8 @@ impl Default for RunOptions {
 /// A TUI run request with an optional client-local browser-frame source.
 pub struct RunRequest<'a> {
     options: &'a RunOptions,
-    browser_provider: Option<Box<dyn BrowserFrameProvider>>,
-    local_reconnect: Option<&'a dyn Fn(&Path) -> Result<InteractiveClient, DaemonError>>,
+    browser_provider: Option<fn() -> Option<Box<dyn BrowserFrameProvider>>>,
+    local_reconnect: Option<&'a dyn Fn(&Path, bool) -> Result<InteractiveClient, DaemonError>>,
 }
 
 impl RunOptions {
@@ -69,11 +69,11 @@ impl RunOptions {
     #[must_use]
     pub fn with_browser_provider(
         &self,
-        browser_provider: Option<Box<dyn BrowserFrameProvider>>,
+        browser_provider: fn() -> Option<Box<dyn BrowserFrameProvider>>,
     ) -> RunRequest<'_> {
         RunRequest {
             options: self,
-            browser_provider,
+            browser_provider: Some(browser_provider),
             local_reconnect: None,
         }
     }
@@ -94,7 +94,7 @@ impl<'a> RunRequest<'a> {
     #[must_use]
     pub fn with_local_reconnect(
         mut self,
-        reconnect: &'a dyn Fn(&Path) -> Result<InteractiveClient, DaemonError>,
+        reconnect: &'a dyn Fn(&Path, bool) -> Result<InteractiveClient, DaemonError>,
     ) -> Self {
         self.local_reconnect = Some(reconnect);
         self
@@ -127,18 +127,10 @@ impl From<io::Error> for Error {
 pub fn run<'a>(request: impl Into<RunRequest<'a>>) -> Result<(), Error> {
     let request = request.into();
     let options = request.options;
-    let (fleet_hosts, _) = configured_fleet_hosts()
-        .map_err(|error| Error::message(format!("could not read zz/config: {error}")))?;
-    let endpoint = resolve_endpoint(options, &fleet_hosts)?;
-    let local_endpoint = Endpoint::Local(options.socket_path.clone());
-    let local_host_label = short_device_name().unwrap_or_else(|| "localhost".to_owned());
-    let host_label = options
-        .host
-        .clone()
-        .unwrap_or_else(|| local_host_label.clone());
+    let resolved = resolve_run(options)?;
     let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
     let initial = initial_connection(
-        &endpoint,
+        &resolved.endpoint,
         &options.socket_path,
         interactive,
         options.restart_daemon,
@@ -148,24 +140,168 @@ pub fn run<'a>(request: impl Into<RunRequest<'a>>) -> Result<(), Error> {
     if !interactive {
         return Err(Error::message("open terminal failed: not a terminal"));
     }
+    let browser_provider = request.browser_provider.and_then(|provider| provider());
     app::run(
         initial,
-        endpoint,
-        local_endpoint,
-        options.session.as_deref(),
-        options.detach_others,
-        host_label,
-        local_host_label,
-        fleet_hosts,
-        request.browser_provider,
+        resolved.endpoint,
+        resolved.local_endpoint,
+        app::InitialAttach::Request {
+            target: options.session.clone(),
+            detach_others: options.detach_others,
+        },
+        resolved.host_label,
+        resolved.local_host_label,
+        resolved.fleet_hosts,
+        browser_provider,
     )
     .map_err(Error::message)
 }
 
+pub fn run_new_session<'a>(
+    request: impl Into<RunRequest<'a>>,
+    invocations: impl IntoIterator<Item = CommandInvocation>,
+) -> Result<(), Error> {
+    let request = request.into();
+    let options = request.options;
+    let resolved = resolve_run(options)?;
+    let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
+    let initial = initial_connection(
+        &resolved.endpoint,
+        &options.socket_path,
+        interactive,
+        options.restart_daemon,
+        request.local_reconnect,
+    )?;
+    match execute_new_session(&initial, invocations)? {
+        NewSessionOutcome::Detached => Ok(()),
+        NewSessionOutcome::Attached { session, messages } => {
+            let browser_provider = request.browser_provider.and_then(|provider| provider());
+            app::run(
+                initial,
+                resolved.endpoint,
+                resolved.local_endpoint,
+                app::InitialAttach::AlreadyAttached { session, messages },
+                resolved.host_label,
+                resolved.local_host_label,
+                resolved.fleet_hosts,
+                browser_provider,
+            )
+            .map_err(Error::message)
+        }
+    }
+}
+
 pub fn run_cli(arguments: impl IntoIterator<Item = String>) -> Result<(), Error> {
     let options = parse_arguments(arguments)?;
-    let reconnect = |path: &Path| spawn_and_connect_daemon(path);
+    let reconnect =
+        |path: &Path, client_has_terminal| spawn_and_connect_daemon(path, client_has_terminal);
     run(RunRequest::from(&options).with_local_reconnect(&reconnect))
+}
+
+struct ResolvedRun {
+    endpoint: Endpoint,
+    local_endpoint: Endpoint,
+    host_label: String,
+    local_host_label: String,
+    fleet_hosts: Vec<zz_daemon::HostEntry>,
+}
+
+fn resolve_run(options: &RunOptions) -> Result<ResolvedRun, Error> {
+    let (fleet_hosts, _) = configured_fleet_hosts()
+        .map_err(|error| Error::message(format!("could not read zz/config: {error}")))?;
+    let endpoint = resolve_endpoint(options, &fleet_hosts)?;
+    let local_endpoint = Endpoint::Local(options.socket_path.clone());
+    let local_host_label = short_device_name().unwrap_or_else(|| "localhost".to_owned());
+    let host_label = options
+        .host
+        .clone()
+        .unwrap_or_else(|| local_host_label.clone());
+    Ok(ResolvedRun {
+        endpoint,
+        local_endpoint,
+        host_label,
+        local_host_label,
+        fleet_hosts,
+    })
+}
+
+enum NewSessionOutcome {
+    Detached,
+    Attached {
+        session: zz_protocol::SessionId,
+        messages: Vec<ProtocolMessage>,
+    },
+}
+
+fn execute_new_session(
+    client: &InteractiveClient,
+    invocations: impl IntoIterator<Item = CommandInvocation>,
+) -> Result<NewSessionOutcome, Error> {
+    let mut attached_session = None;
+    let mut messages = Vec::new();
+    'commands: for invocation in invocations {
+        let request_id = client
+            .execute(invocation)
+            .map_err(|error| Error::message(error.to_string()))?;
+        loop {
+            let message = client
+                .recv()
+                .map_err(|error| Error::message(error.to_string()))?;
+            match message {
+                ProtocolMessage::CommandResponse(CommandResponse::Success {
+                    request_id: response_id,
+                    output,
+                    exit_code,
+                }) if response_id == request_id => {
+                    print_command_output(&output)?;
+                    if exit_code != 0 {
+                        return Err(Error::message(format!(
+                            "command exited with status {exit_code}"
+                        )));
+                    }
+                    break;
+                }
+                ProtocolMessage::CommandResponse(CommandResponse::Error {
+                    request_id: response_id,
+                    error,
+                    output,
+                }) if response_id == request_id => {
+                    print_command_output(&output)?;
+                    if attached_session.is_none() {
+                        return Err(Error::message(error.tmux_message()));
+                    }
+                    messages.push(ProtocolMessage::CommandResponse(CommandResponse::Error {
+                        request_id: response_id,
+                        error,
+                        output,
+                    }));
+                    break 'commands;
+                }
+                message @ ProtocolMessage::Attached { session, .. } => {
+                    attached_session = Some(session);
+                    messages.push(message);
+                }
+                message => messages.push(message),
+            }
+        }
+    }
+    Ok(match attached_session {
+        Some(session) => NewSessionOutcome::Attached { session, messages },
+        None => NewSessionOutcome::Detached,
+    })
+}
+
+fn print_command_output(output: &str) -> Result<(), Error> {
+    if output.is_empty() {
+        return Ok(());
+    }
+    let mut stdout = io::stdout().lock();
+    stdout.write_all(output.as_bytes())?;
+    if !output.ends_with('\n') {
+        stdout.write_all(b"\n")?;
+    }
+    stdout.flush()?;
+    Ok(())
 }
 
 fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<RunOptions, Error> {
@@ -237,9 +373,13 @@ fn initial_connection(
     local_socket: &Path,
     interactive: bool,
     restart_daemon: bool,
-    reconnect: Option<&dyn Fn(&Path) -> Result<InteractiveClient, DaemonError>>,
+    reconnect: Option<&dyn Fn(&Path, bool) -> Result<InteractiveClient, DaemonError>>,
 ) -> Result<InteractiveClient, Error> {
-    match InteractiveClient::connect_endpoint(endpoint, TerminalColorScheme::Dark) {
+    match InteractiveClient::connect_endpoint_with_terminal(
+        endpoint,
+        TerminalColorScheme::Dark,
+        interactive,
+    ) {
         Ok(client) => Ok(client),
         Err(error) if matches!(endpoint, Endpoint::Local(_)) => {
             let error = classify_local_connect_error(local_socket, error);
@@ -253,8 +393,11 @@ fn initial_connection(
                             | io::ErrorKind::ConnectionReset
                     )
             ) {
-                return reconnect.ok_or_else(|| Error::message(error.to_string()))?(local_socket)
-                    .map_err(|restart| Error::message(format!("daemon start failed: {restart}")));
+                return reconnect.ok_or_else(|| Error::message(error.to_string()))?(
+                    local_socket,
+                    interactive,
+                )
+                .map_err(|restart| Error::message(format!("daemon start failed: {restart}")));
             }
             let DaemonError::IncompatibleDaemon { .. } = error else {
                 return Err(Error::message(error.to_string()));
@@ -278,6 +421,7 @@ fn initial_connection(
                 .map_err(|restart| Error::message(format!("{error}; restart failed: {restart}")))?;
             reconnect.ok_or_else(|| Error::message("no daemon launcher is available"))?(
                 local_socket,
+                interactive,
             )
             .map_err(|restart| Error::message(format!("daemon restart failed: {restart}")))
         }
@@ -326,7 +470,10 @@ fn resolve_attach_target(client: &InteractiveClient, target: Option<&str>) -> Re
     }
 }
 
-fn spawn_and_connect_daemon(path: &Path) -> Result<InteractiveClient, DaemonError> {
+fn spawn_and_connect_daemon(
+    path: &Path,
+    client_has_terminal: bool,
+) -> Result<InteractiveClient, DaemonError> {
     let executable = std::env::current_exe()
         .ok()
         .and_then(|executable| executable.parent().map(|directory| directory.join("zz")))
@@ -348,7 +495,11 @@ fn spawn_and_connect_daemon(path: &Path) -> Result<InteractiveClient, DaemonErro
 
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        match InteractiveClient::connect_with_color_scheme(path, TerminalColorScheme::Dark) {
+        match InteractiveClient::connect_with_color_scheme_and_terminal(
+            path,
+            TerminalColorScheme::Dark,
+            client_has_terminal,
+        ) {
             Ok(client) => return Ok(client),
             Err(error) if Instant::now() >= deadline => return Err(error),
             Err(_) => thread::sleep(Duration::from_millis(20)),

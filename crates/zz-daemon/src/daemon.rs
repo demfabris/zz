@@ -3169,6 +3169,7 @@ impl Shared {
         client_instance_id: ClientInstanceId,
         device_name: Option<String>,
         color_scheme: Option<TerminalColorScheme>,
+        client_has_terminal: bool,
     ) -> (ClientId, ServerHello) {
         let mut inner = self.inner.lock();
         inner.engine.set_format_now(unix_timestamp());
@@ -3176,6 +3177,9 @@ impl Shared {
         inner.next_client_id = inner.next_client_id.saturating_add(1);
         inner.client_instances.insert(client, client_instance_id);
         inner.client_kinds.insert(client, kind);
+        if kind == ClientKind::Interactive && client_has_terminal {
+            inner.client_terminals.insert(client);
+        }
         if let Some(device_name) = device_name {
             inner.client_names.insert(client, device_name);
         }
@@ -3264,8 +3268,13 @@ impl Shared {
         color_scheme: Option<TerminalColorScheme>,
         outbound: Arc<OutboundMailbox>,
     ) -> (ClientId, ServerHello) {
-        let (client, hello) =
-            self.register(kind, ClientInstanceId::default(), device_name, color_scheme);
+        let (client, hello) = self.register(
+            kind,
+            ClientInstanceId::default(),
+            device_name,
+            color_scheme,
+            kind == ClientKind::Interactive,
+        );
         if matches!(kind, ClientKind::Interactive | ClientKind::Control) {
             self.subscribe(client, outbound);
         }
@@ -3286,6 +3295,7 @@ impl Shared {
             inner.client_names.remove(&client);
             inner.client_instances.remove(&client);
             inner.client_kinds.remove(&client);
+            inner.client_terminals.remove(&client);
             inner.control_outputs.remove(&client);
             inner.key_engines.remove(&client);
             inner.copy_sessions.remove(&client);
@@ -3434,6 +3444,7 @@ impl Shared {
         };
         if kind == ClientKind::Interactive
             && !output.is_empty()
+            && canonical_command(&command.name) != "new-session"
             && let Err(error) =
                 self.open_command_output(client, context.pane, command.name.clone(), output)
         {
@@ -3473,10 +3484,44 @@ impl Shared {
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
     ) -> Result<Execution, DaemonError> {
+        let client_terminal = if context.has_no_client() {
+            ClientTerminal::NoClient
+        } else {
+            client_terminal(&self.inner.lock(), client, kind)
+        };
+        self.execute_with_mux_source_for_terminal(
+            client,
+            kind,
+            context,
+            command,
+            mux_source,
+            client_terminal,
+        )
+    }
+
+    fn execute_with_mux_source_for_terminal(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+        mux_source: MuxOptionSource,
+        client_terminal: ClientTerminal,
+    ) -> Result<Execution, DaemonError> {
         let no_hooks = context.no_hooks;
         let original_context = context.clone();
         let name = canonical_command(&command.name).to_owned();
-        let result = self.execute_with_mux_source_raw(client, kind, context, command, mux_source);
+        let previous_client_terminal = context_client_terminal(context);
+        set_context_client_terminal(context, client_terminal);
+        let result = self.execute_with_mux_source_raw(
+            client,
+            kind,
+            context,
+            command,
+            mux_source,
+            client_terminal,
+        );
+        set_context_client_terminal(context, previous_client_terminal);
         let hook_output = if no_hooks {
             String::new()
         } else {
@@ -3524,6 +3569,7 @@ impl Shared {
         context: &mut ExecutionContext,
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
+        client_terminal: ClientTerminal,
     ) -> Result<Execution, DaemonError> {
         let canonical = canonical_command(&command.name);
         let preempted = zz_mux::CommandSpec::DAEMON_COMMAND_NAMES
@@ -3585,7 +3631,14 @@ impl Shared {
             return result;
         }
         let generation = self.inner.lock().engine.state.generation();
-        let result = self.execute_with_mux_source_inner(client, kind, context, command, mux_source);
+        let result = self.execute_with_mux_source_inner(
+            client,
+            kind,
+            context,
+            command,
+            mux_source,
+            client_terminal,
+        );
         let publish_snapshot = {
             let inner = self.inner.lock();
             let current = inner.engine.state.generation();
@@ -3664,6 +3717,7 @@ impl Shared {
         let mut output = String::new();
         for commands in commands {
             let mut hook_context = context.clone();
+            hook_context.set_no_client();
             hook_context.enter_hook(variables.clone());
             for command in commands {
                 hook_context.no_hooks = true;
@@ -3734,6 +3788,7 @@ impl Shared {
         context: &mut ExecutionContext,
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
+        client_terminal: ClientTerminal,
     ) -> Result<Execution, DaemonError> {
         let format_variables = context.format_variables.clone();
         let event_hooks_enabled = !context.no_hooks;
@@ -3767,7 +3822,6 @@ impl Shared {
         let mut shutdown_requested = false;
         let mut immediate_hooks = Vec::new();
         let mut pending_hook_events = Vec::new();
-
         let (mut execution, mux_options_event) = {
             let mut inner = self.inner.lock();
             let hook_snapshot_before =
@@ -3820,12 +3874,16 @@ impl Shared {
                 (!format_variables.is_empty()).then_some(&format_variables),
             );
             inner.engine.set_format_now(unix_timestamp());
+            let previous_client_terminal = context_client_terminal(context);
+            set_context_client_terminal(context, client_terminal);
             let execution = inner.engine.execute_with_shell_validator(
                 context,
                 command,
                 &mut hooks,
                 &mut |shell| shell_is_valid(Path::new(shell)),
-            )?;
+            );
+            set_context_client_terminal(context, previous_client_terminal);
+            let execution = execution?;
             if !inner.engine.state.sessions.is_empty() {
                 self.exit_empty_armed.store(true, Ordering::Release);
             }
@@ -4915,7 +4973,7 @@ impl Shared {
             }
         }
         if let Some((session, detach_others)) = attach {
-            if matches!(kind, ClientKind::Interactive | ClientKind::Control) {
+            if client_terminal == ClientTerminal::Present {
                 let (mut snapshot, attach_hook_events) =
                     self.attach_collect_event_hooks(client, session, event_hooks_enabled)?;
                 pending_hook_events.extend(attach_hook_events);
@@ -5028,9 +5086,13 @@ impl Shared {
                     reload_config = true;
                 } else {
                     let mut report = ConfigLoadReport::default();
-                    if let Err(error) =
-                        self.load_config_file_with_report(&path, context, 0, &mut report)
-                    {
+                    if let Err(error) = self.load_config_file_with_report_for_terminal(
+                        &path,
+                        context,
+                        0,
+                        &mut report,
+                        client_terminal,
+                    ) {
                         if source_file_error.is_none() {
                             source_file_error = Some(error);
                         }
@@ -12740,8 +12802,13 @@ impl Shared {
         context: &mut ExecutionContext,
         mux_config: Option<&Path>,
     ) -> Result<(), DaemonError> {
-        let (color_scheme, appearance_config_overrides) = {
+        let (color_scheme, appearance_config_overrides, config_client_terminal) = {
             let inner = self.inner.lock();
+            let kind = inner
+                .client_kinds
+                .get(&client)
+                .copied()
+                .unwrap_or(ClientKind::Command);
             (
                 inner
                     .client_color_schemes
@@ -12749,6 +12816,7 @@ impl Shared {
                     .copied()
                     .unwrap_or(inner.active_color_scheme),
                 inner.appearance_config_overrides.clone(),
+                client_terminal(&inner, client, kind),
             )
         };
         let load = resolve_appearance(color_scheme, &appearance_config_overrides);
@@ -12756,7 +12824,13 @@ impl Shared {
         self.inner.lock().engine.keys = KeyTables::default();
         let mut report = ConfigLoadReport::default();
         if let Some(config) = mux_config {
-            self.load_config_file_with_report(config, context, 0, &mut report)?;
+            self.load_config_file_with_report_for_terminal(
+                config,
+                context,
+                0,
+                &mut report,
+                config_client_terminal,
+            )?;
         }
         self.apply_stored_mux_config_overrides("reload-mux-replay");
 
@@ -12807,15 +12881,39 @@ impl Shared {
         context: &mut ExecutionContext,
         depth: usize,
     ) -> Result<(), DaemonError> {
-        self.load_config_file_with_report(path, context, depth, &mut ConfigLoadReport::default())
+        self.load_config_file_with_report_for_terminal(
+            path,
+            context,
+            depth,
+            &mut ConfigLoadReport::default(),
+            ClientTerminal::NoClient,
+        )
     }
 
+    #[cfg(test)]
     fn load_config_file_with_report(
         self: &Arc<Self>,
         path: &Path,
         context: &mut ExecutionContext,
         depth: usize,
         report: &mut ConfigLoadReport,
+    ) -> Result<(), DaemonError> {
+        self.load_config_file_with_report_for_terminal(
+            path,
+            context,
+            depth,
+            report,
+            ClientTerminal::NoClient,
+        )
+    }
+
+    fn load_config_file_with_report_for_terminal(
+        self: &Arc<Self>,
+        path: &Path,
+        context: &mut ExecutionContext,
+        depth: usize,
+        report: &mut ConfigLoadReport,
+        client_terminal: ClientTerminal,
     ) -> Result<(), DaemonError> {
         if depth >= MAX_CONFIG_DEPTH {
             log::warn!(
@@ -12923,9 +13021,13 @@ impl Shared {
                         continue;
                     }
                     for source in matches.paths {
-                        if let Err(error) =
-                            self.load_config_file_with_report(&source, context, depth + 1, report)
-                            && source_error.is_none()
+                        if let Err(error) = self.load_config_file_with_report_for_terminal(
+                            &source,
+                            context,
+                            depth + 1,
+                            report,
+                            client_terminal,
+                        ) && source_error.is_none()
                         {
                             source_error = Some(error);
                         }
@@ -12937,12 +13039,13 @@ impl Shared {
                 continue;
             }
             match self
-                .execute_with_mux_source(
+                .execute_with_mux_source_for_terminal(
                     ClientId(u64::MAX),
                     ClientKind::Command,
                     context,
                     &command,
                     MuxOptionSource::TmuxConfig,
+                    client_terminal,
                 )
                 .map_err(discard_command_output)
             {
@@ -13658,6 +13761,41 @@ impl ConfigLoadReport {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClientTerminal {
+    NoClient,
+    Absent,
+    Present,
+}
+
+fn context_client_terminal(context: &ExecutionContext) -> ClientTerminal {
+    if context.has_no_client() {
+        ClientTerminal::NoClient
+    } else if context.has_client_terminal() {
+        ClientTerminal::Present
+    } else {
+        ClientTerminal::Absent
+    }
+}
+
+fn set_context_client_terminal(context: &mut ExecutionContext, terminal: ClientTerminal) {
+    match terminal {
+        ClientTerminal::NoClient => context.set_no_client(),
+        ClientTerminal::Absent => context.set_client_terminal(false),
+        ClientTerminal::Present => context.set_client_terminal(true),
+    }
+}
+
+fn client_terminal(inner: &ServerState, client: ClientId, kind: ClientKind) -> ClientTerminal {
+    match kind {
+        ClientKind::Control => ClientTerminal::Present,
+        ClientKind::Interactive if inner.client_terminals.contains(&client) => {
+            ClientTerminal::Present
+        }
+        ClientKind::Interactive | ClientKind::Command => ClientTerminal::Absent,
+    }
+}
+
 #[derive(Default)]
 struct ServerState {
     engine: MuxEngine,
@@ -13674,6 +13812,7 @@ struct ServerState {
     client_names: BTreeMap<ClientId, String>,
     client_instances: BTreeMap<ClientId, ClientInstanceId>,
     client_kinds: BTreeMap<ClientId, ClientKind>,
+    client_terminals: BTreeSet<ClientId>,
     terminals: BTreeMap<PaneId, Arc<TerminalSession>>,
     terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,
     command_outputs: BTreeMap<ClientId, CommandOutputSession>,
@@ -18825,6 +18964,11 @@ fn handle_connection<S: TransportStream>(
         hello.client_instance_id,
         hello.device_name.clone(),
         hello.color_scheme,
+        hello.kind == ClientKind::Interactive
+            && hello
+                .capabilities
+                .iter()
+                .any(|capability| capability == ClientHello::CLIENT_TERMINAL_CAPABILITY),
     );
     let mut registration = ClientRegistrationGuard::new(shared, client);
     log::debug!(
@@ -20663,7 +20807,7 @@ mod tests {
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "exit-fixture", "exit"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "exit-fixture", "exit"]),
             )
             .expect("create terminal pane");
         shared.exit_empty_armed.store(true, Ordering::Release);
@@ -20706,7 +20850,12 @@ mod tests {
                 &mut context,
                 &CommandInvocation::new(
                     "new-session",
-                    ["-s", "dead-fixture", "printf 'ZZ_DEAD_FRAME\\n'; exit 7"],
+                    [
+                        "-d",
+                        "-s",
+                        "dead-fixture",
+                        "printf 'ZZ_DEAD_FRAME\\n'; exit 7",
+                    ],
                 ),
             )
             .expect("create exiting terminal pane");
@@ -20998,7 +21147,10 @@ mod tests {
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "signal-fixture", "kill -TERM $$"]),
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "signal-fixture", "kill -TERM $$"],
+                ),
             )
             .expect("create signalled terminal pane");
         let pane = context.pane.expect("terminal pane");
@@ -21172,6 +21324,41 @@ mod tests {
         assert!(attached_index.is_some());
         assert!(snapshot_index.is_some());
         assert!(attached_index < snapshot_index);
+    }
+
+    #[test]
+    fn interactive_new_session_without_a_terminal_is_rejected_before_creation() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register(
+            ClientKind::Interactive,
+            ClientInstanceId::default(),
+            None,
+            None,
+            false,
+        );
+        shared.subscribe(client, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+
+        assert!(matches!(
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "headless"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "open terminal failed: not a terminal"
+        ));
+        let inner = shared.inner.lock();
+        assert!(inner.engine.state.sessions.is_empty());
+        assert!(inner.attached.is_empty());
+        drop(inner);
+        assert!(
+            !take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(message, ProtocolMessage::Attached { .. }))
+        );
     }
 
     #[test]
@@ -21351,10 +21538,8 @@ mod tests {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
         shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
-        let context = ExecutionContext {
-            no_hooks: true,
-            ..ExecutionContext::default()
-        };
+        let mut context = ExecutionContext::default();
+        context.no_hooks = true;
         shared
             .buffer_command(
                 &context,
@@ -23097,7 +23282,7 @@ mod tests {
                 ClientId(3),
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "gated"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "gated"]),
             )
             .expect("session");
         shared
@@ -23225,7 +23410,7 @@ mod tests {
                 ClientId(3),
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "work", "-n", "source"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "work", "-n", "source"]),
             )
             .expect("source window");
         let source = context.pane.expect("source pane");
@@ -26253,7 +26438,7 @@ mod tests {
                 ClientId(7),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "detached"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "detached"]),
             )
             .expect("detached session");
         let pane = context.pane.expect("terminal pane");
@@ -26345,7 +26530,7 @@ mod tests {
                 ClientId(7),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "seeded-environment"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "seeded-environment"]),
             )
             .expect("session");
         let pane = context.pane.expect("terminal pane");
@@ -26894,7 +27079,7 @@ mod tests {
                 ClientId(7),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "history"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "history"]),
             )
             .expect("session");
         let session = context.session.expect("session id");
@@ -26929,7 +27114,8 @@ mod tests {
     #[test]
     fn configured_split_window_binding_creates_a_terminal_without_rewriting_the_command() {
         let shared = Arc::new(Shared::new(1));
-        let client = ClientId(7);
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
         let mut context = ExecutionContext::default();
         let config = zz_mux::parse_config(
             "picker.conf",
@@ -27055,7 +27241,8 @@ bind - split-window -v -c "#{pane_current_path}"
     #[test]
     fn default_percent_binding_creates_a_picker_via_split_picker() {
         let shared = Arc::new(Shared::new(1));
-        let client = ClientId(7);
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
         let mut context = ExecutionContext::default();
         shared
             .execute(
@@ -27145,7 +27332,13 @@ bind - split-window -v -c "#{pane_current_path}"
                 &mut context,
                 &CommandInvocation::new(
                     "new-session",
-                    ["-s", "cwd", "-c", donor_literal.to_string_lossy().as_ref()],
+                    [
+                        "-d",
+                        "-s",
+                        "cwd",
+                        "-c",
+                        donor_literal.to_string_lossy().as_ref(),
+                    ],
                 ),
             )
             .expect("session with literal cwd");
@@ -27261,7 +27454,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientId(7),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "cwd"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "cwd"]),
             )
             .expect("session");
         let first = context.pane.expect("first pane");
@@ -27477,7 +27670,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientId(7),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "words"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "words"]),
             )
             .expect("session");
         let session = context.session.expect("session id");
@@ -27565,7 +27758,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientId(7),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "mode-keys"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "mode-keys"]),
             )
             .expect("session");
         let session = context.session.expect("session id");
@@ -30863,7 +31056,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 &mut setup,
-                &CommandInvocation::new("new-session", ["-s", "yield"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "yield"]),
             )
             .expect("create shared session");
         let session = setup.session.expect("shared session");
@@ -31004,7 +31197,7 @@ bind - split-window -v -c "#{pane_current_path}"
         for command in [
             CommandInvocation::new("set-option", ["-g", "prefix", "C-a"]),
             CommandInvocation::new("bind-key", ["c", "new-window"]),
-            CommandInvocation::new("new-session", ["-s", "stray"]),
+            CommandInvocation::new("new-session", ["-d", "-s", "stray"]),
         ] {
             shared
                 .execute(
@@ -31821,7 +32014,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 &mut create_context,
-                &CommandInvocation::new("new-session", ["-s", "shared-focus", "-n", "agent"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "shared-focus", "-n", "agent"]),
             )
             .expect("create shared session");
         let session = create_context.session.expect("shared session");

@@ -54,6 +54,7 @@ const MAX_COMMAND_PROMPT_LABEL_BYTES: usize = 1024;
 const MAX_COMMAND_PROMPT_TEMPLATE_BYTES: usize = 8 * 1024;
 const DEFAULT_DISPLAY_MESSAGE: &str =
     "[#{session_name}] #{window_index}:#{window_name}, current pane #{pane_index}";
+const DEFAULT_NEW_SESSION_FORMAT: &str = "#{session_name}:";
 const DEFAULT_LIST_COMMANDS_FORMAT: &str =
     "#{command_list_name}#{?command_list_alias, (#{command_list_alias}),} #{command_list_usage}";
 const DEFAULT_LIST_SESSIONS_FORMAT: &str = concat!(
@@ -117,13 +118,35 @@ pub fn if_shell_truthy(value: &str) -> bool {
     value.as_bytes().first().is_some_and(|first| *first != b'0')
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionContext {
     pub session: Option<SessionId>,
     pub window: Option<WindowId>,
     pub pane: Option<PaneId>,
+    client_terminal: ClientTerminal,
     pub no_hooks: bool,
     pub format_variables: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ClientTerminal {
+    NoClient,
+    Absent,
+    #[default]
+    Present,
+}
+
+impl Default for ExecutionContext {
+    fn default() -> Self {
+        Self {
+            session: None,
+            window: None,
+            pane: None,
+            client_terminal: ClientTerminal::Present,
+            no_hooks: false,
+            format_variables: BTreeMap::new(),
+        }
+    }
 }
 
 impl ExecutionContext {
@@ -148,6 +171,28 @@ impl ExecutionContext {
         self.session = target.session;
         self.window = target.window;
         self.pane = target.pane;
+    }
+
+    #[must_use]
+    pub fn has_client_terminal(&self) -> bool {
+        self.client_terminal == ClientTerminal::Present
+    }
+
+    #[must_use]
+    pub fn has_no_client(&self) -> bool {
+        self.client_terminal == ClientTerminal::NoClient
+    }
+
+    pub fn set_client_terminal(&mut self, present: bool) {
+        self.client_terminal = if present {
+            ClientTerminal::Present
+        } else {
+            ClientTerminal::Absent
+        };
+    }
+
+    pub fn set_no_client(&mut self) {
+        self.client_terminal = ClientTerminal::NoClient;
     }
 
     pub fn retarget_to_pane(&mut self, state: &MuxState, pane: PaneId) -> bool {
@@ -1850,6 +1895,11 @@ impl MuxEngine {
         self.state.synchronized_input_targets(source)
     }
 
+    pub fn new_session_attaches(args: &[String]) -> Result<bool, ServerError> {
+        let (options, _) = parse_command_options("new-session", args)?;
+        Ok(options.has("-A") || !options.has("-d"))
+    }
+
     /// Apply one parsed command and return side effects for the daemon adapter.
     pub fn execute(
         &mut self,
@@ -2098,13 +2148,17 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("new-session", args)?;
         let command = shell_command_positional(&positional);
-        let detached = options.has("-d");
+        let detached = options.has("-d") || context.client_terminal == ClientTerminal::NoClient;
         if options.has("-A") {
             let existing = match options.value("-s") {
                 Some(name) => session_named(&self.state, name),
                 None => self.state.resolve_session(None, context.session).ok(),
             };
             if let Some(session) = existing {
+                if context.has_no_client() {
+                    return Ok(Execution::default());
+                }
+                require_client_terminal(context)?;
                 let window = session_active_window(&self.state, session)?;
                 let pane = window_active_pane(&self.state, window)?;
                 context.retarget(&ExecutionContext::new(
@@ -2118,12 +2172,20 @@ impl MuxEngine {
                 }));
             }
         }
-        let (inherit_cwd_from, cwd) =
-            spawn_cwd_source(self, &options, context.pane, &PaneKind::Terminal, hooks);
         let name = options
             .value("-s")
             .map_or_else(|| next_session_name(&self.state), str::to_owned);
+        if session_named(&self.state, &name).is_some() {
+            return Err(ServerError::InvalidCommand(format!(
+                "duplicate session: {name}"
+            )));
+        }
+        if !detached {
+            require_client_terminal(context)?;
+        }
         let extent = initial_window_extent(&options, self.global_default_size())?;
+        let (inherit_cwd_from, cwd) =
+            spawn_cwd_source(self, &options, context.pane, &PaneKind::Terminal, hooks);
         let base_index = self.global_base_index;
         let (session, window, pane) = self
             .state
@@ -2153,6 +2215,22 @@ impl MuxEngine {
             Some(window),
             Some(pane),
         ));
+        let output = if options.has("-P") {
+            expand_format_with_hooks(
+                options.value("-F").unwrap_or(DEFAULT_NEW_SESSION_FORMAT),
+                self,
+                FormatContext {
+                    session: Some(session),
+                    window: Some(window),
+                    pane: None,
+                    active_session: Some(session),
+                    format_type: FormatType::None,
+                },
+                hooks,
+            )
+        } else {
+            String::new()
+        };
         let mut effects = vec![MuxEffect::PaneCreated {
             pane,
             kind: PaneKindSnapshot::Terminal,
@@ -2166,10 +2244,7 @@ impl MuxEngine {
                 detach_others: false,
             });
         }
-        Ok(Execution {
-            output: String::new(),
-            effects,
-        })
+        Ok(Execution { output, effects })
     }
 
     fn list_sessions(
@@ -2268,10 +2343,14 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("attach-session", args)?;
         reject_positionals("attach-session", &positional)?;
+        if context.has_no_client() {
+            return Ok(Execution::default());
+        }
         let detach_others = options.has("-d");
         let session = self
             .state
             .resolve_session(options.value("-t"), context.session)?;
+        require_client_terminal(context)?;
         let window = session_active_window(&self.state, session)?;
         let pane = window_active_pane(&self.state, window)?;
         context.retarget(&ExecutionContext::new(
@@ -8954,8 +9033,8 @@ fn split_size(options: &Options) -> Option<SplitSize<'_>> {
 fn initial_window_extent(options: &Options, default_size: &str) -> Result<(u16, u16), ServerError> {
     let default = parse_default_size(default_size).unwrap_or(DEFAULT_WINDOW_EXTENT);
     Ok((
-        initial_window_dimension(options, "-x", default.0)?,
-        initial_window_dimension(options, "-y", default.1)?,
+        initial_window_dimension(options, "-x", default.0, "width")?,
+        initial_window_dimension(options, "-y", default.1, "height")?,
     ))
 }
 
@@ -8982,12 +9061,43 @@ fn initial_window_dimension(
     options: &Options,
     option: &str,
     default: u16,
+    dimension: &str,
 ) -> Result<u16, ServerError> {
-    options.value(option).map_or(Ok(default), |value| {
-        value
-            .parse::<u16>()
-            .map_err(|_| ServerError::InvalidCommand(format!("invalid window size: {value}")))
-    })
+    let Some(value) = options.value(option) else {
+        return Ok(default);
+    };
+    if value == "-" {
+        return Ok(match dimension {
+            "width" => DEFAULT_WINDOW_EXTENT.0,
+            "height" => DEFAULT_WINDOW_EXTENT.1,
+            _ => default,
+        });
+    }
+    match value.parse::<i128>() {
+        Ok(number) if number < 1 => Err(ServerError::InvalidCommand(format!(
+            "{dimension} too small"
+        ))),
+        Ok(number) if number > i128::from(u16::MAX) => Err(ServerError::InvalidCommand(format!(
+            "{dimension} too large"
+        ))),
+        Ok(number) => Ok(u16::try_from(number).expect("bounded dimension fits u16")),
+        Err(_) if decimal_digits(value.strip_prefix('-')) => Err(ServerError::InvalidCommand(
+            format!("{dimension} too small"),
+        )),
+        Err(_) if decimal_digits(Some(value.strip_prefix('+').unwrap_or(value))) => Err(
+            ServerError::InvalidCommand(format!("{dimension} too large")),
+        ),
+        Err(_) => Err(ServerError::InvalidCommand(format!("{dimension} invalid"))),
+    }
+}
+
+fn require_client_terminal(context: &ExecutionContext) -> Result<(), ServerError> {
+    match context.client_terminal {
+        ClientTerminal::Absent => Err(ServerError::InvalidCommand(
+            "open terminal failed: not a terminal".to_owned(),
+        )),
+        ClientTerminal::NoClient | ClientTerminal::Present => Ok(()),
+    }
 }
 
 fn implied_window_extent(measured: u16, window: u16, pane: u16) -> u16 {
@@ -10430,6 +10540,175 @@ mod tests {
     }
 
     #[test]
+    fn clientless_new_session_forces_detached_creation() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext {
+            client_terminal: ClientTerminal::NoClient,
+            ..ExecutionContext::default()
+        };
+
+        let execution = engine
+            .execute(&mut context, &command("new-session", &["-s", "fromconfig"]))
+            .expect("clientless new session");
+
+        assert!(
+            execution
+                .effects
+                .iter()
+                .all(|effect| !matches!(effect, MuxEffect::Attach { .. }))
+        );
+        assert!(session_named(&engine.state, "fromconfig").is_some());
+    }
+
+    #[test]
+    fn clientless_attach_commands_are_silent_noops() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-d", "-s", "base"]))
+            .expect("base session");
+        let session = context.session;
+        context.client_terminal = ClientTerminal::NoClient;
+
+        let new_session = engine
+            .execute(&mut context, &command("new-session", &["-A", "-s", "base"]))
+            .expect("clientless new-session -A");
+        assert!(new_session.output.is_empty());
+        assert!(new_session.effects.is_empty());
+        assert_eq!(context.session, session);
+
+        let attach = engine
+            .execute(&mut context, &command("attach-session", &["-t", "bogus"]))
+            .expect("clientless attach-session");
+        assert!(attach.output.is_empty());
+        assert!(attach.effects.is_empty());
+        assert_eq!(context.session, session);
+    }
+
+    #[test]
+    fn new_session_check_order_matches_terminal_duplicate_and_size_rules() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext {
+            client_terminal: ClientTerminal::Absent,
+            ..ExecutionContext::default()
+        };
+
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("new-session", &["-s", "missing-terminal"]),
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "open terminal failed: not a terminal"
+        ));
+        assert!(engine.state.sessions.is_empty());
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "duplicate"]),
+            )
+            .expect("detached session");
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("new-session", &["-s", "duplicate", "-x", "0"]),
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "duplicate session: duplicate"
+        ));
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("new-session", &["-s", "fresh-size", "-x", "0"]),
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "open terminal failed: not a terminal"
+        ));
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("new-session", &["-A", "-d", "-s", "duplicate"]),
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "open terminal failed: not a terminal"
+        ));
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("attach-session", &["-t", "duplicate"]),
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "open terminal failed: not a terminal"
+        ));
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-A", "-d", "-s", "detached"]),
+            )
+            .expect("fresh -A -d remains detached");
+        context.client_terminal = ClientTerminal::Present;
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("new-session", &["-s", "bad-width", "-x", "0"]),
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "width too small"
+        ));
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("new-session", &["-s", "bad-height", "-y", "0"]),
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "height too small"
+        ));
+        assert_eq!(engine.state.sessions.len(), 2);
+    }
+
+    #[test]
+    fn new_session_prints_the_created_session_with_the_requested_format() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+
+        let default = engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-P", "-d", "-s", "printed"]),
+            )
+            .expect("printed session");
+        assert_eq!(default.output, "printed:");
+
+        let formatted = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &[
+                        "-P",
+                        "-d",
+                        "-F",
+                        "#{session_name}/#{window_index}",
+                        "-s",
+                        "formatted",
+                    ],
+                ),
+            )
+            .expect("formatted session");
+        assert_eq!(formatted.output, "formatted/0");
+
+        let ignored = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-F", "#{session_name}", "-s", "silent"],
+                ),
+            )
+            .expect("silent session");
+        assert!(ignored.output.is_empty());
+    }
+
+    #[test]
     fn most_recent_context_drives_originless_new_session_cwd() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -10608,6 +10887,45 @@ mod tests {
                 .layout
                 .extent(),
             (90, 43)
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "dash-width", "-x", "-"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.state.windows[&context.window.unwrap()]
+                .layout
+                .extent(),
+            (80, 43)
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "dash-height", "-y", "-"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.state.windows[&context.window.unwrap()]
+                .layout
+                .extent(),
+            (132, 24)
+        );
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-s", "dash-both", "-x", "-", "-y", "-"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.state.windows[&context.window.unwrap()]
+                .layout
+                .extent(),
+            (80, 24)
         );
         engine
             .execute(
@@ -13502,6 +13820,21 @@ mod tests {
         assert_eq!(options.value("-U"), Some("5"));
         assert!(options.has("-R"));
         assert!(positional.is_empty());
+    }
+
+    #[test]
+    fn new_session_attach_routing_uses_the_command_option_parser() {
+        let attaches = |args: &[&str]| {
+            MuxEngine::new_session_attaches(
+                &args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>(),
+            )
+            .expect("valid new-session arguments")
+        };
+
+        assert!(attaches(&["-s", "a", "/usr/bin/true", "-d"]));
+        assert!(attaches(&["-s", "b", "--", "-d"]));
+        assert!(attaches(&["-dA", "-s", "existing"]));
+        assert!(!attaches(&["-dsfoo"]));
     }
 
     #[test]

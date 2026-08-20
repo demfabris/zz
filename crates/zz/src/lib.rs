@@ -56,6 +56,8 @@ use zz_daemon::{
 };
 use zz_daemon::{DaemonError, InteractiveClient};
 #[cfg(not(target_os = "ios"))]
+use zz_mux::MuxEngine;
+#[cfg(not(target_os = "ios"))]
 use zz_protocol::{
     CommandInvocation, MAX_AGENT_SEND_BYTES, PROTOCOL_VERSION, ServerError, ServerHello,
     canonical_command,
@@ -704,7 +706,9 @@ fn run_command_mode(
             login_shell,
         ));
     }
-    let mut commands = split_command_chain(arguments).into_iter();
+    let command_chain = split_command_chain(arguments);
+    let new_session_tui = command_chain_uses_tui(&command_chain);
+    let mut commands = command_chain.into_iter();
     let Some(mut invocation) = commands.next() else {
         if host.is_some() {
             eprintln!("zz: --host requires a command");
@@ -794,6 +798,51 @@ fn run_command_mode(
         return Some(run_kill_server(socket_path, invocation.args));
     }
 
+    if command == "agent-send" && zz_daemon::agent_send_reads_stdin(&invocation.args) {
+        match read_stdin_payload() {
+            Ok(payload) => {
+                if !invocation.args.iter().any(|argument| argument == "--") {
+                    invocation.args.push("--".to_owned());
+                }
+                invocation.args.push(payload);
+            }
+            Err(error) => {
+                eprintln!("zz: {error}");
+                return Some(ExitCode::FAILURE);
+            }
+        }
+    }
+
+    if new_session_tui {
+        let options = zz_tui::RunOptions {
+            socket_path: socket_path.to_path_buf(),
+            host: host.map(str::to_owned),
+            session: None,
+            restart_daemon: false,
+            detach_others: false,
+        };
+        let reconnect = |path: &Path, client_has_terminal| {
+            connect_interactive_client_with_config_and_terminal(
+                path,
+                TerminalColorScheme::Dark,
+                mux_config_files,
+                client_has_terminal,
+            )
+        };
+        let request = options
+            .with_browser_provider(tui_browser_provider)
+            .with_local_reconnect(&reconnect);
+        return Some(
+            match zz_tui::run_new_session(request, std::iter::once(invocation).chain(commands)) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("{error}");
+                    ExitCode::FAILURE
+                }
+            },
+        );
+    }
+
     if canonical_command(&command) == "attach-session" {
         let options = match parse_native_attach_arguments(invocation.args) {
             Ok(options) => options,
@@ -817,21 +866,16 @@ fn run_command_mode(
             restart_daemon: options.restart_daemon,
             detach_others: options.detach_others,
         };
-        let browser_provider = {
-            use std::io::IsTerminal as _;
-            (std::io::stdin().is_terminal() && std::io::stdout().is_terminal())
-                .then(tui_browser_provider)
-                .flatten()
-        };
-        let reconnect = |path: &Path| {
-            connect_interactive_client_with_config(
+        let reconnect = |path: &Path, client_has_terminal| {
+            connect_interactive_client_with_config_and_terminal(
                 path,
                 TerminalColorScheme::Dark,
                 mux_config_files,
+                client_has_terminal,
             )
         };
         let request = options
-            .with_browser_provider(browser_provider)
+            .with_browser_provider(tui_browser_provider)
             .with_local_reconnect(&reconnect);
         return Some(match zz_tui::run(request) {
             Ok(()) => ExitCode::SUCCESS,
@@ -840,21 +884,6 @@ fn run_command_mode(
                 ExitCode::FAILURE
             }
         });
-    }
-
-    if command == "agent-send" && zz_daemon::agent_send_reads_stdin(&invocation.args) {
-        match read_stdin_payload() {
-            Ok(payload) => {
-                if !invocation.args.iter().any(|argument| argument == "--") {
-                    invocation.args.push("--".to_owned());
-                }
-                invocation.args.push(payload);
-            }
-            Err(error) => {
-                eprintln!("zz: {error}");
-                return Some(ExitCode::FAILURE);
-            }
-        }
     }
 
     let start_server = !no_start_server && tmux_command_starts_server(&command);
@@ -904,6 +933,17 @@ fn run_command_mode(
             Some(ExitCode::FAILURE)
         }
     }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn new_session_uses_tui(invocation: &CommandInvocation) -> bool {
+    canonical_command(&invocation.name) == "new-session"
+        && MuxEngine::new_session_attaches(&invocation.args).unwrap_or(false)
+}
+
+#[cfg(not(target_os = "ios"))]
+fn command_chain_uses_tui(invocations: &[CommandInvocation]) -> bool {
+    invocations.iter().any(new_session_uses_tui)
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1211,10 +1251,7 @@ fn command_error_message(error: &DaemonError) -> String {
 
 #[cfg(not(target_os = "ios"))]
 fn server_error_message(error: &ServerError) -> String {
-    match error {
-        ServerError::InvalidCommand(message) => message.clone(),
-        error => error.to_string(),
-    }
+    error.tmux_message()
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1755,11 +1792,27 @@ fn connect_interactive_client_with_config(
     color_scheme: TerminalColorScheme,
     mux_config_files: &[PathBuf],
 ) -> Result<InteractiveClient, DaemonError> {
+    connect_interactive_client_with_config_and_terminal(path, color_scheme, mux_config_files, true)
+}
+
+#[cfg(not(target_os = "ios"))]
+fn connect_interactive_client_with_config_and_terminal(
+    path: &Path,
+    color_scheme: TerminalColorScheme,
+    mux_config_files: &[PathBuf],
+    client_has_terminal: bool,
+) -> Result<InteractiveClient, DaemonError> {
     connect_or_spawn_daemon(
         path,
         Some(color_scheme),
         mux_config_files,
-        || InteractiveClient::connect_with_color_scheme(path, color_scheme),
+        || {
+            InteractiveClient::connect_with_color_scheme_and_terminal(
+                path,
+                color_scheme,
+                client_has_terminal,
+            )
+        },
         InteractiveClient::server_hello,
     )
 }
@@ -1842,14 +1895,16 @@ mod tests {
 
     use super::{
         ApplicationArgumentError, TMUX_USAGE, TMUX_VERSION_OUTPUT, application_arguments,
-        application_working_directory, command_error_message, daemon_is_missing,
-        execute_command_chain, implicit_tmux_endpoint_conflict, is_kill_server_command,
-        parse_native_attach_arguments, protocol_version_output, run_command_mode,
-        split_command_chain, terminal_color_scheme, tmux_command_starts_server,
+        application_working_directory, command_chain_uses_tui, command_error_message,
+        daemon_is_missing, execute_command_chain, implicit_tmux_endpoint_conflict,
+        is_kill_server_command, new_session_uses_tui, parse_native_attach_arguments,
+        protocol_version_output, run_command_mode, split_command_chain, terminal_color_scheme,
+        tmux_command_starts_server,
     };
     #[cfg(unix)]
     use super::{tmux_label_socket_path, tmux_socket_root};
     use zz_daemon::DaemonError;
+    use zz_protocol::CommandInvocation;
 
     #[test]
     fn kill_server_accepts_command_and_flag_spellings_only() {
@@ -1929,6 +1984,45 @@ mod tests {
         ] {
             assert!(!tmux_command_starts_server(command), "{command}");
         }
+    }
+
+    #[test]
+    fn new_session_tui_routing_resolves_prefixes_and_tmux_argv_edges() {
+        let routes = |name: &str, args: &[&str]| {
+            new_session_uses_tui(&CommandInvocation::new(name, args.iter().copied()))
+        };
+
+        assert!(routes("new-session", &[]));
+        assert!(routes("new", &["-s", "work"]));
+        assert!(routes("new-s", &["-dA", "-s", "work"]));
+        assert!(routes("new-session", &["-s", "a", "/usr/bin/true", "-d"]));
+        assert!(routes("new-session", &["-s", "b", "--", "-d"]));
+        assert!(!routes("new-session", &["-dsfoo"]));
+        assert!(!routes("new-session", &["-s"]));
+        assert!(!routes("list-sessions", &[]));
+    }
+
+    #[test]
+    fn new_session_tui_routing_scans_the_complete_command_chain() {
+        let attaching_later = split_command_chain(
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "first",
+                ";",
+                "new-session",
+                "-s",
+                "later",
+            ]
+            .map(str::to_owned),
+        );
+        assert!(command_chain_uses_tui(&attaching_later));
+
+        let detached_only = split_command_chain(
+            &["new-session", "-d", "-s", "first", ";", "list-sessions"].map(str::to_owned),
+        );
+        assert!(!command_chain_uses_tui(&detached_only));
     }
 
     #[test]

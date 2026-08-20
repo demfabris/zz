@@ -101,8 +101,15 @@ pub struct CommandClient {
 
 impl CommandClient {
     pub fn connect(path: &Path) -> Result<Self, DaemonError> {
-        let connected =
-            connect::<LocalTransport>(path, path.display(), ClientKind::Command, None, None, true)?;
+        let connected = connect::<LocalTransport>(
+            path,
+            path.display(),
+            ClientKind::Command,
+            None,
+            None,
+            false,
+            true,
+        )?;
         Ok(Self::from_connected(connected))
     }
 
@@ -118,6 +125,7 @@ impl CommandClient {
                     None,
                     None,
                     false,
+                    false,
                 )?;
                 Ok(Self::from_connected(connected))
             }
@@ -131,8 +139,15 @@ impl CommandClient {
                 {
                     let ssh_forward = SshForward::start(endpoint, None)?;
                     let stream = LocalTransport::connect(ssh_forward.local_socket())?;
-                    let connected =
-                        connect_stream(stream, endpoint, ClientKind::Command, None, None, false)?;
+                    let connected = connect_stream(
+                        stream,
+                        endpoint,
+                        ClientKind::Command,
+                        None,
+                        None,
+                        false,
+                        false,
+                    )?;
                     Ok(Self::from_connected_with_ssh(connected, ssh_forward))
                 }
                 #[cfg(not(any(unix, windows)))]
@@ -231,6 +246,7 @@ impl InteractiveClient {
             None,
             None,
             false,
+            false,
         )?;
         Ok(Self::from_connected(connected))
     }
@@ -242,11 +258,36 @@ impl InteractiveClient {
         Self::connect_endpoint(&Endpoint::Local(path.to_owned()), color_scheme)
     }
 
+    pub fn connect_with_color_scheme_and_terminal(
+        path: &Path,
+        color_scheme: TerminalColorScheme,
+        client_has_terminal: bool,
+    ) -> Result<Self, DaemonError> {
+        Self::connect_endpoint_with_terminal(
+            &Endpoint::Local(path.to_owned()),
+            color_scheme,
+            client_has_terminal,
+        )
+    }
+
     pub fn connect_endpoint(
         endpoint: &Endpoint,
         color_scheme: TerminalColorScheme,
     ) -> Result<Self, DaemonError> {
         Self::connect_endpoint_with_prompts(endpoint, color_scheme, None)
+    }
+
+    pub fn connect_endpoint_with_terminal(
+        endpoint: &Endpoint,
+        color_scheme: TerminalColorScheme,
+        client_has_terminal: bool,
+    ) -> Result<Self, DaemonError> {
+        Self::connect_endpoint_with_prompts_and_terminal(
+            endpoint,
+            color_scheme,
+            None,
+            client_has_terminal,
+        )
     }
 
     /// Connect, letting `prompts` answer whatever ssh asks along the way.
@@ -256,6 +297,15 @@ impl InteractiveClient {
         endpoint: &Endpoint,
         color_scheme: TerminalColorScheme,
         prompts: Option<crate::askpass::SshPrompts>,
+    ) -> Result<Self, DaemonError> {
+        Self::connect_endpoint_with_prompts_and_terminal(endpoint, color_scheme, prompts, true)
+    }
+
+    fn connect_endpoint_with_prompts_and_terminal(
+        endpoint: &Endpoint,
+        color_scheme: TerminalColorScheme,
+        prompts: Option<crate::askpass::SshPrompts>,
+        client_has_terminal: bool,
     ) -> Result<Self, DaemonError> {
         let device_name = short_device_name();
         match endpoint {
@@ -267,6 +317,7 @@ impl InteractiveClient {
                     ClientKind::Interactive,
                     device_name.clone(),
                     Some(color_scheme),
+                    client_has_terminal,
                     false,
                 )?;
                 Ok(Self::from_connected(connected))
@@ -281,6 +332,7 @@ impl InteractiveClient {
                         ClientKind::Interactive,
                         device_name,
                         Some(color_scheme),
+                        client_has_terminal,
                         false,
                     )?;
                     let mut client = Self::from_connected(connected);
@@ -297,6 +349,7 @@ impl InteractiveClient {
                         ClientKind::Interactive,
                         device_name,
                         Some(color_scheme),
+                        client_has_terminal,
                         false,
                     )?;
                     Ok(Self::from_connected_with_ssh(connected, ssh_forward))
@@ -707,6 +760,7 @@ fn connect<T: Transport>(
     kind: ClientKind,
     device_name: Option<String>,
     color_scheme: Option<TerminalColorScheme>,
+    client_has_terminal: bool,
     send_origin: bool,
 ) -> Result<Connected<T::Stream>, DaemonError> {
     let stream = T::connect(endpoint)?;
@@ -716,6 +770,7 @@ fn connect<T: Transport>(
         kind,
         device_name,
         color_scheme,
+        client_has_terminal,
         send_origin,
     )
 }
@@ -726,12 +781,13 @@ fn connect_stream<S: TransportStream>(
     kind: ClientKind,
     device_name: Option<String>,
     color_scheme: Option<TerminalColorScheme>,
+    client_has_terminal: bool,
     send_origin: bool,
 ) -> Result<Connected<S>, DaemonError> {
     let started = diagnostic_timer();
     let mut reader = ProtocolReceiver::new(stream.try_clone()?);
     let mut writer = ProtocolSender::new(stream);
-    let capabilities = if kind == ClientKind::Command {
+    let mut capabilities = if kind == ClientKind::Command {
         std::env::var(crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE)
             .ok()
             .filter(|token| !token.is_empty())
@@ -746,6 +802,9 @@ fn connect_stream<S: TransportStream>(
     } else {
         Vec::new()
     };
+    if kind == ClientKind::Interactive && client_has_terminal {
+        capabilities.push(ClientHello::CLIENT_TERMINAL_CAPABILITY.to_owned());
+    }
     writer.send(&ProtocolMessage::ClientHello(ClientHello {
         protocol_version: PROTOCOL_VERSION,
         client_instance_id: client_instance_id(),

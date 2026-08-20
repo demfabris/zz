@@ -361,7 +361,7 @@ impl MuxState {
         let name = name.into();
         if self.sessions.values().any(|session| session.name == name) {
             return Err(ServerError::InvalidCommand(format!(
-                "duplicate session name: {name}"
+                "duplicate session: {name}"
             )));
         }
         let session_id = self.allocate_session_id();

@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     io::{self, Read as _},
     mem,
     sync::{
@@ -376,24 +376,56 @@ enum ProtocolOutcome {
     Exit(String),
 }
 
+pub(crate) enum InitialAttach {
+    Request {
+        target: Option<String>,
+        detach_others: bool,
+    },
+    AlreadyAttached {
+        session: zz_protocol::SessionId,
+        messages: Vec<ProtocolMessage>,
+    },
+}
+
 pub(crate) fn run(
     initial: InteractiveClient,
     mut endpoint: Endpoint,
     local_endpoint: Endpoint,
-    target: Option<&str>,
-    detach_others: bool,
+    initial_attach: InitialAttach,
     host_label: String,
     local_host_label: String,
     fleet_hosts: Vec<HostEntry>,
     browser_provider: Option<Box<dyn BrowserFrameProvider>>,
 ) -> Result<(), String> {
+    let (attach_target, detach_others, initial_messages, attempt) = match initial_attach {
+        InitialAttach::Request {
+            target,
+            detach_others,
+        } => {
+            let attempt = if target.is_some() {
+                AttachAttempt::Explicit
+            } else {
+                AttachAttempt::Default
+            };
+            (
+                target.unwrap_or_default(),
+                Some(detach_others),
+                Vec::new(),
+                attempt,
+            )
+        }
+        InitialAttach::AlreadyAttached { session, messages } => {
+            (session.to_string(), None, messages, AttachAttempt::Explicit)
+        }
+    };
     let size = TerminalSize::detect().map_err(|error| error.to_string())?;
     let mut core = seeded_core(initial.server_hello().clone());
     let mut client = Arc::new(initial);
-    let attach_target = target.unwrap_or_default().to_owned();
-    client
-        .attach_session(attach_target, detach_others)
-        .map_err(|error| error.to_string())?;
+    if let Some(detach_others) = detach_others {
+        client
+            .attach_session(attach_target.clone(), detach_others)
+            .map_err(|error| error.to_string())?;
+    }
 
     let mut terminal = TerminalGuard::enter().map_err(|error| error.to_string())?;
     let pixel_mouse = terminal.pixel_mouse();
@@ -421,6 +453,7 @@ pub(crate) fn run(
         Arc::clone(&client),
         Arc::clone(&core),
         connection_id,
+        initial_messages,
         events.clone(),
         Arc::clone(&frames),
         Arc::clone(&kitty_images),
@@ -428,11 +461,7 @@ pub(crate) fn run(
     )?;
     spawn_terminal_reader(events.clone())?;
 
-    let mut attempt = if target.is_some() {
-        AttachAttempt::Explicit
-    } else {
-        AttachAttempt::Default
-    };
+    let mut attempt = attempt;
     let mut creating_default = false;
     let mut remembered_session = None;
     let mut reconnect_available = true;
@@ -796,6 +825,7 @@ fn replace_connection(
         Arc::clone(&connected.client),
         Arc::clone(&connected.core),
         next_connection_id,
+        Vec::new(),
         events.clone(),
         Arc::clone(&next_frames),
         Arc::clone(&next_kitty_images),
@@ -820,6 +850,7 @@ fn spawn_protocol_reader(
     client: Arc<InteractiveClient>,
     core: Arc<Mutex<ClientCore>>,
     connection: u64,
+    initial_messages: Vec<ProtocolMessage>,
     events: mpsc::Sender<MainEvent>,
     frames: Arc<FrameInbox>,
     kitty_images: Arc<KittyImageInbox>,
@@ -830,17 +861,22 @@ fn spawn_protocol_reader(
     thread::Builder::new()
         .name("zz-tui-protocol".to_owned())
         .spawn(move || {
+            let mut initial_messages = VecDeque::from(initial_messages);
             'reader: loop {
-                let message = match client.recv() {
-                    Ok(message) => message,
-                    Err(error) => {
-                        if !thread_cancelled.load(Ordering::Acquire) {
-                            let _ = events.send(MainEvent::Disconnected {
-                                connection,
-                                error: error.to_string(),
-                            });
+                let message = if let Some(message) = initial_messages.pop_front() {
+                    message
+                } else {
+                    match client.recv() {
+                        Ok(message) => message,
+                        Err(error) => {
+                            if !thread_cancelled.load(Ordering::Acquire) {
+                                let _ = events.send(MainEvent::Disconnected {
+                                    connection,
+                                    error: error.to_string(),
+                                });
+                            }
+                            break;
                         }
-                        break;
                     }
                 };
                 if thread_cancelled.load(Ordering::Acquire) {
@@ -1243,7 +1279,7 @@ fn handle_command_response(
             ..
         } => Ok(ProtocolOutcome::None),
         CommandResponse::Error { error, .. } => {
-            model.client_message = Some(error.to_string());
+            model.client_message = Some(error.tmux_message());
             Ok(ProtocolOutcome::Repaint)
         }
         CommandResponse::Success { .. } => {

@@ -163,6 +163,13 @@ fn mode_keys_from_environment(visual: Option<&OsStr>, editor: Option<&OsStr>) ->
     }
 }
 
+fn editor_from_environment(visual: Option<&OsStr>, editor: Option<&OsStr>) -> String {
+    visual.or(editor).map_or_else(
+        || "/usr/bin/vi".to_owned(),
+        |value| value.to_string_lossy().into_owned(),
+    )
+}
+
 #[cfg(unix)]
 fn shell_is_valid_for_program(shell: &Path, program: &OsStr) -> bool {
     use std::os::unix::ffi::OsStrExt as _;
@@ -2553,6 +2560,7 @@ impl Shared {
             std::env::temp_dir().join("zz-test-paste"),
             std::env::temp_dir().join("zz-test.sock"),
             "emacs",
+            "/usr/bin/vi",
             std::iter::empty::<(String, String)>(),
         )
     }
@@ -2567,6 +2575,7 @@ impl Shared {
     ) -> Self {
         let visual = std::env::var_os("VISUAL");
         let editor = std::env::var_os("EDITOR");
+        let default_editor = editor_from_environment(visual.as_deref(), editor.as_deref());
         Self::configured_with_boot_environment(
             server_id,
             appearance,
@@ -2575,6 +2584,7 @@ impl Shared {
             paste_directory,
             socket_path,
             mode_keys_from_environment(visual.as_deref(), editor.as_deref()),
+            &default_editor,
             daemon_environment(),
         )
     }
@@ -2587,6 +2597,7 @@ impl Shared {
         paste_directory: PathBuf,
         socket_path: PathBuf,
         default_mode_keys: &str,
+        default_editor: &str,
         environment: I,
     ) -> Self
     where
@@ -2613,6 +2624,7 @@ impl Shared {
             .engine
             .set_default_mode_keys(default_mode_keys)
             .expect("daemon mode-keys default is valid");
+        state.engine.initialize_default_editor(default_editor);
         state.engine.initialize_default_shell(default_shell);
         state.engine.seed_global_environment(environment);
         let (host, host_short) = host_names();
@@ -7116,7 +7128,13 @@ impl Shared {
             let pane = target
                 .pane
                 .ok_or_else(|| ServerError::MissingTarget("current pane".to_owned()))?;
-            let defaults = inner.engine.popup_options_for_window(window)?;
+            let style_window = inner
+                .engine
+                .state
+                .sessions
+                .get(&session)
+                .map_or(window, |state| state.active_window);
+            let defaults = inner.engine.popup_options_for_window(style_window)?;
             let border_lines = if parsed.borderless {
                 PopupBorderLines::None
             } else if let Some(value) = parsed.border_lines.as_deref() {
@@ -19411,6 +19429,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn editor_option_uses_daemon_boot_environment_precedence() {
+        assert_eq!(
+            editor_from_environment(Some(OsStr::new("nvim")), Some(OsStr::new("vim"))),
+            "nvim"
+        );
+        assert_eq!(
+            editor_from_environment(None, Some(OsStr::new("emacs"))),
+            "emacs"
+        );
+        assert_eq!(
+            editor_from_environment(Some(OsStr::new("")), Some(OsStr::new("vim"))),
+            ""
+        );
+        assert_eq!(editor_from_environment(None, None), "/usr/bin/vi");
+    }
+
     #[cfg(unix)]
     #[test]
     fn checkshell_rejects_relative_non_executable_and_own_binary_paths() {
@@ -19610,10 +19645,22 @@ mod tests {
             std::env::temp_dir().join("zz-test-paste"),
             std::env::temp_dir().join("zz-test.sock"),
             "vi",
+            "nvim",
             [("PHASE4D_BOOT", "seeded")],
         );
         let mut inner = shared.inner.lock();
         assert_eq!(inner.engine.mux_option_value(MuxOptionKey::ModeKeys), "vi");
+        assert_eq!(
+            inner
+                .engine
+                .execute(
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("show-options", ["-sv", "editor"]),
+                )
+                .unwrap()
+                .output,
+            "nvim"
+        );
         assert_eq!(
             inner
                 .engine
@@ -33152,6 +33199,86 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("lock-session", ["-t", "work"]),
             )
             .expect("existing lock session");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn display_popup_resolves_styles_from_the_sessions_current_window() {
+        let (shared, client, _, mut context) = popup_test_workspace("desktop");
+        let first_window = context.window.expect("current popup window");
+        let created = shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-window", ["-d", "-n", "target"]),
+            )
+            .expect("create popup target window");
+        let target_pane = match created.effects.first() {
+            Some(MuxEffect::PaneCreated { pane, .. }) => *pane,
+            other => panic!("expected target pane creation: {other:?}"),
+        };
+        let target_window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(target_pane)
+            .expect("popup target window");
+        let first_window = first_window.to_string();
+        let target_window = target_window.to_string();
+        let target_pane = target_pane.to_string();
+
+        for (window, style, border_style) in [
+            (target_window.as_str(), "bg=red", "fg=cyan"),
+            (first_window.as_str(), "bg=blue", "fg=magenta"),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-window-option",
+                        ["-t", window, "popup-style", style],
+                    ),
+                )
+                .expect("set window popup style");
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-window-option",
+                        ["-t", window, "popup-border-style", border_style],
+                    ),
+                )
+                .expect("set window popup border style");
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-t", &target_pane, "exit 0"]),
+            )
+            .expect("open popup for target pane");
+        let state = wait_for_popup_state(&shared, client, |state| state.dead);
+        // The pin reads popup styles from the target session's current window
+        // (cmd-display-menu.c: `s->curw->window->options`), not from the window
+        // that owns the `-t` pane, which `new-window -d` left unfocused.
+        assert_eq!(state.style, "bg=blue");
+        assert_eq!(state.border_style, "fg=magenta");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-C"]),
+            )
+            .expect("clear target popup");
     }
 
     #[cfg(unix)]

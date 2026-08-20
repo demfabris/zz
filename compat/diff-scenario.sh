@@ -131,7 +131,9 @@ tmux_start_command() {
       ZZ_SMOKE_TMUX_LABEL="$TMUX_SOCKET_NAME" \
       "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" -f /dev/null "$@"
   else
-    "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" -f /dev/null "$@"
+    env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+      -u EDITOR -u VISUAL \
+      "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" -f /dev/null "$@"
   fi
 }
 

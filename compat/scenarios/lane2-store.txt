@@ -1,0 +1,194 @@
+out: show-options -sv backspace
+out: show-options -sv default-client-command
+out: show-options -sv editor
+out: show-options -sv extended-keys
+out: show-options -sv extended-keys-format
+out: show-options -sv get-clipboard
+out: show-options -sv input-buffer-size
+out: show-options -sv variation-selector-always-wide
+out: show-options -gv assume-paste-time
+out: show-options -gv activity-action
+out: show-options -gv message-command-style
+out: show-options -gv message-format
+out: show-options -gv message-line
+out: show-options -gv message-style
+out: show-options -gv prompt-cursor-colour
+out: show-options -gv prompt-command-cursor-colour
+out: show-options -gv prompt-cursor-style
+out: show-options -gv silence-action
+out: show-options -gv prompt-command-cursor-style
+out: show-options -gwv clock-mode-colour
+out: show-options -gwv clock-mode-style
+out: show-options -gwv fill-character
+out: show-options -gwv monitor-activity
+out: show-options -gwv monitor-bell
+out: show-options -gwv monitor-silence
+out: show-options -gwv pane-border-indicators
+out: show-options -gwv pane-border-lines
+out: show-options -gwv pane-scrollbars
+out: show-options -gwv pane-scrollbars-timeout
+out: show-options -gwv pane-scrollbars-style
+out: show-options -gwv pane-scrollbars-position
+out: show-options -gwv xterm-keys
+# zz deliberately keeps a 10000 history default; normalize the listing-only comparison.
+set-option -g history-limit 2000
+out: show-options -s
+out: show-options -g
+out: show-options -gw
+set-option -s backspace C-a
+set-option -s default-client-command display-message
+set-option -s editor /bin/ed
+set-option -s extended-keys always
+set-option -s extended-keys-format csi-u
+set-option -s get-clipboard both
+set-option -s input-buffer-size 2097152
+set-option -s variation-selector-always-wide off
+set-option -g assume-paste-time 25
+set-option -g activity-action current
+set-option -g message-command-style fg=red
+set-option -g message-format plain
+set-option -g message-line 4
+set-option -g message-style bg=blue
+set-option -g prompt-cursor-colour red
+set-option -g prompt-command-cursor-colour blue
+set-option -g prompt-cursor-style bar
+set-option -g prompt-command-cursor-style blinking-bar
+set-option -g silence-action none
+set-option -gw clock-mode-colour green
+set-option -gw clock-mode-style 24-with-seconds
+set-option -gw fill-character x
+set-option -gw monitor-activity on
+set-option -gw monitor-bell off
+set-option -gw monitor-silence 30
+set-option -gw pane-border-indicators both
+set-option -gw pane-border-lines double
+set-option -gw pane-scrollbars auto-hide
+set-option -gw pane-scrollbars-timeout 750
+set-option -gw pane-scrollbars-style fg=white
+set-option -gw pane-scrollbars-position left
+set-option -gw xterm-keys off
+out: show-options -sv backspace
+out: show-options -sv default-client-command
+out: show-options -sv editor
+out: show-options -sv extended-keys
+out: show-options -sv extended-keys-format
+out: show-options -sv get-clipboard
+out: show-options -sv input-buffer-size
+out: show-options -sv variation-selector-always-wide
+out: show-options -gv assume-paste-time
+out: show-options -gv activity-action
+out: show-options -gv message-command-style
+out: show-options -gv message-format
+out: show-options -gv message-line
+out: show-options -gv message-style
+out: show-options -gv prompt-cursor-colour
+out: show-options -gv prompt-command-cursor-colour
+out: show-options -gv prompt-cursor-style
+out: show-options -gv silence-action
+out: show-options -gv prompt-command-cursor-style
+out: show-options -gwv clock-mode-colour
+out: show-options -gwv clock-mode-style
+out: show-options -gwv fill-character
+out: show-options -gwv monitor-activity
+out: show-options -gwv monitor-bell
+out: show-options -gwv monitor-silence
+out: show-options -gwv pane-border-indicators
+out: show-options -gwv pane-border-lines
+out: show-options -gwv pane-scrollbars
+out: show-options -gwv pane-scrollbars-timeout
+out: show-options -gwv pane-scrollbars-style
+out: show-options -gwv pane-scrollbars-position
+out: show-options -gwv xterm-keys
+set-option -p pane-border-lines heavy
+set-option -wU pane-border-lines
+out: show-options -pA pane-border-lines
+set-option -s backspace not-a-key
+set-option -s default-client-command no-such-command
+set-option -s extended-keys sometimes
+set-option -s input-buffer-size 0
+set-option -s variation-selector-always-wide maybe
+set-option -g assume-paste-time -1
+set-option -g activity-action all
+set-option -g message-line 5
+set-option -g prompt-cursor-colour not-a-colour
+set-option -g silence-action ALL
+set-option -gw clock-mode-style 13
+set-option -gw monitor-activity maybe
+set-option -gw monitor-bell maybe
+set-option -gw monitor-silence -1
+set-option -gw pane-scrollbars-style not-a-style
+set-option -s command-alias zero=display-message,one=display-message
+out: show-options -s command-alias
+set-option -s command-alias[0] ZERO
+set-option -sa command-alias[1] -suffix
+set-option -su command-alias[0]
+set-option -sa command-alias hole=display-message,tail=display-message
+out: show-options -s command-alias
+set-option -su command-alias
+out: show-options -s command-alias
+set-option -s codepoint-widths U+0041=1,U+0042=2
+out: show-options -s codepoint-widths
+set-option -s codepoint-widths[4] U+0043=1
+set-option -su codepoint-widths[0]
+set-option -sa codepoint-widths U+0044=2
+out: show-options -s codepoint-widths
+set-option -su codepoint-widths
+out: show-options -s codepoint-widths
+set-option -s terminal-overrides alpha:RGB,beta:AX
+out: show-options -s terminal-overrides
+set-option -s terminal-overrides[7] gamma:Tc
+set-option -sa terminal-overrides[7] -suffix
+set-option -su terminal-overrides[0]
+set-option -sa terminal-overrides hole:Ms
+out: show-options -s terminal-overrides
+set-option -su terminal-overrides
+out: show-options -s terminal-overrides
+set-option -s terminal-features alpha:title,beta:clipboard
+out: show-options -s terminal-features
+set-option -s terminal-features[7] gamma:focus
+set-option -sa terminal-features[7] :cstyle
+set-option -su terminal-features[0]
+set-option -sa terminal-features hole:ccolour
+out: show-options -s terminal-features
+set-option -su terminal-features
+out: show-options -s terminal-features
+set-option -s user-keys first,second
+out: show-options -s user-keys
+set-option -s user-keys[7] third
+set-option -sa user-keys[7] -suffix
+set-option -su user-keys[0]
+set-option -sa user-keys hole
+out: show-options -s user-keys
+set-option -su user-keys
+out: show-options -s user-keys
+set-option -g status-format left,right
+out: show-options -g status-format
+set-option -g status-format[7] tail
+set-option -ga status-format[7] -suffix
+set-option -gu status-format[0]
+set-option -ga status-format hole
+out: show-options -g status-format
+set-option -gu status-format
+out: show-options -g status-format
+set-option -gw pane-colours red,blue
+out: show-options -gw pane-colours
+set-option -gw pane-colours[7] green
+set-option -gwa pane-colours[7] yellow
+set-option -gwu pane-colours[0]
+set-option -gwa pane-colours white
+out: show-options -gw pane-colours
+set-option -gwu pane-colours
+out: show-options -gw pane-colours
+set-option -g alert-bell display-message
+out: show-hooks -g alert-bell
+out: show-options -g alert-bell
+set-option -ga alert-bell 'display-message -p added'
+out: show-hooks -g alert-bell
+out: show-options -g alert-bell
+set-option -gu alert-bell[0]
+out: show-hooks -g alert-bell
+out: show-options -g alert-bell
+set-option -gu alert-bell
+out: show-hooks -g alert-bell
+out: show-options -g alert-bell
+out: show-options -g

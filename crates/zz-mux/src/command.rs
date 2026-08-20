@@ -11,7 +11,8 @@ use zz_protocol::{
     DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
     DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES,
     MAX_GUI_TEXT_BYTES, MuxOptionKey, PaneId, PaneKindSnapshot, PopupBorderLines, ServerError,
-    SessionId, TerminalUiCommand, WindowId, normalize_browser_profile_name, resolve_command,
+    SessionId, TerminalUiCommand, WindowId, canonical_key, normalize_browser_profile_name,
+    resolve_command,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, DEFAULT_HISTORY_LIMIT,
@@ -35,10 +36,17 @@ use crate::{
     layout::PANE_MAXIMUM,
     model::DEFAULT_WINDOW_EXTENT,
     tmux_options::{
-        HOOK_NAMES, TmuxOption, TmuxOptionScope, UPDATE_ENVIRONMENT_DEFAULT, match_tmux_option,
-        parse_tmux_option, tmux_option_is_hook, tmux_options,
+        HOOK_NAMES, TmuxArrayValue, TmuxOption, TmuxOptionScope, TmuxStoredScalarKind,
+        UPDATE_ENVIRONMENT_DEFAULT, match_tmux_option, parse_tmux_option, tmux_option_is_hook,
+        tmux_option_table_order, tmux_options, tmux_stored_array, tmux_stored_scalar,
     },
     valid_style,
+};
+
+#[cfg(test)]
+use crate::tmux_options::{
+    MESSAGE_COMMAND_STYLE_DEFAULT, MESSAGE_FORMAT_DEFAULT, MESSAGE_STYLE_DEFAULT,
+    PANE_SCROLLBARS_STYLE_DEFAULT,
 };
 
 const MAX_COPY_COMMAND_BYTES: usize = 8 * 1024;
@@ -495,12 +503,12 @@ enum TmuxOptionTarget {
 type UserOptions = BTreeMap<String, String>;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum HookIndex {
+enum ArrayIndex {
     Numeric(u32),
     Named(String),
 }
 
-impl HookIndex {
+impl ArrayIndex {
     fn parse(value: String) -> Self {
         value
             .parse()
@@ -515,8 +523,45 @@ impl HookIndex {
     }
 }
 
-type HookArray = BTreeMap<HookIndex, Vec<CommandInvocation>>;
+type StringArray = BTreeMap<ArrayIndex, String>;
+type ArrayTable = BTreeMap<&'static str, StringArray>;
+type HookArray = BTreeMap<ArrayIndex, Vec<CommandInvocation>>;
 type HookTable = BTreeMap<String, HookArray>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StoredArrays {
+    server: ArrayTable,
+    global_session: ArrayTable,
+    sessions: BTreeMap<SessionId, ArrayTable>,
+    global_window: ArrayTable,
+    windows: BTreeMap<WindowId, ArrayTable>,
+    panes: BTreeMap<PaneId, ArrayTable>,
+}
+
+type ScalarTable = BTreeMap<&'static str, String>;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct StoredScalars {
+    server: ScalarTable,
+    global_session: ScalarTable,
+    sessions: BTreeMap<SessionId, ScalarTable>,
+    global_window: ScalarTable,
+    windows: BTreeMap<WindowId, ScalarTable>,
+    panes: BTreeMap<PaneId, ScalarTable>,
+}
+
+impl Default for StoredArrays {
+    fn default() -> Self {
+        Self {
+            server: default_array_table(TmuxOptionScope::Server),
+            global_session: default_array_table(TmuxOptionScope::Session),
+            sessions: BTreeMap::new(),
+            global_window: default_array_table(TmuxOptionScope::WindowPane),
+            windows: BTreeMap::new(),
+            panes: BTreeMap::new(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct EnvironmentEntry {
@@ -596,9 +641,9 @@ pub struct MuxEngine {
     window_remain_on_exit: BTreeMap<WindowId, RemainOnExit>,
     pane_remain_on_exit: BTreeMap<PaneId, RemainOnExit>,
     global_popup_style: String,
-    session_popup_styles: BTreeMap<SessionId, String>,
+    window_popup_styles: BTreeMap<WindowId, String>,
     global_popup_border_style: String,
-    session_popup_border_styles: BTreeMap<SessionId, String>,
+    window_popup_border_styles: BTreeMap<WindowId, String>,
     global_popup_border_lines: PopupBorderLines,
     window_popup_border_lines: BTreeMap<WindowId, PopupBorderLines>,
     global_menu_style: String,
@@ -630,6 +675,8 @@ pub struct MuxEngine {
     global_window_user_options: UserOptions,
     window_user_options: BTreeMap<WindowId, UserOptions>,
     pane_user_options: BTreeMap<PaneId, UserOptions>,
+    stored_arrays: StoredArrays,
+    stored_scalars: StoredScalars,
     global_hooks: HookTable,
     session_hooks: BTreeMap<SessionId, HookTable>,
     global_window_hooks: HookTable,
@@ -768,9 +815,9 @@ impl Default for MuxEngine {
             window_remain_on_exit: BTreeMap::new(),
             pane_remain_on_exit: BTreeMap::new(),
             global_popup_style: PopupOptions::default().style,
-            session_popup_styles: BTreeMap::new(),
+            window_popup_styles: BTreeMap::new(),
             global_popup_border_style: PopupOptions::default().border_style,
-            session_popup_border_styles: BTreeMap::new(),
+            window_popup_border_styles: BTreeMap::new(),
             global_popup_border_lines: PopupBorderLines::Single,
             window_popup_border_lines: BTreeMap::new(),
             global_menu_style: MenuOptions::default().style,
@@ -802,6 +849,8 @@ impl Default for MuxEngine {
             global_window_user_options: UserOptions::new(),
             window_user_options: BTreeMap::new(),
             pane_user_options: BTreeMap::new(),
+            stored_arrays: StoredArrays::default(),
+            stored_scalars: StoredScalars::default(),
             global_hooks: global_hook_table(TmuxOptionScope::Session),
             session_hooks: BTreeMap::new(),
             global_window_hooks: global_hook_table(TmuxOptionScope::Window),
@@ -1192,6 +1241,10 @@ impl MuxEngine {
         self.global_default_shell = value.into();
     }
 
+    pub fn initialize_default_editor(&mut self, value: impl Into<String>) {
+        self.server_options.editor = value.into();
+    }
+
     pub fn global_default_shell(&self) -> &str {
         &self.global_default_shell
     }
@@ -1217,21 +1270,18 @@ impl MuxEngine {
     }
 
     pub fn popup_options_for_window(&self, window: WindowId) -> Result<PopupOptions, ServerError> {
-        let session = self
-            .state
-            .windows
-            .get(&window)
-            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?
-            .session;
+        if !self.state.windows.contains_key(&window) {
+            return Err(ServerError::MissingTarget(window.to_string()));
+        }
         Ok(PopupOptions {
             style: self
-                .session_popup_styles
-                .get(&session)
+                .window_popup_styles
+                .get(&window)
                 .cloned()
                 .unwrap_or_else(|| self.global_popup_style.clone()),
             border_style: self
-                .session_popup_border_styles
-                .get(&session)
+                .window_popup_border_styles
+                .get(&window)
                 .cloned()
                 .unwrap_or_else(|| self.global_popup_border_style.clone()),
             border_lines: self
@@ -1984,10 +2034,6 @@ impl MuxEngine {
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_default_shells
             .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_popup_styles
-            .retain(|session, _| self.state.sessions.contains_key(session));
-        self.session_popup_border_styles
-            .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_lock_commands
             .retain(|session, _| self.state.sessions.contains_key(session));
         self.session_lock_after_times
@@ -2019,6 +2065,10 @@ impl MuxEngine {
         self.window_automatic_rename_formats
             .retain(|window, _| self.state.windows.contains_key(window));
         self.window_remain_on_exit
+            .retain(|window, _| self.state.windows.contains_key(window));
+        self.window_popup_styles
+            .retain(|window, _| self.state.windows.contains_key(window));
+        self.window_popup_border_styles
             .retain(|window, _| self.state.windows.contains_key(window));
         self.window_popup_border_lines
             .retain(|window, _| self.state.windows.contains_key(window));
@@ -4648,43 +4698,85 @@ impl MuxEngine {
         }
         let target =
             self.resolve_tmux_option_target(context, &options, false, table_option.scope)?;
-        let index = parsed.index.map(HookIndex::parse);
-        if options.has("-u") {
-            if let Some(index) = index {
-                if let Some(hook) = self.hook_array_mut(target, table_option.name) {
-                    hook.remove(&index);
-                }
-            } else if matches!(
-                target,
-                TmuxOptionTarget::GlobalSession | TmuxOptionTarget::GlobalWindow
-            ) {
-                self.hook_array_mut(target, table_option.name)
-                    .expect("global hook table is complete")
-                    .clear();
-            } else if let Some(hooks) = self.hook_table_mut(target) {
-                hooks.remove(table_option.name);
-            }
+        self.set_hook_array_option(
+            target,
+            table_option.name,
+            parsed.index,
+            positional.get(1).map(String::as_str),
+            &options,
+        )
+    }
+
+    fn set_hook_array_option(
+        &mut self,
+        target: TmuxOptionTarget,
+        name: &'static str,
+        index: Option<String>,
+        value: Option<&str>,
+        options: &Options,
+    ) -> Result<Execution, ServerError> {
+        let index = index.map(ArrayIndex::parse);
+        let unset = option_is_unset(options);
+        let already = self
+            .hook_array(target, name)
+            .is_some_and(|hook| index.as_ref().is_none_or(|index| hook.contains_key(index)));
+        if options.has("-o") && !unset && already {
+            let displayed_index = index.as_ref().map(ArrayIndex::display);
+            let option = indexed_option_name(name, displayed_index.as_deref());
+            return already_set_or_quiet(options, &option);
+        }
+        if options.has("-U")
+            && let TmuxOptionTarget::Window(window) = target
+        {
+            self.remove_pane_hook_overrides(window, name, index.as_ref());
+        }
+        if unset {
+            self.unset_hook_array(target, name, index.as_ref());
             return Ok(Execution::default());
         }
-        let value = positional
-            .get(1)
-            .ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
+        let value = value.ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
         let commands = parse_hook_commands(self, value)?;
-        let hook = self.hook_array_mut_or_insert(target, table_option.name);
+        let hook = self.hook_array_mut_or_insert(target, name);
         if let Some(index) = index {
             hook.insert(index, commands);
         } else if options.has("-a") {
-            let index = first_free_hook_index(hook)?;
-            hook.insert(HookIndex::Numeric(index), commands);
+            let index = first_free_array_index(hook.keys())?;
+            hook.insert(ArrayIndex::Numeric(index), commands);
         } else {
             hook.clear();
-            hook.insert(HookIndex::Numeric(0), commands);
+            hook.insert(ArrayIndex::Numeric(0), commands);
         }
         Ok(Execution::default())
     }
 
     fn hook_array(&self, target: TmuxOptionTarget, name: &str) -> Option<&HookArray> {
         self.hook_table(target).and_then(|hooks| hooks.get(name))
+    }
+
+    fn hook_array_readback(
+        &self,
+        target: TmuxOptionTarget,
+        name: &str,
+        include_inherited: bool,
+    ) -> Option<(&HookArray, bool)> {
+        if let Some(hook) = self.hook_array(target, name) {
+            return Some((hook, false));
+        }
+        if !include_inherited {
+            return None;
+        }
+        let inherited = match target {
+            TmuxOptionTarget::Session(_) => self.global_hooks.get(name),
+            TmuxOptionTarget::Window(_) => self.global_window_hooks.get(name),
+            TmuxOptionTarget::Pane(pane) => self
+                .state
+                .window_for_pane(pane)
+                .and_then(|window| self.window_hooks.get(&window))
+                .and_then(|hooks| hooks.get(name))
+                .or_else(|| self.global_window_hooks.get(name)),
+            _ => None,
+        }?;
+        Some((inherited, true))
     }
 
     fn hook_array_mut(&mut self, target: TmuxOptionTarget, name: &str) -> Option<&mut HookArray> {
@@ -4743,6 +4835,378 @@ impl MuxEngine {
             TmuxOptionTarget::Window(window) => self.window_hooks.get_mut(&window),
             TmuxOptionTarget::Pane(pane) => self.pane_hooks.get_mut(&pane),
             TmuxOptionTarget::Server => None,
+        }
+    }
+
+    fn unset_hook_array(
+        &mut self,
+        target: TmuxOptionTarget,
+        name: &str,
+        index: Option<&ArrayIndex>,
+    ) {
+        if let Some(index) = index {
+            if let Some(hook) = self.hook_array_mut(target, name) {
+                hook.remove(index);
+            }
+        } else if matches!(
+            target,
+            TmuxOptionTarget::GlobalSession | TmuxOptionTarget::GlobalWindow
+        ) {
+            self.hook_array_mut(target, name)
+                .expect("global hook table is complete")
+                .clear();
+        } else if let Some(hooks) = self.hook_table_mut(target) {
+            hooks.remove(name);
+        }
+    }
+
+    fn remove_pane_hook_overrides(
+        &mut self,
+        window: WindowId,
+        name: &str,
+        index: Option<&ArrayIndex>,
+    ) {
+        let panes = self
+            .state
+            .windows
+            .get(&window)
+            .map(|window| window.pane_order().to_vec())
+            .unwrap_or_default();
+        for pane in panes {
+            self.unset_hook_array(TmuxOptionTarget::Pane(pane), name, index);
+        }
+    }
+
+    fn scalar_table(&self, target: TmuxOptionTarget) -> Option<&ScalarTable> {
+        match target {
+            TmuxOptionTarget::Server => Some(&self.stored_scalars.server),
+            TmuxOptionTarget::GlobalSession => Some(&self.stored_scalars.global_session),
+            TmuxOptionTarget::Session(session) => self.stored_scalars.sessions.get(&session),
+            TmuxOptionTarget::GlobalWindow => Some(&self.stored_scalars.global_window),
+            TmuxOptionTarget::Window(window) => self.stored_scalars.windows.get(&window),
+            TmuxOptionTarget::Pane(pane) => self.stored_scalars.panes.get(&pane),
+        }
+    }
+
+    fn scalar_table_mut_or_insert(&mut self, target: TmuxOptionTarget) -> &mut ScalarTable {
+        match target {
+            TmuxOptionTarget::Server => &mut self.stored_scalars.server,
+            TmuxOptionTarget::GlobalSession => &mut self.stored_scalars.global_session,
+            TmuxOptionTarget::Session(session) => {
+                self.stored_scalars.sessions.entry(session).or_default()
+            }
+            TmuxOptionTarget::GlobalWindow => &mut self.stored_scalars.global_window,
+            TmuxOptionTarget::Window(window) => {
+                self.stored_scalars.windows.entry(window).or_default()
+            }
+            TmuxOptionTarget::Pane(pane) => self.stored_scalars.panes.entry(pane).or_default(),
+        }
+    }
+
+    fn scalar_option_effective(&self, target: TmuxOptionTarget, name: &str) -> Option<&str> {
+        if let Some(value) = self
+            .scalar_table(target)
+            .and_then(|options| options.get(name))
+        {
+            return Some(value);
+        }
+        let inherited = match target {
+            TmuxOptionTarget::Session(_) => self.stored_scalars.global_session.get(name),
+            TmuxOptionTarget::Window(_) => self.stored_scalars.global_window.get(name),
+            TmuxOptionTarget::Pane(pane) => self
+                .state
+                .window_for_pane(pane)
+                .and_then(|window| self.stored_scalars.windows.get(&window))
+                .and_then(|options| options.get(name))
+                .or_else(|| self.stored_scalars.global_window.get(name)),
+            TmuxOptionTarget::Server
+            | TmuxOptionTarget::GlobalSession
+            | TmuxOptionTarget::GlobalWindow => None,
+        };
+        inherited
+            .map(String::as_str)
+            .or_else(|| tmux_stored_scalar(name).map(|metadata| metadata.default))
+    }
+
+    fn scalar_option_readback(
+        &self,
+        target: TmuxOptionTarget,
+        name: &str,
+        include_inherited: bool,
+    ) -> Option<(String, bool)> {
+        if let Some(value) = self
+            .scalar_table(target)
+            .and_then(|options| options.get(name))
+        {
+            return Some((value.clone(), false));
+        }
+        if matches!(
+            target,
+            TmuxOptionTarget::Server
+                | TmuxOptionTarget::GlobalSession
+                | TmuxOptionTarget::GlobalWindow
+        ) {
+            return tmux_stored_scalar(name).map(|metadata| (metadata.default.to_owned(), false));
+        }
+        include_inherited
+            .then(|| self.scalar_option_effective(target, name))
+            .flatten()
+            .map(|value| (value.to_owned(), true))
+    }
+
+    fn set_stored_scalar_option(
+        &mut self,
+        name: &'static str,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        let metadata = tmux_stored_scalar(name).expect("stored scalar metadata");
+        let unset = option_is_unset(options);
+        let locally_set = match target {
+            TmuxOptionTarget::Server
+            | TmuxOptionTarget::GlobalSession
+            | TmuxOptionTarget::GlobalWindow => true,
+            _ => self
+                .scalar_table(target)
+                .is_some_and(|values| values.contains_key(name)),
+        };
+        if options.has("-o") && !unset && locally_set {
+            return already_set_or_quiet(options, name);
+        }
+        if options.has("-U")
+            && let TmuxOptionTarget::Window(window) = target
+        {
+            let panes = self
+                .state
+                .windows
+                .get(&window)
+                .map(|window| window.pane_order().to_vec())
+                .unwrap_or_default();
+            for pane in panes {
+                remove_named_option_override(&mut self.stored_scalars.panes, pane, name);
+            }
+        }
+        if unset {
+            match target {
+                TmuxOptionTarget::Server => {
+                    self.stored_scalars.server.remove(name);
+                }
+                TmuxOptionTarget::GlobalSession => {
+                    self.stored_scalars.global_session.remove(name);
+                }
+                TmuxOptionTarget::Session(session) => {
+                    remove_named_option_override(&mut self.stored_scalars.sessions, session, name);
+                }
+                TmuxOptionTarget::GlobalWindow => {
+                    self.stored_scalars.global_window.remove(name);
+                }
+                TmuxOptionTarget::Window(window) => {
+                    remove_named_option_override(&mut self.stored_scalars.windows, window, name);
+                }
+                TmuxOptionTarget::Pane(pane) => {
+                    remove_named_option_override(&mut self.stored_scalars.panes, pane, name);
+                }
+            }
+            return Ok(Execution::default());
+        }
+        let current = self
+            .scalar_option_effective(target, name)
+            .expect("stored scalar has a default");
+        let appended = options
+            .has("-a")
+            .then(|| {
+                metadata
+                    .kind
+                    .append_separator()
+                    .and_then(|separator| value.map(|value| format!("{current}{separator}{value}")))
+            })
+            .flatten();
+        let next =
+            normalize_stored_scalar_value(metadata.kind, appended.as_deref().or(value), current)?;
+        self.scalar_table_mut_or_insert(target).insert(name, next);
+        Ok(Execution::default())
+    }
+
+    fn array_table(&self, target: TmuxOptionTarget) -> Option<&ArrayTable> {
+        match target {
+            TmuxOptionTarget::Server => Some(&self.stored_arrays.server),
+            TmuxOptionTarget::GlobalSession => Some(&self.stored_arrays.global_session),
+            TmuxOptionTarget::Session(session) => self.stored_arrays.sessions.get(&session),
+            TmuxOptionTarget::GlobalWindow => Some(&self.stored_arrays.global_window),
+            TmuxOptionTarget::Window(window) => self.stored_arrays.windows.get(&window),
+            TmuxOptionTarget::Pane(pane) => self.stored_arrays.panes.get(&pane),
+        }
+    }
+
+    fn array_table_mut(&mut self, target: TmuxOptionTarget) -> Option<&mut ArrayTable> {
+        match target {
+            TmuxOptionTarget::Server => Some(&mut self.stored_arrays.server),
+            TmuxOptionTarget::GlobalSession => Some(&mut self.stored_arrays.global_session),
+            TmuxOptionTarget::Session(session) => self.stored_arrays.sessions.get_mut(&session),
+            TmuxOptionTarget::GlobalWindow => Some(&mut self.stored_arrays.global_window),
+            TmuxOptionTarget::Window(window) => self.stored_arrays.windows.get_mut(&window),
+            TmuxOptionTarget::Pane(pane) => self.stored_arrays.panes.get_mut(&pane),
+        }
+    }
+
+    fn array_table_mut_or_insert(&mut self, target: TmuxOptionTarget) -> &mut ArrayTable {
+        match target {
+            TmuxOptionTarget::Server => &mut self.stored_arrays.server,
+            TmuxOptionTarget::GlobalSession => &mut self.stored_arrays.global_session,
+            TmuxOptionTarget::Session(session) => {
+                self.stored_arrays.sessions.entry(session).or_default()
+            }
+            TmuxOptionTarget::GlobalWindow => &mut self.stored_arrays.global_window,
+            TmuxOptionTarget::Window(window) => {
+                self.stored_arrays.windows.entry(window).or_default()
+            }
+            TmuxOptionTarget::Pane(pane) => self.stored_arrays.panes.entry(pane).or_default(),
+        }
+    }
+
+    fn array_option(&self, target: TmuxOptionTarget, name: &str) -> Option<&StringArray> {
+        self.array_table(target)
+            .and_then(|options| options.get(name))
+    }
+
+    fn array_option_readback(
+        &self,
+        target: TmuxOptionTarget,
+        name: &str,
+        include_inherited: bool,
+    ) -> Option<(&StringArray, bool)> {
+        if let Some(array) = self.array_option(target, name) {
+            return Some((array, false));
+        }
+        if !include_inherited {
+            return None;
+        }
+        let inherited = match target {
+            TmuxOptionTarget::Session(_) => self.stored_arrays.global_session.get(name),
+            TmuxOptionTarget::Window(_) => self.stored_arrays.global_window.get(name),
+            TmuxOptionTarget::Pane(pane) => self
+                .state
+                .window_for_pane(pane)
+                .and_then(|window| self.stored_arrays.windows.get(&window))
+                .and_then(|options| options.get(name))
+                .or_else(|| self.stored_arrays.global_window.get(name)),
+            _ => None,
+        }?;
+        Some((inherited, true))
+    }
+
+    fn set_array_option(
+        &mut self,
+        target: TmuxOptionTarget,
+        name: &'static str,
+        index: Option<String>,
+        value: Option<&str>,
+        options: &Options,
+    ) -> Result<Execution, ServerError> {
+        let metadata = tmux_stored_array(name).expect("stored array metadata");
+        let index = index.map(ArrayIndex::parse);
+        let unset = option_is_unset(options);
+        let already = self
+            .array_option(target, name)
+            .is_some_and(|array| index.as_ref().is_none_or(|index| array.contains_key(index)));
+        if options.has("-o") && !unset && already {
+            let displayed_index = index.as_ref().map(ArrayIndex::display);
+            let option = indexed_option_name(name, displayed_index.as_deref());
+            return already_set_or_quiet(options, &option);
+        }
+        if options.has("-U")
+            && let TmuxOptionTarget::Window(window) = target
+        {
+            self.remove_pane_array_overrides(window, name, index.as_ref());
+        }
+        if unset {
+            self.unset_array_option(target, name, index.as_ref());
+            return Ok(Execution::default());
+        }
+        let value = value.ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
+        if let Some(index) = index {
+            validate_array_value(metadata.value, value)?;
+            let array = self
+                .array_table_mut_or_insert(target)
+                .entry(name)
+                .or_default();
+            if options.has("-a") && metadata.value == TmuxArrayValue::String {
+                array
+                    .entry(index)
+                    .and_modify(|current| current.push_str(value))
+                    .or_insert_with(|| value.to_owned());
+            } else {
+                array.insert(index, value.to_owned());
+            }
+            return Ok(Execution::default());
+        }
+        let append = options.has("-a");
+        if !append {
+            self.array_table_mut_or_insert(target)
+                .entry(name)
+                .or_default()
+                .clear();
+        }
+        for item in value
+            .split(|character| metadata.separators.contains(character))
+            .filter(|item| !item.is_empty())
+        {
+            validate_array_value(metadata.value, item)?;
+            let array = self
+                .array_table_mut_or_insert(target)
+                .entry(name)
+                .or_default();
+            let index = first_free_array_index(array.keys())?;
+            array.insert(ArrayIndex::Numeric(index), item.to_owned());
+        }
+        Ok(Execution::default())
+    }
+
+    fn unset_array_option(
+        &mut self,
+        target: TmuxOptionTarget,
+        name: &'static str,
+        index: Option<&ArrayIndex>,
+    ) {
+        if let Some(index) = index {
+            if let Some(array) = self
+                .array_table_mut(target)
+                .and_then(|options| options.get_mut(name))
+            {
+                array.remove(index);
+            }
+            return;
+        }
+        if matches!(
+            target,
+            TmuxOptionTarget::Server
+                | TmuxOptionTarget::GlobalSession
+                | TmuxOptionTarget::GlobalWindow
+        ) {
+            let defaults = default_array(name);
+            self.array_table_mut(target)
+                .expect("global array table")
+                .insert(name, defaults);
+        } else if let Some(options) = self.array_table_mut(target) {
+            options.remove(name);
+        }
+    }
+
+    fn remove_pane_array_overrides(
+        &mut self,
+        window: WindowId,
+        name: &'static str,
+        index: Option<&ArrayIndex>,
+    ) {
+        let panes = self
+            .state
+            .windows
+            .get(&window)
+            .map(|window| window.pane_order().to_vec())
+            .unwrap_or_default();
+        for pane in panes {
+            self.unset_array_option(TmuxOptionTarget::Pane(pane), name, index);
         }
     }
 
@@ -4877,7 +5341,7 @@ impl MuxEngine {
             return Ok(Execution::default());
         };
         let mut lines = Vec::new();
-        let index = parsed.index.map(HookIndex::parse);
+        let index = parsed.index.map(ArrayIndex::parse);
         push_shown_hook(&mut lines, table_option.name, hook, index.as_ref());
         Ok(Execution::output(lines.join("\n")))
     }
@@ -4983,6 +5447,31 @@ impl MuxEngine {
             }
         };
         if table_option.is_array {
+            if tmux_option_is_hook(table_option.name)
+                || tmux_stored_array(table_option.name).is_some()
+            {
+                let target = match self.resolve_tmux_option_target(
+                    context,
+                    &options,
+                    force_window,
+                    table_option.scope,
+                ) {
+                    Ok(target) => target,
+                    Err(_) if options.has("-q") => return Ok(Execution::default()),
+                    Err(error) => return Err(error),
+                };
+                return if tmux_option_is_hook(table_option.name) {
+                    self.set_hook_array_option(
+                        target,
+                        table_option.name,
+                        parsed.index,
+                        value,
+                        &options,
+                    )
+                } else {
+                    self.set_array_option(target, table_option.name, parsed.index, value, &options)
+                };
+            }
             return Ok(Execution::default());
         }
         if table_option.default.is_none()
@@ -5072,6 +5561,9 @@ impl MuxEngine {
             option if let Some(option) = PaneOption::from_name(option) => {
                 self.set_pane_option(option, value, &options, target)
             }
+            option if tmux_stored_scalar(option).is_some() => {
+                self.set_stored_scalar_option(option, value, &options, target)
+            }
             option => unreachable!("implemented option {option} has a setter"),
         }
     }
@@ -5155,12 +5647,22 @@ impl MuxEngine {
                     push_shown_option(&mut lines, name, value, true, false, value_only);
                 }
             }
-            for option in tmux_options().filter(|option| {
-                !option.is_array
-                    && tmux_option_is_implemented(*option)
-                    && option_scope_matches_target(option.scope, target)
-            }) {
-                if let Some((value, inherited)) =
+            for option in tmux_options_for_listing(target) {
+                if let Some(metadata) = tmux_stored_array(option.name) {
+                    if let Some((array, inherited)) =
+                        self.array_option_readback(target, option.name, include_inherited)
+                    {
+                        push_shown_array(
+                            &mut lines,
+                            option.name,
+                            array,
+                            None,
+                            metadata.value == TmuxArrayValue::String,
+                            inherited,
+                            value_only,
+                        );
+                    }
+                } else if let Some((value, inherited)) =
                     self.tmux_option_readback(option, target, include_inherited)?
                 {
                     push_shown_option(
@@ -5228,6 +5730,48 @@ impl MuxEngine {
             }
         };
         if option.is_array {
+            if tmux_option_is_hook(option.name) || tmux_stored_array(option.name).is_some() {
+                let target = match self.resolve_tmux_option_target(
+                    context,
+                    &options,
+                    force_window,
+                    option.scope,
+                ) {
+                    Ok(target) => target,
+                    Err(_) if options.has("-q") => return Ok(Execution::default()),
+                    Err(error) => return Err(error),
+                };
+                let requested = parsed.index.map(ArrayIndex::parse);
+                let mut lines = Vec::new();
+                if tmux_option_is_hook(option.name) {
+                    if let Some((hook, inherited)) =
+                        self.hook_array_readback(target, option.name, include_inherited)
+                    {
+                        push_shown_hook_option(
+                            &mut lines,
+                            option.name,
+                            hook,
+                            requested.as_ref(),
+                            inherited,
+                            value_only,
+                        );
+                    }
+                } else if let Some((array, inherited)) =
+                    self.array_option_readback(target, option.name, include_inherited)
+                {
+                    let metadata = tmux_stored_array(option.name).expect("stored array metadata");
+                    push_shown_array(
+                        &mut lines,
+                        option.name,
+                        array,
+                        requested.as_ref(),
+                        metadata.value == TmuxArrayValue::String,
+                        inherited,
+                        value_only,
+                    );
+                }
+                return Ok(Execution::output(shown_options_output(&lines)));
+            }
             return Ok(Execution::default());
         }
         if !tmux_option_is_implemented(option) {
@@ -5462,6 +6006,9 @@ impl MuxEngine {
         target: TmuxOptionTarget,
         include_inherited: bool,
     ) -> Result<Option<(String, bool)>, ServerError> {
+        if tmux_stored_scalar(option.name).is_some() {
+            return Ok(self.scalar_option_readback(target, option.name, include_inherited));
+        }
         let inherited = || {
             include_inherited
                 .then(|| {
@@ -5495,16 +6042,6 @@ impl MuxEngine {
                         .map(|value| (value.clone(), false))
                         .or_else(inherited)
                 }
-                "popup-style" => self
-                    .session_popup_styles
-                    .get(&session)
-                    .map(|value| (value.clone(), false))
-                    .or_else(inherited),
-                "popup-border-style" => self
-                    .session_popup_border_styles
-                    .get(&session)
-                    .map(|value| (value.clone(), false))
-                    .or_else(inherited),
                 "lock-command" => self
                     .session_lock_commands
                     .get(&session)
@@ -5627,6 +6164,16 @@ impl MuxEngine {
                     .state
                     .window_synchronize_override(window)?
                     .map(|value| (tmux_flag(value).to_owned(), false))
+                    .or_else(inherited),
+                "popup-style" => self
+                    .window_popup_styles
+                    .get(&window)
+                    .map(|value| (value.clone(), false))
+                    .or_else(inherited),
+                "popup-border-style" => self
+                    .window_popup_border_styles
+                    .get(&window)
+                    .map(|value| (value.clone(), false))
                     .or_else(inherited),
                 "popup-border-lines" => self
                     .window_popup_border_lines
@@ -5762,7 +6309,18 @@ impl MuxEngine {
             "menu-border-lines" => self.global_menu_border_lines.as_str().to_owned(),
             "lock-command" => self.global_lock_command.clone(),
             "lock-after-time" => self.global_lock_after_time.to_string(),
-            _ => return None,
+            name => {
+                let target = match match_tmux_option(name).ok().flatten()?.scope {
+                    TmuxOptionScope::Server => TmuxOptionTarget::Server,
+                    TmuxOptionScope::Session => TmuxOptionTarget::GlobalSession,
+                    TmuxOptionScope::Window | TmuxOptionScope::WindowPane => {
+                        TmuxOptionTarget::GlobalWindow
+                    }
+                };
+                return self
+                    .scalar_option_effective(target, name)
+                    .map(str::to_owned);
+            }
         })
     }
 
@@ -5780,21 +6338,21 @@ impl MuxEngine {
                 let (global, locals, local_key) = if option == "popup-style" {
                     (
                         &mut self.global_popup_style,
-                        &mut self.session_popup_styles,
+                        &mut self.window_popup_styles,
                         match target {
-                            TmuxOptionTarget::Session(session) => Some(session),
-                            TmuxOptionTarget::GlobalSession => None,
-                            _ => unreachable!("popup style is session scoped"),
+                            TmuxOptionTarget::Window(window) => Some(window),
+                            TmuxOptionTarget::GlobalWindow => None,
+                            _ => unreachable!("popup style is window scoped"),
                         },
                     )
                 } else {
                     (
                         &mut self.global_popup_border_style,
-                        &mut self.session_popup_border_styles,
+                        &mut self.window_popup_border_styles,
                         match target {
-                            TmuxOptionTarget::Session(session) => Some(session),
-                            TmuxOptionTarget::GlobalSession => None,
-                            _ => unreachable!("popup style is session scoped"),
+                            TmuxOptionTarget::Window(window) => Some(window),
+                            TmuxOptionTarget::GlobalWindow => None,
+                            _ => unreachable!("popup style is window scoped"),
                         },
                     )
                 };
@@ -6811,8 +7369,30 @@ impl MuxEngine {
             self.server_options.reset(option);
             return Ok(Execution::default());
         }
-        let appended = (options.has("-a") && option.is_string())
-            .then(|| value.map(|value| format!("{}{value}", self.server_options.value(option))))
+        let normalized = match option {
+            ServerOption::Backspace => value
+                .map(|value| {
+                    if valid_option_key(value) {
+                        Ok(canonical_key(value))
+                    } else {
+                        Err(ServerError::InvalidCommand(format!("bad key: {value}")))
+                    }
+                })
+                .transpose()?,
+            ServerOption::DefaultClientCommand => {
+                value.map(normalize_option_command).transpose()?
+            }
+            _ => None,
+        };
+        let value = normalized.as_deref().or(value);
+        let appended = (options.has("-a"))
+            .then(|| {
+                option.append_separator().and_then(|separator| {
+                    value.map(|value| {
+                        format!("{}{separator}{value}", self.server_options.value(option))
+                    })
+                })
+            })
             .flatten();
         self.server_options
             .set_command(option, appended.as_deref().or(value))
@@ -6853,8 +7433,13 @@ impl MuxEngine {
             || self.global_session_options.clone(),
             |session| self.session_knobs(session),
         );
-        let appended = (options.has("-a") && option.is_string() && locally_set)
-            .then(|| value.map(|value| format!("{}{value}", previous.value(option))))
+        let appended = options
+            .has("-a")
+            .then(|| {
+                option.append_separator().and_then(|separator| {
+                    value.map(|value| format!("{}{separator}{value}", previous.value(option)))
+                })
+            })
             .flatten();
         let mut next = previous;
         next.set_command(option, appended.as_deref().or(value))
@@ -6902,8 +7487,13 @@ impl MuxEngine {
                 self.global_window_options.reset(option);
             }
         } else {
-            let appended = (options.has("-a") && option.is_string() && locally_set)
-                .then(|| value.map(|value| format!("{}{value}", previous.value(option))))
+            let appended = options
+                .has("-a")
+                .then(|| {
+                    option.append_separator().and_then(|separator| {
+                        value.map(|value| format!("{}{separator}{value}", previous.value(option)))
+                    })
+                })
                 .flatten();
             let mut next = previous.clone();
             next.set_command(option, appended.as_deref().or(value))
@@ -6959,6 +7549,12 @@ impl MuxEngine {
         if options.has("-o") && !unset && locally_set {
             return already_set_or_quiet(options, option.as_str());
         }
+        let pane_overrides_removed = match target {
+            TmuxOptionTarget::Window(window) if options.has("-U") => {
+                self.remove_pane_option_overrides(window, option)
+            }
+            _ => false,
+        };
         let previous = match target {
             TmuxOptionTarget::GlobalWindow => self.global_pane_options.clone(),
             TmuxOptionTarget::Window(window) => self.pane_knobs_for_window(window),
@@ -6979,8 +7575,13 @@ impl MuxEngine {
                 _ => unreachable!("pane options have window-pane scope"),
             }
         } else {
-            let appended = (options.has("-a") && option.is_string() && locally_set)
-                .then(|| value.map(|value| format!("{}{value}", previous.value(option))))
+            let appended = options
+                .has("-a")
+                .then(|| {
+                    option.append_separator().and_then(|separator| {
+                        value.map(|value| format!("{}{separator}{value}", previous.value(option)))
+                    })
+                })
                 .flatten();
             let mut next = previous.clone();
             next.set_command(option, appended.as_deref().or(value))
@@ -7008,7 +7609,7 @@ impl MuxEngine {
             TmuxOptionTarget::Pane(pane) => self.pane_knobs(pane),
             _ => unreachable!("pane options have window-pane scope"),
         };
-        if next == previous || !option.updates_terminal_worker() {
+        if next == previous && !pane_overrides_removed || !option.updates_terminal_worker() {
             return Ok(Execution::default());
         }
         let (window, pane) = match target {
@@ -7021,6 +7622,24 @@ impl MuxEngine {
             window,
             pane,
         }))
+    }
+
+    fn remove_pane_option_overrides(&mut self, window: WindowId, option: PaneOption) -> bool {
+        let panes = self
+            .state
+            .windows
+            .get(&window)
+            .map(|window| window.pane_order().to_vec())
+            .unwrap_or_default();
+        let mut removed = false;
+        for pane in panes {
+            removed |= self
+                .pane_options
+                .get(&pane)
+                .is_some_and(|values| values.contains_key(&option));
+            remove_option_override(&mut self.pane_options, pane, option);
+        }
+        removed
     }
 
     fn set_word_separators(
@@ -7844,6 +8463,19 @@ fn remove_option_override<K: Copy + Ord, O: Copy + Ord>(
     }
 }
 
+fn remove_named_option_override<K: Copy + Ord>(
+    values: &mut BTreeMap<K, ScalarTable>,
+    target: K,
+    option: &str,
+) {
+    if let Some(options) = values.get_mut(&target) {
+        options.remove(option);
+        if options.is_empty() {
+            values.remove(&target);
+        }
+    }
+}
+
 fn tmux_option_is_implemented(option: TmuxOption) -> bool {
     option.default.is_some()
         || StatusOption::from_name(option.name).is_some()
@@ -7852,6 +8484,18 @@ fn tmux_option_is_implemented(option: TmuxOption) -> bool {
         || SessionOption::from_name(option.name).is_some()
         || WindowOption::from_name(option.name).is_some()
         || PaneOption::from_name(option.name).is_some()
+}
+
+fn tmux_options_for_listing(target: TmuxOptionTarget) -> Vec<TmuxOption> {
+    let mut options = tmux_options()
+        .filter(|option| option_scope_matches_target(option.scope, target))
+        .filter(|option| {
+            tmux_stored_array(option.name).is_some()
+                || !option.is_array && tmux_option_is_implemented(*option)
+        })
+        .collect::<Vec<_>>();
+    options.sort_unstable_by_key(|option| tmux_option_table_order(option.name));
+    options
 }
 
 fn tmux_option_value_is_string(option: TmuxOption) -> bool {
@@ -7864,6 +8508,7 @@ fn tmux_option_value_is_string(option: TmuxOption) -> bool {
         || SessionOption::from_name(option.name).is_some_and(SessionOption::is_string)
         || WindowOption::from_name(option.name).is_some_and(WindowOption::is_string)
         || PaneOption::from_name(option.name).is_some_and(PaneOption::is_string)
+        || tmux_stored_scalar(option.name).is_some_and(|metadata| metadata.kind.is_string())
 }
 
 fn push_shown_option(
@@ -7889,6 +8534,43 @@ fn push_shown_option(
         value.to_owned()
     };
     lines.push(format!("{name} {value}"));
+}
+
+fn push_shown_array(
+    lines: &mut Vec<String>,
+    name: &str,
+    array: &StringArray,
+    requested: Option<&ArrayIndex>,
+    is_string: bool,
+    inherited: bool,
+    value_only: bool,
+) {
+    if let Some(index) = requested {
+        let name = indexed_option_name(name, Some(&index.display()));
+        push_shown_option(
+            lines,
+            &name,
+            array.get(index).map_or("", String::as_str),
+            is_string,
+            inherited,
+            value_only,
+        );
+        return;
+    }
+    if array.is_empty() {
+        if !value_only {
+            lines.push(if inherited {
+                format!("{name}*")
+            } else {
+                name.to_owned()
+            });
+        }
+        return;
+    }
+    for (index, value) in array {
+        let name = indexed_option_name(name, Some(&index.display()));
+        push_shown_option(lines, &name, value, is_string, inherited, value_only);
+    }
 }
 
 fn shown_options_output(lines: &[String]) -> String {
@@ -8387,6 +9069,87 @@ fn validate_unimplemented_option_value(
             Err(ServerError::InvalidCommand("syntax error".to_owned()))
         }
         _ => Ok(()),
+    }
+}
+
+fn normalize_stored_scalar_value(
+    kind: TmuxStoredScalarKind,
+    value: Option<&str>,
+    current: &str,
+) -> Result<String, ServerError> {
+    match kind {
+        TmuxStoredScalarKind::String => value
+            .map(str::to_owned)
+            .ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned())),
+        TmuxStoredScalarKind::Style => {
+            let value =
+                value.ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
+            if value.contains("#{") || valid_style(value) {
+                Ok(value.to_owned())
+            } else {
+                Err(ServerError::InvalidCommand(format!(
+                    "invalid style: {value}"
+                )))
+            }
+        }
+        TmuxStoredScalarKind::Colour => {
+            let value =
+                value.ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
+            if value.is_empty()
+                || value.contains("#{")
+                || parse_tmux_colour(value).is_some()
+                || zz_terminal::parse_x11_color(value).is_some()
+            {
+                Ok(value.to_owned())
+            } else {
+                Err(ServerError::InvalidCommand(format!(
+                    "invalid colour: {value}"
+                )))
+            }
+        }
+        TmuxStoredScalarKind::Flag => {
+            let enabled = match value {
+                None | Some("") => current != "on",
+                Some("1") => true,
+                Some("0") => false,
+                Some(value)
+                    if value.eq_ignore_ascii_case("on") || value.eq_ignore_ascii_case("yes") =>
+                {
+                    true
+                }
+                Some(value)
+                    if value.eq_ignore_ascii_case("off") || value.eq_ignore_ascii_case("no") =>
+                {
+                    false
+                }
+                Some(value) => {
+                    return Err(ServerError::InvalidCommand(format!("bad value: {value}")));
+                }
+            };
+            Ok(tmux_flag(enabled).to_owned())
+        }
+        TmuxStoredScalarKind::Choice(choices) => {
+            if let Some(value) = value {
+                return choices
+                    .contains(&value)
+                    .then(|| value.to_owned())
+                    .ok_or_else(|| ServerError::InvalidCommand(format!("unknown value: {value}")));
+            }
+            Ok(match choices.iter().position(|choice| *choice == current) {
+                Some(0) => choices[1].to_owned(),
+                Some(1) => choices[0].to_owned(),
+                _ => current.to_owned(),
+            })
+        }
+        TmuxStoredScalarKind::Key => {
+            let value =
+                value.ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
+            if valid_option_key(value) {
+                Ok(canonical_key(value))
+            } else {
+                Err(ServerError::InvalidCommand(format!("bad key: {value}")))
+            }
+        }
     }
 }
 
@@ -9126,6 +9889,35 @@ fn parse_hook_commands(
     Ok(parsed.commands)
 }
 
+fn normalize_option_command(value: &str) -> Result<String, ServerError> {
+    let parsed = crate::parse_config("<set-option>", value);
+    if !parsed.diagnostics.is_empty() {
+        return Err(ServerError::InvalidCommand("syntax error".to_owned()));
+    }
+    parsed
+        .commands
+        .into_iter()
+        .map(|mut command| {
+            command.name = match resolve_command(&command.name) {
+                CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => {
+                    name.to_owned()
+                }
+                CommandResolution::Ambiguous(message) => {
+                    return Err(ServerError::InvalidCommand(message));
+                }
+                CommandResolution::Unknown => {
+                    return Err(ServerError::InvalidCommand(format!(
+                        "unknown command: {}",
+                        command.name
+                    )));
+                }
+            };
+            Ok(format_command(&command))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(|commands| commands.join(" ; "))
+}
+
 fn has_unquoted_hook_format(input: &str) -> bool {
     let mut characters = input.chars().peekable();
     let mut single_quoted = false;
@@ -9250,14 +10042,54 @@ fn format_command_arguments(arguments: &[String]) -> String {
         .join(" ")
 }
 
-fn first_free_hook_index(hook: &HookArray) -> Result<u32, ServerError> {
-    let mut index = 0_u32;
-    while hook.contains_key(&HookIndex::Numeric(index)) {
-        index = index
-            .checked_add(1)
-            .ok_or_else(|| ServerError::InvalidCommand("no free hook index".to_owned()))?;
+fn first_free_array_index<'a>(
+    keys: impl IntoIterator<Item = &'a ArrayIndex>,
+) -> Result<u32, ServerError> {
+    let mut next = 0_u32;
+    for key in keys {
+        match key {
+            ArrayIndex::Numeric(index) if *index == next => {
+                next = next
+                    .checked_add(1)
+                    .ok_or_else(|| ServerError::InvalidCommand("no free array index".to_owned()))?;
+            }
+            ArrayIndex::Numeric(index) if *index < next => {}
+            _ => break,
+        }
     }
-    Ok(index)
+    Ok(next)
+}
+
+fn default_array(name: &'static str) -> StringArray {
+    tmux_stored_array(name)
+        .expect("stored array metadata")
+        .defaults
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            (
+                ArrayIndex::Numeric(u32::try_from(index).expect("array default index fits u32")),
+                (*value).to_owned(),
+            )
+        })
+        .collect()
+}
+
+fn default_array_table(scope: TmuxOptionScope) -> ArrayTable {
+    tmux_options()
+        .filter(|option| option.scope == scope && tmux_stored_array(option.name).is_some())
+        .map(|option| (option.name, default_array(option.name)))
+        .collect()
+}
+
+fn validate_array_value(kind: TmuxArrayValue, value: &str) -> Result<(), ServerError> {
+    if kind == TmuxArrayValue::Colour
+        && parse_tmux_colour(value).is_none()
+        && zz_terminal::parse_x11_color(value).is_none()
+    {
+        return Err(ServerError::InvalidCommand(format!("bad colour: {value}")));
+    }
+    Ok(())
 }
 
 fn global_hook_table(scope: TmuxOptionScope) -> HookTable {
@@ -9279,36 +10111,49 @@ fn push_shown_hook(
     lines: &mut Vec<String>,
     name: &str,
     hook: &HookArray,
-    requested: Option<&HookIndex>,
+    requested: Option<&ArrayIndex>,
+) {
+    push_shown_hook_option(lines, name, hook, requested, false, false);
+}
+
+fn push_shown_hook_option(
+    lines: &mut Vec<String>,
+    name: &str,
+    hook: &HookArray,
+    requested: Option<&ArrayIndex>,
+    inherited: bool,
+    value_only: bool,
 ) {
     if let Some(index) = requested {
-        if let Some(commands) = hook.get(index) {
-            lines.push(format!(
-                "{name}[{}] {}",
-                index.display(),
-                commands
-                    .iter()
-                    .map(format_command)
-                    .collect::<Vec<_>>()
-                    .join(" ; ")
-            ));
-        }
-        return;
-    }
-    if hook.is_empty() {
-        lines.push(name.to_owned());
-        return;
-    }
-    for (index, commands) in hook {
-        lines.push(format!(
-            "{name}[{}] {}",
-            index.display(),
+        let value = hook.get(index).map_or_else(String::new, |commands| {
             commands
                 .iter()
                 .map(format_command)
                 .collect::<Vec<_>>()
                 .join(" ; ")
-        ));
+        });
+        let name = indexed_option_name(name, Some(&index.display()));
+        push_shown_option(lines, &name, &value, false, inherited, value_only);
+        return;
+    }
+    if hook.is_empty() {
+        if !value_only {
+            lines.push(if inherited {
+                format!("{name}*")
+            } else {
+                name.to_owned()
+            });
+        }
+        return;
+    }
+    for (index, commands) in hook {
+        let value = commands
+            .iter()
+            .map(format_command)
+            .collect::<Vec<_>>()
+            .join(" ; ");
+        let name = indexed_option_name(name, Some(&index.display()));
+        push_shown_option(lines, &name, &value, false, inherited, value_only);
     }
 }
 
@@ -14776,6 +15621,515 @@ mod tests {
     }
 
     #[test]
+    fn lane2_scalar_families_store_read_back_unset_and_validate() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "lane2"]))
+            .unwrap();
+        for (flags, name, expected) in [
+            ("-sv", "backspace", "C-?"),
+            ("-sv", "default-client-command", "new-session"),
+            ("-sv", "editor", "/usr/bin/vi"),
+            ("-sv", "extended-keys", "off"),
+            ("-sv", "extended-keys-format", "xterm"),
+            ("-sv", "get-clipboard", "buffer"),
+            ("-sv", "input-buffer-size", "1048576"),
+            ("-sv", "variation-selector-always-wide", "on"),
+            ("-gv", "assume-paste-time", "1"),
+            ("-gv", "message-line", "0"),
+            ("-gv", "prompt-cursor-colour", "\n"),
+            ("-gv", "prompt-command-cursor-colour", "\n"),
+            ("-gv", "prompt-cursor-style", "default"),
+            ("-gv", "prompt-command-cursor-style", "default"),
+            ("-gwv", "clock-mode-colour", "themeblue"),
+            ("-gwv", "clock-mode-style", "24"),
+            ("-gwv", "fill-character", "\n"),
+            ("-gwv", "pane-border-indicators", "colour"),
+            ("-gwv", "pane-border-lines", "single"),
+            ("-gwv", "pane-scrollbars", "off"),
+            ("-gwv", "pane-scrollbars-timeout", "500"),
+            (
+                "-gwv",
+                "pane-scrollbars-style",
+                PANE_SCROLLBARS_STYLE_DEFAULT,
+            ),
+            ("-gwv", "pane-scrollbars-position", "right"),
+            ("-gwv", "xterm-keys", "on"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", &[flags, name]))
+                    .unwrap()
+                    .output,
+                expected,
+                "{name}"
+            );
+        }
+        for (name, expected) in [
+            ("message-command-style", MESSAGE_COMMAND_STYLE_DEFAULT),
+            ("message-format", MESSAGE_FORMAT_DEFAULT),
+            ("message-style", MESSAGE_STYLE_DEFAULT),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", &["-gv", name]))
+                    .unwrap()
+                    .output,
+                expected,
+                "{name}"
+            );
+        }
+
+        for args in [
+            &["-s", "backspace", "BSpace"] as &[&str],
+            &["-s", "default-client-command", "neww -d"],
+            &["-s", "editor", "nvim"],
+            &["-s", "extended-keys", "always"],
+            &["-s", "extended-keys-format", "csi-u"],
+            &["-s", "get-clipboard", "both"],
+            &["-s", "input-buffer-size", "1048577"],
+            &["-s", "variation-selector-always-wide", "off"],
+            &["-g", "assume-paste-time", "9"],
+            &["-g", "message-command-style", "fg=red"],
+            &["-g", "message-format", "message"],
+            &["-g", "message-line", "4"],
+            &["-g", "message-style", "bg=blue"],
+            &["-g", "prompt-cursor-colour", "red"],
+            &["-g", "prompt-command-cursor-colour", "blue"],
+            &["-g", "prompt-cursor-style", "block"],
+            &["-g", "prompt-command-cursor-style", "bar"],
+            &["-gw", "clock-mode-colour", "cyan"],
+            &["-gw", "clock-mode-style", "12-with-seconds"],
+            &["-gw", "fill-character", "x"],
+            &["-gw", "pane-border-indicators", "arrows"],
+            &["-gw", "pane-border-lines", "heavy"],
+            &["-gw", "pane-scrollbars", "auto-hide"],
+            &["-gw", "pane-scrollbars-timeout", "750"],
+            &["-gw", "pane-scrollbars-style", "fg=white"],
+            &["-gw", "pane-scrollbars-position", "left"],
+            &["-gw", "xterm-keys", "off"],
+        ] {
+            engine
+                .execute(&mut context, &command("set-option", args))
+                .unwrap();
+        }
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "default-client-command"]),
+                )
+                .unwrap()
+                .output,
+            "new-window -d"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-ag", "message-style", "bold"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gv", "message-style"]),
+                )
+                .unwrap()
+                .output,
+            "bg=blue,bold"
+        );
+        engine
+            .execute(&mut context, &command("set-option", &["-su", "editor"]))
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-options", &["-sv", "editor"]))
+                .unwrap()
+                .output,
+            "/usr/bin/vi"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-p", "pane-border-lines", "double"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-wU", "pane-border-lines"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-pA", "pane-border-lines"]),
+                )
+                .unwrap()
+                .output,
+            "pane-border-lines* heavy"
+        );
+
+        for (args, expected) in [
+            (
+                &["-s", "backspace", "not-a-key"] as &[&str],
+                "bad key: not-a-key",
+            ),
+            (
+                &["-s", "extended-keys", "sometimes"],
+                "unknown value: sometimes",
+            ),
+            (
+                &["-s", "input-buffer-size", "1048575"],
+                "value is too small: 1048575",
+            ),
+            (
+                &["-s", "variation-selector-always-wide", "maybe"],
+                "bad value: maybe",
+            ),
+            (
+                &["-g", "prompt-cursor-colour", "not-a-colour"],
+                "invalid colour: not-a-colour",
+            ),
+            (
+                &["-gw", "pane-scrollbars-style", "not-a-style"],
+                "invalid style: not-a-style",
+            ),
+            (
+                &["-gw", "pane-scrollbars-timeout", "nope"],
+                "value is invalid: nope",
+            ),
+        ] {
+            assert!(matches!(
+                engine.execute(&mut context, &command("set-option", args)),
+                Err(ServerError::InvalidCommand(message)) if message == expected
+            ));
+        }
+    }
+
+    #[test]
+    fn boot_resolved_editor_is_visible_through_option_readback() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine.initialize_default_editor("nvim");
+
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-options", &["-sv", "editor"]),)
+                .unwrap()
+                .output,
+            "nvim"
+        );
+        assert!(
+            engine
+                .execute(&mut context, &command("show-options", &["-s"]))
+                .unwrap()
+                .output
+                .lines()
+                .any(|line| line == "editor nvim")
+        );
+    }
+
+    #[test]
+    fn every_remaining_named_scalar_stores_and_bare_listings_cover_the_pin_table() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-s", "all-options"]),
+            )
+            .unwrap();
+
+        let storage_only = tmux_options()
+            .filter(|option| tmux_stored_scalar(option.name).is_some())
+            .collect::<Vec<_>>();
+        assert_eq!(storage_only.len(), 63);
+        for option in storage_only {
+            let metadata = tmux_stored_scalar(option.name).expect("storage-only metadata");
+            let alternate = match metadata.kind {
+                TmuxStoredScalarKind::String => "stored",
+                TmuxStoredScalarKind::Style => "fg=red",
+                TmuxStoredScalarKind::Colour => "red",
+                TmuxStoredScalarKind::Flag => {
+                    if metadata.default == "on" {
+                        "off"
+                    } else {
+                        "on"
+                    }
+                }
+                TmuxStoredScalarKind::Choice(choices) => choices
+                    .iter()
+                    .copied()
+                    .find(|choice| *choice != metadata.default)
+                    .expect("choice has an alternate"),
+                TmuxStoredScalarKind::Key => "C-a",
+            };
+            let set_flag = match option.scope {
+                TmuxOptionScope::Server => "-s",
+                TmuxOptionScope::Session => "-g",
+                TmuxOptionScope::Window | TmuxOptionScope::WindowPane => "-gw",
+            };
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-option", &[set_flag, option.name, alternate]),
+                )
+                .unwrap_or_else(|error| panic!("{}: {error}", option.name));
+            let show_flag = match option.scope {
+                TmuxOptionScope::Server => "-sv",
+                TmuxOptionScope::Session => "-gv",
+                TmuxOptionScope::Window | TmuxOptionScope::WindowPane => "-gwv",
+            };
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &command("show-options", &[show_flag, option.name]),
+                    )
+                    .unwrap()
+                    .output,
+                alternate,
+                "{}",
+                option.name
+            );
+            let unset_flag = match option.scope {
+                TmuxOptionScope::Server => "-su",
+                TmuxOptionScope::Session => "-gu",
+                TmuxOptionScope::Window | TmuxOptionScope::WindowPane => "-gwu",
+            };
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-option", &[unset_flag, option.name]),
+                )
+                .unwrap();
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &command("show-options", &[show_flag, option.name]),
+                    )
+                    .unwrap()
+                    .output,
+                metadata.default,
+                "{}",
+                option.name
+            );
+        }
+
+        let mut listed = BTreeSet::new();
+        for flags in [["-s"].as_slice(), ["-g"].as_slice(), ["-gw"].as_slice()] {
+            for line in engine
+                .execute(&mut context, &command("show-options", flags))
+                .unwrap()
+                .output
+                .lines()
+            {
+                let name = line
+                    .split_ascii_whitespace()
+                    .next()
+                    .expect("listed option name")
+                    .split('[')
+                    .next()
+                    .expect("base option name");
+                listed.insert(name.to_owned());
+            }
+        }
+        let expected = tmux_options()
+            .filter(|option| !tmux_option_is_hook(option.name))
+            .map(|option| option.name)
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(listed, expected);
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "destroy-unattached", "keep-last"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["destroy-unattached", "on"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-v", "destroy-unattached"]),
+                )
+                .unwrap()
+                .output,
+            "on"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-u", "destroy-unattached"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-Av", "destroy-unattached"]),
+                )
+                .unwrap()
+                .output,
+            "keep-last"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-gw", "window-style", "fg=red"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-p", "window-style", "fg=blue"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-wU", "window-style"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-pAv", "window-style"]),
+                )
+                .unwrap()
+                .output,
+            "fg=red"
+        );
+
+        for (args, expected) in [
+            (
+                &["-s", "theme", "automatic"] as &[&str],
+                "unknown value: automatic",
+            ),
+            (
+                &["-g", "display-panes-colour", "not-a-colour"],
+                "invalid colour: not-a-colour",
+            ),
+            (
+                &["-gw", "copy-mode-match-style", "not-a-style"],
+                "invalid style: not-a-style",
+            ),
+            (&["-g", "prefix2", "not-a-key"], "bad key: not-a-key"),
+        ] {
+            assert!(matches!(
+                engine.execute(&mut context, &command("set-option", args)),
+                Err(ServerError::InvalidCommand(message)) if message == expected
+            ));
+        }
+    }
+
+    #[test]
+    fn lane2_monitor_options_store_read_back_unset_and_validate_without_effects() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+
+        for (flags, name, expected) in [
+            ("-gv", "activity-action", "other"),
+            ("-gv", "silence-action", "other"),
+            ("-gwv", "monitor-activity", "off"),
+            ("-gwv", "monitor-bell", "on"),
+            ("-gwv", "monitor-silence", "0"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", &[flags, name]))
+                    .unwrap()
+                    .output,
+                expected,
+                "{name}"
+            );
+        }
+
+        for args in [
+            &["-g", "activity-action", "any"] as &[&str],
+            &["-g", "silence-action", "none"],
+            &["-gw", "monitor-activity", "on"],
+            &["-gw", "monitor-bell", "off"],
+            &["-gw", "monitor-silence", "30"],
+        ] {
+            let execution = engine
+                .execute(&mut context, &command("set-option", args))
+                .unwrap();
+            assert!(execution.effects.is_empty());
+        }
+        for (flags, name, expected) in [
+            ("-gv", "activity-action", "any"),
+            ("-gv", "silence-action", "none"),
+            ("-gwv", "monitor-activity", "on"),
+            ("-gwv", "monitor-bell", "off"),
+            ("-gwv", "monitor-silence", "30"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", &[flags, name]))
+                    .unwrap()
+                    .output,
+                expected,
+                "{name}"
+            );
+        }
+
+        for args in [
+            &["-gu", "activity-action"] as &[&str],
+            &["-gu", "silence-action"],
+            &["-gwu", "monitor-activity"],
+            &["-gwu", "monitor-bell"],
+            &["-gwu", "monitor-silence"],
+        ] {
+            engine
+                .execute(&mut context, &command("set-option", args))
+                .unwrap();
+        }
+        for (flags, name, expected) in [
+            ("-gv", "activity-action", "other"),
+            ("-gv", "silence-action", "other"),
+            ("-gwv", "monitor-activity", "off"),
+            ("-gwv", "monitor-bell", "on"),
+            ("-gwv", "monitor-silence", "0"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", &[flags, name]))
+                    .unwrap()
+                    .output,
+                expected,
+                "{name}"
+            );
+        }
+
+        for args in [
+            &["-g", "activity-action", "all"] as &[&str],
+            &["-g", "silence-action", "ALL"],
+            &["-gw", "monitor-activity", "maybe"],
+            &["-gw", "monitor-bell", "maybe"],
+            &["-gw", "monitor-silence", "-1"],
+        ] {
+            assert!(
+                engine
+                    .execute(&mut context, &command("set-option", args))
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
     fn terminal_knob_effects_preserve_global_window_and_pane_scope() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -15853,30 +17207,99 @@ mod tests {
             .execute(&mut context, &command("new-session", &["-s", "work"]))
             .unwrap();
 
-        for args in [
-            &["-g", "status-format", "value"] as &[&str],
-            &["-g", "status-format[0]", "value"],
-            &["-g", "command-alias[0]", "value"],
-            &["-g", "terminal-features[0]", "value"],
-            &["-g", "update-environment[0]", "value"],
-            &["-gw", "pane-colors[0]", "value"],
-        ] {
-            assert_eq!(
-                engine
-                    .execute(&mut context, &command("set-option", args))
-                    .unwrap(),
-                Execution::default()
-            );
-        }
-        for argument in ["status-format", "status-format[0]", "pane-colors[0]"] {
-            assert_eq!(
-                engine
-                    .execute(&mut context, &command("show-options", &["-g", argument]),)
-                    .unwrap()
-                    .output,
-                ""
-            );
-        }
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "status-format", "one,two three"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "status-format"]),
+                )
+                .unwrap()
+                .output,
+            "status-format[0] one\nstatus-format[1] two\nstatus-format[2] three"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-ga", "status-format[1]", " tail"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "status-format[1]"]),
+                )
+                .unwrap()
+                .output,
+            "status-format[1] \"two tail\""
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-gu", "status-format[0]"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-ga", "status-format", "reused"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gv", "status-format[0]"]),
+                )
+                .unwrap()
+                .output,
+            "reused"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "terminal-features", "one,two"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "terminal-features"]),
+                )
+                .unwrap()
+                .output,
+            "one\ntwo"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-gw", "pane-colors", "red,blue"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gw", "pane-colours"]),
+                )
+                .unwrap()
+                .output,
+            "pane-colours[0] red\npane-colours[1] blue"
+        );
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("set-option", &["-gw", "pane-colours[0]", "value"]),
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "bad colour: value"
+        ));
 
         engine
             .execute(
@@ -15950,6 +17373,239 @@ mod tests {
     }
 
     #[test]
+    fn lane2_array_storage_and_hook_option_routing_match_the_pin_shapes() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "lane2"]))
+            .unwrap();
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-s", "command-alias"]),
+                )
+                .unwrap()
+                .output,
+            concat!(
+                "command-alias[0] split-pane=split-window\n",
+                "command-alias[1] splitp=split-window\n",
+                "command-alias[2] \"server-info=show-messages -JT\"\n",
+                "command-alias[3] \"info=show-messages -JT\"\n",
+                "command-alias[4] \"choose-window=choose-tree -w\"\n",
+                "command-alias[5] \"choose-session=choose-tree -s\"",
+            )
+        );
+        for (name, value) in [
+            ("command-alias", "alias=display-message"),
+            ("codepoint-widths", "U+41=1"),
+            ("terminal-overrides", "term:RGB"),
+            ("terminal-features", "term:title"),
+            ("user-keys", "abc"),
+        ] {
+            let indexed = format!("{name}[7]");
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-option", &["-s", &indexed, value]),
+                )
+                .unwrap();
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", &["-sv", &indexed]),)
+                    .unwrap()
+                    .output,
+                value,
+                "{name}"
+            );
+        }
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "update-environment", "FOO BAR"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "update-environment"]),
+                )
+                .unwrap()
+                .output,
+            "update-environment[0] FOO\nupdate-environment[1] BAR"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "codepoint-widths", ""]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-s", "codepoint-widths"]),
+                )
+                .unwrap()
+                .output,
+            "codepoint-widths"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "codepoint-widths"]),
+                )
+                .unwrap()
+                .output,
+            ""
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "status-format", "global"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-options", &["status-format"]),)
+                .unwrap()
+                .output,
+            ""
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-A", "status-format"]),
+                )
+                .unwrap()
+                .output,
+            "status-format[0]* global"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["status-format[3]", "local"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-A", "status-format"]),
+                )
+                .unwrap()
+                .output,
+            "status-format[3] local"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-u", "status-format"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-A", "status-format"]),
+                )
+                .unwrap()
+                .output,
+            "status-format[0]* global"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-p", "pane-colours[0]", "red"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-wU", "pane-colours"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-pA", "pane-colours"]),
+                )
+                .unwrap()
+                .output,
+            "pane-colours*"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "alert-bell", "display-message"]),
+            )
+            .unwrap();
+        let through_hooks = engine
+            .execute(&mut context, &command("show-hooks", &["-g", "alert-bell"]))
+            .unwrap()
+            .output;
+        let through_options = engine
+            .execute(
+                &mut context,
+                &command("show-options", &["-g", "alert-bell"]),
+            )
+            .unwrap()
+            .output;
+        assert_eq!(through_options, through_hooks);
+        assert_eq!(through_options, "alert-bell[0] display-message");
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-ga", "alert-bell", "kill-pane"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gv", "alert-bell"]),
+                )
+                .unwrap()
+                .output,
+            "display-message\nkill-pane"
+        );
+
+        let server_listing = engine
+            .execute(&mut context, &command("show-options", &["-s"]))
+            .unwrap()
+            .output;
+        assert!(
+            server_listing.find("command-alias[0]").unwrap()
+                < server_listing.find("codepoint-widths").unwrap()
+        );
+        assert!(
+            server_listing.find("terminal-overrides[0]").unwrap()
+                < server_listing.find("terminal-features[0]").unwrap()
+        );
+        let window_listing = engine
+            .execute(&mut context, &command("show-options", &["-gw"]))
+            .unwrap()
+            .output;
+        let scrollbars = window_listing.find("pane-scrollbars off").unwrap();
+        let timeout = window_listing.find("pane-scrollbars-timeout 500").unwrap();
+        let style = window_listing.find("pane-scrollbars-style ").unwrap();
+        let position = window_listing
+            .find("pane-scrollbars-position right")
+            .unwrap();
+        assert!(scrollbars < timeout && timeout < style && style < position);
+        assert!(!server_listing.contains("alert-bell"));
+        assert!(!window_listing.contains("alert-bell"));
+    }
+
+    #[test]
     fn plain_option_listings_expose_only_tmux_and_user_names() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -15983,8 +17639,10 @@ mod tests {
                     .next()
                     .expect("listed option name")
                     .trim_end_matches('*');
+                let name = name.split('[').next().expect("option name before index");
                 assert!(name.starts_with('@') || tmux_names.contains(name), "{line}");
                 assert!(!is_native_option(name), "{line}");
+                assert!(!tmux_option_is_hook(name), "{line}");
             }
         }
         assert_eq!(
@@ -18921,54 +20579,90 @@ mod tests {
     }
 
     #[test]
-    fn popup_options_keep_session_and_window_inheritance_independent() {
+    fn popup_options_keep_window_inheritance_independent() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
             .execute(&mut context, &command("new-session", &["-s", "work"]))
             .unwrap();
-        let window = context.window.unwrap();
+        let first = context.window.unwrap();
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "second"]))
+            .unwrap();
+        let second = context.window.unwrap();
+        let second_target = second.to_string();
         assert_eq!(
-            engine.popup_options_for_window(window).unwrap(),
+            engine.popup_options_for_window(first).unwrap(),
+            PopupOptions::default()
+        );
+        assert_eq!(
+            engine.popup_options_for_window(second).unwrap(),
             PopupOptions::default()
         );
 
         engine
             .execute(
                 &mut context,
-                &command("set-option", &["-g", "popup-style", "bg=blue,fg=white"]),
+                &command(
+                    "set-window-option",
+                    &["-g", "popup-style", "bg=blue,fg=white"],
+                ),
             )
             .unwrap();
         engine
             .execute(
                 &mut context,
-                &command("set-option", &["-o", "popup-style", "bg=red"]),
+                &command(
+                    "set-window-option",
+                    &["-o", "-t", &second_target, "popup-style", "bg=red"],
+                ),
             )
             .unwrap();
         assert!(matches!(
             engine.execute(
                 &mut context,
-                &command("set-option", &["-o", "popup-style", "bg=green"])
+                &command(
+                    "set-window-option",
+                    &["-o", "-t", &second_target, "popup-style", "bg=green"]
+                )
             ),
             Err(ServerError::InvalidCommand(message))
                 if message == "already set: popup-style"
         ));
         assert_eq!(
-            engine.popup_options_for_window(window).unwrap().style,
+            engine.popup_options_for_window(first).unwrap().style,
+            "bg=blue,fg=white"
+        );
+        assert_eq!(
+            engine.popup_options_for_window(second).unwrap().style,
             "bg=red"
         );
         engine
-            .execute(&mut context, &command("set-option", &["-u", "popup-style"]))
+            .execute(
+                &mut context,
+                &command(
+                    "set-window-option",
+                    &["-u", "-t", &second_target, "popup-style"],
+                ),
+            )
             .unwrap();
         assert_eq!(
-            engine.popup_options_for_window(window).unwrap().style,
+            engine.popup_options_for_window(second).unwrap().style,
             "bg=blue,fg=white"
         );
 
         engine
             .execute(
                 &mut context,
-                &command("set-option", &["popup-border-style", "bg=black,fg=cyan"]),
+                &command(
+                    "set-window-option",
+                    &[
+                        "-t",
+                        &second_target,
+                        "popup-border-style",
+                        "bg=black,fg=cyan",
+                    ],
+                ),
             )
             .unwrap();
         engine
@@ -18980,11 +20674,22 @@ mod tests {
         engine
             .execute(
                 &mut context,
-                &command("set-window-option", &["popup-border-lines", "rounded"]),
+                &command(
+                    "set-window-option",
+                    &["-t", &second_target, "popup-border-lines", "rounded"],
+                ),
             )
             .unwrap();
         assert_eq!(
-            engine.popup_options_for_window(window).unwrap(),
+            engine.popup_options_for_window(first).unwrap(),
+            PopupOptions {
+                style: "bg=blue,fg=white".to_owned(),
+                border_style: PopupOptions::default().border_style,
+                border_lines: PopupBorderLines::Double,
+            }
+        );
+        assert_eq!(
+            engine.popup_options_for_window(second).unwrap(),
             PopupOptions {
                 style: "bg=blue,fg=white".to_owned(),
                 border_style: "bg=black,fg=cyan".to_owned(),
@@ -18995,7 +20700,10 @@ mod tests {
             engine
                 .execute(
                     &mut context,
-                    &command("show-options", &["-v", "popup-border-style"]),
+                    &command(
+                        "show-window-options",
+                        &["-t", &second_target, "-v", "popup-border-style"],
+                    ),
                 )
                 .unwrap()
                 .output,
@@ -19005,7 +20713,10 @@ mod tests {
             engine
                 .execute(
                     &mut context,
-                    &command("show-window-options", &["-v", "popup-border-lines"]),
+                    &command(
+                        "show-window-options",
+                        &["-t", &second_target, "-v", "popup-border-lines"],
+                    ),
                 )
                 .unwrap()
                 .output,
@@ -19014,20 +20725,40 @@ mod tests {
         engine
             .execute(
                 &mut context,
-                &command("set-window-option", &["-u", "popup-border-lines"]),
+                &command(
+                    "set-window-option",
+                    &["-u", "-t", &second_target, "popup-border-lines"],
+                ),
             )
             .unwrap();
         assert_eq!(
             engine
-                .popup_options_for_window(window)
+                .popup_options_for_window(second)
                 .unwrap()
                 .border_lines,
             PopupBorderLines::Double
         );
+        let session_listing = engine
+            .execute(&mut context, &command("show-options", &["-g"]))
+            .unwrap()
+            .output;
+        let window_listing = engine
+            .execute(&mut context, &command("show-options", &["-gw"]))
+            .unwrap()
+            .output;
+        for option in ["popup-style", "popup-border-style"] {
+            let prefix = format!("{option} ");
+            assert!(
+                !session_listing
+                    .lines()
+                    .any(|line| line.starts_with(&prefix))
+            );
+            assert!(window_listing.lines().any(|line| line.starts_with(&prefix)));
+        }
         assert!(matches!(
             engine.execute(
                 &mut context,
-                &command("set-option", &["popup-border-lines", "zigzag"])
+                &command("set-window-option", &["popup-border-lines", "zigzag"])
             ),
             Err(ServerError::InvalidCommand(message))
                 if message == "unknown value: zigzag"
@@ -19168,32 +20899,24 @@ mod tests {
             .unwrap();
 
         for (scope, option, value) in [
-            ("-g", "popup-style", "fg=red,bg=#00ff7f,bold,nounderscore"),
-            ("-g", "popup-border-style", "fg=colour255,bg=black,italics"),
-            ("", "popup-style", "default,none,bright|reverse"),
-            ("", "popup-border-style", "fg=cyan,bg=colour0,noitalics"),
+            ("-gw", "popup-style", "fg=red,bg=#00ff7f,bold,nounderscore"),
+            ("-gw", "popup-border-style", "fg=colour255,bg=black,italics"),
+            ("-w", "popup-style", "default,none,bright|reverse"),
+            ("-w", "popup-border-style", "fg=cyan,bg=colour0,noitalics"),
         ] {
-            let args = if scope.is_empty() {
-                vec![option, value]
-            } else {
-                vec![scope, option, value]
-            };
+            let args = vec![scope, option, value];
             engine
                 .execute(&mut context, &command("set-option", &args))
                 .unwrap();
         }
 
         for (scope, option, value) in [
-            ("-g", "popup-style", "bogus-not-a-style"),
-            ("-g", "popup-border-style", "fg=not-a-colour"),
-            ("", "popup-style", "bold,unknown"),
-            ("", "popup-border-style", "bg=#12345g"),
+            ("-gw", "popup-style", "bogus-not-a-style"),
+            ("-gw", "popup-border-style", "fg=not-a-colour"),
+            ("-w", "popup-style", "bold,unknown"),
+            ("-w", "popup-border-style", "bg=#12345g"),
         ] {
-            let args = if scope.is_empty() {
-                vec![option, value]
-            } else {
-                vec![scope, option, value]
-            };
+            let args = vec![scope, option, value];
             assert!(matches!(
                 engine.execute(&mut context, &command("set-option", &args)),
                 Err(ServerError::InvalidCommand(message))

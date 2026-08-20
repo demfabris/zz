@@ -904,6 +904,11 @@ pub fn canonical_key(value: &str) -> String {
     if value == " " || trimmed == "Space" {
         return " ".to_owned();
     }
+    // The pin's key_string_table spells the empty key `None` and parses it
+    // case-insensitively (key-string.c), so every spelling round-trips as `None`.
+    if trimmed.eq_ignore_ascii_case("none") {
+        return "None".to_owned();
+    }
     let mut control = false;
     let mut alt = false;
     let mut rest = trimmed;

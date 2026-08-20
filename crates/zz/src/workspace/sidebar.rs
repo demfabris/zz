@@ -6,27 +6,27 @@ use std::{
 use gpui::{
     AnyElement, App, AppContext as _, Context, CursorStyle, Entity, EventEmitter, FocusHandle,
     Hsla, InteractiveElement as _, IntoElement, KeyBinding, ListSizingBehavior, MouseButton,
-    ParentElement as _, Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _,
-    Styled as _, UniformListScrollHandle, Window, WindowControlArea, div, img,
-    prelude::FluentBuilder as _, px, uniform_list,
+    ParentElement as _, Render, RenderOnce, ScrollStrategy, SharedString,
+    StatefulInteractiveElement as _, Styled as _, UniformListScrollHandle, Window,
+    WindowControlArea, div, img, prelude::FluentBuilder as _, px, uniform_list,
 };
 use zz_client::{ChromeAction, SIDEBAR_TABLE};
+use zz_mux::parse_styled_segments;
 use zz_protocol::{
     Axis, CommandInvocation, MuxSnapshot, PaneId, SessionId, StatusLine, WindowId, WindowSnapshot,
 };
 use zz_ui::menu::DropdownMenu as _;
 use zz_ui::navigation::{
-    WORKSPACE_SIDEBAR_DEFAULT_WIDTH as SIDEBAR_DEFAULT_WIDTH, WORKSPACE_STRIP_GAP as STRIP_GAP,
-    WORKSPACE_TREE_ACTION_INSET as TREE_ACTION_INSET,
+    WORKSPACE_SIDEBAR_DEFAULT_WIDTH as SIDEBAR_DEFAULT_WIDTH, WORKSPACE_SIDEBAR_STATUS_PADDING,
+    WORKSPACE_STRIP_GAP as STRIP_GAP, WORKSPACE_TREE_ACTION_INSET as TREE_ACTION_INSET,
     WORKSPACE_TREE_CONTENT_INSET as TREE_CONTENT_INSET,
     WORKSPACE_TREE_INDENT_WIDTH as TREE_INDENT_WIDTH,
     WORKSPACE_TREE_MARKER_SLOT_WIDTH as TREE_MARKER_SLOT_WIDTH,
     WORKSPACE_TREE_NODE_ICON_SIZE as TREE_NODE_ICON_SIZE, sidebar_settings_button,
-    workspace_layout_button, workspace_sidebar_attention, workspace_sidebar_divider,
-    workspace_sidebar_status, workspace_sidebar_surface, workspace_sidebar_titlebar,
+    workspace_layout_button, workspace_row_highlight, workspace_sidebar_attention,
+    workspace_sidebar_divider, workspace_sidebar_surface, workspace_sidebar_titlebar,
     workspace_strip_chip_connector, workspace_strip_group_separator, workspace_strip_session_badge,
-    workspace_strip_window_pill, workspace_tree_disclosure, workspace_tree_marker,
-    workspace_tree_row,
+    workspace_tree_disclosure, workspace_tree_marker, workspace_tree_row,
 };
 use zz_ui::{
     ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, Sizable as _,
@@ -58,6 +58,7 @@ use crate::{
             select_window_command, session_initial, session_label, split_picker_command,
         },
     },
+    theme::{TmuxStyledText, tmux_styled_text},
     window::{corners::WindowCorners, drag::window_drag_handle},
     workspace::tree::{IndentGuideColors, WorkspaceIndentGuides},
 };
@@ -73,6 +74,8 @@ const SIDEBAR_RESIZE_HANDLE_WIDTH: f32 = 8.0;
 const TREE_INDENT_GUIDE_OFFSET: f32 = TREE_MARKER_SLOT_WIDTH / 2.0;
 const TREE_INDENT_GUIDE_PADDING: f32 = 4.0;
 const TREE_KEY_CONTEXT: &str = "WorkspaceTree";
+const STRIP_WINDOW_PILL_HEIGHT: f32 = 24.0;
+const STRIP_WINDOW_PILL_WIDTH: f32 = 104.0;
 
 gpui::actions!(
     workspace_tree,
@@ -915,10 +918,10 @@ impl WorkspaceSidebar {
                     &self.badges,
                     TreeNode::Target(attached_host, TreeTarget::Window(id)),
                 );
-                let chip = workspace_strip_window_pill(
+                let chip = render_strip_window_pill(
                     ("workspace-strip-window", id.0),
                     format!("workspace-strip-window-{}", id.0).into(),
-                    strip_window_label(window).into(),
+                    window,
                     id == focused_window,
                     connected,
                     self.render_strip_window_delete(id, connected, cx),
@@ -1104,7 +1107,8 @@ impl Render for WorkspaceSidebar {
         } else {
             let attention = self.render_attention(attached_host, attached, connected, cx);
             render_status_section(attention, self.mux.read(cx).status(), cx)
-        };
+        }
+        .map(IntoElement::into_any_element);
         let controls = if settings_route {
             div().into_any_element()
         } else {
@@ -1166,7 +1170,86 @@ impl EventEmitter<SidebarModeChanged> for WorkspaceSidebar {}
 impl EventEmitter<SidebarRouteChanged> for WorkspaceSidebar {}
 
 fn strip_window_label(window: &WindowSnapshot) -> String {
-    format!("{}:{}", window.index, window.name)
+    let label = parse_styled_segments(&window.status_label)
+        .into_iter()
+        .map(|segment| segment.text)
+        .collect::<String>();
+    if label.is_empty() {
+        format!("{}:{}", window.index, window.name)
+    } else {
+        label
+    }
+}
+
+fn render_strip_window_pill(
+    id: impl Into<gpui::ElementId>,
+    group: SharedString,
+    window: &WindowSnapshot,
+    active: bool,
+    connected: bool,
+    delete: impl IntoElement,
+    cx: &App,
+) -> gpui::Stateful<gpui::Div> {
+    let rest = cx.theme().background.washed(1);
+    let highlight = workspace_row_highlight(cx);
+    let pill_background = if active && connected { highlight } else { rest };
+    let foreground = if active && connected {
+        cx.theme().foreground
+    } else {
+        cx.theme().foreground.muted()
+    };
+    let mut label = tmux_styled_text(&window.status_label, foreground, pill_background, cx);
+    if label.text.is_empty() {
+        let fallback = strip_window_label(window);
+        label = tmux_styled_text(&fallback, foreground, pill_background, cx);
+    }
+    let tooltip = label.text.clone();
+    let tint = label.take_explicit_background_color();
+
+    div()
+        .id(id)
+        .group(group.clone())
+        .relative()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(px(2.0))
+        .h(px(STRIP_WINDOW_PILL_HEIGHT))
+        .w(px(STRIP_WINDOW_PILL_WIDTH))
+        .pl(px(10.0))
+        .pr(px(4.0))
+        .rounded(cx.theme().radius)
+        .bg(pill_background)
+        .text_size(rems_from_px(11.0))
+        .text_color(foreground)
+        .when(connected, |this| {
+            this.cursor_pointer().hover(move |this| this.bg(highlight))
+        })
+        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+        .children(tint.map(|tint| {
+            div()
+                .absolute()
+                .inset_0()
+                .rounded(cx.theme().radius)
+                .bg(tint.fill())
+                .group_hover(group.clone(), move |this| this.bg(highlight))
+        }))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(label.into_styled_text()),
+        )
+        .child(
+            div()
+                .flex_none()
+                .invisible()
+                .group_hover(group, gpui::Styled::visible)
+                .child(delete),
+        )
 }
 
 #[derive(Clone, Debug)]
@@ -1387,38 +1470,85 @@ struct TreeRowRuntime {
     badges: Rc<BTreeMap<(HostId, PaneId), AgentBadge>>,
 }
 
+#[derive(IntoElement)]
+struct StatusSectionElement {
+    attention: Option<AnyElement>,
+    left: TmuxStyledText,
+    right: TmuxStyledText,
+}
+
+impl RenderOnce for StatusSectionElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let left = self.left.into_styled_text();
+        let right = self.right.into_styled_text();
+
+        div()
+            .id("workspace-sidebar-status")
+            .flex()
+            .flex_none()
+            .items_center()
+            .w_full()
+            .gap(px(6.0))
+            .px(px(TREE_CONTENT_INSET))
+            .py(px(WORKSPACE_SIDEBAR_STATUS_PADDING))
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .overflow_hidden()
+            .text_xs()
+            .text_color(cx.theme().foreground.muted())
+            .children(self.attention)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(left),
+            )
+            .child(div().flex_none().whitespace_nowrap().child(right))
+    }
+}
+
 fn render_status_section(
     attention: Option<AnyElement>,
     status: &StatusLine,
     cx: &App,
-) -> Option<AnyElement> {
-    let [left, right] = [status.left.as_str(), status.right.as_str()]
-        .map(|half| SharedString::from(half.trim().to_owned()));
-    if attention.is_none() && left.is_empty() && right.is_empty() {
+) -> Option<StatusSectionElement> {
+    if attention.is_none() && status.left.is_empty() && status.right.is_empty() {
         return None;
     }
-    Some(
-        workspace_sidebar_status("workspace-sidebar-status", attention, left, right, cx)
-            .into_any_element(),
-    )
+    let [left, right] = styled_status_halves(status, cx);
+    Some(StatusSectionElement {
+        attention,
+        left,
+        right,
+    })
 }
 
-fn render_strip_status(status: &StatusLine, cx: &App) -> Option<gpui::Div> {
-    let [left, right] = [status.left.as_str(), status.right.as_str()]
-        .map(|half| SharedString::from(half.trim().to_owned()));
-    if left.is_empty() && right.is_empty() {
-        return None;
-    }
-    let left = (!left.is_empty()).then(|| {
-        div()
-            .min_w_0()
-            .overflow_hidden()
-            .whitespace_nowrap()
-            .text_ellipsis()
-            .child(left)
-    });
-    let right = (!right.is_empty()).then(|| div().flex_none().whitespace_nowrap().child(right));
-    Some(
+#[derive(IntoElement)]
+struct StripStatusElement {
+    left: Option<TmuxStyledText>,
+    right: Option<TmuxStyledText>,
+}
+
+impl RenderOnce for StripStatusElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let left = self.left.map(|left| {
+            div()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(left.into_styled_text())
+        });
+        let right = self.right.map(|right| {
+            div()
+                .flex_none()
+                .whitespace_nowrap()
+                .child(right.into_styled_text())
+        });
+
         div()
             .flex()
             .flex_none()
@@ -1427,8 +1557,25 @@ fn render_strip_status(status: &StatusLine, cx: &App) -> Option<gpui::Div> {
             .text_xs()
             .text_color(cx.theme().foreground.muted())
             .children(left)
-            .children(right),
-    )
+            .children(right)
+    }
+}
+
+fn render_strip_status(status: &StatusLine, cx: &App) -> Option<StripStatusElement> {
+    if status.left.is_empty() && status.right.is_empty() {
+        return None;
+    }
+    let [left, right] = styled_status_halves(status, cx);
+    Some(StripStatusElement {
+        left: (!status.left.is_empty()).then_some(left),
+        right: (!status.right.is_empty()).then_some(right),
+    })
+}
+
+fn styled_status_halves(status: &StatusLine, cx: &App) -> [TmuxStyledText; 2] {
+    let foreground = cx.theme().foreground.muted();
+    let background = cx.theme().background;
+    [&status.left, &status.right].map(|half| tmux_styled_text(half, foreground, background, cx))
 }
 
 fn session_owning_pane(snapshot: &MuxSnapshot, pane: PaneId) -> Option<SessionId> {
@@ -2432,6 +2579,64 @@ mod tests {
         let mut orphaned = mux_window(5, 3, "scratch", 12);
         orphaned.panes.clear();
         assert_eq!(strip_window_label(&orphaned), "3:scratch");
+
+        let mut formatted = window.clone();
+        formatted.status_label = "#[fg=green] 2:formatted* ".to_owned();
+        assert_eq!(strip_window_label(&formatted), " 2:formatted* ");
+        formatted.status_label = "#[bold]".to_owned();
+        assert_eq!(strip_window_label(&formatted), "2:work");
+    }
+
+    #[gpui::test]
+    fn status_render_paths_draw_styled_runs_without_trimming_spaces(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let status = StatusLine {
+            left: "  #[fg=red,bold]left  ".to_owned(),
+            right: "#[bg=blue]right  ".to_owned(),
+        };
+        let cx = cx.add_empty_window();
+
+        cx.update(|_, cx| {
+            let strip = render_strip_status(&status, cx).expect("status strip");
+            let left = strip.left.as_ref().expect("left strip half");
+            let right = strip.right.as_ref().expect("right strip half");
+            assert_eq!(left.text.as_ref(), "  left  ");
+            assert_eq!(right.text.as_ref(), "right  ");
+            assert_eq!(left.highlights.len(), 1);
+            assert_eq!(left.highlights[0].0, 2..8);
+            assert_eq!(
+                left.highlights[0].1.font_weight,
+                Some(gpui::FontWeight::BOLD)
+            );
+            assert_eq!(right.highlights.len(), 1);
+            assert_eq!(right.highlights[0].0, 0..7);
+            assert!(right.highlights[0].1.background_color.is_some());
+
+            let section = render_status_section(None, &status, cx).expect("status section");
+            assert_eq!(section.left.text.as_ref(), "  left  ");
+            assert_eq!(section.right.text.as_ref(), "right  ");
+            assert_eq!(section.left.highlights, left.highlights);
+            assert_eq!(section.right.highlights, right.highlights);
+        });
+
+        cx.draw(
+            gpui::Point::default(),
+            gpui::size(px(320.0), px(40.0)),
+            |_, cx| {
+                render_strip_status(&status, cx)
+                    .expect("status strip")
+                    .into_element()
+            },
+        );
+        cx.draw(
+            gpui::Point::default(),
+            gpui::size(px(320.0), px(40.0)),
+            |_, cx| {
+                render_status_section(None, &status, cx)
+                    .expect("status section")
+                    .into_element()
+            },
+        );
     }
 
     #[test]

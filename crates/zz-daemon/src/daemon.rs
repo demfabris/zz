@@ -15468,10 +15468,48 @@ fn expand_window_status_labels(
                 Some(window.active_pane),
             );
             let mut hooks = DaemonFormatHooks::command(facts);
+            let style = expand_window_status_style(&formats, &context, &mut hooks);
+            let label = expand_status(format, &context, &mut hooks);
             window.status_label =
-                truncate_window_status_label(expand_status(format, &context, &mut hooks));
+                truncate_window_status_label(format!("#[{style}]#[push-default]{label}"));
         }
     }
+}
+
+fn expand_window_status_style(
+    formats: &zz_mux::WindowStatusFormats,
+    context: &zz_mux::StatusContext,
+    hooks: &mut DaemonFormatHooks<'_>,
+) -> String {
+    let mut style = if context.window_active == Some(true) {
+        let current = expand_status(&formats.current_style, context, hooks);
+        if current == "default" {
+            expand_status(&formats.style, context, hooks)
+        } else {
+            current
+        }
+    } else {
+        expand_status(&formats.style, context, hooks)
+    };
+    if context.window_last == Some(true) {
+        let last = expand_status(&formats.last_style, context, hooks);
+        append_window_status_style(&mut style, &last);
+    }
+    if context.window_bell {
+        let bell = expand_status(&formats.bell_style, context, hooks);
+        append_window_status_style(&mut style, &bell);
+    }
+    style
+}
+
+fn append_window_status_style(style: &mut String, layer: &str) {
+    if layer == "default" || layer.is_empty() {
+        return;
+    }
+    if !style.is_empty() {
+        style.push(' ');
+    }
+    style.push_str(layer);
 }
 
 fn truncate_window_status_label(mut label: String) -> String {
@@ -19193,8 +19231,14 @@ mod tests {
 
         let mut snapshot = engine.state.snapshot();
         expand_window_status_labels(&engine, &FormatHookFacts::default(), &mut snapshot);
-        assert_eq!(snapshot.sessions[0].windows[0].status_label, "0:main*");
-        assert_eq!(snapshot.sessions[0].windows[1].status_label, "1:logs ");
+        assert_eq!(
+            snapshot.sessions[0].windows[0].status_label,
+            "#[underscore]#[push-default]0:main*"
+        );
+        assert_eq!(
+            snapshot.sessions[0].windows[1].status_label,
+            "#[default]#[push-default]1:logs "
+        );
 
         engine
             .execute(
@@ -19222,12 +19266,124 @@ mod tests {
         expand_window_status_labels(&engine, &FormatHookFacts::default(), &mut snapshot);
         assert_eq!(
             snapshot.sessions[0].windows[0].status_label,
-            "#[bold]CURRENT:0:main:*"
+            "#[underscore]#[push-default]#[bold]CURRENT:0:main:*"
         );
         assert_eq!(
             snapshot.sessions[0].windows[1].status_label,
-            "#[italics]PLAIN:1:logs:"
+            "#[default]#[push-default]#[italics]PLAIN:1:logs:"
         );
+    }
+
+    #[test]
+    fn window_status_label_styles_follow_pinned_precedence() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "styles", "-n", "main"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-window", ["-d", "-t", "styles:", "-n", "logs"]),
+            )
+            .unwrap();
+        for (option, value) in [
+            ("window-status-format", "#I:#W"),
+            ("window-status-current-format", "#I:#W"),
+            ("window-status-style", "fg=red,bold"),
+            ("window-status-current-style", "fg=blue"),
+            ("window-status-last-style", "bg=green,nobold"),
+            ("window-status-bell-style", "fg=yellow,italics"),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new("set-window-option", ["-g", option, value]),
+                )
+                .unwrap();
+        }
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("select-window", ["-t", "styles:1"]),
+            )
+            .unwrap();
+
+        let snapshot = engine.state.snapshot();
+        let main_pane = snapshot.sessions[0].windows[0].active_pane;
+        let logs_pane = snapshot.sessions[0].windows[1].active_pane;
+        assert!(engine.state.set_pane_bell(main_pane, true));
+
+        let mut snapshot = engine.state.snapshot();
+        expand_window_status_labels(&engine, &FormatHookFacts::default(), &mut snapshot);
+        let main = &snapshot.sessions[0].windows[0];
+        let logs = &snapshot.sessions[0].windows[1];
+        assert!(
+            main.status_label
+                .starts_with("#[fg=red,bold bg=green,nobold fg=yellow,italics]#[push-default]")
+        );
+        assert!(logs.status_label.starts_with("#[fg=blue]#[push-default]"));
+
+        let main_style = &zz_mux::parse_styled_segments(&main.status_label)[0].style;
+        assert_eq!(main_style.fg, Some(zz_mux::TmuxColour::Basic(3)));
+        assert_eq!(main_style.bg, Some(zz_mux::TmuxColour::Basic(2)));
+        assert_eq!(main_style.attributes.bold, zz_mux::TmuxAttributeState::Off);
+        assert_eq!(
+            main_style.attributes.italics,
+            zz_mux::TmuxAttributeState::On
+        );
+        let logs_style = &zz_mux::parse_styled_segments(&logs.status_label)[0].style;
+        assert_eq!(logs_style.fg, Some(zz_mux::TmuxColour::Basic(4)));
+        assert_eq!(logs_style.bg, None);
+        assert_eq!(
+            logs_style.attributes.bold,
+            zz_mux::TmuxAttributeState::Unset
+        );
+
+        assert!(engine.state.set_pane_bell(main_pane, false));
+        assert!(engine.state.set_pane_bell(logs_pane, true));
+        let mut snapshot = engine.state.snapshot();
+        expand_window_status_labels(&engine, &FormatHookFacts::default(), &mut snapshot);
+        let logs_style =
+            &zz_mux::parse_styled_segments(&snapshot.sessions[0].windows[1].status_label)[0].style;
+        assert_eq!(logs_style.fg, Some(zz_mux::TmuxColour::Basic(3)));
+        assert_eq!(logs_style.bg, None);
+        assert_eq!(
+            logs_style.attributes.bold,
+            zz_mux::TmuxAttributeState::Unset
+        );
+        assert_eq!(
+            logs_style.attributes.italics,
+            zz_mux::TmuxAttributeState::On
+        );
+
+        for (option, value) in [
+            (
+                "window-status-current-style",
+                "#{?window_active,default,fg=blue}",
+            ),
+            ("window-status-last-style", "default"),
+            ("window-status-bell-style", "default"),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new("set-window-option", ["-g", option, value]),
+                )
+                .unwrap();
+        }
+        let mut snapshot = engine.state.snapshot();
+        expand_window_status_labels(&engine, &FormatHookFacts::default(), &mut snapshot);
+        for window in &snapshot.sessions[0].windows {
+            let style = &zz_mux::parse_styled_segments(&window.status_label)[0].style;
+            assert_eq!(style.fg, Some(zz_mux::TmuxColour::Basic(1)));
+            assert_eq!(style.bg, None);
+            assert_eq!(style.attributes.bold, zz_mux::TmuxAttributeState::On);
+            assert_eq!(style.attributes.italics, zz_mux::TmuxAttributeState::Unset);
+        }
     }
 
     #[test]

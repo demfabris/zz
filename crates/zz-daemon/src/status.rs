@@ -14,8 +14,10 @@ use std::{
 use chrono::Local;
 use glob::{MatchOptions, Pattern};
 use regex::RegexBuilder;
-use zz_mux::{MuxEngine, StatusContext, StatusFormats, StatusHooks, expand_status};
-use zz_protocol::{ClientId, MuxSnapshot, PaneId, SessionId, StatusLine, WindowId};
+use zz_mux::{MuxEngine, StatusContext, StatusFormats, StatusHooks, display_width, expand_status};
+use zz_protocol::{
+    ClientId, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, SessionId, StatusLine, WindowId,
+};
 use zz_terminal::{CellWidth, TerminalSession, TerminalViewport};
 
 use crate::{configure_tmux_shim, shell_process};
@@ -221,10 +223,155 @@ fn render(
         tmux_shim,
         zz_executable,
     );
+    let left = expand_status(&request.formats.left, &request.context, &mut hooks);
+    let right = expand_status(&request.formats.right, &request.context, &mut hooks);
     StatusLine {
-        left: expand_status(&request.formats.left, &request.context, &mut hooks),
-        right: expand_status(&request.formats.right, &request.context, &mut hooks),
+        left: wrap_status_style(
+            &request.formats,
+            &trim_status_left(&left, usize::from(request.formats.left_length)),
+            &request.formats.left_style,
+        ),
+        right: wrap_status_style(
+            &request.formats,
+            // Wave B may re-trim status-right client-side to keep the clock visible;
+            // the wire remains pin-faithful.
+            &trim_status_left(&right, usize::from(request.formats.right_length)),
+            &request.formats.right_style,
+        ),
     }
+}
+
+fn wrap_status_style(formats: &StatusFormats, text: &str, side_style: &str) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    let mut base = formats.style.clone();
+    if formats.foreground != "default" {
+        if !base.is_empty() {
+            base.push(',');
+        }
+        base.push_str("fg=");
+        base.push_str(&formats.foreground);
+    }
+    if formats.background != "default" {
+        if !base.is_empty() {
+            base.push(',');
+        }
+        base.push_str("bg=");
+        base.push_str(&formats.background);
+    }
+    if base.is_empty() && matches!(side_style, "" | "default") {
+        return text.to_owned();
+    }
+    let mut output = String::with_capacity(
+        (base.len() + side_style.len() + text.len() + 32).min(MAX_STATUS_TEXT_BYTES),
+    );
+    let carries_base = if base.is_empty() {
+        false
+    } else {
+        let marker = format!("#[{base}]");
+        if marker.len() + "#[push-default]".len() <= MAX_STATUS_TEXT_BYTES {
+            output.push_str(&marker);
+            true
+        } else {
+            false
+        }
+    };
+    if !side_style.is_empty() {
+        let marker = format!("#[{side_style}]");
+        let reserved = if carries_base {
+            "#[push-default]".len()
+        } else {
+            0
+        };
+        if output.len() + marker.len() + reserved <= MAX_STATUS_TEXT_BYTES {
+            output.push_str(&marker);
+        }
+    }
+    if carries_base {
+        output.push_str("#[push-default]");
+    }
+    let remaining = MAX_STATUS_TEXT_BYTES - output.len();
+    let boundary = (0..=remaining.min(text.len()))
+        .rev()
+        .find(|index| text.is_char_boundary(*index))
+        .unwrap_or_default();
+    output.push_str(&text[..boundary]);
+    output
+}
+
+fn trim_status_left(value: &str, limit: usize) -> String {
+    let bytes = value.as_bytes();
+    let mut output = String::with_capacity(value.len());
+    let mut index = 0;
+    let mut width = 0;
+    while index < bytes.len() && width < limit {
+        if bytes[index] == b'#' {
+            let start = index;
+            while bytes.get(index) == Some(&b'#') {
+                index += 1;
+            }
+            let hashes = index - start;
+            let marker = bytes.get(index) == Some(&b'[') && hashes % 2 == 1;
+            let leading_width = if bytes.get(index) == Some(&b'[') {
+                hashes / 2
+            } else {
+                hashes.div_ceil(2)
+            };
+            let copy_width = leading_width.min(limit - width);
+            if copy_width != 0 {
+                if hashes == 1 {
+                    output.push('#');
+                } else {
+                    output.extend(std::iter::repeat_n('#', copy_width * 2));
+                }
+                width += copy_width;
+            }
+            if marker {
+                let marker_start = index - 1;
+                let Some(end) = status_style_end(value, index + 1) else {
+                    break;
+                };
+                output.push_str(&value[marker_start..=end]);
+                index = end + 1;
+            }
+            continue;
+        }
+        let character = value[index..]
+            .chars()
+            .next()
+            .expect("status trim index is on a character boundary");
+        let character_width = display_width(character.encode_utf8(&mut [0; 4]));
+        if width + character_width <= limit {
+            output.push(character);
+        }
+        width += character_width;
+        index += character.len_utf8();
+    }
+    output
+}
+
+fn status_style_end(value: &str, start: usize) -> Option<usize> {
+    let bytes = value.as_bytes();
+    let mut position = start;
+    let mut formats = 0;
+    while position < bytes.len() {
+        if bytes[position] == b'#' && bytes.get(position + 1) == Some(&b'{') {
+            formats += 1;
+            position += 2;
+            continue;
+        }
+        if bytes[position] == b'}' && formats != 0 {
+            formats -= 1;
+            position += 1;
+            continue;
+        }
+        if bytes[position] == b']' && formats == 0 {
+            return Some(position);
+        }
+        position += 1;
+    }
+    None
 }
 
 pub(crate) struct DaemonFormatHooks<'a> {
@@ -687,11 +834,14 @@ mod tests {
         StatusRequest {
             client: ClientId(client),
             formats: StatusFormats {
-                enabled: true,
-                lines: 1,
-                interval: Duration::from_secs(15),
                 left: left.to_owned(),
                 right: right.to_owned(),
+                style: String::new(),
+                left_style: String::new(),
+                right_style: String::new(),
+                left_length: u16::MAX,
+                right_length: u16::MAX,
+                ..StatusFormats::default()
             },
             context: StatusContext {
                 session_name: "work".to_owned(),
@@ -720,6 +870,42 @@ mod tests {
         assert_eq!(second.len(), 1);
         assert_eq!(second[0].0, ClientId(2));
         assert_eq!(second[0].1.left, "[infra]");
+    }
+
+    #[test]
+    fn status_sides_left_trim_display_width_without_counting_styles() {
+        assert_eq!(trim_status_left("a#[bold]界bc", 4), "a#[bold]界b");
+        assert_eq!(trim_status_left("##[bold]界", 3), "##[b");
+    }
+
+    #[test]
+    fn status_sides_carry_base_then_side_styles() {
+        let mut request = request(1, "abcdef", "uvwxyz");
+        request.formats.style = "bg=blue,fg=white".to_owned();
+        request.formats.foreground = "red".to_owned();
+        request.formats.left_style = "bold".to_owned();
+        request.formats.right_style = "italics".to_owned();
+        request.formats.left_length = 4;
+        request.formats.right_length = 3;
+        let status = StatusRenderer::default().render_initial(&request);
+        assert_eq!(
+            status.left,
+            "#[bg=blue,fg=white,fg=red]#[bold]#[push-default]abcd"
+        );
+        assert_eq!(
+            status.right,
+            "#[bg=blue,fg=white,fg=red]#[italics]#[push-default]uvw"
+        );
+    }
+
+    #[test]
+    fn status_style_wrapping_stays_inside_the_wire_limit() {
+        let mut request = request(1, &"x".repeat(MAX_STATUS_TEXT_BYTES), "");
+        request.formats.style = "bold,".repeat(800);
+        request.formats.left_style = "italics,".repeat(800);
+        let status = StatusRenderer::default().render_initial(&request);
+        assert_eq!(status.validate(), Ok(()));
+        assert!(status.left.is_char_boundary(status.left.len()));
     }
 
     #[test]

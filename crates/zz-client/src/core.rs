@@ -847,6 +847,7 @@ mod tests {
                     panes: entries,
                     layout_dump: String::new(),
                     visible_layout_dump: String::new(),
+                    status_label: String::new(),
                 }],
                 viewers: Vec::new(),
             }],

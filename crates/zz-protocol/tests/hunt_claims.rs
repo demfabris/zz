@@ -13,8 +13,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_sixty_eight() {
-    assert_eq!(PROTOCOL_VERSION, 68);
+fn protocol_version_on_this_commit_is_sixty_nine() {
+    assert_eq!(PROTOCOL_VERSION, 69);
 }
 
 #[test]
@@ -93,10 +93,11 @@ fn control_events_and_window_layout_fields_keep_the_frozen_wire_tail() {
         panes: BTreeMap::new(),
         layout_dump: "L".to_owned(),
         visible_layout_dump: "V".to_owned(),
+        status_label: "S".to_owned(),
     };
     assert_eq!(
         postcard::to_stdvec(&window).expect("encode window"),
-        [1, 2, 1, b'w', 1, 3, 0, 0, 3, 0, 1, b'L', 1, b'V']
+        [1, 2, 1, b'w', 1, 3, 0, 0, 3, 0, 1, b'L', 1, b'V', 1, b'S']
     );
 }
 
@@ -145,7 +146,7 @@ fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x44, 0x00, 0x00, 0x44, 0x00, 0x00, 0x00, 0x00,
+            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x45, 0x00, 0x00, 0x45, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00,
         ]
     );

@@ -3141,6 +3141,7 @@ impl MuxState {
                 .collect(),
             layout_dump,
             visible_layout_dump,
+            status_label: String::new(),
         }
     }
 

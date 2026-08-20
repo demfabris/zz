@@ -1202,6 +1202,21 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 index += character.len_utf8();
                 continue;
             }
+            let hashes_end = format.as_bytes()[index..]
+                .iter()
+                .position(|byte| *byte != b'#')
+                .map_or(format.len(), |offset| index + offset);
+            if format.as_bytes().get(hashes_end) == Some(&b'[') {
+                let Some(end) = find_style_end(format, hashes_end + 1) else {
+                    break;
+                };
+                self.flush(&mut output, &mut literal);
+                output.push_str(&format[index..=hashes_end]);
+                output.push_str(&self.expand_style_body(&format[hashes_end + 1..end], depth));
+                output.push(']');
+                index = end + 1;
+                continue;
+            }
             let next_index = index + 1;
             let Some(next) = format[next_index..].chars().next() else {
                 break;
@@ -1212,13 +1227,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                     literal.push(next);
                     index = after_next;
                 }
-                '[' => {
-                    if let Some(end) = find_plain_group_end(format, after_next, '[', ']') {
-                        index = end + 1;
-                    } else {
-                        break;
-                    }
-                }
+                '[' => unreachable!("style openers are handled before format tokens"),
                 '(' => {
                     let Some(end) = find_plain_group_end(format, after_next, '(', ')') else {
                         break;
@@ -1251,6 +1260,54 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             }
         }
         self.flush(&mut output, &mut literal);
+        output
+    }
+
+    fn expand_style_body(&mut self, body: &str, depth: usize) -> String {
+        let mut output = String::with_capacity(body.len());
+        let mut index = 0;
+        while index < body.len() {
+            if body.as_bytes()[index] != b'#' {
+                let character = body[index..]
+                    .chars()
+                    .next()
+                    .expect("index is on a character boundary");
+                output.push(character);
+                index += character.len_utf8();
+                continue;
+            }
+            let Some(next) = body.as_bytes().get(index + 1).copied() else {
+                break;
+            };
+            match next {
+                b'{' => {
+                    let Some(end) = find_format_end(body, index) else {
+                        break;
+                    };
+                    match self.expand_replacement(&body[index + 2..end], depth + 1) {
+                        Ok(value) => output.push_str(&value),
+                        Err(()) => break,
+                    }
+                    index = end + 1;
+                }
+                b'(' => {
+                    let Some(end) = find_plain_group_end(body, index + 2, '(', ')') else {
+                        break;
+                    };
+                    output.push_str(&self.hooks.shell(&body[index + 2..end]));
+                    index = end + 1;
+                }
+                b'#' | b'}' | b',' => {
+                    output.push(char::from(next));
+                    index += 2;
+                }
+                _ => {
+                    output.push('#');
+                    output.push(char::from(next));
+                    index += 2;
+                }
+            }
+        }
         output
     }
 
@@ -2367,6 +2424,26 @@ fn find_plain_group_end(text: &str, start: usize, open: char, close: char) -> Op
     None
 }
 
+fn find_style_end(text: &str, start: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut position = start;
+    while position < bytes.len() {
+        if bytes[position] == b'#' && bytes.get(position + 1) == Some(&b'{') {
+            position = find_format_end(text, position)? + 1;
+            continue;
+        }
+        if bytes[position] == b'#' && bytes.get(position + 1) == Some(&b'(') {
+            position = find_plain_group_end(text, position + 2, '(', ')')? + 1;
+            continue;
+        }
+        if bytes[position] == b']' {
+            return Some(position);
+        }
+        position += 1;
+    }
+    None
+}
+
 fn find_format_end(text: &str, start: usize) -> Option<usize> {
     let bytes = text.as_bytes();
     let mut depth = 0usize;
@@ -3396,7 +3473,15 @@ mod tests {
             "[work] 1:main.0 %7 *- tower.local tower"
         );
         assert_eq!(expand("##S #z"), "#S #z");
-        assert_eq!(expand("#[fg=green,bold]%H:%M#[default]"), "09:41");
+        assert_eq!(
+            expand("#[fg=green,bold]%H:%M#[default]"),
+            "#[fg=green,bold]09:41#[default]"
+        );
+        assert_eq!(
+            expand("#[fg=#{?client_prefix,red,green},range=#I]X"),
+            "#[fg=green,range=#I]X"
+        );
+        assert_eq!(expand("##[fg=#{l:red}]X"), "##[fg=red]X");
         assert_eq!(expand("up #(uptime)"), "up <uptime>");
         assert_eq!(expand("#(date %H:%M)"), "<date 09:41>");
         assert_eq!(

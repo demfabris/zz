@@ -46,8 +46,9 @@ pub use message::{
 pub use snapshot::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, BrowserProfileNameError,
     DEFAULT_BROWSER_PROFILE, EditorDescriptor, EditorDescriptorError, LayoutNode,
-    MAX_BROWSER_PROFILE_NAME_BYTES, MAX_EDITOR_PATH_BYTES, MuxSnapshot, PaneKindSnapshot,
-    PaneSnapshot, SessionSnapshot, SessionViewer, WindowSnapshot, normalize_browser_profile_name,
+    MAX_BROWSER_PROFILE_NAME_BYTES, MAX_EDITOR_PATH_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES,
+    MuxSnapshot, PaneKindSnapshot, PaneSnapshot, SessionSnapshot, SessionViewer, WindowSnapshot,
+    normalize_browser_profile_name,
 };
 pub use terminal_codec::{
     decode_protocol_frame, encode_protocol_message, encode_protocol_message_into,

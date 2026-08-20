@@ -10,12 +10,13 @@ mod layout_pin_tests;
 mod model;
 mod parser;
 mod status;
+mod style;
 mod tmux_options;
 
 pub use command::{
     AgentOptions, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
     MAX_WORD_SEPARATORS_BYTES, MenuOptions, MuxEffect, MuxEngine, PaneRuntimeFacts, PopupOptions,
-    hook_format_variables, if_shell_truthy, valid_style,
+    hook_format_variables, if_shell_truthy,
 };
 pub use formats::{TmuxColour, display_width, indexed_colour_rgb, parse_tmux_colour};
 pub use layout::{CellLayout, SplitSize};
@@ -25,8 +26,14 @@ pub use model::{
 };
 pub use parser::{ConfigDiagnostic, ParsedConfig, command_block_body, parse_config};
 pub use status::{
-    DEFAULT_STATUS_INTERVAL, DEFAULT_STATUS_LEFT, DEFAULT_STATUS_RIGHT, FormatUniverse,
-    StatusContext, StatusFormats, StatusHooks, StatusOption, expand_format_values, expand_status,
+    DEFAULT_STATUS_INTERVAL, DEFAULT_STATUS_LEFT, DEFAULT_STATUS_RIGHT, DEFAULT_STATUS_STYLE,
+    DEFAULT_WINDOW_STATUS_FORMAT, FormatUniverse, StatusContext, StatusFormats, StatusHooks,
+    StatusJustify, StatusOption, StatusPosition, WindowStatusFormats, WindowStatusOption,
+    expand_format_values, expand_status,
+};
+pub use style::{
+    StyledSegment, TmuxAlign, TmuxAttributeState, TmuxAttributes, TmuxDefaultType, TmuxList,
+    TmuxRange, TmuxStyle, TmuxWidth, parse_style, parse_styled_segments, valid_style,
 };
 pub use zz_protocol::{Binding, KeyDecision, KeyEngine, KeyTables, canonical_key};
 pub use zz_protocol::{

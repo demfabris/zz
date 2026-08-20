@@ -9,7 +9,7 @@ use std::{
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use thiserror::Error;
 
-use crate::{PaneId, SessionId, SplitId, WindowId};
+use crate::{PaneId, SessionId, SplitId, WindowId, message::deserialize_bounded_text};
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,6 +21,7 @@ pub enum Axis {
 
 const MAX_LAYOUT_DEPTH: usize = 256;
 const MAX_LAYOUT_NODES: usize = 65_535;
+pub const MAX_WINDOW_STATUS_LABEL_BYTES: usize = 1024;
 
 #[derive(Clone, Copy, Default)]
 struct LayoutDecodeState {
@@ -379,6 +380,15 @@ pub struct WindowSnapshot {
     pub panes: BTreeMap<PaneId, PaneSnapshot>,
     pub layout_dump: String,
     pub visible_layout_dump: String,
+    #[serde(deserialize_with = "deserialize_window_status_label")]
+    pub status_label: String,
+}
+
+fn deserialize_window_status_label<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_text(deserializer, MAX_WINDOW_STATUS_LABEL_BYTES)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -451,6 +461,7 @@ mod tests {
             panes: BTreeMap::new(),
             layout_dump: String::new(),
             visible_layout_dump: String::new(),
+            status_label: String::new(),
         };
         let first = WindowId(1);
         let second = WindowId(2);
@@ -479,6 +490,34 @@ mod tests {
             ..stamped
         };
         assert_eq!(detached.focused_window_for(&session), first);
+    }
+
+    #[test]
+    fn window_status_label_deserialization_is_bounded() {
+        let pane = PaneId(1);
+        let window = |status_label: String| WindowSnapshot {
+            id: WindowId(1),
+            index: 0,
+            name: "main".to_owned(),
+            automatic_rename: true,
+            active_pane: pane,
+            zoomed_pane: None,
+            layout: LayoutNode::Pane(pane),
+            panes: BTreeMap::new(),
+            layout_dump: String::new(),
+            visible_layout_dump: String::new(),
+            status_label,
+        };
+        let boundary = window("x".repeat(MAX_WINDOW_STATUS_LABEL_BYTES));
+        let encoded = postcard::to_stdvec(&boundary).expect("encode boundary label");
+        assert_eq!(
+            postcard::from_bytes::<WindowSnapshot>(&encoded).expect("decode boundary label"),
+            boundary
+        );
+
+        let oversized = window("x".repeat(MAX_WINDOW_STATUS_LABEL_BYTES + 1));
+        let encoded = postcard::to_stdvec(&oversized).expect("encode oversized label");
+        assert!(postcard::from_bytes::<WindowSnapshot>(&encoded).is_err());
     }
 
     #[test]

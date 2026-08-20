@@ -21,8 +21,8 @@ use zz_terminal::{
 
 use crate::{
     Binding, KeyTables, LayoutPreset, MuxState, PaneDirection, PaneKind, SplitPlacement,
-    SplitSize as LayoutSplitSize, StatusContext, StatusFormats, StatusOption, canonical_command,
-    command_spec,
+    SplitSize as LayoutSplitSize, StatusContext, StatusFormats, StatusOption, WindowStatusFormats,
+    WindowStatusOption, canonical_command, command_spec,
     formats::{
         CommandHooks, FormatContext, FormatType, StatusHooks, expand_format_time_with_hooks,
         expand_format_with_hooks, format_true, parse_tmux_colour,
@@ -33,6 +33,7 @@ use crate::{
         HOOK_NAMES, TmuxOption, TmuxOptionScope, UPDATE_ENVIRONMENT_DEFAULT, match_tmux_option,
         parse_tmux_option, tmux_option_is_hook, tmux_options,
     },
+    valid_style,
 };
 
 const MAX_COPY_COMMAND_BYTES: usize = 8 * 1024;
@@ -625,6 +626,9 @@ pub struct MuxEngine {
     global_environment: Environment,
     session_environments: BTreeMap<SessionId, Environment>,
     status: StatusFormats,
+    session_status_options: BTreeMap<SessionId, BTreeMap<StatusOption, String>>,
+    window_status: WindowStatusFormats,
+    window_status_options: BTreeMap<WindowId, BTreeMap<WindowStatusOption, String>>,
     format_host: String,
     format_host_short: String,
     format_pid: u32,
@@ -778,6 +782,9 @@ impl Default for MuxEngine {
             global_environment: Environment::new(),
             session_environments: BTreeMap::new(),
             status: StatusFormats::default(),
+            session_status_options: BTreeMap::new(),
+            window_status: WindowStatusFormats::default(),
+            window_status_options: BTreeMap::new(),
             format_host: String::new(),
             format_host_short: String::new(),
             format_pid: 0,
@@ -891,6 +898,34 @@ impl MuxEngine {
     /// The `status-*` options a client's status line is rendered from.
     pub const fn status_formats(&self) -> &StatusFormats {
         &self.status
+    }
+
+    #[must_use]
+    pub fn status_formats_for_session(&self, session: Option<SessionId>) -> StatusFormats {
+        let mut formats = self.status.clone();
+        if let Some(overrides) =
+            session.and_then(|session| self.session_status_options.get(&session))
+        {
+            for (option, value) in overrides {
+                formats
+                    .set(*option, Some(value))
+                    .expect("stored status option was validated");
+            }
+        }
+        formats
+    }
+
+    #[must_use]
+    pub fn window_status_formats(&self, window: WindowId) -> WindowStatusFormats {
+        let mut formats = self.window_status.clone();
+        if let Some(overrides) = self.window_status_options.get(&window) {
+            for (option, value) in overrides {
+                formats
+                    .set(*option, Some(value))
+                    .expect("stored window status option was validated");
+            }
+        }
+        formats
     }
 
     pub fn set_format_server_context(
@@ -4718,7 +4753,11 @@ impl MuxEngine {
         if table_option.is_array {
             return Ok(Execution::default());
         }
-        if table_option.default.is_none() && parsed.index.is_none() {
+        if table_option.default.is_none()
+            && StatusOption::from_name(table_option.name).is_none()
+            && WindowStatusOption::from_name(table_option.name).is_none()
+            && parsed.index.is_none()
+        {
             validate_unimplemented_option_value(table_option.name, value)?;
             return Err(ServerError::UnsupportedCommand(format!(
                 "set-option {}",
@@ -4779,11 +4818,13 @@ impl MuxEngine {
             "prefix" | "set-clipboard" | "copy-command" => {
                 self.set_scalar_tmux_option(table_option.name, value, &options)
             }
-            option => self.set_status_option(
-                StatusOption::from_name(option).expect("implemented status option"),
-                value,
-                &options,
-            ),
+            option if let Some(option) = StatusOption::from_name(option) => {
+                self.set_status_option(option, value, &options, target)
+            }
+            option if let Some(option) = WindowStatusOption::from_name(option) => {
+                self.set_window_status_option(option, value, &options, target)
+            }
+            option => unreachable!("implemented option {option} has a setter"),
         }
     }
 
@@ -4868,7 +4909,7 @@ impl MuxEngine {
             }
             for option in tmux_options().filter(|option| {
                 !option.is_array
-                    && option.default.is_some()
+                    && tmux_option_is_implemented(*option)
                     && option_scope_matches_target(option.scope, target)
             }) {
                 if let Some((value, inherited)) =
@@ -4878,10 +4919,7 @@ impl MuxEngine {
                         &mut lines,
                         option.name,
                         &value,
-                        option
-                            .default
-                            .expect("implemented option has a default")
-                            .is_string(),
+                        tmux_option_value_is_string(option),
                         inherited,
                         value_only,
                     );
@@ -4944,7 +4982,7 @@ impl MuxEngine {
         if option.is_array {
             return Ok(Execution::default());
         }
-        if option.default.is_none() {
+        if !tmux_option_is_implemented(option) {
             return Ok(Execution::default());
         }
         let target =
@@ -4964,10 +5002,7 @@ impl MuxEngine {
             &mut lines,
             &name,
             &value,
-            option
-                .default
-                .expect("implemented option has a default")
-                .is_string(),
+            tmux_option_value_is_string(option),
             inherited,
             value_only,
         );
@@ -5196,6 +5231,14 @@ impl MuxEngine {
                 .or_else(|| option.default.map(|default| default.value().to_owned()))
                 .map(|value| (value, false)),
             TmuxOptionTarget::Session(session) => match option.name {
+                name if StatusOption::from_name(name).is_some() => {
+                    let option = StatusOption::from_name(name).expect("guarded status option");
+                    self.session_status_options
+                        .get(&session)
+                        .and_then(|values| values.get(&option))
+                        .map(|value| (value.clone(), false))
+                        .or_else(inherited)
+                }
                 "popup-style" => self
                     .session_popup_styles
                     .get(&session)
@@ -5269,6 +5312,15 @@ impl MuxEngine {
                 _ => inherited(),
             },
             TmuxOptionTarget::Window(window) => match option.name {
+                name if WindowStatusOption::from_name(name).is_some() => {
+                    let option =
+                        WindowStatusOption::from_name(name).expect("guarded window status option");
+                    self.window_status_options
+                        .get(&window)
+                        .and_then(|values| values.get(&option))
+                        .map(|value| (value.clone(), false))
+                        .or_else(inherited)
+                }
                 "aggressive-resize" => self
                     .state
                     .window_aggressive_resize_override(window)?
@@ -5372,6 +5424,12 @@ impl MuxEngine {
     }
 
     fn global_tmux_option_value(&self, name: &str) -> Option<String> {
+        if let Some(option) = StatusOption::from_name(name) {
+            return Some(self.status.value(option));
+        }
+        if let Some(option) = WindowStatusOption::from_name(name) {
+            return Some(self.window_status.value(option).to_owned());
+        }
         Some(match name {
             "default-command" => self.global_default_command.clone(),
             "default-shell" => self.global_default_shell.clone(),
@@ -5394,10 +5452,6 @@ impl MuxEngine {
             "renumber-windows" => tmux_flag(self.global_renumber_windows).to_owned(),
             "repeat-time" => self.global_repeat_time_ms.to_string(),
             "set-clipboard" => self.set_clipboard.as_str().to_owned(),
-            "status" => self.status.lines_string(),
-            "status-interval" => self.status.interval.as_secs().to_string(),
-            "status-left" => self.status.left.clone(),
-            "status-right" => self.status.right.clone(),
             "synchronize-panes" => tmux_flag(self.state.global_synchronize_panes()).to_owned(),
             "update-environment" => UPDATE_ENVIRONMENT_DEFAULT.to_owned(),
             "word-separators" => self.global_word_separators.clone(),
@@ -6268,44 +6322,183 @@ impl MuxEngine {
         Ok(Execution::default())
     }
 
-    /// Only the global scope exists: zz renders one status section per window.
     fn set_status_option(
         &mut self,
         option: StatusOption,
         value: Option<&str>,
         options: &Options,
+        target: TmuxOptionTarget,
     ) -> Result<Execution, ServerError> {
         let unset = option_is_unset(options);
-        if option == StatusOption::Enabled && !unset && value.is_none_or(str::is_empty) {
-            let changed = self.status.toggle_enabled_choice();
+        let session = match target {
+            TmuxOptionTarget::GlobalSession => None,
+            TmuxOptionTarget::Session(session) => Some(session),
+            _ => unreachable!("status options have session scope"),
+        };
+        let already_set = session.is_none_or(|session| {
+            self.session_status_options
+                .get(&session)
+                .is_some_and(|values| values.contains_key(&option))
+        });
+        if options.has("-o") && !unset && already_set {
+            return already_set_or_quiet(options, option.as_str());
+        }
+        let previous = self.status_formats_for_session(session);
+        if unset {
+            if let Some(session) = session {
+                if let Some(values) = self.session_status_options.get_mut(&session) {
+                    values.remove(&option);
+                    if values.is_empty() {
+                        self.session_status_options.remove(&session);
+                    }
+                }
+            } else {
+                self.status
+                    .set(option, None)
+                    .map_err(ServerError::InvalidCommand)?;
+            }
+            let changed = self.status_formats_for_session(session) != previous;
             return Ok(if changed {
                 Execution::effect(MuxEffect::StatusFormatsChanged)
             } else {
                 Execution::default()
             });
         }
+
+        let mut next = previous.clone();
+        let toggled = if option == StatusOption::Enabled && value.is_none_or(str::is_empty) {
+            next.toggle_enabled_choice();
+            Some(next.value(option))
+        } else if option == StatusOption::Justify && value.is_none() {
+            Some(
+                match next.justify {
+                    crate::StatusJustify::Left => crate::StatusJustify::Centre,
+                    crate::StatusJustify::Centre => crate::StatusJustify::Left,
+                    value => value,
+                }
+                .as_str()
+                .to_owned(),
+            )
+        } else if option == StatusOption::Position && value.is_none() {
+            Some(
+                match next.position {
+                    crate::StatusPosition::Top => crate::StatusPosition::Bottom,
+                    crate::StatusPosition::Bottom => crate::StatusPosition::Top,
+                }
+                .as_str()
+                .to_owned(),
+            )
+        } else {
+            None
+        };
+        let value = toggled.as_deref().or(value);
         let appended = (!unset && options.has("-a"))
-            .then(|| self.status.format(option))
+            .then(|| previous.format(option))
             .flatten()
             .zip(value)
-            .map(|(current, value)| format!("{current}{value}"));
-        let value = match (&appended, unset) {
-            (_, true) => None,
-            (Some(appended), false) => Some(appended.as_str()),
-            (None, false) => Some(value.ok_or_else(|| {
-                ServerError::InvalidCommand(format!("set-option {} needs a value", option.as_str()))
-            })?),
-        };
-
-        let changed = self
-            .status
-            .set(option, value)
-            .map_err(|message| ServerError::InvalidCommand(message.to_owned()))?;
+            .map(|(current, value)| {
+                let separator = if option.is_style() && !current.is_empty() && !value.is_empty() {
+                    ","
+                } else {
+                    ""
+                };
+                format!("{current}{separator}{value}")
+            });
+        let value = appended.as_deref().or(value).ok_or_else(|| {
+            ServerError::InvalidCommand(format!("set-option {} needs a value", option.as_str()))
+        })?;
+        next.set(option, Some(value))
+            .map_err(ServerError::InvalidCommand)?;
+        let changed = next != previous;
+        if let Some(session) = session {
+            self.session_status_options
+                .entry(session)
+                .or_default()
+                .insert(option, next.value(option));
+        } else {
+            self.status = next;
+        }
         Ok(if changed {
             Execution::effect(MuxEffect::StatusFormatsChanged)
         } else {
             Execution::default()
         })
+    }
+
+    fn set_window_status_option(
+        &mut self,
+        option: WindowStatusOption,
+        value: Option<&str>,
+        options: &Options,
+        target: TmuxOptionTarget,
+    ) -> Result<Execution, ServerError> {
+        let unset = option_is_unset(options);
+        let window = match target {
+            TmuxOptionTarget::GlobalWindow => None,
+            TmuxOptionTarget::Window(window) => Some(window),
+            _ => unreachable!("window status options have window scope"),
+        };
+        let already_set = window.is_none_or(|window| {
+            self.window_status_options
+                .get(&window)
+                .is_some_and(|values| values.contains_key(&option))
+        });
+        if options.has("-o") && !unset && already_set {
+            return already_set_or_quiet(options, option.as_str());
+        }
+        let previous = window.map_or_else(
+            || self.window_status.clone(),
+            |window| self.window_status_formats(window),
+        );
+        if unset {
+            if let Some(window) = window {
+                if let Some(values) = self.window_status_options.get_mut(&window) {
+                    values.remove(&option);
+                    if values.is_empty() {
+                        self.window_status_options.remove(&window);
+                    }
+                }
+            } else {
+                self.window_status
+                    .set(option, None)
+                    .map_err(ServerError::InvalidCommand)?;
+            }
+        } else {
+            let value = value.ok_or_else(|| {
+                ServerError::InvalidCommand(format!("set-option {} needs a value", option.as_str()))
+            })?;
+            let appended = options.has("-a").then(|| {
+                let current = previous.value(option);
+                let separator = if option.is_style() && !current.is_empty() && !value.is_empty() {
+                    ","
+                } else {
+                    ""
+                };
+                format!("{current}{separator}{value}")
+            });
+            let value = appended.as_deref().unwrap_or(value);
+            let mut next = previous.clone();
+            next.set(option, Some(value))
+                .map_err(ServerError::InvalidCommand)?;
+            if let Some(window) = window {
+                self.window_status_options
+                    .entry(window)
+                    .or_default()
+                    .insert(option, next.value(option).to_owned());
+            } else {
+                self.window_status = next;
+            }
+        }
+        let next = window.map_or_else(
+            || self.window_status.clone(),
+            |window| self.window_status_formats(window),
+        );
+        if next == previous {
+            Ok(Execution::default())
+        } else {
+            self.state.bump_generation();
+            Ok(Execution::effect(MuxEffect::SnapshotChanged))
+        }
     }
 
     fn set_word_separators(
@@ -7116,6 +7309,20 @@ fn option_scope_matches_target(scope: TmuxOptionScope, target: TmuxOptionTarget)
     )
 }
 
+fn tmux_option_is_implemented(option: TmuxOption) -> bool {
+    option.default.is_some()
+        || StatusOption::from_name(option.name).is_some()
+        || WindowStatusOption::from_name(option.name).is_some()
+}
+
+fn tmux_option_value_is_string(option: TmuxOption) -> bool {
+    option
+        .default
+        .is_some_and(super::tmux_options::TmuxOptionDefault::is_string)
+        || StatusOption::from_name(option.name).is_some_and(StatusOption::is_string)
+        || WindowStatusOption::from_name(option.name).is_some()
+}
+
 fn push_shown_option(
     lines: &mut Vec<String>,
     name: &str,
@@ -7226,128 +7433,6 @@ fn tmux_vis(value: &str, double_quoted: bool) -> String {
 
 fn tmux_flag(value: bool) -> &'static str {
     if value { "on" } else { "off" }
-}
-
-pub fn valid_style(value: &str) -> bool {
-    value
-        .split([' ', ',', '\n'])
-        .filter(|token| !token.is_empty())
-        .all(valid_style_token)
-}
-
-fn valid_style_token(token: &str) -> bool {
-    if token.len() > 255 {
-        return false;
-    }
-    let lower = token.to_ascii_lowercase();
-    if matches!(
-        lower.as_str(),
-        "default"
-            | "none"
-            | "ignore"
-            | "noignore"
-            | "push-default"
-            | "pop-default"
-            | "set-default"
-            | "nolist"
-            | "norange"
-            | "noalign"
-            | "nolink"
-            | "noattr"
-    ) {
-        return true;
-    }
-    if let Some(colour) = lower
-        .strip_prefix("fg=")
-        .or_else(|| lower.strip_prefix("bg="))
-        .or_else(|| lower.strip_prefix("fill="))
-        .or_else(|| lower.strip_prefix("us="))
-    {
-        return parse_tmux_colour(colour).is_some();
-    }
-    if let Some(align) = lower.strip_prefix("align=") {
-        return matches!(align, "left" | "centre" | "right" | "absolute-centre");
-    }
-    if let Some(list) = lower.strip_prefix("list=") {
-        return matches!(list, "on" | "focus" | "left-marker" | "right-marker" | "no");
-    }
-    if let Some(range) = lower.strip_prefix("range=") {
-        return valid_style_range(range);
-    }
-    if let Some(dim) = lower.strip_prefix("dim=") {
-        return valid_style_percentage(dim);
-    }
-    if let Some(width) = lower.strip_prefix("width=") {
-        return valid_style_unsigned(width.strip_suffix('%').unwrap_or(width));
-    }
-    if let Some(pad) = lower.strip_prefix("pad=") {
-        return valid_style_unsigned(pad);
-    }
-    if lower.starts_with("link=") {
-        return true;
-    }
-    if let Some(attributes) = lower.strip_prefix("no") {
-        return valid_style_attributes(attributes);
-    }
-    valid_style_attributes(&lower)
-}
-
-fn valid_style_range(range: &str) -> bool {
-    let Some((kind, argument)) = range.split_once('|') else {
-        return !matches!(
-            range,
-            "control" | "pane" | "window" | "session" | "user" | ""
-        );
-    };
-    if argument.is_empty() {
-        return false;
-    }
-    match kind {
-        "control" => argument.parse::<u8>().is_ok_and(|value| value <= 9),
-        "pane" => argument.strip_prefix('%').is_some_and(valid_style_unsigned),
-        "window" => valid_style_unsigned(argument),
-        "session" => argument.strip_prefix('$').is_some_and(valid_style_unsigned),
-        "left" | "right" => false,
-        _ => true,
-    }
-}
-
-fn valid_style_percentage(value: &str) -> bool {
-    value
-        .strip_suffix('%')
-        .unwrap_or(value)
-        .parse::<u8>()
-        .is_ok_and(|value| value <= 100)
-}
-
-fn valid_style_unsigned(value: &str) -> bool {
-    !value.is_empty() && value.parse::<u32>().is_ok()
-}
-
-fn valid_style_attributes(attributes: &str) -> bool {
-    if matches!(attributes, "default" | "none") {
-        return true;
-    }
-    attributes.split('|').all(|attribute| {
-        matches!(
-            attribute,
-            "acs"
-                | "bright"
-                | "bold"
-                | "dim"
-                | "underscore"
-                | "blink"
-                | "reverse"
-                | "hidden"
-                | "italics"
-                | "strikethrough"
-                | "double-underscore"
-                | "curly-underscore"
-                | "dotted-underscore"
-                | "dashed-underscore"
-                | "overline"
-        )
-    })
 }
 
 fn validate_environment_name(name: &str) -> Result<(), ServerError> {
@@ -14391,6 +14476,276 @@ mod tests {
                 .output,
             "status-right \"#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\\\"#{=21:pane_title}\\\" %H:%M %d-%b-%y\""
         );
+        for (option, expected) in [
+            ("status-style", "bg=themegreen,fg=themeblack"),
+            ("status-bg", "default"),
+            ("status-fg", "default"),
+            ("status-left-style", "default"),
+            ("status-right-style", "default"),
+            ("status-left-length", "10"),
+            ("status-right-length", "40"),
+            ("status-justify", "left"),
+            ("status-position", "bottom"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", &["-gv", option]))
+                    .unwrap()
+                    .output,
+                expected,
+                "{option}"
+            );
+        }
+        for (option, expected) in [
+            (
+                "window-status-format",
+                "#I:#W#{?window_flags,#{window_flags}, }",
+            ),
+            (
+                "window-status-current-format",
+                "#I:#W#{?window_flags,#{window_flags}, }",
+            ),
+            ("window-status-separator", " "),
+            ("window-status-style", "default"),
+            ("window-status-current-style", "underscore"),
+            ("window-status-last-style", "default"),
+            ("window-status-bell-style", "reverse"),
+            ("window-status-activity-style", "reverse"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", &["-gwv", option]))
+                    .unwrap()
+                    .output,
+                expected,
+                "{option}"
+            );
+        }
+    }
+
+    #[test]
+    fn status_options_store_inherit_unset_and_validate() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.expect("session");
+        let window = context.window.expect("window");
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "status-left-length", "12"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-t", "work", "status-left-length", "5"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.status_formats_for_session(Some(session)).left_length,
+            5
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-ut", "work", "status-left-length"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.status_formats_for_session(Some(session)).left_length,
+            12
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-window-option",
+                    &["-g", "window-status-format", "plain:#I:#W"],
+                ),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-window-option",
+                    &["-t", "work:0", "window-status-current-format", "current:#W"],
+                ),
+            )
+            .unwrap();
+        let formats = engine.window_status_formats(window);
+        assert_eq!(formats.format, "plain:#I:#W");
+        assert_eq!(formats.current_format, "current:#W");
+
+        for (option, value, error) in [
+            ("status-style", "bogus", "invalid style: bogus"),
+            ("status-bg", "bogus", "bad colour: bogus"),
+            ("status-left-length", "-1", "value is too small: -1"),
+            ("status-right-length", "32768", "value is too large: 32768"),
+            ("status-justify", "middle", "unknown value: middle"),
+            ("status-position", "middle", "unknown value: middle"),
+        ] {
+            assert!(matches!(
+                engine.execute(
+                    &mut context,
+                    &command("set-option", &["-g", option, value]),
+                ),
+                Err(ServerError::InvalidCommand(message)) if message == error
+            ));
+        }
+    }
+
+    #[test]
+    fn status_style_options_defer_expansion_and_append_with_commas() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-ag", "status-style", "fg=white"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gv", "status-style"]),
+                )
+                .unwrap()
+                .output,
+            "bg=themegreen,fg=themeblack,fg=white"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "status-left-style", "bold"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-ag", "status-left-style", "italics"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gv", "status-left-style"]),
+                )
+                .unwrap()
+                .output,
+            "bold,italics"
+        );
+
+        let dynamic = "fg=#{?client_prefix,red,green}";
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "status-right-style", dynamic]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-ag", "status-right-style", "bold"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gv", "status-right-style"]),
+                )
+                .unwrap()
+                .output,
+            format!("{dynamic},bold")
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-window-option", &["-g", "window-status-style", dynamic]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-window-option",
+                    &["-ag", "window-status-style", "italics"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gwv", "window-status-style"]),
+                )
+                .unwrap()
+                .output,
+            format!("{dynamic},italics")
+        );
+    }
+
+    #[test]
+    fn bare_status_option_listings_include_the_full_wave_a_family() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+
+        let session = engine
+            .execute(&mut context, &command("show-options", &["-g"]))
+            .unwrap()
+            .output;
+        for name in [
+            "status-style",
+            "status-bg",
+            "status-fg",
+            "status-left-style",
+            "status-right-style",
+            "status-left-length",
+            "status-right-length",
+            "status-justify",
+            "status-position",
+        ] {
+            let prefix = format!("{name} ");
+            assert!(
+                session.lines().any(|line| line.starts_with(&prefix)),
+                "bare session listing omitted {name}"
+            );
+        }
+
+        let window = engine
+            .execute(&mut context, &command("show-options", &["-gw"]))
+            .unwrap()
+            .output;
+        for name in [
+            "window-status-format",
+            "window-status-current-format",
+            "window-status-separator",
+            "window-status-style",
+            "window-status-current-style",
+            "window-status-last-style",
+            "window-status-bell-style",
+            "window-status-activity-style",
+        ] {
+            let prefix = format!("{name} ");
+            assert!(
+                window.lines().any(|line| line.starts_with(&prefix)),
+                "bare window listing omitted {name}"
+            );
+        }
     }
 
     #[test]
@@ -17778,7 +18133,6 @@ mod tests {
             "list=focus",
             "list=left-marker",
             "list=right-marker",
-            "list=no",
             "nolist",
             "range=left",
             "range=right",
@@ -17818,6 +18172,7 @@ mod tests {
             "fill=",
             "us=",
             "list=bogus",
+            "list=no",
             "range=control|10",
             "range=pane|12",
             "range=session|12",

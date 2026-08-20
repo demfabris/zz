@@ -1383,6 +1383,7 @@ mod tests {
             )]),
             layout_dump: "abcd,80x24,0,0,5".to_owned(),
             visible_layout_dump: "ef01,80x24,0,0,5".to_owned(),
+            status_label: String::new(),
         };
         let mut state = ControlState::default();
         state.attach(

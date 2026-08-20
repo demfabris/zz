@@ -14,14 +14,14 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 68;
+pub const PROTOCOL_VERSION: u16 = 69;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
 pub const MAX_CHOOSE_TREE_QUERY_BYTES: usize = 4 * 1024;
 pub const MAX_CHOOSE_BUFFER_QUERY_BYTES: usize = 4 * 1024;
 /// Longest either half of a rendered status line may be.
-pub const MAX_STATUS_TEXT_BYTES: usize = 1024;
+pub const MAX_STATUS_TEXT_BYTES: usize = 4096;
 /// Longest payload `agent-send` may push into a GUI-owned composer or prompt.
 pub const MAX_AGENT_SEND_BYTES: usize = 1024 * 1024;
 /// Longest path or human-readable message carried by a GUI request or its reply.
@@ -604,7 +604,10 @@ where
     Ok(bytes)
 }
 
-fn deserialize_bounded_text<'de, D>(deserializer: D, limit: usize) -> Result<String, D::Error>
+pub(crate) fn deserialize_bounded_text<'de, D>(
+    deserializer: D,
+    limit: usize,
+) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
 {

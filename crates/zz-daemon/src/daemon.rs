@@ -22,7 +22,7 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     CellLayout, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision,
     KeyEngine, KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts,
-    canonical_command, command_block_body, display_width, expand_format_values,
+    canonical_command, command_block_body, display_width, expand_format_values, expand_status,
     hook_format_variables, if_shell_truthy,
 };
 use zz_protocol::{
@@ -33,12 +33,13 @@ use zz_protocol::{
     CommandPromptKind, CommandPromptState, CommandRequest, CommandResponse, ConfigOverrideEntry,
     ConfirmAction, ConfirmState, DisplayPanesAction, DisplayPanesState, Event, EventPayload,
     GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_CHOOSE_BUFFER_QUERY_BYTES,
-    MAX_CHOOSE_TREE_QUERY_BYTES, MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource,
-    MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId,
-    PaneIndicator, PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction,
-    PopupBorderLines, PopupState, ProtocolError, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError,
-    ServerHello, SessionId, SessionViewer, SplitId, StatusLine, WindowId,
-    encode_protocol_message_into, encode_terminal_viewport_event_into, read_protocol_message_into,
+    MAX_CHOOSE_TREE_QUERY_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MenuAction, MenuItem, MenuState,
+    MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY,
+    PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot, PasteUploadPurpose,
+    PastedImageFormat, PopupAction, PopupBorderLines, PopupState, ProtocolError, ProtocolMessage,
+    SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId, SessionViewer, SplitId, StatusLine,
+    WindowId, encode_protocol_message_into, encode_terminal_viewport_event_into,
+    read_protocol_message_into,
 };
 use zz_terminal::{
     AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance, CaptureBoundary,
@@ -2773,7 +2774,6 @@ impl Shared {
         let requests = {
             let mut inner = self.inner.lock();
             inner.engine.set_format_now(unix_timestamp());
-            let formats = inner.engine.status_formats().clone();
             let snapshot = inner.engine.state.snapshot();
             let facts = format_hook_facts(&inner);
             inner
@@ -2784,7 +2784,7 @@ impl Shared {
                     let attached = client_attached_session(&inner, client);
                     StatusRequest {
                         client,
-                        formats: formats.clone(),
+                        formats: inner.engine.status_formats_for_session(attached),
                         context: status_context(
                             &snapshot,
                             &inner.engine,
@@ -2881,7 +2881,23 @@ impl Shared {
                         break;
                     }
                     shared.refresh_control_subscriptions();
-                    let interval = shared.inner.lock().engine.status_formats().interval;
+                    let interval = {
+                        let inner = shared.inner.lock();
+                        inner
+                            .subscribers
+                            .keys()
+                            .map(|client| {
+                                inner
+                                    .engine
+                                    .status_formats_for_session(client_attached_session(
+                                        &inner, *client,
+                                    ))
+                                    .interval
+                            })
+                            .filter(|interval| !interval.is_zero())
+                            .min()
+                            .unwrap_or_default()
+                    };
                     if interval.is_zero() {
                         due = Instant::now();
                         continue;
@@ -3070,7 +3086,7 @@ impl Shared {
         let attached = client_attached_session(&inner, client);
         let request = StatusRequest {
             client,
-            formats: inner.engine.status_formats().clone(),
+            formats: inner.engine.status_formats_for_session(attached),
             context: status_context(
                 &inner.engine.state.snapshot(),
                 &inner.engine,
@@ -15429,6 +15445,45 @@ fn stamp_snapshot_for_client(
             })
             .collect();
     }
+    let facts = format_hook_facts(inner);
+    expand_window_status_labels(&inner.engine, &facts, snapshot);
+}
+
+fn expand_window_status_labels(
+    engine: &MuxEngine,
+    facts: &FormatHookFacts,
+    snapshot: &mut MuxSnapshot,
+) {
+    for session in &mut snapshot.sessions {
+        for window in &mut session.windows {
+            let formats = engine.window_status_formats(window.id);
+            let format = if window.id == session.active_window {
+                &formats.current_format
+            } else {
+                &formats.format
+            };
+            let context = engine.format_status_context(
+                Some(session.id),
+                Some(window.id),
+                Some(window.active_pane),
+            );
+            let mut hooks = DaemonFormatHooks::command(facts);
+            window.status_label =
+                truncate_window_status_label(expand_status(format, &context, &mut hooks));
+        }
+    }
+}
+
+fn truncate_window_status_label(mut label: String) -> String {
+    if label.len() <= MAX_WINDOW_STATUS_LABEL_BYTES {
+        return label;
+    }
+    let boundary = (0..=MAX_WINDOW_STATUS_LABEL_BYTES)
+        .rev()
+        .find(|index| label.is_char_boundary(*index))
+        .unwrap_or_default();
+    label.truncate(boundary);
+    label
 }
 
 fn command_prompt_key(
@@ -19116,6 +19171,62 @@ mod tests {
         assert_eq!(
             tmux_environment(socket, None),
             format!("/tmp/zz-tmux-environment.sock,{},-1", std::process::id())
+        );
+    }
+
+    #[test]
+    fn window_status_labels_expand_current_plain_markers_and_flags() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "labels", "-n", "main"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-window", ["-d", "-t", "labels:", "-n", "logs"]),
+            )
+            .unwrap();
+
+        let mut snapshot = engine.state.snapshot();
+        expand_window_status_labels(&engine, &FormatHookFacts::default(), &mut snapshot);
+        assert_eq!(snapshot.sessions[0].windows[0].status_label, "0:main*");
+        assert_eq!(snapshot.sessions[0].windows[1].status_label, "1:logs ");
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-g", "window-status-format", "#[italics]PLAIN:#I:#W:#F"],
+                ),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-window-option",
+                    [
+                        "-g",
+                        "window-status-current-format",
+                        "#[bold]CURRENT:#I:#W:#F",
+                    ],
+                ),
+            )
+            .unwrap();
+        let mut snapshot = engine.state.snapshot();
+        expand_window_status_labels(&engine, &FormatHookFacts::default(), &mut snapshot);
+        assert_eq!(
+            snapshot.sessions[0].windows[0].status_label,
+            "#[bold]CURRENT:0:main:*"
+        );
+        assert_eq!(
+            snapshot.sessions[0].windows[1].status_label,
+            "#[italics]PLAIN:1:logs:"
         );
     }
 
@@ -36658,6 +36769,74 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.attached.get(&SessionId(0)),
             Some(&BTreeSet::from([first, second]))
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn status_options_cross_the_socket_with_markers_and_pin_readback_shapes() {
+        let socket = daemon_test_endpoint("status-options");
+        let daemon = Daemon::new(&socket).without_user_config();
+        let daemon_thread = thread::spawn(move || daemon.run_foreground());
+        let mut commands = connect_command_retry(&socket);
+        commands
+            .execute(CommandInvocation::new(
+                "new-session",
+                ["-d", "-s", "status-wire"],
+            ))
+            .unwrap();
+        let interactive = Arc::new(connect_interactive_retry(&socket));
+        let (messages, reader) = spawn_reader(Arc::clone(&interactive));
+        let mut terminal_state = TerminalTestState::default();
+        interactive.attach("status-wire").unwrap();
+        wait_for(&messages, &mut terminal_state, |message, _| {
+            matches!(message, ProtocolMessage::Attached { .. })
+        });
+
+        for args in [
+            &["-g", "status-style", "bg=blue,fg=white"] as &[&str],
+            &["-g", "status-bg", "red"],
+            &["-g", "status-left-style", "bold"],
+            &["-g", "status-left-length", "4"],
+            &["-g", "status-position", "top"],
+            &["-g", "status-left", "#[italics]abcdef"],
+        ] {
+            commands
+                .execute(CommandInvocation::new("set-option", args.iter().copied()))
+                .unwrap();
+        }
+        for (option, expected) in [
+            ("status-style", "status-style bg=blue,fg=white"),
+            ("status-bg", "status-bg red"),
+            ("status-left-style", "status-left-style bold"),
+            ("status-left-length", "status-left-length 4"),
+            ("status-position", "status-position top"),
+            ("status-left", "status-left \"#[italics]abcdef\""),
+        ] {
+            assert_eq!(
+                commands
+                    .execute(CommandInvocation::new("show-options", ["-g", option]))
+                    .unwrap(),
+                expected
+            );
+        }
+        wait_for(&messages, &mut terminal_state, |message, _| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::StatusChanged { status },
+                    ..
+                }) if status.left
+                    == "#[bg=blue,fg=white,bg=red]#[bold]#[push-default]#[italics]abcd"
+            )
+        });
+
+        commands
+            .execute(CommandInvocation::new("kill-server", [] as [&str; 0]))
+            .unwrap();
+        drop(messages);
+        drop(interactive);
+        reader.join().unwrap();
+        daemon_thread.join().unwrap().unwrap();
     }
 
     #[test]

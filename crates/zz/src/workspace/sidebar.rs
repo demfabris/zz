@@ -2250,6 +2250,7 @@ mod tests {
             panes: BTreeMap::from([(pane.id, pane)]),
             layout_dump: String::new(),
             visible_layout_dump: String::new(),
+            status_label: String::new(),
         }
     }
 
@@ -2273,6 +2274,7 @@ mod tests {
             panes: BTreeMap::from([(terminal.id, terminal), (browser.id, browser)]),
             layout_dump: String::new(),
             visible_layout_dump: String::new(),
+            status_label: String::new(),
         };
         MuxSnapshot {
             generation: 7,

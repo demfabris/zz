@@ -23,7 +23,7 @@ use zz_mux::{
     CellLayout, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision,
     KeyEngine, KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts,
     canonical_command, command_block_body, display_width, expand_format_values,
-    hook_format_variables, if_shell_truthy, parse_config,
+    hook_format_variables, if_shell_truthy,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -5960,7 +5960,10 @@ impl Shared {
             InsertedCommandSource::String(input) | InsertedCommandSource::Block(input) => input,
             InsertedCommandSource::Shell(_) => unreachable!(),
         };
-        let parsed = parse_config(label, input);
+        let parsed = {
+            let inner = self.inner.lock();
+            inner.engine.parse_config(label, input)
+        };
         if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
             return Err(ServerError::InvalidCommand(diagnostic.message).into());
         }
@@ -7223,7 +7226,7 @@ impl Shared {
                 .expect("confirm command was required");
             let command = command_block_body(command).unwrap_or(command);
             let command = expand_popup_value(&inner, &target, context.session, command);
-            let parsed_commands = parse_config("<confirm-before>", &command);
+            let parsed_commands = inner.engine.parse_config("<confirm-before>", &command);
             if let Some(diagnostic) = parsed_commands.diagnostics.first() {
                 return Err(ServerError::InvalidCommand(diagnostic.message.clone()).into());
             }
@@ -9650,7 +9653,10 @@ impl Shared {
             .template
             .as_deref()
             .unwrap_or(submission.input.as_str());
-        let mut parsed = parse_config("<command-prompt>", source);
+        let mut parsed = {
+            let inner = self.inner.lock();
+            inner.engine.parse_config("<command-prompt>", source)
+        };
         if let Some(diagnostic) = parsed.diagnostics.first() {
             self.publish_to_client(
                 client,
@@ -12455,7 +12461,12 @@ impl Shared {
             }
             Err(error) => return Err(error.into()),
         };
-        let parsed = parse_config(path.display().to_string(), &input);
+        let parsed = {
+            let inner = self.inner.lock();
+            inner
+                .engine
+                .parse_config(path.display().to_string(), &input)
+        };
         for diagnostic in parsed.diagnostics {
             log::warn!(
                 "{}:{}:{}: {}",
@@ -12465,6 +12476,13 @@ impl Shared {
                 diagnostic.message
             );
             report.note_invalid_at(&diagnostic.source, diagnostic.line, &diagnostic.message);
+        }
+        for assignment in parsed.environment {
+            self.inner.lock().engine.set_config_environment(
+                assignment.name,
+                assignment.value,
+                assignment.hidden,
+            );
         }
         for command in parsed.commands {
             if command.name == "reload-config" {
@@ -21903,6 +21921,59 @@ mod tests {
             .expect("a missing mux config file loads defaults");
     }
 
+    #[test]
+    fn config_assignments_hidden_readback_expansion_and_conditions_match_the_pin() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let mux_config = directory.path().join("mux.conf");
+        fs::write(
+            &mux_config,
+            "CFGVAR=fromconfig\n\
+             %hidden CFGHID=hiddencfg\n\
+             JOINED=$CFGVAR-${CFGVAR}\n\
+             ORDER=first\n\
+             set-environment -g ORDER command\n\
+             ORDER=last\n\
+             %if \"#{==:x,x}\"\n\
+             set-environment -g TRUE_BRANCH selected\n\
+             %else\n\
+             set-environment -g TRUE_BRANCH wrong\n\
+             %endif\n\
+             %if \"#(printf spawned)\"\n\
+             set-environment -g NOJOB wrong\n\
+             %else\n\
+             set-environment -g NOJOB empty\n\
+             %endif\n",
+        )
+        .expect("mux config fixture");
+
+        let shared = Arc::new(Shared::new(48));
+        let mut context = ExecutionContext::default();
+        shared
+            .load_config_file(&mux_config, &mut context, 0)
+            .expect("source mux config");
+
+        for (args, expected) in [
+            (&["-g", "CFGVAR"] as &[&str], "CFGVAR=fromconfig"),
+            (&["-gh", "CFGHID"], "CFGHID=hiddencfg"),
+            (&["-g", "CFGHID"], ""),
+            (&["-g", "JOINED"], "JOINED=fromconfig-fromconfig"),
+            (&["-g", "ORDER"], "ORDER=command"),
+            (&["-g", "TRUE_BRANCH"], "TRUE_BRANCH=selected"),
+            (&["-g", "NOJOB"], "NOJOB=empty"),
+        ] {
+            let output = shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-environment", args.iter().copied()),
+                )
+                .expect("show config environment")
+                .output;
+            assert_eq!(output, expected, "{args:?}");
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn config_shell_commands_block_and_execute_in_order_without_an_output_sink() {
@@ -23950,6 +24021,26 @@ mod tests {
                 Err(ServerError::InvalidCommand(message)) if message == IF_SHELL_USAGE
             ));
         }
+    }
+
+    #[test]
+    fn if_shell_bodies_expand_the_live_global_environment() {
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .inner
+            .lock()
+            .engine
+            .seed_global_environment([("FOO", "hello")]);
+        let output = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("if-shell", ["-F", "1", "display-message -p $FOO"]),
+            )
+            .expect("environment-backed if-shell body");
+
+        assert_eq!(output.output, "hello");
     }
 
     #[cfg(unix)]
@@ -26007,7 +26098,7 @@ mod tests {
         let shared = Arc::new(Shared::new(1));
         let client = ClientId(7);
         let mut context = ExecutionContext::default();
-        let config = parse_config(
+        let config = zz_mux::parse_config(
             "picker.conf",
             r##"set -g prefix C-a
 bind | split-window -h -c "#{pane_current_path}"

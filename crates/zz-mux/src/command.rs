@@ -25,7 +25,7 @@ use crate::{
     command_spec,
     formats::{
         CommandHooks, FormatContext, FormatType, StatusHooks, expand_format_time_with_hooks,
-        expand_format_with_hooks, parse_tmux_colour,
+        expand_format_with_hooks, format_true, parse_tmux_colour,
     },
     layout::PANE_MAXIMUM,
     model::DEFAULT_WINDOW_EXTENT,
@@ -290,6 +290,42 @@ struct ListKeyHooks<'a, H> {
     key: &'a str,
     binding: &'a Binding,
     prefix: &'a str,
+}
+
+struct ConfigConditionHooks<'a> {
+    engine: &'a MuxEngine,
+    inner: CommandHooks,
+}
+
+impl StatusHooks for ConfigConditionHooks<'_> {
+    fn strftime(&mut self, literal: &str) -> String {
+        self.inner.strftime(literal)
+    }
+
+    fn shell(&mut self, _command: &str) -> String {
+        String::new()
+    }
+
+    fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        let option = if name.starts_with('@') {
+            self.engine
+                .server_user_options
+                .get(name)
+                .or_else(|| self.engine.global_window_user_options.get(name))
+                .or_else(|| self.engine.global_session_user_options.get(name))
+                .cloned()
+        } else {
+            self.engine.global_tmux_option_value(name)
+        };
+        option.or_else(|| {
+            context.variable(name).is_none().then(|| {
+                self.engine
+                    .global_environment
+                    .get(name)
+                    .and_then(|entry| entry.value.clone())
+            })?
+        })
+    }
 }
 
 impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
@@ -832,7 +868,7 @@ impl MuxEngine {
                 self.user_option_readback(TmuxOptionTarget::Window(window), name, true)
             })
             .map(|(value, _)| value);
-        let commands = parse_hook_commands(session.or(pane).or(window)?).ok()?;
+        let commands = parse_hook_commands(self, session.or(pane).or(window)?).ok()?;
         Some(vec![commands])
     }
 
@@ -873,6 +909,33 @@ impl MuxEngine {
 
     pub const fn set_format_now(&mut self, now: u64) {
         self.format_now = now;
+    }
+
+    #[must_use]
+    pub fn evaluate_config_condition(&self, condition: &str) -> bool {
+        let mut hooks = ConfigConditionHooks {
+            engine: self,
+            inner: CommandHooks::new(self.format_now()),
+        };
+        let expanded =
+            expand_format_with_hooks(condition, self, FormatContext::default(), &mut hooks);
+        format_true(&expanded)
+    }
+
+    #[must_use]
+    pub fn parse_config(&self, source: impl Into<String>, input: &str) -> crate::ParsedConfig {
+        let mut context = (
+            |name: &str| self.global_environment_variable(name),
+            |condition: &str| self.evaluate_config_condition(condition),
+        );
+        crate::parser::parse_config_with(source, input, &mut context)
+    }
+
+    pub fn parse_config_without_variable_expansion(
+        source: impl Into<String>,
+        input: &str,
+    ) -> crate::ParsedConfig {
+        crate::parser::parse_config_without_variable_expansion(source, input)
     }
 
     pub fn expand_pane_format_time(
@@ -1053,6 +1116,23 @@ impl MuxEngine {
                 )
             })
             .collect();
+    }
+
+    #[must_use]
+    pub fn global_environment_variable(&self, name: &str) -> Option<String> {
+        self.global_environment
+            .get(name)
+            .and_then(|entry| entry.value.clone())
+    }
+
+    pub fn set_config_environment(&mut self, name: String, value: String, hidden: bool) {
+        self.global_environment.insert(
+            name,
+            EnvironmentEntry {
+                value: Some(value),
+                hidden,
+            },
+        );
     }
 
     pub fn mark_session_active(&mut self, session: SessionId) {
@@ -4065,7 +4145,7 @@ impl MuxEngine {
         let note = options.value("-N").map(str::to_owned);
         let key = required_arg(&positional, 0, "key")?;
         required_arg(&positional, 1, "command")?;
-        let commands = bound_commands(&positional[1..])?;
+        let commands = bound_commands(self, &positional[1..])?;
         self.keys.bind(
             table,
             key,
@@ -4322,7 +4402,7 @@ impl MuxEngine {
         let value = positional
             .get(1)
             .ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
-        let commands = parse_hook_commands(value)?;
+        let commands = parse_hook_commands(self, value)?;
         let hook = self.hook_array_mut_or_insert(target, table_option.name);
         if let Some(index) = index {
             hook.insert(index, commands);
@@ -8333,11 +8413,16 @@ fn copy_selection_action(
     }))
 }
 
-fn bound_commands(tail: &[String]) -> Result<Vec<CommandInvocation>, ServerError> {
+// Accepted divergence: opaque blocks expand against the live global environment when
+// reparsed, so a mutation after config load can change the payload.
+fn bound_commands(
+    engine: &MuxEngine,
+    tail: &[String],
+) -> Result<Vec<CommandInvocation>, ServerError> {
     let commands = if let [argument] = tail
         && let Some(body) = crate::parser::command_block_body(argument)
     {
-        let parsed = crate::parse_config("<bind-key>", body);
+        let parsed = engine.parse_config("<bind-key>", body);
         if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
             return Err(ServerError::InvalidCommand(diagnostic.message));
         }
@@ -8368,12 +8453,15 @@ fn bound_commands(tail: &[String]) -> Result<Vec<CommandInvocation>, ServerError
     Ok(commands)
 }
 
-fn parse_hook_commands(value: &str) -> Result<Vec<CommandInvocation>, ServerError> {
+fn parse_hook_commands(
+    engine: &MuxEngine,
+    value: &str,
+) -> Result<Vec<CommandInvocation>, ServerError> {
     let input = crate::parser::command_block_body(value).unwrap_or(value);
     if has_unquoted_hook_format(input) {
         return Err(ServerError::InvalidCommand("syntax error".to_owned()));
     }
-    let parsed = crate::parse_config("<set-hook>", input);
+    let parsed = engine.parse_config("<set-hook>", input);
     if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
         return Err(ServerError::InvalidCommand(diagnostic.message));
     }
@@ -11975,6 +12063,23 @@ mod tests {
     }
 
     #[test]
+    fn bind_key_blocks_expand_the_live_global_environment() {
+        let mut engine = MuxEngine::default();
+        engine.seed_global_environment([("FOO", "hello")]);
+        engine
+            .execute(
+                &mut ExecutionContext::default(),
+                &command("bind-key", &["Q", "{ send-keys $FOO }"]),
+            )
+            .expect("environment-backed binding");
+
+        assert_eq!(
+            engine.keys.get("prefix", "Q").expect("binding").commands,
+            [CommandInvocation::new("send-keys", ["hello"])]
+        );
+    }
+
+    #[test]
     fn bind_key_chains_execute_in_order_and_list_keys_round_trips_them() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -12286,7 +12391,7 @@ mod tests {
             engine
                 .hook_commands(Some(session), "after-select-window")
                 .expect("global fallback"),
-            [parse_hook_commands("display-message global").unwrap()]
+            [parse_hook_commands(&engine, "display-message global").unwrap()]
         );
 
         engine
@@ -12535,7 +12640,7 @@ mod tests {
                 context: target,
             }] if name == "@myhook"
                 && target == &context
-                && commands == &vec![parse_hook_commands(hook_command).unwrap()]
+                && commands == &vec![parse_hook_commands(&engine, hook_command).unwrap()]
         ));
 
         engine
@@ -12607,7 +12712,7 @@ mod tests {
         assert!(matches!(
             session_scoped.effects.as_slice(),
             [MuxEffect::RunHook { commands, .. }]
-                if commands == &vec![parse_hook_commands("display-message session").unwrap()]
+                if commands == &vec![parse_hook_commands(&engine, "display-message session").unwrap()]
         ));
         engine
             .execute(&mut context, &command("set-hook", &["-g", "-u", "@scoped"]))
@@ -12618,7 +12723,7 @@ mod tests {
         assert!(matches!(
             window_scoped.effects.as_slice(),
             [MuxEffect::RunHook { commands, .. }]
-                if commands == &vec![parse_hook_commands("display-message window").unwrap()]
+                if commands == &vec![parse_hook_commands(&engine, "display-message window").unwrap()]
         ));
     }
 
@@ -12784,13 +12889,13 @@ mod tests {
             engine
                 .event_hook_commands(&first_context, "pane-died")
                 .expect("first window hook"),
-            [parse_hook_commands("display-message first-window").unwrap()]
+            [parse_hook_commands(&engine, "display-message first-window").unwrap()]
         );
         assert_eq!(
             engine
                 .event_hook_commands(&second_context, "pane-died")
                 .expect("second window fallback"),
-            [parse_hook_commands("display-message global-window").unwrap()]
+            [parse_hook_commands(&engine, "display-message global-window").unwrap()]
         );
 
         engine
@@ -12812,7 +12917,7 @@ mod tests {
             engine
                 .event_hook_commands(&first_context, "pane-died")
                 .expect("first pane hook"),
-            [parse_hook_commands("display-message first-pane").unwrap()]
+            [parse_hook_commands(&engine, "display-message first-pane").unwrap()]
         );
         engine
             .execute(
@@ -12827,7 +12932,7 @@ mod tests {
             engine
                 .event_hook_commands(&first_context, "pane-died")
                 .expect("first window hook after pane unset"),
-            [parse_hook_commands("display-message first-window").unwrap()]
+            [parse_hook_commands(&engine, "display-message first-window").unwrap()]
         );
 
         for args in [
@@ -12842,7 +12947,7 @@ mod tests {
             engine
                 .event_hook_commands(&second_context, "alert-bell")
                 .expect("local session hook"),
-            [parse_hook_commands("display-message local-session").unwrap()]
+            [parse_hook_commands(&engine, "display-message local-session").unwrap()]
         );
         engine
             .execute(&mut context, &command("set-hook", &["-u", "alert-bell"]))
@@ -12851,7 +12956,7 @@ mod tests {
             engine
                 .event_hook_commands(&second_context, "alert-bell")
                 .expect("global session fallback"),
-            [parse_hook_commands("display-message global-session").unwrap()]
+            [parse_hook_commands(&engine, "display-message global-session").unwrap()]
         );
     }
 
@@ -12889,9 +12994,9 @@ mod tests {
             )
             .unwrap();
         let expected_commands = [
-            parse_hook_commands("display-message first").unwrap(),
-            parse_hook_commands("display-message second").unwrap(),
-            parse_hook_commands("display-message named").unwrap(),
+            parse_hook_commands(&engine, "display-message first").unwrap(),
+            parse_hook_commands(&engine, "display-message second").unwrap(),
+            parse_hook_commands(&engine, "display-message named").unwrap(),
         ];
         assert!(matches!(
             execution.effects.as_slice(),
@@ -17224,6 +17329,77 @@ mod tests {
         for value in [" 0", "1", "false"] {
             assert!(if_shell_truthy(value), "{value:?}");
         }
+    }
+
+    #[test]
+    fn config_condition_formats_use_pin_truth_options_environment_and_no_jobs() {
+        let mut engine = MuxEngine::default();
+        engine.set_format_server_context("tower.local", "tower", "/tmp/zz.sock", 1);
+        engine.seed_global_environment([
+            ("WAVE_ENV", "yes"),
+            ("host", "environment-must-not-shadow"),
+        ]);
+        engine.set_config_environment("HIDDEN_WAVE".to_owned(), "yes".to_owned(), true);
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "prefix", "C-a"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "@grammar-wave", "yes"]),
+            )
+            .unwrap();
+
+        for condition in [
+            "00",
+            "0.0",
+            "false",
+            " ",
+            "#{==:#{host},tower.local}",
+            "#{==:#{prefix},C-a}",
+            "#{==:#{@grammar-wave},yes}",
+            "#{==:#{WAVE_ENV},yes}",
+            "#{==:#{HIDDEN_WAVE},yes}",
+            "#{==:#(printf spawned),}",
+        ] {
+            assert!(engine.evaluate_config_condition(condition), "{condition}");
+        }
+        for condition in ["", "0", "#(printf spawned)", "#{session_name}"] {
+            assert!(!engine.evaluate_config_condition(condition), "{condition}");
+        }
+    }
+
+    #[test]
+    fn config_conditions_observe_preparse_state_not_same_file_commands() {
+        let mut engine = MuxEngine::default();
+        let parsed = engine.parse_config(
+            "test.conf",
+            "set-option -g @grammar-wave yes\n\
+             %if #{@grammar-wave}\n\
+             set-option -g @branch same-file\n\
+             %else\n\
+             set-option -g @branch preparse\n\
+             %endif\n",
+        );
+        assert_eq!(parsed.commands.len(), 2);
+        assert_eq!(parsed.commands[1].args[2], "preparse");
+
+        engine
+            .execute(
+                &mut ExecutionContext::default(),
+                &command("set-option", &["-g", "@grammar-wave", "yes"]),
+            )
+            .unwrap();
+        let parsed = engine.parse_config(
+            "test.conf",
+            "%if #{@grammar-wave}\nset-option -g @branch preexisting\n%endif\n",
+        );
+        assert_eq!(parsed.commands.len(), 1);
+        assert_eq!(parsed.commands[0].args[2], "preexisting");
     }
 
     #[test]

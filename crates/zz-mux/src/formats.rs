@@ -2501,7 +2501,7 @@ fn unescape(text: &str) -> String {
     output
 }
 
-fn format_true(value: &str) -> bool {
+pub(crate) fn format_true(value: &str) -> bool {
     !value.is_empty() && value != "0"
 }
 

@@ -798,7 +798,7 @@ fn parse_line(line: &str) -> ParsedLine {
     if line.is_empty() {
         return ParsedLine::Detach;
     }
-    let parsed = zz_mux::parse_config("<control>", line);
+    let parsed = zz_mux::MuxEngine::parse_config_without_variable_expansion("<control>", line);
     if let Some(diagnostic) = parsed.diagnostics.first() {
         return ParsedLine::Error(format!("parse error: {}", diagnostic.message));
     }
@@ -1180,6 +1180,11 @@ mod tests {
             parse_line("set 'oops"),
             ParsedLine::Error("parse error: unterminated quote".to_owned())
         );
+        let ParsedLine::Commands(commands) = parse_line("set-environment -g CONTROL_LITERAL $FOO")
+        else {
+            panic!("literal variable command was not parsed");
+        };
+        assert_eq!(commands[0].args, ["-g", "CONTROL_LITERAL", "$FOO"]);
     }
 
     #[test]

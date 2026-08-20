@@ -1,0 +1,20 @@
+# The nested `tmux -C source-file` of the broken sub-config emits %config-error on
+# the pin only: zz's source-file swallows parse diagnostics (pre-existing gap,
+# ticketed in the drop-in plan — not part of the grammar wave). The abort SEMANTICS
+# are still pinned both sides by the GRAMMAR_PARSE_ASSIGN / *_ERROR readbacks below.
+expect-warn: tmux /tmp/zz-config-grammar-error.conf:2: invalid octal escape
+conf: fixtures/config-grammar.conf
+out: show-environment -g GRAMMAR_BARE
+out: show-environment -g GRAMMAR_BRACED
+out: show-environment -g GRAMMAR_ORDER
+out: show-environment -g GRAMMAR_SAMESTMT
+out: show-environment -g GRAMMAR_PARSE_ASSIGN
+out: show-environment -g GRAMMAR_BEFORE_ERROR
+out: show-environment -g GRAMMAR_AFTER_ERROR
+out: show-environment -g GRAMMAR_TRUE
+out: show-environment -g GRAMMAR_ELIF
+out: show-environment -g GRAMMAR_FALSE
+out: show-environment -gh GRAMMAR_HIDDEN
+out: show-environment -g GRAMMAR_HIDDEN
+out: show-options -gqv @grammar-escape
+fmt: #{window_name}

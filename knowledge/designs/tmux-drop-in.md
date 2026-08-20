@@ -751,6 +751,23 @@ recognized-but-unimplemented, 7 of 8 array options have no storage, and `set-opt
 `is_array` early return) — a silent no-op, worse than the loud skip. Every missing option
 now belongs to exactly one lane:
 
+**Status-bar family wave A SHIPPED 2026-08-20 (engine/daemon/wire; GUI titlebar = wave
+B, pending):** all 17 status/window-status options store with pin-probed byte-exact
+defaults (`themegreen` IS the next-3.8 spelling — the pin grew theme-palette colours),
+`#{`-bearing style values defer validation like the pin (options.c:1177), `-a` joins
+styles with commas, a real `parse_style`/`parse_styled_segments` replaced the
+discard-everything validator (valid_style = is_some), the formats engine preserves
+`#[…]` markers (inner `#{}`/`#()` expand per format.c), the renderer wraps halves in
+the pin's default-stack order and left-trims BOTH halves to the length budgets (the
+pin template left-trims status-right too — probed), and `WindowSnapshot.status_label`
+(v69) ships per-window expanded `window-status-format` labels. Guards: 66→72-step
+status-options differential scenario incl. rejections + bare-listing steps. Ledgered:
+`#()` inside window-status-format renders empty (no job cache on the label path),
+`#{window_flags}` lacks `# ~ M` (pre-existing), `#[ignore]` later-marker parsing
+unused until wave B, unknown `range=` carried as `Other`, status-justify/-position/
+status 2..5 stored-not-honored (titlebar is top, single-line, tabs own the centre).
+own-conf's skip warning dropped 9 → 8 (`status-position` now stores).
+
 **Lane 1 — GUI-effect (~48; implement, wired to real behavior).** The status-bar family
 rendered in the collapsed-sidebar titlebar strip, which is already a proto-status-bar
 (session badge = `status-left`'s `[#S]`, tab row = window list, right corner = the default

@@ -197,7 +197,7 @@ inside a generic “unsupported formats” claim.
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
 | `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
-# Options: 38 of 180
+# Options: 55 of 180
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin.
 Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-panes`,
@@ -208,8 +208,13 @@ Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-pan
 `aggressive-resize`, plus the later arrivals `initial-repeat-time`, `lock-after-time`,
 `lock-command`, `default-command`, `default-shell`, `update-environment`, `menu-style`,
 `menu-selected-style`, `menu-border-style`, `menu-border-lines`, `popup-style`,
-`popup-border-style`, and `popup-border-lines`. The remaining 142 are lane-assigned in the
-drop-in plan's "options residue" section (GUI-effect / store-only / N-A-native).
+`popup-border-style`, and `popup-border-lines`, plus the 2026-08-20 status-bar wave's 17:
+`status-style`, `status-bg`, `status-fg`, `status-justify` (stored), `status-position`
+(stored), `status-left-style`, `status-right-style`, `status-left-length`,
+`status-right-length`, and the eight `window-status-*` format/style/separator options —
+all with pin-probed defaults, `#{`-deferred style validation, and comma-joined `-a`. The
+remaining 125 are lane-assigned in the drop-in plan's "options residue" section
+(GUI-effect / store-only / N-A-native).
 The index trio follows tmux's session/window inheritance, allocation,
 targeting, format, and close-triggered renumbering behavior. (`set-option` also accepts six
 zz-native names — the agent/editor/history-trickle keys — which don't count toward tmux

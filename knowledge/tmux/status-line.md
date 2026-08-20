@@ -92,7 +92,7 @@ whole body as a variable name, or expands a nested `#{...}` body as plain format
 | `#{S:...}`, `#{W:...}`, `#{P:...}` | expand once per session, window, or pane; an optional second body formats the active row |
 | `#{C:text}`, `#{C/ri:pattern}` | return the one-based visible pane row matching a glob substring or ERE; no match is `0` |
 | `#(uptime)` | shell command output, first line only |
-| `#[fg=green,bold]` | style directives, **dropped** |
+| `#[fg=green,bold]` | style directives, **preserved as markers** since the 2026-08-20 status-bar wave (inner `#{…}`/`#()` expand like the pin); clients parse them via `parse_styled_segments` — GUI rendering lands in the titlebar wave |
 
 The parser accepts semicolon modifier chains and nested bodies. It evaluates modifier arguments
 before the body, uses tmux truthiness (empty and exact `0` are false), and stops recursion at 100
@@ -147,9 +147,14 @@ Two format rules preserve the status renderer's contract:
 
 - **strftime runs per literal run, not over the whole expansion.** A `%` that arrives from a variable
   or from `#(date +%H)` stays unchanged. The `T` modifier requests the whole-value time pass.
-- **Style directives are dropped rather than rejected.** A config full of `#[fg=colour234]` renders
-  its text in the sidebar's own muted foreground instead of failing. zz's chrome takes its colors from
-  the app palette, not from per-config escape styling.
+- **Style directives survive expansion since the 2026-08-20 status-bar wave.** The engine keeps
+  `#[…]` blocks (expanding `#{…}`/`#()` inside them like the pin), the daemon wraps each half with
+  the base/side style prefix in the pin's default-stack order, trims both halves left to the
+  `status-*-length` display-width budgets, and ships raw marker-bearing strings; the whole
+  status/window-status option family (17 options) stores with pin-exact defaults, `#{`-bearing
+  style values deferring validation and `-a` appending with commas like the pin. Per-window
+  expanded labels ride `WindowSnapshot.status_label` (protocol v69). The sidebar still renders
+  its muted-foreground text until the GUI titlebar wave consumes the markers.
 
 # When the status re-renders
 

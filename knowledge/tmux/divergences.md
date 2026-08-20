@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: tmux divergence matrix
-description: "Every known divergence from tmux at the pinned reference commit: the 24 missing commands and why, behavioral gaps on the implemented surface, the options coverage (all 180 store, 78 behave), and the protocol-level differences."
+description: "Every known divergence from tmux at the pinned reference commit: the 13 missing commands and why, the 33 implemented commands that still reject tmux flags, behavioral gaps on the implemented surface, the options coverage (all 180 store, 66 behave), and the protocol-level differences."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-20T00:00:00-03:00
@@ -27,13 +27,19 @@ The one-line read: everything marked **silent** below is a bug by zz's own doctr
 must mean what tmux means, or error loudly); everything loud is a choice; the "genuine gaps"
 command block plus the remaining options grind is the actual drop-in backlog.
 
-# Missing commands (24 of ~92)
+# Missing commands (13 of 92)
 
-zz's shared catalog holds 73 verbs: 14 zz-native and 59 tmux. `MuxEngine` runs 56 of the tmux
-verbs, while the daemon runs the cataloged `list-clients`, `refresh-client`, and `show-messages`
-because they need client or message state. The daemon also implements 8 uncataloged tmux verbs:
-`capture-pane` and `set-`/`show-`/`list-`/`load-`/`save-`/`delete-`/`paste-buffer`. That leaves 24
-of tmux's ~92 commands absent, in three deliberate groups.
+Counted 2026-08-20 against the pin's `cmd_table[]` (92 entries, 78 with an alias, 170
+spellings). zz's shared catalog (`crates/zz-protocol/src/catalog.rs`) holds 93 verbs: 14
+zz-native and 79 tmux — 61 in `COMMAND_SPECS` plus 18 in `DAEMON_COMMAND_SPECS` for the verbs
+that need client, job, buffer, or overlay state (`capture-pane`, the seven `*-buffer` commands,
+`run-shell`, `if-shell`, `wait-for`, `pipe-pane`, `display-popup`, `display-menu`,
+`confirm-before`, and the lock trio). `MuxEngine` runs 58 of the tmux verbs; the daemon
+intercepts `list-clients`, `refresh-client`, and `show-messages` ahead of it. Every pin alias
+resolves to the same command it does in tmux. That leaves 13 of tmux's 92 commands absent
+(`UNIMPLEMENTED_TMUX_COMMAND_TABLE`, 21 spellings), all answering `unsupported command: <name>`
+rc 1, counted as skips in config reports, and absent from `list-commands` so feature probes
+take their fallback path. Four deliberate groups:
 
 ## Exec commands (doctrine revised by phase 5, 2026-08-18)
 
@@ -85,16 +91,70 @@ semantics on menus stay GUI-native).
 | `clock-mode` | Full-pane clock. |
 | `suspend-client` | Ctrl-Z the attaching client. |
 
-## Genuine gaps — buildable, nothing blocks them (6)
+## Genuine gaps — buildable, nothing blocks them (4)
 
 | Command | What it does | Weight |
 | --- | --- | --- |
-| `switch-client` | Move the attached client to another session; scripts use `-t` constantly. Phase 8 closed the rest of the client seam 2026-08-20, so this is the last consumer of it — but it must retarget *another* client, which the `new-session` path never needed. | high |
-| `link-window` / `unlink-window` | One window shared into several sessions; zz has no linked-window model. | low |
-| `resize-window` | Manual window sizing decoupled from clients. | low |
-| `clear-prompt-history` / `show-prompt-history` | Prompt history management. | low |
+| `switch-client` | Move the attached client to another session; scripts use `-t` constantly. Phase 8 closed the rest of the client seam 2026-08-20, so this is the last consumer of it — but it must retarget *another* client, which the `new-session` path never needed. The server half exists (`ClientHello.origin`, `ClientTerminal`, the `client-terminal-v1` token); no daemon→Interactive-client "retarget" message exists in the protocol yet. | high |
+| `resize-window` | Manual window sizing decoupled from clients. Also what makes `window-size manual` behave as `latest` today. | low |
+| `clear-prompt-history` / `show-prompt-history` | Prompt history management (`prompt-history-limit` and `history-file` already behave). | low |
 
-Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassessed.
+## Parked by decision or by model (4)
+
+| Command | Why it stays out |
+| --- | --- |
+| `link-window` / `unlink-window` | Linked windows and session groups are skipped permanently (drop-in plan decision 3). One window belongs to one session. |
+| `new-pane` / `switch-mode` | The pin's floating-pane family (new in next-3.8). zz has no floating-pane model; the phase-1 picker verb was renamed off `new-pane` so the name stays tmux's. Unassessed beyond that. |
+
+# Flag-level gaps on implemented commands (33 of 79)
+
+Being cataloged is not the whole contract: 33 of the 79 implemented tmux commands still
+reject flags the pin accepts, answering `unsupported command: <cmd> -X` rc 1 (and counting
+as config skips). Three mechanisms, all catalog-driven or allowlisted, none silent:
+`CommandOptionSpec.unsupported` entries in `catalog.rs` (enforced at
+`zz-mux/src/command.rs:9355`), the daemon's `parse_buffer_command_args` allowlist
+(`daemon.rs:17820`), and `capture-pane`'s own arm (`daemon.rs:18062`). Inventory as of
+2026-08-20 (flags in pin spelling; rows marked † are gated by decision 3 or by the absence
+of floating panes, the rest are plain work):
+
+| Command | Rejected flags |
+| --- | --- |
+| `new-session` | `-E -X -e -f`, `-t` † |
+| `attach-session` | `-c -E -f -r -x` |
+| `detach-client` | `-E -t -P` |
+| `kill-session` | `-g -f` |
+| `list-sessions` / `list-windows` / `list-panes` / `list-clients` / `list-buffers` | `-f -O -r` (filters, sort order, reverse) |
+| `new-window` | `-b -E -P -e -F` |
+| `kill-window` / `kill-pane` | `-f` |
+| `split-window` | `-e -E -F -I -k -m -P -R -s -S -T -W -Z` |
+| `break-pane` | `-a -b -P -W -F -x -y -X -Y` |
+| `join-pane` | `-l` |
+| `move-pane` | `-D -L -P -R -U -X -Y -l -z -M` (floating-pane placement) † |
+| `select-pane` | `-d -e -g -M -m -P` |
+| `last-pane` | `-d -e` |
+| `resize-pane` | `-M -T` |
+| `send-keys` | `-c -F -K -M -R`; `-H` bytes `80`–`ff` |
+| `send-prefix` | `-2` |
+| `copy-mode` | `-k -H -S -s` |
+| `command-prompt` | `-1 -C -e -F -i -k -l -N -P -t -T` |
+| `choose-tree` | `-F -f -G -h -K -k -N -O -r -y` |
+| `choose-buffer` | `-F -f -K -k -N -O -r -y` |
+| `display-message` | `-a -C -c -d -l -I -N -v` |
+| `display-panes` | `-N -t` |
+| `show-messages` | `-J -T -t` |
+| `clear-history` | `-H` |
+| `unbind-key` | `-a -q` |
+| `list-keys` | `-1 -a -N -O -P -r`; a positional key filter |
+| `set-option` / `set-window-option` | `-F` |
+| `source-file` | `-t -F -n -v` |
+| `set-buffer` | `-t -n -w` |
+| `load-buffer` | `-t -w`; `-` stdin |
+| `save-buffer` | `-` stdout |
+| `capture-pane` | `-C -F -H -L -P -R` |
+| `refresh-client` | `-c -D -L -R -U -l -r` and positionals (attached-client redraw/scroll family) |
+
+`list-commands` prints each command's usage with zz's accepted flags, so the rows above are
+the exact places its output differs from the pin's.
 
 # Divergences on the implemented surface
 
@@ -103,16 +163,15 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | `find-window` | Detached CLI calls validate the target and return success with no output, including for zero matches. zz does not open tmux's attached-client window-tree chooser. | **silent**, bounded |
 | `list-commands` | zz lists implemented commands in tmux's line format. Each usage string reports zz's accepted flags, so affected rows differ from the pin. Unimplemented commands stay absent so feature probes can take their fallback path. | **silent**, deliberate |
 | `list-keys` default formatting | `list-keys -F` expands the pin's per-binding `key_repeat`, `key_note`, `key_prefix`, `key_table`, raw `key_string`, and quoted `key_command` facts. The no-`-F` form remains zz's unpadded `bind-key` rendering rather than the pin's list-width-aware padded template. | **silent**, deliberate deferred formatting |
-| `refresh-client` | Detached command clients receive tmux's exact `no current client` error. zz does not implement attached-client redraws or control-mode subscriptions. | loud |
+| `refresh-client` | `-A`/`-B`/`-C`/`-f`/`-F`/`-S`/`-t` behave (phase 6: flow control, subscriptions, control-client sizing). The attached-client redraw/scroll family (`-c -D -L -R -U -l -r`, positionals) answers `unsupported command: refresh-client interactive behavior`; detached command clients with no target get the pin's exact `no current client`. | loud |
 | `copy-mode` | `-k -H -S -s` rejected (`-e`/`-q`/`-M` — the stock-binding trio — are implemented). | loud |
-| `source-file` | No `-` stdin (refused loudly), no `-F`/`-n`/`-v`. Globbing works. | loud |
-| `show-options` on unimplemented names | Catalogued scalar options without zz storage have no invented value and print nothing, including under `-A`. Bare and indexed array spellings use the same empty-success path. Implemented scalars and every stored `@` user option retain normal scope and inheritance readback. | **silent**, honest omission |
-| `mouse` / `escape-time` | Both options have typed storage, pin defaults, inheritance, unset, and readback. The desktop GUI does not consume either value; their input semantics belong to the phase-8 TUI attach surface. | **silent**, deliberate |
+| `source-file` | Parse diagnostics are shaped like the pin's (`path:line: message`) but travel as client-event warnings, so control-mode and GUI clients see them (`%config-error`) while the plain CLI exits 0 with empty stderr where the pin prints the line and exits 1 — pinned by `cli_binary.rs:1388`, so closing it is a test change plus a behavior change. `-` stdin refused loudly; `-t`/`-F`/`-n`/`-v` rejected as unsupported. Globbing works. | **silent** on the CLI, loud elsewhere |
+| `mouse` / `escape-time` | Both options have typed storage, pin defaults, inheritance, unset, and readback. Nothing consumes either: the desktop GUI ignores them, `MuxOptionKey` carries neither on the wire, and zz-tui — the attach surface the alias lives on — does not depend on zz-mux and reads no tmux option at all (its mouse handling is terminal-capability-driven, unconditional). | **silent**, store-only |
 | `automatic-rename` / `automatic-rename-format` | `automatic-rename` gates the desktop's active-pane-derived tab label, and explicit `rename-window`, `new-window -n`, or the first-window name pins a window-local `off`. zz does not mutate `Window.name` every 500 ms, so `#{window_name}` remains the explicit model name, and the stored format string is not evaluated by the presentation-only renamer. | **silent**, bounded |
 | `aggressive-resize` + `window-size` | Since 2026-08-20 both compose like the pin (`resize.c:366-376`): `aggressive-resize` is a candidate FILTER (ON = clients focused on the window; OFF = zz's viewer set, a per-client-focus stand-in for the pin's linked-window `session_has`), and `window-size` is the AGGREGATION policy — `latest` (default) picks the most-recent-input owner, `largest`/`smallest` aggregate componentwise. ON no longer forces `smallest`; configs relying on that must also set `window-size smallest`. `manual` is stored but behaves as `latest` until `resize-window` exists. | **silent**, bounded |
 | `display-time` | Status-message toasts consume the configured milliseconds. Since 2026-08-20 the omitted `display-panes -d` duration comes from `display-panes-time` like the pin (the old reuse divergence is closed). A zero toast remains until manual dismissal, while tmux dismisses its zero-duration status message on a key. | **silent**, deliberate |
 | `respawn-pane` / `respawn-window` | Dead panes revive with stable pane identity; `respawn-window` keeps its first pane and removes the rest. `-k`, `-c`, repeated `-e NAME=VALUE`, and stored command/cwd reuse are implemented. The pin's `-E` empty-environment flag is cataloged but rejected. | loud for `-E` |
-| Array options | zz parses tmux's `name[index]` grammar but stores and renders none of the pin's 76 array options. Bare and indexed set/show requests succeed with no output. Indexed `@` or table scalars follow tmux: set returns `not an array`, while show reads the scalar through the indexed spelling. | **silent**, honest omission |
+| Array options | Since the 2026-08-20 Lane-2 sweep all eight real array options (`command-alias`, `codepoint-widths`, `user-keys`, `terminal-overrides`, `terminal-features`, `status-format`, `pane-colours`, `update-environment`) store with the pin's separators, hole reuse, and `name[N]`/`-u name[N]` semantics, and the 68 hook names route to the hook table. None of the eight drives behavior: command dispatch consults the static `COMMAND_SPECS` alias table, never `command-alias`; the status renderer reads `status-left`/`status-right`, never `status-format[]`; and session seeding uses the hardcoded default list (`command.rs:6691`), so `set -g update-environment FOO` changes readback only. Indexed `@`/table scalars follow tmux (`not an array` on set; indexed show reads the scalar). | **silent**, store-only |
 | `history-limit` default | zz keeps 10,000 lines for its product default; the pin keeps 2,000. `show-options -g history-limit` prints the effective 10,000 value. | **silent**, deliberate |
 | Plain option listings | No-argument listings contain tmux table names and `@` user names. The six zz-native settings stay available through explicit-name queries and never appear as unknown words in tmux-parsing scripts. | **silent**, zz extension hidden from tmux listings |
 | Session environment updates | Both servers seed their global environment at boot. tmux copies each `update-environment` name from the creating client's environment; zz has no client-environment field and copies from the daemon's boot environment. They differ when the daemon outlives the shell that started it. Missing names become unset markers on both. | **silent**, bounded |
@@ -129,7 +188,7 @@ Plus `switch-mode`, new in the pinned tmux alongside floating panes — unassess
 | Command-name abbreviation | CLOSED by wave 7d (2026-08-18): zz implements the pin's `cmd_find` contract (cmd.c:470-508) — exact alias wins outright, a unique prefix over the alphabetical name table resolves (engine and daemon dispatch alike), several matches answer the pin's byte-exact `ambiguous command: <name>, could be: <list>`. Reviewer-swept every 2..N prefix of all 92 pin names: resolution classes match; remaining textual differences are the ledgered arity/flag wording (7c). Prefixes resolving to catalogued-but-unimplemented commands answer `unsupported command: <canonical>`. | closed |
 | `set prefix` key validation | zz rejects unresolvable bare keys with the pin's `bad key: <value>` but silently accepts unresolvable `C-`/`M-` keys the pin rejects (`C-zz`): a typo'd prefix is accepted and never fires. Full strictness needs the pin's `key_string_table` breadth (`^a` caret form, `BTab`, the KP family) — a partial tightening would loudly reject pin-valid keys instead, so this waits for a key-string parity wave. | **silent** edge |
 | Error-shape residue (post-7b) | Grep-facing error classes are pin-bare and byte-exact since wave 7b (2026-08-18): the twelve `options-values.sh` regress strings, `can't find session/window/pane:`, `unknown command:`, `already set:`, `open terminal failed: not a terminal`, show-messages pairs, `%config-error <file>:<line>:`. Catalogued-but-unimplemented commands/options answer `unsupported command: <name>` — a zz-only condition the pin would instead run. Arity/flag rejections and usage fallbacks keep zz wording (`<cmd> does not support -X` vs the pin's `command <cmd>: unknown flag -X`; no `usage:` fallback) pending per-command arity metadata (7c). | loud |
-| Alerts | Bell-only: `monitor-activity`/`monitor-silence` don't exist. Matches tmux defaults, ignores those configs. | **silent** |
+| Alerts | Bell path only: `bell-action` and `visual-bell` behave on the pin's alerts.c model (C1, 2026-08-20). `monitor-activity`/`monitor-silence`/`monitor-bell`, `activity-action`/`silence-action`, and `visual-activity`/`visual-silence` store and read back but drive nothing — the bell path stays unconditional (`honest_knobs.rs:764`) and no activity/silence timers exist. Matches tmux defaults; an explicit `monitor-activity on` is silently inert. | **silent**, store-only |
 | `select-layout main-*` with 2 panes | The pin never sizes the lone "other" pane (layout-set.c:264-269, :458-463), leaving stale geometry that fails tmux's own `layout_check`; zz sizes it (80x24 → main 80x22 + other 80x1). Deliberate: zz refuses to reproduce an upstream bug. | **silent**, zz more correct |
 | `select-layout -E` on a mixed parent | The pin spreads only leaf children (layout.c `layout_cell_is_tiled`) but divides the parent's full extent among them, so a parent mixing leaves with nested nodes gets corrupt sums (observed: 40+42+39 in an 80-wide window, last pane at xoff 84). Every later operation on that corrupted window keeps diverging: one `-E` produced four geometry divergences, three downstream, so the known scenario has one causal step but the divergence is not bounded to it. zz refuses that spread and stops the walk where the pin stops. All-leaf parents are exact (48 pin fixtures + `known/known-spread-mixed.txt`). | **silent**, zz more correct |
 | `select-layout` strings with zero-sized leaves | The pin accepts a leaf with width or height zero. zz rejects it to preserve the `PANE_MINIMUM` invariant. | **loud**, zz more correct |
@@ -202,77 +261,109 @@ inside a generic “unsupported formats” claim.
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
 | `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
-# Options: all 180 store, 78 behave
+# Options: all 180 store, 66 behave
 
-tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin.
-Since the 2026-08-20 Lane-2 sweep **every one of the 180 stores** with the pin's exact
-default, type validation, scope, inheritance, `-a`/`-u`/toggle semantics, and listing
-shape, so bare `show-options -s`/`-g`/`-gw` byte-match the pin and a real `tmux.conf`
-imports with **zero skipped lines**. The seven array options gained real indexed
-storage (separator, hole reuse, `name[N]`, `-u name[N]` vs `-u name`) and
-`set-option <hook-name>` now writes the same store as `set-hook` — the two paths that
-used to silently succeed while doing nothing. The count below tracks options whose
-values also drive BEHAVIOR; the rest are honest storage awaiting their wave.
-Implemented tmux names: `prefix`, `mode-keys`, `history-limit`, `synchronize-panes`,
-`word-separators`, `buffer-limit`, `message-limit`, `set-clipboard`, `copy-command`, `status`,
-`status-interval`, `status-left`, `status-right`, `base-index`, `pane-base-index`, and
-`renumber-windows`, plus `mouse`, `escape-time`, `automatic-rename`,
-`automatic-rename-format`, `remain-on-exit`, `default-terminal`, `display-time`, `repeat-time`, and
-`aggressive-resize`, plus the later arrivals `initial-repeat-time`, `lock-after-time`,
-`lock-command`, `default-command`, `default-shell`, `update-environment`, `menu-style`,
-`menu-selected-style`, `menu-border-style`, `menu-border-lines`, `popup-style`,
-`popup-border-style`, and `popup-border-lines`, plus the 2026-08-20 status-bar wave's 17:
-`status-style`, `status-bg`, `status-fg`, `status-justify` (stored), `status-position`
-(stored), `status-left-style`, `status-right-style`, `status-left-length`,
-`status-right-length`, and the eight `window-status-*` format/style/separator options —
-all with pin-probed defaults, `#{`-deferred style validation, and comma-joined `-a`, plus
-the honest-knobs C1 seventeen (2026-08-20): `focus-events`, `bell-action`, `visual-bell`,
-`key-table`, `prefix-timeout`, `prompt-history-limit`, `history-file`,
-`display-panes-time`, `main-pane-width/height`, `other-pane-width/height`,
-`tiled-layout-max-columns`, `default-size`, `window-size`, `allow-set-title`, and
-`allow-rename` (storage-only — no ESC-k scanner), plus the C2 terminal-worker six
-(2026-08-20): `wrap-search`, `allow-passthrough` (`on` behaves as `all` — the worker
-lacks visibility state; payloads cap at 1 MiB then discard-until-ST; nested
-`\ePtmux;` is not recursively unwrapped; unwrap targets the pane VT, correct for
-zz-native kitty/sixel), `cursor-style`/`cursor-colour` (per-pane appearance clones;
-a zz-config `cursor-blink` override still outranks the pane option's blink half), and
-`alternate-screen`/`scroll-on-clear` (store-only — enforcement would need lossy byte
-rewrites). The remaining 102 are lane-assigned in the drop-in plan's "options residue"
-section (GUI-effect / store-only / N-A-native).
+tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin. Since
+the 2026-08-20 Lane-2 sweep **every one of the 180 stores** with the pin's exact default,
+type validation, scope, inheritance, `-a`/`-u`/toggle semantics, and listing shape, so bare
+`show-options -s`/`-g`/`-gw` byte-match the pin and a real `tmux.conf` imports with **zero
+skipped lines**. That is test-enforced: `tmux_options.rs`
+(`listing_order_covers_every_non_hook_table_option_once`,
+`every_named_option_has_storage_metadata`) and `command.rs`
+(`every_remaining_named_scalar_stores_and_bare_listings_cover_the_pin_table`) pin the 180,
+the eight array options store with indexed semantics, and `set-option <hook-name>` writes
+the hook table — the two paths that used to silently succeed while doing nothing are dead.
+
+**66 behave**, meaning a value change is consumed somewhere outside set/show/inherit/
+readback (consumer-traced 2026-08-20). **114 are store-only.** The earlier "78 behave"
+counted options given a typed home in the honest-knobs/status structs, twelve of which
+nothing reads. No marker in the table distinguishes the two and no test pins the count:
+`tmux_stored_scalar` (63 names) and `tmux_stored_array` (8) are store-only by
+construction, but 39 enum-resident names and 4 dedicated-field names are indistinguishable
+from behaving options without tracing readers. A `BEHAVES` list beside
+`OPTION_TABLE_ORDER` with a drift test is the cheapest fix and belongs to the next knob
+wave.
+
+**Behaving (66):**
+
+- Indexing and sessions: `base-index`, `pane-base-index`, `renumber-windows`,
+  `default-size`, `window-size`, `aggressive-resize`, `history-limit` (10,000 product
+  default; the pin keeps 2,000 — the one fenced default divergence).
+- Keys and prompts: `prefix`, `mode-keys`, `key-table`, `prefix-timeout`, `repeat-time`,
+  `initial-repeat-time`, `prompt-history-limit`, `history-file` (saved on submission, not
+  at shutdown), `word-separators`, `wrap-search`.
+- Spawn and terminal: `default-shell`, `default-command`, `default-terminal`,
+  `remain-on-exit`, `focus-events`, `allow-passthrough` (`on` behaves as `all` — the
+  worker lacks visibility state; payloads cap at 1 MiB then discard-until-ST; nested
+  `\ePtmux;` is not recursively unwrapped), `allow-set-title`, `cursor-style`/
+  `cursor-colour` (per-pane appearance clones; a zz-config `cursor-blink` override still
+  outranks the blink half), `synchronize-panes`.
+- Names and alerts: `automatic-rename`, `automatic-rename-format`, `bell-action`,
+  `visual-bell`.
+- Overlays and buffers: `display-time`, `display-panes-time`, `message-limit`,
+  `buffer-limit`, `set-clipboard`, `copy-command`, and the seven `menu-*`/`popup-*`
+  style and border options.
+- Layout: `main-pane-width`/`-height`, `other-pane-width`/`-height`,
+  `tiled-layout-max-columns`.
+- Status bar (GUI titlebar strip and tabs; see the Presentation row): `status`,
+  `status-interval`, `status-left`/`-right`, `status-left-length`/`-right-length`,
+  `status-left-style`/`-right-style`, `status-style`, `status-bg`, `status-fg`,
+  `window-status-format`, `window-status-current-format`, `window-status-style`,
+  `window-status-current-style`, `window-status-last-style`, `window-status-bell-style`.
+
+**Store-only (114):**
+
+- Typed storage that nothing reads (43): `mouse`, `escape-time`, `lock-after-time`,
+  `lock-command` (the lock commands are no-ops); `monitor-activity`, `monitor-silence`,
+  `monitor-bell`, `activity-action`, `silence-action`; `allow-rename`, `alternate-screen`,
+  `scroll-on-clear`, `extended-keys`, `extended-keys-format`, `xterm-keys`, `backspace`,
+  `editor`, `assume-paste-time`, `input-buffer-size`, `get-clipboard`,
+  `default-client-command`, `fill-character`, `variation-selector-always-wide`;
+  `message-style`, `message-command-style`, `message-format`, `message-line`;
+  `pane-border-lines`, `pane-border-indicators`, the four `pane-scrollbars*`; the four
+  `prompt-*cursor-*`; `clock-mode-colour`, `clock-mode-style`; `status-justify`,
+  `status-position`, `window-status-separator`, `window-status-activity-style`.
+- Generic scalar storage (63) plus the eight arrays: everything else in the table,
+  including `set-titles`/`set-titles-string`, `prefix2`, `display-panes-format`,
+  `remain-on-exit-format`, `visual-activity`/`visual-silence`, `status-keys`, the
+  lifecycle quartet (`exit-empty`, `exit-unattached`, `destroy-unattached`,
+  `detach-on-destroy`), `pane-border-style`/`pane-active-border-style`,
+  `window-style`/`window-active-style`, `mode-style` and the `copy-mode-*` styles,
+  `terminal-overrides[]`, `terminal-features[]`, `command-alias[]`, `status-format[]`,
+  `update-environment[]` (seeding uses the hardcoded default list), `user-keys[]`,
+  `pane-colours[]`, `codepoint-widths[]`, the 21 theme-palette options, and the
+  `tree-mode-*` trio. Lane assignments live in the drop-in plan's "options residue"
+  section.
+
+The index trio follows tmux's session/window inheritance, allocation, targeting, format,
+and close-triggered renumbering behavior. `set-option` also accepts six zz-native names —
+the agent/editor/history-trickle keys — which don't count toward tmux coverage and never
+appear in the no-argument listings (those contain tmux table names and `@` names only).
+`show-options` and `show-window-options` expose values with tmux's exact string escaping,
+value-only and inherited forms. Free-form `@` names are pure string storage at server,
+global-session, session, global-window, window, and pane scope, including append and unset;
+this is the storage seam TPM and plugins use. Global and per-session environment overlays
+have `set-environment`/`show-environment` readback and are merged into new terminal PTYs,
+including hidden and child-unset entries; the daemon seeds the global map from its process
+environment, and `new-session` copies the fixed default `update-environment` names or
+writes unset markers. `automatic-rename` gates the desktop's active-pane label and explicit
+window names install the pin's window-local `off`; its format string is evaluated by the
+daemon-side label path only. `remain-on-exit` retains a frozen dead pane with live
+`pane_dead` and normal-exit `pane_dead_status` facts, and the respawn commands revive that
+stable pane slot. `default-terminal`, `display-time`, and `repeat-time` feed new PTYs,
+client message/overlay timers, and each attached session's repeat-key window.
 Bare `list-keys` output lacks the pin's flags-column padding (`bind-key  -T` two-space
 form) — ledgered for the key-string wave.
-The index trio follows tmux's session/window inheritance, allocation,
-targeting, format, and close-triggered renumbering behavior. (`set-option` also accepts six
-zz-native names — the agent/editor/history-trickle keys — which don't count toward tmux
-coverage.) `show-options` and `show-window-options` expose implemented values with tmux's exact
-string escaping, value-only and inherited forms. Their no-argument listings contain tmux names and
-`@` names only; explicit queries still expose zz-native settings. Free-form `@` names are pure string storage at
-server, global-session, session, global-window, window, and pane scope, including append and unset;
-this is the storage seam TPM and plugins use. zz parses indexed spellings for scalars and arrays,
-but array storage remains an honest empty-success omission. Global and per-session environment
-overlays have `set-environment`/`show-environment` readback and are merged into new terminal PTYs,
-including hidden and child-unset entries. The daemon seeds the global map from its process
-environment, and `new-session` copies the fixed `update-environment` names or writes unset markers.
-Everything else is reported-and-skipped by the
-[conf parser](/tmux/conf-parser.md).
-`automatic-rename` gates the desktop's active-pane label and explicit window names install the
-pin's window-local `off`; its format string is storage-only. `remain-on-exit` retains a frozen dead
-pane with live `pane_dead` and normal-exit `pane_dead_status` facts, and the respawn commands revive
-that stable pane slot. `default-terminal`, `display-time`, and `repeat-time` feed new PTYs, client
-message/overlay timers, and each attached session's repeat-key window. `aggressive-resize` selects
-the smallest current viewer grid per window. `mouse` and `escape-time` remain storage-only until the
-TUI attach surface consumes them. `set-titles`, `terminal-overrides`, monitor options, and styles
-remain later work.
 
 # Protocol and process level
 
 | Area | tmux | zz |
 | --- | --- | --- |
 | Env contract | `$TMUX`, `$TMUX_PANE`, plus server-seeded global and client-updated session overlays | Panes get `$TMUX` in tmux's exact `socket,pid,session` shape plus `TMUX_PANE=%N`; exec-family jobs get `$TMUX` without `TMUX_PANE`; wave 7d added status-job `TMUX=socket,pid,-1`, `PWD`, and no `TMUX_PANE`. `ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET` ride alongside panes. The remaining clean/session job-overlay divergence is listed above. |
-| Binary argv | `-L -S -f -2 -C -u -V -N -c -l` | Closed by 7a (2026-08-18): `-V` (`tmux 3.8-zz`), `-L`/`-S`/`-f`/`-c`/`-N`/`-l`/`-2`/`-u`, tmux-shaped usage and unknown-option lines, pin CMD_STARTSERVER autostart. `-C`/`-CC` still rejected (phase 6 front-end). |
+| Binary argv | `-L -S -f -2 -C -u -V -N -c -l` | Closed by 7a (2026-08-18): `-V` (`tmux 3.8-zz`), `-L`/`-S`/`-f`/`-c`/`-N`/`-l`/`-2`/`-u`, tmux-shaped usage and unknown-option lines, pin CMD_STARTSERVER autostart. `-C`/`-CC` are the phase-6 control-mode front-end (row below). |
 | Control mode `-CC` | What iTerm2 integration speaks. | SHIPPED (phase 6 complete 2026-08-18): a stdio front-end speaking the full CC protocol — framing, notifications, `%output` with flow control (pause/age-kill/pacing), `refresh-client -A/-B/-C/-f`. Deliberate divergences, all reviewer-endorsed: blocks are COMPLETE (WAIT commands keep output in-block; after-hooks add no extra block; `%pause`/`%continue` land after the triggering block, not inside); per-client monotonic `n`; zz-lax unquoted `%`-words on the control stdin; automatic-rename transients single-fire. |
 | Session groups | `new-session -t`. | Cataloged, rejected. |
-| Presentation | Status line, prompts, choosers drawn as terminal escapes. | All native GPUI — `#[…]` styles dropped, `status-style`/`-format`/`-justify`/`-position` out of scope. |
+| Presentation | Status line, prompts, choosers drawn as terminal escapes. | Native chrome on both clients. Since the 2026-08-20 status-bar waves the GUI titlebar strip and tab pills render literal `#[…]` styles and the `status-*`/`window-status-*` style options; `status-format[]`, `status-justify`, and `status-position` are stored but not honored (the strip is top, single-line, tabs own the centre). zz-tui receives only pre-expanded `status-left`/`status-right` text — styles, justify, and position are dropped before the wire. Prompts and choosers stay native on both. |
 
 # Related
 

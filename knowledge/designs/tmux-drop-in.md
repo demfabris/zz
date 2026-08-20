@@ -70,27 +70,60 @@ strings from the pin's own regress suite match byte-exact; and the attach contra
 verified live on a pty (`new -s x \; split-window -h` → alt screen, panes `0` and `1` on
 both binaries).
 
-**Options: all 180 of the pin's named options store; 78 also behave.** The remaining ~102
-are honest storage — they accept, validate, scope, inherit, and read back exactly like the
-pin, and each carries a divergence row saying so. Nothing silently succeeds doing nothing
-any more.
+**Options: all 180 of the pin's named options store; 66 behave.** The remaining 114 are
+honest storage — they accept, validate, scope, inherit, and read back exactly like the pin,
+and the [divergence matrix](/tmux/divergences.md) carries both rosters. (The running
+"78/180" tallies in the residue section below counted options given a typed home in the
+honest-knobs structs; a 2026-08-20 consumer trace found twelve of those unread. No table
+marker or drift test separates the two yet.) Nothing silently succeeds doing nothing any
+more.
 
-**What is genuinely left**, in the order it matters:
+**Commands: 79 of the pin's 92 verbs run; 13 are absent** (4 buildable, 4 native-chrome
+superseded, 4 parked by decision or by the missing floating-pane model, `server-access`).
+But **33 of the 79 still reject tmux flags** — roughly 160 `unsupported` flag pairs,
+inventoried in the matrix — so "100% of the command grammar" holds at the verb level, not
+yet at the flag level.
 
-1. **`switch-client`** — the last consumer of the client seam phase 8 opened. Unlike
-   `new-session`, it must retarget *another* client. Its own wave.
-2. **Behavior for stored knobs (the C3 batch)** — monitor/activity flags, the `set-titles`
-   pair, `prefix2`, `display-panes-format`, `remain-on-exit-format`, and parse-time
-   `command-alias` resolution. One protocol bump (v70) covers the lot; held pending
-   fabrico's hardware smoke.
-3. **Ledgered attach-surface residue** — `-x -`/`-y -` using the client's size, the
-   nested-tty check, the `[exited]`/`[detached]` client-exit notices, and `source-file`
-   swallowing diagnostics. All in the [divergence matrix](/tmux/divergences.md).
-4. **Optional waves** — the 7c error-wording appendix, key-string parity (including
-   `list-keys` padding), and adding Oh My Tmux to the smoke corpus (unblocked since `%if`
-   evaluation landed).
-5. **Parked by decision** — `status-keys` vi prompt (half-vi is worse than none), linked
-   windows and session groups (decision 3), real-tmux socket interop (decision 4).
+**What is genuinely left**, in the order a tmux user meets it (proposed 2026-08-20):
+
+1. **The flag-level sweep** — the script-facing tranche first: `new-window`/`split-window`
+   `-P -F -e -b`, `break-pane -P -F`, `display-message -c -a -l`, `set-option -F`,
+   `list-keys -N -a`, `send-keys -M`, `attach-session -c -r`, `capture-pane -C -F`, the
+   `list-* -f -O -r` filter/sort trio. Each is catalog-driven work; none needs a protocol
+   bump. Rows marked † in the matrix stay parked.
+2. **`switch-client` and `detach-on-destroy`** — one wave, one seam: both retarget an
+   *Interactive* client to another session, which needs the daemon→client message the
+   protocol still lacks (the server half — `ClientHello.origin`, `ClientTerminal`, the
+   `client-terminal-v1` token — exists). tmux-sessionist, sesh, tmux-fzf, and tmuxinator
+   all depend on it.
+3. **The TUI consumes its options** — zz-tui does not depend on zz-mux and reads no tmux
+   option: `mouse`, `escape-time`, `status-position`/`-justify`, the status styles, plus the
+   client-side attach residue that shares the surface (`[exited]`/`[detached]` notices, the
+   nested-tty refusal, `-x -`/`-y -` from the client's size — `ClientHello` carries no
+   size today).
+4. **The C3 knob batch** — `monitor-activity`/`monitor-silence` with the `#`/`~` window
+   flags and `activity-action`/`visual-activity`, the `set-titles` pair, `prefix2`,
+   `display-panes-format`, `remain-on-exit-format`, parse-time `command-alias`, honoring a
+   user's `update-environment` list at seeding (today hardcoded), the lifecycle quartet
+   when explicitly set, and the renderer styles fabrico already decided (`pane-*border-style`
+   colors, `window-style`/`window-active-style` dimming, `mode-style`). Add the `BEHAVES`
+   list + drift test with it. One protocol bump (v70) covers the lot.
+5. **`source-file` diagnostics on the CLI** — exit 1 with the pin's `path:line: message`
+   where today the plain CLI exits 0 silent (the shape already exists as an event warning;
+   `cli_binary.rs:1388` pins the current behavior and must move with it). Small; can ride
+   wave 1.
+6. **Optional waves** — the 7c error-wording appendix (25 `needs a value` sites, `unknown
+   flag -X`, the `usage:` fallback), key-string parity (`list-keys` padding, `C-zz` prefix
+   strictness), `resize-window` (also unparks `window-size manual`), the prompt-history
+   pair, lock-program spawning on the TUI.
+7. **Parked by decision** — `status-keys` vi prompt (half-vi is worse than none), linked
+   windows and session groups (decision 3), the floating-pane family (`new-pane`,
+   `switch-mode`, `move-pane` placement flags), real-tmux socket interop (decision 4), the
+   21 theme-palette options and `tree-mode-*` (no demand).
+
+Cheap and worth doing before any of it: add Oh My Tmux to the alias smoke corpus
+(`compat/fetch-corpus.sh` pins seven plugins; the `%if` blocker is gone) — it is the most
+common real config and its skip report will re-rank the list above with data.
 
 Hardware-pending items that need fabrico rather than code: the wave-B status-bar visual
 smoke, a live `allow-passthrough` image smoke, the DCS-filter bench A/B, and an iTerm2
@@ -202,7 +235,7 @@ same loop as phases 0–3: settled plan → codex → full gates → adversarial
 | Behavior options, semantics half | `mouse`, `escape-time`, `automatic-rename`, `automatic-rename-format`, `remain-on-exit`, `default-terminal`, `display-time`, and `repeat-time` typed storage/readback; active-pane tab-label gating and explicit-name pinning; retained dead facts plus stable-id `respawn-pane`/`respawn-window`; TERM, message/overlay timeout, and repeat-window consumers. `mouse` and `escape-time` stay storage-only for phase 8. The review round caught two falsified claims (a renamer that never fired; default-terminal correct in readback but not AT the default — the ledger's default-path hazard) and both are fixed and pin-verified; defaults come from the PIN BUILD's -DTMUX_MOUSE/-DTMUX_TERM, protocol v59, and the macOS zero-pgid panic behind the oldest flaky CI test died in validation | **shipped 2026-08-17** (wave 4f-1, one review round, CONFIRMED-CLOSED) |
 | Behavior options, sizing/boot half | `aggressive-resize` stored at global-window/window scope; ON selects componentwise smallest rows and columns from clients actually viewing each window, while the existing zoom gate, active-pane writer, one-cell dead-band, and repeat memo remain unchanged (verified by positive control; seeded convergence sims pass on real sockets). Lazy-create boot parity: fresh daemons empty+unarmed, session 0 on the first default Interactive attach, ids aligned with tmux from the first `new-session` — the harness prologue's auto-session kill is gone and the GEO id-stripping is DELETED, so raw layout checksums and leaf pane ids byte-compare against the pin across all 25 scenarios | **shipped 2026-08-17** (wave 4f-2, one review round, CONFIRMED-CLOSED — phase 4 complete) |
 | Daemon boot parity | CLI-spawned daemons boot empty; the first CLI `new-session` takes name `0` and ids `$0`/`@0`/`%0`, while an empty-target Interactive attach lazily materializes that next numeric session. The harness no longer kills zz session `0` in its prologue and now compares raw layout checksums and leaf ids | **shipped 2026-08-17** (wave 4f-2, phase 4 closed) |
-| Styles (`#[…]`, `*-style`) | meaningful on the TUI surface; GUI maps to theme | later |
+| Styles (`#[…]`, `*-style`) | GUI titlebar strip and tabs render them since waves A/B (2026-08-20); zz-tui still drops them before the wire; the terminal-renderer styles (`pane-*border-style`, `window-style`, `mode-style`) are C3 | partial |
 | `source-file -F`/`-n`/`-v` | format-expanded paths, parse-only, verbose printing — deferred from phase 1 | later |
 
 `switch-client` is **not** mechanical: a pane script's `switch-client` must retarget some
@@ -710,9 +743,11 @@ this list is the campaign-level index of it plus the items that never got a matr
 
 **Deferred mechanics (owner in parentheses):**
 
-- Array options as a category (`status-format[N]`, `command-alias`, `terminal-features`):
-  indexed spellings parse and answer silently; storage/rendering unimplemented (styles
-  wave / TUI phases).
+- Array options as a category (`status-format[N]`, `command-alias`, `terminal-features`,
+  `update-environment`, …): all eight store with indexed semantics since the Lane-2 sweep
+  (2026-08-20), none is consumed — dispatch uses the static alias table, the status
+  renderer reads `status-left`/`-right`, and session seeding hardcodes the default
+  `update-environment` list (C3 / TUI phases).
 - Styles (`#[…]`, `*-style` options) and `source-file -F/-n/-v` (marked *later* in the
   phase-4 table; styles are TUI-meaningful).
 - `#()` job bodies: both sides strftime the whole string first (pinned by test), but the
@@ -830,6 +865,12 @@ this list is the campaign-level index of it plus the items that never got a matr
 
 # The options residue — three lanes (decided 2026-08-19)
 
+*Count correction, 2026-08-20:* the wave stamps below ("72/180", "78/180", "78 behave")
+are the campaign's running tallies of options given a typed home in the honest-knobs and
+status structs. A consumer trace on 2026-08-20 found that twelve of those are never read —
+the true split is **66 behave / 114 store-only**, and the divergence matrix now carries
+both rosters. The stamps are left as written; the matrix is the number to quote.
+
 The 2026-08-19 full inventory: 38 of the pin's 180 named options are implemented, 142 are
 recognized-but-unimplemented, 7 of 8 array options have no storage, and `set-option
 <hook-name>` plus indexed array spellings **silently succeed doing nothing** (the
@@ -911,7 +952,7 @@ the filter; a live image.nvim/kitty-icat smoke with `allow-passthrough on`.
 
 **Lane-2 sweep SHIPPED 2026-08-20 — every option in the table now has a home (180/180
 store, 78 behave):** the remaining ~90 names gained pin-exact defaults, validation, scope,
-inheritance, and listing shapes; the seven array options gained real indexed storage with
+inheritance, and listing shapes; the eight array options gained real indexed storage with
 the pin's separators, hole-reuse, and `name[N]`/`-u name[N]` semantics; and `set-option
 <hook-name>` writes the hook table instead of silently succeeding. Both silent-success
 paths are dead. Bare `show-options -s`/`-g`/`-gw` byte-match the pin, and both smoke

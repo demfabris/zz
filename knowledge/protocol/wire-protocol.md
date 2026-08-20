@@ -393,6 +393,14 @@ unbounded `#()` script off the wire.
   then forces the peers to agree. A rejected first frame gets a best-effort mismatch response before
   disconnect; clients also classify the received envelope version or the daemon's versioned identity
   file, so an older local daemon produces a legible restart path rather than a bare EOF.
+- **`ClientHello.capabilities` carries the caller's terminal.** Since 2026-08-20 an Interactive
+  client sends `client-terminal-v1` when its stdin and stdout are both a TTY. That is tmux's
+  `CLIENT_TERMINAL` flag: the daemon uses it to decide whether `new-session`/`attach-session` may
+  attach the caller, and the engine turns a missing token into the pin's
+  `open terminal failed: not a terminal`. Command clients never send it; Control clients are
+  exempt (the pin's `server_client_open` returns early for `CLIENT_CONTROL`), and the GUI defaults
+  to sending it. Because the field is an already-shipped `Vec<String>`, adding a token changes no
+  encoding and needed **no version bump** — the phase-8 attach wave shipped entirely on v69.
 - **Capability strings are now descriptive, all of them.** The daemon advertises a fixed list in
   `ServerHello.capabilities` (`mux-v1`, `terminal-viewport-v3`, `terminal-row-patches`,
   `terminal-appearance-v2`, `config-overrides-v1`, `browser-panes`, `tmux-config-subset`,

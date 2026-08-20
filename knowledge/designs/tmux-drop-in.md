@@ -535,7 +535,7 @@ appendix: arity/flag rejection wording, the `usage:` fallback, and the
   `~` expansion** for unquoted and just-inside-double-quote leading tildes, because
   stored bindings are `list-keys`-visible and the pin stores absolute paths.
 
-## Phase 8 — the attach contract (rows 1, 3, 4 closed; row 2 — the new-session client seam — remains)
+## Phase 8 — the attach contract (CLOSED 2026-08-20; all four rows)
 
 The four invocations the alias lives on (rows 3-4 largely closed by 7a
 2026-08-18, row 1 by the launcher wave 2026-08-19):
@@ -543,7 +543,7 @@ The four invocations the alias lives on (rows 3-4 largely closed by 7a
 | Invocation | tmux | zz today |
 | --- | --- | --- |
 | `tmux` | new session + attach this TTY | CLOSED 2026-08-19 — the installed launcher rewrites bare argv to `attach`: TUI on a TTY, lazy first-session create. A re-invocation attaches to the live session where tmux would stack a new one (deliberate); the GUI moved behind the exact verb `zz app` |
-| `tmux new -s foo` | create **and** attach this process | creates, exits — the daemon applies `MuxEffect::Attach` only for Interactive clients |
+| `tmux new -s foo` | create **and** attach this process | CLOSED 2026-08-20 — the CLI routes attaching forms through the TUI on an Interactive connection; the engine runs the pin's check order and refuses off a TTY without creating anything |
 | `tmux attach -t foo` | attach this TTY | works — full `-t`/`-d` grammar, TUI attach on a TTY, engine-identical `can't find session:` headless (7a) |
 | `tmux attach` | attach, starting the server if needed | works — autostarts the daemon (CMD_STARTSERVER), `no sessions` on an empty server, TTY check last (7a) |
 
@@ -557,12 +557,40 @@ private `tmux` PATH shim gated by the `ZZ_STARTUP_REENTRY` capability so `run-sh
 ship the CLI launcher as `cli`, `/usr/bin/zz` points at it, and the desktop entry runs
 `zz app`.
 
-Still needed (row 2): a story for `new-session` attaching the calling process — run the TUI
-client, or a Command→Interactive upgrade; the daemon applies `MuxEffect::Attach` only to
-Interactive/Control clients — plus the no-tty `new-session` divergence deferred from 7a
-(pin: `open terminal failed: not a terminal` rc 1; zz: detached create rc 0) and
-`mouse`/`escape-time` consumption in the TUI. Shares the client-seam work with
-`switch-client` (phase 4).
+The 2026-08-20 client-seam wave closed row 2. `zz new -s foo` on a TTY now creates the
+session and attaches the calling process; off a TTY it refuses exactly like the pin and
+creates nothing.
+
+The shape, deliberately: **no connection upgrade and no protocol bump.** `zz attach`
+already bypasses the Command client (`run_command_mode` intercepts it and runs the TUI on
+an Interactive connection), so `new-session` rides the same precedent — the CLI routes any
+*attaching* invocation of the chain to the TUI, and the whole `\;` chain executes on that
+Interactive connection. The engine gained tmux's `CLIENT_TERMINAL` as a three-state
+`ClientTerminal { NoClient, Absent, Present }` on the execution context, and the client
+declares its terminal through a `client-terminal-v1` token in `ClientHello.capabilities` —
+a free-form `Vec<String>`, so the encoding is unchanged and `PROTOCOL_VERSION` stays 69.
+
+The pin's check order is reproduced exactly, and **no failing check creates a session**:
+`-A` delegate (which ignores `-d`) → duplicate → nested → terminal → `-x`/`-y`
+(`cmd-new-session.c:122-238`). Three states, not two, because the pin distinguishes a NULL
+client from a client without a terminal: `if (c == NULL) detached = 1` (`:164-167`) makes a
+config's bare `new-session` create detached, and `if (c == NULL) return CMD_RETURN_NORMAL`
+(`cmd-attach-session.c:71-72`) — placed *above* target resolution — makes a config's
+`attach-session`, `new-session -A`, and even `attach-session -t bogus` silent successes.
+Hooks run as NULL clients too. Four review rounds were needed to get those three states
+right; the two-state version silently broke both config and hooks.
+
+Also closed with the wave: `-P`/`-F` output (default template `#{session_name}:`), the
+`width/height too small|too large|invalid` family, literal `-x -`/`-y -`, and the
+`duplicate session:` string (it had carried a stray `name` word since before the campaign).
+
+Still open on this surface, ledgered rather than done: `-x -`/`-y -` use 80×24 instead of
+the *client's* size (the pin reads `c->tty.sx/sy`, which needs the client's terminal size
+plumbed to the engine); the nested-session check (`server_client_check_nested` compares the
+client's tty against this server's pane ttys — keying off `$TMUX` alone is wrong, since a
+fake `$TMUX` on a non-pane pty still attaches on the pin); the client-exit notices
+(`[exited]`, `[detached (from session X)]`); and `switch-client`, which shares this seam but
+needs to retarget *another* client and so keeps its own wave.
 
 # Acceptance
 
@@ -580,7 +608,9 @@ Interactive/Control clients — plus the no-tty `new-session` divergence deferre
   under decision 3. The carve-out is accepted, not accidental.
 - `bench/run.sh` shows no regression after phase 3.
 
-**Full drop-in (phase 8):** the four attach-contract invocations behave on a TTY.
+**Full drop-in (phase 8):** the four attach-contract invocations behave on a TTY. **Met
+2026-08-20** — verified live against the pin on a pty (`new -s x \; split-window -h` →
+alt screen, panes `0` and `1` on both) and byte-exact headless for every error row.
 
 # Out of scope, permanently
 

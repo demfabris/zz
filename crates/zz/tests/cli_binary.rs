@@ -667,6 +667,96 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn attached_tui_renders_daemon_authored_styled_status_labels() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        for arguments in [
+            ["new-session", "-d", "-s", "styled", "-n", "main"].as_slice(),
+            ["set", "-t", "styled", "status-left", "#[fg=red,bold]LEFT"].as_slice(),
+            ["set", "-t", "styled", "status-right", "#[bg=blue]RIGHT"].as_slice(),
+            [
+                "setw",
+                "-t",
+                "styled:0",
+                "window-status-current-format",
+                "#[underscore]CUSTOM",
+            ]
+            .as_slice(),
+        ] {
+            let output = fixture.run(arguments);
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let Ok((mut master, slave)) = open_pty() else {
+            return;
+        };
+        rustix::io::ioctl_fionbio(&master, true).expect("set pty master nonblocking");
+        let stdin = slave.try_clone().expect("clone pty stdin");
+        let stdout = slave.try_clone().expect("clone pty stdout");
+        let mut child = fixture
+            .command()
+            .args(["attach-session", "-t", "styled"])
+            .stdin(Stdio::from(stdin))
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(slave))
+            .spawn()
+            .expect("spawn styled TUI attach");
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut captured = Vec::new();
+        let mut early_status = None;
+        let rendered = loop {
+            let mut buffer = [0_u8; 4096];
+            match master.read(&mut buffer) {
+                Ok(0) => {}
+                Ok(count) => captured.extend_from_slice(&buffer[..count]),
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                Err(_) => {}
+            }
+            if [
+                b"LEFT".as_slice(),
+                b"RIGHT".as_slice(),
+                b"CUSTOM".as_slice(),
+            ]
+            .into_iter()
+            .all(|needle| {
+                captured
+                    .windows(needle.len())
+                    .any(|window| window == needle)
+            }) {
+                break true;
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+            if let Some(status) = child.try_wait().expect("poll styled TUI attach") {
+                early_status = Some(status);
+                break false;
+            }
+            thread::sleep(Duration::from_millis(5));
+        };
+
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(master);
+
+        assert!(
+            rendered,
+            "child exited early={early_status:?}; pty output={}",
+            String::from_utf8_lossy(&captured),
+        );
+        assert!(!captured.windows(2).any(|window| window == b"#["));
+        assert!(!captured.windows(6).any(|window| window == b"0:main"));
+    }
+
+    #[test]
     fn chain_error_after_attachment_is_rendered_inside_the_tui() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
@@ -1549,8 +1639,11 @@ mod daemon_autostart {
             let notifications = stream
                 .outside
                 .iter()
-                .filter(|line| !line.starts_with("%output ") && line.as_str() != "%exit")
-                .skip_while(|line| line.starts_with("%window-renamed @0 "))
+                .filter(|line| {
+                    !line.starts_with("%output ")
+                        && !line.starts_with("%window-renamed @")
+                        && line.as_str() != "%exit"
+                })
                 .collect::<Vec<_>>();
             assert!(notifications[0].starts_with("%window-add @"));
             assert_eq!(notifications[1], "%sessions-changed");
@@ -1573,7 +1666,8 @@ mod daemon_autostart {
                     && fields.get(3).is_some_and(|layout| checked_layout(layout))
             }));
             assert!(
-                notifications
+                stream
+                    .outside
                     .iter()
                     .any(|line| line.starts_with("%window-renamed @") && line.ends_with(" during"))
             );

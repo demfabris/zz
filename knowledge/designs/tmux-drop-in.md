@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux drop-in plan
 description: "The alias-tmux=zz plan: 100% of tmux's command grammar, options, formats, and geometry on tmux names, zz power moved to superset verbs, exec commands behind an import-time consent gate — nine phases ending at the TTY attach contract, one permanent skip (linked windows), one explicit non-goal (real-tmux socket interop)."
-status: Shipped — all nine phases complete 2026-08-20; residue and remaining waves listed under "Where this stands"
+status: Original nine phases shipped 2026-08-20; campaign planned against 57ae502, safe prelude implemented locally, core campaign parked for approval
 tags:
 - tmux
 - compatibility
@@ -131,7 +131,7 @@ corpus data: Oh My Tmux, fzf-tmux, tmux-sessionizer, and the seven pinned plugin
    broad: its 45 remaining pairs split into 25 server/core behaviors, 13 true
    client/presentation behaviors, and 7 parked context/model cases. Future tranches follow
    that ownership instead of moving server work into zz-tui.
-3. **The TUI consumes its options and client-owned flags** — zz-tui does not depend on zz-mux and reads no tmux
+3. **The TUI consumes its options and client-surfaced state** — zz-tui does not depend on zz-mux and reads no tmux
    option: `mouse`, `escape-time`, `status-position`/`-justify`, the status styles, plus the
    13 genuinely client/presentation-owned flag pairs and the attach residue that shares the
    surface (the nested-tty refusal,
@@ -145,9 +145,10 @@ corpus data: Oh My Tmux, fzf-tmux, tmux-sessionizer, and the seven pinned plugin
    fabrico already decided (`pane-*border-style` colors, `window-style`/
    `window-active-style` dimming, `mode-style`). Add the `BEHAVES` list + drift test.
 5. **`source-file` diagnostics on the CLI** — exit 1 with the pin's `path:line: message`
-   where today the plain CLI exits 0 silent (the shape already exists as an event warning;
-   the CLI event-routing path must move with it and gain direct diagnostic coverage). Small;
-   rides wave 2.
+   where today the plain CLI exits 0 silent. Revalidation found that parse and glob failures
+   fit the current response types, but the zz-only unsupported summary cannot reach stderr
+   with exit 0 because Command responses have no stderr channel. Keep the whole item parked
+   until that response contract is approved rather than splitting one command's diagnostics.
 6. **Optional waves** — the 7c error-wording appendix (25 `needs a value` sites, `unknown
    flag -X`, the `usage:` fallback), key-string parity (`list-keys` padding, `C-zz` prefix
    strictness), `resize-window` (also unparks `window-size manual`), the prompt-history
@@ -160,6 +161,472 @@ corpus data: Oh My Tmux, fzf-tmux, tmux-sessionizer, and the seven pinned plugin
 Hardware-pending items that need fabrico rather than code: the wave-B status-bar visual
 smoke, a live `allow-passthrough` image smoke, the DCS-filter bench A/B, and an iTerm2
 `-CC` run.
+
+# Final compatibility campaign (planned at `57ae502`)
+
+This campaign closes items 3 through 6 from the live queue, then works through the
+remaining flag ledger. File-and-line anchors in this section refer to commit `57ae502`.
+Before each wave starts, revalidate its anchors and assumptions against the current tree.
+
+The unattended implementation boundary allows CI fixes and client consumption of behavior
+the daemon already owns. Append-only contract plumbing requires prior approval. Work that
+changes mux, daemon, session, lifecycle, parsing, targeting, geometry, wire contracts, or
+command semantics stays planned until fabrico approves it. The review after each wave must
+re-check this boundary.
+
+## Reviewed execution split (2026-08-20)
+
+Three read-only source reviews checked this section at `57ae502`. The unattended work is a
+no-wire safe prelude:
+
+1. Restore CI on Linux, Windows, and macOS. The macOS failure is the isolated
+   `control_notifications_layout_and_output_follow_the_live_socket_stream` event-ordering
+   failure in addition to the Linux and Windows failures listed below.
+2. Add the 67-name `BEHAVES` roster and drift test.
+3. Move the complete style parsing unit into `zz-protocol`: `TmuxStyle`, `TmuxColour`,
+   `parse_styled_segments`, `parse_style`, and `parse_tmux_colour`, including the X11 color
+   dependency now reached through `zz-mux::formats`. Re-export the public surface from
+   `zz-mux`.
+4. Fix the TUI's existing-wire status bug: parse the styled `left`, `right`, and
+   `status_label` strings it already receives, and build the window list from
+   `status_label`. Position, justify, mouse, escape-time, title, tty facts, client size, and
+   read-only policy wait for the protocol and core campaign.
+5. Park `source-file` diagnostics. Parse and glob errors fit the existing response variants,
+   but the required unsupported-command summary cannot reach stderr with exit 0 without a
+   response-contract change or brittle CLI text classification.
+
+Protocol v71 stays a single bump, but it starts after fabrico approves the core semantics.
+This keeps the bump from carrying undefined prompt fields, a custom terminal-codec change,
+an ownership-changing `PaneIndicator` string, and optional lock messages before their
+behavior is settled.
+
+## Campaign choices
+
+1. Use one append-only protocol bump, v71, at the start of the approved core campaign. The
+   safe prelude makes no wire change.
+2. Move the complete style and tmux-color parser unit from `zz-mux` to `zz-protocol`.
+   `style.rs` is not pure at `57ae502`: it imports `TmuxColour` and `parse_tmux_colour`
+   from `zz-mux::formats`, whose named-color path calls `zz_terminal::parse_x11_color`.
+   Move that unit together and re-export it from `zz-mux` so existing consumers remain
+   stable.
+3. Reuse existing channels where they preserve semantics. Terminal appearance uses the
+   per-pane appearance bridge. Initial tty and size facts use `ClientHello.capabilities`;
+   later size changes use the v71 client-size input. Park `remain-on-exit-format` until
+   terminal core owns a post-worker VT injection or frozen-view reconstruction seam.
+
+The starting ledger has 129 unsupported command-and-flag pairs. Waves B through D remove
+15, leaving 114. The revised G plan assigns 85 implementations and names 29 parked pairs,
+including the four client-environment flags and `split-window -I` omitted from the first
+count.
+
+## Wave 0 - CI green
+
+**Implemented and reviewer-closed locally 2026-08-21.** Linux gates the macOS-only helper
+and test imports. The Windows lock now resolves `gpu-allocator 0.28.0` against the same
+`windows 0.62.2` types as `wgpu-hal 30.0.0`; an MSVC cross-check passes. The macOS
+control-notification failure was a test filter that removed automatic rename only at the
+start of the stream. The test now removes asynchronous rename events from the positional
+sequence and asserts the explicit rename against the unfiltered stream. Claude's second
+read-only review returned MERGE-READY after the first round found both test issues.
+
+- Linux: gate `startup_directory_environment` and its tests in
+  `crates/zz/src/bin/zz_cli.rs` with the same macOS cfg as `launch_application`.
+- Windows: resolve the `gpu-allocator` and `windows` crate
+  `ResourceCategory: From<&D3D12_RESOURCE_DESC>` mismatch at the registry dependency edge.
+  `gpu-allocator 0.28.0` resolves `windows 0.59.0`, while `wgpu-hal 30.0.0` resolves
+  `windows 0.62.2`. The carried zed fork does not own either registry pin, so
+  `just fork-rebase zed` is not the fix route.
+- macOS: isolate
+  `daemon_autostart::control_mode::control_notifications_layout_and_output_follow_the_live_socket_stream`.
+  The failed CI run observed `%window-renamed` before `%sessions-changed`; establish whether
+  this is the recorded load-only ordering flake before changing production ordering.
+
+## Wave A - foundations
+
+**Safe foundation slice implemented locally 2026-08-21.** `BEHAVES` now publishes and
+test-pins the 67 consumer-traced options. The complete tmux color and styled-segment parser
+lives in `zz-protocol`, with the existing `zz-mux` exports preserved. Protocol v71 and every
+behavior-changing field remain parked in A3. Claude Sonnet's independent read-only review
+returned MERGE-READY with no blockers or should-fix findings.
+
+### A1. `BEHAVES` roster and drift test
+
+Add `pub const BEHAVES: &[&str]` beside `OPTION_TABLE_ORDER` in
+`crates/zz-mux/src/tmux_options.rs`, seeded with the 67 behaving names from
+`knowledge/tmux/divergences.md`. Add a test beside
+`listing_order_covers_every_non_hook_table_option_once` that requires every roster entry to
+exist in the table and pins the initial count to 67. Each later wave moves names into the
+roster and updates the assertion.
+
+### A2. Shared style parser
+
+Move the complete parser unit to `crates/zz-protocol/src/style.rs`: `TmuxStyle`,
+`TmuxColour`, `parse_style`, `parse_styled_segments`, and `parse_tmux_colour`, including the
+named X11 color path. Re-export the same symbols from `zz-mux` so existing consumers do not
+move. Keep the parser tests with the implementation.
+
+### A3. Protocol v71 (parked until core approval)
+
+The approval audit completed read-only on 2026-08-21. Append the following fields and
+variants as one bump. Postcard structs and enums stay append-only; the manually encoded
+terminal lane retains its explicit byte layout.
+
+| Contract | Exact shape | Consumer and ownership |
+| --- | --- | --- |
+| Mux options | Append `MuxOptionKey::{Mouse, EscapeTime, Prefix2}` with tags 14 through 16. Keep `Prefix` and `Prefix2` global in v71 because the shared `KeyTables` own one prefix pair; tmux-style session-scoped prefixes require a separate core refactor. | B2, B3, C2. `Mouse` publishes the attached session's effective value; `EscapeTime` and `Prefix2` publish the global values. |
+| Status | Append `StatusLine.{title: String, base_style: String, rows: Vec<String>, position: StatusPosition, message_line: u8, customized: bool}`. Keep the existing `left` and `right` first for v70 layout. Move `StatusPosition` into `zz-protocol` and re-export it from `zz-mux`; keep justify inside the expanded row formats. Cap rows at five and every string at 4 KiB. Reject a sixth row before allocation, require `base_style` to parse as a style, and require `message_line == 0` for no rows or less than `rows.len()` otherwise. | B1 and B4, C3. `rows` is the authoritative personalized status block and drives `is_empty`: zero rows means off, blank rows still consume geometry, and sparse `status-format` indices do not compact. `base_style` paints blank rows. `customized` controls zz-native hints even when an explicit value equals the default. Title still publishes while status is off. |
+| Display panes | Append `PaneIndicator.label: String`, bounded to 1 KiB; remove its current `Copy` shape and borrow it in helpers. | C4. The daemon expands `display-panes-format` separately in each pane context and both clients paint the result. |
+| Pane borders | Append `PaneSnapshot.{border_colour, active_border_colour}: Option<TmuxColour>` and give `TmuxColour` validated wire serialization. `None` means theme fallback. | C9. Pane-scoped fields preserve pane to window to global inheritance; one pair on `WindowSnapshot` cannot represent distinct pane overrides. Keep non-color attributes ledgered. |
+| Prompt | Keep `CommandPromptKind::{Command, Value}`. Append `prompt_type: CommandPromptType`, `mode: CommandPromptMode`, and `no_freeze: bool`; types are `Command|Search` and `Text|Single|Numeric|Incremental|Key|BackspaceExit`. Do not add a prompt-key action. | D1. `kind` remains presentation state, while `-T` is independent. Resolve mode flags with pinned priority `-1`, `-N`, `-i`, `-k`, `-e`; preserve `-C` independently. Route raw special-mode keys through the existing pane-targeted `InputMessage::Key`. The daemon prompt state machine returns handled or pass so `-N` can submit digits and then feed the first non-digit into normal key processing. |
+| Copy mode | Append `hide_position: bool` after `TerminalMode::Copy.total`; encode Copy as tag plus two `u64`s plus one canonical bool byte. Append `TerminalViewAction::EnterCopyModeWith { scroll_exit, hide_position }` at tag 27 while preserving both old variants. | D2. The action shape lets `-e` and `-H` compose; both clients suppress only the position text. |
+| Choosers | Append bounded `key: String` to `ChooseTreeItem` and `ChooseBufferItem`; cap it at 64 bytes and use empty for no shortcut. | D4. Existing actions already carry `KeyInput`. Default rows use `0..9`, then `M-a..M-z`; invalid keys become empty and duplicate keys select the first row before navigation. `-N` preview state remains internal. |
+| Command stderr | Append `stderr: String` after `CommandResponse::Success.exit_code`, using the existing frame bound. Preserve the current output-only client API and add a stream-aware result for the CLI. | Wave E. v71 initializes it empty; Wave E later populates exact stdout and stderr independently, including stderr with exit 0. |
+| Timed-message lifecycle | Append `message_id: u64` to `EventPayload::TimedClientMessage` and append `EventPayload::TimedClientMessageCleared { message_id }` at tag 46. The daemon assigns identities and owns timers. | D3 and D1. The daemon freezes terminal publication per client for an ordinary message or prompt, keeps PTY parsing live, then publishes one full latest viewport before patches resume. `display-message -C` and incremental or `-C` prompts skip the freeze. Identity prevents an old timer from clearing a replacement; an explicit clear makes duration-zero and TUI behavior converge. |
+| Client terminal facts | Keep the initial `client-tty-v1:` and `client-size-v1:` values in `ClientHello.capabilities`; append `InputMessage::ClientTerminalSize { columns, rows }` at tag 17 for later `SIGWINCH` updates. | B5. The daemon uses current per-client facts for nested-session checks, dash dimensions, and client width/height formats. Clients collect the initial values before connect, then publish size changes. |
+
+`MuxOptionsChanged` remains a complete replacement map but becomes per-recipient for
+session-effective values. Publish the effective map after attach and client switch. A global
+mouse write recomputes every attached client because session overrides may mask it; a
+target-session write refreshes only clients attached there. The mux effect must carry scope.
+`StatusLine` stays independently personalized and equality-deduplicated.
+
+Exclude the optional lock pair from v71. If F5 is later approved, give
+`EventPayload::Lock { command }` and `InputMessage::Unlocked` their own protocol bump and
+explicit client process-execution policy rather than freezing that optional contract here.
+
+Update the protocol constant, frozen byte tests, protocol claim tests,
+`knowledge/protocol/wire-protocol.md`, `knowledge/protocol/snapshots.md`,
+`knowledge/crates/zz-protocol.md`, managed protocol index, and root protocol summary in the
+bump. Add boundary and malformed-decode tests for every new bounded or typed field, plus
+two-client/two-session convergence tests for personalized mux options and status metadata.
+Add bounded-row tests for zero through five rows, sparse and explicit-empty arrays,
+message-line clamping, base style, title with status off, and rejection before allocation.
+
+## Wave B - TUI option consumption and attach residue
+
+At the source anchor, the TUI ignored `CoreEvent::MuxOptionsChanged`, stored no mux option
+state, and printed daemon-authored `#[style]` markers as text. The safe prelude fixed the
+existing-wire text and style path. This wave adds the remaining option and row contracts.
+
+The safe prelude implements only styled parsing and `status_label` consumption in item 1,
+using the v70 fields already on the wire. The rest of Wave B waits for v71 and core approval.
+
+**Existing-v70 slice implemented locally 2026-08-21.** The TUI now parses styled runs for
+the daemon-expanded left, right, and per-window labels; uses `status_label` instead of
+reconstructing window names; and includes style state in its repaint cache. Its existing
+three-row sidebar, bottom-row placement, left/right gap policy, indicators, detach hint, and
+character-count clipping remain unchanged. The focused 71-test TUI suite, full 51-test CLI
+binary suite, live PTY styled-status proof, and focused no-dependency clippy pass. Claude
+Sonnet's independent read-only review returned MERGE-READY with no blockers or should-fix
+findings after rerunning those gates.
+
+1. Status line:
+   - Have `zz-mux` expose the effective sparse `status-format` array. The daemon expands
+     each active row in personalized client context, including window, pane, and session
+     loops, time, styles, ranges, and list metadata. Resolve `status-style`, then apply
+     non-default `status-fg` and `status-bg` precedence into `base_style`.
+   - Publish no rows for `status off`; publish indices 0 through `status-1` for values one
+     through five. Default row 0 contains status-left, the window list, and status-right;
+     row 1 contains the pane list; row 2 contains the session list; rows 3 and 4 are blank.
+     Missing numeric entries paint blank rows and do not pull later entries upward.
+   - Keep `left`, `right`, and `WindowSnapshot.status_label` for legacy/native summary
+     surfaces, but stop reconstructing the tmux status block from them.
+   - Add one shared status-row compositor for both clients. It owns display width, style,
+     alignment, fill, list focus and truncation, markers, and window/pane/session hit ranges.
+     Widen pane and session range identifiers to `u64` before using them for input.
+   - Put the status block at the top or bottom. Top shifts the main canvas by `rows.len()`;
+     bottom shrinks it without shifting. Suppress the block when terminal height cannot
+     leave pane content. Blank rows still consume height and paint `base_style`.
+   - Keep the three-row zz-native sidebar beside the main content. Render every tmux row
+     across the main columns rather than replacing pane/session rows with sidebar content.
+     GPUI gets a dedicated top or bottom N-row container.
+   - Treat row count and position changes as layout events: recompute geometry, repaint,
+     resend terminal sizes, and resynchronize browser surfaces.
+   - `message_line` selects the row that prompts and messages replace. With status off,
+     create one virtual message row at the configured top or bottom position.
+   - Keep `PREFIX` and `COPY` state indicators. Drop the literal `Ctrl-\\ detach` hint when a
+     user explicitly sets a status option.
+   - Track global and session explicit status writes separately from effective
+     `StatusFormats`, including explicit values that equal defaults and later unsets. Track
+     explicit `status`, `status-*`, and `status-format` writes.
+   - Make scoped `status-format` array writes refresh attached clients; current generic
+     array writes emit no status effect.
+   - Move `status-format`, `status-justify`, `status-position`, `pane-status-style`,
+     `pane-status-current-style`, `window-pane-status-format`,
+     `window-pane-current-status-format`, `session-status-style`,
+     `session-status-current-style`, and `message-line` into `BEHAVES` with this slice.
+2. `mouse`: gate outer-terminal mouse modes on the session's `Mouse` option, re-emit or
+   retract them on `MuxOptionsChanged`, and reject mouse events at the input seam when off.
+3. `escape-time`: replace the hardcoded 25 ms receive timeout with the `EscapeTime` option.
+   The pinned default is 10 ms, so tests must cover the default path.
+4. Title source and sinks:
+   - Implement C3's `set-titles` and `set-titles-string` expansion first. Publish the title
+     even when `status off` bypasses status-row rendering.
+   - Write OSC 2 from the TUI when a non-empty `StatusLine.title` changes and set the GPUI
+     window title from the same field.
+5. Attach residue through capability tokens:
+   - Collect tty and size before the connection. `client-tty-v1:/dev/ttysN` lets the daemon
+     compare the caller tty with pane ttys and issue the pinned nested-session refusal.
+   - `client-size-v1:COLSxROWS` supplies the initial `-x -` and `-y -` creation dimensions
+     and `ClientFormatFacts.width` and `height`; publish later `SIGWINCH` changes through the
+     v71 client-size input.
+   - Define tty discovery for Command clients rather than limiting the check to TUI attach.
+6. Read-only clients: insert the client on `attach-session -r`, then gate terminal and
+   browser key/text, paste, mouse, divider resize, prompt and chooser actions, uploads, and
+   every direct raw-input route at the daemon input funnel.
+
+Use the phase-8 PTY fixture in `crates/zz/tests/cli_binary.rs` to prove that styled status
+content contains no literal `#[`, top status occupies row zero, `mouse off` emits no
+`?1003h`, and nested attach prints the pinned refusal.
+
+## Wave C - C3 knob batch
+
+1. Alerts: generalize `raise_pane_bell` into an alert path for bell, activity, and silence.
+   Track per-window activity and silence flags, reset silence deadlines on output, aggregate
+   pane state, and clear flags on selection. Generalize the client-keyed display-panes
+   deadline code or add a pane/window timer owner. Expose `#` and `~` through formats, apply
+   `window-status-activity-style`, and fire the alert hooks. Move `monitor-activity`,
+   `monitor-silence`, `monitor-bell`, `activity-action`, `silence-action`, `visual-activity`,
+   `visual-silence`, and `window-status-activity-style` into `BEHAVES` and add deterministic
+   differential scenarios.
+2. `prefix2` and `send-prefix -2`: store a second prefix in the shared key tables, arm and
+   re-arm on either prefix, publish it through `MuxOptionKey::Prefix2`, and send nothing when
+   the second prefix is unset. Remove Oh My Tmux's last expected warning.
+3. `set-titles` and `set-titles-string`: execute this source half before B4's client sinks.
+   Expand the title per client and publish it independently of status visibility.
+4. `display-panes-format`: expand the format per pane into `PaneIndicator.label`. Both
+   clients parse styled segments before painting, including the default `#[align=right]`;
+   honor overlay alignment and clip the resulting row to the pane indicator width.
+5. `remain-on-exit-format`: park until the terminal actor has an approved post-worker VT
+   injection or frozen-view reconstruction seam. The current retained-pane path marks the
+   pane dead after the live PTY/VT actor exits, so the proposed feed path does not exist.
+6. `command-alias`: expand one alias layer before canonical command lookup and in bind-time
+   validation and option-command normalization. Expand before daemon command preemption so
+   aliases can target daemon-owned commands. Parse the stored value with the pinned argv
+   grammar, append caller arguments, and do not recurse. The six stored defaults match the
+   pin and none is duplicated in `CommandSpec.aliases`, so the catalog needs no alias
+   deletion.
+7. `update-environment`: read the global array option during session seeding. Keep the
+   client's environment flags ledgered because the current wire does not carry that
+   environment.
+8. Lifecycle trio: add explicit-set tracking and honor `exit-empty`, `exit-unattached`, and
+   `destroy-unattached` only after the user sets them. Override the current automatic
+   shutdown path with that effective policy. Keep `destroy-unattached=keep-group` ledgered
+   while linked session groups remain the permanent compatibility skip. Test lifecycle
+   behavior in daemon tests so a scenario does not kill its harness.
+9. Renderer styles:
+   - Feed `window-style`, `window-active-style`, `mode-style`, and the three copy-mode styles
+     through the existing per-pane appearance bridge.
+   - Carry typed `pane-border-style` and `pane-active-border-style` colors on each v71
+     `PaneSnapshot`. Clients fall back to theme colors when the fields are `None`. Keep
+     non-color attributes as a documented divergence.
+   - Resolve border colors per pane during personalized daemon snapshot stamping. Refresh
+     active and inactive appearance after pane/window selection and relocation as well as
+     option writes.
+
+The full B and C target moves `BEHAVES` from 67 to 105: 12 Wave B consumers and 26 Wave C
+consumers. The C tranche, if approved without `remain-on-exit-format`, stops at 104.
+Regenerate the option rosters in `knowledge/tmux/divergences.md` and enforce both expected
+deltas in tests.
+
+## Wave D - daemon-owned interactive state
+
+1. Implement `command-prompt -1 -k -N -T -i -C -e` in the daemon-owned prompt state
+   machine. Clients render state and forward raw keys. Keep Command and Search histories
+   separate; run special modes through the pane-targeted key path; let numeric mode submit
+   and pass its first non-digit into normal input. Plain prompts use the shared per-client
+   freeze lifecycle, while incremental and `-C` prompts keep publishing terminal frames.
+2. Implement `copy-mode -H` through a `hide_position` field that suppresses the copy
+   position in both clients.
+3. Implement `display-message -C` as tmux's `no_freeze` behavior: keep terminal updates
+   flowing while the status message is displayed. Plain `display-message` freezes
+   presentation for that client, and clear resumes it with a full latest viewport. `-C`
+   does not clear the message. Cover positive timers, duration zero and key clear,
+   replacement-message timer safety, and TUI clearing.
+4. Implement `choose-tree` and `choose-buffer -K -N`: the daemon expands a key for each row,
+   the key selects the row, and both clients show it. One `-N` disables preview; repeated
+   `-NN` selects tmux's large-preview mode. zz can accept the no-preview case and must ledger
+   large preview until it has a matching presentation.
+
+Implement and review D2 and D4 before the shared freeze work. Implement D3 next, then reuse
+its lifecycle in D1. Use control-mode and PTY tests for interactive prompt behavior, then
+delete the matching refusal assertions.
+
+## Wave E - `source-file` CLI diagnostics
+
+**Parked after source and live-behavior revalidation 2026-08-21.** A3 adds the response
+stderr channel needed for mixed output and for the zz-only unsupported summary. CLI text
+classification remains rejected because it would leak daemon semantics into presentation
+code.
+
+For an explicit `source-file` issued by a Command client, append invalid-line diagnostics to
+stdout and return exit 1. Interactive and Control clients keep warning events and
+`%config-error`. A glob miss without `-q` uses `No such file or directory: path` on stderr
+and exits 1; a quiet miss produces no output and exits 0. Mixed invalid input and a glob miss
+populate both streams and exit 1. Preserve diagnostic order and duplicates. The zz-only
+`skipped N unsupported tmux command(s): name, ...` summary stays on stderr and exits 0 so a
+config with supported tmux behavior continues to load.
+
+Add a stream-aware command result while preserving the current output-only client API.
+Treat completed commands with exit 1 as successful protocol responses; reserve response
+errors for dispatch, transport, and server failures. The CLI prints both streams and stops
+a command chain on nonzero. Add CLI coverage for the glob-resolved matched path plus
+`:1: unknown command: wibble` on stdout with exit 1, the mixed-stream matrix, nested and
+multiple inputs, the default-config path, Control `%config-error`, and a smoke scenario that
+stages its fixture. `source-file -` remains in the separate G6 streaming contract.
+
+## Wave F - shared contracts and optional semantics
+
+0. Shared parser and count foundation: give daemon and mux handlers one catalog-driven
+   option and positional parser. Put reusable parsing beside `CommandSpec` in `zz-protocol`
+   or export one deliberate mux API. Add positional minima and maxima, then route the four
+   daemon parser exceptions through it. Add a machine-enforced unsupported-pair roster and
+   exact per-wave deltas; `BEHAVES` cannot measure flag work.
+1. Error contract, after F0: centralize pinned unknown-flag, missing-value, too-few and
+   too-many argument, alias, and usage fallback shapes. Treat this as a command-semantics
+   tranche rather than a text-only cleanup.
+2. Key grammar and tables: add a fallible canonical key parser, reject malformed modifier
+   tails, align bare `list-keys` output, and pin the supported stock copy-table metadata,
+   repeat flags, and actions. Preserve zz-native product bindings. Review missing actions
+   before importing more pinned rows. Complete this tranche before G4.
+3. `resize-window` and `window-size manual`: approve geometry policy on its own. Specify
+   absolute and relative precedence, ranges, persistent manual extent across viewer changes,
+   layout effects, PTY resize behavior, and differential fixtures. Stop resolving Manual as
+   Latest only after those invariants have tests.
+4. Prompt history, after A3 and D1: add typed Command and Search storage plus
+   `show-prompt-history` and `clear-prompt-history [-T type]`. Pin ordering, output, errors,
+   and prompt-to-history routing. Clearing rewrites persisted state so old entries do not
+   return after restart. Keep save-on-submit as the documented durability choice.
+5. Lock and client process control: defer for a separate protocol and execution-policy
+   approval together with `detach-client -E`. Settle target fanout, stale unlock rejection,
+   reconnect cleanup, input gating, shell/cwd/environment, process failure, raw-mode restore,
+   hooks, and `lock-after-time`. Keep the GUI behavior ledgered until it owns a lock flow.
+
+## Wave G - remaining server and engine flags
+
+Complete F0 before these tranches. For each pair, change the catalog's unsupported flag to
+an accepted flag or value and update the usage string in the same hunk. Add handler
+behavior, delete its named refusal test, add differential coverage, and update the exact
+unsupported-pair roster.
+
+Tranches:
+
+- G1 environment: carry repeated creation-command `-e KEY=VAL` through the internal spawn
+  effects for new session, window, and pane paths, with pinned validation and precedence
+  against session and global environment. Park all four `-E` pairs for `attach-session`,
+  `new-session`, `new-window`, and `split-window` until the client environment has an
+  approved wire contract.
+- G2 pane input and marking: `select-pane -d -e -m -M -g -P`, `last-pane -d -e`, the marked
+  pane target and format facts, and per-pane style storage. Gate every daemon input route,
+  keep one global marked pane, and clear it on pane relocation or death. Implement after C9.
+- G3a placement: `break-pane -a -b`, `new-window -b`, `join-pane -l`, and
+  `split-window -Z`.
+- G3b spawn metadata and styles: `split-window -k -m -R -s -S -T`. Keep the C5-dependent
+  subset parked until its terminal seam has approval; implement the independent subset only
+  after C9 defines per-pane metadata.
+- G3c wait lifecycle: implement `split-window -W` with command-queue ownership,
+  cancellation, client disconnect, and daemon lifecycle tests.
+- G4 keys: `list-keys -1 -a -N -O -P -r` and `unbind-key -a -q`. `Binding` already carries
+  `note: Option<String>` and its wire snapshot preserves it, so `list-keys -N` has backing
+  state. Implement after F2 and pin filtering, sort order, prefix formatting, widths,
+  missing targets, notes, and repeat metadata.
+- G5a chooser residue: `choose-buffer -F -k -y` and `choose-tree -F -h -k -y`.
+- G5b output, format, and filter behavior: the relevant `display-message`, `display-panes`,
+  `show-messages`, `source-file`, `capture-pane`, and `command-prompt` pairs.
+- G5c client and process control: the remaining `detach-client`, `attach-session`,
+  `new-session`, and `kill-*` pairs. Keep `detach-client -E` with F5's process-policy
+  approval.
+- G5d clipboard and client targeting: the remaining `set-buffer` and `load-buffer` pairs;
+  `-w` targets a client clipboard rather than the current pane-based broadcast.
+- G5e terminal engine and history: the remaining capture, copy-mode, clear-history,
+  send-keys, and resize-pane pairs. Review pending-output, escape, hyperlink,
+  alternate-history, reset, and target semantics before accepting each flag.
+- G5f mouse-driven behavior: `resize-pane -M` consumes an originating drag event and keeps
+  its own input and geometry tranche.
+- G6 binary stdin and stdout streaming: `split-window -I`, `load-buffer -`, `save-buffer -`,
+  and `source-file -`. Only `split-window -I` is an unsupported flag pair; the other three
+  are accepted positional grammar with missing behavior. Park the tranche until a dedicated
+  protocol defines bounded binary chunks, EOF, backpressure, cancellation, disconnect,
+  size limits, and binary stdout.
+- Keep 24 pairs parked: `move-pane` x10, `break-pane -W -x -y -X -Y`, `new-session -t`,
+  `kill-session -g`, `choose-tree -G`, `command-prompt -P`, `copy-mode -S`,
+  `send-keys -M`, `display-message -I`, and `show-messages -T -t`.
+
+The current ledger has 129 unsupported flag pairs across 30 commands. Waves B through D
+remove 15, leaving 114 for G and the parked contracts. The original G list omitted seven
+chooser pairs and four parked `-E` pairs; the unsupported-pair roster replaces prose
+arithmetic as the completion proof. With the seven chooser pairs assigned to G5a and the
+current `-E`, streaming, and explicit parked sets unchanged, the planned result is 85
+implemented and 29 parked.
+
+## Order and wave gates
+
+The completed safe prelude is `0 -> A1 -> A2 -> B1-existing-wire`. After core approval, run
+`A3 -> B with C3 title production -> C except C5 -> E -> D2 -> D4 -> D3 -> D1`. E proves the
+new response streams without interactive state. D3 establishes the freeze lifecycle before
+D1 reuses it for prompts.
+
+Continue with `F0 -> F1 -> F2 -> F3 -> F4 -> G1 -> G2 -> G3a -> independent G3b -> G3c ->
+G4 -> G5a..G5f`. C5 and its G3b dependents wait for a terminal injection design. F5 plus
+`detach-client -E` needs a later process-control bump, and G6 needs a binary-stream bump.
+Each contract gets its own approval and review.
+
+Each wave closes with:
+
+- focused tests for each affected package and behavior
+- `cargo test --workspace --all-features`
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- `cargo fmt --all -- --check`
+- `git diff --check`
+- OKF validation
+- `compat/run.sh --strict-geometry`, followed by a hard postcondition of at least the
+  current 48 scenario rows, zero SKIPs, and no divergences outside the two documented
+  geometry fixtures
+- the `BEHAVES` assertion and option ledger updated
+- the exact unsupported-pair roster and expected tranche delta updated
+- `knowledge/tmux/divergences.md`, this plan, and `knowledge/log.md` updated
+- an independent read-only Claude review against the pinned tmux source; Grok may substitute
+  after its local CLI is authenticated
+
+Give the independent reviewer the start commit, diff manifest, affected invariants, pinned
+tmux anchors, and gate output. If review fixes land, rerun the focused and common gates and
+obtain a clean follow-up verdict before closing the tranche.
+
+The final campaign handoff also runs the CI surfaces outside those common gates: native and
+nightly-wasm UI showcase checks, release-profile `zz-mux`, `just ios-test`, macOS CEF release
+bundling, DMG packaging, and the hardware smokes below. Linux and Windows runtime and
+packaging proof require remote CI. The workflow has no manual dispatch, so without later
+commit and push authorization the final report records those platforms as pending rather
+than claiming proof.
+
+**Safe prelude common gates passed locally 2026-08-21.** The full workspace all-feature test
+suite and all-target clippy pass, formatting and diff checks are clean, and OKF validation is
+conformant with only the pre-existing stale-research warning. The strict compatibility run
+completed all 48 scenarios with zero SKIPs and zero unexpected divergences; its two known
+geometry fixtures matched their documented divergences, and all eight plugin smokes passed.
+
+## Decision ledger for the unattended run
+
+| Decision | Recommended disposition |
+| --- | --- |
+| Shared style parser | Move the style and tmux-color parser unit together to `zz-protocol`, then re-export it from `zz-mux`. |
+| F5 TUI lock | Park. It adds new lock execution behavior and optional wire messages. |
+| TUI status extras | Keep `PREFIX` and `COPY`; hide the detach hint after explicit status customization. |
+| Unsupported config summary | Park until Command responses gain an approved stderr channel; keep stderr plus exit 0 and invalid lines at exit 1 in the eventual contract. |
+| Client environment and stdin wire | Park G1 `-E` and all G6 streaming until fabrico approves the contracts. |
+| Protocol v71 | Recommend the audited single bundle in A3, with per-client option publication, personalized status metadata, per-pane typed border colors, and Command-response stderr. Keep it parked until fabrico approves it. |
+| Prefix scope | Keep both prefixes global in v71 to match the current shared key-table contract; treat tmux-style session scope as a separate core refactor. |
+| Lock wire | Exclude it from v71; if F5 is approved, use a separate bump with an explicit client process-execution policy. |
+| Timed messages and prompts | Add daemon-owned per-client presentation freeze, message identity, and explicit clear to v71. Route prompt special keys through the existing pane-targeted input and let the daemon return handled or pass. |
+| `remain-on-exit-format` | Park C5 until terminal core owns a post-worker VT injection or frozen-view reconstruction seam. |
+| F and G grouping | Use the parser foundation and semantic tranches above. Reject the old mechanical-single batch and enforce the 129-pair ledger in code. |
+| Core semantic waves | Park daemon, mux, lifecycle, parser, target, geometry, and command-semantic changes under the unattended boundary. |
+
+## Hardware smokes
+
+The existing open smokes remain: Wave-B status, `allow-passthrough` image output,
+DCS-filter benchmark A/B, and iTerm2 `-CC`. Add TUI status at the top with styles, GUI pane
+border colors and inactive-window dimming, and the TUI lock flow if F5 later enters scope.
 
 # Phases
 

@@ -759,6 +759,76 @@ const ALIASES: &[(&str, &str)] = &[
     ("pane-colors", "pane-colours"),
 ];
 
+pub const BEHAVES: &[&str] = &[
+    "base-index",
+    "pane-base-index",
+    "renumber-windows",
+    "default-size",
+    "window-size",
+    "aggressive-resize",
+    "history-limit",
+    "detach-on-destroy",
+    "prefix",
+    "mode-keys",
+    "key-table",
+    "prefix-timeout",
+    "repeat-time",
+    "initial-repeat-time",
+    "prompt-history-limit",
+    "history-file",
+    "word-separators",
+    "wrap-search",
+    "default-shell",
+    "default-command",
+    "default-terminal",
+    "remain-on-exit",
+    "focus-events",
+    "allow-passthrough",
+    "allow-set-title",
+    "cursor-style",
+    "cursor-colour",
+    "synchronize-panes",
+    "automatic-rename",
+    "automatic-rename-format",
+    "bell-action",
+    "visual-bell",
+    "display-time",
+    "display-panes-time",
+    "message-limit",
+    "buffer-limit",
+    "set-clipboard",
+    "copy-command",
+    "menu-border-lines",
+    "menu-border-style",
+    "menu-selected-style",
+    "menu-style",
+    "popup-border-lines",
+    "popup-border-style",
+    "popup-style",
+    "main-pane-width",
+    "main-pane-height",
+    "other-pane-width",
+    "other-pane-height",
+    "tiled-layout-max-columns",
+    "status",
+    "status-interval",
+    "status-left",
+    "status-right",
+    "status-left-length",
+    "status-right-length",
+    "status-left-style",
+    "status-right-style",
+    "status-style",
+    "status-bg",
+    "status-fg",
+    "window-status-format",
+    "window-status-current-format",
+    "window-status-style",
+    "window-status-current-style",
+    "window-status-last-style",
+    "window-status-bell-style",
+];
+
 const OPTION_TABLE_ORDER: &[&str] = &[
     "backspace",
     "buffer-limit",
@@ -1244,6 +1314,16 @@ mod tests {
                 .map(|option| option.name)
                 .collect()
         );
+    }
+
+    #[test]
+    fn behaving_option_roster_is_complete_unique_and_catalogued() {
+        assert_eq!(BEHAVES.len(), 67);
+        assert_eq!(BEHAVES.iter().copied().collect::<BTreeSet<_>>().len(), 67);
+        let catalog = tmux_options()
+            .map(|option| option.name)
+            .collect::<BTreeSet<_>>();
+        assert!(BEHAVES.iter().all(|name| catalog.contains(name)));
     }
 
     #[test]

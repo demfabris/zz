@@ -5,7 +5,7 @@ use glob::{MatchOptions, Pattern};
 use regex::{Captures, RegexBuilder};
 use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{CommandSpec, MAX_STATUS_TEXT_BYTES, PaneId, SessionId, WindowId};
-use zz_terminal::parse_x11_color;
+pub use zz_protocol::{TmuxColour, parse_tmux_colour};
 
 use crate::{MuxEngine, PaneKind, layout::CellLayout};
 
@@ -2252,16 +2252,6 @@ fn pad_value(value: &str, width: isize) -> String {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TmuxColour {
-    Basic(u8),
-    Indexed(u8),
-    Rgb(u32),
-    Default,
-    Terminal,
-    Theme(u8),
-}
-
 fn format_colour(value: &str, flags: &str) -> String {
     if flags.contains('f') || flags.contains('b') {
         if value.eq_ignore_ascii_case("none") {
@@ -2274,72 +2264,6 @@ fn format_colour(value: &str, flags: &str) -> String {
     parse_tmux_colour(value)
         .and_then(colour_rgb)
         .map_or_else(String::new, |colour| format!("{colour:06x}"))
-}
-
-pub fn parse_tmux_colour(value: &str) -> Option<TmuxColour> {
-    if value.is_empty() || value.trim() != value || value.chars().any(char::is_whitespace) {
-        return None;
-    }
-    if let Some(hex) = value.strip_prefix('#') {
-        if hex.len() == 6 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return u32::from_str_radix(hex, 16).ok().map(TmuxColour::Rgb);
-        }
-        return None;
-    }
-    let lower = value.to_ascii_lowercase();
-    if let Some(index) = lower
-        .strip_prefix("colour")
-        .or_else(|| lower.strip_prefix("color"))
-        .and_then(|value| value.parse::<u8>().ok())
-    {
-        return Some(TmuxColour::Indexed(index));
-    }
-    if lower == "default" {
-        return Some(TmuxColour::Default);
-    }
-    if lower == "terminal" {
-        return Some(TmuxColour::Terminal);
-    }
-    if let Some(index) = [
-        "themeblack",
-        "themewhite",
-        "themelightgrey",
-        "themedarkgrey",
-        "themegreen",
-        "themeyellow",
-        "themered",
-        "themeblue",
-        "themecyan",
-        "thememagenta",
-    ]
-    .iter()
-    .position(|name| *name == lower)
-    {
-        return u8::try_from(index).ok().map(TmuxColour::Theme);
-    }
-    let basic = match lower.as_str() {
-        "black" | "0" => Some(0),
-        "red" | "1" => Some(1),
-        "green" | "2" => Some(2),
-        "yellow" | "3" => Some(3),
-        "blue" | "4" => Some(4),
-        "magenta" | "5" => Some(5),
-        "cyan" | "6" => Some(6),
-        "white" | "7" => Some(7),
-        "brightblack" | "90" => Some(8),
-        "brightred" | "91" => Some(9),
-        "brightgreen" | "92" => Some(10),
-        "brightyellow" | "93" => Some(11),
-        "brightblue" | "94" => Some(12),
-        "brightmagenta" | "95" => Some(13),
-        "brightcyan" | "96" => Some(14),
-        "brightwhite" | "97" => Some(15),
-        _ => None,
-    };
-    if let Some(basic) = basic {
-        return Some(TmuxColour::Basic(basic));
-    }
-    parse_x11_color(value).map(|colour| TmuxColour::Rgb(colour.packed()))
 }
 
 fn colour_rgb(colour: TmuxColour) -> Option<u32> {

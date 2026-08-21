@@ -51,6 +51,7 @@ fn startup_directory() -> Option<PathBuf> {
         })
 }
 
+#[cfg(target_os = "macos")]
 fn startup_directory_environment(directory: &Path) -> OsString {
     let mut environment = OsString::from(APP_STARTUP_DIRECTORY_ENV);
     environment.push("=");
@@ -163,9 +164,15 @@ fn launch(executable: &Path, arguments: &[OsString]) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use std::{ffi::OsString, path::Path};
+    use std::ffi::OsString;
 
-    use super::{bundled_executable, cli_arguments, startup_directory_environment};
+    #[cfg(target_os = "macos")]
+    use std::path::Path;
+
+    use super::{bundled_executable, cli_arguments};
+
+    #[cfg(target_os = "macos")]
+    use super::startup_directory_environment;
 
     #[test]
     fn resolves_the_executable_beside_the_launcher() {
@@ -201,6 +208,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn app_launch_preserves_the_callers_working_directory() {
         assert_eq!(

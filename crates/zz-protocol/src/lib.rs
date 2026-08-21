@@ -6,6 +6,7 @@ mod id;
 mod key;
 mod message;
 mod snapshot;
+mod style;
 mod terminal_codec;
 
 pub use catalog::{
@@ -49,6 +50,11 @@ pub use snapshot::{
     MAX_BROWSER_PROFILE_NAME_BYTES, MAX_EDITOR_PATH_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES,
     MuxSnapshot, PaneKindSnapshot, PaneSnapshot, SessionSnapshot, SessionViewer, WindowSnapshot,
     normalize_browser_profile_name,
+};
+pub use style::{
+    StyledSegment, TmuxAlign, TmuxAttributeState, TmuxAttributes, TmuxColour, TmuxDefaultType,
+    TmuxList, TmuxRange, TmuxStyle, TmuxWidth, parse_style, parse_styled_segments,
+    parse_tmux_colour, valid_style,
 };
 pub use terminal_codec::{
     decode_protocol_frame, encode_protocol_message, encode_protocol_message_into,

@@ -4,10 +4,13 @@ use std::{
     io::{self, Write as _},
 };
 
-use zz_protocol::{Axis, PaneId, PaneKindSnapshot};
+use zz_protocol::{
+    Axis, PaneId, PaneKindSnapshot, StyledSegment, TmuxAttributeState, TmuxColour, TmuxStyle,
+    parse_styled_segments,
+};
 use zz_terminal::{
-    CellWidth, Color, CursorStyle, Glyph, KittyPlacement, PackedCell, PackedStyle, TerminalMode,
-    TerminalViewport, UnderlineStyle,
+    CellWidth, Color, CursorStyle, Glyph, KittyPlacement, PackedCell, PackedStyle,
+    TerminalAppearance, TerminalMode, TerminalViewport, UnderlineStyle,
 };
 
 use crate::{
@@ -38,9 +41,89 @@ struct PaintedPane {
     rect: Rect,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct StyledLine {
+    segments: Vec<StyledSegment>,
+}
+
+impl StyledLine {
+    fn parsed(value: &str) -> Self {
+        Self {
+            segments: parse_styled_segments(value),
+        }
+    }
+
+    fn plain(value: &str) -> Self {
+        let mut line = Self::default();
+        line.push_plain(value);
+        line
+    }
+
+    fn push_plain(&mut self, value: &str) {
+        self.push_segment(value, TmuxStyle::default());
+    }
+
+    fn append(&mut self, other: &Self) {
+        for segment in &other.segments {
+            self.push_segment(&segment.text, segment.style.clone());
+        }
+    }
+
+    fn push_segment(&mut self, value: &str, style: TmuxStyle) {
+        if value.is_empty() {
+            return;
+        }
+        if let Some(last) = self.segments.last_mut().filter(|last| last.style == style) {
+            last.text.push_str(value);
+        } else {
+            self.segments.push(StyledSegment {
+                text: value.to_owned(),
+                style,
+            });
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.segments
+            .iter()
+            .map(|segment| segment.text.chars().count())
+            .sum()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.segments.is_empty()
+    }
+
+    fn clear(&mut self) {
+        self.segments.clear();
+    }
+
+    fn truncate(&self, width: usize) -> Self {
+        let mut truncated = Self::default();
+        let mut remaining = width;
+        for segment in &self.segments {
+            if remaining == 0 {
+                break;
+            }
+            let text = segment.text.chars().take(remaining).collect::<String>();
+            remaining = remaining.saturating_sub(text.chars().count());
+            truncated.push_segment(&text, segment.style.clone());
+        }
+        truncated
+    }
+
+    #[cfg(test)]
+    fn plain_text(&self) -> String {
+        self.segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PaintedSidebarRow {
-    text: String,
+    text: StyledLine,
     selected: bool,
     status: bool,
 }
@@ -53,7 +136,7 @@ pub(crate) struct Renderer {
     headers: HashMap<PaneId, String>,
     picker_cards: HashMap<PaneId, (Rect, usize)>,
     sidebar_rows: Vec<PaintedSidebarRow>,
-    status: String,
+    status: StyledLine,
     damage: HashMap<PaneId, FrameDamage>,
     browser_placements: HashMap<PaneId, KittyPlacement>,
     browser_painted: HashMap<PaneId, bool>,
@@ -70,7 +153,7 @@ impl Renderer {
             headers: HashMap::new(),
             picker_cards: HashMap::new(),
             sidebar_rows: Vec::new(),
-            status: String::new(),
+            status: StyledLine::default(),
             damage: HashMap::new(),
             browser_placements: HashMap::new(),
             browser_painted: HashMap::new(),
@@ -767,13 +850,14 @@ impl Renderer {
             } else {
                 (model.appearance.foreground, model.appearance.background)
             };
-            write_colored_text(
+            write_styled_text(
                 &mut self.output,
                 0,
                 u16::try_from(index).unwrap_or(u16::MAX),
                 &row.text,
                 foreground,
                 background,
+                &model.appearance,
             );
         }
         if force {
@@ -807,13 +891,14 @@ impl Renderer {
             if self.sidebar_rows.get(index) == Some(&row) {
                 continue;
             }
-            write_colored_text(
+            write_styled_text(
                 &mut self.output,
                 0,
                 u16::try_from(index).unwrap_or(u16::MAX),
                 &row.text,
                 model.appearance.background,
                 model.appearance.foreground,
+                &model.appearance,
             );
             if let Some(cached) = self.sidebar_rows.get_mut(index) {
                 *cached = row;
@@ -829,13 +914,14 @@ impl Renderer {
         if self.status == line {
             return;
         }
-        write_colored_text(
+        write_styled_text(
             &mut self.output,
             0,
             model.size.rows.saturating_sub(1),
             &line,
             model.appearance.background,
             model.appearance.foreground,
+            &model.appearance,
         );
         self.status = line;
     }
@@ -1158,7 +1244,7 @@ fn sidebar_rows(model: &Model) -> Vec<PaintedSidebarRow> {
                 .map_or_else(String::new, |row| row.text.clone())
         };
         rows.push(PaintedSidebarRow {
-            text: padded_segment(&text, sidebar::WIDTH, ' '),
+            text: padded_styled(&StyledLine::plain(&text), sidebar::WIDTH, ' '),
             selected: model.sidebar.focused && index == model.sidebar.selected,
             status: false,
         });
@@ -1173,15 +1259,16 @@ fn sidebar_rows(model: &Model) -> Vec<PaintedSidebarRow> {
     rows
 }
 
-fn sidebar_status_lines(model: &Model) -> Vec<String> {
+fn sidebar_status_lines(model: &Model) -> Vec<StyledLine> {
     let line_count = usize::from(model.size.rows.min(sidebar::STATUS_ROWS));
     if line_count == 0 {
         return Vec::new();
     }
     if let Some(prompt) = &model.command_prompt {
-        let mut lines = vec![" ".repeat(usize::from(sidebar::WIDTH)); line_count];
-        lines[line_count - 1] = padded_segment(
-            &format!("{}{}", prompt.prompt, prompt.input),
+        let mut lines =
+            vec![StyledLine::plain(&" ".repeat(usize::from(sidebar::WIDTH))); line_count];
+        lines[line_count - 1] = padded_styled(
+            &StyledLine::plain(&format!("{}{}", prompt.prompt, prompt.input)),
             sidebar::WIDTH,
             ' ',
         );
@@ -1190,13 +1277,17 @@ fn sidebar_status_lines(model: &Model) -> Vec<String> {
 
     let base = combine_status(
         &base_status_left(model),
-        &model.status.right,
+        &StyledLine::parsed(&model.status.right),
         sidebar::WIDTH,
     );
-    let indicators = padded_segment(&status_indicators(model), sidebar::WIDTH, ' ');
+    let indicators = padded_styled(
+        &StyledLine::plain(&status_indicators(model)),
+        sidebar::WIDTH,
+        ' ',
+    );
     let message = combine_status(
-        model.client_message.as_deref().unwrap_or_default(),
-        "Ctrl-\\ detach",
+        &StyledLine::plain(model.client_message.as_deref().unwrap_or_default()),
+        &StyledLine::plain("Ctrl-\\ detach"),
         sidebar::WIDTH,
     );
     [base, indicators, message]
@@ -1205,42 +1296,49 @@ fn sidebar_status_lines(model: &Model) -> Vec<String> {
         .collect()
 }
 
-fn status_line(model: &Model, width: u16) -> String {
+fn status_line(model: &Model, width: u16) -> StyledLine {
     if let Some(prompt) = &model.command_prompt {
-        return padded_segment(&format!("{}{}", prompt.prompt, prompt.input), width, ' ');
+        return padded_styled(
+            &StyledLine::plain(&format!("{}{}", prompt.prompt, prompt.input)),
+            width,
+            ' ',
+        );
     }
     let mut left = base_status_left(model);
     let indicators = status_indicators(model);
     if !indicators.is_empty() {
-        left.push_str("  ");
-        left.push_str(&indicators);
+        left.push_plain("  ");
+        left.push_plain(&indicators);
     }
     if let Some(message) = &model.client_message {
-        left.push_str("  ");
-        left.push_str(message);
+        left.push_plain("  ");
+        left.push_plain(message);
     }
-    left.push_str("  Ctrl-\\ detach");
-    combine_status(&left, &model.status.right, width)
+    left.push_plain("  Ctrl-\\ detach");
+    combine_status(&left, &StyledLine::parsed(&model.status.right), width)
 }
 
-fn base_status_left(model: &Model) -> String {
-    let mut left = model.status.left.clone();
+fn base_status_left(model: &Model) -> StyledLine {
+    let mut left = StyledLine::parsed(&model.status.left);
     if let Some(session) = model.session() {
         if !left.is_empty() {
-            left.push(' ');
+            left.push_plain(" ");
         }
-        write!(left, "[{}]", session.name).expect("writing to String cannot fail");
+        left.push_plain(&format!("[{}]", session.name));
         for window in &session.windows {
-            let marker = if model.snapshot.focused_window_for(session) == window.id {
-                '*'
-            } else {
-                ' '
-            };
-            write!(left, " {marker}{}:{}", window.index, window.name)
-                .expect("writing to String cannot fail");
+            append_status_label(&mut left, &window.status_label);
         }
     }
     left
+}
+
+fn append_status_label(line: &mut StyledLine, value: &str) {
+    let label = StyledLine::parsed(value);
+    if label.is_empty() {
+        return;
+    }
+    line.push_plain(" ");
+    line.append(&label);
 }
 
 fn status_indicators(model: &Model) -> String {
@@ -1274,15 +1372,24 @@ fn status_indicators(model: &Model) -> String {
     indicators
 }
 
-fn combine_status(left: &str, right: &str, width: u16) -> String {
+fn combine_status(left: &StyledLine, right: &StyledLine, width: u16) -> StyledLine {
     let width = usize::from(width);
-    let right = truncate(right, u16::try_from(width).unwrap_or(u16::MAX));
-    let right_len = right.chars().count();
+    let right = right.truncate(width);
+    let right_len = right.len();
     let left_width = width.saturating_sub(right_len + usize::from(!right.is_empty()));
-    let left = truncate(left, u16::try_from(left_width).unwrap_or(u16::MAX));
-    let left_len = left.chars().count();
+    let mut left = left.truncate(left_width);
+    let left_len = left.len();
     let gap = width.saturating_sub(left_len + right_len);
-    format!("{left}{}{right}", " ".repeat(gap))
+    left.push_plain(&" ".repeat(gap));
+    left.append(&right);
+    left
+}
+
+fn padded_styled(line: &StyledLine, width: u16, fill: char) -> StyledLine {
+    let mut line = line.truncate(usize::from(width));
+    let padding = usize::from(width).saturating_sub(line.len());
+    line.push_plain(&fill.to_string().repeat(padding));
+    line
 }
 
 fn padded_segment(text: &str, width: u16, fill: char) -> String {
@@ -1331,6 +1438,105 @@ fn write_colored_text(
     .expect("writing to Vec cannot fail");
     output.extend_from_slice(text.as_bytes());
     output.extend_from_slice(b"\x1b[0m");
+}
+
+fn write_styled_text(
+    output: &mut Vec<u8>,
+    column: u16,
+    row: u16,
+    line: &StyledLine,
+    foreground: Color,
+    background: Color,
+    appearance: &TerminalAppearance,
+) {
+    write_cursor_position(output, column, row);
+    for segment in &line.segments {
+        write_tmux_sgr(output, &segment.style, foreground, background, appearance);
+        output.extend_from_slice(segment.text.as_bytes());
+    }
+    output.extend_from_slice(b"\x1b[0m");
+}
+
+fn write_tmux_sgr(
+    output: &mut Vec<u8>,
+    style: &TmuxStyle,
+    default_foreground: Color,
+    default_background: Color,
+    appearance: &TerminalAppearance,
+) {
+    output.extend_from_slice(b"\x1b[0m");
+    let attributes = &style.attributes;
+    if attributes.noattr != TmuxAttributeState::On {
+        if attributes.bold == TmuxAttributeState::On {
+            output.extend_from_slice(b"\x1b[1m");
+        }
+        if attributes.dim == TmuxAttributeState::On {
+            output.extend_from_slice(b"\x1b[2m");
+        }
+        if attributes.italics == TmuxAttributeState::On {
+            output.extend_from_slice(b"\x1b[3m");
+        }
+        for (state, sequence) in [
+            (attributes.underscore, b"\x1b[4m".as_slice()),
+            (attributes.double_underscore, b"\x1b[4:2m".as_slice()),
+            (attributes.curly_underscore, b"\x1b[4:3m".as_slice()),
+            (attributes.dotted_underscore, b"\x1b[4:4m".as_slice()),
+            (attributes.dashed_underscore, b"\x1b[4:5m".as_slice()),
+        ] {
+            if state == TmuxAttributeState::On {
+                output.extend_from_slice(sequence);
+            }
+        }
+        if attributes.blink == TmuxAttributeState::On {
+            output.extend_from_slice(b"\x1b[5m");
+        }
+        if attributes.reverse == TmuxAttributeState::On {
+            output.extend_from_slice(b"\x1b[7m");
+        }
+        if attributes.hidden == TmuxAttributeState::On {
+            output.extend_from_slice(b"\x1b[8m");
+        }
+        if attributes.strikethrough == TmuxAttributeState::On {
+            output.extend_from_slice(b"\x1b[9m");
+        }
+        if attributes.overline == TmuxAttributeState::On {
+            output.extend_from_slice(b"\x1b[53m");
+        }
+    }
+    if let Some(colour) = style.us {
+        let colour = resolve_tmux_colour(colour, default_foreground, appearance);
+        write!(output, "\x1b[58;2;{};{};{}m", colour.r, colour.g, colour.b)
+            .expect("writing to Vec cannot fail");
+    }
+    let foreground = style.fg.map_or(default_foreground, |colour| {
+        resolve_tmux_colour(colour, default_foreground, appearance)
+    });
+    let background = style.bg.map_or(default_background, |colour| {
+        resolve_tmux_colour(colour, default_background, appearance)
+    });
+    write!(
+        output,
+        "\x1b[38;2;{};{};{};48;2;{};{};{}m",
+        foreground.r, foreground.g, foreground.b, background.r, background.g, background.b
+    )
+    .expect("writing to Vec cannot fail");
+}
+
+fn resolve_tmux_colour(
+    colour: TmuxColour,
+    fallback: Color,
+    appearance: &TerminalAppearance,
+) -> Color {
+    match colour {
+        TmuxColour::Basic(index) | TmuxColour::Indexed(index) => {
+            appearance.palette[usize::from(index)]
+        }
+        TmuxColour::Rgb(value) => Color::from_packed(value),
+        TmuxColour::Theme(index) => [0, 7, 7, 0, 2, 3, 1, 4, 6, 5]
+            .get(usize::from(index))
+            .map_or(fallback, |index| appearance.palette[*index]),
+        TmuxColour::Default | TmuxColour::Terminal => fallback,
+    }
 }
 
 fn write_sgr(
@@ -1457,6 +1663,75 @@ mod tests {
         assert_eq!(output.matches("\x1b[38;2;").count(), 2);
         assert!(output.contains("ab"));
         assert!(output.contains('c'));
+    }
+
+    #[test]
+    fn styled_lines_clip_text_without_counting_markers() {
+        let line = StyledLine::parsed("#[fg=red]abcd#[bold]ef");
+        assert_eq!(line.len(), 6);
+        assert_eq!(line.plain_text(), "abcdef");
+
+        let clipped = line.truncate(5);
+        assert_eq!(clipped.plain_text(), "abcde");
+        assert_eq!(clipped.segments.len(), 2);
+        assert_eq!(clipped.segments[0].style.fg, Some(TmuxColour::Basic(1)));
+        assert_eq!(
+            clipped.segments[1].style.attributes.bold,
+            TmuxAttributeState::On
+        );
+    }
+
+    #[test]
+    fn styled_lines_render_palette_rgb_and_attributes_without_markers() {
+        let appearance = TerminalAppearance::default();
+        let line = StyledLine::parsed(
+            "#[fg=red,bg=#010203,bold,underscore,reverse]X#[fg=colour42,nobold,nounderscore,noreverse]Y",
+        );
+        let mut output = Vec::new();
+        write_styled_text(
+            &mut output,
+            0,
+            0,
+            &line,
+            appearance.background,
+            appearance.foreground,
+            &appearance,
+        );
+        let output = String::from_utf8(output).unwrap();
+        let red = appearance.palette[1];
+        let indexed = appearance.palette[42];
+
+        assert!(output.contains("\x1b[1m"));
+        assert!(output.contains("\x1b[4m"));
+        assert!(output.contains("\x1b[7m"));
+        assert!(output.contains(&format!("38;2;{};{};{}", red.r, red.g, red.b)));
+        assert!(output.contains("48;2;1;2;3"));
+        assert!(output.contains(&format!("38;2;{};{};{}", indexed.r, indexed.g, indexed.b)));
+        assert!(output.contains('X'));
+        assert!(output.contains('Y'));
+        assert!(!output.contains("#["));
+    }
+
+    #[test]
+    fn style_only_changes_invalidate_cached_lines() {
+        assert_ne!(
+            StyledLine::parsed("#[fg=red]same"),
+            StyledLine::parsed("#[fg=blue]same")
+        );
+    }
+
+    #[test]
+    fn window_status_labels_use_daemon_text_and_keep_empty_formats_empty() {
+        let mut line = StyledLine::plain("[session]");
+        append_status_label(&mut line, "#[bold]CUSTOM");
+        append_status_label(&mut line, "#[default]");
+
+        assert_eq!(line.plain_text(), "[session] CUSTOM");
+        assert_eq!(line.segments.len(), 2);
+        assert_eq!(
+            line.segments[1].style.attributes.bold,
+            TmuxAttributeState::On
+        );
     }
 
     #[test]

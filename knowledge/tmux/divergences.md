@@ -323,12 +323,10 @@ the hook table — the two paths that used to silently succeed while doing nothi
 **67 behave**, meaning a value change is consumed somewhere outside set/show/inherit/
 readback (consumer-traced 2026-08-20). **113 are store-only.** The earlier "78 behave"
 counted options given a typed home in the honest-knobs/status structs, twelve of which
-nothing reads. No marker in the table distinguishes the two and no test pins the count:
-`tmux_stored_scalar` (63 names) and `tmux_stored_array` (8) are store-only by
-construction, but 39 enum-resident names and 4 dedicated-field names are indistinguishable
-from behaving options without tracing readers. A `BEHAVES` list beside
-`OPTION_TABLE_ORDER` with a drift test is the cheapest fix and belongs to the next knob
-wave.
+nothing reads. `tmux_options::BEHAVES` now distinguishes the 67 consumer-traced names from
+storage-only options and test-pins its count, uniqueness, and membership in the option
+catalog. `tmux_stored_scalar` (63 names) and `tmux_stored_array` (8) remain store-only by
+construction; later consumer waves must move each newly behaving name into `BEHAVES`.
 
 **Behaving (67):**
 
@@ -409,7 +407,7 @@ form) — ledgered for the key-string wave.
 | Binary argv | `-L -S -f -2 -C -u -V -N -c -l` | Closed by 7a (2026-08-18): `-V` (`tmux 3.8-zz`), `-L`/`-S`/`-f`/`-c`/`-N`/`-l`/`-2`/`-u`, tmux-shaped usage and unknown-option lines, pin CMD_STARTSERVER autostart. `-C`/`-CC` are the phase-6 control-mode front-end (row below). |
 | Control mode `-CC` | What iTerm2 integration speaks. | SHIPPED (phase 6 complete 2026-08-18): a stdio front-end speaking the full CC protocol — framing, notifications, `%output` with flow control (pause/age-kill/pacing), `refresh-client -A/-B/-C/-f`. Deliberate divergences, all reviewer-endorsed: blocks are COMPLETE (WAIT commands keep output in-block; after-hooks add no extra block; `%pause`/`%continue` land after the triggering block, not inside); per-client monotonic `n`; zz-lax unquoted `%`-words on the control stdin; automatic-rename transients single-fire. |
 | Session groups | `new-session -t`. | Cataloged, rejected. |
-| Presentation | Status line, prompts, choosers drawn as terminal escapes. | Native chrome on both clients. Since the 2026-08-20 status-bar waves the GUI titlebar strip and tab pills render literal `#[…]` styles and the `status-*`/`window-status-*` style options; `status-format[]`, `status-justify`, and `status-position` are stored but not honored (the strip is top, single-line, tabs own the centre). zz-tui receives only pre-expanded `status-left`/`status-right` text — styles, justify, and position are dropped before the wire. Prompts and choosers stay native on both. |
+| Presentation | Status line, prompts, choosers drawn as terminal escapes. | Native chrome on both clients. Since the 2026-08-20 status-bar waves the GUI titlebar strip and tab pills render literal `#[…]` styles and the `status-*`/`window-status-*` style options. The TUI now interprets the daemon-expanded styles in `status-left`, `status-right`, and each window `status_label`, but retains its native three-row sidebar or single bottom row. `status-format[]`, `status-justify`, and `status-position` are stored but not honored (the GUI strip stays top and single-line; the TUI stays bottom and left/right-gapped). Prompts and choosers stay native on both. |
 
 # Related
 

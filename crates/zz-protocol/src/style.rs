@@ -1,4 +1,80 @@
-use crate::{TmuxColour, parse_tmux_colour};
+use zz_terminal::parse_x11_color;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TmuxColour {
+    Basic(u8),
+    Indexed(u8),
+    Rgb(u32),
+    Default,
+    Terminal,
+    Theme(u8),
+}
+
+pub fn parse_tmux_colour(value: &str) -> Option<TmuxColour> {
+    if value.is_empty() || value.trim() != value || value.chars().any(char::is_whitespace) {
+        return None;
+    }
+    if let Some(hex) = value.strip_prefix('#') {
+        if hex.len() == 6 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return u32::from_str_radix(hex, 16).ok().map(TmuxColour::Rgb);
+        }
+        return None;
+    }
+    let lower = value.to_ascii_lowercase();
+    if let Some(index) = lower
+        .strip_prefix("colour")
+        .or_else(|| lower.strip_prefix("color"))
+        .and_then(|value| value.parse::<u8>().ok())
+    {
+        return Some(TmuxColour::Indexed(index));
+    }
+    if lower == "default" {
+        return Some(TmuxColour::Default);
+    }
+    if lower == "terminal" {
+        return Some(TmuxColour::Terminal);
+    }
+    if let Some(index) = [
+        "themeblack",
+        "themewhite",
+        "themelightgrey",
+        "themedarkgrey",
+        "themegreen",
+        "themeyellow",
+        "themered",
+        "themeblue",
+        "themecyan",
+        "thememagenta",
+    ]
+    .iter()
+    .position(|name| *name == lower)
+    {
+        return u8::try_from(index).ok().map(TmuxColour::Theme);
+    }
+    let basic = match lower.as_str() {
+        "black" | "0" => Some(0),
+        "red" | "1" => Some(1),
+        "green" | "2" => Some(2),
+        "yellow" | "3" => Some(3),
+        "blue" | "4" => Some(4),
+        "magenta" | "5" => Some(5),
+        "cyan" | "6" => Some(6),
+        "white" | "7" => Some(7),
+        "brightblack" | "90" => Some(8),
+        "brightred" | "91" => Some(9),
+        "brightgreen" | "92" => Some(10),
+        "brightyellow" | "93" => Some(11),
+        "brightblue" | "94" => Some(12),
+        "brightmagenta" | "95" => Some(13),
+        "brightcyan" | "96" => Some(14),
+        "brightwhite" | "97" => Some(15),
+        _ => None,
+    };
+    if let Some(basic) = basic {
+        return Some(TmuxColour::Basic(basic));
+    }
+    parse_x11_color(value).map(|colour| TmuxColour::Rgb(colour.packed()))
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TmuxAttributeState {

@@ -12,7 +12,6 @@ mod model;
 mod parser;
 mod sort;
 mod status;
-mod style;
 mod tmux_options;
 
 pub use command::{
@@ -35,12 +34,13 @@ pub use status::{
     StatusJustify, StatusOption, StatusPosition, WindowStatusFormats, WindowStatusOption,
     expand_format_values, expand_status,
 };
-pub use style::{
-    StyledSegment, TmuxAlign, TmuxAttributeState, TmuxAttributes, TmuxDefaultType, TmuxList,
-    TmuxRange, TmuxStyle, TmuxWidth, parse_style, parse_styled_segments, valid_style,
-};
+pub use tmux_options::BEHAVES;
 pub use zz_protocol::{Binding, KeyDecision, KeyEngine, KeyTables, canonical_key};
 pub use zz_protocol::{
     COMMAND_SPECS, CommandOptionSpec, CommandSpec, CommandValueKind, canonical_command,
     command_spec,
+};
+pub use zz_protocol::{
+    StyledSegment, TmuxAlign, TmuxAttributeState, TmuxAttributes, TmuxDefaultType, TmuxList,
+    TmuxRange, TmuxStyle, TmuxWidth, parse_style, parse_styled_segments, valid_style,
 };

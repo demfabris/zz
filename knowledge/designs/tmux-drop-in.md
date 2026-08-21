@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux drop-in plan
 description: "The alias-tmux=zz plan: 100% of tmux's command grammar, options, formats, and geometry on tmux names, zz power moved to superset verbs, exec commands behind an import-time consent gate — nine phases ending at the TTY attach contract, one permanent skip (linked windows), one explicit non-goal (real-tmux socket interop)."
-status: Original nine phases shipped 2026-08-20; campaign planned against 57ae502, safe prelude implemented locally, core campaign parked for approval
+status: Original nine phases shipped 2026-08-20; campaign planned against 57ae502, safe prelude shipped, core campaign approved 2026-08-21 and in execution
 tags:
 - tmux
 - compatibility
@@ -60,6 +60,14 @@ The target splits in two:
    means flags too. The divergence matrix's flag table is the tracker.
 8. Execution loop unchanged: codex implements from a settled plan, full gates, grok-4.6
    adversarial pin review, close.
+
+**Decisions (2026-08-21, fabrico):**
+
+9. The core campaign is approved in the recommended order: `A3 -> B with C3 title
+   production -> C except C5 -> E -> D2 -> D4 -> D3 -> D1`, with the approval-audit
+   amendments below folded in. C5, lock/process execution, binary streaming, and
+   session-scoped prefixes stay parked.
+10. Each reviewed wave commits to `main` locally; pushes stay explicit.
 
 # Where this stands (2026-08-20)
 
@@ -282,7 +290,7 @@ terminal lane retains its explicit byte layout.
 | Choosers | Append bounded `key: String` to `ChooseTreeItem` and `ChooseBufferItem`; cap it at 64 bytes and use empty for no shortcut. | D4. Existing actions already carry `KeyInput`. Default rows use `0..9`, then `M-a..M-z`; invalid keys become empty and duplicate keys select the first row before navigation. `-N` preview state remains internal. |
 | Command stderr | Append `stderr: String` after `CommandResponse::Success.exit_code`, using the existing frame bound. Preserve the current output-only client API and add a stream-aware result for the CLI. | Wave E. v71 initializes it empty; Wave E later populates exact stdout and stderr independently, including stderr with exit 0. |
 | Timed-message lifecycle | Append `message_id: u64` to `EventPayload::TimedClientMessage` and append `EventPayload::TimedClientMessageCleared { message_id }` at tag 46. The daemon assigns identities and owns timers. | D3 and D1. The daemon freezes terminal publication per client for an ordinary message or prompt, keeps PTY parsing live, then publishes one full latest viewport before patches resume. `display-message -C` and incremental or `-C` prompts skip the freeze. Identity prevents an old timer from clearing a replacement; an explicit clear makes duration-zero and TUI behavior converge. |
-| Client terminal facts | Keep the initial `client-tty-v1:` and `client-size-v1:` values in `ClientHello.capabilities`; append `InputMessage::ClientTerminalSize { columns, rows }` at tag 17 for later `SIGWINCH` updates. | B5. The daemon uses current per-client facts for nested-session checks, dash dimensions, and client width/height formats. Clients collect the initial values before connect, then publish size changes. |
+| Client terminal facts | Introduce `client-tty-v1:` and `client-size-v1:` as new value tokens in `ClientHello.capabilities` (none exist today; `zz-client` currently sends empty capabilities, and the existing value-token precedent is `zz-startup-reentry=`); append `InputMessage::ClientTerminalSize { columns, rows }` at tag 17 for later `SIGWINCH` updates. | B5. The daemon uses current per-client facts for nested-session checks, dash dimensions, and client width/height formats. Clients collect the initial values before connect, then publish size changes. |
 
 `MuxOptionsChanged` remains a complete replacement map but becomes per-recipient for
 session-effective values. Publish the effective map after attach and client switch. A global
@@ -301,6 +309,27 @@ bump. Add boundary and malformed-decode tests for every new bounded or typed fie
 two-client/two-session convergence tests for personalized mux options and status metadata.
 Add bounded-row tests for zero through five rows, sparse and explicit-empty arrays,
 message-line clamping, base style, title with status off, and rejection before allocation.
+
+**Approval-audit amendments (2026-08-21, verified against `4164524`):**
+
+- The bundle spans three crates, not one. `TerminalViewAction::EnterCopyModeWith` and
+  `TerminalMode::Copy.hide_position` land in `zz-terminal` (`interaction.rs`, `model.rs`),
+  and the Copy change edits the manual terminal lane in three coordinated places
+  (`encoded_mode_len` 17 -> 18, `encode_mode`, `decode_mode`); the length arm `Copy` shares
+  with `View` must split, or `View` frames hit a capacity mismatch.
+- `StatusPosition` (today in `zz-mux/src/status.rs`, no serde derives, `#[default]` on the
+  tag-1 `Bottom` variant) and `TmuxColour` (`Rgb(u32)` packs 24-bit color) both need
+  validated wire serialization written, not just relocation.
+- Three wire-append rows carry non-append source semantics the review must name:
+  `StatusLine::is_empty` changes meaning (two callers depend on the current one),
+  `MuxOptions::validate` is an exact-set check so all 17 keys ship atomically, and dropping
+  `PaneIndicator`'s `Copy` touches three by-value consumers.
+- Version-pin surfaces the bump must update: `zz-protocol/tests/hunt_claims.rs` (version
+  assert, literal hello frame bytes, `MuxOptionKey::ALL` length, tag-13 pin), the
+  `message.rs` frozen-tail tests, and the protocol knowledge pages stating 70.
+- `escape-time` already parses, stores, and reads back in `zz-mux` with the pinned default
+  10 (`command.rs` `escape_time_ms`); the v71 work is publication and consumption, not the
+  option itself.
 
 ## Wave B - TUI option consumption and attach residue
 
@@ -373,7 +402,11 @@ findings after rerunning those gates.
    - Define tty discovery for Command clients rather than limiting the check to TUI attach.
 6. Read-only clients: insert the client on `attach-session -r`, then gate terminal and
    browser key/text, paste, mouse, divider resize, prompt and chooser actions, uploads, and
-   every direct raw-input route at the daemon input funnel.
+   every direct raw-input route at the daemon input funnel. Two pre-existing seams to fix
+   with it: the CLI natively rejects `-r` before any daemon round-trip
+   (`crates/zz/src/lib.rs` native-attach parser), and `switch-client -r` already toggles
+   `read_only_clients` that nothing enforces — it also spuriously reports `ignore-size` in
+   `client_flags`.
 
 Use the phase-8 PTY fixture in `crates/zz/tests/cli_binary.rs` to prove that styled status
 content contains no literal `#[`, top status occupies row zero, `mouse off` emits no
@@ -442,7 +475,11 @@ deltas in tests.
    flowing while the status message is displayed. Plain `display-message` freezes
    presentation for that client, and clear resumes it with a full latest viewport. `-C`
    does not clear the message. Cover positive timers, duration zero and key clear,
-   replacement-message timer safety, and TUI clearing.
+   replacement-message timer safety, and TUI clearing. Audit facts: today the client owns
+   the timer and the TUI drops `duration_ms` entirely (messages pin forever), so D3
+   includes TUI timer/clear consumption; the daemon-owned `DisplayPanesDeadline`
+   dispatcher is the working precedent for daemon-side deadlines, but it stores one
+   deadline per client, so per-message identity still needs its own state.
 4. Implement `choose-tree` and `choose-buffer -K -N`: the daemon expands a key for each row,
    the key selects the row, and both clients show it. One `-N` disables preview; repeated
    `-NN` selects tmux's large-preview mode. zz can accept the no-preview case and must ledger
@@ -458,6 +495,13 @@ delete the matching refusal assertions.
 stderr channel needed for mixed output and for the zz-only unsupported summary. CLI text
 classification remains rejected because it would leak daemon semantics into presentation
 code.
+
+Two audit facts shape this wave: Command clients are never subscribed to the event stream
+at all (`daemon.rs` subscribes Interactive and Control only), so the CLI cannot receive
+warning events even in principle — the stderr field is required, not convenient. And
+control-mode `%config-error` is reconstructed by a prose sniffer (`is_config_message` in
+`control_mode.rs` pattern-matches warning text), so any rewording of config diagnostics
+must either move to a typed marker or pin the wording with a test.
 
 For an explicit `source-file` issued by a Command client, append invalid-line diagnostics to
 stdout and return exit 1. Interactive and Control clients keep warning events and

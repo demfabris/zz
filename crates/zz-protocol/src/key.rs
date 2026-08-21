@@ -534,7 +534,7 @@ pub enum KeyDecision {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct KeyEngine {
     table: Option<String>,
-    pending: Option<Vec<CommandInvocation>>,
+    pending: Option<(Vec<CommandInvocation>, bool)>,
     repeat_count: Option<u16>,
     repeat_deadline: Option<Instant>,
     prefix_deadline: Option<Instant>,
@@ -555,23 +555,23 @@ impl KeyEngine {
         };
     }
 
-    fn take_pending_jump_target(&mut self, key: &str) -> Option<KeyDecision> {
-        let mut commands = self.pending.take()?;
+    fn take_pending_jump_target(&mut self, key: &str) -> Option<(KeyDecision, bool)> {
+        let (mut commands, repeat) = self.pending.take()?;
         if key == "Escape" {
-            return Some(KeyDecision::Ignore);
+            return Some((KeyDecision::Ignore, false));
         }
         for command in &mut commands {
             if copy_jump_needs_target(command) {
                 command.args.push(key.to_owned());
             }
         }
-        Some(KeyDecision::Commands(commands))
+        Some((KeyDecision::Commands(commands), repeat))
     }
 
-    fn decide(&mut self, commands: Vec<CommandInvocation>) -> KeyDecision {
+    fn decide(&mut self, commands: Vec<CommandInvocation>, repeat: bool) -> (KeyDecision, bool) {
         if let Some(digit) = copy_mode_repeat_digit(&commands) {
             self.repeat_count = Some(u16::from(digit));
-            return KeyDecision::Ignore;
+            return (KeyDecision::Ignore, false);
         }
         let commands = match self.repeat_count.take() {
             Some(count) if commands.iter().all(copy_mode_action_command) => {
@@ -585,10 +585,10 @@ impl KeyEngine {
             _ => commands,
         };
         if commands.iter().any(copy_jump_needs_target) {
-            self.pending = Some(commands);
-            KeyDecision::Ignore
+            self.pending = Some((commands, repeat));
+            (KeyDecision::Ignore, false)
         } else {
-            KeyDecision::Commands(commands)
+            (KeyDecision::Commands(commands), repeat)
         }
     }
 
@@ -624,6 +624,28 @@ impl KeyEngine {
         prefix_timeout: Duration,
         root_table: &str,
     ) -> KeyDecision {
+        self.handle_with_repeat_metadata(
+            tables,
+            key,
+            now,
+            repeat_time,
+            initial_repeat_time,
+            prefix_timeout,
+            root_table,
+        )
+        .0
+    }
+
+    pub fn handle_with_repeat_metadata(
+        &mut self,
+        tables: &KeyTables,
+        key: &str,
+        now: Instant,
+        repeat_time: Duration,
+        initial_repeat_time: Duration,
+        prefix_timeout: Duration,
+        root_table: &str,
+    ) -> (KeyDecision, bool) {
         let key = canonical_key(key);
         if self.repeat_deadline.is_some_and(|deadline| now >= deadline) {
             self.table = None;
@@ -637,7 +659,7 @@ impl KeyEngine {
         if self.repeat_count.is_some() && self.table.as_deref() == Some("copy-mode-vi") {
             if key == "Escape" {
                 self.repeat_count = None;
-                return KeyDecision::Ignore;
+                return (KeyDecision::Ignore, false);
             }
             if key.len() == 1
                 && let Some(digit) = key.as_bytes().first().copied().filter(u8::is_ascii_digit)
@@ -649,7 +671,7 @@ impl KeyEngine {
                         .saturating_add(u16::from(digit - b'0'))
                         .min(9_999),
                 );
-                return KeyDecision::Ignore;
+                return (KeyDecision::Ignore, false);
             }
         }
         if self.table.is_none() && key == tables.prefix {
@@ -657,7 +679,7 @@ impl KeyEngine {
             self.repeat_deadline = None;
             self.prefix_deadline = (!prefix_timeout.is_zero()).then_some(now + prefix_timeout);
             self.last_repeat_key = None;
-            return KeyDecision::Prefix;
+            return (KeyDecision::Prefix, false);
         }
         let mut table = self.table.clone().unwrap_or_else(|| root_table.to_owned());
         let exact_binding = tables.get(&table, &key);
@@ -684,7 +706,7 @@ impl KeyEngine {
             if key == tables.prefix {
                 self.table = Some("prefix".to_owned());
                 self.prefix_deadline = (!prefix_timeout.is_zero()).then_some(now + prefix_timeout);
-                return KeyDecision::Prefix;
+                return (KeyDecision::Prefix, false);
             }
             root_table.clone_into(&mut table);
             if let Some(root_binding) = tables.get(root_table, &key) {
@@ -701,12 +723,12 @@ impl KeyEngine {
                 self.table = None;
                 self.prefix_deadline = None;
                 self.last_repeat_key = None;
-                return KeyDecision::Ignore;
+                return (KeyDecision::Ignore, false);
             }
             return if self.table.is_some() {
-                KeyDecision::Ignore
+                (KeyDecision::Ignore, false)
             } else {
-                KeyDecision::Pass
+                (KeyDecision::Pass, false)
             };
         };
         if table == "prefix" && binding.repeat && !repeat_time.is_zero() {
@@ -731,7 +753,7 @@ impl KeyEngine {
             self.last_repeat_key = None;
         }
         let commands = binding.commands.clone();
-        self.decide(commands)
+        self.decide(commands, binding.repeat)
     }
 
     pub fn switch_table(&mut self, table: Option<String>) {
@@ -1430,6 +1452,74 @@ mod tests {
             engine.handle_with_repeat_time(&tables, "Right", start, Duration::ZERO),
             KeyDecision::Pass
         );
+    }
+
+    #[test]
+    fn command_decisions_report_the_binding_repeat_bit() {
+        let mut tables = KeyTables::default();
+        tables.bind(
+            "prefix",
+            "R",
+            Binding {
+                commands: vec![CommandInvocation::new("display-message", ["repeat"])],
+                repeat: true,
+                note: None,
+            },
+        );
+        let start = Instant::now();
+        let mut engine = KeyEngine::default();
+        assert_eq!(
+            engine.handle_with_repeat_metadata(
+                &tables,
+                "C-b",
+                start,
+                Duration::from_millis(500),
+                Duration::ZERO,
+                Duration::ZERO,
+                "root",
+            ),
+            (KeyDecision::Prefix, false)
+        );
+        assert_eq!(
+            engine.handle_with_repeat_metadata(
+                &tables,
+                "R",
+                start,
+                Duration::from_millis(500),
+                Duration::ZERO,
+                Duration::ZERO,
+                "root",
+            ),
+            (
+                KeyDecision::Commands(vec![CommandInvocation::new("display-message", ["repeat"],)]),
+                true,
+            )
+        );
+        engine.switch_table(None);
+        assert_eq!(
+            engine.handle_with_repeat_metadata(
+                &tables,
+                "C-b",
+                start,
+                Duration::from_millis(500),
+                Duration::ZERO,
+                Duration::ZERO,
+                "root",
+            ),
+            (KeyDecision::Prefix, false)
+        );
+        assert!(matches!(
+            engine.handle_with_repeat_metadata(
+                &tables,
+                "c",
+                start,
+                Duration::from_millis(500),
+                Duration::ZERO,
+                Duration::ZERO,
+                "root",
+            ),
+            (KeyDecision::Commands(_), false)
+        ));
     }
 
     #[test]

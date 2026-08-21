@@ -167,6 +167,14 @@ pub enum CoreEvent {
     Message(Box<ProtocolMessage>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CoreDetachReason {
+    Requested,
+    Evicted,
+    SessionDestroyed,
+    ServerStopping,
+}
+
 /// The sans-IO client brain: decoded protocol messages in, [`CoreEvent`]s and
 /// [`Outbound`] requests out, reduced state behind accessors. One instance per
 /// daemon connection; a [`ProtocolMessage::ServerHello`] resets it for reuse
@@ -182,6 +190,7 @@ pub struct ClientCore {
     status: StatusLine,
     snapshot: Arc<MuxSnapshot>,
     attached_session: Option<SessionId>,
+    last_detach_reason: Option<CoreDetachReason>,
     viewports: HashMap<PaneId, TerminalViewport>,
     agent_states: HashMap<PaneId, AgentPaneWire>,
     full_pending: HashSet<PaneId>,
@@ -300,6 +309,27 @@ impl ClientCore {
     }
 
     #[must_use]
+    pub const fn last_detach_reason(&self) -> Option<CoreDetachReason> {
+        self.last_detach_reason
+    }
+
+    #[must_use]
+    pub const fn last_detach_was_session_destroyed(&self) -> bool {
+        matches!(
+            self.last_detach_reason,
+            Some(CoreDetachReason::SessionDestroyed)
+        )
+    }
+
+    #[must_use]
+    pub const fn last_detach_was_server_stopping(&self) -> bool {
+        matches!(
+            self.last_detach_reason,
+            Some(CoreDetachReason::ServerStopping)
+        )
+    }
+
+    #[must_use]
     pub fn viewport(&self, pane: PaneId) -> Option<&TerminalViewport> {
         self.viewports.get(&pane)
     }
@@ -415,6 +445,7 @@ impl ClientCore {
     /// [`Self::reset_session`].
     pub fn clear_attachment(&mut self) {
         self.attached_session = None;
+        self.last_detach_reason = None;
         self.snapshot = Arc::new(MuxSnapshot::default());
         self.viewports.clear();
         self.agent_states.clear();
@@ -531,10 +562,24 @@ impl ClientCore {
                 }
                 self.events.push_back(CoreEvent::PaneRemoved { pane });
             }
-            EventPayload::Detached { session, by } => {
+            EventPayload::Detached {
+                session,
+                by,
+                reason,
+            } => {
                 if self.attached_session == Some(session) {
                     self.attached_session = None;
                 }
+                self.last_detach_reason = Some(if reason.is_requested() {
+                    CoreDetachReason::Requested
+                } else if reason.is_evicted() {
+                    CoreDetachReason::Evicted
+                } else if reason.is_session_destroyed() {
+                    CoreDetachReason::SessionDestroyed
+                } else {
+                    debug_assert!(reason.is_server_stopping());
+                    CoreDetachReason::ServerStopping
+                });
                 self.events.push_back(CoreEvent::Detached { session, by });
             }
             EventPayload::ServerStopping => self.events.push_back(CoreEvent::ServerStopping),
@@ -871,6 +916,19 @@ mod tests {
             drain(&mut core),
             vec![CoreEvent::PrefixCancelled { request_id: 73 }]
         );
+    }
+
+    #[test]
+    fn detached_reason_is_retained_without_changing_the_shell_event_shape() {
+        let session = SessionId(7);
+        let mut core = ClientCore::new();
+        core.handle_message(event(EventPayload::detached_session_destroyed(session)));
+        assert_eq!(
+            drain(&mut core),
+            vec![CoreEvent::Detached { session, by: None }]
+        );
+        assert!(core.last_detach_was_session_destroyed());
+        assert!(!core.last_detach_was_server_stopping());
     }
 
     #[test]

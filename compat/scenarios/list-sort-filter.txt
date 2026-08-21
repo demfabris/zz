@@ -1,0 +1,12 @@
+new-session -d -s z
+out: list-sessions -O name -r -F #{session_name}:#{line}
+out: list-sessions -O name -f #{==:#{session_name},z} -F #{session_name}:#{line}
+new-window -d -t w: -n zed
+new-window -d -t w: -n alpha
+out: list-windows -t w -O name -r -F #{window_name}:#{line}
+split-window -d -h -t w:0.0
+out: list-panes -t w:0 -O index -r -f #{>=:#{pane_index},0} -F #{pane_index}:#{line}
+set-buffer aa
+set-buffer bbbbb
+out: list-buffers -O name -r -f #{m:buffer*,#{buffer_name}} -F #{buffer_name}:#{buffer_size}
+list-sessions -O bogus

@@ -1,0 +1,22 @@
+# Oh My Tmux (gpakosz/.tmux), the most common real-world config. Its .tmux.conf
+# pipes ITSELF through sh (`cut -c3- "$TMUX_CONF" | sh -s _apply_configuration`)
+# and locates itself as ~/.tmux.conf, so the corpus file is staged verbatim with
+# the stock .tmux.conf.local beside it. The zz warning line is the drop-in
+# campaign's baseline: each wave that lands a listed command shrinks it.
+stage: ~/.tmux/plugins/oh-my-tmux/.tmux.conf.local ~/.tmux.conf.local
+conf: ~/.tmux/plugins/oh-my-tmux/.tmux.conf
+expect-warn: zz skipped 1 unsupported tmux command: send-prefix -2
+keys: prefix e
+keys: prefix r
+keys: prefix C-c
+keys: prefix -
+keys: prefix _
+keys: prefix h
+keys: prefix Tab
+keys: prefix BTab
+out: show-options -sv escape-time
+out: show-options -gv history-limit
+out: show-options -gv display-panes-time
+out: show-options -gv status-interval
+out: show-options -gv renumber-windows
+out: show-options -gwv pane-base-index

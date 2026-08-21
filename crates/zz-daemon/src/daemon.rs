@@ -21,9 +21,10 @@ use parking_lot::{Condvar, Mutex};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     CellLayout, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision,
-    KeyEngine, KeyTables, MuxEffect, MuxEngine, MuxState, PaneKind, PaneRuntimeFacts, TmuxColour,
-    WindowSize, canonical_command, command_block_body, display_width, expand_format_values,
-    expand_status, hook_format_variables, if_shell_truthy, parse_tmux_colour,
+    KeyEngine, KeyTables, MuxEffect, MuxEngine, PaneKind, PaneRuntimeFacts, TmuxColour, TmuxSort,
+    TmuxSortOrder, WindowSize, canonical_command, command_block_body, display_width,
+    expand_format_values, expand_status, format_true, hook_format_variables, if_shell_truthy,
+    parse_tmux_colour,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -127,7 +128,6 @@ const MAX_CHOOSE_BUFFER_PREVIEW_BYTES: usize = 256;
 const CHOOSE_BUFFER_PAGE_ROWS: usize = 10;
 const MAX_PASTE_BUFFER_BYTES: usize = 32 * 1024 * 1024;
 const MAX_PASTE_BUFFER_NAME_BYTES: usize = 4 * 1024;
-const MAX_PASTE_BUFFER_SAMPLE_BYTES: usize = 40;
 const MAX_DISPLAY_PANE_INDICATORS: usize = 4_096;
 const MAX_CONCURRENT_PASTE_UPLOADS: usize = 2;
 const PASTE_UPLOAD_RETENTION: usize = 8;
@@ -1801,6 +1801,7 @@ enum DaemonCommandDispatch {
     DisplayMenu,
     ConfirmBefore,
     Lock,
+    SwitchClient,
 }
 
 const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
@@ -1851,6 +1852,8 @@ const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
     ("lock", DaemonCommandDispatch::Lock),
     ("lock-session", DaemonCommandDispatch::Lock),
     ("locks", DaemonCommandDispatch::Lock),
+    ("switch-client", DaemonCommandDispatch::SwitchClient),
+    ("switchc", DaemonCommandDispatch::SwitchClient),
 ];
 
 fn daemon_command_dispatch(name: &str) -> Option<DaemonCommandDispatch> {
@@ -3177,6 +3180,10 @@ impl Shared {
         inner.next_client_id = inner.next_client_id.saturating_add(1);
         inner.client_instances.insert(client, client_instance_id);
         inner.client_kinds.insert(client, kind);
+        inner.activity_sequence = inner.activity_sequence.saturating_add(1);
+        let activity = inner.activity_sequence;
+        inner.client_activity.insert(client, activity);
+        inner.client_activity_times.insert(client, unix_timestamp());
         if kind == ClientKind::Interactive && client_has_terminal {
             inner.client_terminals.insert(client);
         }
@@ -3296,6 +3303,11 @@ impl Shared {
             inner.client_instances.remove(&client);
             inner.client_kinds.remove(&client);
             inner.client_terminals.remove(&client);
+            inner.client_origins.remove(&client);
+            inner.client_activity.remove(&client);
+            inner.client_activity_times.remove(&client);
+            inner.last_sessions.remove(&client);
+            inner.read_only_clients.remove(&client);
             inner.control_outputs.remove(&client);
             inner.key_engines.remove(&client);
             inner.copy_sessions.remove(&client);
@@ -3522,7 +3534,11 @@ impl Shared {
             client_terminal,
         );
         set_context_client_terminal(context, previous_client_terminal);
-        let hook_output = if no_hooks {
+        let suppress_after_hook = matches!(
+            &result,
+            Ok(execution) if execution.effects.contains(&MuxEffect::SuppressAfterHook)
+        );
+        let hook_output = if no_hooks || suppress_after_hook {
             String::new()
         } else {
             let (hook, mut hook_context) = match &result {
@@ -3621,6 +3637,9 @@ impl Shared {
                     }
                     DaemonCommandDispatch::Lock => {
                         self.lock_command(client, context, canonical, &command.args)
+                    }
+                    DaemonCommandDispatch::SwitchClient => {
+                        self.switch_client(client, kind, context, &command.args)
                     }
                 }
             });
@@ -3883,7 +3902,7 @@ impl Shared {
                 &mut |shell| shell_is_valid(Path::new(shell)),
             );
             set_context_client_terminal(context, previous_client_terminal);
-            let execution = execution?;
+            let mut execution = execution?;
             if !inner.engine.state.sessions.is_empty() {
                 self.exit_empty_armed.store(true, Ordering::Release);
             }
@@ -3957,6 +3976,7 @@ impl Shared {
                 .collect::<BTreeSet<_>>();
             let resized_panes = panes_for_windows(&inner, &resized_windows);
             snapshot_changed |= write_back_terminal_geometries(&mut inner, &resized_panes, true);
+            let mut pane_format_output = None;
             for effect in &execution.effects {
                 match effect {
                     MuxEffect::PaneCreated {
@@ -4072,6 +4092,11 @@ impl Shared {
                             PaneRuntimeFacts {
                                 current_path,
                                 start_path,
+                                pid: session.process_id(),
+                                tty: session
+                                    .tty()
+                                    .map(|path| path.to_string_lossy().into_owned())
+                                    .unwrap_or_default(),
                                 ..PaneRuntimeFacts::default()
                             },
                             &mut hooks,
@@ -4260,7 +4285,8 @@ impl Shared {
                     | MuxEffect::PaneMaterialized {
                         kind: PaneKindSnapshot::Browser(_) | PaneKindSnapshot::Picker,
                         ..
-                    } => {}
+                    }
+                    | MuxEffect::SuppressAfterHook => {}
                     MuxEffect::PaneCreated {
                         pane,
                         kind: PaneKindSnapshot::Agent(descriptor),
@@ -4551,6 +4577,9 @@ impl Shared {
                     MuxEffect::ChooseTree {
                         pane,
                         kind: tree_kind,
+                        sessions_only,
+                        filter,
+                        sort,
                     } => {
                         if kind != ClientKind::Interactive
                             || !inner.subscribers.contains_key(&client)
@@ -4561,11 +4590,16 @@ impl Shared {
                             .into());
                         }
                         let attached_session = client_attached_session(&inner, client);
+                        let facts = format_hook_facts(&inner);
                         let chooser = ChooseTreeSession::new(
                             *tree_kind,
+                            *sessions_only,
                             *pane,
-                            &inner.engine.state,
+                            &inner.engine,
                             attached_session,
+                            &facts,
+                            filter.clone(),
+                            *sort,
                         )?;
                         if attached_session != Some(chooser.source_session) {
                             return Err(ServerError::PaneNotAttached(*pane).into());
@@ -4584,7 +4618,7 @@ impl Shared {
                         inner.choose_trees.insert(client, chooser);
                         direct_events.push(EventPayload::ChooseTree { state: Some(state) });
                     }
-                    MuxEffect::ChooseBuffer { pane } => {
+                    MuxEffect::ChooseBuffer { pane, filter, sort } => {
                         if kind != ClientKind::Interactive
                             || !inner.subscribers.contains_key(&client)
                         {
@@ -4594,10 +4628,15 @@ impl Shared {
                             .into());
                         }
                         let attached_session = client_attached_session(&inner, client);
+                        let facts = format_hook_facts(&inner);
                         let Some(chooser) = ChooseBufferSession::new(
                             *pane,
-                            &inner.engine.state,
+                            &inner.engine,
                             &inner.paste_buffers,
+                            attached_session,
+                            &facts,
+                            filter.clone(),
+                            *sort,
                         )?
                         else {
                             continue;
@@ -4837,10 +4876,56 @@ impl Shared {
                     } => {
                         immediate_hooks.push((name.clone(), commands.clone(), context.clone()));
                     }
+                    MuxEffect::PaneFormatOutput {
+                        pane,
+                        format,
+                        active_session,
+                    } => {
+                        pane_format_output = Some((*pane, format.clone(), *active_session));
+                    }
                     MuxEffect::ReloadConfig => reload_config = true,
                     MuxEffect::KillServer => shutdown_requested = true,
                     MuxEffect::SnapshotChanged => snapshot_changed = true,
                 }
+            }
+            if let Some((pane, format, active_session)) = pane_format_output {
+                if let Some(terminal) = inner.terminals.get(&pane).cloned() {
+                    drop(inner);
+                    wait_for_terminal_identity(&terminal);
+                    inner = self.inner.lock();
+                    if inner
+                        .terminals
+                        .get(&pane)
+                        .is_some_and(|current| Arc::ptr_eq(current, &terminal))
+                    {
+                        let mut runtime = inner
+                            .engine
+                            .pane_runtime_facts(pane)
+                            .cloned()
+                            .unwrap_or_default();
+                        runtime.pid = terminal.process_id();
+                        runtime.tty = terminal
+                            .tty()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        inner
+                            .engine
+                            .set_pane_runtime_facts_with_hooks(pane, runtime, &mut hooks);
+                    }
+                }
+                let target = ExecutionContext::for_pane(&inner.engine.state, pane)
+                    .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+                let facts = format_hook_facts(&inner);
+                let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                    &facts,
+                    (!format_variables.is_empty()).then_some(&format_variables),
+                );
+                let mut output =
+                    inner
+                        .engine
+                        .expand_pane_format(&format, &target, active_session, &mut hooks);
+                output.push('\n');
+                execution.output = output;
             }
             shutdown_requested |= self.should_shutdown_if_empty(&inner);
             if snapshot_changed {
@@ -4957,7 +5042,7 @@ impl Shared {
             None => {}
             Some(DetachScope::Client) => {
                 if let Some(session) = detached_session {
-                    self.publish_to_client(client, EventPayload::Detached { session, by: None });
+                    self.publish_to_client(client, EventPayload::detached_evicted(session, None));
                 }
                 self.detach_with_event_hooks(client, event_hooks_enabled);
             }
@@ -4967,7 +5052,7 @@ impl Shared {
             Some(DetachScope::Session(session)) => {
                 self.evict_clients_with_event_hooks(Some(session), client, event_hooks_enabled);
                 if detached_session == Some(session) {
-                    self.publish_to_client(client, EventPayload::Detached { session, by: None });
+                    self.publish_to_client(client, EventPayload::detached_evicted(session, None));
                     self.detach_with_event_hooks(client, event_hooks_enabled);
                 }
             }
@@ -4976,6 +5061,7 @@ impl Shared {
             if client_terminal == ClientTerminal::Present {
                 let (mut snapshot, attach_hook_events) =
                     self.attach_collect_event_hooks(client, session, event_hooks_enabled)?;
+                self.refresh_control_output_taps();
                 pending_hook_events.extend(attach_hook_events);
                 if detach_others {
                     self.evict_clients_with_event_hooks(Some(session), client, event_hooks_enabled);
@@ -5119,6 +5205,10 @@ impl Shared {
             source_file_error = Some(error);
         }
         self.publish_key_tables_if_changed();
+        pending_hook_events.extend(std::mem::take(&mut self.inner.lock().deferred_event_hooks));
+        if std::mem::take(&mut self.inner.lock().deferred_control_refresh) {
+            self.refresh_control_output_taps();
+        }
         self.run_event_hooks(pending_hook_events);
         source_file_error.map_or(Ok(execution), Err)
     }
@@ -5941,7 +6031,7 @@ impl Shared {
         args: &[String],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_run_shell_args(args)?;
-        let (target, command_context, command, cwd, tmux) = {
+        let (target, command_context, command, cwd, tmux, environment) = {
             let mut inner = self.inner.lock();
             let target = parsed
                 .target
@@ -6008,7 +6098,8 @@ impl Shared {
             });
             let cwd = job_working_directory(&inner, &command_context, parsed.cwd.as_deref());
             let tmux = tmux_environment(&self.socket_path, command_context.session);
-            (target, command_context, command, cwd, tmux)
+            let environment = inner.engine.job_environment(command_context.session);
+            (target, command_context, command, cwd, tmux, environment)
         };
 
         if matches!(&command, Some(InsertedCommandSource::Block(_))) && !parsed.command_mode {
@@ -6105,6 +6196,7 @@ impl Shared {
                         command,
                         cwd,
                         tmux,
+                        environment,
                         parsed.show_stderr,
                         delay,
                         move |result| {
@@ -6140,6 +6232,7 @@ impl Shared {
                         command.clone(),
                         cwd,
                         tmux,
+                        environment,
                         parsed.show_stderr,
                         delay,
                         move |result| {
@@ -6168,7 +6261,7 @@ impl Shared {
         args: &[String],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_if_shell_args(args)?;
-        let (condition, command_context, cwd, tmux) = {
+        let (condition, command_context, cwd, tmux, environment) = {
             let mut inner = self.inner.lock();
             let target = parsed.target.as_deref().and_then(|target| {
                 inner
@@ -6195,7 +6288,8 @@ impl Shared {
                 expand_format_values(&parsed.positional[0], &format_context, &mut hooks);
             let cwd = job_working_directory(&inner, &command_context, None);
             let tmux = tmux_environment(&self.socket_path, command_context.session);
-            (condition, command_context, cwd, tmux)
+            let environment = inner.engine.job_environment(command_context.session);
+            (condition, command_context, cwd, tmux, environment)
         };
 
         if parsed.format {
@@ -6221,62 +6315,81 @@ impl Shared {
             let shared = Arc::clone(self);
             let branches = parsed.positional;
             let condition_for_error = condition.clone();
-            self.spawn_shell_job(condition, cwd, tmux, false, Duration::ZERO, move |result| {
-                if let Ok(result) = result {
-                    let Some(branch) = select_if_shell_branch(&branches, result.status.success())
-                    else {
-                        return;
-                    };
-                    let source = inserted_command_source(branch);
-                    let mut context = command_context;
-                    match shared.execute_inserted_commands(
-                        client,
-                        kind,
-                        &mut context,
-                        &source,
-                        "<if-shell>",
-                    ) {
-                        Ok(result) => shared.route_background_inserted_output(
+            self.spawn_shell_job(
+                condition,
+                cwd,
+                tmux,
+                environment,
+                false,
+                Duration::ZERO,
+                move |result| {
+                    if let Ok(result) = result {
+                        let Some(branch) =
+                            select_if_shell_branch(&branches, result.status.success())
+                        else {
+                            return;
+                        };
+                        let source = inserted_command_source(branch);
+                        let mut context = command_context;
+                        match shared.execute_inserted_commands(
                             client,
                             kind,
-                            &context,
-                            "if-shell".to_owned(),
-                            &result.output,
-                        ),
-                        Err(error) => {
-                            if let Some(output) = daemon_error_output(&error) {
-                                shared.route_background_inserted_output(
-                                    client,
-                                    kind,
-                                    &context,
-                                    "if-shell".to_owned(),
-                                    output,
+                            &mut context,
+                            &source,
+                            "<if-shell>",
+                        ) {
+                            Ok(result) => shared.route_background_inserted_output(
+                                client,
+                                kind,
+                                &context,
+                                "if-shell".to_owned(),
+                                &result.output,
+                            ),
+                            Err(error) => {
+                                if let Some(output) = daemon_error_output(&error) {
+                                    shared.route_background_inserted_output(
+                                        client,
+                                        kind,
+                                        &context,
+                                        "if-shell".to_owned(),
+                                        output,
+                                    );
+                                }
+                                shared.publish_background_command_error(
+                                    client, &context, &error, true,
                                 );
                             }
-                            shared.publish_background_command_error(client, &context, &error, true);
                         }
+                    } else {
+                        let error = ServerError::InvalidCommand(format!(
+                            "failed to run command: {condition_for_error}"
+                        ))
+                        .into();
+                        shared.publish_background_command_error(
+                            client,
+                            &command_context,
+                            &error,
+                            false,
+                        );
                     }
-                } else {
-                    let error = ServerError::InvalidCommand(format!(
-                        "failed to run command: {condition_for_error}"
-                    ))
-                    .into();
-                    shared.publish_background_command_error(
-                        client,
-                        &command_context,
-                        &error,
-                        false,
-                    );
-                }
-            })?;
+                },
+            )?;
             return Ok(Execution::default());
         }
 
         let (sender, receiver) = mpsc::sync_channel(1);
         let failed_condition = condition.clone();
-        self.spawn_shell_job(condition, cwd, tmux, false, Duration::ZERO, move |result| {
-            let _ = sender.send(result);
-        })?;
+        self.spawn_shell_job(
+            condition,
+            cwd,
+            tmux,
+            environment,
+            false,
+            Duration::ZERO,
+            move |result| {
+                let _ = sender.send(result);
+            },
+        )?;
         let result = receiver
             .recv()
             .map_err(|error| DaemonError::Thread(format!("if-shell worker stopped: {error}")))?;
@@ -6500,6 +6613,7 @@ impl Shared {
         command: String,
         cwd: PathBuf,
         tmux: String,
+        environment: Vec<(String, Option<String>)>,
         show_stderr: bool,
         delay: Duration,
         callback: impl FnOnce(Result<ShellJobResult, ()>) + Send + 'static,
@@ -6525,6 +6639,7 @@ impl Shared {
                     &command,
                     &cwd,
                     &tmux,
+                    &environment,
                     &zz_socket,
                     startup_reentry.as_deref(),
                     tmux_shim.as_deref(),
@@ -6728,7 +6843,7 @@ impl Shared {
         name: &str,
         args: &[String],
     ) -> Result<Execution, DaemonError> {
-        let parsed = parse_buffer_command_args(name, args, &['F', 't'], &[])?;
+        let parsed = parse_buffer_command_args(name, args, &['F', 'f', 'O', 't'], &['r'])?;
         require_no_positionals(name, &parsed)?;
         let mut inner = self.inner.lock();
         let target = parsed
@@ -6740,6 +6855,7 @@ impl Shared {
                     .resolve_session(Some(target), context.session)
             })
             .transpose()?;
+        let sort = TmuxSort::parse(parsed.value('O'), parsed.has('r'), None)?;
         inner.engine.set_format_now(unix_timestamp());
         let mut clients = inner
             .attached
@@ -6752,19 +6868,28 @@ impl Shared {
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
-        clients.sort_by(|(left, _), (right, _)| {
-            let left_name = inner
-                .client_names
-                .get(left)
-                .cloned()
-                .unwrap_or_else(|| format!("device-{}", left.0));
-            let right_name = inner
-                .client_names
-                .get(right)
-                .cloned()
-                .unwrap_or_else(|| format!("device-{}", right.0));
-            left_name.cmp(&right_name).then(left.0.cmp(&right.0))
-        });
+        clients.sort_by_key(|(client, _)| client.0);
+        sort.apply(
+            &mut clients,
+            |(left, left_session), (right, right_session)| {
+                let left_facts = client_format_facts(&inner, *left, *left_session);
+                let right_facts = client_format_facts(&inner, *right, *right_session);
+                let ordering = match sort.order() {
+                    Some(TmuxSortOrder::Activity) => inner
+                        .client_activity
+                        .get(right)
+                        .copied()
+                        .unwrap_or_default()
+                        .cmp(&inner.client_activity.get(left).copied().unwrap_or_default()),
+                    Some(TmuxSortOrder::Creation) => left.0.cmp(&right.0),
+                    Some(TmuxSortOrder::Name) => left_facts.name.cmp(&right_facts.name),
+                    Some(TmuxSortOrder::Size) => (left_facts.width, left_facts.height)
+                        .cmp(&(right_facts.width, right_facts.height)),
+                    _ => std::cmp::Ordering::Equal,
+                };
+                ordering.then_with(|| left_facts.name.cmp(&right_facts.name))
+            },
+        );
         let format = parsed.value('F').unwrap_or(
             "#{client_name}: #{session_name} [#{client_width}x#{client_height} #{client_termname}] #{?#{!=:#{client_uid},#{uid}},[user #{?client_user,#{client_user},#{client_uid},}] ,}#{?client_flags,(,}#{client_flags}#{?client_flags,),}",
         );
@@ -6790,16 +6915,264 @@ impl Shared {
                 client: Some(client_facts),
                 ..FormatHookFacts::default()
             };
-            let mut hooks = DaemonFormatHooks::command_with_optional_variables(
-                &facts,
-                context.format_variables(),
+            let mut variables = context.format_variables().cloned().unwrap_or_default();
+            variables.insert(
+                "client_activity".to_owned(),
+                inner
+                    .client_activity_times
+                    .get(&client)
+                    .copied()
+                    .unwrap_or_default()
+                    .to_string(),
             );
+            variables.insert(
+                "client_flags".to_owned(),
+                format_client_flags(&inner, client),
+            );
+            variables.insert(
+                "client_key_table".to_owned(),
+                inner
+                    .key_engines
+                    .get(&client)
+                    .and_then(KeyEngine::active_table)
+                    .map_or_else(
+                        || inner.engine.key_table_for_session(session_id).clone(),
+                        str::to_owned,
+                    ),
+            );
+            variables.insert(
+                "client_last_session".to_owned(),
+                inner
+                    .last_sessions
+                    .get(&client)
+                    .and_then(|last| inner.engine.state.sessions.get(last))
+                    .map(|session| session.name.clone())
+                    .unwrap_or_default(),
+            );
+            variables.insert(
+                "client_readonly".to_owned(),
+                usize::from(inner.read_only_clients.contains(&client)).to_string(),
+            );
+            variables.insert("client_session".to_owned(), session.name.clone());
+            variables.insert(
+                "session_last_attached".to_owned(),
+                inner
+                    .session_last_attached
+                    .get(&session_id)
+                    .copied()
+                    .unwrap_or_default()
+                    .to_string(),
+            );
+            if let Some(filter) = parsed.value('f') {
+                let mut hooks =
+                    DaemonFormatHooks::command_with_optional_variables(&facts, Some(&variables));
+                if !format_true(&expand_format_values(filter, &format_context, &mut hooks)) {
+                    continue;
+                }
+            }
+            let mut hooks =
+                DaemonFormatHooks::command_with_optional_variables(&facts, Some(&variables));
             output.push(expand_format_values(format, &format_context, &mut hooks));
         }
         Ok(Execution {
             output: output.join("\n"),
             effects: Vec::new(),
         })
+    }
+
+    fn switch_client(
+        self: &Arc<Self>,
+        invoking_client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        args: &[String],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_buffer_command_args(
+            "switch-client",
+            args,
+            &['c', 'O', 't', 'T'],
+            &['E', 'F', 'l', 'n', 'p', 'r', 'Z'],
+        )?;
+        require_no_positionals("switch-client", &parsed)?;
+        let target_client = {
+            let inner = self.inner.lock();
+            resolve_switch_client_target(&inner, invoking_client, kind, parsed.value('c'))?
+        };
+        let (walk_session, mut target_session, target_window, target_pane) = {
+            let inner = self.inner.lock();
+            let current_session = client_attached_session(&inner, target_client)
+                .ok_or_else(|| ServerError::InvalidCommand("no current client".to_owned()))?;
+            let current_session_state = inner
+                .engine
+                .state
+                .sessions
+                .get(&current_session)
+                .ok_or_else(|| ServerError::MissingTarget(current_session.to_string()))?;
+            let current_window =
+                client_focused_window(&inner, target_client, current_session_state);
+            let current_pane = inner.engine.state.windows[&current_window].active_pane;
+            match parsed.value('t') {
+                Some(target)
+                    if target == "="
+                        || target.contains(':')
+                        || target.contains('.')
+                        || target.contains('%') =>
+                {
+                    let pane = inner.engine.resolve_pane(
+                        Some(target),
+                        Some(current_window),
+                        Some(current_pane),
+                    )?;
+                    let window = inner
+                        .engine
+                        .state
+                        .window_for_pane(pane)
+                        .ok_or_else(|| ServerError::MissingTarget(target.to_owned()))?;
+                    let session = inner.engine.state.windows[&window].session;
+                    (current_session, session, Some(window), Some(pane))
+                }
+                Some(target) => {
+                    let session = inner
+                        .engine
+                        .state
+                        .resolve_session(Some(target), Some(current_session))?;
+                    (current_session, session, None, None)
+                }
+                None => (current_session, current_session, None, None),
+            }
+        };
+        if parsed.has('r') {
+            let mut inner = self.inner.lock();
+            if !inner.read_only_clients.remove(&target_client) {
+                inner.read_only_clients.insert(target_client);
+            }
+        }
+        if let Some(table) = parsed.value('T') {
+            let mut inner = self.inner.lock();
+            if inner.engine.keys.table_names().all(|name| name != table) {
+                return Err(
+                    ServerError::InvalidCommand(format!("table {table} doesn't exist")).into(),
+                );
+            }
+            inner
+                .key_engines
+                .entry(target_client)
+                .or_default()
+                .switch_table(Some(table.to_owned()));
+            drop(inner);
+            self.sync_prefix_armed(target_client);
+            return Ok(Execution::default());
+        }
+        let sort = TmuxSort::parse(parsed.value('O'), parsed.has('r'), None)?;
+        if parsed.has('n') || parsed.has('p') {
+            let inner = self.inner.lock();
+            let mut sessions = inner
+                .engine
+                .state
+                .sessions_by_name()
+                .into_iter()
+                .map(|session| session.id)
+                .collect::<Vec<_>>();
+            sort.apply(&mut sessions, |left, right| {
+                let left = &inner.engine.state.sessions[left];
+                let right = &inner.engine.state.sessions[right];
+                let ordering = match sort.order() {
+                    Some(TmuxSortOrder::Activity) => right.sort_activity.cmp(&left.sort_activity),
+                    Some(TmuxSortOrder::Creation) => left.sort_created.cmp(&right.sort_created),
+                    Some(TmuxSortOrder::Index) => left.id.cmp(&right.id),
+                    Some(TmuxSortOrder::Name) => left.name.cmp(&right.name),
+                    _ => std::cmp::Ordering::Equal,
+                };
+                ordering.then_with(|| left.name.cmp(&right.name))
+            });
+            let current = sessions
+                .iter()
+                .position(|session| *session == walk_session)
+                .ok_or_else(|| ServerError::MissingTarget(walk_session.to_string()))?;
+            let selected = if parsed.has('n') {
+                (current + 1) % sessions.len()
+            } else {
+                (current + sessions.len() - 1) % sessions.len()
+            };
+            target_session = sessions[selected];
+        } else if parsed.has('l') {
+            let inner = self.inner.lock();
+            target_session = inner
+                .last_sessions
+                .get(&target_client)
+                .copied()
+                .filter(|session| inner.engine.state.sessions.contains_key(session))
+                .ok_or_else(|| ServerError::InvalidCommand("can't find last session".to_owned()))?;
+        }
+        let selection_events = if !parsed.has('n') && !parsed.has('p') && !parsed.has('l') {
+            let mut inner = self.inner.lock();
+            let mut events = Vec::new();
+            if let Some(pane) = target_pane.filter(|pane| {
+                target_window
+                    .is_some_and(|window| inner.engine.state.windows[&window].active_pane != *pane)
+            }) {
+                let before = MuxHookSnapshot::capture(&inner.engine);
+                inner
+                    .engine
+                    .state
+                    .select_pane_with_zoom(pane, parsed.has('Z'))?;
+                let after = MuxHookSnapshot::capture(&inner.engine);
+                events.extend(mux_hook_events(&before, &after, "switch-client"));
+            }
+            if let Some(window) = target_window {
+                let before = MuxHookSnapshot::capture(&inner.engine);
+                inner.engine.state.select_window(target_session, window)?;
+                let after = MuxHookSnapshot::capture(&inner.engine);
+                events.extend(mux_hook_events(&before, &after, "switch-client"));
+            }
+            events
+        } else {
+            Vec::new()
+        };
+        self.run_event_hooks(selection_events);
+        let preserve_repeat = context.repeat_binding();
+        let same_session =
+            client_attached_session(&self.inner.lock(), target_client) == Some(target_session);
+        let (snapshot, mut attach_events) =
+            self.attach_collect_event_hooks(target_client, target_session, !context.no_hooks)?;
+        if same_session && !context.no_hooks {
+            let inner = self.inner.lock();
+            let hook_snapshot = MuxHookSnapshot::capture(&inner.engine);
+            let hook_context = hook_snapshot.session_context(target_session);
+            attach_events.push(PendingHookEvent::client(
+                "client-session-changed",
+                hook_context,
+                target_client,
+                inner.client_names.get(&target_client).map(String::as_str),
+                &hook_snapshot,
+            ));
+        }
+        self.refresh_control_output_taps();
+        if !preserve_repeat {
+            self.inner
+                .lock()
+                .key_engines
+                .entry(target_client)
+                .or_default()
+                .switch_table(None);
+            self.sync_prefix_armed(target_client);
+        }
+        self.run_event_hooks(attach_events);
+        if target_client == invoking_client {
+            retarget_context_to_attachment(&self.inner.lock(), target_client, context);
+        }
+        let outbound = { self.inner.lock().subscribers.get(&target_client).cloned() };
+        if let Some(outbound) = outbound {
+            outbound.reset_kitty_images();
+            outbound.reset_pasted_images();
+            let _ = outbound.enqueue_reliable(&ProtocolMessage::Attached {
+                session: target_session,
+                snapshot,
+            });
+            self.send_resync(target_client, &outbound);
+        }
+        self.publish_snapshot();
+        Ok(Execution::default())
     }
 
     fn show_messages(&self, name: &str, args: &[String]) -> Result<Execution, DaemonError> {
@@ -7792,54 +8165,49 @@ impl Shared {
                 })
             }
             "list-buffers" | "lsb" => {
-                let parsed = parse_buffer_command_args(name, args, &['F'], &[])?;
+                let parsed = parse_buffer_command_args(name, args, &['F', 'f', 'O'], &['r'])?;
                 require_no_positionals(name, &parsed)?;
+                let sort = TmuxSort::parse(parsed.value('O'), parsed.has('r'), None)?;
                 let mut inner = self.inner.lock();
-                if let Some(format) = parsed.value('F') {
-                    inner.engine.set_format_now(unix_timestamp());
-                    let format_context = inner.engine.format_status_context(None, None, None);
-                    let output = inner
-                        .paste_buffers
-                        .iter()
-                        .map(|buffer| {
-                            let facts = FormatHookFacts {
-                                buffer: Some(buffer_format_facts(buffer)),
-                                ..FormatHookFacts::default()
-                            };
-                            let mut hooks = DaemonFormatHooks::command_with_optional_variables(
-                                &facts,
-                                context.format_variables(),
-                            );
-                            expand_format_values(format, &format_context, &mut hooks)
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    return Ok(Execution {
-                        output,
-                        effects: Vec::new(),
-                    });
+                inner.engine.set_format_now(unix_timestamp());
+                let format_context = inner.engine.format_status_context(None, None, None);
+                let mut buffers = inner.paste_buffers.clone();
+                sort.apply(&mut buffers, |left, right| {
+                    let ordering = match sort.order() {
+                        Some(TmuxSortOrder::Creation) => right.created.cmp(&left.created),
+                        Some(TmuxSortOrder::Name) => left.name.cmp(&right.name),
+                        Some(TmuxSortOrder::Size) => left.data.len().cmp(&right.data.len()),
+                        _ => std::cmp::Ordering::Equal,
+                    };
+                    ordering.then_with(|| left.name.cmp(&right.name))
+                });
+                let format = parsed
+                    .value('F')
+                    .unwrap_or("#{buffer_name}: #{buffer_size} bytes: \"#{buffer_sample}\"");
+                let mut output = Vec::new();
+                for buffer in &buffers {
+                    let facts = FormatHookFacts {
+                        buffer: Some(buffer_format_facts(buffer)),
+                        ..FormatHookFacts::default()
+                    };
+                    if let Some(filter) = parsed.value('f') {
+                        let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                            &facts,
+                            context.format_variables(),
+                        );
+                        if !format_true(&expand_format_values(filter, &format_context, &mut hooks))
+                        {
+                            continue;
+                        }
+                    }
+                    let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                        &facts,
+                        context.format_variables(),
+                    );
+                    output.push(expand_format_values(format, &format_context, &mut hooks));
                 }
-                let now = SystemTime::now();
-                let output = inner
-                    .paste_buffers
-                    .iter()
-                    .map(|buffer| {
-                        let age = now
-                            .duration_since(buffer.created)
-                            .unwrap_or_default()
-                            .as_secs();
-                        format!(
-                            "{}: {} bytes: \"{}\" ({}s ago)",
-                            buffer.name,
-                            buffer.data.len(),
-                            bounded_buffer_sample(&buffer.data, MAX_PASTE_BUFFER_SAMPLE_BYTES),
-                            age
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
                 Ok(Execution {
-                    output,
+                    output: output.join("\n"),
                     effects: Vec::new(),
                 })
             }
@@ -8057,12 +8425,13 @@ impl Shared {
     ) -> Result<MuxSnapshot, ServerError> {
         let (snapshot, events) =
             self.attach_collect_event_hooks(client, session, event_hooks_enabled)?;
+        self.refresh_control_output_taps();
         self.run_event_hooks(events);
         Ok(snapshot)
     }
 
     fn attach_collect_event_hooks(
-        self: &Arc<Self>,
+        &self,
         client: ClientId,
         session: SessionId,
         event_hooks_enabled: bool,
@@ -8121,6 +8490,19 @@ impl Shared {
         }
         inner.attached.retain(|_, clients| !clients.is_empty());
         inner.attached.entry(session).or_default().insert(client);
+        if previous_session != Some(session)
+            && let Some(previous_session) = previous_session
+            && inner.engine.state.sessions.contains_key(&previous_session)
+        {
+            inner.last_sessions.insert(client, previous_session);
+        }
+        inner.activity_sequence = inner.activity_sequence.saturating_add(1);
+        let activity = inner.activity_sequence;
+        inner.client_activity.insert(client, activity);
+        inner.session_activity.insert(session, activity);
+        let now = unix_timestamp();
+        inner.client_activity_times.insert(client, now);
+        inner.session_last_attached.insert(session, now);
         if let Some(output) = inner.control_outputs.get_mut(&client) {
             for pane in output.panes.values_mut() {
                 pane.pending.clear();
@@ -8209,7 +8591,6 @@ impl Shared {
             terminal.attach_view(view);
         }
         apply_terminal_resizes(resizes);
-        self.refresh_control_output_taps();
         Ok((snapshot, hook_events))
     }
 
@@ -8317,10 +8698,7 @@ impl Shared {
         for (session, victim) in victims {
             self.publish_to_client(
                 victim,
-                EventPayload::Detached {
-                    session,
-                    by: Some(by.clone()),
-                },
+                EventPayload::detached_evicted(session, Some(by.clone())),
             );
             self.detach_with_event_hooks(victim, event_hooks_enabled);
         }
@@ -8377,6 +8755,10 @@ impl Shared {
         inner.focused_windows.remove(&client);
         inner.client_terminal_input_sequences.remove(&client);
         inner.key_engines.remove(&client);
+        inner.last_sessions.remove(&client);
+        inner.read_only_clients.remove(&client);
+        inner.client_activity.remove(&client);
+        inner.client_activity_times.remove(&client);
         let copy_session = inner
             .copy_sessions
             .remove(&client)
@@ -8968,7 +9350,7 @@ impl Shared {
     }
 
     fn note_terminal_input(&self, client: ClientId, pane: PaneId) {
-        let resizes = {
+        let (resizes, refresh_activity_choosers) = {
             let mut inner = self.inner.lock();
             let session = client_is_attached_to_pane(&inner, client, pane)
                 .then(|| inner.engine.state.window_for_pane(pane))
@@ -8977,12 +9359,26 @@ impl Shared {
                 .map(|window| window.session);
             if let Some(session) = session {
                 inner.engine.mark_session_active(session);
+                inner.activity_sequence = inner.activity_sequence.saturating_add(1);
+                let activity = inner.activity_sequence;
+                inner.client_activity.insert(client, activity);
+                inner.session_activity.insert(session, activity);
+                inner.client_activity_times.insert(client, unix_timestamp());
             }
-            terminal_resizes_after_client_input(&mut inner, client, pane)
+            let refresh_activity_choosers = inner
+                .choose_trees
+                .values()
+                .any(|chooser| chooser.sort.order() == Some(TmuxSortOrder::Activity));
+            (
+                terminal_resizes_after_client_input(&mut inner, client, pane),
+                refresh_activity_choosers,
+            )
         };
         apply_terminal_resizes(resizes);
         if self.clear_pane_bell(pane) {
             self.publish_snapshot();
+        } else if refresh_activity_choosers {
+            self.refresh_choose_trees();
         }
     }
 
@@ -9083,7 +9479,8 @@ impl Shared {
         let mut pass_start = None;
         for (offset, character) in text.char_indices() {
             let mut encoded = [0_u8; 4];
-            let decision = self.key_decision(client, character.encode_utf8(&mut encoded), false);
+            let (decision, repeat_binding) =
+                self.key_decision_with_repeat(client, character.encode_utf8(&mut encoded), false);
             match decision {
                 KeyDecision::Pass => {
                     if command_output_active
@@ -9112,7 +9509,14 @@ impl Shared {
                     if let Some(start) = pass_start.take() {
                         self.dispatch_input_text(client, pane, &mut sinks, &text[start..offset])?;
                     }
-                    self.execute_key_commands(client, kind, context, pane, &commands)?;
+                    self.execute_key_commands(
+                        client,
+                        kind,
+                        context,
+                        pane,
+                        &commands,
+                        repeat_binding,
+                    )?;
                     sinks = None;
                     if self.inner.lock().command_prompts.contains_key(&client) {
                         let remaining = &text[offset + character.len_utf8()..];
@@ -9232,7 +9636,7 @@ impl Shared {
             return Ok(());
         }
         let key = input_key_name(&input);
-        let decision = self.key_decision(
+        let (decision, repeat_binding) = self.key_decision_with_repeat(
             client,
             &key,
             input.action == zz_terminal::KeyAction::Release,
@@ -9262,7 +9666,7 @@ impl Shared {
             }
             KeyDecision::Prefix | KeyDecision::Ignore => Ok(()),
             KeyDecision::Commands(commands) => {
-                self.execute_key_commands(client, kind, context, pane, &commands)
+                self.execute_key_commands(client, kind, context, pane, &commands, repeat_binding)
             }
         };
         self.sync_prefix_armed(client);
@@ -9359,7 +9763,8 @@ impl Shared {
                 action => action,
             };
             let attached_session = client_attached_session(&inner, client);
-            let result = match chooser.apply(action, &inner.engine.state, attached_session) {
+            let facts = format_hook_facts(&inner);
+            let result = match chooser.apply(action, &inner.engine, attached_session, &facts) {
                 Ok(result) => result,
                 Err(error) => {
                     inner.choose_trees.insert(client, chooser);
@@ -9453,17 +9858,16 @@ impl Shared {
                         ChooseBufferInputOutcome::Delta { search, selected }
                     }
                     ChooseBufferResult::Delete(name) => {
-                        let deleted_index = usize::try_from(chooser.rendered.selected)
-                            .unwrap_or(usize::MAX)
-                            .min(inner.paste_buffers.len().saturating_sub(1));
                         inner.paste_buffers.retain(|buffer| buffer.name != name);
                         deleted = Some(name);
-                        chooser.selected = inner
-                            .paste_buffers
-                            .get(deleted_index)
-                            .or_else(|| inner.paste_buffers.last())
-                            .map(|buffer| buffer.name.clone());
-                        chooser.rebuild(&inner.paste_buffers);
+                        chooser.selected = None;
+                        let facts = format_hook_facts(&inner);
+                        chooser.rebuild(
+                            &inner.engine,
+                            &inner.paste_buffers,
+                            attached_session,
+                            &facts,
+                        );
                         if chooser.rendered.items.is_empty() {
                             ChooseBufferInputOutcome::Full(None)
                         } else {
@@ -9770,11 +10174,16 @@ impl Shared {
         context: &mut ExecutionContext,
         pane: PaneId,
         commands: &[CommandInvocation],
+        repeat_binding: bool,
     ) -> Result<(), DaemonError> {
         let mut output = String::new();
         let mut output_truncated = false;
         for command in commands {
-            let execution = match self.execute(client, kind, context, command) {
+            let previous_repeat_binding = context.repeat_binding();
+            context.set_repeat_binding(repeat_binding);
+            let execution = self.execute(client, kind, context, command);
+            context.set_repeat_binding(previous_repeat_binding);
+            let execution = match execution {
                 Ok(execution) => execution,
                 Err(error) => {
                     if let Some(error_output) = daemon_error_output(&error)
@@ -10484,6 +10893,15 @@ impl Shared {
     }
 
     fn key_decision(&self, client: ClientId, key: &str, release: bool) -> KeyDecision {
+        self.key_decision_with_repeat(client, key, release).0
+    }
+
+    fn key_decision_with_repeat(
+        &self,
+        client: ClientId,
+        key: &str,
+        release: bool,
+    ) -> (KeyDecision, bool) {
         let mut inner = self.inner.lock();
         if release {
             return if inner
@@ -10491,9 +10909,9 @@ impl Shared {
                 .get_mut(&client)
                 .is_some_and(|keys| keys.remove(bare_key_name(key)))
             {
-                KeyDecision::Prefix
+                (KeyDecision::Prefix, false)
             } else {
-                KeyDecision::Pass
+                (KeyDecision::Pass, false)
             };
         }
         let mut key_engine = inner.key_engines.remove(&client).unwrap_or_default();
@@ -10509,7 +10927,7 @@ impl Shared {
                 inner.engine.key_table_for_session(session),
             )
         });
-        let decision = key_engine.handle_with_repeat_times(
+        let (decision, repeat_binding) = key_engine.handle_with_repeat_metadata(
             &inner.engine.keys,
             key,
             Instant::now(),
@@ -10534,7 +10952,7 @@ impl Shared {
                 table.as_deref().unwrap_or(&root_table)
             );
         }
-        decision
+        (decision, repeat_binding)
     }
 
     fn filter_suppressed_text<'a>(&self, client: ClientId, text: &'a str) -> Cow<'a, str> {
@@ -11047,7 +11465,7 @@ impl Shared {
                         break;
                     }
                     match event {
-                        TerminalEvent::ViewportReady => {
+                        TerminalEvent::ViewportReady { .. } => {
                             if let Some(viewport) =
                                 terminal.latest_viewport_for(TerminalViewId(client.0))
                             {
@@ -11125,7 +11543,7 @@ impl Shared {
                         return;
                     }
                     match event {
-                        TerminalEvent::ViewportReady => {
+                        TerminalEvent::ViewportReady { .. } => {
                             let viewport = terminal
                                 .latest_viewport_for(TerminalViewId(client.0))
                                 .unwrap_or_else(|| terminal.latest_viewport());
@@ -11454,7 +11872,7 @@ impl Shared {
                         break;
                     }
                     match event {
-                        TerminalEvent::ViewportReady => {
+                        TerminalEvent::ViewportReady { output_activity } => {
                             let mut current =
                                 terminal.latest_viewports().into_iter().collect::<Vec<_>>();
                             current.sort_by_key(|(view, _)| view.0);
@@ -11473,6 +11891,7 @@ impl Shared {
                                     &terminal,
                                     &runtime_viewport,
                                     &current_command,
+                                    output_activity,
                                 );
                             }
                             let referenced_images = current
@@ -11779,6 +12198,7 @@ impl Shared {
         terminal: &Arc<TerminalSession>,
         viewport: &TerminalViewport,
         current_command: &str,
+        output_activity: bool,
     ) {
         let current_path = terminal_working_directory(terminal)
             .map(|path| path.to_string_lossy().into_owned())
@@ -11789,7 +12209,7 @@ impl Shared {
             .tty()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let (changed, events) = {
+        let (changed, events, refresh_activity_choosers) = {
             let mut inner = self.inner.lock();
             if !inner
                 .terminals
@@ -11798,6 +12218,14 @@ impl Shared {
             {
                 return;
             }
+            if output_activity {
+                inner.engine.state.touch_window_activity_for_pane(pane);
+            }
+            let refresh_activity_choosers = output_activity
+                && inner
+                    .choose_trees
+                    .values()
+                    .any(|chooser| chooser.sort.order() == Some(TmuxSortOrder::Activity));
             let previous = inner
                 .engine
                 .pane_runtime_facts(pane)
@@ -11820,27 +12248,83 @@ impl Shared {
                 &mut hooks,
             );
             let after = MuxHookSnapshot::capture(&inner.engine);
-            (changed, mux_hook_events(&before, &after, ""))
+            (
+                changed,
+                mux_hook_events(&before, &after, ""),
+                refresh_activity_choosers,
+            )
         };
         if changed {
             self.publish_snapshot();
+        } else if refresh_activity_choosers {
+            self.refresh_choose_trees();
         }
         self.run_event_hooks(events);
     }
 
     fn detach_removed_sessions(&self) {
-        let detached = {
-            let inner = self.inner.lock();
-            inner
+        let destroyed = {
+            let mut inner = self.inner.lock();
+            let mut destroyed = inner
+                .engine
+                .take_destroyed_sessions()
+                .into_iter()
+                .map(|(session, name, policy)| (session, (name, policy)))
+                .collect::<BTreeMap<_, _>>();
+            for session in inner
                 .attached
-                .iter()
-                .filter(|(session, _)| !inner.engine.state.sessions.contains_key(session))
-                .flat_map(|(session, clients)| clients.iter().map(|client| (*session, *client)))
+                .keys()
+                .copied()
+                .filter(|session| !inner.engine.state.sessions.contains_key(session))
+                .collect::<Vec<_>>()
+            {
+                destroyed
+                    .entry(session)
+                    .or_insert_with(|| (session.to_string(), "on".to_owned()));
+            }
+            destroyed
+                .into_iter()
+                .map(|(session, (name, policy))| {
+                    inner.last_sessions.retain(|_, last| *last != session);
+                    let clients = inner.attached.get(&session).cloned().unwrap_or_default();
+                    let survivor = destroyed_session_survivor(&inner, &name, &policy);
+                    inner.session_activity.remove(&session);
+                    inner.session_last_attached.remove(&session);
+                    (session, clients, survivor)
+                })
                 .collect::<Vec<_>>()
         };
-        for (session, client) in detached {
-            self.publish_to_client(client, EventPayload::Detached { session, by: None });
-            let _ = self.detach_client_state(client, false);
+        for (session, clients, survivor) in destroyed {
+            for client in clients {
+                if let Some(survivor) = survivor {
+                    match self.attach_collect_event_hooks(client, survivor, true) {
+                        Ok((snapshot, events)) => {
+                            let mut inner = self.inner.lock();
+                            inner.last_sessions.remove(&client);
+                            inner.deferred_event_hooks.extend(events);
+                            inner.deferred_control_refresh = true;
+                            let outbound = inner.subscribers.get(&client).cloned();
+                            drop(inner);
+                            if let Some(outbound) = outbound {
+                                outbound.reset_kitty_images();
+                                outbound.reset_pasted_images();
+                                let _ = outbound.enqueue_reliable(&ProtocolMessage::Attached {
+                                    session: survivor,
+                                    snapshot,
+                                });
+                                self.send_resync(client, &outbound);
+                            }
+                            continue;
+                        }
+                        Err(error) => log::warn!(
+                            target: "zz_daemon::detach_on_destroy",
+                            "client {client} could not move to survivor {survivor} after session {session} died: {error}"
+                        ),
+                    }
+                }
+                self.publish_to_client(client, EventPayload::detached_session_destroyed(session));
+                let _ = self.detach_client_state(client, false);
+            }
         }
     }
 
@@ -11894,7 +12378,8 @@ impl Shared {
                     updates.push((client, None));
                     continue;
                 }
-                chooser.rebuild(&inner.engine.state, attached_session);
+                let facts = format_hook_facts(&inner);
+                chooser.rebuild(&inner.engine, attached_session, &facts);
                 let state = chooser.rendered.clone();
                 inner.choose_trees.insert(client, chooser);
                 updates.push((client, Some(state)));
@@ -11937,7 +12422,13 @@ impl Shared {
                     updates.push((client, None));
                     continue;
                 }
-                chooser.rebuild(&inner.paste_buffers);
+                let facts = format_hook_facts(&inner);
+                chooser.rebuild(
+                    &inner.engine,
+                    &inner.paste_buffers,
+                    attached_session,
+                    &facts,
+                );
                 let state = chooser.rendered.clone();
                 inner.choose_buffers.insert(client, chooser);
                 updates.push((client, Some(state)));
@@ -13813,6 +14304,16 @@ struct ServerState {
     client_instances: BTreeMap<ClientId, ClientInstanceId>,
     client_kinds: BTreeMap<ClientId, ClientKind>,
     client_terminals: BTreeSet<ClientId>,
+    client_origins: BTreeMap<ClientId, PaneId>,
+    last_sessions: BTreeMap<ClientId, SessionId>,
+    read_only_clients: BTreeSet<ClientId>,
+    client_activity: BTreeMap<ClientId, u64>,
+    client_activity_times: BTreeMap<ClientId, u64>,
+    session_activity: BTreeMap<SessionId, u64>,
+    session_last_attached: BTreeMap<SessionId, u64>,
+    activity_sequence: u64,
+    deferred_event_hooks: Vec<PendingHookEvent>,
+    deferred_control_refresh: bool,
     terminals: BTreeMap<PaneId, Arc<TerminalSession>>,
     terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,
     command_outputs: BTreeMap<ClientId, CommandOutputSession>,
@@ -14169,6 +14670,8 @@ enum ChooseBufferInputOutcome {
 struct ChooseBufferSession {
     source_pane: PaneId,
     source_session: SessionId,
+    filter: Option<String>,
+    sort: TmuxSort,
     names: Vec<String>,
     selected: Option<String>,
     search: Option<ChooseBufferSearchState>,
@@ -14179,21 +14682,28 @@ struct ChooseBufferSession {
 impl ChooseBufferSession {
     fn new(
         source_pane: PaneId,
-        state: &MuxState,
+        engine: &MuxEngine,
         buffers: &[PasteBuffer],
+        attached_session: Option<SessionId>,
+        facts: &FormatHookFacts,
+        filter: Option<String>,
+        sort: TmuxSort,
     ) -> Result<Option<Self>, ServerError> {
-        let source_window = state
+        let source_window = engine
+            .state
             .window_for_pane(source_pane)
             .ok_or_else(|| ServerError::MissingTarget(source_pane.to_string()))?;
-        let source_session = state.windows[&source_window].session;
+        let source_session = engine.state.windows[&source_window].session;
         if buffers.is_empty() {
             return Ok(None);
         }
         let mut chooser = Self {
             source_pane,
             source_session,
+            filter,
+            sort,
             names: Vec::new(),
-            selected: buffers.first().map(|buffer| buffer.name.clone()),
+            selected: None,
             search: None,
             last_search: None,
             rendered: ChooseBufferState {
@@ -14202,14 +14712,62 @@ impl ChooseBufferSession {
                 selected: 0,
             },
         };
-        chooser.rebuild(buffers);
+        chooser.rebuild(engine, buffers, attached_session, facts);
         Ok(Some(chooser))
     }
 
-    fn rebuild(&mut self, buffers: &[PasteBuffer]) {
+    fn rebuild(
+        &mut self,
+        engine: &MuxEngine,
+        buffers: &[PasteBuffer],
+        attached_session: Option<SessionId>,
+        facts: &FormatHookFacts,
+    ) {
         self.names.clear();
-        let mut items = Vec::with_capacity(buffers.len().min(MAX_CHOOSE_BUFFER_ITEMS));
-        for buffer in buffers.iter().take(MAX_CHOOSE_BUFFER_ITEMS) {
+        let source_context = ExecutionContext::for_pane(&engine.state, self.source_pane);
+        let mut sorted = buffers.iter().collect::<Vec<_>>();
+        self.sort.apply(&mut sorted, |left, right| {
+            let ordering = match self.sort.order() {
+                Some(TmuxSortOrder::Creation) => right.created.cmp(&left.created),
+                Some(TmuxSortOrder::Name) => left.name.cmp(&right.name),
+                Some(TmuxSortOrder::Size) => left.data.len().cmp(&right.data.len()),
+                _ => std::cmp::Ordering::Equal,
+            };
+            ordering.then_with(|| left.name.cmp(&right.name))
+        });
+        let filtered = |apply_filter: bool| {
+            sorted
+                .iter()
+                .copied()
+                .filter(|buffer| {
+                    if !apply_filter {
+                        return true;
+                    }
+                    let (Some(filter), Some(source_context)) =
+                        (self.filter.as_deref(), source_context.as_ref())
+                    else {
+                        return true;
+                    };
+                    let row_facts = FormatHookFacts {
+                        buffer: Some(buffer_format_facts(buffer)),
+                        ..facts.clone()
+                    };
+                    let mut hooks = DaemonFormatHooks::command(&row_facts);
+                    format_true(&engine.expand_pane_format(
+                        filter,
+                        source_context,
+                        attached_session,
+                        &mut hooks,
+                    ))
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut visible = filtered(self.filter.is_some());
+        if visible.is_empty() && self.filter.is_some() {
+            visible = filtered(false);
+        }
+        let mut items = Vec::with_capacity(visible.len().min(MAX_CHOOSE_BUFFER_ITEMS));
+        for buffer in visible.into_iter().take(MAX_CHOOSE_BUFFER_ITEMS) {
             self.names.push(buffer.name.clone());
             items.push(ChooseBufferItem {
                 name: bounded_choose_buffer_name(&buffer.name),
@@ -14436,32 +14994,6 @@ fn bounded_choose_buffer_preview(data: &[u8]) -> String {
     preview
 }
 
-fn bounded_buffer_sample(data: &[u8], max_bytes: usize) -> String {
-    let prefix_len = data.len().min(max_bytes);
-    let sample = String::from_utf8_lossy(&data[..prefix_len]);
-    let mut output = String::with_capacity(max_bytes);
-    let mut truncated = prefix_len < data.len();
-    for character in sample.chars() {
-        let mut encoded = [0; 4];
-        let fragment = match character {
-            '\n' => "\\n",
-            '\r' => "\\r",
-            '\t' => "\\t",
-            character if character.is_control() => "�",
-            character => character.encode_utf8(&mut encoded),
-        };
-        if output.len().saturating_add(fragment.len()) > max_bytes.saturating_sub(3) {
-            truncated = true;
-            break;
-        }
-        output.push_str(fragment);
-    }
-    if truncated {
-        output.push_str("...");
-    }
-    output
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ChooseTreeResult {
     Updated(ChooseTreeUpdateKind),
@@ -14480,6 +15012,9 @@ struct ChooseTreeSession {
     source_pane: PaneId,
     source_session: SessionId,
     kind: ChooseTreeKind,
+    sessions_only: bool,
+    filter: Option<String>,
+    sort: TmuxSort,
     expanded_sessions: BTreeSet<SessionId>,
     expanded_windows: BTreeSet<zz_protocol::WindowId>,
     selected: Option<ChooseTreeTarget>,
@@ -14491,28 +15026,47 @@ struct ChooseTreeSession {
 impl ChooseTreeSession {
     fn new(
         kind: ChooseTreeKind,
+        sessions_only: bool,
         source_pane: PaneId,
-        state: &MuxState,
+        engine: &MuxEngine,
         attached_session: Option<SessionId>,
+        facts: &FormatHookFacts,
+        filter: Option<String>,
+        sort: TmuxSort,
     ) -> Result<Self, ServerError> {
-        let source_window = state
+        let source_window = engine
+            .state
             .window_for_pane(source_pane)
             .ok_or_else(|| ServerError::MissingTarget(source_pane.to_string()))?;
-        let source_session = state.windows[&source_window].session;
-        let expanded_sessions = state.sessions.keys().copied().collect();
+        let source_session = engine.state.windows[&source_window].session;
+        let expanded_sessions = if sessions_only {
+            BTreeSet::new()
+        } else {
+            engine.state.sessions.keys().copied().collect()
+        };
         let expanded_windows = if kind == ChooseTreeKind::Panes {
-            state.windows.keys().copied().collect()
+            engine.state.windows.keys().copied().collect()
         } else {
             BTreeSet::new()
         };
-        let selected = Some(match kind {
-            ChooseTreeKind::Windows => ChooseTreeTarget::Window(source_window),
-            ChooseTreeKind::Panes => ChooseTreeTarget::Pane(source_pane),
+        let selected = Some(if sessions_only {
+            ChooseTreeTarget::Session(source_session)
+        } else {
+            match kind {
+                ChooseTreeKind::Windows => ChooseTreeTarget::Window(source_window),
+                ChooseTreeKind::Panes if engine.state.windows[&source_window].panes.len() == 1 => {
+                    ChooseTreeTarget::Window(source_window)
+                }
+                ChooseTreeKind::Panes => ChooseTreeTarget::Pane(source_pane),
+            }
         });
         let mut chooser = Self {
             source_pane,
             source_session,
             kind,
+            sessions_only,
+            filter,
+            sort,
             expanded_sessions,
             expanded_windows,
             selected,
@@ -14525,17 +15079,159 @@ impl ChooseTreeSession {
                 kind,
             },
         };
-        chooser.rebuild(state, attached_session);
+        chooser.rebuild(engine, attached_session, facts);
         Ok(chooser)
     }
 
-    fn rebuild(&mut self, state: &MuxState, attached_session: Option<SessionId>) {
-        let mut items = Vec::new();
-        'sessions: for session in state.sessions.values() {
-            let session_has_children = session
+    fn branches(
+        &self,
+        engine: &MuxEngine,
+        attached_session: Option<SessionId>,
+        facts: &FormatHookFacts,
+        apply_filter: bool,
+    ) -> Vec<(SessionId, Vec<(WindowId, Vec<PaneId>)>)> {
+        let state = &engine.state;
+        let mut sessions = state
+            .sessions_by_name()
+            .into_iter()
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+        self.sort.apply(&mut sessions, |left, right| {
+            let left = &state.sessions[left];
+            let right = &state.sessions[right];
+            let ordering = match self.sort.order() {
+                Some(TmuxSortOrder::Activity) => right.sort_activity.cmp(&left.sort_activity),
+                Some(TmuxSortOrder::Creation) => left.sort_created.cmp(&right.sort_created),
+                Some(TmuxSortOrder::Index) => left.id.cmp(&right.id),
+                Some(TmuxSortOrder::Name) => left.name.cmp(&right.name),
+                _ => std::cmp::Ordering::Equal,
+            };
+            ordering.then_with(|| left.name.cmp(&right.name))
+        });
+
+        let mut branches = Vec::new();
+        for session_id in sessions {
+            let Some(session) = state.sessions.get(&session_id) else {
+                continue;
+            };
+            let mut windows = session
                 .windows
                 .iter()
-                .any(|window| state.windows.contains_key(window));
+                .copied()
+                .filter(|window| state.windows.contains_key(window))
+                .collect::<Vec<_>>();
+            self.sort.apply(&mut windows, |left, right| {
+                let left = &state.windows[left];
+                let right = &state.windows[right];
+                let ordering = match self.sort.order() {
+                    Some(TmuxSortOrder::Activity) => right.activity.cmp(&left.activity),
+                    Some(TmuxSortOrder::Creation) => left.created.cmp(&right.created),
+                    Some(TmuxSortOrder::Index) => left.index.cmp(&right.index),
+                    Some(TmuxSortOrder::Name) => left.name.cmp(&right.name),
+                    Some(TmuxSortOrder::Size) => {
+                        let left_extent = (
+                            engine
+                                .window_extent(left.id, zz_protocol::Axis::Horizontal)
+                                .unwrap_or_default(),
+                            engine
+                                .window_extent(left.id, zz_protocol::Axis::Vertical)
+                                .unwrap_or_default(),
+                        );
+                        let right_extent = (
+                            engine
+                                .window_extent(right.id, zz_protocol::Axis::Horizontal)
+                                .unwrap_or_default(),
+                            engine
+                                .window_extent(right.id, zz_protocol::Axis::Vertical)
+                                .unwrap_or_default(),
+                        );
+                        (u32::from(left_extent.0) * u32::from(left_extent.1))
+                            .cmp(&(u32::from(right_extent.0) * u32::from(right_extent.1)))
+                    }
+                    _ => std::cmp::Ordering::Equal,
+                };
+                ordering.then_with(|| left.name.cmp(&right.name))
+            });
+
+            let mut visible_windows = Vec::new();
+            for window_id in windows {
+                let window = &state.windows[&window_id];
+                let mut panes = window.pane_order().to_vec();
+                self.sort.apply(&mut panes, |left, right| {
+                    let left_pane = &window.panes[left];
+                    let right_pane = &window.panes[right];
+                    let left_index = window
+                        .pane_order()
+                        .iter()
+                        .position(|pane| pane == left)
+                        .unwrap_or_default();
+                    let right_index = window
+                        .pane_order()
+                        .iter()
+                        .position(|pane| pane == right)
+                        .unwrap_or_default();
+                    let ordering = match self.sort.order() {
+                        Some(TmuxSortOrder::Activity) => {
+                            left_pane.active_point.cmp(&right_pane.active_point)
+                        }
+                        Some(TmuxSortOrder::Creation) => left.cmp(right),
+                        Some(TmuxSortOrder::Index) => left_index.cmp(&right_index),
+                        Some(TmuxSortOrder::Name) => left_pane.title.cmp(&right_pane.title),
+                        Some(TmuxSortOrder::Size) => {
+                            let left_extent =
+                                window.displayed_pane_geometry(*left).unwrap_or_default();
+                            let right_extent =
+                                window.displayed_pane_geometry(*right).unwrap_or_default();
+                            (u32::from(left_extent.0) * u32::from(left_extent.1))
+                                .cmp(&(u32::from(right_extent.0) * u32::from(right_extent.1)))
+                        }
+                        _ => std::cmp::Ordering::Equal,
+                    };
+                    ordering.then_with(|| left_pane.title.cmp(&right_pane.title))
+                });
+                if apply_filter {
+                    panes.retain(|pane| {
+                        let (Some(filter), Some(target)) = (
+                            self.filter.as_deref(),
+                            ExecutionContext::for_pane(state, *pane),
+                        ) else {
+                            return true;
+                        };
+                        let mut hooks = DaemonFormatHooks::command(facts);
+                        format_true(&engine.expand_pane_format(
+                            filter,
+                            &target,
+                            attached_session,
+                            &mut hooks,
+                        ))
+                    });
+                }
+                if !apply_filter || !panes.is_empty() {
+                    visible_windows.push((window_id, panes));
+                }
+            }
+            if !apply_filter || !visible_windows.is_empty() {
+                branches.push((session_id, visible_windows));
+            }
+        }
+        branches
+    }
+
+    fn rebuild(
+        &mut self,
+        engine: &MuxEngine,
+        attached_session: Option<SessionId>,
+        facts: &FormatHookFacts,
+    ) {
+        let state = &engine.state;
+        let mut branches = self.branches(engine, attached_session, facts, self.filter.is_some());
+        if branches.is_empty() && self.filter.is_some() {
+            branches = self.branches(engine, attached_session, facts, false);
+        }
+        let mut items = Vec::new();
+        'sessions: for (session_id, windows) in branches {
+            let session = &state.sessions[&session_id];
+            let session_has_children = !windows.is_empty();
             let session_expanded =
                 session_has_children && self.expanded_sessions.contains(&session.id);
             if !push_choose_tree_item(
@@ -14559,14 +15255,11 @@ impl ChooseTreeSession {
                 continue;
             }
 
-            for window_id in &session.windows {
-                let Some(window) = state.windows.get(window_id) else {
-                    continue;
-                };
-                let window_has_children =
-                    self.kind == ChooseTreeKind::Panes && !window.panes.is_empty();
+            for (window_id, panes) in windows {
+                let window = &state.windows[&window_id];
+                let window_has_children = !panes.is_empty();
                 let window_expanded =
-                    window_has_children && self.expanded_windows.contains(window_id);
+                    window_has_children && self.expanded_windows.contains(&window_id);
                 if !push_choose_tree_item(
                     &mut items,
                     ChooseTreeItem {
@@ -14575,12 +15268,12 @@ impl ChooseTreeSession {
                             window.index, window.name
                         )),
                         detail: format_count(window.panes.len(), "pane"),
-                        target: ChooseTreeTarget::Window(*window_id),
+                        target: ChooseTreeTarget::Window(window_id),
                         depth: 1,
                         flags: choose_tree_flags(
                             window_expanded,
                             window_has_children,
-                            session.active_window == *window_id,
+                            session.active_window == window_id,
                         ),
                         pane_kind: None,
                     },
@@ -14591,7 +15284,7 @@ impl ChooseTreeSession {
                     continue;
                 }
 
-                for pane_id in window.pane_order().iter().copied() {
+                for pane_id in panes {
                     let Some(pane) = window.panes.get(&pane_id) else {
                         continue;
                     };
@@ -14630,12 +15323,19 @@ impl ChooseTreeSession {
             }
         }
 
-        let fallback = state
-            .window_for_pane(self.source_pane)
-            .map(|window| match self.kind {
-                ChooseTreeKind::Windows => ChooseTreeTarget::Window(window),
-                ChooseTreeKind::Panes => ChooseTreeTarget::Pane(self.source_pane),
-            });
+        let fallback = state.window_for_pane(self.source_pane).map(|window| {
+            if self.sessions_only {
+                ChooseTreeTarget::Session(self.source_session)
+            } else {
+                match self.kind {
+                    ChooseTreeKind::Windows => ChooseTreeTarget::Window(window),
+                    ChooseTreeKind::Panes if state.windows[&window].panes.len() == 1 => {
+                        ChooseTreeTarget::Window(window)
+                    }
+                    ChooseTreeKind::Panes => ChooseTreeTarget::Pane(self.source_pane),
+                }
+            }
+        });
         let selected = self
             .selected
             .and_then(|target| items.iter().position(|item| item.target == target))
@@ -14656,8 +15356,9 @@ impl ChooseTreeSession {
     fn apply(
         &mut self,
         action: ChooseTreeAction,
-        state: &MuxState,
+        engine: &MuxEngine,
         attached_session: Option<SessionId>,
+        facts: &FormatHookFacts,
     ) -> Result<ChooseTreeResult, ServerError> {
         let len = self.rendered.items.len();
         let current = usize::try_from(self.rendered.selected)
@@ -14691,7 +15392,7 @@ impl ChooseTreeSession {
                 if let Some(item) = self.rendered.items.get(current).cloned() {
                     if item.expanded() {
                         self.set_expanded(item.target, false);
-                        self.rebuild(state, attached_session);
+                        self.rebuild(engine, attached_session, facts);
                         update = ChooseTreeUpdateKind::Full;
                     } else if item.depth > 0
                         && let Some(parent) = self.rendered.items[..current]
@@ -14707,7 +15408,7 @@ impl ChooseTreeSession {
                 if let Some(item) = self.rendered.items.get(current).cloned() {
                     if item.has_children() && !item.expanded() {
                         self.set_expanded(item.target, true);
-                        self.rebuild(state, attached_session);
+                        self.rebuild(engine, attached_session, facts);
                         update = ChooseTreeUpdateKind::Full;
                     } else {
                         self.select_index((current + 1).min(len.saturating_sub(1)));
@@ -15397,6 +16098,41 @@ fn client_context_pane(inner: &ServerState, client: ClientId) -> Option<PaneId> 
         })
 }
 
+fn sync_context_with_attachment(
+    inner: &ServerState,
+    client: ClientId,
+    context: &mut ExecutionContext,
+) {
+    retarget_context_to_attachment(inner, client, context);
+}
+
+fn retarget_context_to_attachment(
+    inner: &ServerState,
+    client: ClientId,
+    context: &mut ExecutionContext,
+) {
+    let Some(session) = client_attached_session(inner, client)
+        .and_then(|session| inner.engine.state.sessions.get(&session))
+    else {
+        return;
+    };
+    let window = client_focused_window(inner, client, session);
+    let Some(pane) = inner
+        .engine
+        .state
+        .windows
+        .get(&window)
+        .map(|window| window.active_pane)
+    else {
+        return;
+    };
+    context.retarget(&ExecutionContext::new(
+        Some(session.id),
+        Some(window),
+        Some(pane),
+    ));
+}
+
 fn enter_copy_session(
     inner: &mut ServerState,
     client: ClientId,
@@ -15543,12 +16279,145 @@ fn client_attached_session(inner: &ServerState, client: ClientId) -> Option<Sess
         .find_map(|(session, clients)| clients.contains(&client).then_some(*session))
 }
 
-fn format_client_flags(inner: &ServerState, client: ClientId) -> String {
-    if inner.client_kinds.get(&client) != Some(&ClientKind::Control) {
-        return String::new();
+fn best_client_on_session(inner: &ServerState, session: SessionId) -> Option<ClientId> {
+    inner
+        .attached
+        .get(&session)?
+        .iter()
+        .copied()
+        .max_by_key(|client| {
+            (
+                inner
+                    .client_activity
+                    .get(client)
+                    .copied()
+                    .unwrap_or_default(),
+                client.0,
+            )
+        })
+}
+
+fn best_attached_session(inner: &ServerState) -> Option<SessionId> {
+    inner
+        .attached
+        .iter()
+        .filter(|(session, clients)| {
+            !clients.is_empty() && inner.engine.state.sessions.contains_key(session)
+        })
+        .map(|(session, _)| *session)
+        .max_by_key(|session| {
+            let state = &inner.engine.state.sessions[session];
+            (state.sort_activity, state.sort_created, state.name.clone())
+        })
+}
+
+fn newest_session_matching(
+    inner: &ServerState,
+    predicate: impl Fn(SessionId) -> bool,
+) -> Option<SessionId> {
+    inner
+        .engine
+        .state
+        .sessions
+        .values()
+        .filter(|session| predicate(session.id))
+        .max_by_key(|session| {
+            (
+                session.sort_activity,
+                session.sort_created,
+                session.name.clone(),
+            )
+        })
+        .map(|session| session.id)
+}
+
+fn destroyed_session_survivor(
+    inner: &ServerState,
+    destroyed_name: &str,
+    policy: &str,
+) -> Option<SessionId> {
+    match policy {
+        "off" => newest_session_matching(inner, |_| true),
+        "no-detached" => newest_session_matching(inner, |session| {
+            inner.attached.get(&session).is_none_or(BTreeSet::is_empty)
+        }),
+        "previous" => {
+            let sessions = inner.engine.state.sessions_by_name();
+            sessions
+                .iter()
+                .rev()
+                .find(|session| session.name.as_str() < destroyed_name)
+                .or_else(|| sessions.last())
+                .map(|session| session.id)
+        }
+        "next" => {
+            let sessions = inner.engine.state.sessions_by_name();
+            sessions
+                .iter()
+                .find(|session| session.name.as_str() > destroyed_name)
+                .or_else(|| sessions.first())
+                .map(|session| session.id)
+        }
+        _ => None,
     }
-    let mut flags = vec!["control-mode".to_owned()];
-    if let Some(output) = inner.control_outputs.get(&client) {
+}
+
+fn resolve_switch_client_target(
+    inner: &ServerState,
+    invoking_client: ClientId,
+    kind: ClientKind,
+    target: Option<&str>,
+) -> Result<ClientId, ServerError> {
+    if let Some(target) = target {
+        let target = target.strip_suffix(':').unwrap_or(target);
+        return inner
+            .attached
+            .values()
+            .flatten()
+            .copied()
+            .find(|client| {
+                inner
+                    .client_names
+                    .get(client)
+                    .is_some_and(|name| name == target)
+                    || format!("device-{}", client.0) == target
+            })
+            .ok_or_else(|| ServerError::InvalidCommand(format!("can't find client: {target}")));
+    }
+    if matches!(kind, ClientKind::Interactive | ClientKind::Control)
+        && client_attached_session(inner, invoking_client).is_some()
+    {
+        return Ok(invoking_client);
+    }
+    if let Some(session) = inner
+        .client_origins
+        .get(&invoking_client)
+        .and_then(|pane| inner.engine.state.window_for_pane(*pane))
+        .and_then(|window| inner.engine.state.windows.get(&window))
+        .map(|window| window.session)
+        && let Some(client) = best_client_on_session(inner, session)
+    {
+        return Ok(client);
+    }
+    best_attached_session(inner)
+        .and_then(|session| best_client_on_session(inner, session))
+        .ok_or_else(|| ServerError::InvalidCommand("no current client".to_owned()))
+}
+
+fn format_client_flags(inner: &ServerState, client: ClientId) -> String {
+    let mut flags = Vec::new();
+    if client_attached_session(inner, client).is_some() {
+        flags.push("attached".to_owned());
+    }
+    if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
+        flags.push("control-mode".to_owned());
+    }
+    if inner.read_only_clients.contains(&client) {
+        flags.push("ignore-size".to_owned());
+    }
+    if inner.client_kinds.get(&client) == Some(&ClientKind::Control)
+        && let Some(output) = inner.control_outputs.get(&client)
+    {
         if output.no_output {
             flags.push("no-output".to_owned());
         }
@@ -15558,6 +16427,9 @@ fn format_client_flags(inner: &ServerState, client: ClientId) -> String {
         if let Some(pause_after_ms) = output.pause_after_ms {
             flags.push(format!("pause-after={}", pause_after_ms / 1000));
         }
+    }
+    if inner.read_only_clients.contains(&client) {
+        flags.push("read-only".to_owned());
     }
     flags.join(",")
 }
@@ -16163,11 +17035,28 @@ struct ShellJobResult {
     status: ExitStatus,
 }
 
+fn apply_job_environment(
+    process: &mut std::process::Command,
+    environment: &[(String, Option<String>)],
+) {
+    for (name, value) in environment {
+        match value {
+            Some(value) => {
+                process.env(name, value);
+            }
+            None => {
+                process.env_remove(name);
+            }
+        }
+    }
+}
+
 #[cfg(unix)]
 fn run_shell_job(
     command: &str,
     cwd: &Path,
     tmux: &str,
+    environment: &[(String, Option<String>)],
     zz_socket: &Path,
     startup_reentry: Option<&str>,
     tmux_shim: Option<&Path>,
@@ -16186,6 +17075,7 @@ fn run_shell_job(
     let stdout = OwnedFd::from(child_socket.try_clone().map_err(|_| ())?);
     let cwd = existing_job_working_directory(cwd);
     let mut process = shell_process(command);
+    apply_job_environment(&mut process, environment);
     process
         .arg0("sh")
         .process_group(0)
@@ -16227,6 +17117,7 @@ fn run_shell_job(
     command: &str,
     cwd: &Path,
     tmux: &str,
+    environment: &[(String, Option<String>)],
     zz_socket: &Path,
     startup_reentry: Option<&str>,
     tmux_shim: Option<&Path>,
@@ -16237,6 +17128,7 @@ fn run_shell_job(
 ) -> Result<ShellJobResult, ()> {
     let cwd = existing_job_working_directory(cwd);
     let mut process = shell_process(command);
+    apply_job_environment(&mut process, environment);
     process
         .current_dir(&cwd)
         .env("PWD", cwd.as_os_str())
@@ -17163,6 +18055,16 @@ fn terminal_view_action_is_input(action: &zz_terminal::TerminalViewAction) -> bo
     }
 }
 
+fn wait_for_terminal_identity(terminal: &TerminalSession) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while terminal.process_id().is_none() || cfg!(unix) && terminal.tty().is_none() {
+        if terminal.completion().is_some() || Instant::now() >= deadline {
+            return;
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
 fn terminal_resizes_for_panes(
     inner: &ServerState,
     panes: &BTreeSet<PaneId>,
@@ -17200,6 +18102,13 @@ fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
 }
 
 fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
+    let session_activity = inner
+        .engine
+        .state
+        .sessions
+        .iter()
+        .map(|(session, state)| (*session, state.sort_activity))
+        .collect();
     FormatHookFacts {
         terminals: Arc::new(inner.terminals.clone()),
         pane_pipes: Arc::new(
@@ -17224,6 +18133,7 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
                 })
                 .collect(),
         ),
+        session_activity: Arc::new(session_activity),
         buffer: inner
             .paste_buffers
             .iter()
@@ -18970,6 +19880,9 @@ fn handle_connection<S: TransportStream>(
                 .iter()
                 .any(|capability| capability == ClientHello::CLIENT_TERMINAL_CAPABILITY),
     );
+    if let Some(origin) = hello.origin {
+        shared.inner.lock().client_origins.insert(client, origin);
+    }
     let mut registration = ClientRegistrationGuard::new(shared, client);
     log::debug!(
         target: "zz_daemon::diagnostics::connection",
@@ -19065,6 +19978,9 @@ fn handle_connection<S: TransportStream>(
                 request_id,
                 command,
             }) => {
+                if let Some(context) = context.as_mut() {
+                    sync_context_with_attachment(&shared.inner.lock(), client, context);
+                }
                 if let Some(sender) = &command_sender {
                     if sender
                         .send(CommandRequest {
@@ -19136,7 +20052,8 @@ fn handle_connection<S: TransportStream>(
                     .flatten();
                 shared.detach(client);
                 if let Some(session) = control_session {
-                    shared.publish_to_client(client, EventPayload::Detached { session, by: None });
+                    shared
+                        .publish_to_client(client, EventPayload::detached_requested(session, None));
                 }
             }
             ProtocolMessage::SetColorScheme(color_scheme) => {
@@ -19148,6 +20065,9 @@ fn handle_connection<S: TransportStream>(
                 shared.set_config_overrides(client, hello.kind, &entries);
             }
             ProtocolMessage::Input(input) => {
+                if let Some(context) = context.as_mut() {
+                    sync_context_with_attachment(&shared.inner.lock(), client, context);
+                }
                 if hello.kind != ClientKind::Interactive {
                     let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
                         CommandResponse::Error {
@@ -21954,8 +22874,8 @@ mod tests {
             )
             .expect("list client flags")
             .output;
-        assert!(listed.contains("control:control-mode,no-output,wait-exit,pause-after=2"));
-        assert!(listed.contains("interactive:"));
+        assert!(listed.contains("control:attached,control-mode,no-output,wait-exit,pause-after=2"));
+        assert!(listed.contains("interactive:attached"));
         let messages = take_reliable_messages(&control_mailbox);
         assert!(messages.iter().any(|message| matches!(
             message,
@@ -21989,7 +22909,7 @@ mod tests {
             .expect("clear control flags");
         assert_eq!(
             format_client_flags(&shared.inner.lock(), control),
-            "control-mode"
+            "attached,control-mode"
         );
     }
 
@@ -22376,7 +23296,7 @@ mod tests {
         assert!(
             initial
                 .iter()
-                .any(|event| event.0 == "flags" && event.5 == "control-mode")
+                .any(|event| event.0 == "flags" && event.5 == "attached,control-mode")
         );
 
         shared.refresh_control_subscriptions();
@@ -25063,6 +25983,94 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn shell_jobs_receive_the_global_and_session_environment_overlays() {
+        let shared = Arc::new(Shared::new(1));
+        shared.inner.lock().engine.seed_global_environment([
+            ("JOBENV_SEEDED", "daemon"),
+            ("JOBENV_HIDDEN", "daemonval"),
+            ("JOBENV_UNSET", "daemonval"),
+        ]);
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-environment", ["-g", "JOBENV_GLOBAL", "global"]),
+            )
+            .expect("global environment");
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-environment",
+                    ["-g", "-h", "JOBENV_HIDDEN", "newhidden"],
+                ),
+            )
+            .expect("hidden global environment");
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-environment", ["-g", "-r", "JOBENV_UNSET"]),
+            )
+            .expect("child-unset global environment");
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["printf '%s|%s|%s|%s' \"$JOBENV_GLOBAL\" \"$JOBENV_SEEDED\" \"${JOBENV_HIDDEN-unset}\" \"${JOBENV_UNSET-unset}\""],
+                ),
+            )
+            .expect("sessionless shell job");
+        assert_eq!(output.output, "global|daemon|unset|unset");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "job-overlay", "--", "sleep", "30"],
+                ),
+            )
+            .expect("job target session");
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-environment",
+                    ["-t", "job-overlay", "JOBENV_SESSION", "session"],
+                ),
+            )
+            .expect("session environment");
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["printf '%s|%s' \"$JOBENV_SESSION\" \"$JOBENV_GLOBAL\""],
+                ),
+            )
+            .expect("session shell job");
+        assert_eq!(output.output, "session|global");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn shell_jobs_receive_both_socket_contracts_without_tmux_pane() {
         let shared = Arc::new(Shared::new(1));
         let client = ClientId(7);
@@ -26370,6 +27378,28 @@ mod tests {
             )
             .expect("format automatic buffer");
         assert_eq!(displayed.output, "buffer0|5|bravo|1");
+
+        for (arguments, expected) in [
+            (vec!["-F", "#{buffer_name}"], "buffer0\nnamed"),
+            (vec!["-r", "-F", "#{buffer_name}"], "buffer0\nnamed"),
+            (
+                vec!["-O", "name", "-r", "-F", "#{buffer_name}"],
+                "named\nbuffer0",
+            ),
+            (
+                vec!["-f", "#{==:#{buffer_name},named}", "-F", "#{buffer_name}"],
+                "named",
+            ),
+        ] {
+            let listed = shared
+                .buffer_command(
+                    &context,
+                    "list-buffers",
+                    &arguments.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+                )
+                .expect("sort and filter buffers");
+            assert_eq!(listed.output, expected);
+        }
 
         let pane = context.pane.expect("format target pane").to_string();
         let targeted = shared
@@ -29965,9 +30995,10 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[test]
     fn choose_tree_model_flattens_mixed_panes_and_supports_collapse_and_search() {
-        let mut state = MuxState::default();
-        let (session, window, terminal) = state.create_session("work").expect("session");
-        let browser = state
+        let mut engine = MuxEngine::default();
+        let (session, window, terminal) = engine.state.create_session("work").expect("session");
+        let browser = engine
+            .state
             .split_pane(
                 terminal,
                 zz_protocol::Axis::Horizontal,
@@ -29977,9 +31008,18 @@ bind - split-window -v -c "#{pane_current_path}"
                 )),
             )
             .expect("browser pane");
-        let mut chooser =
-            ChooseTreeSession::new(ChooseTreeKind::Panes, terminal, &state, Some(session))
-                .expect("chooser");
+        let facts = FormatHookFacts::default();
+        let mut chooser = ChooseTreeSession::new(
+            ChooseTreeKind::Panes,
+            false,
+            terminal,
+            &engine,
+            Some(session),
+            &facts,
+            None,
+            TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+        )
+        .expect("chooser");
 
         assert_eq!(chooser.rendered.items.len(), 4);
         assert!(chooser.rendered.items.iter().any(|item| {
@@ -29992,10 +31032,10 @@ bind - split-window -v -c "#{pane_current_path}"
         );
 
         chooser
-            .apply(ChooseTreeAction::Select(0), &state, Some(session))
+            .apply(ChooseTreeAction::Select(0), &engine, Some(session), &facts)
             .expect("select session");
         chooser
-            .apply(ChooseTreeAction::Collapse, &state, Some(session))
+            .apply(ChooseTreeAction::Collapse, &engine, Some(session), &facts)
             .expect("collapse session");
         assert_eq!(chooser.rendered.items.len(), 1);
         assert_eq!(
@@ -30004,36 +31044,38 @@ bind - split-window -v -c "#{pane_current_path}"
         );
 
         chooser
-            .apply(ChooseTreeAction::Expand, &state, Some(session))
+            .apply(ChooseTreeAction::Expand, &engine, Some(session), &facts)
             .expect("expand session");
         chooser
-            .apply(ChooseTreeAction::Select(1), &state, Some(session))
+            .apply(ChooseTreeAction::Select(1), &engine, Some(session), &facts)
             .expect("select window");
         chooser
-            .apply(ChooseTreeAction::Expand, &state, Some(session))
+            .apply(ChooseTreeAction::Expand, &engine, Some(session), &facts)
             .expect("expand window");
         chooser
             .apply(
                 ChooseTreeAction::SearchStart { reverse: false },
-                &state,
+                &engine,
                 Some(session),
+                &facts,
             )
             .expect("start search");
         chooser
             .apply(
                 ChooseTreeAction::SearchAppend("example.com".to_owned()),
-                &state,
+                &engine,
                 Some(session),
+                &facts,
             )
             .expect("search browser");
         assert_eq!(chooser.selected, Some(ChooseTreeTarget::Pane(browser)));
-        assert_eq!(state.windows[&window].panes.len(), 2);
+        assert_eq!(engine.state.windows[&window].panes.len(), 2);
     }
 
     #[test]
     fn choose_buffer_model_bounds_metadata_and_searches_server_side_contents() {
-        let mut state = MuxState::default();
-        let (_, _, pane) = state.create_session("work").expect("session");
+        let mut engine = MuxEngine::default();
+        let (session, _, pane) = engine.state.create_session("work").expect("session");
         let buffers = vec![
             PasteBuffer {
                 name: "newest".to_owned(),
@@ -30056,9 +31098,17 @@ bind - split-window -v -c "#{pane_current_path}"
                 utf8: true,
             },
         ];
-        let mut chooser = ChooseBufferSession::new(pane, &state, &buffers)
-            .expect("valid pane")
-            .expect("nonempty chooser");
+        let mut chooser = ChooseBufferSession::new(
+            pane,
+            &engine,
+            &buffers,
+            Some(session),
+            &FormatHookFacts::default(),
+            None,
+            TmuxSort::parse(None, false, Some(TmuxSortOrder::Creation)).unwrap(),
+        )
+        .expect("valid pane")
+        .expect("nonempty chooser");
 
         assert_eq!(chooser.rendered.items.len(), 2);
         assert_eq!(chooser.rendered.items[0].name, "newest");
@@ -30083,6 +31133,156 @@ bind - split-window -v -c "#{pane_current_path}"
                 .expect("paste selected"),
             ChooseBufferResult::Paste(name) if name == "older"
         ));
+    }
+
+    #[test]
+    fn chooser_specs_sort_filter_and_fall_back_when_filters_match_nothing() {
+        let mut engine = MuxEngine::default();
+        let (z, z_window, z_pane) = engine.state.create_session("z").expect("z session");
+        let (a, _, _) = engine.state.create_session("a").expect("a session");
+        let facts = FormatHookFacts::default();
+        let session_items = |filter: Option<&str>, reversed: bool| {
+            ChooseTreeSession::new(
+                ChooseTreeKind::Windows,
+                true,
+                z_pane,
+                &engine,
+                Some(z),
+                &facts,
+                filter.map(str::to_owned),
+                TmuxSort::parse(None, reversed, Some(TmuxSortOrder::Index)).unwrap(),
+            )
+            .expect("session chooser")
+            .rendered
+            .items
+            .into_iter()
+            .map(|item| item.target)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            session_items(None, false),
+            [ChooseTreeTarget::Session(z), ChooseTreeTarget::Session(a)]
+        );
+        assert_eq!(
+            session_items(None, true),
+            [ChooseTreeTarget::Session(a), ChooseTreeTarget::Session(z)]
+        );
+        assert_eq!(
+            session_items(Some("#{==:#{session_name},a}"), false),
+            [ChooseTreeTarget::Session(a)]
+        );
+        assert_eq!(
+            session_items(Some("#{==:#{session_name},missing}"), false),
+            [ChooseTreeTarget::Session(z), ChooseTreeTarget::Session(a)]
+        );
+
+        let mut collapsed_sessions = ChooseTreeSession::new(
+            ChooseTreeKind::Windows,
+            true,
+            z_pane,
+            &engine,
+            Some(z),
+            &facts,
+            None,
+            TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+        )
+        .expect("collapsed session chooser");
+        collapsed_sessions
+            .apply(ChooseTreeAction::Expand, &engine, Some(z), &facts)
+            .expect("expand selected session");
+        assert!(
+            collapsed_sessions
+                .rendered
+                .items
+                .iter()
+                .any(|item| item.target == ChooseTreeTarget::Window(z_window) && item.depth == 1)
+        );
+
+        let mut collapsed_windows = ChooseTreeSession::new(
+            ChooseTreeKind::Windows,
+            false,
+            z_pane,
+            &engine,
+            Some(z),
+            &facts,
+            None,
+            TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+        )
+        .expect("collapsed window chooser");
+        assert_eq!(
+            collapsed_windows.selected,
+            Some(ChooseTreeTarget::Window(z_window))
+        );
+        collapsed_windows
+            .apply(ChooseTreeAction::Expand, &engine, Some(z), &facts)
+            .expect("expand selected window");
+        assert!(
+            collapsed_windows
+                .rendered
+                .items
+                .iter()
+                .any(|item| item.target == ChooseTreeTarget::Pane(z_pane) && item.depth == 2)
+        );
+
+        let default_tree = ChooseTreeSession::new(
+            ChooseTreeKind::Panes,
+            false,
+            z_pane,
+            &engine,
+            Some(z),
+            &facts,
+            None,
+            TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+        )
+        .expect("default chooser");
+        assert_eq!(
+            default_tree.selected,
+            Some(ChooseTreeTarget::Window(z_window))
+        );
+
+        let buffers = vec![
+            PasteBuffer {
+                name: "newest".to_owned(),
+                data: Arc::from(b"new".as_slice()),
+                created: UNIX_EPOCH + Duration::from_secs(20),
+                automatic: false,
+                utf8: true,
+            },
+            PasteBuffer {
+                name: "older".to_owned(),
+                data: Arc::from(b"old".as_slice()),
+                created: UNIX_EPOCH + Duration::from_secs(10),
+                automatic: false,
+                utf8: true,
+            },
+        ];
+        let filtered = ChooseBufferSession::new(
+            z_pane,
+            &engine,
+            &buffers,
+            Some(z),
+            &facts,
+            Some("#{==:#{buffer_name},older}".to_owned()),
+            TmuxSort::parse(None, true, Some(TmuxSortOrder::Creation)).unwrap(),
+        )
+        .expect("valid source")
+        .expect("filtered chooser");
+        assert_eq!(filtered.names, ["older"]);
+
+        let fallback = ChooseBufferSession::new(
+            z_pane,
+            &engine,
+            &buffers,
+            Some(z),
+            &facts,
+            Some("0".to_owned()),
+            TmuxSort::parse(None, true, Some(TmuxSortOrder::Creation)).unwrap(),
+        )
+        .expect("valid source")
+        .expect("fallback chooser");
+        assert_eq!(fallback.names, ["older", "newest"]);
+        assert_eq!(fallback.rendered.selected, 0);
+        assert_eq!(fallback.selected.as_deref(), Some("older"));
     }
 
     #[test]
@@ -31419,7 +32619,7 @@ bind - split-window -v -c "#{pane_current_path}"
             matches!(
                 message,
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::Detached { session: detached, by: None },
+                    payload: EventPayload::Detached { session: detached, by: None, .. },
                     ..
                 }) if *detached == session
             )
@@ -31479,7 +32679,7 @@ bind - split-window -v -c "#{pane_current_path}"
             matches!(
                 message,
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::Detached { session: detached, by: Some(by) },
+                    payload: EventPayload::Detached { session: detached, by: Some(by), .. },
                     ..
                 }) if *detached == session && by == "desktop"
             )
@@ -31537,7 +32737,7 @@ bind - split-window -v -c "#{pane_current_path}"
             matches!(
                 message,
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::Detached { session: detached, by: None },
+                    payload: EventPayload::Detached { session: detached, by: None, .. },
                     ..
                 }) if *detached == session
             )
@@ -31663,6 +32863,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             EventPayload::Detached {
                                 session: detached,
                                 by: Some(device),
+                                ..
                             },
                         ..
                     }) if *detached == session && device == "laptop"
@@ -31772,6 +32973,7 @@ bind - split-window -v -c "#{pane_current_path}"
                                 EventPayload::Detached {
                                     session: detached,
                                     by: None,
+                                    ..
                                 },
                             ..
                         }) if *detached == session
@@ -34016,7 +35218,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn list_clients_uses_attached_registry_name_order_and_session_filtering() {
+    fn list_clients_sorts_before_session_filtering_and_preserves_global_lines() {
         let shared = Arc::new(Shared::new(1));
         let mut context = ExecutionContext::default();
         shared
@@ -34067,7 +35269,44 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("list-clients", [] as [&str; 0]),
             )
             .unwrap();
-        assert_eq!(listed.output, "alpha: A [0x0 ] \nzeta: z [0x0 ] ");
+        assert_eq!(
+            listed.output,
+            "zeta: z [0x0 ] (attached)\nalpha: A [0x0 ] (attached)"
+        );
+
+        let sorted = shared
+            .execute(
+                ClientId(91),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("list-clients", ["-O", "name", "-F", "#{client_name}"]),
+            )
+            .unwrap();
+        assert_eq!(sorted.output, "alpha\nzeta");
+
+        let index_fallback = shared
+            .execute(
+                ClientId(91),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("list-clients", ["-O", "index", "-F", "#{client_name}"]),
+            )
+            .unwrap();
+        assert_eq!(index_fallback.output, "alpha\nzeta");
+
+        assert!(matches!(
+            shared.execute(
+                ClientId(91),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "list-clients",
+                    ["-t", "missing", "-O", "not-an-order"],
+                ),
+            ),
+            Err(DaemonError::Server(ServerError::SessionNotFound(target)))
+                if target == "missing"
+        ));
 
         let filtered = shared
             .execute(
@@ -34079,6 +35318,8 @@ bind - split-window -v -c "#{pane_current_path}"
                     [
                         "-t",
                         "z",
+                        "-O",
+                        "name",
                         "-F",
                         "#{line}:#{client_name}:#{session_name}:#{client_width}x#{client_height}:#{client_termname}",
                     ],
@@ -34086,6 +35327,972 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .unwrap();
         assert_eq!(filtered.output, "1:zeta:z:0x0:");
+    }
+
+    fn switch_test_session(shared: &Shared, name: &str) -> (SessionId, WindowId, PaneId) {
+        shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_session(name)
+            .expect("create switch-client session")
+    }
+
+    #[test]
+    fn switch_client_moves_one_client_tracks_last_and_routes_one_attached() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, a_pane) = switch_test_session(&shared, "A");
+        let (b, _, _) = switch_test_session(&shared, "B");
+        let target_mailbox = OutboundMailbox::new();
+        let peer_mailbox = OutboundMailbox::new();
+        let hook_mailbox = OutboundMailbox::new();
+        let (target, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("target".to_owned()),
+            None,
+            Arc::clone(&target_mailbox),
+        );
+        let (peer, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("peer".to_owned()),
+            None,
+            Arc::clone(&peer_mailbox),
+        );
+        let (hooks, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("hooks".to_owned()),
+            None,
+            Arc::clone(&hook_mailbox),
+        );
+        shared.attach(target, a).expect("attach target to A");
+        shared.attach(peer, a).expect("attach peer to A");
+        shared.attach(hooks, b).expect("attach hook observer to B");
+        take_reliable_messages(&target_mailbox);
+        take_reliable_messages(&peer_mailbox);
+        take_reliable_messages(&hook_mailbox);
+
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, a_pane)
+            .expect("target context");
+        shared
+            .execute(
+                target,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-t", "B"]),
+            )
+            .expect("switch target to B");
+
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(client_attached_session(&inner, target), Some(b));
+            assert_eq!(client_attached_session(&inner, peer), Some(a));
+            assert_eq!(inner.last_sessions.get(&target), Some(&a));
+        }
+        let target_messages = take_reliable_messages(&target_mailbox);
+        assert_eq!(
+            target_messages
+                .iter()
+                .filter(|message| matches!(message, ProtocolMessage::Attached { session, .. } if *session == b))
+                .count(),
+            1
+        );
+        assert!(
+            take_reliable_messages(&peer_mailbox)
+                .iter()
+                .all(|message| !matches!(message, ProtocolMessage::Attached { .. }))
+        );
+        let hook_messages = take_reliable_messages(&hook_mailbox);
+        assert_eq!(
+            hook_messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::HookEvent { name, .. },
+                        ..
+                    }) if name == "client-session-changed"
+                ))
+                .count(),
+            1
+        );
+        assert!(hook_messages.iter().all(|message| !matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::HookEvent { name, .. },
+                ..
+            }) if name == "client-attached"
+        )));
+
+        shared
+            .execute(
+                target,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-l"]),
+            )
+            .expect("switch back to A");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), target),
+            Some(a)
+        );
+        shared
+            .execute(
+                target,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-t", "B"]),
+            )
+            .expect("return to B");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-session", ["-t", "A"]),
+            )
+            .expect("kill A");
+        assert!(matches!(
+            shared.execute(
+                target,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-l"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "can't find last session"
+        ));
+    }
+
+    #[test]
+    fn switch_client_notifies_when_the_session_does_not_change() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, a_pane) = switch_test_session(&shared, "A");
+        let (b, _, _) = switch_test_session(&shared, "B");
+        let target_mailbox = OutboundMailbox::new();
+        let hook_mailbox = OutboundMailbox::new();
+        let (target, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("target".to_owned()),
+            None,
+            Arc::clone(&target_mailbox),
+        );
+        let (hooks, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("hooks".to_owned()),
+            None,
+            Arc::clone(&hook_mailbox),
+        );
+        shared.attach(target, a).expect("attach target");
+        shared.attach(hooks, b).expect("attach hook observer");
+        take_reliable_messages(&target_mailbox);
+        take_reliable_messages(&hook_mailbox);
+
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, a_pane)
+            .expect("target context");
+        shared
+            .execute(
+                target,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-t", "A"]),
+            )
+            .expect("same-session switch");
+
+        assert_eq!(
+            take_reliable_messages(&hook_mailbox)
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::HookEvent { name, .. },
+                        ..
+                    }) if name == "client-session-changed"
+                ))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn switch_client_resolves_origin_errors_names_and_walks_name_order() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, a_pane) = switch_test_session(&shared, "a");
+        let (m, _, _) = switch_test_session(&shared, "m");
+        let (z, _, _) = switch_test_session(&shared, "z");
+        let (a_client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("alpha".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (z_client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("zeta".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (command, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        shared.attach(a_client, a).expect("attach alpha");
+        shared.attach(z_client, z).expect("attach zeta");
+        shared.inner.lock().client_origins.insert(command, a_pane);
+
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("switch-client", ["-t", "m"]),
+            )
+            .expect("origin selects alpha");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), a_client),
+            Some(m)
+        );
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), z_client),
+            Some(z)
+        );
+
+        shared
+            .execute(
+                a_client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("switch-client", ["-t", "a"]),
+            )
+            .expect("reset alpha to a");
+        shared
+            .execute(
+                a_client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("switch-client", ["-t", "m", "-n"]),
+            )
+            .expect("walk from the current session instead of the parsed target");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), a_client),
+            Some(m)
+        );
+
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                a_client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-n"]),
+            )
+            .expect("m next is z");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), a_client),
+            Some(z)
+        );
+        shared
+            .execute(
+                a_client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-r", "-n"]),
+            )
+            .expect("z next wraps to a");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), a_client),
+            Some(a)
+        );
+        assert!(shared.inner.lock().read_only_clients.contains(&a_client));
+        shared
+            .execute(
+                a_client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-p"]),
+            )
+            .expect("a previous wraps to z");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), a_client),
+            Some(z)
+        );
+        shared
+            .execute(
+                a_client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-O", "name", "-r", "-n"]),
+            )
+            .expect("explicit reverse order walks z to m");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), a_client),
+            Some(m)
+        );
+        assert!(!shared.inner.lock().read_only_clients.contains(&a_client));
+        shared
+            .execute(
+                a_client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-t", "a"]),
+            )
+            .expect("reset before combined walk flags");
+        shared
+            .execute(
+                a_client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-np"]),
+            )
+            .expect("next wins when next and previous are both set");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), a_client),
+            Some(m)
+        );
+        assert!(matches!(
+            shared.execute(
+                a_client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "switch-client",
+                    ["-t", "missing", "-O", "bogus"],
+                ),
+            ),
+            Err(DaemonError::Server(ServerError::SessionNotFound(target)))
+                if target == "missing"
+        ));
+        assert!(matches!(
+            shared.execute(
+                a_client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-r", "-O", "bogus"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "invalid sort order"
+        ));
+        assert!(shared.inner.lock().read_only_clients.contains(&a_client));
+
+        for target in ["bogus", "bogus:"] {
+            assert!(matches!(
+                shared.execute(
+                    command,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("switch-client", ["-c", target]),
+                ),
+                Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                    if message == "can't find client: bogus"
+            ));
+        }
+        let solo = Arc::new(Shared::new(3));
+        let (solo_client, _) =
+            solo.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let mut solo_context = ExecutionContext::default();
+        solo.execute(
+            solo_client,
+            ClientKind::Command,
+            &mut solo_context,
+            &CommandInvocation::new("new-session", ["-d", "-s", "only"]),
+        )
+        .expect("solo session");
+        let only = solo_context.session.expect("solo session id");
+        solo.attach(solo_client, only)
+            .expect("attach the solo client");
+        for flag in ["-n", "-p"] {
+            solo.execute(
+                solo_client,
+                ClientKind::Interactive,
+                &mut solo_context,
+                &CommandInvocation::new("switch-client", [flag]),
+            )
+            .expect("a single session wraps to itself like the pin");
+            assert_eq!(
+                client_attached_session(&solo.inner.lock(), solo_client),
+                Some(only)
+            );
+        }
+        let empty = Arc::new(Shared::new(2));
+        let (command, _) =
+            empty.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        assert!(matches!(
+            empty.execute(
+                command,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("switch-client", [] as [&str; 0]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "no current client"
+        ));
+    }
+
+    #[test]
+    fn switch_client_key_table_and_formats_are_client_local() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, _) = switch_test_session(&shared, "A");
+        let (b, _, b_pane) = switch_test_session(&shared, "B");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("desktop".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(client, a).expect("attach desktop");
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-t", "B"]),
+            )
+            .expect("switch to B");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-r", "-T", "prefix", "-O", "bogus"]),
+            )
+            .expect("set prefix table before sort validation");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(client_attached_session(&inner, client), Some(b));
+            assert_eq!(inner.key_engines[&client].active_table(), Some("prefix"));
+        }
+        assert!(matches!(
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-T", "nope"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "table nope doesn't exist"
+        ));
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-t", "B"]),
+            )
+            .expect("typed same-session switch resets the key table");
+        assert_eq!(
+            shared.inner.lock().key_engines[&client].active_table(),
+            None
+        );
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("bind-key", ["-r", "R", "switch-client", "-t", "A"]),
+            )
+            .expect("bind repeat switch");
+        for input in [
+            test_key(
+                KeyCode::Character('b'),
+                Modifiers::new(false, true, false, false),
+                None,
+            ),
+            test_key(KeyCode::Character('R'), Modifiers::default(), Some("R")),
+        ] {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::Key {
+                        pane: b_pane,
+                        input,
+                        text_follows: false,
+                    },
+                )
+                .expect("execute repeat switch binding");
+        }
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(client_attached_session(&inner, client), Some(a));
+            assert_eq!(inner.key_engines[&client].active_table(), Some("prefix"));
+        }
+        let listed = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "list-clients",
+                    [
+                        "-F",
+                        "#{client_last_session}|#{client_session}|#{client_readonly}|#{client_flags}|#{client_key_table}|#{session_last_attached}",
+                    ],
+                ),
+            )
+            .expect("list switch formats")
+            .output;
+        let fields = listed.split('|').collect::<Vec<_>>();
+        assert_eq!(
+            &fields[..5],
+            ["B", "A", "1", "attached,ignore-size,read-only", "prefix",]
+        );
+        assert!(fields[5].parse::<u64>().is_ok_and(|time| time > 0));
+    }
+
+    #[test]
+    fn switch_client_repeat_binding_preserves_target_client_table() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, a_pane) = switch_test_session(&shared, "A");
+        let (b, _, _) = switch_test_session(&shared, "B");
+        let (invoker, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("invoker".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (target, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("target".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(invoker, a).expect("attach invoker");
+        shared.attach(target, a).expect("attach target");
+        let mut invoker_context = ExecutionContext::default();
+        let mut target_context = ExecutionContext::default();
+        shared
+            .execute(
+                target,
+                ClientKind::Interactive,
+                &mut target_context,
+                &CommandInvocation::new("switch-client", ["-T", "prefix"]),
+            )
+            .expect("set target prefix table");
+        shared
+            .execute(
+                invoker,
+                ClientKind::Interactive,
+                &mut invoker_context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    ["-r", "R", "switch-client", "-c", "target", "-t", "B"],
+                ),
+            )
+            .expect("bind targeted repeat switch");
+        for input in [
+            test_key(
+                KeyCode::Character('b'),
+                Modifiers::new(false, true, false, false),
+                None,
+            ),
+            test_key(KeyCode::Character('R'), Modifiers::default(), Some("R")),
+        ] {
+            shared
+                .input(
+                    invoker,
+                    ClientKind::Interactive,
+                    &mut invoker_context,
+                    InputMessage::Key {
+                        pane: a_pane,
+                        input,
+                        text_follows: false,
+                    },
+                )
+                .expect("execute targeted repeat switch binding");
+        }
+        let inner = shared.inner.lock();
+        assert_eq!(client_attached_session(&inner, target), Some(b));
+        assert_eq!(inner.key_engines[&target].active_table(), Some("prefix"));
+    }
+
+    #[test]
+    fn switch_client_targets_panes_preserves_zoom_and_orders_hooks() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, _) = switch_test_session(&shared, "A");
+        let (b, _, _) = switch_test_session(&shared, "B");
+        let (target_window, first_pane, target_pane) = {
+            let mut inner = shared.inner.lock();
+            let (window, first) = inner
+                .engine
+                .state
+                .create_window_at(
+                    b,
+                    Some(1),
+                    Some("target".to_owned()),
+                    PaneKind::Terminal,
+                    false,
+                )
+                .expect("create target window");
+            let target = inner
+                .engine
+                .state
+                .split_pane(first, zz_protocol::Axis::Horizontal, PaneKind::Terminal)
+                .expect("split target window once");
+            inner
+                .engine
+                .state
+                .split_pane(first, zz_protocol::Axis::Vertical, PaneKind::Terminal)
+                .expect("split target window twice");
+            inner
+                .engine
+                .state
+                .toggle_zoom(first)
+                .expect("zoom target window");
+            (window, first, target)
+        };
+        let target_mailbox = OutboundMailbox::new();
+        let hook_mailbox = OutboundMailbox::new();
+        let (target, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("target".to_owned()),
+            None,
+            Arc::clone(&target_mailbox),
+        );
+        let (hooks, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("hooks".to_owned()),
+            None,
+            Arc::clone(&hook_mailbox),
+        );
+        shared.attach(target, a).expect("attach target to A");
+        shared.attach(hooks, b).expect("attach hook observer to B");
+        take_reliable_messages(&target_mailbox);
+        take_reliable_messages(&hook_mailbox);
+
+        shared
+            .execute(
+                target,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("switch-client", ["-Z", "-t", "B:1.2"]),
+            )
+            .expect("switch to indexed pane and preserve zoom");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.state.sessions[&b].active_window, target_window);
+            assert_eq!(
+                inner.engine.state.windows[&target_window].active_pane,
+                target_pane
+            );
+            assert_eq!(
+                inner.engine.state.windows[&target_window].zoomed_pane,
+                Some(target_pane)
+            );
+        }
+        let ordered_hooks = take_reliable_messages(&hook_mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::HookEvent { name, .. },
+                    ..
+                }) if matches!(
+                    name.as_str(),
+                    "window-pane-changed" | "session-window-changed" | "client-session-changed"
+                ) =>
+                {
+                    Some(name)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ordered_hooks,
+            [
+                "window-pane-changed",
+                "session-window-changed",
+                "client-session-changed"
+            ]
+        );
+
+        shared
+            .execute(
+                target,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("switch-client", ["-t", "A"]),
+            )
+            .expect("switch away from target pane");
+        shared
+            .execute(
+                target,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("switch-client", ["-t", &format!("%{}", target_pane.0)]),
+            )
+            .expect("switch back to the already-active pane");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.engine.state.windows[&target_window].active_pane,
+                target_pane
+            );
+            assert_eq!(
+                inner.engine.state.windows[&target_window].zoomed_pane,
+                Some(target_pane)
+            );
+        }
+        assert_ne!(first_pane, target_pane);
+        shared
+            .execute(
+                target,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("switch-client", ["-t", &format!("%{}", first_pane.0)]),
+            )
+            .expect("switch to an inactive pane and clear zoom");
+        let inner = shared.inner.lock();
+        assert_eq!(
+            inner.engine.state.windows[&target_window].active_pane,
+            first_pane
+        );
+        assert_eq!(inner.engine.state.windows[&target_window].zoomed_pane, None);
+    }
+
+    #[test]
+    fn attached_context_sync_follows_a_same_session_window_switch() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, first_window, first_pane) = switch_test_session(&shared, "same");
+        let (second_window, second_pane) = {
+            let mut inner = shared.inner.lock();
+            let (window, pane) = inner
+                .engine
+                .state
+                .create_window_at(
+                    session,
+                    Some(1),
+                    Some("second".to_owned()),
+                    PaneKind::Terminal,
+                    false,
+                )
+                .expect("create second window");
+            inner
+                .engine
+                .state
+                .select_window(session, first_window)
+                .expect("restore first window");
+            (window, pane)
+        };
+        let (victim, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("victim".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (command, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        shared.attach(victim, session).expect("attach victim");
+        let mut victim_context =
+            ExecutionContext::new(Some(session), Some(first_window), Some(first_pane));
+
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("switch-client", ["-c", "victim", "-t", "same:1"]),
+            )
+            .expect("move victim within its session");
+        assert_eq!(victim_context.window, Some(first_window));
+        sync_context_with_attachment(&shared.inner.lock(), victim, &mut victim_context);
+        assert_eq!(victim_context.session, Some(session));
+        assert_eq!(victim_context.window, Some(second_window));
+        assert_eq!(victim_context.pane, Some(second_pane));
+    }
+
+    #[test]
+    fn detach_on_destroy_retargets_control_clients_without_a_detach() {
+        let shared = Arc::new(Shared::new(1));
+        let (_, _, _) = switch_test_session(&shared, "a");
+        let (b, _, b_pane) = switch_test_session(&shared, "b");
+        let (c, _, _) = switch_test_session(&shared, "c");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared
+            .attach(control, b)
+            .expect("attach the control client to b");
+        take_reliable_messages(&mailbox);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, b_pane)
+            .expect("b context");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-t", "b", "detach-on-destroy", "off"]),
+            )
+            .expect("set detach-on-destroy");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("kill-session", ["-t", "b"]),
+            )
+            .expect("destroy b");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), control),
+            Some(c)
+        );
+        let messages = take_reliable_messages(&mailbox);
+        let kinds = messages
+            .iter()
+            .map(|message| match message {
+                ProtocolMessage::Attached { session, .. } => format!("attached:{session}"),
+                ProtocolMessage::Event(Event { payload, .. }) => {
+                    format!("event:{}", std::any::type_name_of_val(payload))
+                        .replace("zz_protocol::message::", "")
+                        + &match payload {
+                            EventPayload::Detached {
+                                session, reason, ..
+                            } => {
+                                format!(" detached:{session} {reason:?}")
+                            }
+                            EventPayload::HookEvent { name, .. } => format!(" hook:{name}"),
+                            _ => String::new(),
+                        }
+                }
+                other => format!("other:{}", std::any::type_name_of_val(other)),
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !messages.iter().any(|message| matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Detached { .. },
+                    ..
+                })
+            )),
+            "control client must not be detached when a survivor exists: {kinds:?}"
+        );
+        assert!(
+            messages.iter().any(|message| matches!(
+                message,
+                ProtocolMessage::Attached { session, .. } if *session == c
+            )),
+            "control client must be attached to the survivor: {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn detach_on_destroy_selects_each_policy_survivor() {
+        for (policy, expected) in [
+            ("off", Some("c")),
+            ("on", None),
+            ("no-detached", Some("c")),
+            ("previous", Some("a")),
+            ("next", Some("c")),
+        ] {
+            let shared = Arc::new(Shared::new(1));
+            let (a, _, _) = switch_test_session(&shared, "a");
+            let (b, _, b_pane) = switch_test_session(&shared, "b");
+            let (c, _, _) = switch_test_session(&shared, "c");
+            let target_mailbox = OutboundMailbox::new();
+            let (target, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                Some("target".to_owned()),
+                None,
+                Arc::clone(&target_mailbox),
+            );
+            let (activity, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                Some("activity".to_owned()),
+                None,
+                OutboundMailbox::new(),
+            );
+            shared.attach(activity, a).expect("activate a");
+            if policy == "off" {
+                shared.attach(activity, c).expect("make c newest");
+            }
+            shared.attach(target, b).expect("attach target to b");
+            take_reliable_messages(&target_mailbox);
+            let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, b_pane)
+                .expect("b context");
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-option", ["-t", "b", "detach-on-destroy", policy]),
+                )
+                .expect("set detach-on-destroy");
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("kill-session", ["-t", "b"]),
+                )
+                .expect("destroy b");
+
+            let attached = client_attached_session(&shared.inner.lock(), target);
+            let expected_id = match expected {
+                Some("a") => Some(a),
+                Some("c") => Some(c),
+                _ => None,
+            };
+            assert_eq!(attached, expected_id, "policy {policy}");
+            assert!(!shared.inner.lock().last_sessions.contains_key(&target));
+            let messages = take_reliable_messages(&target_mailbox);
+            if let Some(expected_id) = expected_id {
+                assert!(messages.iter().any(|message| matches!(
+                    message,
+                    ProtocolMessage::Attached { session, .. } if *session == expected_id
+                )));
+            } else {
+                assert!(messages.iter().any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::Detached { session, reason, .. },
+                        ..
+                    }) if *session == b && reason.is_session_destroyed()
+                )));
+            }
+        }
+    }
+
+    #[test]
+    fn detach_on_destroy_runs_for_last_window_and_last_pane() {
+        for (command, target) in [("kill-window", "b:0"), ("kill-pane", "b:0.0")] {
+            let shared = Arc::new(Shared::new(1));
+            switch_test_session(&shared, "a");
+            let (b, _, b_pane) = switch_test_session(&shared, "b");
+            let mailbox = OutboundMailbox::new();
+            let (client, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                Some("target".to_owned()),
+                None,
+                Arc::clone(&mailbox),
+            );
+            shared.attach(client, b).expect("attach target to b");
+            take_reliable_messages(&mailbox);
+            let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, b_pane)
+                .expect("b context");
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(command, ["-t", target]),
+                )
+                .expect("destroy final resource");
+            assert_eq!(client_attached_session(&shared.inner.lock(), client), None);
+            assert!(
+                take_reliable_messages(&mailbox)
+                    .iter()
+                    .any(|message| matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::Detached { session, reason, .. },
+                            ..
+                        }) if *session == b && reason.is_session_destroyed()
+                    ))
+            );
+        }
     }
 
     #[test]
@@ -34996,7 +37203,8 @@ bind - split-window -v -c "#{pane_current_path}"
     #[test]
     fn terminal_events_fire_rename_title_and_bell_hooks() {
         let shared = Arc::new(Shared::new(1));
-        let (_, pane, terminal) = output_view_session_fixture(&shared, "terminal-events", "first");
+        let (session, pane, terminal) =
+            output_view_session_fixture(&shared, "terminal-events", "first");
         let window = shared
             .inner
             .lock()
@@ -35029,7 +37237,34 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.inner.lock().message_log.clear();
 
         let viewport = terminal.latest_viewport();
-        shared.synchronize_pane_runtime(pane, &terminal, &viewport, "fish");
+        let (window_activity, session_activity) = {
+            let inner = shared.inner.lock();
+            (
+                inner.engine.state.windows[&window].activity,
+                inner.engine.state.sessions[&session].sort_activity,
+            )
+        };
+        shared.synchronize_pane_runtime(pane, &terminal, &viewport, "fish", false);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.engine.state.windows[&window].activity,
+                window_activity
+            );
+            assert_eq!(
+                inner.engine.state.sessions[&session].sort_activity,
+                session_activity
+            );
+        }
+        shared.synchronize_pane_runtime(pane, &terminal, &viewport, "fish", true);
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.engine.state.windows[&window].activity > window_activity);
+            assert_eq!(
+                inner.engine.state.sessions[&session].sort_activity,
+                session_activity
+            );
+        }
         shared
             .execute(
                 ClientId(7),
@@ -35478,6 +37713,25 @@ bind - split-window -v -c "#{pane_current_path}"
             }
         );
 
+        let reused = shared.execute_command_request(
+            ClientId(7),
+            ClientKind::Command,
+            &mut context,
+            2,
+            &CommandInvocation::new(
+                "new-window",
+                ["-S", "-n", "hooked", "-P", "-F", "SHOULD-NOT-PRINT"],
+            ),
+        );
+        assert_eq!(
+            reused,
+            CommandResponse::Success {
+                request_id: 2,
+                output: String::new(),
+                exit_code: 0,
+            }
+        );
+
         shared
             .execute(
                 ClientId(7),
@@ -35486,6 +37740,76 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("kill-session", ["-t", session.to_string().as_str()]),
             )
             .expect("clean up hook session");
+    }
+
+    #[test]
+    fn pane_creation_output_waits_for_spawn_facts_and_preserves_empty_lines() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "format-output", "--", "sleep", "30"],
+                ),
+            )
+            .expect("format output session");
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-window",
+                    [
+                        "-d",
+                        "-P",
+                        "-F",
+                        "#{pane_start_path}|#{pane_pid}|#{pane_tty}|#{pane_start_command}",
+                        "--",
+                        "sleep",
+                        "30",
+                    ],
+                ),
+            )
+            .expect("formatted new window")
+            .output;
+        let fields = output.split('|').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 4);
+        assert!(!fields[0].is_empty());
+        assert!(fields[1].parse::<u32>().is_ok_and(|pid| pid != 0));
+        if cfg!(unix) {
+            assert!(!fields[2].is_empty());
+        }
+        assert!(fields[3].contains("sleep"));
+        assert!(fields[3].contains("30"));
+
+        let empty = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("split-window", ["-d", "-P", "-F", ""]),
+            )
+            .expect("empty formatted split")
+            .output;
+        assert_eq!(empty.as_bytes(), b"\n");
+
+        let trailing_newline = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("split-window", ["-d", "-P", "-F", "X\n"]),
+            )
+            .expect("formatted split ending in a newline")
+            .output;
+        assert_eq!(trailing_newline.as_bytes(), b"X\n\n");
     }
 
     #[test]
@@ -35972,11 +38296,16 @@ bind - split-window -v -c "#{pane_current_path}"
                 .create_session("ephemeral")
                 .expect("session");
             inner.attached.entry(session).or_default().insert(client);
+            let facts = format_hook_facts(&inner);
             let chooser = ChooseTreeSession::new(
                 ChooseTreeKind::Panes,
+                false,
                 source,
-                &inner.engine.state,
+                &inner.engine,
                 Some(session),
+                &facts,
+                None,
+                TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
             )
             .expect("chooser");
             inner.choose_trees.insert(client, chooser);
@@ -36007,7 +38336,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn daemon_session_and_window_choosers_focus_sidebar_without_opening_a_tree() {
+    fn daemon_focus_sidebar_stays_separate_from_session_and_window_choosers() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
         let (client, _) =
@@ -36025,23 +38354,52 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.attach(client, session).expect("attach session");
         take_reliable_messages(&mailbox);
 
-        for command in [
-            CommandInvocation::new("focus-sidebar", [] as [&str; 0]),
-            CommandInvocation::new("choose-tree", ["-Zs"]),
-            CommandInvocation::new("choose-tree", ["-Zw"]),
-        ] {
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("focus-sidebar", [] as [&str; 0]),
+            )
+            .expect("focus sidebar");
+        let messages = take_reliable_messages(&mailbox);
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::FocusSidebar,
+                ..
+            })
+        )));
+        assert!(!shared.inner.lock().choose_trees.contains_key(&client));
+
+        for (flag, sessions_only) in [("-Zs", true), ("-Zw", false)] {
             shared
-                .execute(client, ClientKind::Interactive, &mut context, &command)
-                .expect("focus sidebar");
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("choose-tree", [flag]),
+                )
+                .expect("open chooser");
             let messages = take_reliable_messages(&mailbox);
             assert!(messages.iter().any(|message| matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ChooseTree { state: Some(_) },
+                    ..
+                })
+            )));
+            assert!(!messages.iter().any(|message| matches!(
                 message,
                 ProtocolMessage::Event(Event {
                     payload: EventPayload::FocusSidebar,
                     ..
                 })
             )));
-            assert!(!shared.inner.lock().choose_trees.contains_key(&client));
+            let inner = shared.inner.lock();
+            let chooser = inner.choose_trees.get(&client).expect("stored chooser");
+            assert_eq!(chooser.kind, ChooseTreeKind::Windows);
+            assert_eq!(chooser.sessions_only, sessions_only);
         }
 
         let error = shared

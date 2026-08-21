@@ -46,6 +46,7 @@ pub(crate) struct FormatHookFacts {
     pub(crate) terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
     pub(crate) pane_pipes: Arc<BTreeMap<PaneId, u32>>,
     pub(crate) session_attachments: Arc<BTreeMap<SessionId, (usize, String)>>,
+    pub(crate) session_activity: Arc<BTreeMap<SessionId, u64>>,
     pub(crate) buffer: Option<BufferFormatFacts>,
     pub(crate) client: Option<ClientFormatFacts>,
     pub(crate) message: Option<MessageFormatFacts>,
@@ -588,6 +589,14 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             ),
             _ => None,
         }
+    }
+
+    fn session_activity(&mut self, session: SessionId) -> u64 {
+        self.facts
+            .session_activity
+            .get(&session)
+            .copied()
+            .unwrap_or_default()
     }
 
     fn pane_search(

@@ -422,7 +422,7 @@ fn brace_command_lists_bind_as_a_single_command_sequence() {
     assert!(
         listed
             .lines()
-            .any(|line| line == "bind-key -T root F2 send-keys 'a ; b' \\; new-window"),
+            .any(|line| line == "bind-key -T root F2 send-keys \"a ; b\" \\; new-window"),
         "{listed}"
     );
 }
@@ -1799,7 +1799,6 @@ fn creation_commands_refuse_the_valued_options_they_cannot_honor() {
     for (name, args) in [
         ("new-session", &["-e", "FOO=bar"]),
         ("new-window", &["-e", "FOO=bar"]),
-        ("new-window", &["-F", "#{window_id}"]),
         ("split-window", &["-e", "FOO=bar"]),
     ] {
         let error = engine

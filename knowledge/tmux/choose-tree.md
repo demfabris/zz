@@ -9,17 +9,14 @@ timestamp: 2026-07-30T21:21:06Z
 
 # Overview
 
-Session and window selection use a persistent navigation surface instead of a floating chooser.
-That surface is the workspace sidebar, which is always present: collapsing it parks a narrow rail
-rather than removing it. `focus-sidebar` and the compatibility forms `choose-tree -s` and
-`choose-tree -w` emit
-`MuxEffect::FocusSidebar { pane }`; the server sends the invoking interactive client a reliable
-`EventPayload::FocusSidebar`, and the app expands the sidebar and focuses its tree.
+zz has two distinct navigation surfaces. `focus-sidebar` opens the persistent workspace tree;
+collapsing it parks a narrow rail rather than removing it. The default `C-b s` and `C-b w`
+bindings call this zz-native command directly.
 
-The remaining flagless `choose-tree` and `choose-buffer` modes are tmux-style choosers rendered as
-daemon-owned native GPUI overlays, not terminal escape content. In [`crates/zz-mux`](/crates/zz-mux.md),
-`choose-tree` emits `MuxEffect::ChooseTree { pane, kind: Panes }` and `choose-buffer`
-emits `MuxEffect::ChooseBuffer { pane }`. The [server](/crates/zz-daemon.md) builds a snapshot
+Every `choose-tree` form and `choose-buffer` opens a tmux-style chooser rendered as a
+daemon-owned native GPUI overlay, not terminal escape content. In
+[`crates/zz-mux`](/crates/zz-mux.md), the effects carry the target pane, chooser shape,
+filter, and parsed sort order. The [server](/crates/zz-daemon.md) builds a snapshot
 (`ChooseTreeState` / `ChooseBufferState`, defined in [protocol](/crates/zz-protocol.md)) and the
 [app](/crates/zz.md) paints it above the invoking terminal *or* browser pane. The overlay blocks
 input from leaking into the covered pane, follows live mux mutations, survives protocol resync, can
@@ -29,15 +26,25 @@ activate targets in another session, and closes when its underlying data empties
 
 `choose-tree` chooses a `ChooseTreeKind`, selected by flag:
 
-| Invocation | `ChooseTreeKind` | Shows |
+| Invocation | `ChooseTreeKind` | Initial view |
 | --- | --- | --- |
-| `choose-tree` (default) | `Panes` | full `$session → @window → %pane` hierarchy, incl. terminal, browser, and Agent pane types |
-| `choose-tree -s` | . | focus the configured persistent navigation surface; no overlay is created |
-| `choose-tree -w` | . | focus the configured persistent navigation surface; no overlay is created |
+| `choose-tree` (default) | `Panes` | full `$session → @window → %pane` hierarchy, including terminal, browser, and Agent pane types |
+| `choose-tree -s` | `Windows` | session rows, each expandable through windows to panes |
+| `choose-tree -w` | `Windows` | expanded sessions with window rows, each window expandable to panes |
 
-Supported flags are `-s`, `-w`, `-Z` (zoom), and `-t` (target pane); `-s` and `-w` are mutually
-exclusive, and positional command templates are rejected (`UnsupportedCommand`). The default bindings
-are `C-b s` and `C-b w`, both mapped directly to `focus-sidebar`.
+Supported flags are `-s`, `-w`, `-Z` (zoom), `-t` (target pane), `-f` (format filter),
+`-O` (sort order), and `-r` (reverse). The pin accepts `-s` and `-w` together and gives
+`-s` precedence. These flags change only the initial collapse depth; every form retains the
+complete hierarchy. A default chooser opened from a one-pane source window initially selects that
+window row. Positional command templates are rejected. The accepted sort names are case-insensitive:
+`activity`, `creation`, `index`/`key`, `modifier`, `name`/`title`, `order`, `size`,
+and `z`. The tree defaults to index order, so `-r` alone reverses it. The same criterion
+sorts sessions, each session's windows, and each window's panes independently.
+
+The filter is evaluated once per pane with complete session/window/pane format context. Windows
+and sessions with no matching descendant are pruned. If nothing matches, zz restores the
+unfiltered tree like tmux; the native overlay does not yet show tmux's
+`filter: no matches` status.
 
 When focused, the sidebar selects and reveals the active pane. A collapsed sidebar is expanded first,
 so the keyboard contract below is the only one. Arrow keys or `hjkl` move and collapse/expand tree
@@ -78,20 +85,23 @@ a `depth`, an optional `pane_kind` (`ChooseTreePaneKind::Terminal`/`Browser`/`Ag
 
 In the GPUI overlay these map to: arrow keys or `hjkl` navigate and collapse/expand, Enter or
 double-click activates, `/` and `?` search, `n`/`N` repeat the search, `q`/Escape closes. Custom
-formats, filters, templates, tagging, previews, kill/swap actions, and `choose-client` are explicitly
-unsupported.
+row formats (`-F`), command templates, `-G`/`-h`/`-K`/`-k`/`-N`/`-y`, tagging, previews,
+kill/swap actions, and `choose-client` are explicitly unsupported.
 
 # choose-buffer
 
-`choose-buffer` (default `C-b =`, flags `-Z` and `-t`) opens a sibling overlay over the daemon's
-global paste-buffer store. Its wire model is deliberately bounded: `ChooseBufferItem` holds only a
+`choose-buffer` (default `C-b =`) accepts `-Z`, `-t`, `-f`, `-O`, and `-r` and opens a
+sibling overlay over the daemon's global paste-buffer store. Its wire model is deliberately
+bounded: `ChooseBufferItem` holds only a
 `name`, a single-line `preview`, `size_bytes`, and `created_unix_seconds`; full buffer contents stay
 in the daemon until paste. `ChooseBufferAction` mirrors the tree's navigation plus `Paste`,
 `PasteIndex`, and `Delete`. In the overlay: arrow keys or `j`/`k` navigate, Enter/`p` or double-click
 pastes through the same synchronized-input path as `paste-buffer`, `d` deletes, `/` and `?` search
-names and full server-side contents, and `q`/Escape closes. Buffers are newest-first; formats,
-filters, sort orders, key formats, tagging, editor integration, and custom command templates are
-rejected.
+names and full server-side contents, and `q`/Escape closes. Buffers default to creation order,
+newest first; `-r` alone makes that oldest first. Filters receive the source
+session/window/pane context plus buffer facts, and a zero-match filter falls back to the
+unfiltered chooser. Custom row formats (`-F`), `-K`/`-k`/`-N`/`-y`, tagging, editor
+integration, and custom command templates remain rejected.
 
 # Key files
 

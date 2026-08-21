@@ -373,7 +373,33 @@ enum ProtocolOutcome {
     Repaint,
     RepaintAll,
     QueueControl(Vec<u8>),
-    Exit(String),
+    Exit(TuiExit),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum TuiExit {
+    Detached(String),
+    Exited,
+    ServerExited,
+    ServerExitedUnexpectedly,
+}
+
+impl TuiExit {
+    fn notice(&self) -> String {
+        match self {
+            Self::Detached(session) => format!("[detached (from session {session})]"),
+            Self::Exited => "[exited]".to_owned(),
+            Self::ServerExited => "[server exited]".to_owned(),
+            Self::ServerExitedUnexpectedly => "[server exited unexpectedly]".to_owned(),
+        }
+    }
+
+    const fn exit_code(&self) -> u8 {
+        match self {
+            Self::Detached(_) | Self::Exited => 0,
+            Self::ServerExited | Self::ServerExitedUnexpectedly => 1,
+        }
+    }
 }
 
 pub(crate) enum InitialAttach {
@@ -638,7 +664,9 @@ pub(crate) fn run(
                             }
                         }
                     }
-                    InputOutcome::Detach => break Ok("detached".to_owned()),
+                    InputOutcome::Detach => {
+                        break Ok(TuiExit::Detached(attached_session_name(&model)));
+                    }
                 }
             }
             MainEvent::Terminal(Err(error)) => break Err(error),
@@ -694,25 +722,24 @@ pub(crate) fn run(
                     continue;
                 }
                 if !reconnect_available {
-                    break Err(format!("connection closed after reconnect: {error}"));
+                    break Ok(TuiExit::ServerExitedUnexpectedly);
                 }
                 reconnect_available = false;
                 log::warn!("zz-tui connection closed: {error}");
                 let session = remembered_session.or(model.attached_session);
-                let replacement = prepare_connection(
+                let Ok(replacement) = prepare_connection(
                     &endpoint,
                     session.map_or_else(String::new, |session| session.to_string()),
-                )
-                .map_err(|reconnect| {
-                    format!("connection closed ({error}); reconnect failed: {reconnect}")
-                })?;
+                ) else {
+                    break Ok(TuiExit::ServerExitedUnexpectedly);
+                };
                 attempt = if session.is_some() {
                     AttachAttempt::Remembered
                 } else {
                     AttachAttempt::Default
                 };
                 creating_default = false;
-                replace_connection(
+                if replace_connection(
                     &mut client,
                     &mut core,
                     &mut protocol_reader,
@@ -722,7 +749,11 @@ pub(crate) fn run(
                     &mut frames,
                     &mut kitty_images,
                     &kitty_gate,
-                )?;
+                )
+                .is_err()
+                {
+                    break Ok(TuiExit::ServerExitedUnexpectedly);
+                }
                 browser.reset_connection();
                 renderer.reset_kitty_images();
                 model.reset_connection(&lock_core(&core));
@@ -747,7 +778,7 @@ pub(crate) fn run(
                         .map_err(|error| error.to_string())?;
                 }
             }
-            MainEvent::Signal => break Ok("detached".to_owned()),
+            MainEvent::Signal => break Ok(TuiExit::Detached(attached_session_name(&model))),
         }
         remembered_session = model.attached_session.or(remembered_session);
     };
@@ -755,9 +786,13 @@ pub(crate) fn run(
     browser.close_all();
     drop(terminal);
     match outcome {
-        Ok(message) => {
-            println!("{message}");
-            Ok(())
+        Ok(exit) => {
+            println!("{}", exit.notice());
+            if exit.exit_code() == 0 {
+                Ok(())
+            } else {
+                std::process::exit(i32::from(exit.exit_code()))
+            }
         }
         Err(error) => Err(error),
     }
@@ -1156,12 +1191,18 @@ fn handle_core_event(
             model.viewports.remove(&pane);
             Ok(ProtocolOutcome::RepaintAll)
         }
-        CoreEvent::Detached { session, by } if model.attached_session == Some(session) => Ok(
-            ProtocolOutcome::Exit(
-                by.map_or_else(|| "detached".to_owned(), |by| format!("detached by {by}")),
-            ),
-        ),
-        CoreEvent::ServerStopping => Ok(ProtocolOutcome::Exit("zz daemon stopped".to_owned())),
+        CoreEvent::Detached { session, by: _ } if model.attached_session == Some(session) => {
+            let core = lock_core(core);
+            let exit = if core.last_detach_was_session_destroyed() {
+                TuiExit::Exited
+            } else if core.last_detach_was_server_stopping() {
+                TuiExit::ServerExited
+            } else {
+                TuiExit::Detached(attached_session_name(model))
+            };
+            Ok(ProtocolOutcome::Exit(exit))
+        }
+        CoreEvent::ServerStopping => Ok(ProtocolOutcome::Exit(TuiExit::ServerExited)),
         CoreEvent::AgentCommand { request_id, .. } => {
             client
                 .send_gui_response(GuiResponse::Error {
@@ -1232,6 +1273,21 @@ fn handle_core_event(
         | CoreEvent::AgentSessions { .. }
         | CoreEvent::Message(_) => Ok(ProtocolOutcome::None),
     }
+}
+
+fn attached_session_name(model: &Model) -> String {
+    model
+        .attached_session
+        .and_then(|attached| {
+            model
+                .snapshot
+                .sessions
+                .iter()
+                .find(|session| session.id == attached)
+        })
+        .map(|session| session.name.clone())
+        .or_else(|| model.attached_session.map(|session| session.to_string()))
+        .unwrap_or_default()
 }
 
 fn handle_command_response(
@@ -1450,6 +1506,27 @@ fn send_resizes(model: &mut Model, client: &InteractiveClient) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tui_exit_notices_and_codes_match_tmux() {
+        for (exit, notice, code) in [
+            (
+                TuiExit::Detached("work".to_owned()),
+                "[detached (from session work)]",
+                0,
+            ),
+            (TuiExit::Exited, "[exited]", 0),
+            (TuiExit::ServerExited, "[server exited]", 1),
+            (
+                TuiExit::ServerExitedUnexpectedly,
+                "[server exited unexpectedly]",
+                1,
+            ),
+        ] {
+            assert_eq!(exit.notice(), notice);
+            assert_eq!(exit.exit_code(), code);
+        }
+    }
 
     #[test]
     fn frame_inbox_keeps_only_the_latest_viewport_per_pane() {

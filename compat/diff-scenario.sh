@@ -186,7 +186,7 @@ prepare_smoke() {
   local plugin
   local plugins=(
     tpm tmux-sensible vim-tmux-navigator tmux-yank tmux-resurrect
-    tmux-continuum tmux-fpp
+    tmux-continuum tmux-fpp oh-my-tmux
   )
 
   [ -d "$CORPUS_DIR" ] || die "smoke corpus is missing: $CORPUS_DIR"
@@ -218,14 +218,34 @@ prepare_smoke() {
     "$ZZ_HOME/.tmux/bin/apply-theme"
 }
 
-stage_smoke_conf() {
+resolve_smoke_path() {
   local argument="$1"
-  local source
 
   case "$argument" in
-  /*) source="$argument" ;;
-  *) source="$(dirname -- "$SCENARIO_FILE")/$argument" ;;
+  "~/"*) printf '%s/%s\n' "$ZZ_HOME" "${argument#"~/"}" ;;
+  /*) printf '%s\n' "$argument" ;;
+  *) printf '%s/%s\n' "$(dirname -- "$SCENARIO_FILE")" "$argument" ;;
   esac
+}
+
+stage_smoke_file() {
+  local source destination
+
+  source="$(resolve_smoke_path "$1")"
+  destination="$(resolve_smoke_path "$2")"
+  [ -f "$source" ] || die "smoke stage source not found: $source"
+  case "$destination" in
+  "$ZZ_HOME"/*) ;;
+  *) die "smoke stage destination must be under ~/: $2" ;;
+  esac
+  mkdir -p "$(dirname -- "$destination")"
+  cp -- "$source" "$destination"
+}
+
+stage_smoke_conf() {
+  local source
+
+  source="$(resolve_smoke_path "$1")"
   [ -f "$source" ] || die "smoke config not found: $source"
   if grep -q 'ZZ_SMOKE_CANARY' "$source"; then
     die "smoke config must not depend on ZZ_SMOKE_CANARY: $source"
@@ -464,6 +484,7 @@ compare_snapshot() {
 } >>"$LOG_FILE"
 
 if [ "$SMOKE_MODE" -eq 1 ]; then
+  staged_files=()
   while IFS= read -r raw_line || [ -n "$raw_line" ]; do
     raw_line="${raw_line%$'\r'}"
     line="${raw_line#"${raw_line%%[![:space:]]*}"}"
@@ -487,11 +508,20 @@ if [ "$SMOKE_MODE" -eq 1 ]; then
     shim:*)
       die "shim does not accept a value: $line"
       ;;
+    stage:*)
+      staged_files+=("${line#stage:}")
+      ;;
     esac
   done <"$SCENARIO_FILE"
   LC_ALL=C sort -u -o "$EXPECTED_ZZ_WARNINGS" "$EXPECTED_ZZ_WARNINGS"
   LC_ALL=C sort -u -o "$EXPECTED_TMUX_WARNINGS" "$EXPECTED_TMUX_WARNINGS"
   prepare_smoke
+  for staged in ${staged_files[@]+"${staged_files[@]}"}; do
+    read -r stage_source stage_destination stage_extra <<<"$staged"
+    [ -n "$stage_source" ] && [ -n "$stage_destination" ] && [ -z "${stage_extra:-}" ] ||
+      die "stage needs exactly a source and a destination: stage:$staged"
+    stage_smoke_file "$stage_source" "$stage_destination"
+  done
 fi
 
 zz_command daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
@@ -557,7 +587,7 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   key_name=""
   command_text="$line"
   case "$line" in
-  shim:* | expect-warn:*)
+  shim:* | expect-warn:* | stage:*)
     continue
     ;;
   conf:*)

@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: tmux divergence matrix
-description: "Every known divergence from tmux at the pinned reference commit: the 13 missing commands and why, the 33 implemented commands that still reject tmux flags, behavioral gaps on the implemented surface, the options coverage (all 180 store, 66 behave), and the protocol-level differences."
+description: "Every known divergence from tmux at the pinned reference commit: the 12 missing commands and why, the 30 implemented commands that still reject tmux flags, behavioral gaps on the implemented surface, the options coverage (all 180 store, 67 behave), and the protocol-level differences."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-20T00:00:00-03:00
@@ -23,21 +23,26 @@ hunt-claim regressions, including two implemented backwards
 `kill-session -C`, `new-session -A`, `resize-pane` attached-adjustment, `send-keys -H`/`-l`,
 `copy-mode -du`, window-step-error, and boolean-case fixes.
 
+The counts and flag ledger were refreshed against the live source after Waves 2a and 2b on
+2026-08-20. The pre-wave catalog held 159 unsupported pairs across 38 tmux commands; those
+waves removed 30 pairs, leaving 129 across 30. The zz-only `split-picker` contributes another
+19 markers to a raw catalog grep and is deliberately excluded from tmux compatibility counts.
+
 The one-line read: everything marked **silent** below is a bug by zz's own doctrine (tmux syntax
 must mean what tmux means, or error loudly); everything loud is a choice; the "genuine gaps"
 command block plus the remaining options grind is the actual drop-in backlog.
 
-# Missing commands (13 of 92)
+# Missing commands (12 of 92)
 
 Counted 2026-08-20 against the pin's `cmd_table[]` (92 entries, 78 with an alias, 170
-spellings). zz's shared catalog (`crates/zz-protocol/src/catalog.rs`) holds 93 verbs: 14
-zz-native and 79 tmux — 61 in `COMMAND_SPECS` plus 18 in `DAEMON_COMMAND_SPECS` for the verbs
+spellings). zz's shared catalog (`crates/zz-protocol/src/catalog.rs`) holds 94 verbs: 14
+zz-native and 80 tmux — 61 in `COMMAND_SPECS` plus 19 in `DAEMON_COMMAND_SPECS` for the verbs
 that need client, job, buffer, or overlay state (`capture-pane`, the seven `*-buffer` commands,
 `run-shell`, `if-shell`, `wait-for`, `pipe-pane`, `display-popup`, `display-menu`,
-`confirm-before`, and the lock trio). `MuxEngine` runs 58 of the tmux verbs; the daemon
-intercepts `list-clients`, `refresh-client`, and `show-messages` ahead of it. Every pin alias
-resolves to the same command it does in tmux. That leaves 13 of tmux's 92 commands absent
-(`UNIMPLEMENTED_TMUX_COMMAND_TABLE`, 21 spellings), all answering `unsupported command: <name>`
+`confirm-before`, `switch-client`, and the lock trio). `MuxEngine` runs 58 of the tmux verbs; the daemon
+intercepts `list-clients`, `refresh-client`, `show-messages`, and `switch-client` ahead of it. Every pin alias
+resolves to the same command it does in tmux. That leaves 12 of tmux's 92 commands absent
+(`UNIMPLEMENTED_TMUX_COMMAND_TABLE`, 19 spellings), all answering `unsupported command: <name>`
 rc 1, counted as skips in config reports, and absent from `list-commands` so feature probes
 take their fallback path. Four deliberate groups:
 
@@ -91,11 +96,10 @@ semantics on menus stay GUI-native).
 | `clock-mode` | Full-pane clock. |
 | `suspend-client` | Ctrl-Z the attaching client. |
 
-## Genuine gaps — buildable, nothing blocks them (4)
+## Genuine gaps — buildable, nothing blocks them (3)
 
 | Command | What it does | Weight |
 | --- | --- | --- |
-| `switch-client` | Move the attached client to another session; scripts use `-t` constantly. Phase 8 closed the rest of the client seam 2026-08-20, so this is the last consumer of it — but it must retarget *another* client, which the `new-session` path never needed. The server half exists (`ClientHello.origin`, `ClientTerminal`, the `client-terminal-v1` token); no daemon→Interactive-client "retarget" message exists in the protocol yet. | high |
 | `resize-window` | Manual window sizing decoupled from clients. Also what makes `window-size manual` behave as `latest` today. | low |
 | `clear-prompt-history` / `show-prompt-history` | Prompt history management (`prompt-history-limit` and `history-file` already behave). | low |
 
@@ -106,55 +110,91 @@ semantics on menus stay GUI-native).
 | `link-window` / `unlink-window` | Linked windows and session groups are skipped permanently (drop-in plan decision 3). One window belongs to one session. |
 | `new-pane` / `switch-mode` | The pin's floating-pane family (new in next-3.8). zz has no floating-pane model; the phase-1 picker verb was renamed off `new-pane` so the name stays tmux's. Unassessed beyond that. |
 
-# Flag-level gaps on implemented commands (33 of 79)
+# Flag-level gaps on implemented commands (30 of 80; 129 pairs)
 
-Being cataloged is not the whole contract: 33 of the 79 implemented tmux commands still
-reject flags the pin accepts, answering `unsupported command: <cmd> -X` rc 1 (and counting
-as config skips). Three mechanisms, all catalog-driven or allowlisted, none silent:
-`CommandOptionSpec.unsupported` entries in `catalog.rs` (enforced at
-`zz-mux/src/command.rs:9355`), the daemon's `parse_buffer_command_args` allowlist
-(`daemon.rs:17820`), and `capture-pane`'s own arm (`daemon.rs:18062`). Inventory as of
-2026-08-20 (flags in pin spelling; rows marked † are gated by decision 3 or by the absence
-of floating panes, the rest are plain work):
+Being cataloged is not the whole contract: 30 of the 80 implemented tmux commands still
+reject 129 flags the pin accepts, answering `unsupported command: <cmd> -X` rc 1 (and
+counting as config skips). The catalog declares the unsupported pairs and the mux/daemon
+parsers enforce them. Inventory as of 2026-08-20 (flags in pin spelling; flags marked † are
+gated by decision 3 or by missing context/model support, the rest are plain work):
 
 | Command | Rejected flags |
 | --- | --- |
-| `new-session` | `-E -X -e -f`, `-t` † |
 | `attach-session` | `-c -E -f -r -x` |
-| `detach-client` | `-E -t -P` |
-| `kill-session` | `-g -f` |
-| `list-sessions` / `list-windows` / `list-panes` / `list-clients` / `list-buffers` | `-f -O -r` (filters, sort order, reverse) |
-| `new-window` | `-b -E -P -e -F` |
-| `kill-window` / `kill-pane` | `-f` |
-| `split-window` | `-e -E -F -I -k -m -P -R -s -S -T -W -Z` |
-| `break-pane` | `-a -b -P -W -F -x -y -X -Y` |
-| `join-pane` | `-l` |
-| `move-pane` | `-D -L -P -R -U -X -Y -l -z -M` (floating-pane placement) † |
-| `select-pane` | `-d -e -g -M -m -P` |
-| `last-pane` | `-d -e` |
-| `resize-pane` | `-M -T` |
-| `send-keys` | `-c -F -K -M -R`; `-H` bytes `80`–`ff` |
-| `send-prefix` | `-2` |
-| `copy-mode` | `-k -H -S -s` |
-| `command-prompt` | `-1 -C -e -F -i -k -l -N -P -t -T` |
-| `choose-tree` | `-F -f -G -h -K -k -N -O -r -y` |
-| `choose-buffer` | `-F -f -K -k -N -O -r -y` |
-| `display-message` | `-a -C -c -d -l -I -N -v` |
-| `display-panes` | `-N -t` |
-| `show-messages` | `-J -T -t` |
-| `clear-history` | `-H` |
-| `unbind-key` | `-a -q` |
-| `list-keys` | `-1 -a -N -O -P -r`; a positional key filter |
-| `set-option` / `set-window-option` | `-F` |
-| `source-file` | `-t -F -n -v` |
-| `set-buffer` | `-t -n -w` |
-| `load-buffer` | `-t -w`; `-` stdin |
-| `save-buffer` | `-` stdout |
+| `break-pane` | `-a -b`; `-W -x -y -X -Y` † |
 | `capture-pane` | `-C -F -H -L -P -R` |
-| `refresh-client` | `-c -D -L -R -U -l -r` and positionals (attached-client redraw/scroll family) |
+| `choose-buffer` | `-F -K -k -N -y` |
+| `choose-tree` | `-F -h -K -k -N -y`; `-G` † |
+| `clear-history` | `-H` |
+| `command-prompt` | `-1 -C -e -F -i -k -l -N -t -T`; `-P` † |
+| `copy-mode` | `-k -H -s`; `-S` † |
+| `detach-client` | `-E -t -P` |
+| `display-message` | `-a -C -c -d -l -N -v`; `-I` † |
+| `display-panes` | `-N -t` |
+| `join-pane` | `-l` |
+| `kill-pane` | `-f` |
+| `kill-session` | `-f`; `-g` † |
+| `kill-window` | `-f` |
+| `last-pane` | `-d -e` |
+| `list-keys` | `-1 -a -N -O -P -r` |
+| `load-buffer` | `-t -w` |
+| `move-pane` | `-D -L -P -R -U -X -Y -l -z -M` (floating-pane placement) † |
+| `new-session` | `-E -X -e -f`; `-t` † |
+| `new-window` | `-b -E -e` |
+| `resize-pane` | `-M -T` |
+| `select-pane` | `-d -e -g -M -m -P` |
+| `send-keys` | `-c -F -K -R`; `-M` † |
+| `send-prefix` | `-2` |
+| `set-buffer` | `-t -n -w` |
+| `show-messages` | `-J`; `-T -t` † |
+| `source-file` | `-t -F -n -v` |
+| `split-window` | `-e -E -I -k -m -R -s -S -T -W -Z` |
+| `unbind-key` | `-a -q` |
 
 `list-commands` prints each command's usage with zz's accepted flags, so the rows above are
-the exact places its output differs from the pin's.
+the exact catalog-declared places its output differs from the pin's.
+
+## Accepted grammar that still diverges
+
+The catalog count does not include syntax zz accepts or parses before diverging:
+
+- `refresh-client` rejects bare redraw, `-S`, `-c -D -L -R -U -l -r`, and the optional
+  adjustment positional. `-A -B -C -f -F -t` behave.
+- `load-buffer -` rejects stdin, `save-buffer -` rejects stdout, and `source-file -` rejects
+  stdin.
+- `show-buffer` refuses non-UTF-8 buffer bytes.
+- `capture-pane -p` and `-T` parse but do not affect behavior. Routing looks only at whether
+  `-b` is present: bare capture prints instead of filling the default buffer, while
+  `-b name -p` stores instead of printing.
+- `list-keys <key>` rejects the positional key filter.
+- `send-keys -H` rejects bytes `80` through `ff`.
+- Bind-time validation checks names and catalog flags but still misses complete positional
+  arity/target validation and daemon-command payload validation.
+
+## Catalog overacceptance
+
+Four flags are zz extensions on tmux command names even though the pin rejects them:
+`move-pane -p` and `send-keys -C`/`-P`/`-o`. They are compatibility debt, not progress
+against the 129 unsupported pairs.
+
+## Former Wave 2e ownership (45 pairs)
+
+The old plan grouped these commands under a TUI tranche. Source tracing shows that most of
+the work belongs to the server:
+
+| Command family | Server/core | Client/presentation | Parked on missing context/model |
+| --- | --- | --- | --- |
+| `command-prompt` | `-F -l -t` | `-1 -C -e -i -k -N -T` | `-P` pane-rendered prompt |
+| `copy-mode` | `-k -s` | `-H` indicator visibility | `-S` bound mouse-slider context |
+| `send-keys` | `-c -F -K -R` | . | `-M` originating mouse event |
+| `display-message` | `-a -c -d -l -N -v` | `-C` | `-I` CLI stdin/protocol stream |
+| chooser residue | tree `-F -h -k -y`; buffer `-F -k -y` | `-K -N` on both | tree `-G` session groups |
+| `display-panes` | `-N -t` | . | . |
+| `show-messages` | `-J` | . | `-T -t` TTY capability model |
+
+That is **25 server/core**, **13 client/presentation**, and **7 parked** pairs. The TUI
+queue should contain only the middle column; moving the first column there would duplicate
+daemon-owned command semantics in a client.
 
 # Divergences on the implemented surface
 
@@ -162,10 +202,17 @@ the exact places its output differs from the pin's.
 | --- | --- | --- |
 | `find-window` | Detached CLI calls validate the target and return success with no output, including for zero matches. zz does not open tmux's attached-client window-tree chooser. | **silent**, bounded |
 | `list-commands` | zz lists implemented commands in tmux's line format. Each usage string reports zz's accepted flags, so affected rows differ from the pin. Unimplemented commands stay absent so feature probes can take their fallback path. | **silent**, deliberate |
-| `list-keys` default formatting | `list-keys -F` expands the pin's per-binding `key_repeat`, `key_note`, `key_prefix`, `key_table`, raw `key_string`, and quoted `key_command` facts. The no-`-F` form remains zz's unpadded `bind-key` rendering rather than the pin's list-width-aware padded template. | **silent**, deliberate deferred formatting |
-| `refresh-client` | `-A`/`-B`/`-C`/`-f`/`-F`/`-S`/`-t` behave (phase 6: flow control, subscriptions, control-client sizing). The attached-client redraw/scroll family (`-c -D -L -R -U -l -r`, positionals) answers `unsupported command: refresh-client interactive behavior`; detached command clients with no target get the pin's exact `no current client`. | loud |
+| `list-keys` default formatting | `list-keys -F` expands the pin's per-binding `key_repeat`, `key_note`, `key_prefix`, `key_table`, raw `key_string`, and quoted `key_command` facts. Since 2026-08-20 every stored command renders through the pin's `args_print` model — `#{key_command}`, the bare `list-keys` form, and `show-hooks` alike: canonical names, value-less flags merged first in flag order, valued flags in flag order, `args_escape` quoting (seven pin vectors plus three hook shapes byte-matched). Still missing: the bare form's list-width-aware padding, and zz's default copy-mode tables mark 35 (`copy-mode`) / 76 (`copy-mode-vi`) stock bindings `-r` where the pin marks none — zz's copy-mode model uses the repeat flag, so `#{key_repeat}` and bare listings differ for stock bindings only. | **silent**, deferred |
+| `refresh-client` | `-A`/`-B`/`-C`/`-f`/`-F`/`-t` behave (phase 6: flow control, subscriptions, control-client sizing). Bare redraw, `-S`, and the attached-client redraw/scroll family (`-c -D -L -R -U -l -r` plus the optional positional adjustment) answer `unsupported command: refresh-client interactive behavior`; detached command clients with no target get the pin's exact `no current client`. | loud |
+| `switch-client -c` TTY targets | Client names and zz's synthetic `device-N` ids resolve, including one trailing `:` trimmed like the pin. Native clients do not send an attach-client TTY path, so the pin's full-tty and `/dev/`-stripped aliases cannot resolve. | loud for a TTY-only target |
+| `switch-client -r` | The per-client toggle and `client_readonly`/`client_flags` projection behave. `client_flags` places the modeled bits in pin order: `attached`, `control-mode`, `ignore-size`, control-flow flags, then `read-only`. Input is not gated this wave, so a reported read-only client can still write to panes. | **silent**, deferred |
+| `switch-client -E` | Accepted as a no-op because zz does not retain the attaching client's environment; the same missing model already bounds session `update-environment` seeding. | **silent**, bounded |
+| Session current window across clients | tmux stores one current window on the session, so `select-window` or `switch-client -t session:window` moves every client attached there. zz keeps `focused_windows` per client by design. One client can change windows without moving its peers, and peer rows from `list-clients -F '#{window_index}'` can differ from the pin. | **silent**, deliberate zz extension |
+| `#{client_flags}` unmodeled flags | zz emits `attached` and every modeled control/read-only flag in the pin's sequence. It omits `focused` because the daemon does not track terminal focus, and it omits the pin's `UTF-8` client flag because UTF-8 is a fixed protocol contract rather than client state. | **silent**, bounded |
 | `copy-mode` | `-k -H -S -s` rejected (`-e`/`-q`/`-M` — the stock-binding trio — are implemented). | loud |
-| `source-file` | Parse diagnostics are shaped like the pin's (`path:line: message`) but travel as client-event warnings, so control-mode and GUI clients see them (`%config-error`) while the plain CLI exits 0 with empty stderr where the pin prints the line and exits 1 — pinned by `cli_binary.rs:1388`, so closing it is a test change plus a behavior change. `-` stdin refused loudly; `-t`/`-F`/`-n`/`-v` rejected as unsupported. Globbing works. | **silent** on the CLI, loud elsewhere |
+| Native chooser status | `choose-tree` and `choose-buffer` implement `-f`/`-O`/`-r`, including tmux's default orders, hierarchy pruning, and zero-match fallback to the unfiltered chooser. The native overlay does not show tmux's `filter: no matches` status after that fallback. | **silent**, cosmetic |
+| `capture-pane` routing | `-p` and `-T` are accepted but inert. A bare capture prints instead of filling the default buffer, while `-b name -p` stores instead of printing. | **silent** |
+| `source-file` | Parse diagnostics are shaped like the pin's (`path:line: message`) but travel as client-event warnings, so control-mode and GUI clients see them (`%config-error`) while the plain CLI exits 0 with empty stderr where the pin prints the line and exits 1. Closing it requires changing the CLI event-routing behavior and adding direct diagnostic coverage. `-` stdin refused loudly; `-t`/`-F`/`-n`/`-v` rejected as unsupported. Globbing works. | **silent** on the CLI, loud elsewhere |
 | `mouse` / `escape-time` | Both options have typed storage, pin defaults, inheritance, unset, and readback. Nothing consumes either: the desktop GUI ignores them, `MuxOptionKey` carries neither on the wire, and zz-tui — the attach surface the alias lives on — does not depend on zz-mux and reads no tmux option at all (its mouse handling is terminal-capability-driven, unconditional). | **silent**, store-only |
 | `automatic-rename` / `automatic-rename-format` | `automatic-rename` gates the desktop's active-pane-derived tab label, and explicit `rename-window`, `new-window -n`, or the first-window name pins a window-local `off`. zz does not mutate `Window.name` every 500 ms, so `#{window_name}` remains the explicit model name, and the stored format string is not evaluated by the presentation-only renamer. | **silent**, bounded |
 | `aggressive-resize` + `window-size` | Since 2026-08-20 both compose like the pin (`resize.c:366-376`): `aggressive-resize` is a candidate FILTER (ON = clients focused on the window; OFF = zz's viewer set, a per-client-focus stand-in for the pin's linked-window `session_has`), and `window-size` is the AGGREGATION policy — `latest` (default) picks the most-recent-input owner, `largest`/`smallest` aggregate componentwise. ON no longer forces `smallest`; configs relying on that must also set `window-size smallest`. `manual` is stored but behaves as `latest` until `resize-window` exists. | **silent**, bounded |
@@ -178,10 +225,10 @@ the exact places its output differs from the pin's.
 | `new-session` attach contract | Closed 2026-08-20. `zz new -s foo` creates and attaches on a TTY, refuses off one with `open terminal failed: not a terminal` and creates nothing, and reproduces the pin's full check order (`-A` delegate ignoring `-d` → duplicate → nested → terminal → `-x`/`-y`). NULL-client callers (config files, hooks) force detached and treat attach as a silent success, matching `cmd-new-session.c:164-167` and `cmd-attach-session.c:71-72`. | closed |
 | `new-session -x -` / `-y -` | The literal `-` is accepted and no longer an error, but it resolves to the 80x24 default instead of the *client's* terminal size (the pin reads `c->tty.sx/sy`, `cmd-new-session.c:216-238`). Detached-with-no-client is identical to the pin; only the with-a-client case differs. Needs the client's terminal size plumbed into the engine. | **silent**, bounded |
 | Nested `new-session` / `attach-session` | The pin refuses with `sessions should be nested with care, unset $TMUX to force` when the calling client's tty is a pane of this server (`server_client_check_nested`, gated at `cmd-new-session.c:191-198`); zz runs a nested TUI instead. `$TMUX` alone is the wrong signal — a fake `$TMUX` on a non-pane pty still attaches on the pin, so this needs the client's tty compared against pane ttys. | loud on the pin, permissive in zz |
-| Client-exit notices | On a pty the pin prints `[exited]` when the attached session ends and `[detached (from session X)]` on prefix-d, both after leaving the alternate screen. zz-tui prints neither. Shared with `zz attach`; predates the phase-8 wave. | **silent**, bounded |
+| Client-exit notices | Closed for zz-tui in protocol v70: requested/evicted detaches print `[detached (from session X)]` rc 0, a destroyed session with no survivor prints `[exited]` rc 0, shutdown prints `[server exited]` rc 1, and a lost connection prints `[server exited unexpectedly]` rc 1, all after terminal restoration. Native GUI and control-mode surfaces keep their existing presentation. | closed |
 | In-UI error text width | Command errors surfaced inside the TUI render in the sidebar's 28-column status row, so a long tmux message truncates (`can't find window: 99` shows as `can't find win`). The message text itself is now the pin's, via one shared renderer. Collapsed-sidebar mode uses the full width. | **silent**, cosmetic |
 | `#()` job environment | Closed by wave 7d: status jobs receive `TMUX=socket,pid,-1`, the pane working directory as `PWD`, and no `TMUX_PANE`, matching the pin's session-null status-job shape. | closed |
-| Shell job environment overlay | tmux constructs jobs from a clean global environment plus the session `set-environment` overlay and selected TERM-family variables. zz jobs inherit the daemon's complete environment and do not merge session environment or synthesize the TERM family. The smoke harness injects a canary so scenarios cannot accidentally depend on inherited host state. | **silent**, deferred |
+| Shell job environment overlay | Closed on the overlay half 2026-08-20: `run-shell`/`if-shell` jobs receive the global `set-environment` overlay and, when the job has a session, the session overlay — hidden entries withheld, child-unset markers removed — matching `environ_for_session`; this is what lets Oh My Tmux's `$TMUX_PROGRAM`-chained bootstrap run at all. Still divergent: jobs start from the daemon's environment rather than a clean one, the TERM family (`TERM`, `TERM_PROGRAM`, `COLORTERM`) is not synthesized, and status `#()` jobs get only `TMUX`/`PWD`. The smoke harness injects a canary so scenarios cannot accidentally depend on inherited host state. | **silent**, bounded |
 | `#{version}` | zz reports `3.8-zz`, sharing the compatibility-version source used by `zz -V` (`tmux 3.8-zz`); the pin reports `next-3.8`. The suffix is deliberate so scripts can identify the compatible implementation without confusing it with upstream tmux. | **silent**, deliberate |
 | Non-UTF-8 command arguments | tmux prints a byte such as `a\377b` with octal vis escaping. zz converts argv with `to_string_lossy` before escaping and prints `a<U+FFFD>b`. | **silent**, accepted edge |
 | Config `~` expansion | Leading `~` of unquoted words and a `~` just inside an opening double quote expand to `$HOME` at parse time, matching the pin (single-quoted, escaped, and mid-word tildes stay literal on both sides — probe-verified 7/7). Deliberate residue: `~user` forms stay literal where the pin resolves them via `getpwnam`, and an unset/empty `HOME` leaves the `~` literal where the pin fails the line with a parse error. | **silent** edge |
@@ -203,8 +250,7 @@ the exact places its output differs from the pin's.
 | `send-keys -N` (no keys) | Arms the **invoking client's** count prefix; tmux stores it on the pane mode, so another client's (or a Command client's) `-N` is a silent no-op in zz. | **silent** edge |
 | `send-keys -X` | `select-line`/`copy-end-of-line` ignore counts; flags written after the verb (`-X copy-selection -C`) parse as positionals; no "not in a mode" error. | **silent** |
 | `send-keys -H` | Bytes `80`–`ff` refused; tmux writes the raw byte (`KeyToken::Literal` carries UTF-8). | loud |
-| `new-window` | `-S` skips tmux's target-index gating and "multiple windows named" error. | **silent** |
-| Unguarded commands | Closed by the [drop-in plan](/designs/tmux-drop-in.md)'s phase 0: every engine command rejects options centrally from its catalog `CommandSpec` — flags tmux has at the pin but zz lacks error as unsupported (and count in config-import skip reports); flags tmux doesn't have error as invalid. Residual: the daemon-side `capture-pane`/buffer family still hand-rolls parsing. | loud |
+| Unguarded commands | Closed by the [drop-in plan](/designs/tmux-drop-in.md)'s phase 0: every engine command rejects options centrally from its catalog `CommandSpec` — flags tmux has at the pin but zz lacks error as unsupported (and count in config-import skip reports); flags tmux doesn't have error as invalid. Residual: the daemon-side `capture-pane`/buffer family still hand-rolls parsing, though since 2026-08-20 its 19 catalog specs carry the pin's full flag arity (accepted and `unsupported` alike), so renderers and hook variables read the right shapes. | loud |
 | `bind-key` payloads | Bind-time validation covers names and flags only; positional arity and target errors still surface at keypress, and daemon-side verbs (`capture-pane`, the buffer family) bind with no validation at all. tmux validates the full argument template at bind time. | **silent** edge |
 | Empty-daemon listing and attach | Both servers now begin with empty session/window/pane sets, so the first `new-session` gets name `0` and ids `$0`/`@0`/`%0`. zz's CLI connection path auto-starts a missing daemon and `list-sessions` succeeds with empty output, while tmux's missing-server path reports `no server running on ...`. A default Interactive attach to an empty zz daemon lazily creates the next numeric session; registration, background fleet probes, explicit missing targets, and Command clients do not. | **silent**, native-client accommodation |
 
@@ -217,12 +263,12 @@ inside a generic “unsupported formats” claim.
 | Variable | Missing backing | Loud or silent? |
 | --- | --- | --- |
 | `buffer_mode_format` | No tmux buffer-mode row formatter; zz's buffer chooser is native. | **silent** |
-| `client_activity` | Client activity time is not fed into format expansion. | **silent** |
+| `client_activity` | `list-clients -F` supplies the daemon's retained activity time; status-line expansion still lacks a client row context. | **silent**, bounded |
 | `client_colours` | The attaching client's terminal color count is not fed into format expansion. | **silent** |
 | `client_created` | Client creation time is not retained as a format fact. | **silent** |
-| `client_flags` | tmux client flags have no zz format projection. | **silent** |
-| `client_key_table` | The per-client key engine does not expose its active table as a format fact. | **silent** |
-| `client_last_session` | The client's previous session is not retained as a format fact. | **silent** |
+| `client_flags` | `list-clients -F` supplies `attached` plus modeled read-only and control flags in pin order; status-line expansion still lacks a client row context. | **silent**, bounded |
+| `client_key_table` | `list-clients -F` supplies the active per-client table; status-line expansion still lacks a client row context. | **silent**, bounded |
+| `client_last_session` | `list-clients -F` supplies the previous live session; status-line expansion still lacks a client row context. | **silent**, bounded |
 | `client_mode_format` | No tmux client-mode row formatter; zz's client surfaces are native. | **silent** |
 | `client_name` | `list-clients` supplies the registry name; status-line expansion still lacks a client row context. | **silent** |
 | `client_session` | `list-clients` supplies the attached session name; status-line expansion still lacks a client row context. | **silent** |
@@ -250,18 +296,18 @@ inside a generic “unsupported formats” claim.
 | `pane_pb_state` | Terminal progress-bar state is not mirrored into mux facts. | **silent** |
 | `pane_search_string` | Native per-view search text is not mirrored into mux facts. | **silent** |
 | `pane_tabs` | Terminal tab stops are not mirrored into mux facts. | **silent** |
-| `session_activity` | No activity timestamp is exposed; `S/t` still sorts by creation time. The daemon separately tracks only the most-recent session needed for targetless Command-client context. | **silent** |
+| `session_activity` | The daemon tracks activity to choose `detach-on-destroy off` survivors, but it is not exposed as a format fact; `S/t` still sorts by creation time. | **silent** |
 | `session_group` | Session groups are unsupported, so no group name exists. | **silent** |
 | `session_group_attached_list` | Session groups are unsupported, so no grouped attachment list exists. | **silent** |
 | `session_group_list` | Session groups are unsupported, so no member list exists. | **silent** |
-| `session_last_attached` | Last-attachment time is not tracked. | **silent** |
+| `session_last_attached` | `list-clients -F` supplies the retained time for the row's session; status-line expansion still lacks a client row context. | **silent**, bounded |
 | `session_path` | zz has no separate per-session working directory fact. | **silent** |
 | `tree_mode_format` | No tmux tree-mode row formatter; zz's tree chooser is native. | **silent** |
-| `window_activity` | Window activity time is not tracked; `W/t` retains window-index order. | **silent** |
+| `window_activity` | Mux state tracks a monotonic activity point for `-O activity` list and chooser sorting, but does not expose a timestamp through this format variable; `W/t` retains window-index order. | **silent**, bounded |
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
 | `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
-# Options: all 180 store, 66 behave
+# Options: all 180 store, 67 behave
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin. Since
 the 2026-08-20 Lane-2 sweep **every one of the 180 stores** with the pin's exact default,
@@ -274,8 +320,8 @@ skipped lines**. That is test-enforced: `tmux_options.rs`
 the eight array options store with indexed semantics, and `set-option <hook-name>` writes
 the hook table — the two paths that used to silently succeed while doing nothing are dead.
 
-**66 behave**, meaning a value change is consumed somewhere outside set/show/inherit/
-readback (consumer-traced 2026-08-20). **114 are store-only.** The earlier "78 behave"
+**67 behave**, meaning a value change is consumed somewhere outside set/show/inherit/
+readback (consumer-traced 2026-08-20). **113 are store-only.** The earlier "78 behave"
 counted options given a typed home in the honest-knobs/status structs, twelve of which
 nothing reads. No marker in the table distinguishes the two and no test pins the count:
 `tmux_stored_scalar` (63 names) and `tmux_stored_array` (8) are store-only by
@@ -284,11 +330,11 @@ from behaving options without tracing readers. A `BEHAVES` list beside
 `OPTION_TABLE_ORDER` with a drift test is the cheapest fix and belongs to the next knob
 wave.
 
-**Behaving (66):**
+**Behaving (67):**
 
 - Indexing and sessions: `base-index`, `pane-base-index`, `renumber-windows`,
   `default-size`, `window-size`, `aggressive-resize`, `history-limit` (10,000 product
-  default; the pin keeps 2,000 — the one fenced default divergence).
+  default; the pin keeps 2,000 — the one fenced default divergence), `detach-on-destroy`.
 - Keys and prompts: `prefix`, `mode-keys`, `key-table`, `prefix-timeout`, `repeat-time`,
   `initial-repeat-time`, `prompt-history-limit`, `history-file` (saved on submission, not
   at shutdown), `word-separators`, `wrap-search`.
@@ -311,7 +357,7 @@ wave.
   `window-status-format`, `window-status-current-format`, `window-status-style`,
   `window-status-current-style`, `window-status-last-style`, `window-status-bell-style`.
 
-**Store-only (114):**
+**Store-only (113):**
 
 - Typed storage that nothing reads (43): `mouse`, `escape-time`, `lock-after-time`,
   `lock-command` (the lock commands are no-ops); `monitor-activity`, `monitor-silence`,
@@ -323,11 +369,11 @@ wave.
   `pane-border-lines`, `pane-border-indicators`, the four `pane-scrollbars*`; the four
   `prompt-*cursor-*`; `clock-mode-colour`, `clock-mode-style`; `status-justify`,
   `status-position`, `window-status-separator`, `window-status-activity-style`.
-- Generic scalar storage (63) plus the eight arrays: everything else in the table,
+- Generic scalar storage (62 of the 63 scalar-backed names) plus the eight arrays: everything else in the table,
   including `set-titles`/`set-titles-string`, `prefix2`, `display-panes-format`,
   `remain-on-exit-format`, `visual-activity`/`visual-silence`, `status-keys`, the
-  lifecycle quartet (`exit-empty`, `exit-unattached`, `destroy-unattached`,
-  `detach-on-destroy`), `pane-border-style`/`pane-active-border-style`,
+  lifecycle trio (`exit-empty`, `exit-unattached`, `destroy-unattached`),
+  `pane-border-style`/`pane-active-border-style`,
   `window-style`/`window-active-style`, `mode-style` and the `copy-mode-*` styles,
   `terminal-overrides[]`, `terminal-features[]`, `command-alias[]`, `status-format[]`,
   `update-environment[]` (seeding uses the hardcoded default list), `user-keys[]`,
@@ -367,8 +413,9 @@ form) — ledgered for the key-string wave.
 
 # Related
 
-- [tmux drop-in plan](/designs/tmux-drop-in.md) — the 2026-08-16 plan that closes almost every
-  row in this matrix; only linked windows/session groups and real-tmux socket interop stay.
+- [tmux drop-in plan](/designs/tmux-drop-in.md) — the 2026-08-16 plan and current work queue.
+  Linked windows/session groups and real-tmux socket interop are the only permanent exclusions;
+  the other ledgered rows remain compatibility work or bounded native-surface divergences.
 - [tmux compatibility philosophy](/tmux/tmux-compat.md) — the contract these divergences are
   measured against.
 - [tmux superset roadmap](/designs/tmux-superset-roadmap.md) — the tier ladder and the amended

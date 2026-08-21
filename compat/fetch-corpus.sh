@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fetches the pinned tmux plugin corpus used by alias smoke scenarios.
-# ZZ_COMPAT_CORPUS may provide a directory containing the seven checkouts.
+# ZZ_COMPAT_CORPUS may provide a directory containing the eight checkouts.
 set -euo pipefail
 
 COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,6 +14,7 @@ plugins=(
   "tmux-resurrect|https://github.com/tmux-plugins/tmux-resurrect.git|cff343cf9e81983d3da0c8562b01616f12e8d548"
   "tmux-continuum|https://github.com/tmux-plugins/tmux-continuum.git|0698e8f4b17d6454c71bf5212895ec055c578da0"
   "tmux-fpp|https://github.com/tmux-plugins/tmux-fpp.git|878302f228ee14f0fa59717f63743d396b327a21"
+  "oh-my-tmux|https://github.com/gpakosz/.tmux.git|58a3dcc0d718ec0fa1c0d5a2fddd640a1ad7a5b7"
 )
 
 log() { printf '\033[1;36m==>\033[0m %s\n' "$*" >&2; }
@@ -44,7 +45,7 @@ if [ -n "${ZZ_COMPAT_CORPUS:-}" ]; then
     die "ZZ_COMPAT_CORPUS is not a directory: $ZZ_COMPAT_CORPUS"
   corpus_dir="$(cd -- "$ZZ_COMPAT_CORPUS" && pwd)"
   verify_corpus "$corpus_dir" ||
-    die "ZZ_COMPAT_CORPUS does not contain all seven pinned plugin checkouts"
+    die "ZZ_COMPAT_CORPUS does not contain all eight pinned plugin checkouts"
   printf '%s\n' "$corpus_dir"
   exit 0
 fi

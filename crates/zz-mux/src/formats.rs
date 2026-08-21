@@ -1067,6 +1067,18 @@ pub trait StatusHooks {
         None
     }
 
+    fn session_activity(&mut self, _session: SessionId) -> u64 {
+        0
+    }
+
+    fn window_activity(&mut self, _window: WindowId) -> u64 {
+        0
+    }
+
+    fn pane_activity(&mut self, _pane: PaneId) -> u64 {
+        0
+    }
+
     fn pane_search(
         &mut self,
         _pane: Option<PaneId>,
@@ -2578,7 +2590,7 @@ fn unescape(text: &str) -> String {
     output
 }
 
-pub(crate) fn format_true(value: &str) -> bool {
+pub fn format_true(value: &str) -> bool {
     !value.is_empty() && value != "0"
 }
 

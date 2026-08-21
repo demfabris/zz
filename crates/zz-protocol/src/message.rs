@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 69;
+pub const PROTOCOL_VERSION: u16 = 70;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
@@ -1591,6 +1591,36 @@ pub struct Event {
     pub payload: EventPayload,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DetachReason {
+    Requested,
+    Evicted,
+    SessionDestroyed,
+    ServerStopping,
+}
+
+impl DetachReason {
+    #[must_use]
+    pub const fn is_requested(self) -> bool {
+        matches!(self, Self::Requested)
+    }
+
+    #[must_use]
+    pub const fn is_evicted(self) -> bool {
+        matches!(self, Self::Evicted)
+    }
+
+    #[must_use]
+    pub const fn is_session_destroyed(self) -> bool {
+        matches!(self, Self::SessionDestroyed)
+    }
+
+    #[must_use]
+    pub const fn is_server_stopping(self) -> bool {
+        matches!(self, Self::ServerStopping)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum EventPayload {
     Snapshot(MuxSnapshot),
@@ -1677,6 +1707,7 @@ pub enum EventPayload {
     Detached {
         session: SessionId,
         by: Option<String>,
+        reason: DetachReason,
     },
     HistoryChunk {
         pane: PaneId,
@@ -1792,6 +1823,44 @@ pub enum EventPayload {
         pane: Option<PaneId>,
         value: String,
     },
+}
+
+impl EventPayload {
+    #[must_use]
+    pub fn detached_requested(session: SessionId, by: Option<String>) -> Self {
+        Self::Detached {
+            session,
+            by,
+            reason: DetachReason::Requested,
+        }
+    }
+
+    #[must_use]
+    pub fn detached_evicted(session: SessionId, by: Option<String>) -> Self {
+        Self::Detached {
+            session,
+            by,
+            reason: DetachReason::Evicted,
+        }
+    }
+
+    #[must_use]
+    pub fn detached_session_destroyed(session: SessionId) -> Self {
+        Self::Detached {
+            session,
+            by: None,
+            reason: DetachReason::SessionDestroyed,
+        }
+    }
+
+    #[must_use]
+    pub fn detached_server_stopping(session: SessionId) -> Self {
+        Self::Detached {
+            session,
+            by: None,
+            reason: DetachReason::ServerStopping,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2288,5 +2357,32 @@ mod tests {
             }),
             45
         );
+    }
+
+    #[test]
+    fn detached_reason_holds_its_appended_wire_field() {
+        assert_eq!(super::PROTOCOL_VERSION, 70);
+        for (reason, tag) in [
+            (super::DetachReason::Requested, 0),
+            (super::DetachReason::Evicted, 1),
+            (super::DetachReason::SessionDestroyed, 2),
+            (super::DetachReason::ServerStopping, 3),
+        ] {
+            let event = super::Event {
+                sequence: 0,
+                payload: super::EventPayload::Detached {
+                    session: crate::SessionId(1),
+                    by: None,
+                    reason,
+                },
+            };
+            let bytes = postcard::to_stdvec(&event).expect("detached event encodes");
+            assert_eq!(bytes[1], 23);
+            assert_eq!(bytes.last(), Some(&tag));
+            assert_eq!(
+                postcard::from_bytes::<super::Event>(&bytes).expect("detached event decodes"),
+                event
+            );
+        }
     }
 }

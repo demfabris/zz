@@ -122,7 +122,12 @@ This makes literal `tmux` calls inside plugins hit the intended server on both s
 The smoke directives are:
 
 - `conf: <path>` stages and sources a config after linking cached plugins into
-  `~/.tmux/plugins/<name>`.
+  `~/.tmux/plugins/<name>`. A `~/`-prefixed path resolves against the scratch HOME, so a
+  corpus file can be staged verbatim (`conf: ~/.tmux/plugins/oh-my-tmux/.tmux.conf`) —
+  needed when a config locates itself as `~/.tmux.conf`, as Oh My Tmux does.
+- `stage: <source> <destination>` copies one file into the scratch HOME before sourcing
+  (both paths accept the same `~/` resolution; the destination must be under `~/`). Oh My
+  Tmux uses it for its stock `.tmux.conf.local`.
 - `expect-warn: zz <text>` and `expect-warn: tmux <text>` pin each side's
   `%config-error` set. Do not cross-diff skip summaries: they intentionally have no pin analogue.
   The harness separately requires the current tier-1 config loads to finish with `%end` on both

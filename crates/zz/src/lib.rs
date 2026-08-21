@@ -916,15 +916,15 @@ fn run_command_mode(
     match execute_command_chain(
         std::iter::once(invocation).chain(commands),
         |command| client.execute(command),
-        print_command_output,
+        |output| print_command_output(&output),
     ) {
         Ok(()) => Some(ExitCode::SUCCESS),
         Err(DaemonError::CommandExit { output, exit_code }) => {
-            print_command_output(output);
+            print_command_output(&output);
             Some(ExitCode::from(exit_code))
         }
         Err(DaemonError::CommandFailed { output, error }) => {
-            print_command_output(output);
+            print_command_output(&output);
             eprintln!("{}", command_error_message(&error));
             Some(ExitCode::FAILURE)
         }
@@ -1229,15 +1229,16 @@ fn format_local_command_error(path: &Path, error: DaemonError) -> String {
 }
 
 #[cfg(not(target_os = "ios"))]
-fn print_command_output(mut output: String) {
+fn print_command_output(output: &str) {
     if output.is_empty() {
         return;
     }
-    if output.ends_with('\n') {
-        output.pop();
+    let mut stdout = io::stdout().lock();
+    let _ = stdout.write_all(output.as_bytes());
+    if !output.ends_with('\n') {
+        let _ = stdout.write_all(b"\n");
     }
-    println!("{output}");
-    let _ = io::stdout().flush();
+    let _ = stdout.flush();
 }
 
 #[cfg(not(target_os = "ios"))]

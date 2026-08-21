@@ -318,6 +318,24 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn switch_client_from_a_plain_shell_reports_the_pinned_client_errors() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "w"]);
+        assert_eq!(created.status.code(), Some(0));
+
+        let clientless = fixture.run(&["switch-client", "-t", "w"]);
+        assert_eq!(clientless.status.code(), Some(1));
+        assert_eq!(clientless.stderr, b"no current client\n");
+
+        let unknown = fixture.run(&["switch-client", "-c", "bogus:", "-t", "w"]);
+        assert_eq!(unknown.status.code(), Some(1));
+        assert_eq!(unknown.stderr, b"can't find client: bogus\n");
+    }
+
+    #[test]
     fn runtime_config_commands_keep_the_command_client_terminal_state() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
@@ -521,6 +539,27 @@ mod daemon_autostart {
         assert_eq!(formatted.status.code(), Some(0));
         assert_eq!(formatted.stdout, b"formatted/0\n");
         assert!(formatted.stderr.is_empty());
+
+        let empty = fixture.run(&["new-window", "-d", "-t", "formatted:", "-P", "-F", ""]);
+        assert_eq!(empty.status.code(), Some(0));
+        assert_eq!(empty.stdout, b"\n");
+        assert!(empty.stderr.is_empty());
+
+        let trailing_newline =
+            fixture.run(&["new-window", "-d", "-t", "formatted:", "-P", "-F", "X\n"]);
+        assert_eq!(trailing_newline.status.code(), Some(0));
+        assert_eq!(trailing_newline.stdout, b"X\n\n");
+        assert!(trailing_newline.stderr.is_empty());
+
+        let split = fixture.run(&["split-window", "-d", "-t", "formatted:0"]);
+        assert_eq!(split.status.code(), Some(0));
+        assert!(split.stdout.is_empty());
+        assert!(split.stderr.is_empty());
+
+        let broken = fixture.run(&["break-pane", "-d", "-P", "-s", "formatted:0.1", "-F", "X\n"]);
+        assert_eq!(broken.status.code(), Some(0));
+        assert_eq!(broken.stdout, b"X\n\n");
+        assert!(broken.stderr.is_empty());
     }
 
     #[test]

@@ -1,0 +1,6 @@
+switch-client -c bogus
+switch-client -t nope
+switch-client -T nope
+switch-client -l
+switch-client -n
+out: list-clients

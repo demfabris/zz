@@ -447,7 +447,9 @@ pub struct TerminalOpenUri {
 /// reliable terminal-side effect is ready for the daemon.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TerminalEvent {
-    ViewportReady,
+    ViewportReady {
+        output_activity: bool,
+    },
     ViewClosed(TerminalViewId),
     CopyReady {
         view: TerminalViewId,
@@ -516,6 +518,7 @@ struct EventQueueState {
     pending_reliable: AtomicUsize,
     pending_reliable_bytes: AtomicUsize,
     notification_pending: AtomicBool,
+    output_activity_pending: AtomicBool,
     bell_pending: AtomicBool,
     foreground: RwLock<Option<Box<ForegroundSource>>>,
     completion: AtomicU64,
@@ -527,6 +530,7 @@ impl EventQueueState {
             pending_reliable: AtomicUsize::new(0),
             pending_reliable_bytes: AtomicUsize::new(0),
             notification_pending: AtomicBool::new(false),
+            output_activity_pending: AtomicBool::new(false),
             bell_pending: AtomicBool::new(false),
             foreground: RwLock::new(None),
             completion: AtomicU64::new(0),
@@ -535,11 +539,15 @@ impl EventQueueState {
 }
 
 impl TerminalEvents {
-    fn received(&self, event: &TerminalEvent) {
-        if matches!(event, TerminalEvent::ViewportReady) {
+    fn received(&self, event: &mut TerminalEvent) {
+        if let TerminalEvent::ViewportReady { output_activity } = event {
             self.state
                 .notification_pending
                 .store(false, Ordering::Release);
+            *output_activity = self
+                .state
+                .output_activity_pending
+                .swap(false, Ordering::AcqRel);
             return;
         }
 
@@ -558,14 +566,14 @@ impl TerminalEvents {
 
     /// Receives the next terminal event, blocking the caller.
     pub fn recv_blocking(&self) -> Result<TerminalEvent, async_channel::RecvError> {
-        let event = self.receiver.recv_blocking()?;
-        self.received(&event);
+        let mut event = self.receiver.recv_blocking()?;
+        self.received(&mut event);
         Ok(event)
     }
 
     pub fn try_recv(&self) -> Result<TerminalEvent, async_channel::TryRecvError> {
-        let event = self.receiver.try_recv()?;
-        self.received(&event);
+        let mut event = self.receiver.try_recv()?;
+        self.received(&mut event);
         Ok(event)
     }
 }
@@ -2944,7 +2952,9 @@ impl Publisher {
     fn notify_viewports(&self, viewport: &TerminalViewport, view_count: usize) {
         let notification_was_pending = self.state.notification_pending.swap(true, Ordering::AcqRel);
         if !notification_was_pending {
-            match self.event_tx.try_send(TerminalEvent::ViewportReady) {
+            match self.event_tx.try_send(TerminalEvent::ViewportReady {
+                output_activity: false,
+            }) {
                 Ok(()) | Err(async_channel::TrySendError::Closed(_)) => {}
                 Err(async_channel::TrySendError::Full(_)) => {
                     self.state
@@ -2998,6 +3008,12 @@ impl Publisher {
                     .collect(),
             );
         }
+    }
+
+    fn mark_output_activity(&self) {
+        self.state
+            .output_activity_pending
+            .store(true, Ordering::Release);
     }
 
     fn fail(&self, error: &WorkerError) {
@@ -3123,7 +3139,7 @@ fn reliable_event_bytes(event: &TerminalEvent) -> usize {
             })),
         TerminalEvent::OpenUri(open) => open.uri.len(),
         TerminalEvent::ClipboardSet { text, .. } => text.len(),
-        TerminalEvent::ViewportReady
+        TerminalEvent::ViewportReady { .. }
         | TerminalEvent::ViewClosed(_)
         | TerminalEvent::Bell
         | TerminalEvent::PlaceholderBound { .. }
@@ -4147,6 +4163,7 @@ fn run_terminal(
             } else {
                 search_refresh_due = None;
             }
+            publisher.mark_output_activity();
             publish_active_views(
                 &mut terminal,
                 publisher,
@@ -5009,6 +5026,9 @@ fn run_terminal(
                 code: status.exit_code(),
                 signal,
             });
+            if had_output || output_pending {
+                publisher.mark_output_activity();
+            }
             publish_active_views(
                 &mut terminal,
                 publisher,
@@ -11495,18 +11515,25 @@ mod tests {
 
         assert!(matches!(
             events.try_recv().expect("coalesced viewport event"),
-            TerminalEvent::ViewportReady
+            TerminalEvent::ViewportReady {
+                output_activity: false
+            }
         ));
         assert!(!event_state.notification_pending.load(Ordering::Acquire));
+        publisher.mark_output_activity();
         publisher.publish(TerminalViewport::blank(1, 1, SessionStatus::Running));
         assert_eq!(events.receiver.len(), MAX_PENDING_TERMINAL_EVENTS);
         assert!(events.receiver.is_full());
 
         let mut reliable_events = 0;
         let mut viewport_events = 0;
+        let mut output_activity_events = 0;
         while let Ok(event) = events.try_recv() {
             match event {
-                TerminalEvent::ViewportReady => viewport_events += 1,
+                TerminalEvent::ViewportReady { output_activity } => {
+                    viewport_events += 1;
+                    output_activity_events += usize::from(output_activity);
+                }
                 TerminalEvent::OpenUri(_) => reliable_events += 1,
                 TerminalEvent::ViewClosed(_)
                 | TerminalEvent::CopyReady { .. }
@@ -11520,6 +11547,7 @@ mod tests {
             }
         }
         assert_eq!(viewport_events, 1);
+        assert_eq!(output_activity_events, 1);
         assert_eq!(reliable_events, MAX_PENDING_RELIABLE_EVENTS);
         assert_eq!(event_state.pending_reliable.load(Ordering::Acquire), 0);
         assert_eq!(

@@ -1,0 +1,8 @@
+out: set-option -gF @probe #{session_name}:#{window_index}.#{pane_index}
+out: show-options -gv @probe
+out: set-window-option -F -t w:0 @window #{window_index}.#{pane_index}
+out: show-window-options -t w:0 -v @window
+out: new-window -d -t w: -n printed -P -F #{session_name}:#{window_index}.#{pane_index}
+out: split-window -d -t w:0.0 -P -F #{session_name}:#{window_index}.#{pane_index}
+out: break-pane -d -s w:0.1 -n moved -P -F #{session_name}:#{window_index}.#{pane_index}
+out: new-window -S -n main -P -F ignored

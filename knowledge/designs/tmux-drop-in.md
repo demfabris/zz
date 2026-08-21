@@ -46,10 +46,27 @@ The target splits in two:
 4. Interop with a real tmux binary over its private socket protocol is a non-goal. The alias
    means zz handles tmux's argv everywhere; it never speaks tmux's client-server wire format.
 
+**Decisions (2026-08-20, fabrico):**
+
+5. Protocol bumps proceed append-only as waves need them; the hardware-smoke list is
+   verification debt, not a merge gate. `switch-client` takes v70, C3 takes the next.
+6. Surface rule for client-level behavior (`switch-client`, `detach-on-destroy`, the
+   lifecycle flags, `mouse`, `escape-time`, the `[detached]` notice): **zz-tui is tmux-exact
+   including defaults** — its session dying exits to the shell unless the config says
+   otherwise; **the GUI keeps zz behavior at defaults** and honors these options only when a
+   config sets them explicitly. `switch-client` on the GUI is a sidebar focus change, never
+   a detach.
+7. The flag-level sweep runs to **zero non-parked flags**; "100% of the command grammar"
+   means flags too. The divergence matrix's flag table is the tracker.
+8. Execution loop unchanged: codex implements from a settled plan, full gates, grok-4.6
+   adversarial pin review, close.
+
 # Where this stands (2026-08-20)
 
-**All nine phases are shipped. Both halves of the target are met:** a tmux config or script
-cannot tell zz from tmux, and a human typing `tmux new -s foo` lands inside the session.
+**All nine original phases are shipped, and the human attach half of the target is met:** a human
+typing `tmux new -s foo` lands inside the session. Strict config/script indistinguishability remains
+the end-state rather than a current claim: the live ledger below still has unsupported flags and
+documented semantic divergences.
 
 | Phase | State |
 | --- | --- |
@@ -70,7 +87,7 @@ strings from the pin's own regress suite match byte-exact; and the attach contra
 verified live on a pty (`new -s x \; split-window -h` → alt screen, panes `0` and `1` on
 both binaries).
 
-**Options: all 180 of the pin's named options store; 66 behave.** The remaining 114 are
+**Options: all 180 of the pin's named options store; 67 behave.** The remaining 113 are
 honest storage — they accept, validate, scope, inherit, and read back exactly like the pin,
 and the [divergence matrix](/tmux/divergences.md) carries both rosters. (The running
 "78/180" tallies in the residue section below counted options given a typed home in the
@@ -78,40 +95,59 @@ honest-knobs structs; a 2026-08-20 consumer trace found twelve of those unread. 
 marker or drift test separates the two yet.) Nothing silently succeeds doing nothing any
 more.
 
-**Commands: 79 of the pin's 92 verbs run; 13 are absent** (4 buildable, 4 native-chrome
+**Commands: 80 of the pin's 92 verbs run; 12 are absent** (3 buildable, 4 native-chrome
 superseded, 4 parked by decision or by the missing floating-pane model, `server-access`).
-But **33 of the 79 still reject tmux flags** — roughly 160 `unsupported` flag pairs,
-inventoried in the matrix — so "100% of the command grammar" holds at the verb level, not
-yet at the flag level.
+After Waves 2a and 2b, **30 of the 80 still reject tmux flags** — exactly 129
+catalog-declared `unsupported` pairs, inventoried in the matrix — so "100% of the command
+grammar" holds at the verb level, not yet at the flag level.
 
-**What is genuinely left**, in the order a tmux user meets it (proposed 2026-08-20):
+**What is genuinely left**, in the order real configs hit it (re-ranked 2026-08-20 on
+corpus data: Oh My Tmux, fzf-tmux, tmux-sessionizer, and the seven pinned plugins):
 
-1. **The flag-level sweep** — the script-facing tranche first: `new-window`/`split-window`
-   `-P -F -e -b`, `break-pane -P -F`, `display-message -c -a -l`, `set-option -F`,
-   `list-keys -N -a`, `send-keys -M`, `attach-session -c -r`, `capture-pane -C -F`, the
-   `list-* -f -O -r` filter/sort trio. Each is catalog-driven work; none needs a protocol
-   bump. Rows marked † in the matrix stay parked.
-2. **`switch-client` and `detach-on-destroy`** — one wave, one seam: both retarget an
-   *Interactive* client to another session, which needs the daemon→client message the
-   protocol still lacks (the server half — `ClientHello.origin`, `ClientTerminal`, the
-   `client-terminal-v1` token — exists). tmux-sessionist, sesh, tmux-fzf, and tmuxinator
-   all depend on it.
-3. **The TUI consumes its options** — zz-tui does not depend on zz-mux and reads no tmux
+0. ~~**Oh My Tmux into the smoke corpus**~~ — SHIPPED 2026-08-20 (scenario green: 15 steps,
+   zero divergences; after Wave 2a, zz's baseline is one skip: `send-prefix -2`).
+   Flushed out and fixed the same day: shell jobs missing the
+   `set-environment` overlay, and stored-command rendering ignoring `args_print`.
+1. ~~**`switch-client` and `detach-on-destroy`** (v70)~~ — **SHIPPED 2026-08-20**.
+   Daemon-owned retargeting now covers `-c`/`-t`/`-T`/`-l`/`-n`/`-p`/`-r`/`-Z`, unsolicited
+   `Attached` convergence, client/session activity and previous-session formats, every
+   `detach-on-destroy` policy, reasoned detaches, and tmux-exact TUI exit notices. Oh My
+   Tmux's `prefix BTab` now binds and the warning baseline fell from five skips to four.
+   This was the single most common thing real
+   scripts did that zz couldn't: 12 corpus hits across tmux-sessionizer (whose `$TMUX` branch
+   7a made it take), tmux-resurrect's restore (8 calls), and Oh My Tmux's `prefix C-f` /
+   `prefix BTab`. The protocol v70 wave reused `ProtocolMessage::Attached` rather than
+   adding a second retarget message. The post-implementation pin review closed three mismatches:
+   typed switches now reset the target client's key table unless a real `bind-key -r` binding
+   invoked them, including switches aimed at another client with `-c`,
+   attached connection contexts follow same-session window retargets, and same-session switches
+   emit `%session-changed`. The divergence matrix records zz's per-client window focus and the
+   unmodeled `focused`/`UTF-8` client flags. Surface rule: decision 6.
+2. ~~**The flag-level sweep, Waves 2a and 2b**~~ — **SHIPPED 2026-08-20**.
+   `set`/`setw -F` and `new-window`/`split-window`/`break-pane -P -F` removed eight
+   pairs; shared filter/sort semantics for five list commands, both choosers, and
+   `switch-client -O` removed another 22. The exact catalog ledger moved from 159 pairs
+   across 38 tmux commands to 129 across 30. The proposed Wave 2e "TUI" bucket was too
+   broad: its 45 remaining pairs split into 25 server/core behaviors, 13 true
+   client/presentation behaviors, and 7 parked context/model cases. Future tranches follow
+   that ownership instead of moving server work into zz-tui.
+3. **The TUI consumes its options and client-owned flags** — zz-tui does not depend on zz-mux and reads no tmux
    option: `mouse`, `escape-time`, `status-position`/`-justify`, the status styles, plus the
-   client-side attach residue that shares the surface (`[exited]`/`[detached]` notices, the
-   nested-tty refusal, `-x -`/`-y -` from the client's size — `ClientHello` carries no
+   13 genuinely client/presentation-owned flag pairs and the attach residue that shares the
+   surface (the nested-tty refusal,
+   `-x -`/`-y -` from the client's size — `ClientHello` carries no
    size today).
-4. **The C3 knob batch** — `monitor-activity`/`monitor-silence` with the `#`/`~` window
-   flags and `activity-action`/`visual-activity`, the `set-titles` pair, `prefix2`,
-   `display-panes-format`, `remain-on-exit-format`, parse-time `command-alias`, honoring a
-   user's `update-environment` list at seeding (today hardcoded), the lifecycle quartet
-   when explicitly set, and the renderer styles fabrico already decided (`pane-*border-style`
-   colors, `window-style`/`window-active-style` dimming, `mode-style`). Add the `BEHAVES`
-   list + drift test with it. One protocol bump (v70) covers the lot.
+4. **The C3 knob batch** (v71) — `monitor-activity`/`monitor-silence` with the `#`/`~`
+   window flags and `activity-action`/`visual-activity`, the `set-titles` pair, `prefix2`
+   (Oh My Tmux's `send-prefix -2`), `display-panes-format`, `remain-on-exit-format`,
+   parse-time `command-alias`, honoring a user's `update-environment` list at seeding
+   (today hardcoded), the remaining lifecycle trio when explicitly set, and the renderer styles
+   fabrico already decided (`pane-*border-style` colors, `window-style`/
+   `window-active-style` dimming, `mode-style`). Add the `BEHAVES` list + drift test.
 5. **`source-file` diagnostics on the CLI** — exit 1 with the pin's `path:line: message`
    where today the plain CLI exits 0 silent (the shape already exists as an event warning;
-   `cli_binary.rs:1388` pins the current behavior and must move with it). Small; can ride
-   wave 1.
+   the CLI event-routing path must move with it and gain direct diagnostic coverage). Small;
+   rides wave 2.
 6. **Optional waves** — the 7c error-wording appendix (25 `needs a value` sites, `unknown
    flag -X`, the `usage:` fallback), key-string parity (`list-keys` padding, `C-zz` prefix
    strictness), `resize-window` (also unparks `window-size manual`), the prompt-history
@@ -120,10 +156,6 @@ yet at the flag level.
    windows and session groups (decision 3), the floating-pane family (`new-pane`,
    `switch-mode`, `move-pane` placement flags), real-tmux socket interop (decision 4), the
    21 theme-palette options and `tree-mode-*` (no demand).
-
-Cheap and worth doing before any of it: add Oh My Tmux to the alias smoke corpus
-(`compat/fetch-corpus.sh` pins seven plugins; the `%if` blocker is gone) — it is the most
-common real config and its skip report will re-rank the list above with data.
 
 Hardware-pending items that need fabrico rather than code: the wave-B status-bar visual
 smoke, a live `allow-passthrough` image smoke, the DCS-filter bench A/B, and an iTerm2
@@ -238,11 +270,10 @@ same loop as phases 0–3: settled plan → codex → full gates → adversarial
 | Styles (`#[…]`, `*-style`) | GUI titlebar strip and tabs render them since waves A/B (2026-08-20); zz-tui still drops them before the wire; the terminal-renderer styles (`pane-*border-style`, `window-style`, `mode-style`) are C3 | partial |
 | `source-file -F`/`-n`/`-v` | format-expanded paths, parse-only, verbose printing — deferred from phase 1 | later |
 
-`switch-client` is **not** mechanical: a pane script's `switch-client` must retarget some
-*other* Interactive client's attachment, and the only pane→client seam today is
-`ClientHello.origin`, sent by Command clients only. Phase 8 opened that seam on 2026-08-20
-but never needed to retarget a second client, so `switch-client` still owns the harder half
-and keeps its own wave.
+`switch-client` shipped as protocol v70 on 2026-08-20. A pane script can retarget the
+Interactive client selected from its retained `ClientHello.origin`; the daemon reuses its
+attachment path and sends the existing `ProtocolMessage::Attached` unsolicited to converge
+the target client's presentation and command context.
 
 ## Phase 5 — the exec family (COMPLETE 2026-08-18)
 
@@ -605,10 +636,20 @@ appendix: arity/flag rejection wording, the `usage:` fallback, and the
   | `fpp-init` | Binding and note registration; pane runtime remains out of scope |
   | `own-conf` | Frozen first-party `~/.tmux.conf` snapshot and exact skip summary |
   | `fixture-conf` | The in-tree parser fixture promoted to an end-to-end smoke |
+  | `oh-my-tmux` | Oh My Tmux's full boot including its shell half (added 2026-08-20), seven stock bindings, six option readbacks |
 
   The corpus pins TPM, tmux-sensible, vim-tmux-navigator, tmux-yank, tmux-resurrect,
-  tmux-continuum, and tmux-fpp. Oh My Tmux remains gated on `%if` evaluation and is not part of
-  this wave.
+  tmux-continuum, tmux-fpp, and — since 2026-08-20 — Oh My Tmux (`gpakosz/.tmux` at
+  `58a3dcc`). Oh My Tmux's `.tmux.conf` pipes *itself* through `sh` and locates itself as
+  `~/.tmux.conf`, so the harness stages the corpus file verbatim (`conf: ~/…` resolves
+  against the scratch HOME) with its stock `.tmux.conf.local` beside it (`stage:`). Its zz
+  warning line — now one skip, `send-prefix -2` — is the campaign's
+  baseline to drive to zero. Adding it flushed out two real defects on
+  first contact: shell jobs never received the `set-environment` overlay (so Oh My Tmux's
+  `$TMUX_PROGRAM`-chained bootstrap silently never ran), and every stored-command renderer
+  ignored the pin's `args_print` shape (flag grouping and order, canonical names,
+  `args_escape` quoting) — both fixed and pin-matched the same day, the latter by giving the
+  19 daemon-side catalog specs their real flag arity.
 
   The corpus forced three capability fixes on first contact, each hit by a real config
   (all reviewer-swept against the pin): **command prefix resolution** — the pin's
@@ -675,9 +716,8 @@ Still open on this surface, ledgered rather than done: `-x -`/`-y -` use 80×24 
 the *client's* size (the pin reads `c->tty.sx/sy`, which needs the client's terminal size
 plumbed to the engine); the nested-session check (`server_client_check_nested` compares the
 client's tty against this server's pane ttys — keying off `$TMUX` alone is wrong, since a
-fake `$TMUX` on a non-pane pty still attaches on the pin); the client-exit notices
-(`[exited]`, `[detached (from session X)]`); and `switch-client`, which shares this seam but
-needs to retarget *another* client and so keeps its own wave.
+fake `$TMUX` on a non-pane pty still attaches on the pin). Protocol v70 closed the
+client-exit notices and `switch-client` retargeting on 2026-08-20.
 
 # Acceptance
 
@@ -758,8 +798,8 @@ this list is the campaign-level index of it plus the items that never got a matr
   (choose-tree work).
 - Positional-arity validation is unguarded and the daemon buffer family hand-rolls its
   parsing (phase-0 leftovers); `move-pane -p` is zz-lax.
-- The TTY attach contract closed 2026-08-20 (phase 8); `switch-client` still rides the
-  client seam and is the only thing left on it. Control mode is phase 6; `tmux -V`/`$TMUX`
+- The TTY attach contract closed 2026-08-20 (phase 8); protocol v70 then closed
+  `switch-client` and the client-exit notice seam. Control mode is phase 6; `tmux -V`/`$TMUX`
   shape is phase 7.
 - Exec family, hooks bus, popups/menus (phase 5) — see that section's tiering.
 
@@ -868,8 +908,9 @@ this list is the campaign-level index of it plus the items that never got a matr
 *Count correction, 2026-08-20:* the wave stamps below ("72/180", "78/180", "78 behave")
 are the campaign's running tallies of options given a typed home in the honest-knobs and
 status structs. A consumer trace on 2026-08-20 found that twelve of those are never read —
-the true split is **66 behave / 114 store-only**, and the divergence matrix now carries
-both rosters. The stamps are left as written; the matrix is the number to quote.
+the true split was **66 behave / 114 store-only**; protocol v70's `detach-on-destroy`
+consumer moves the current split to **67 behave / 113 store-only**, and the divergence
+matrix carries both rosters. The stamps are left as written; the matrix is the number to quote.
 
 The 2026-08-19 full inventory: 38 of the pin's 180 named options are implemented, 142 are
 recognized-but-unimplemented, 7 of 8 array options have no storage, and `set-option
@@ -983,15 +1024,16 @@ Maintainer decisions folded in: `pane-border-style`/`pane-active-border-style` H
 explicitly-set colors over the theme (attributes beyond color ignored, one divergence
 row); `window-style`/`window-active-style` (inactive-pane dimming) and the
 `mode-style`/`copy-mode-*-style` selection/match/mark styles ALL render in the GUI
-terminal renderer — content styling, no chrome-doctrine conflict. Lifecycle flags
-(`exit-empty`, `exit-unattached`, `destroy-unattached`, `detach-on-destroy`) are honored
-when a config EXPLICITLY sets them; defaults keep zz's persistent-daemon behavior. Note
+terminal renderer — content styling, no chrome-doctrine conflict. The remaining lifecycle
+flags (`exit-empty`, `exit-unattached`, `destroy-unattached`) must be honored when a config
+EXPLICITLY sets them; defaults keep zz's persistent-daemon behavior. Note
 the daemon already carries the machinery: `should_shutdown_if_empty` = armed ∧ zero
 sessions ∧ zero subscribers — wiring `exit-empty` means exposing that switch, and the
 "attached client keeps the daemon alive" guard stays as a documented divergence. The
 Settings → Advanced `QuitDaemonOnExit` key is a DIFFERENT trigger (app quit, not
 sessions-drained); both axes coexist, the settings description should cross-reference.
-`detach-on-destroy` still rides the phase-8 client seam.
+`detach-on-destroy` shipped separately in protocol v70 and follows its pinned default and
+all four explicit survivor policies.
 
 **Lane 2 — store-only (~40; accept + store silently, divergence row each, the TUI
 consumes later).** `terminal-features[]`, `terminal-overrides[]`, `extended-keys(-format)`,
@@ -1040,8 +1082,8 @@ re-parse sites expand at bind/execution time vs the pin's config-tokenization ti
 (comment at `bound_commands`); `\377`→U+00FF and `\000`-retained vs the pin's raw
 byte/NUL-truncation (String storage, test-pinned); the pin's `%elif`/`%else`
 assignment-leak quirk is NOT reproduced (zz keeps single-branch assignment scope);
-`%if c ; cmd ; %endif` is zz-lax (pin rejects the `;`). Oh My Tmux can now join the
-smoke corpus (was gated on `%if`). NEW TICKET exposed with a live repro: zz's
+`%if c ; cmd ; %endif` is zz-lax (pin rejects the `;`). Oh My Tmux joined the smoke
+corpus on 2026-08-20. NEW TICKET exposed with a live repro: zz's
 `source-file` swallows parse diagnostics and exits 0 where the pin prints
 `path:line: message` rc 1 / `%config-error` — pre-existing, documented asymmetrically
 in the config-grammar scenario's warn expectations.
@@ -1054,10 +1096,9 @@ in the config-grammar scenario's warn expectations.
 - Formats/styles are tmux's largest maintenance surface; the pinned-commit discipline
   (verify against `d77c9dc6`, never guess) is what keeps the grind honest.
 - The Interactive/Command client split is load-bearing (attach effects apply only to
-  Interactive clients); `switch-client` and phase 8 both cut into that seam. Phase 8 cut
-  first (2026-08-20) and the seam held: the three-state `ClientTerminal` on the execution
-  context plus a `client-terminal-v1` capability token, no connection upgrade and no
-  protocol bump. `switch-client` should extend that, not invent a second mechanism.
+  Interactive clients). Phase 8 cut first (2026-08-20), then protocol v70 extended the
+  same attachment path for `switch-client` and destroy-policy survivor switches; there is
+  still no connection upgrade or parallel focus mechanism.
 - Consent scope: trusting the user's own config matches tmux and current zz behavior, but it
   means an imported-then-edited config never re-prompts; acceptable, worth stating.
 

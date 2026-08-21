@@ -932,10 +932,11 @@ impl<W: Write> ControlWriter<W> {
     }
 
     fn payload(&mut self, output: &str) -> io::Result<()> {
-        let output = output.strip_suffix('\n').unwrap_or(output);
         if !output.is_empty() {
             self.output.write_all(output.as_bytes())?;
-            self.output.write_all(b"\n")?;
+            if !output.ends_with('\n') {
+                self.output.write_all(b"\n")?;
+            }
         }
         Ok(())
     }
@@ -1151,9 +1152,20 @@ mod tests {
                 },
             )
             .unwrap();
+        let fifth = writer.begin_at(21, 0).unwrap();
+        writer
+            .response(
+                &fifth,
+                CommandResponse::Success {
+                    request_id: 5,
+                    output: "\n".to_owned(),
+                    exit_code: 0,
+                },
+            )
+            .unwrap();
         assert_eq!(
             writer.output,
-            b"%begin 17 1 0\none\ntwo\n%end 17 1 0\n%begin 18 2 1\nhook\n\ncan't find session: gone\n%error 18 2 1\n%begin 19 3 1\nunknown command: bogus-command\n%error 19 3 1\n%begin 20 4 1\nunsupported command: new-pane\n%error 20 4 1\n"
+            b"%begin 17 1 0\none\ntwo\n%end 17 1 0\n%begin 18 2 1\nhook\n\ncan't find session: gone\n%error 18 2 1\n%begin 19 3 1\nunknown command: bogus-command\n%error 19 3 1\n%begin 20 4 1\nunsupported command: new-pane\n%error 20 4 1\n%begin 21 5 0\n\n%end 21 5 0\n"
         );
     }
 

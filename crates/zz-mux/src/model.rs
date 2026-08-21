@@ -208,6 +208,7 @@ pub struct Pane {
     pub id: PaneId,
     pub title: String,
     pub kind: PaneKind,
+    pub active_point: u64,
     /// A BEL rang here and nobody has been back since.
     pub bell: bool,
     pub dead: bool,
@@ -222,6 +223,8 @@ pub struct Window {
     pub session: SessionId,
     pub index: u32,
     pub name: String,
+    pub created: u64,
+    pub activity: u64,
     pub active_pane: PaneId,
     pub zoomed_pane: Option<PaneId>,
     pub layout: CellLayout,
@@ -239,6 +242,8 @@ pub struct Session {
     pub id: SessionId,
     pub name: String,
     pub created: Option<i64>,
+    pub sort_created: u64,
+    pub sort_activity: u64,
     pub windows: Vec<WindowId>,
     pub active_window: WindowId,
     last_window: Option<WindowId>,
@@ -321,6 +326,7 @@ pub struct MuxState {
     next_window_id: u64,
     next_pane_id: u64,
     next_split_id: u64,
+    next_sort_point: u64,
     last_active_session: Option<SessionId>,
     input_options: InputOptions,
     pub sessions: BTreeMap<SessionId, Session>,
@@ -367,10 +373,13 @@ impl MuxState {
         let session_id = self.allocate_session_id();
         let window_id = self.allocate_window_id();
         let pane_id = self.allocate_pane_id();
+        let created = self.allocate_sort_point();
+        let active_point = self.allocate_sort_point();
         let pane = Pane {
             id: pane_id,
             title: "terminal".to_owned(),
             kind: PaneKind::Terminal,
+            active_point,
             bell: false,
             dead: false,
             dead_status: None,
@@ -382,6 +391,8 @@ impl MuxState {
             session: session_id,
             index,
             name: index.to_string(),
+            created,
+            activity: created,
             active_pane: pane_id,
             zoomed_pane: None,
             layout: CellLayout::new(pane_id, extent.0, extent.1),
@@ -400,6 +411,8 @@ impl MuxState {
                 id: session_id,
                 name,
                 created: None,
+                sort_created: created,
+                sort_activity: created,
                 windows: vec![window_id],
                 active_window: window_id,
                 last_window: None,
@@ -475,10 +488,13 @@ impl MuxState {
         let index = self.claim_window_index(session, index, base_index)?;
         let window_id = self.allocate_window_id();
         let pane_id = self.allocate_pane_id();
+        let created = self.allocate_sort_point();
+        let active_point = self.allocate_sort_point();
         let pane = Pane {
             id: pane_id,
             title: pane_title(&kind),
             kind,
+            active_point,
             bell: false,
             dead: false,
             dead_status: None,
@@ -490,6 +506,8 @@ impl MuxState {
             session,
             index,
             name: name.unwrap_or_else(|| index.to_string()),
+            created,
+            activity: created,
             active_pane: pane_id,
             zoomed_pane: None,
             layout: CellLayout::new(pane_id, extent.0, extent.1),
@@ -738,9 +756,9 @@ impl MuxState {
                 .expect("destination session exists");
             destination.active_window = source;
             destination.last_window = None;
-            self.clear_window_bells(source);
+            self.force_activate_window(destination_session, source);
         } else if select || force_select {
-            self.activate_window(destination_session, source);
+            self.force_activate_window(destination_session, source);
         } else if source_session == destination_session
             && source_was_active
             && let Some(fallback) = source_fallback
@@ -751,6 +769,7 @@ impl MuxState {
                 .expect("source session exists");
             session.active_window = fallback;
             session.last_window = None;
+            self.touch_window_activity(fallback);
             self.clear_window_bells(fallback);
         }
 
@@ -759,6 +778,7 @@ impl MuxState {
             if source_empty {
                 self.sessions.remove(&source_session);
             } else if let Some(fallback) = source_fallback {
+                self.touch_window_activity(fallback);
                 self.clear_window_bells(fallback);
             }
         }
@@ -949,6 +969,11 @@ impl MuxState {
             .window_for_pane(target)
             .ok_or_else(|| ServerError::MissingTarget(target.to_string()))?;
         let pane_id = PaneId(self.next_pane_id);
+        let active_point = if placement.detached {
+            0
+        } else {
+            self.allocate_sort_point()
+        };
         let next_pane_id = &mut self.next_pane_id;
         let next_split_id = &mut self.next_split_id;
         let mut ids = || {
@@ -976,6 +1001,7 @@ impl MuxState {
                 id: pane_id,
                 title: pane_title(&kind),
                 kind,
+                active_point,
                 bell: false,
                 dead: false,
                 dead_status: None,
@@ -1036,6 +1062,7 @@ impl MuxState {
         if session_empty {
             self.sessions.remove(&removed.session);
         } else if let Some(window) = activated {
+            self.touch_window_activity(window);
             self.clear_window_bells(window);
         }
         self.bump_generation();
@@ -1098,9 +1125,27 @@ impl MuxState {
             .expect("session exists")
             .activate_window(window);
         if changed {
+            self.touch_window_activity(window);
             self.clear_window_bells(window);
         }
         changed
+    }
+
+    fn force_activate_window(&mut self, session: SessionId, window: WindowId) {
+        self.sessions
+            .get_mut(&session)
+            .expect("session exists")
+            .activate_window(window);
+        self.touch_window_activity(window);
+        self.clear_window_bells(window);
+    }
+
+    fn touch_window_activity(&mut self, window: WindowId) {
+        let activity = self.allocate_sort_point();
+        self.windows
+            .get_mut(&window)
+            .expect("active window exists")
+            .activity = activity;
     }
 
     fn clear_window_bells(&mut self, window: WindowId) {
@@ -1122,9 +1167,20 @@ impl MuxState {
         let window_id = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let active_point = self.allocate_sort_point();
         let window = self.windows.get_mut(&window_id).expect("window exists");
+        if window.active_pane == pane && window.zoomed_pane.is_some() && !preserve_zoom {
+            window.zoomed_pane = None;
+            self.bump_generation();
+            return Ok(false);
+        }
         let pane_changed = activate_window_pane(window, pane, preserve_zoom);
         if pane_changed {
+            window
+                .panes
+                .get_mut(&pane)
+                .expect("selected pane exists")
+                .active_point = active_point;
             self.bump_generation();
         }
         Ok(pane_changed)
@@ -1134,6 +1190,7 @@ impl MuxState {
         let window_id = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let active_point = self.allocate_sort_point();
         let window = self.windows.get_mut(&window_id).expect("window exists");
         if window.panes.len() <= 1 {
             return Ok(());
@@ -1141,11 +1198,38 @@ impl MuxState {
         if window.zoomed_pane.is_some() {
             window.zoomed_pane = None;
         } else {
-            activate_window_pane(window, pane, false);
+            if activate_window_pane(window, pane, false) {
+                window
+                    .panes
+                    .get_mut(&pane)
+                    .expect("selected pane exists")
+                    .active_point = active_point;
+            }
             window.zoomed_pane = Some(pane);
         }
         self.bump_generation();
         Ok(())
+    }
+
+    pub fn touch_window_activity_for_pane(&mut self, pane: PaneId) {
+        let Some(window) = self.window_for_pane(pane) else {
+            return;
+        };
+        self.touch_window_activity(window);
+    }
+
+    fn touch_pane_active_point(&mut self, pane: PaneId) {
+        let Some(window) = self.window_for_pane(pane) else {
+            return;
+        };
+        let active_point = self.allocate_sort_point();
+        if let Some(pane) = self
+            .windows
+            .get_mut(&window)
+            .and_then(|window| window.panes.get_mut(&pane))
+        {
+            pane.active_point = active_point;
+        }
     }
 
     /// Move `pane`'s resize boundary by terminal cells, positive toward the
@@ -1955,7 +2039,18 @@ impl MuxState {
 
     pub(crate) fn mark_session_active(&mut self, session: SessionId) {
         if self.sessions.contains_key(&session) {
+            self.touch_session_activity(session);
             self.last_active_session = Some(session);
+        }
+    }
+
+    pub(crate) fn touch_session_activity(&mut self, session: SessionId) {
+        if self.sessions.contains_key(&session) {
+            let activity = self.allocate_sort_point();
+            self.sessions
+                .get_mut(&session)
+                .expect("active session exists")
+                .sort_activity = activity;
         }
     }
 
@@ -2651,8 +2746,11 @@ impl MuxState {
         window.layout.remap(&replacements);
         window.pane_order = next_order;
         let next_active = replacements[&active];
-        activate_window_pane(window, next_active, false);
+        let pane_changed = activate_window_pane(window, next_active, false);
         window.zoomed_pane = (preserve_zoom && was_zoomed).then_some(next_active);
+        if pane_changed {
+            self.touch_pane_active_point(next_active);
+        }
         self.bump_generation();
         Ok(next_active)
     }
@@ -2681,24 +2779,50 @@ impl MuxState {
         }
 
         if source_window == target_window {
-            let window = self.windows.get_mut(&source_window).expect("window exists");
-            let was_zoomed = window.zoomed_pane.is_some();
-            let swapped = window.layout.swap(source, target);
-            debug_assert!(swapped);
-            swap_pane_order(&mut window.pane_order, source, target);
-            let next_active = if detached {
-                if window.active_pane == source {
-                    target
-                } else if window.active_pane == target {
-                    source
-                } else {
-                    window.active_pane
+            let was_zoomed = {
+                let window = self.windows.get_mut(&source_window).expect("window exists");
+                let was_zoomed = window.zoomed_pane.is_some();
+                let swapped = window.layout.swap(source, target);
+                debug_assert!(swapped);
+                swap_pane_order(&mut window.pane_order, source, target);
+                was_zoomed
+            };
+            if detached {
+                if self.windows[&source_window].active_pane == source {
+                    let changed = activate_window_pane(
+                        self.windows.get_mut(&source_window).expect("window exists"),
+                        target,
+                        false,
+                    );
+                    if changed {
+                        self.touch_pane_active_point(target);
+                    }
+                }
+                if self.windows[&source_window].active_pane == target {
+                    let changed = activate_window_pane(
+                        self.windows.get_mut(&source_window).expect("window exists"),
+                        source,
+                        false,
+                    );
+                    if changed {
+                        self.touch_pane_active_point(source);
+                    }
                 }
             } else {
-                target
-            };
-            activate_window_pane(window, next_active, false);
-            window.zoomed_pane = (preserve_zoom && was_zoomed).then_some(window.active_pane);
+                let changed = activate_window_pane(
+                    self.windows.get_mut(&source_window).expect("window exists"),
+                    target,
+                    false,
+                );
+                if changed {
+                    self.touch_pane_active_point(target);
+                }
+            }
+            let active = self.windows[&source_window].active_pane;
+            self.windows
+                .get_mut(&source_window)
+                .expect("window exists")
+                .zoomed_pane = (preserve_zoom && was_zoomed).then_some(active);
             self.bump_generation();
             return Ok(());
         }
@@ -2743,13 +2867,21 @@ impl MuxState {
         } else {
             source
         };
-        activate_relocated_window_pane(&mut source_state, next_source_active, source);
-        activate_relocated_window_pane(target_state, next_target_active, target);
+        let source_changed =
+            activate_relocated_window_pane(&mut source_state, next_source_active, source);
+        let target_changed =
+            activate_relocated_window_pane(target_state, next_target_active, target);
         source_state.zoomed_pane =
             (preserve_zoom && source_was_zoomed).then_some(source_state.active_pane);
         target_state.zoomed_pane =
             (preserve_zoom && target_was_zoomed).then_some(target_state.active_pane);
         self.windows.insert(source_window, source_state);
+        if source_changed {
+            self.touch_pane_active_point(next_source_active);
+        }
+        if target_changed {
+            self.touch_pane_active_point(next_target_active);
+        }
         self.bump_generation();
         Ok(())
     }
@@ -2790,57 +2922,20 @@ impl MuxState {
         let source_session = self.windows[&source_window].session;
         let index = self.claim_window_index(destination_session, destination_index, base_index)?;
         if self.windows[&source_window].panes.len() == 1 {
-            if source_session == destination_session {
-                let window = self
-                    .windows
+            self.move_window(source_window, destination_session, index, false, !detached)?;
+            if let Some(name) = name {
+                self.windows
                     .get_mut(&source_window)
-                    .expect("source window exists");
-                window.index = index;
-                if let Some(name) = name.as_ref() {
-                    name.clone_into(&mut window.name);
-                }
-                if !detached {
-                    self.activate_window(destination_session, source_window);
-                }
-                self.sort_session_windows(destination_session);
-            } else {
-                let activated = self
-                    .sessions
-                    .get_mut(&source_session)
-                    .expect("source session exists")
-                    .forget_window(source_window);
-                let window = self
-                    .windows
-                    .get_mut(&source_window)
-                    .expect("source window exists");
-                window.session = destination_session;
-                window.index = index;
-                if let Some(name) = name.as_ref() {
-                    name.clone_into(&mut window.name);
-                }
-                self.sessions
-                    .get_mut(&destination_session)
-                    .expect("destination session exists")
-                    .windows
-                    .push(source_window);
-                if let Some(window) = activated {
-                    self.clear_window_bells(window);
-                }
-                if !detached {
-                    self.activate_window(destination_session, source_window);
-                }
-                if self.sessions[&source_session].windows.is_empty() {
-                    self.sessions.remove(&source_session);
-                }
-                self.sort_session_windows(destination_session);
+                    .expect("moved source window exists")
+                    .name = name;
             }
-            self.bump_generation();
             return Ok(source_window);
         }
         let inherited_extent = self
             .session_active_window_extent(destination_session)
             .unwrap_or(DEFAULT_WINDOW_EXTENT);
         let window_id = self.allocate_window_id();
+        let created = self.allocate_sort_point();
         let mut source = self
             .windows
             .remove(&source_window)
@@ -2875,6 +2970,8 @@ impl MuxState {
                 session: destination_session,
                 index,
                 name: window_name,
+                created,
+                activity: created,
                 active_pane: pane,
                 zoomed_pane: None,
                 layout: CellLayout::new(pane, inherited_extent.0, inherited_extent.1),
@@ -2904,6 +3001,7 @@ impl MuxState {
             self.activate_window(destination_session, window_id);
         }
         if let Some(window) = activated {
+            self.touch_window_activity(window);
             self.clear_window_bells(window);
         }
         if source_session != destination_session
@@ -2969,13 +3067,15 @@ impl MuxState {
                 window.layout = original_layout;
                 return Err(split_layout_error(error, target));
             }
+            lose_window_pane(window, source);
             window.pane_order.retain(|pane| *pane != source);
             insert_pane_order(&mut window.pane_order, source, target, false, false);
             window.zoomed_pane = None;
-            if !detached {
-                activate_window_pane(window, source, false);
-            }
+            let pane_changed = !detached && activate_window_pane(window, source, false);
             normalize_window_history(window);
+            if pane_changed {
+                self.touch_pane_active_point(source);
+            }
             self.bump_generation();
             return Ok(());
         }
@@ -3024,10 +3124,15 @@ impl MuxState {
         target_state.panes.insert(source, pane_state);
         insert_pane_order(&mut target_state.pane_order, source, target, false, false);
         target_state.zoomed_pane = None;
-        if !detached {
-            activate_window_pane(target_state, source, false);
-        }
+        let target_changed = !detached && activate_window_pane(target_state, source, false);
         normalize_window_history(target_state);
+        if target_changed {
+            self.touch_pane_active_point(source);
+        }
+
+        if !detached {
+            self.activate_window(target_session, target_window);
+        }
 
         let activated = if source_will_close {
             self.sessions
@@ -3039,10 +3144,8 @@ impl MuxState {
             None
         };
         if let Some(window) = activated {
+            self.touch_window_activity(window);
             self.clear_window_bells(window);
-        }
-        if !detached {
-            self.activate_window(target_session, target_window);
         }
         self.bump_generation();
         Ok(())
@@ -3262,6 +3365,12 @@ impl MuxState {
         let id = SplitId(self.next_split_id);
         self.next_split_id = self.next_split_id.saturating_add(1);
         id
+    }
+
+    fn allocate_sort_point(&mut self) -> u64 {
+        let point = self.next_sort_point;
+        self.next_sort_point = self.next_sort_point.saturating_add(1);
+        point
     }
 
     pub(crate) fn bump_generation(&mut self) {
@@ -3690,17 +3799,34 @@ fn activate_window_pane(window: &mut Window, pane: PaneId, preserve_zoom: bool) 
 
 fn repair_window_after_pane_removal(window: &mut Window, pane: PaneId) {
     window.zoomed_pane = None;
+    lose_window_pane(window, pane);
     window.pane_order.retain(|candidate| *candidate != pane);
-    window.last_panes.retain(|candidate| *candidate != pane);
-    if window.active_pane == pane {
-        let next = window
-            .last_panes
-            .first()
-            .copied()
-            .unwrap_or_else(|| window.layout.panes_in_order()[0]);
-        window.active_pane = next;
-    }
     normalize_window_history(window);
+}
+
+fn lose_window_pane(window: &mut Window, pane: PaneId) {
+    window.last_panes.retain(|candidate| *candidate != pane);
+    if window.active_pane != pane {
+        return;
+    }
+    let position = window
+        .pane_order
+        .iter()
+        .position(|candidate| *candidate == pane)
+        .expect("relocated pane belongs to the window");
+    let next = window
+        .last_panes
+        .first()
+        .copied()
+        .or_else(|| {
+            position
+                .checked_sub(1)
+                .and_then(|position| window.pane_order.get(position).copied())
+        })
+        .or_else(|| window.pane_order.get(position + 1).copied())
+        .expect("losing a pane leaves another pane");
+    window.active_pane = next;
+    window.last_panes.retain(|candidate| *candidate != next);
 }
 
 fn normalize_window_history(window: &mut Window) {
@@ -3755,7 +3881,7 @@ fn swap_pane_order(order: &mut [PaneId], first: PaneId, second: PaneId) {
     }
 }
 
-fn activate_relocated_window_pane(window: &mut Window, pane: PaneId, outgoing: PaneId) {
+fn activate_relocated_window_pane(window: &mut Window, pane: PaneId, outgoing: PaneId) -> bool {
     let previous = window.active_pane;
     window.last_panes.retain(|candidate| {
         *candidate != outgoing && *candidate != pane && window.panes.contains_key(candidate)
@@ -3768,6 +3894,7 @@ fn activate_relocated_window_pane(window: &mut Window, pane: PaneId, outgoing: P
         .last_panes
         .truncate(window.panes.len().saturating_sub(1));
     window.active_pane = pane;
+    previous != pane
 }
 
 fn predict_swap_layout_panes(node: &mut LayoutNode, source: PaneId, target: PaneId) {
@@ -4192,6 +4319,29 @@ mod tests {
             .split_pane(first, Axis::Vertical, PaneKind::Terminal)
             .unwrap();
         assert_eq!(fourth, PaneId(3));
+    }
+
+    #[test]
+    fn pane_removal_fallback_preserves_the_replacement_active_point() {
+        let mut state = MuxState::default();
+        let (_, window, first) = state.create_session("work").unwrap();
+        let second = state
+            .split_pane(first, Axis::Horizontal, PaneKind::Terminal)
+            .unwrap();
+        let third = state
+            .split_pane(second, Axis::Vertical, PaneKind::Terminal)
+            .unwrap();
+        state.select_pane(first).unwrap();
+        let replacement_point = state.windows[&window].panes[&third].active_point;
+
+        state.kill_pane(first).unwrap();
+
+        assert_eq!(state.windows[&window].active_pane, third);
+        assert_eq!(
+            state.windows[&window].panes[&third].active_point,
+            replacement_point
+        );
+        assert!(state.validate().is_ok());
     }
 
     #[test]
@@ -5023,6 +5173,95 @@ mod tests {
     }
 
     #[test]
+    fn kill_and_move_window_touch_only_newly_selected_windows() {
+        let mut state = MuxState::default();
+        let (source_session, fallback, _) = state.create_session("source").unwrap();
+        let (current, _) = state
+            .create_window(source_session, None, PaneKind::Terminal)
+            .unwrap();
+        let fallback_activity = state.windows[&fallback].activity;
+
+        state.kill_window(current).unwrap();
+
+        assert_eq!(state.sessions[&source_session].active_window, fallback);
+        assert!(state.windows[&fallback].activity > fallback_activity);
+
+        let (inactive, _) = state
+            .create_window_at(source_session, None, None, PaneKind::Terminal, false)
+            .unwrap();
+        let fallback_activity = state.windows[&fallback].activity;
+        state.kill_window(inactive).unwrap();
+        assert_eq!(state.windows[&fallback].activity, fallback_activity);
+
+        let (moving, _) = state
+            .create_window(source_session, None, PaneKind::Terminal)
+            .unwrap();
+        let fallback_activity = state.windows[&fallback].activity;
+        state
+            .move_window(moving, source_session, 2, false, false)
+            .unwrap();
+        assert_eq!(state.sessions[&source_session].active_window, fallback);
+        assert!(state.windows[&fallback].activity > fallback_activity);
+
+        let moving_activity = state.windows[&moving].activity;
+        state
+            .move_window(moving, source_session, 3, false, true)
+            .unwrap();
+        assert_eq!(state.sessions[&source_session].active_window, moving);
+        assert!(state.windows[&moving].activity > moving_activity);
+
+        let moving_activity = state.windows[&moving].activity;
+        state
+            .move_window(moving, source_session, 4, false, true)
+            .unwrap();
+        assert!(state.windows[&moving].activity > moving_activity);
+
+        let (destination_session, _, _) = state.create_session("destination").unwrap();
+        let moving_activity = state.windows[&moving].activity;
+        let fallback_activity = state.windows[&fallback].activity;
+        state
+            .move_window(moving, destination_session, 1, false, true)
+            .unwrap();
+        assert_eq!(state.sessions[&destination_session].active_window, moving);
+        assert_eq!(state.sessions[&source_session].active_window, fallback);
+        assert!(state.windows[&moving].activity > moving_activity);
+        assert!(state.windows[&fallback].activity > fallback_activity);
+        assert!(state.windows[&fallback].activity > state.windows[&moving].activity);
+        assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn swap_window_updates_activity_only_when_destination_selection_changes() {
+        let mut state = MuxState::default();
+        let (session, source, _) = state.create_session("work").unwrap();
+        let (target, _) = state
+            .create_window_at(session, None, None, PaneKind::Terminal, false)
+            .unwrap();
+        let source_activity = state.windows[&source].activity;
+        let target_activity = state.windows[&target].activity;
+        let next_sort_point = state.next_sort_point;
+
+        state.swap_windows(source, target, false).unwrap();
+
+        assert_eq!(state.sessions[&session].active_window, target);
+        assert_eq!(state.windows[&source].activity, source_activity);
+        assert_eq!(state.windows[&target].activity, target_activity);
+        assert_eq!(state.next_sort_point, next_sort_point);
+
+        state.select_window(session, source).unwrap();
+        let source_activity = state.windows[&source].activity;
+        let target_activity = state.windows[&target].activity;
+        let next_sort_point = state.next_sort_point;
+        state.swap_windows(source, target, true).unwrap();
+
+        assert_eq!(state.sessions[&session].active_window, source);
+        assert!(state.windows[&source].activity > source_activity);
+        assert_eq!(state.windows[&target].activity, target_activity);
+        assert_eq!(state.next_sort_point, next_sort_point + 1);
+        assert!(state.validate().is_ok());
+    }
+
+    #[test]
     fn pane_swaps_preserve_layout_identity_active_slots_and_cross_window_state() {
         let mut state = MuxState::default();
         let (session, window, first) = state.create_session("work").unwrap();
@@ -5048,6 +5287,8 @@ mod tests {
         let current_split_ids = layout_splits(&state.windows[&window].layout);
         assert_eq!(current_split_ids, split_ids, "split IDs remain stable");
 
+        let second_point = state.windows[&window].panes[&second].active_point;
+        let third_point = state.windows[&window].panes[&third].active_point;
         state.swap_panes(third, second, true, false).unwrap();
         assert_eq!(
             layout_panes(&state.windows[&window].layout),
@@ -5055,9 +5296,14 @@ mod tests {
         );
         assert_eq!(state.windows[&window].pane_order, [first, second, third]);
         assert_eq!(
-            state.windows[&window].active_pane, second,
-            "detached swaps preserve the active layout slot"
+            state.windows[&window].active_pane, third,
+            "tmux reselects the source after briefly selecting the target"
         );
+        let second_point_after = state.windows[&window].panes[&second].active_point;
+        let third_point_after = state.windows[&window].panes[&third].active_point;
+        assert!(second_point_after > second_point);
+        assert!(third_point_after > third_point);
+        assert!(third_point_after > second_point_after);
         assert_eq!(state.windows[&window].zoomed_pane, None);
 
         let (other_window, other) = state
@@ -5139,7 +5385,10 @@ mod tests {
         );
         let rotated_split_ids = layout_splits(&state.windows[&window].layout);
         assert_eq!(rotated_split_ids, split_ids);
-        assert_eq!(state.windows[&window].panes, panes);
+        assert!(state.windows[&window].panes[&first].active_point > panes[&first].active_point);
+        for pane in [second, third, fourth] {
+            assert_eq!(state.windows[&window].panes[&pane], panes[&pane]);
+        }
 
         let restored = state.rotate_window(window, true, true).unwrap();
         assert_eq!(restored, third);
@@ -5150,6 +5399,79 @@ mod tests {
 
         state.rotate_window(window, false, false).unwrap();
         assert_eq!(state.windows[&window].zoomed_pane, None);
+        assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn break_and_join_follow_tmux_window_activity_transitions() {
+        let mut state = MuxState::default();
+        let (session, original_window, first) = state.create_session("work").unwrap();
+        let moving = state
+            .split_pane(first, Axis::Horizontal, PaneKind::Terminal)
+            .unwrap();
+
+        let next_sort_point = state.next_sort_point;
+        let broken_window = state
+            .break_pane(moving, session, None, None, false)
+            .unwrap();
+        assert_eq!(state.next_sort_point, next_sort_point + 2);
+        assert!(
+            state.windows[&broken_window].activity > state.windows[&broken_window].created,
+            "selecting the newly created window updates its activity"
+        );
+        assert_eq!(state.sessions[&session].active_window, broken_window);
+
+        let target_activity = state.windows[&original_window].activity;
+        let next_sort_point = state.next_sort_point;
+        state
+            .join_pane(
+                moving,
+                first,
+                Axis::Horizontal,
+                SplitSize::Default,
+                false,
+                false,
+                false,
+            )
+            .unwrap();
+        assert_eq!(state.next_sort_point, next_sort_point + 2);
+        assert!(!state.windows.contains_key(&broken_window));
+        assert_eq!(state.sessions[&session].active_window, original_window);
+        assert!(state.windows[&original_window].activity > target_activity);
+
+        let next_sort_point = state.next_sort_point;
+        let detached_window = state.break_pane(moving, session, None, None, true).unwrap();
+        assert_eq!(state.next_sort_point, next_sort_point + 1);
+        assert_eq!(
+            state.windows[&detached_window].activity,
+            state.windows[&detached_window].created
+        );
+        state.select_window(session, detached_window).unwrap();
+        let target_activity = state.windows[&original_window].activity;
+        let moving_point = state.windows[&detached_window].panes[&moving].active_point;
+        let next_sort_point = state.next_sort_point;
+
+        state
+            .join_pane(
+                moving,
+                first,
+                Axis::Horizontal,
+                SplitSize::Default,
+                false,
+                false,
+                true,
+            )
+            .unwrap();
+
+        assert_eq!(state.next_sort_point, next_sort_point + 1);
+        assert!(!state.windows.contains_key(&detached_window));
+        assert_eq!(state.sessions[&session].active_window, original_window);
+        assert_eq!(state.windows[&original_window].active_pane, first);
+        assert_eq!(
+            state.windows[&original_window].panes[&moving].active_point,
+            moving_point
+        );
+        assert!(state.windows[&original_window].activity > target_activity);
         assert!(state.validate().is_ok());
     }
 
@@ -5430,6 +5752,55 @@ mod tests {
             assert!(same_projected_geometry(layout, &predicted));
             assert_eq!(state.windows[&window].pane_order, expected_order);
             assert_eq!(state.windows[&window].active_pane, second);
+            assert!(state.validate().is_ok());
+        }
+    }
+
+    #[test]
+    fn same_window_join_matches_tmux_active_pane_transitions() {
+        for detached in [true, false] {
+            let mut state = MuxState::default();
+            let (_, window, first) = state.create_session("work").unwrap();
+            let second = state
+                .split_pane(first, Axis::Horizontal, PaneKind::Terminal)
+                .unwrap();
+            let source = state
+                .split_pane(second, Axis::Vertical, PaneKind::Terminal)
+                .unwrap();
+            state.select_pane(second).unwrap();
+            state.select_pane(source).unwrap();
+            let source_point = state.windows[&window].panes[&source].active_point;
+            let fallback_point = state.windows[&window].panes[&second].active_point;
+            let next_sort_point = state.next_sort_point;
+
+            state
+                .join_pane(
+                    source,
+                    first,
+                    Axis::Horizontal,
+                    SplitSize::Default,
+                    false,
+                    false,
+                    detached,
+                )
+                .unwrap();
+
+            let expected_active = if detached { second } else { source };
+            assert_eq!(state.windows[&window].active_pane, expected_active);
+            assert_eq!(
+                state.windows[&window].panes[&second].active_point, fallback_point,
+                "losing the active source uses the fallback without selecting it"
+            );
+            if detached {
+                assert_eq!(
+                    state.windows[&window].panes[&source].active_point,
+                    source_point
+                );
+                assert_eq!(state.next_sort_point, next_sort_point);
+            } else {
+                assert!(state.windows[&window].panes[&source].active_point > source_point);
+                assert_eq!(state.next_sort_point, next_sort_point + 1);
+            }
             assert!(state.validate().is_ok());
         }
     }

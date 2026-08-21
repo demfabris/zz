@@ -31,16 +31,16 @@ use zz_protocol::{
     ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind, ChooseTreePaneKind,
     ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget, ClientHello, ClientId,
     ClientInstanceId, ClientKind, ClientMessageKind, CommandInvocation, CommandPromptAction,
-    CommandPromptKind, CommandPromptState, CommandRequest, CommandResponse, ConfigOverrideEntry,
-    ConfirmAction, ConfirmState, DisplayPanesAction, DisplayPanesState, Event, EventPayload,
-    GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_CHOOSE_BUFFER_QUERY_BYTES,
-    MAX_CHOOSE_TREE_QUERY_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MenuAction, MenuItem, MenuState,
-    MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY,
-    PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot, PasteUploadPurpose,
-    PastedImageFormat, PopupAction, PopupBorderLines, PopupState, ProtocolError, ProtocolMessage,
-    SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId, SessionViewer, SplitId, StatusLine,
-    WindowId, encode_protocol_message_into, encode_terminal_viewport_event_into,
-    read_protocol_message_into,
+    CommandPromptKind, CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest,
+    CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState, DisplayPanesAction,
+    DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES,
+    MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES,
+    MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot,
+    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot,
+    PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupState,
+    ProtocolError, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId,
+    SessionViewer, SplitId, StatusLine, WindowId, encode_protocol_message_into,
+    encode_terminal_viewport_event_into, read_protocol_message_into,
 };
 use zz_terminal::{
     AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance, CaptureBoundary,
@@ -365,6 +365,11 @@ fn command_log_line(command: &CommandInvocation) -> String {
         line.push_str(argument);
     }
     line
+}
+
+fn next_timed_message_id(inner: &mut ServerState) -> u64 {
+    inner.next_timed_message_id = inner.next_timed_message_id.wrapping_add(1);
+    inner.next_timed_message_id
 }
 
 fn push_server_message(inner: &mut ServerState, text: String) -> u64 {
@@ -3225,6 +3230,10 @@ impl Shared {
             "tmux-config-subset".to_owned(),
             NEW_SESSION_ATTACH_CAPABILITY.to_owned(),
         ];
+        let hello_mux_options = inner.mux_options.clone();
+        inner
+            .published_mux_options
+            .insert(client, hello_mux_options.clone());
         let hello = ServerHello {
             protocol_version: PROTOCOL_VERSION,
             server_id: self.server_id,
@@ -3233,7 +3242,7 @@ impl Shared {
             capabilities,
             appearance: (*inner.appearance).clone(),
             appearance_provenance: inner.appearance_provenance.clone(),
-            mux_options: inner.mux_options.clone(),
+            mux_options: hello_mux_options,
             status: StatusLine::default(),
             key_tables: inner.engine.keys.snapshot(),
         };
@@ -3303,6 +3312,9 @@ impl Shared {
             inner.client_instances.remove(&client);
             inner.client_kinds.remove(&client);
             inner.client_terminals.remove(&client);
+            inner.client_ttys.remove(&client);
+            inner.client_sizes.remove(&client);
+            inner.published_mux_options.remove(&client);
             inner.client_origins.remove(&client);
             inner.client_activity.remove(&client);
             inner.client_activity_times.remove(&client);
@@ -3420,11 +3432,13 @@ impl Shared {
                 request_id,
                 output: execution.output,
                 exit_code: 0,
+                stderr: String::new(),
             },
             Err(DaemonError::CommandExit { output, exit_code }) => CommandResponse::Success {
                 request_id,
                 output,
                 exit_code,
+                stderr: String::new(),
             },
             Err(DaemonError::CommandFailed { output, error }) => {
                 let error = daemon_server_error(*error);
@@ -3835,6 +3849,7 @@ impl Shared {
         let mut reload_config = false;
         let mut snapshot_changed = false;
         let mut mux_options_changed = false;
+        let mut mux_option_refresh_sessions = BTreeSet::new();
         #[cfg(feature = "agent")]
         let mut agent_options_changed = false;
         let mut status_formats_changed = false;
@@ -4716,11 +4731,13 @@ impl Shared {
                         duration_ms,
                     } => {
                         push_server_message(&mut inner, text.clone());
+                        let message_id = next_timed_message_id(&mut inner);
                         direct_events.push(EventPayload::TimedClientMessage {
                             pane: *pane,
                             kind: ClientMessageKind::Info,
                             text: text.clone(),
                             duration_ms: *duration_ms,
+                            message_id,
                         });
                     }
                     MuxEffect::BufferLimitChanged(limit) => {
@@ -4840,12 +4857,16 @@ impl Shared {
                                 .push(DeferredTerminalCommand::Resize { terminal, geometry });
                         }
                     }
-                    MuxEffect::MuxOptionChanged { option } => {
-                        let value = inner.engine.mux_option_value(*option);
-                        mux_options_changed |=
-                            inner.mux_options.set(*option, value.clone(), mux_source);
-                        if mux_source != MuxOptionSource::Override {
-                            inner.mux_option_underlay.set(*option, value, mux_source);
+                    MuxEffect::MuxOptionChanged { option, session } => {
+                        if let Some(session) = session {
+                            mux_option_refresh_sessions.insert(*session);
+                        } else {
+                            let value = inner.engine.mux_option_value(*option);
+                            mux_options_changed |=
+                                inner.mux_options.set(*option, value.clone(), mux_source);
+                            if mux_source != MuxOptionSource::Override {
+                                inner.mux_option_underlay.set(*option, value, mux_source);
+                            }
                         }
                         #[cfg(feature = "agent")]
                         {
@@ -4978,8 +4999,7 @@ impl Shared {
                     ));
                 }
             }
-            let mux_options_event = mux_options_changed.then(|| inner.mux_options.clone());
-            (execution, mux_options_event)
+            (execution, mux_options_changed)
         };
 
         for (name, commands, context) in immediate_hooks {
@@ -5077,6 +5097,7 @@ impl Shared {
                     let _ =
                         outbound.enqueue_reliable(&ProtocolMessage::Attached { session, snapshot });
                     self.send_resync(client, &outbound);
+                    self.publish_effective_mux_options_to(client);
                 }
                 self.publish_snapshot();
             } else if detach_others {
@@ -5121,8 +5142,10 @@ impl Shared {
         for pane in removed_panes {
             self.publish(EventPayload::PaneRemoved(pane));
         }
-        if let Some(options) = mux_options_event {
-            self.publish(EventPayload::MuxOptionsChanged { options });
+        if mux_options_event {
+            self.publish_effective_mux_options(None);
+        } else if !mux_option_refresh_sessions.is_empty() {
+            self.publish_effective_mux_options(Some(&mux_option_refresh_sessions));
         }
         if snapshot_changed {
             self.publish_snapshot();
@@ -7170,6 +7193,7 @@ impl Shared {
                 snapshot,
             });
             self.send_resync(target_client, &outbound);
+            self.publish_effective_mux_options_to(target_client);
         }
         self.publish_snapshot();
         Ok(Execution::default())
@@ -9068,6 +9092,14 @@ impl Shared {
                 }
                 InputMessage::Confirm { action } => {
                     self.input_confirm(client, context, action);
+                }
+                InputMessage::ClientTerminalSize { columns, rows } => {
+                    if columns > 0 && rows > 0 {
+                        self.inner
+                            .lock()
+                            .client_sizes
+                            .insert(client, (columns, rows));
+                    }
                 }
             }
             Ok(())
@@ -12313,6 +12345,7 @@ impl Shared {
                                     snapshot,
                                 });
                                 self.send_resync(client, &outbound);
+                                self.publish_effective_mux_options_to(client);
                             }
                             continue;
                         }
@@ -12594,6 +12627,57 @@ impl Shared {
         }
     }
 
+    /// Publish the complete option map with the recipient's session-effective
+    /// `mouse` value stamped in, skipping recipients whose published map is
+    /// already equal. `sessions` narrows the recipients to clients attached to
+    /// those sessions; `None` publishes to every subscriber.
+    fn publish_effective_mux_options(&self, sessions: Option<&BTreeSet<SessionId>>) {
+        let recipients = {
+            let mut inner = self.inner.lock();
+            let clients = inner
+                .subscribers
+                .keys()
+                .copied()
+                .filter(|client| {
+                    sessions.is_none_or(|sessions| {
+                        client_attached_session(&inner, *client)
+                            .is_some_and(|session| sessions.contains(&session))
+                    })
+                })
+                .collect::<Vec<_>>();
+            clients
+                .into_iter()
+                .filter_map(|client| {
+                    let options = effective_mux_options(&inner, client);
+                    if inner.published_mux_options.get(&client) == Some(&options) {
+                        return None;
+                    }
+                    inner.published_mux_options.insert(client, options.clone());
+                    Some((client, options))
+                })
+                .collect::<Vec<_>>()
+        };
+        for (client, options) in recipients {
+            self.publish_to_client(client, EventPayload::MuxOptionsChanged { options });
+        }
+    }
+
+    fn publish_effective_mux_options_to(&self, client: ClientId) {
+        let options = {
+            let mut inner = self.inner.lock();
+            if !inner.subscribers.contains_key(&client) {
+                return;
+            }
+            let options = effective_mux_options(&inner, client);
+            if inner.published_mux_options.get(&client) == Some(&options) {
+                return;
+            }
+            inner.published_mux_options.insert(client, options.clone());
+            options
+        };
+        self.publish_to_client(client, EventPayload::MuxOptionsChanged { options });
+    }
+
     fn next_gui_request_id() -> u64 {
         static REQUESTS: AtomicU64 = AtomicU64::new(1);
         REQUESTS.fetch_add(1, Ordering::Relaxed)
@@ -12838,7 +12922,7 @@ impl Shared {
             });
             let visual = inner.engine.visual_bell_for_session(session);
             let duration_ms = inner.engine.display_time_for_session(session);
-            let notifications = inner
+            let mut notifications = inner
                 .attached
                 .get(&session)
                 .into_iter()
@@ -12866,12 +12950,20 @@ impl Shared {
                                 kind: ClientMessageKind::Info,
                                 text,
                                 duration_ms,
+                                message_id: 0,
                             });
                         }
                         (*client, events)
                     })
                 })
                 .collect::<Vec<_>>();
+            for (_, events) in &mut notifications {
+                for event in events {
+                    if let EventPayload::TimedClientMessage { message_id, .. } = event {
+                        *message_id = next_timed_message_id(&mut inner);
+                    }
+                }
+            }
             (snapshot_changed, clear_terminal, hook, notifications)
         };
         if snapshot_changed {
@@ -14297,6 +14389,7 @@ struct ServerState {
     mux_config_overrides: Vec<ConfigOverrideEntry>,
     mux_options: MuxOptions,
     mux_option_underlay: MuxOptions,
+    published_mux_options: BTreeMap<ClientId, MuxOptions>,
     key_tables: Vec<zz_protocol::KeyTableSnapshot>,
     active_color_scheme: TerminalColorScheme,
     client_color_schemes: BTreeMap<ClientId, TerminalColorScheme>,
@@ -14304,6 +14397,8 @@ struct ServerState {
     client_instances: BTreeMap<ClientId, ClientInstanceId>,
     client_kinds: BTreeMap<ClientId, ClientKind>,
     client_terminals: BTreeSet<ClientId>,
+    client_ttys: BTreeMap<ClientId, String>,
+    client_sizes: BTreeMap<ClientId, (u16, u16)>,
     client_origins: BTreeMap<ClientId, PaneId>,
     last_sessions: BTreeMap<ClientId, SessionId>,
     read_only_clients: BTreeSet<ClientId>,
@@ -14340,6 +14435,7 @@ struct ServerState {
     command_history: Vec<String>,
     message_log: VecDeque<ServerMessage>,
     next_message_number: u64,
+    next_timed_message_id: u64,
     paste_buffers: Vec<PasteBuffer>,
     automatic_paste_buffer_limit: AutomaticPasteBufferLimit,
     active_copy_pipes: usize,
@@ -14600,6 +14696,7 @@ fn build_display_panes_state(
                 } else {
                     0
                 },
+                label: String::new(),
             }
         })
         .collect();
@@ -14778,6 +14875,7 @@ impl ChooseBufferSession {
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs(),
+                key: String::new(),
             });
         }
         let previous_index = usize::try_from(self.rendered.selected).unwrap_or(usize::MAX);
@@ -15247,6 +15345,7 @@ impl ChooseTreeSession {
                         attached_session == Some(session.id),
                     ),
                     pane_kind: None,
+                    key: String::new(),
                 },
             ) {
                 break;
@@ -15276,6 +15375,7 @@ impl ChooseTreeSession {
                             session.active_window == window_id,
                         ),
                         pane_kind: None,
+                        key: String::new(),
                     },
                 ) {
                     break 'sessions;
@@ -15315,6 +15415,7 @@ impl ChooseTreeSession {
                             depth: 2,
                             flags: choose_tree_flags(false, false, window.active_pane == pane_id),
                             pane_kind,
+                            key: String::new(),
                         },
                     ) {
                         break 'sessions;
@@ -15784,6 +15885,9 @@ impl CommandPrompt {
             } else {
                 Vec::new()
             },
+            prompt_type: CommandPromptType::Command,
+            mode: CommandPromptMode::Text,
+            no_freeze: false,
         }
     }
 
@@ -16195,6 +16299,7 @@ fn terminal_view_action_enters_copy_mode(action: &zz_terminal::TerminalViewActio
         action,
         zz_terminal::TerminalViewAction::EnterCopyMode
             | zz_terminal::TerminalViewAction::EnterCopyModeScrollExit
+            | zz_terminal::TerminalViewAction::EnterCopyModeWith { .. }
     )
 }
 
@@ -16277,6 +16382,41 @@ fn client_attached_session(inner: &ServerState, client: ClientId) -> Option<Sess
         .attached
         .iter()
         .find_map(|(session, clients)| clients.contains(&client).then_some(*session))
+}
+
+fn client_tty_fact(capabilities: &[String]) -> Option<String> {
+    capabilities.iter().find_map(|capability| {
+        capability
+            .strip_prefix(ClientHello::CLIENT_TTY_CAPABILITY_PREFIX)
+            .filter(|tty| !tty.is_empty())
+            .map(str::to_owned)
+    })
+}
+
+fn client_size_fact(capabilities: &[String]) -> Option<(u16, u16)> {
+    capabilities.iter().find_map(|capability| {
+        let value = capability.strip_prefix(ClientHello::CLIENT_SIZE_CAPABILITY_PREFIX)?;
+        let (columns, rows) = value.split_once('x')?;
+        let columns = columns.parse::<u16>().ok().filter(|columns| *columns > 0)?;
+        let rows = rows.parse::<u16>().ok().filter(|rows| *rows > 0)?;
+        Some((columns, rows))
+    })
+}
+
+fn effective_mux_options(inner: &ServerState, client: ClientId) -> MuxOptions {
+    let mut options = inner.mux_options.clone();
+    let mouse = inner
+        .engine
+        .effective_mouse(client_attached_session(inner, client));
+    let source = options
+        .get(MuxOptionKey::Mouse)
+        .map_or(MuxOptionSource::Default, |value| value.source);
+    options.set(
+        MuxOptionKey::Mouse,
+        if mouse { "on" } else { "off" },
+        source,
+    );
+    options
 }
 
 fn best_client_on_session(inner: &ServerState, session: SessionId) -> Option<ClientId> {
@@ -18044,6 +18184,7 @@ fn terminal_view_action_is_input(action: &zz_terminal::TerminalViewAction) -> bo
         | Action::ClearHistory
         | Action::EnterCopyMode
         | Action::EnterCopyModeScrollExit
+        | Action::EnterCopyModeWith { .. }
         | Action::CopyMode(_)
         | Action::CopySelection { .. }
         | Action::SearchBegin(_)
@@ -19880,8 +20021,17 @@ fn handle_connection<S: TransportStream>(
                 .iter()
                 .any(|capability| capability == ClientHello::CLIENT_TERMINAL_CAPABILITY),
     );
-    if let Some(origin) = hello.origin {
-        shared.inner.lock().client_origins.insert(client, origin);
+    {
+        let mut inner = shared.inner.lock();
+        if let Some(origin) = hello.origin {
+            inner.client_origins.insert(client, origin);
+        }
+        if let Some(tty) = client_tty_fact(&hello.capabilities) {
+            inner.client_ttys.insert(client, tty);
+        }
+        if let Some(size) = client_size_fact(&hello.capabilities) {
+            inner.client_sizes.insert(client, size);
+        }
     }
     let mut registration = ClientRegistrationGuard::new(shared, client);
     log::debug!(
@@ -20024,6 +20174,7 @@ fn handle_connection<S: TransportStream>(
                         let _ = outbound
                             .enqueue_reliable(&ProtocolMessage::Attached { session, snapshot });
                         shared.send_resync(client, &outbound);
+                        shared.publish_effective_mux_options_to(client);
                         shared.publish_snapshot();
                     }
                     Err(error) => {
@@ -24705,6 +24856,7 @@ mod tests {
                             kind: ClientMessageKind::Info,
                             text,
                             duration_ms: 750,
+                            ..
                         },
                         ..
                     }) if text == "hello client"
@@ -24720,6 +24872,310 @@ mod tests {
                         ..
                     })
                 ))
+        );
+    }
+
+    #[test]
+    fn timed_message_ids_increase_monotonically() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+
+        for text in ["first", "second"] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("display-message", [text]),
+                )
+                .expect("display message");
+        }
+
+        let ids = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::TimedClientMessage { message_id, .. },
+                    ..
+                }) => Some(message_id),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ids, [1, 2]);
+    }
+
+    fn two_session_pair(
+        shared: &Arc<Shared>,
+    ) -> (
+        (ClientId, Arc<OutboundMailbox>, SessionId),
+        (ClientId, Arc<OutboundMailbox>, SessionId),
+    ) {
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "a"]),
+            )
+            .expect("session a");
+        let a = context.session.expect("session a id");
+        shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "b"]),
+            )
+            .expect("session b");
+        let b = context.session.expect("session b id");
+        let alpha_mailbox = OutboundMailbox::new();
+        let beta_mailbox = OutboundMailbox::new();
+        let (alpha, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("alpha".to_owned()),
+            None,
+            Arc::clone(&alpha_mailbox),
+        );
+        let (beta, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("beta".to_owned()),
+            None,
+            Arc::clone(&beta_mailbox),
+        );
+        shared.attach(alpha, a).expect("attach alpha");
+        shared.attach(beta, b).expect("attach beta");
+        take_reliable_messages(&alpha_mailbox);
+        take_reliable_messages(&beta_mailbox);
+        ((alpha, alpha_mailbox, a), (beta, beta_mailbox, b))
+    }
+
+    #[test]
+    fn mouse_publication_is_per_recipient_for_session_effective_values() {
+        let shared = Arc::new(Shared::new(1));
+        let ((_alpha, alpha_mailbox, _a), (_beta, beta_mailbox, _b)) = two_session_pair(&shared);
+
+        let mouse_values = |mailbox: &OutboundMailbox| {
+            take_reliable_messages(mailbox)
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::MuxOptionsChanged { options },
+                        ..
+                    }) => options
+                        .get(MuxOptionKey::Mouse)
+                        .map(|value| value.value.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        shared
+            .execute(
+                ClientId(91),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-t", "a:", "mouse", "off"]),
+            )
+            .expect("session mouse write");
+        assert_eq!(mouse_values(&alpha_mailbox), ["off"]);
+        assert!(mouse_values(&beta_mailbox).is_empty());
+
+        shared
+            .execute(
+                ClientId(91),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-g", "mouse", "off"]),
+            )
+            .expect("global mouse write");
+        assert_eq!(mouse_values(&alpha_mailbox), ["off"]);
+        assert_eq!(mouse_values(&beta_mailbox), ["off"]);
+
+        shared
+            .execute(
+                ClientId(91),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-g", "mouse", "on"]),
+            )
+            .expect("global mouse restore");
+        assert!(mouse_values(&alpha_mailbox).is_empty());
+        assert_eq!(mouse_values(&beta_mailbox), ["on"]);
+    }
+
+    #[test]
+    fn attach_and_switch_publish_the_effective_map_only_when_it_changes() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        for name in ["a", "b"] {
+            shared
+                .execute(
+                    ClientId(90),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("new-session", ["-d", "-s", name]),
+                )
+                .expect("session");
+        }
+        shared
+            .execute(
+                ClientId(91),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-t", "a:", "mouse", "off"]),
+            )
+            .expect("session mouse write");
+
+        let mailbox = OutboundMailbox::new();
+        let (alpha, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("alpha".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        take_reliable_messages(&mailbox);
+
+        let mouse_values = |mailbox: &OutboundMailbox| {
+            take_reliable_messages(mailbox)
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::MuxOptionsChanged { options },
+                        ..
+                    }) => options
+                        .get(MuxOptionKey::Mouse)
+                        .map(|value| value.value.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let mut attach_context = ExecutionContext::default();
+        shared
+            .execute(
+                alpha,
+                ClientKind::Interactive,
+                &mut attach_context,
+                &CommandInvocation::new("attach-session", ["-t", "a"]),
+            )
+            .expect("attach to a");
+        assert_eq!(mouse_values(&mailbox), ["off"]);
+
+        shared
+            .execute(
+                alpha,
+                ClientKind::Interactive,
+                &mut attach_context,
+                &CommandInvocation::new("switch-client", ["-t", "b"]),
+            )
+            .expect("switch to b");
+        assert_eq!(mouse_values(&mailbox), ["on"]);
+
+        shared
+            .execute(
+                ClientId(91),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-t", "b:", "mouse", "on"]),
+            )
+            .expect("session write equal to the published value");
+        assert!(mouse_values(&mailbox).is_empty());
+
+        shared
+            .execute(
+                alpha,
+                ClientKind::Interactive,
+                &mut attach_context,
+                &CommandInvocation::new("switch-client", ["-t", "a"]),
+            )
+            .expect("switch back to a");
+        assert_eq!(mouse_values(&mailbox), ["off"]);
+    }
+
+    #[test]
+    fn status_position_publishes_per_recipient_for_session_scoped_writes() {
+        let shared = Arc::new(Shared::new(1));
+        let ((_alpha, alpha_mailbox, _a), (_beta, beta_mailbox, _b)) = two_session_pair(&shared);
+        for option in ["status-left", "status-right"] {
+            shared
+                .execute(
+                    ClientId(91),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("set-option", ["-g", option, ""]),
+                )
+                .expect("fixed status half");
+        }
+        shared.refresh_status(false);
+        take_reliable_messages(&alpha_mailbox);
+        take_reliable_messages(&beta_mailbox);
+
+        shared
+            .execute(
+                ClientId(91),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-t", "a:", "status-position", "top"]),
+            )
+            .expect("session status position");
+
+        let positions = |mailbox: &OutboundMailbox| {
+            take_reliable_messages(mailbox)
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::StatusChanged { status },
+                        ..
+                    }) => Some(status.position),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            positions(&alpha_mailbox),
+            [zz_protocol::StatusPosition::Top]
+        );
+        assert!(positions(&beta_mailbox).is_empty());
+    }
+
+    #[test]
+    fn client_terminal_facts_are_parsed_and_stored() {
+        assert_eq!(
+            client_tty_fact(&["client-tty-v1:/dev/pts/3".to_owned()]),
+            Some("/dev/pts/3".to_owned())
+        );
+        assert_eq!(client_tty_fact(&["client-tty-v1:".to_owned()]), None);
+        assert_eq!(client_tty_fact(&["client-terminal-v1".to_owned()]), None);
+        assert_eq!(
+            client_size_fact(&["client-size-v1:120x40".to_owned()]),
+            Some((120, 40))
+        );
+        assert_eq!(client_size_fact(&["client-size-v1:0x40".to_owned()]), None);
+        assert_eq!(client_size_fact(&["client-size-v1:120".to_owned()]), None);
+        assert_eq!(client_size_fact(&["client-terminal-v1".to_owned()]), None);
+
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ClientTerminalSize {
+                    columns: 132,
+                    rows: 50,
+                },
+            )
+            .expect("client size input");
+        assert_eq!(
+            shared.inner.lock().client_sizes.get(&client),
+            Some(&(132, 50))
         );
     }
 
@@ -26645,6 +27101,7 @@ mod tests {
                     request_id: 71,
                     ref output,
                     exit_code: 4,
+                    ..
                 } if output == "'exit 4' returned 4"
             ),
             "{response:?}"
@@ -36798,6 +37255,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 request_id: 1,
                 output: "FIRED-SW".to_owned(),
                 exit_code: 0,
+                stderr: String::new(),
             }
         );
 
@@ -36851,6 +37309,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 request_id: 3,
                 output: "OWN-buffer0\nIDX-A\nIDX-B".to_owned(),
                 exit_code: 0,
+                stderr: String::new(),
             }
         );
 
@@ -36880,6 +37339,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 request_id: 4,
                 output: "SETOPT-FIRED".to_owned(),
                 exit_code: 0,
+                stderr: String::new(),
             }
         );
 
@@ -36907,6 +37367,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 request_id: 5,
                 output: "R-FIRED".to_owned(),
                 exit_code: 0,
+                stderr: String::new(),
             }
         );
     }
@@ -37710,6 +38171,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 request_id: 1,
                 output: "NW-FIRST=hooked\nNW-SECOND=hooked".to_owned(),
                 exit_code: 0,
+                stderr: String::new(),
             }
         );
 
@@ -37729,6 +38191,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 request_id: 2,
                 output: String::new(),
                 exit_code: 0,
+                stderr: String::new(),
             }
         );
 
@@ -37926,6 +38389,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 request_id: 44,
                 output: "before\n'printf before; exit 3' returned 3".to_owned(),
                 exit_code: 3,
+                stderr: String::new(),
             }
         );
     }
@@ -39748,6 +40212,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             kind: ClientMessageKind::Info,
                             text,
                             duration_ms,
+                            ..
                         },
                     ..
                 }) => Some((*pane, text.clone(), *duration_ms)),

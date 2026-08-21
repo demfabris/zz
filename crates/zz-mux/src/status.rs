@@ -5,6 +5,7 @@ use crate::{parse_style, parse_tmux_colour};
 pub use crate::formats::{
     FormatUniverse, StatusContext, StatusHooks, expand_format_values, expand_status,
 };
+pub use zz_protocol::StatusPosition;
 
 pub const DEFAULT_STATUS_LEFT: &str = crate::tmux_options::STATUS_LEFT_DEFAULT;
 pub const DEFAULT_STATUS_RIGHT: &str = crate::tmux_options::STATUS_RIGHT_DEFAULT;
@@ -30,22 +31,6 @@ impl StatusJustify {
             Self::Centre => "centre",
             Self::Right => "right",
             Self::AbsoluteCentre => "absolute-centre",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum StatusPosition {
-    Top,
-    #[default]
-    Bottom,
-}
-
-impl StatusPosition {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Top => "top",
-            Self::Bottom => "bottom",
         }
     }
 }

@@ -101,7 +101,9 @@ fn mode_indicator(mode: TerminalMode, unseen_output: u32) -> Option<ModeIndicato
             detail: format!("+{unseen_output} output"),
         }),
         TerminalMode::Live => None,
-        TerminalMode::Copy { position, total } => Some(ModeIndicator {
+        TerminalMode::Copy {
+            position, total, ..
+        } => Some(ModeIndicator {
             label: Some("COPY MODE"),
             detail: if unseen_output == 0 {
                 format!("{position}/{total}")
@@ -2802,6 +2804,7 @@ mod tests {
                 TerminalMode::Copy {
                     position: 42,
                     total: 900,
+                    hide_position: false,
                 },
                 0,
             ),
@@ -2832,6 +2835,7 @@ mod tests {
                 TerminalMode::Copy {
                     position: 4,
                     total: 20,
+                    hide_position: false,
                 },
                 3,
             ),
@@ -2856,6 +2860,7 @@ mod tests {
         viewport.mode = TerminalMode::Copy {
             position: 1,
             total: 100,
+            hide_position: false,
         };
         assert!(!local_scroll_gate(&viewport, 1));
         viewport.mode = TerminalMode::View {

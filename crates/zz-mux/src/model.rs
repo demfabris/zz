@@ -3245,6 +3245,8 @@ impl MuxState {
                             bell: pane.bell,
                             dead: pane.dead,
                             dead_status: pane.dead_status,
+                            border_colour: None,
+                            active_border_colour: None,
                         },
                     )
                 })

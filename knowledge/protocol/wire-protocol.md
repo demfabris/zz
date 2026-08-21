@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v70)
+title: zz wire protocol (v71)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-08-20T17:00:00-03:00
+timestamp: 2026-08-21T12:00:00-03:00
 ---
 
 # Overview
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 70`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 71`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (70) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (71) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -76,7 +76,7 @@ fields in declaration order.
 | `ClientHello(ClientHello)` | `protocol_version: u16`, `client_instance_id: ClientInstanceId`, `kind: ClientKind`, `device_name: Option<String>` (≤256 B), `capabilities: Vec<String>`, `color_scheme: Option<TerminalColorScheme>`, `origin: Option<PaneId>` | Client → daemon handshake. The process-stable instance ID owns recoverable Agent drafts across reconnects; `device_name` labels this device in presence and eviction notices; `$ZZ_PANE` supplies `origin`, so an untargeted CLI command resolves against its invoking pane |
 | `ServerHello(ServerHello)` | `protocol_version: u16`, `server_id: u64`, `client_id: ClientId`, `client_instance_id: ClientInstanceId`, `capabilities: Vec<String>` (≤64 entries, ≤256 B each), `appearance: TerminalAppearance`, `appearance_provenance: AppearanceProvenance`, `mux_options: MuxOptions`, `status: StatusLine`, `key_tables: Vec<KeyTableSnapshot>` | Daemon → client handshake reply; echoes the accepted process identity, while every key table (root, prefix, copy-mode, copy-mode-vi, custom) lets clients label key hints and render binding help and capabilities describe optional behavior |
 | `CommandRequest(CommandRequest)` | `request_id: u64`, `command: CommandInvocation` | tmux-style command from any client |
-| `CommandResponse(CommandResponse)` | `Success { request_id, output, exit_code }` / `Error { request_id, error: ServerError, output }` | Command result. A client prints either output field before it reports an error or returns the exit code |
+| `CommandResponse(CommandResponse)` | `Success { request_id, output, exit_code, stderr }` / `Error { request_id, error: ServerError, output }` | Command result. A client prints either output field before it reports an error or returns the exit code. `stderr` (appended at v71) stays empty until Wave E streams diagnostics separately |
 | `Attach { session: String }` | target string | Interactive attach request. An empty target lazily creates the next numeric session when the daemon has none; explicit missing targets and Command-kind attaches do not create. A session holds a set of attached clients, so a second device never collides with the first |
 | `Attached { session: SessionId, snapshot: MuxSnapshot }` | resolved id + full state | Attach acknowledgement |
 | `Detach` | . | Interactive detach; drops the sending client's attachment and leaves every other viewer attached. The connection stays open, and the client remains a subscriber that can send another `Attach` |
@@ -204,7 +204,9 @@ becomes `%output`; `PaneOutputState { pane, paused }` and `PaneOutputAged { pane
 (v67) carry flow-control pause/resume and age-stamped output for `%extended-output`;
 `ControlFlags { wait_exit, pause_after_ms, no_output }` (v67) echoes the client's
 `refresh-client -f` flags; and `SubscriptionChanged { name, session, window, window_index, pane, value }`
-(v68) reports a `refresh-client -B` format subscription's value change.
+(v68) reports a `refresh-client -B` format subscription's value change. v71 appends
+`TimedClientMessageCleared { message_id }` at tag 46 — the daemon's explicit early clear for one
+timed message; nothing emits it until Wave D3.
 
 The three payloads `TerminalViewport`, `TerminalPatch`, and `CommandOutput { viewport: Some(..) }` are
 diverted to the [Terminal lane](/protocol/terminal-lanes.md) by `encode_protocol_message`; all other
@@ -338,29 +340,57 @@ rather than 256 entries. Both `ServerHello.appearance_provenance` and `Appearanc
 carry the map, so the settings UI can explain the current value without inferring it from colors.
 Missing keys are rejected during control-message validation.
 
-`MuxOptions` is a `BTreeMap<MuxOptionKey, MuxOptionValue>` over the 14 keys of `MuxOptionKey::ALL`, in
+`MuxOptions` is a `BTreeMap<MuxOptionKey, MuxOptionValue>` over the 17 keys of `MuxOptionKey::ALL`, in
 declaration order: `prefix`, `mode-keys`, `history-limit`, `word-separators`, `copy-command`,
 `set-clipboard`, `buffer-limit`, `synchronize-panes`, `experimental-agent-pane`,
 `experimental-editor-pane`, `history-trickle` (default `2000`), `agent-command`,
-`agent-claude-code-command`, and `agent-auto-approve`. `postcard` encodes the key as its variant
+`agent-claude-code-command`, `agent-auto-approve`, and the v71 tail `mouse` (default `on`),
+`escape-time` (default `10`), and `prefix2` (default `None`). `postcard` encodes the key as its variant
 index, so a new key is appended. Every entry contains an effective display string plus `MuxOptionSource`:
 `Default`, `TmuxConfig`, `Override`, or `RuntimeCommand`. `ServerHello.mux_options` supplies initial
 state and `MuxOptionsChanged` replaces it whenever a successful writer changes a value or source.
-Validation requires exactly those 14 keys and bounds every string to 64 KiB on encode and during
+Since v71 the replacement map is **per recipient** for session-effective values: `mouse` carries the
+receiving client's attached session's effective value, so the daemon publishes the effective map after
+attach and client switch, recomputes every attached client on a global mouse write, and refreshes only
+the clients attached to a target session on a session-scoped write. Each client's map is
+equality-deduplicated like the status line: a recomputation whose result matches what that client
+already holds sends nothing. `escape-time` and `prefix2` publish the global values; no client
+consumes the three new keys yet, and `from_config_key` deliberately omits them, so `zz/config` cannot
+write them until their consuming waves land.
+Validation requires exactly those 17 keys and bounds every string to 64 KiB on encode and during
 deserialization.
 
-`StatusLine { left, right }` is the daemon-rendered [tmux status line](/tmux/status-line.md): finished
+`StatusLine` is the daemon-rendered [tmux status line](/tmux/status-line.md): finished
 text, never formats, because `#()` commands run once per `status-interval` on the daemon's host. It is
 **per client** (a format names the receiving client's own view), so it rides `ServerHello` on connect
-and `publish_to_client` afterwards, and only when the text changed. Both halves are bounded
-to `MAX_STATUS_TEXT_BYTES` (4 KiB) on encode and during deserialization, which keeps an
-unbounded `#()` script off the wire.
+and `publish_to_client` afterwards, and only when the text changed. v70 carried `{ left, right }`;
+v71 appends `title`, `base_style`, `rows: Vec<String>`, `position: StatusPosition` (`Top`/`Bottom`,
+default `Bottom` on wire tag 1), `message_line: u8`, and `customized: bool`. `rows` will become the
+authoritative personalized status block in Wave B1; until then the daemon publishes inert defaults
+(empty rows, empty title and base style, the effective position, message line `0`, `customized`
+false) and `is_empty()` keeps its left/right meaning. Every string field and each row is bounded to
+`MAX_STATUS_TEXT_BYTES` (4 KiB) on encode and during deserialization, rows are capped at
+`MAX_STATUS_ROWS` (5) with a sixth rejected before allocation, `base_style` must parse as a style,
+and `message_line` must be `0` with no rows or under `rows.len()` otherwise; `StatusChanged` payloads
+now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 70`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 71`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v71 is the tmux-campaign append bundle: `MuxOptionKey::{Mouse, EscapeTime, Prefix2}` (tags 14-16)
+  with per-recipient session-effective `mouse` publication; the personalized `StatusLine` tail
+  (`title`, `base_style`, bounded `rows`, `position`, `message_line`, `customized`);
+  `PaneIndicator.label` (≤1 KiB, `Copy` dropped); `PaneSnapshot.{border_colour,
+  active_border_colour}: Option<TmuxColour>` with validated colour serialization (`Rgb` over
+  `0xFFFFFF` rejected on decode); `CommandPromptState.{prompt_type, mode, no_freeze}`;
+  `TerminalMode::Copy.hide_position` (one canonical bool byte on the terminal lane; `View` stays
+  17 bytes) and `TerminalViewAction::EnterCopyModeWith` (tag 27); `key` on `ChooseTreeItem` and
+  `ChooseBufferItem` (≤64 B); `CommandResponse::Success.stderr`;
+  `TimedClientMessage.message_id` plus `EventPayload::TimedClientMessageCleared` (tag 46); and
+  `InputMessage::ClientTerminalSize` (tag 17) beside the new `client-tty-v1:`/`client-size-v1:`
+  hello value tokens. Everything ships with inert daemon defaults; consumption lands in Waves B-E.
 - v70 appends `reason: DetachReason` to `EventPayload::Detached`. The TUI distinguishes requested
   or evicted detaches, destroyed sessions, and server shutdown without adding a second retarget
   message; live client switches still converge through `ProtocolMessage::Attached`.
@@ -420,7 +450,7 @@ unbounded `#()` script off the wire.
   `MAX_FRAME_BYTES` before the payload buffer grows.
   `SetConfigOverrides` is additionally validated at no more than 1,024 single-line pairs, with
   nonempty keys of at most 128 bytes and values of at most 64 KiB. Each mux-option payload must be a
-  complete 14-key map with values of at most 64 KiB; bounded value deserialization rejects an
+  complete 17-key map with values of at most 64 KiB; bounded value deserialization rejects an
   oversized string before it can become protocol state.
 - The GUI-request path is bounded twice, on encode and on decode: `AgentCommand` text to
   `MAX_AGENT_SEND_BYTES` (1 MiB), the screenshot path and every `GuiResponse` string to
@@ -445,20 +475,20 @@ unbounded `#()` script off the wire.
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 70, client_instance_id: ClientInstanceId(1), kind: Interactive,
+`ClientHello { protocol_version: 71, client_instance_id: ClientInstanceId(0), kind: Interactive,
 device_name: None, capabilities: [], color_scheme: Some(Dark), origin: None }` is 17 bytes on the
 wire: an 8-byte envelope over a 9-byte postcard payload.
 
 ```text
 byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15 16
-      0d 00 00 00  00     00      46 00         00 46 01 00 00 00 01 01 00
+      0d 00 00 00  00     00      47 00         00 47 00 00 00 00 01 01 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 13  Control        (= 70)
+      length = 13  Control        (= 71)
 ```
 
 - **length `13`** = `ENVELOPE_BYTES` (4) + payload (9); it counts the four envelope bytes, not itself.
-- **payload** `00 46 01 00 00 00 01 01 00`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x46` (= 70), `client_instance_id` as varint `01`, `kind`
+- **payload** `00 47 00 00 00 00 01 01 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x47` (= 71), `client_instance_id` as varint `00`, `kind`
   variant `0` (`Interactive`), `device_name` as the `Option::None` tag `00`, `capabilities` as the
   sequence length `00`, `Option::Some` tag `01`, `TerminalColorScheme` variant `1` (`Dark`), then
   `origin` as `Option::None` (`00`). Postcard
@@ -485,14 +515,14 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 `UnsupportedLane(u8)`, `UnsupportedFlags(u8)`,
 `VersionMismatch { expected, received }`, `Encode/Decode(postcard::Error)`, `InvalidTerminal`,
 `InvalidAppearance`, `InvalidServerHello`, `InvalidClientHello`, `InvalidConfigOverrides`,
-`InvalidGuiRequest`, `InvalidPasteUpload`, `InvalidAgentPayload`, `Io`.
+`InvalidStatusLine`, `InvalidGuiRequest`, `InvalidPasteUpload`, `InvalidAgentPayload`, `Io`.
 
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 70, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
+client → ClientHello { protocol_version: 71, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
                        capabilities: [], color_scheme: Some(Dark), origin: None }
-server → ServerHello { protocol_version: 70, server_id, client_id: c11, client_instance_id: i1,
+server → ServerHello { protocol_version: 71, server_id, client_id: c11, client_instance_id: i1,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],

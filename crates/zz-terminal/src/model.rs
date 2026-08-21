@@ -549,6 +549,7 @@ pub enum TerminalMode {
     Copy {
         position: u32,
         total: u32,
+        hide_position: bool,
     },
     View {
         position: u32,
@@ -1349,7 +1350,9 @@ impl TerminalViewport {
             || patch.scrollbar.offset.saturating_add(patch.scrollbar.len) > patch.scrollbar.total
             || matches!(
                 patch.mode,
-                TerminalMode::Copy { position, total } | TerminalMode::View { position, total }
+                TerminalMode::Copy {
+                    position, total, ..
+                } | TerminalMode::View { position, total }
                     if total == 0 || position == 0 || position > total
             )
             || patch
@@ -1535,7 +1538,7 @@ mod tests {
         assert_eq!(size_of::<Cursor>(), 8);
         assert_eq!(size_of::<Option<Cursor>>(), 8);
         assert_eq!(size_of::<ScrollbarState>(), 12);
-        assert_eq!(size_of::<TerminalMode>(), 12);
+        assert_eq!(size_of::<TerminalMode>(), 16);
         assert_eq!(align_of::<PackedCell>(), align_of::<u32>());
         assert_eq!(align_of::<PackedStyle>(), align_of::<u32>());
         assert_eq!(align_of::<OverlaySpan>(), align_of::<u16>());
@@ -1551,7 +1554,7 @@ mod tests {
             assert_eq!(size_of::<TerminalPatchRowData>(), 40);
             assert_eq!(size_of::<TerminalDictionaryPatch>(), 8);
             assert_eq!(size_of::<TerminalDictionaryPatchData>(), 48);
-            assert_eq!(size_of::<TerminalViewportPatch>(), 176);
+            assert_eq!(size_of::<TerminalViewportPatch>(), 184);
         }
     }
 

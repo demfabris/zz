@@ -458,6 +458,8 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     use zz_daemon::DaemonError;
     #[cfg(not(target_os = "macos"))]
+    use zz_protocol::{CommandPromptMode, CommandPromptType};
+    #[cfg(not(target_os = "macos"))]
     use zz_ui::Root;
 
     use super::*;
@@ -476,6 +478,9 @@ mod tests {
             cursor: 0,
             kind: CommandPromptKind::Command,
             history: vec!["list-panes".to_owned()],
+            prompt_type: CommandPromptType::Command,
+            mode: CommandPromptMode::Text,
+            no_freeze: false,
         };
         let stale = initial.clone();
         let (_, cx) = cx.add_window_view(move |window, cx| {
@@ -531,6 +536,9 @@ mod tests {
             cursor: 5,
             kind: CommandPromptKind::Value,
             history: Vec::new(),
+            prompt_type: CommandPromptType::Command,
+            mode: CommandPromptMode::Text,
+            no_freeze: false,
         };
         cx.update(|window, cx| {
             palette.update(cx, |palette, cx| {
@@ -556,6 +564,9 @@ mod tests {
             cursor: 5,
             kind: CommandPromptKind::Command,
             history: Vec::new(),
+            prompt_type: CommandPromptType::Command,
+            mode: CommandPromptMode::Text,
+            no_freeze: false,
         };
         let (_, cx) = cx.add_window_view(move |window, cx| {
             let mux = cx.new(|cx| {

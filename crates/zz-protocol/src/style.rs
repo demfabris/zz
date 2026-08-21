@@ -1,13 +1,30 @@
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use zz_terminal::parse_x11_color;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub const MAX_RGB_COLOUR: u32 = 0x00ff_ffff;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TmuxColour {
     Basic(u8),
     Indexed(u8),
-    Rgb(u32),
+    Rgb(#[serde(deserialize_with = "deserialize_rgb_colour")] u32),
     Default,
     Terminal,
     Theme(u8),
+}
+
+fn deserialize_rgb_colour<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let colour = u32::deserialize(deserializer)?;
+    if colour > MAX_RGB_COLOUR {
+        return Err(D::Error::invalid_value(
+            serde::de::Unexpected::Unsigned(u64::from(colour)),
+            &"a packed 24-bit RGB colour",
+        ));
+    }
+    Ok(colour)
 }
 
 pub fn parse_tmux_colour(value: &str) -> Option<TmuxColour> {
@@ -729,6 +746,27 @@ mod tests {
         let segments = parse_styled_segments("#[align=right]right#[noalign]default");
         assert_eq!(segments[0].style.align, Some(TmuxAlign::Right));
         assert_eq!(segments[1].style.align, None);
+    }
+
+    #[test]
+    fn tmux_colour_wire_rejects_rgb_above_24_bits() {
+        for colour in [
+            TmuxColour::Basic(15),
+            TmuxColour::Indexed(255),
+            TmuxColour::Rgb(MAX_RGB_COLOUR),
+            TmuxColour::Default,
+            TmuxColour::Terminal,
+            TmuxColour::Theme(9),
+        ] {
+            let bytes = postcard::to_stdvec(&colour).expect("colour encodes");
+            assert_eq!(
+                postcard::from_bytes::<TmuxColour>(&bytes).expect("colour decodes"),
+                colour
+            );
+        }
+        let oversized =
+            postcard::to_stdvec(&TmuxColour::Rgb(MAX_RGB_COLOUR + 1)).expect("oversized encodes");
+        assert!(postcard::from_bytes::<TmuxColour>(&oversized).is_err());
     }
 
     #[test]

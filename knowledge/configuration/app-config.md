@@ -364,7 +364,11 @@ accepts their spellings, which is what makes a Ghostty file importable, but they
 
 The fourteen mux keys are also transported raw and in file order. The daemon turns each entry into a
 global `set-option`, so repeated keys retain normal last-writer behavior and invalid entries produce
-a daemon diagnostic without blocking later entries.
+a daemon diagnostic without blocking later entries. The wire's `MuxOptions` map carries three more
+keys since v71 — `mouse`, `escape-time`, and `prefix2` — but those are publication-only:
+`MuxOptionKey::from_config_key` deliberately does not map them, so a `zz/config` line naming one is
+ignored with a diagnostic exactly as before the bump. The consuming waves open that config surface
+when they take ownership of the behavior.
 
 | Key | Built-in default | Accepted value / effect |
 | --- | --- | --- |

@@ -323,6 +323,15 @@ fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolErr
             .map_err(|error| ProtocolError::InvalidConfigOverrides(error.to_owned()))?;
     }
     if let ProtocolMessage::Event(Event {
+        payload: EventPayload::StatusChanged { status },
+        ..
+    }) = message
+    {
+        status
+            .validate()
+            .map_err(|error| ProtocolError::InvalidStatusLine(error.to_owned()))?;
+    }
+    if let ProtocolMessage::Event(Event {
         payload: EventPayload::AgentCommand { command, .. },
         ..
     }) = message
@@ -1416,7 +1425,10 @@ fn validate_view_metadata(
     {
         return invalid("scrollbar range is inconsistent");
     }
-    if let TerminalMode::Copy { position, total } | TerminalMode::View { position, total } = mode
+    if let TerminalMode::Copy {
+        position, total, ..
+    }
+    | TerminalMode::View { position, total } = mode
         && (total == 0 || position == 0 || position > total)
     {
         return invalid("copy-mode position is inconsistent");
@@ -1484,7 +1496,8 @@ fn patch_payload_capacity(
 const fn encoded_mode_len(mode: TerminalMode) -> usize {
     match mode {
         TerminalMode::Live => 1,
-        TerminalMode::Copy { .. } | TerminalMode::View { .. } => 17,
+        TerminalMode::Copy { .. } => 18,
+        TerminalMode::View { .. } => 17,
     }
 }
 
@@ -1694,10 +1707,15 @@ fn wire_u32_at(bytes: &[u8], offset: usize) -> u32 {
 fn encode_mode(output: &mut Vec<u8>, mode: TerminalMode) {
     match mode {
         TerminalMode::Live => output.push(0),
-        TerminalMode::Copy { position, total } => {
+        TerminalMode::Copy {
+            position,
+            total,
+            hide_position,
+        } => {
             output.push(1);
             push_u64(output, u64::from(position));
             push_u64(output, u64::from(total));
+            output.push(u8::from(hide_position));
         }
         TerminalMode::View { position, total } => {
             output.push(2);
@@ -1713,6 +1731,7 @@ fn decode_mode(reader: &mut WireReader<'_>) -> Result<TerminalMode, ProtocolErro
         1 => Ok(TerminalMode::Copy {
             position: compact_u32(reader, "copy-mode position")?,
             total: compact_u32(reader, "copy-mode total")?,
+            hide_position: decode_bool(reader.u8()?)?,
         }),
         2 => Ok(TerminalMode::View {
             position: compact_u32(reader, "view-mode position")?,
@@ -2174,6 +2193,7 @@ mod tests {
         let status = crate::StatusLine {
             left: "[work] 1:frontend".to_owned(),
             right: "batt 82% · 09:41".to_owned(),
+            ..crate::StatusLine::default()
         };
         let changed = ProtocolMessage::Event(Event {
             sequence: 97,
@@ -2195,7 +2215,7 @@ mod tests {
             mux_options: MuxOptions::default(),
             status: crate::StatusLine {
                 left: "x".repeat(crate::MAX_STATUS_TEXT_BYTES + 1),
-                right: String::new(),
+                ..crate::StatusLine::default()
             },
             key_tables: Vec::new(),
         };
@@ -2773,10 +2793,47 @@ mod tests {
             TerminalMode::Copy {
                 position: u32::MAX,
                 total: u32::MAX,
+                hide_position: false,
             },
         );
-        assert_eq!(encoded_mode.len(), 17);
+        assert_eq!(encoded_mode.len(), 18);
         assert_eq!(&encoded_mode[1..9], &u64::from(u32::MAX).to_le_bytes());
+        assert_eq!(encoded_mode.last(), Some(&0));
+
+        let mut encoded_view_mode = Vec::new();
+        encode_mode(
+            &mut encoded_view_mode,
+            TerminalMode::View {
+                position: u32::MAX,
+                total: u32::MAX,
+            },
+        );
+        assert_eq!(encoded_view_mode.len(), 17);
+
+        let mut hidden = Vec::new();
+        encode_mode(
+            &mut hidden,
+            TerminalMode::Copy {
+                position: 1,
+                total: 2,
+                hide_position: true,
+            },
+        );
+        assert_eq!(hidden.len(), 18);
+        assert_eq!(hidden.last(), Some(&1));
+        let mut reader = WireReader::new(&hidden);
+        assert_eq!(
+            decode_mode(&mut reader).expect("copy mode decodes"),
+            TerminalMode::Copy {
+                position: 1,
+                total: 2,
+                hide_position: true,
+            }
+        );
+        let last = hidden.len() - 1;
+        hidden[last] = 2;
+        let mut reader = WireReader::new(&hidden);
+        assert!(decode_mode(&mut reader).is_err());
 
         let viewport = TerminalViewport::blank(2, 1, SessionStatus::Running);
         let mut frame = Vec::new();
@@ -3060,6 +3117,7 @@ mod tests {
         viewport.mode = TerminalMode::Copy {
             position: u32::MAX,
             total: u32::MAX,
+            hide_position: true,
         };
         viewport.unseen_output = u32::MAX;
         viewport.set_working_directory(Some(Arc::from("file://localhost/tmp/terminal-fixture")));
@@ -3243,7 +3301,7 @@ mod tests {
     #[test]
     fn agent_runtime_commands_round_trip_on_the_control_lane() {
         let pane = PaneId(12);
-        for message in [
+        let messages = vec![
             ProtocolMessage::AgentPrompt {
                 pane,
                 text: "port the runtime".to_owned(),
@@ -3310,8 +3368,9 @@ mod tests {
                 pane,
                 reclaim_id: 3,
             },
-        ] {
-            assert_control_round_trip(&message);
+        ];
+        for message in &messages {
+            assert_control_round_trip(message);
         }
     }
 
@@ -4002,6 +4061,9 @@ mod tests {
                     cursor: 10,
                     kind: crate::CommandPromptKind::Command,
                     history: vec!["list-sessions".to_owned(), "list-panes".to_owned()],
+                    prompt_type: crate::CommandPromptType::Command,
+                    mode: crate::CommandPromptMode::Text,
+                    no_freeze: false,
                 }),
             },
         });
@@ -4076,6 +4138,7 @@ mod tests {
                         depth: 0,
                         flags: crate::ChooseTreeItem::ACTIVE,
                         pane_kind: None,
+                        key: "0".to_owned(),
                     }],
                     search: None,
                     selected: 0,
@@ -4116,6 +4179,7 @@ mod tests {
                         preview: "hello".to_owned(),
                         size_bytes: 5,
                         created_unix_seconds: 42,
+                        key: String::new(),
                     }],
                     search: None,
                     selected: 0,
@@ -4157,6 +4221,7 @@ mod tests {
                         index: 0,
                         select_key: b'0',
                         flags: crate::PaneIndicator::ACTIVE,
+                        label: String::new(),
                     }],
                 }),
             },

@@ -2366,6 +2366,8 @@ mod tests {
             bell: false,
             dead: false,
             dead_status: None,
+            border_colour: None,
+            active_border_colour: None,
         }
     }
 
@@ -2381,6 +2383,8 @@ mod tests {
             bell: false,
             dead: false,
             dead_status: None,
+            border_colour: None,
+            active_border_colour: None,
         }
     }
 
@@ -2593,6 +2597,7 @@ mod tests {
         let status = StatusLine {
             left: "  #[fg=red,bold]left  ".to_owned(),
             right: "#[bg=blue]right  ".to_owned(),
+            ..StatusLine::default()
         };
         let cx = cx.add_empty_window();
 
@@ -3483,6 +3488,8 @@ mod tests {
             bell: false,
             dead: false,
             dead_status: None,
+            border_colour: None,
+            active_border_colour: None,
         };
 
         let projected = MuxTreePane::from_snapshot(&pane);
@@ -3500,6 +3507,8 @@ mod tests {
             bell: false,
             dead: false,
             dead_status: None,
+            border_colour: None,
+            active_border_colour: None,
         };
 
         let projected = MuxTreePane::from_snapshot(&pane);

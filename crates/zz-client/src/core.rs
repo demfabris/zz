@@ -598,6 +598,7 @@ impl ClientCore {
                 kind,
                 text,
                 duration_ms,
+                ..
             } => {
                 self.events.push_back(CoreEvent::ClientMessage {
                     pane,
@@ -730,7 +731,8 @@ impl ClientCore {
             | EventPayload::PaneOutputState { .. }
             | EventPayload::PaneOutputAged { .. }
             | EventPayload::ControlFlags { .. }
-            | EventPayload::SubscriptionChanged { .. } => {}
+            | EventPayload::SubscriptionChanged { .. }
+            | EventPayload::TimedClientMessageCleared { .. } => {}
         }
     }
 
@@ -870,6 +872,8 @@ mod tests {
                         bell: false,
                         dead: false,
                         dead_status: None,
+                        border_colour: None,
+                        active_border_colour: None,
                     },
                 )
             })

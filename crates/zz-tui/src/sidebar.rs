@@ -436,6 +436,8 @@ mod tests {
             bell,
             dead: false,
             dead_status: None,
+            border_colour: None,
+            active_border_colour: None,
         }
     }
 

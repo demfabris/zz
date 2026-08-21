@@ -9,7 +9,7 @@ use std::{
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use thiserror::Error;
 
-use crate::{PaneId, SessionId, SplitId, WindowId, message::deserialize_bounded_text};
+use crate::{PaneId, SessionId, SplitId, TmuxColour, WindowId, message::deserialize_bounded_text};
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -366,6 +366,10 @@ pub struct PaneSnapshot {
     pub bell: bool,
     pub dead: bool,
     pub dead_status: Option<u32>,
+    /// `pane-border-style` colour override; `None` means theme fallback.
+    pub border_colour: Option<TmuxColour>,
+    /// `pane-active-border-style` colour override; `None` means theme fallback.
+    pub active_border_colour: Option<TmuxColour>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

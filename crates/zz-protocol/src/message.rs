@@ -14,15 +14,25 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 70;
+pub const PROTOCOL_VERSION: u16 = 71;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
+/// Value-token prefix naming the caller's controlling tty, `client-tty-v1:/dev/ttys007`.
+pub const CLIENT_TTY_CAPABILITY_PREFIX: &str = "client-tty-v1:";
+/// Value-token prefix naming the caller's terminal size, `client-size-v1:80x24`.
+pub const CLIENT_SIZE_CAPABILITY_PREFIX: &str = "client-size-v1:";
 pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
 pub const MAX_CHOOSE_TREE_QUERY_BYTES: usize = 4 * 1024;
 pub const MAX_CHOOSE_BUFFER_QUERY_BYTES: usize = 4 * 1024;
 /// Longest either half of a rendered status line may be.
 pub const MAX_STATUS_TEXT_BYTES: usize = 4096;
+/// Most personalized status rows one client may be shown.
+pub const MAX_STATUS_ROWS: usize = 5;
+/// Longest expanded `display-panes-format` label one pane indicator may carry.
+pub const MAX_PANE_INDICATOR_LABEL_BYTES: usize = 1024;
+/// Longest shortcut key spelling one chooser row may carry.
+pub const MAX_CHOOSE_ITEM_KEY_BYTES: usize = 64;
 /// Longest payload `agent-send` may push into a GUI-owned composer or prompt.
 pub const MAX_AGENT_SEND_BYTES: usize = 1024 * 1024;
 /// Longest path or human-readable message carried by a GUI request or its reply.
@@ -105,10 +115,13 @@ pub enum MuxOptionKey {
     AgentCommand,
     AgentClaudeCodeCommand,
     AgentAutoApprove,
+    Mouse,
+    EscapeTime,
+    Prefix2,
 }
 
 impl MuxOptionKey {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 17] = [
         Self::Prefix,
         Self::ModeKeys,
         Self::HistoryLimit,
@@ -123,6 +136,9 @@ impl MuxOptionKey {
         Self::AgentCommand,
         Self::AgentClaudeCodeCommand,
         Self::AgentAutoApprove,
+        Self::Mouse,
+        Self::EscapeTime,
+        Self::Prefix2,
     ];
 
     #[must_use]
@@ -142,6 +158,9 @@ impl MuxOptionKey {
             Self::AgentCommand => "agent-command",
             Self::AgentClaudeCodeCommand => "agent-claude-code-command",
             Self::AgentAutoApprove => "agent-auto-approve",
+            Self::Mouse => "mouse",
+            Self::EscapeTime => "escape-time",
+            Self::Prefix2 => "prefix2",
         }
     }
 
@@ -179,6 +198,9 @@ impl MuxOptionKey {
                 "off".to_owned()
             }
             Self::HistoryTrickle => "2000".to_owned(),
+            Self::Mouse => "on".to_owned(),
+            Self::EscapeTime => "10".to_owned(),
+            Self::Prefix2 => "None".to_owned(),
             Self::AgentCommand => DEFAULT_AGENT_COMMAND.to_owned(),
             Self::AgentClaudeCodeCommand => DEFAULT_AGENT_CLAUDE_CODE_COMMAND.to_owned(),
             Self::AgentAutoApprove => if DEFAULT_AGENT_AUTO_APPROVE {
@@ -347,6 +369,24 @@ pub enum ClientMessageKind {
     Error,
 }
 
+/// Where the status block sits relative to the main canvas.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StatusPosition {
+    Top,
+    #[default]
+    Bottom,
+}
+
+impl StatusPosition {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+        }
+    }
+}
+
 /// One rendered tmux status line, expanded by the daemon. Text, never formats:
 /// a `#()` command runs once on the daemon's host, not once per client.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -355,6 +395,15 @@ pub struct StatusLine {
     pub left: String,
     #[serde(deserialize_with = "deserialize_status_text")]
     pub right: String,
+    #[serde(deserialize_with = "deserialize_status_text")]
+    pub title: String,
+    #[serde(deserialize_with = "deserialize_status_text")]
+    pub base_style: String,
+    #[serde(deserialize_with = "deserialize_status_rows")]
+    pub rows: Vec<String>,
+    pub position: StatusPosition,
+    pub message_line: u8,
+    pub customized: bool,
 }
 
 impl StatusLine {
@@ -364,10 +413,35 @@ impl StatusLine {
         self.left.is_empty() && self.right.is_empty()
     }
 
-    /// Ensure a wire payload stays inside [`MAX_STATUS_TEXT_BYTES`].
+    /// Ensure a wire payload stays inside its byte, row, style, and
+    /// message-line bounds.
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.left.len() > MAX_STATUS_TEXT_BYTES || self.right.len() > MAX_STATUS_TEXT_BYTES {
+        if self.left.len() > MAX_STATUS_TEXT_BYTES
+            || self.right.len() > MAX_STATUS_TEXT_BYTES
+            || self.title.len() > MAX_STATUS_TEXT_BYTES
+            || self.base_style.len() > MAX_STATUS_TEXT_BYTES
+        {
             return Err("status text exceeds the wire byte limit");
+        }
+        if self.rows.len() > MAX_STATUS_ROWS {
+            return Err("status rows exceed the wire row limit");
+        }
+        if self
+            .rows
+            .iter()
+            .any(|row| row.len() > MAX_STATUS_TEXT_BYTES)
+        {
+            return Err("status row exceeds the wire byte limit");
+        }
+        if crate::parse_style(&self.base_style).is_none() {
+            return Err("status base style does not parse as a style");
+        }
+        if self.rows.is_empty() {
+            if self.message_line != 0 {
+                return Err("status message line names a row while no rows are published");
+            }
+        } else if usize::from(self.message_line) >= self.rows.len() {
+            return Err("status message line names a row outside the published rows");
         }
         Ok(())
     }
@@ -378,6 +452,94 @@ where
     D: Deserializer<'de>,
 {
     deserialize_bounded_text(deserializer, MAX_STATUS_TEXT_BYTES)
+}
+
+struct BoundedStatusRow(String);
+
+impl<'de> Deserialize<'de> for BoundedStatusRow {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct StatusRowVisitor;
+
+        impl Visitor<'_> for StatusRowVisitor {
+            type Value = BoundedStatusRow;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    formatter,
+                    "a status row no longer than {MAX_STATUS_TEXT_BYTES} bytes"
+                )
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if value.len() > MAX_STATUS_TEXT_BYTES {
+                    return Err(E::invalid_length(value.len(), &self));
+                }
+                Ok(BoundedStatusRow(value.to_owned()))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if value.len() > MAX_STATUS_TEXT_BYTES {
+                    return Err(E::invalid_length(value.len(), &self));
+                }
+                Ok(BoundedStatusRow(value))
+            }
+        }
+
+        deserializer.deserialize_str(StatusRowVisitor)
+    }
+}
+
+fn deserialize_status_rows<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct StatusRowsVisitor;
+
+    impl<'de> Visitor<'de> for StatusRowsVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "at most {MAX_STATUS_ROWS} bounded status rows")
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let hint = sequence.size_hint();
+            if hint.is_some_and(|length| length > MAX_STATUS_ROWS) {
+                return Err(A::Error::invalid_length(
+                    hint.unwrap_or(MAX_STATUS_ROWS.saturating_add(1)),
+                    &self,
+                ));
+            }
+            let mut rows = Vec::with_capacity(hint.unwrap_or(0).min(MAX_STATUS_ROWS));
+            while rows.len() < MAX_STATUS_ROWS {
+                let Some(row) = sequence.next_element::<BoundedStatusRow>()? else {
+                    return Ok(rows);
+                };
+                rows.push(row.0);
+            }
+            if sequence.next_element::<BoundedStatusRow>()?.is_some() {
+                return Err(A::Error::invalid_length(
+                    MAX_STATUS_ROWS.saturating_add(1),
+                    &self,
+                ));
+            }
+            Ok(rows)
+        }
+    }
+
+    deserializer.deserialize_seq(StatusRowsVisitor)
 }
 
 fn deserialize_agent_send_text<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -658,6 +820,8 @@ pub struct ClientHello {
 
 impl ClientHello {
     pub const CLIENT_TERMINAL_CAPABILITY: &'static str = CLIENT_TERMINAL_CAPABILITY;
+    pub const CLIENT_TTY_CAPABILITY_PREFIX: &'static str = CLIENT_TTY_CAPABILITY_PREFIX;
+    pub const CLIENT_SIZE_CAPABILITY_PREFIX: &'static str = CLIENT_SIZE_CAPABILITY_PREFIX;
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -884,6 +1048,7 @@ pub enum CommandResponse {
         request_id: u64,
         output: String,
         exit_code: u8,
+        stderr: String,
     },
     Error {
         request_id: u64,
@@ -1008,6 +1173,12 @@ pub enum InputMessage {
     },
     Confirm {
         action: ConfirmAction,
+    },
+    /// The client's outer terminal was resized (`SIGWINCH`). Nothing emits
+    /// this yet; the daemon stores the facts per client.
+    ClientTerminalSize {
+        columns: u16,
+        rows: u16,
     },
 }
 
@@ -1259,6 +1430,28 @@ pub enum CommandPromptKind {
     Value,
 }
 
+/// Which prompt history and completion family a prompt belongs to (`-T`).
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CommandPromptType {
+    #[default]
+    Command,
+    Search,
+}
+
+/// How the prompt consumes keys before it submits.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CommandPromptMode {
+    #[default]
+    Text,
+    Single,
+    Numeric,
+    Incremental,
+    Key,
+    BackspaceExit,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandPromptState {
     pub prompt: String,
@@ -1268,6 +1461,9 @@ pub struct CommandPromptState {
     pub kind: CommandPromptKind,
     /// Oldest-to-newest bounded history, populated only for command prompts.
     pub history: Vec<String>,
+    pub prompt_type: CommandPromptType,
+    pub mode: CommandPromptMode,
+    pub no_freeze: bool,
 }
 
 #[repr(u8)]
@@ -1311,6 +1507,16 @@ pub struct ChooseTreeItem {
     pub depth: u8,
     pub flags: u8,
     pub pane_kind: Option<ChooseTreePaneKind>,
+    /// The row's shortcut key in tmux-grammar spelling, empty for none.
+    #[serde(deserialize_with = "deserialize_choose_item_key")]
+    pub key: String,
+}
+
+fn deserialize_choose_item_key<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_text(deserializer, MAX_CHOOSE_ITEM_KEY_BYTES)
 }
 
 impl ChooseTreeItem {
@@ -1383,6 +1589,9 @@ pub struct ChooseBufferItem {
     pub preview: String,
     pub size_bytes: u64,
     pub created_unix_seconds: u64,
+    /// The row's shortcut key in tmux-grammar spelling, empty for none.
+    #[serde(deserialize_with = "deserialize_choose_item_key")]
+    pub key: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1426,31 +1635,42 @@ pub enum ChooseBufferAction {
     Key(KeyInput),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneIndicator {
     pub pane: PaneId,
     pub index: u32,
     /// ASCII key that selects this pane, or zero when the pane has no shortcut.
     pub select_key: u8,
     pub flags: u8,
+    /// The expanded `display-panes-format` product for this pane, empty until
+    /// the daemon publishes it.
+    #[serde(deserialize_with = "deserialize_pane_indicator_label")]
+    pub label: String,
 }
 
 impl PaneIndicator {
     pub const ACTIVE: u8 = 1 << 0;
 
     #[must_use]
-    pub const fn active(self) -> bool {
+    pub const fn active(&self) -> bool {
         self.flags & Self::ACTIVE != 0
     }
 
     #[must_use]
-    pub const fn selection_key(self) -> Option<char> {
+    pub const fn selection_key(&self) -> Option<char> {
         if self.select_key == 0 {
             None
         } else {
             Some(self.select_key as char)
         }
     }
+}
+
+fn deserialize_pane_indicator_label<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_text(deserializer, MAX_PANE_INDICATOR_LABEL_BYTES)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1777,6 +1997,7 @@ pub enum EventPayload {
         kind: ClientMessageKind,
         text: String,
         duration_ms: u32,
+        message_id: u64,
     },
     PrefixCancelled {
         request_id: u64,
@@ -1822,6 +2043,11 @@ pub enum EventPayload {
         window_index: Option<u32>,
         pane: Option<PaneId>,
         value: String,
+    },
+    /// The daemon explicitly retired the identified timed message before its
+    /// duration elapsed. Nothing emits this yet.
+    TimedClientMessageCleared {
+        message_id: u64,
     },
 }
 
@@ -2182,6 +2408,7 @@ mod tests {
                 kind: super::ClientMessageKind::Info,
                 text: String::new(),
                 duration_ms: 0,
+                message_id: 0,
             }),
             34
         );
@@ -2360,8 +2587,422 @@ mod tests {
     }
 
     #[test]
+    fn v71_mux_option_keys_hold_appended_tags_and_defaults() {
+        for (key, tag, name) in [
+            (MuxOptionKey::Mouse, 14_u8, "mouse"),
+            (MuxOptionKey::EscapeTime, 15, "escape-time"),
+            (MuxOptionKey::Prefix2, 16, "prefix2"),
+        ] {
+            assert_eq!(postcard::to_stdvec(&key).expect("mux option key"), [tag]);
+            assert_eq!(key.as_str(), name);
+            assert_eq!(MuxOptionKey::from_config_key(name), None);
+        }
+        let defaults = MuxOptions::default();
+        assert_eq!(
+            defaults.get(MuxOptionKey::Mouse).expect("mouse").value,
+            "on"
+        );
+        assert_eq!(
+            defaults
+                .get(MuxOptionKey::EscapeTime)
+                .expect("escape-time")
+                .value,
+            "10"
+        );
+        assert_eq!(
+            defaults.get(MuxOptionKey::Prefix2).expect("prefix2").value,
+            "None"
+        );
+        assert_eq!(defaults.validate(), Ok(()));
+    }
+
+    #[test]
+    fn status_position_default_bottom_is_the_tag_one_variant() {
+        assert_eq!(
+            super::StatusPosition::default(),
+            super::StatusPosition::Bottom
+        );
+        assert_eq!(
+            postcard::to_stdvec(&super::StatusPosition::Top).expect("top"),
+            [0]
+        );
+        assert_eq!(
+            postcard::to_stdvec(&super::StatusPosition::Bottom).expect("bottom"),
+            [1]
+        );
+        assert_eq!(
+            postcard::from_bytes::<super::StatusPosition>(&[1]).expect("bottom decodes"),
+            super::StatusPosition::Bottom
+        );
+        assert!(postcard::from_bytes::<super::StatusPosition>(&[2]).is_err());
+    }
+
+    #[derive(Serialize)]
+    struct UnboundedStatusLine {
+        left: String,
+        right: String,
+        title: String,
+        base_style: String,
+        rows: Vec<String>,
+        position: super::StatusPosition,
+        message_line: u8,
+        customized: bool,
+    }
+
+    fn unbounded_status(rows: Vec<String>, message_line: u8) -> Vec<u8> {
+        postcard::to_stdvec(&UnboundedStatusLine {
+            left: String::new(),
+            right: String::new(),
+            title: String::new(),
+            base_style: String::new(),
+            rows,
+            position: super::StatusPosition::Bottom,
+            message_line,
+            customized: false,
+        })
+        .expect("status line shape")
+    }
+
+    #[test]
+    fn status_line_appends_after_the_v70_halves() {
+        #[derive(Serialize)]
+        struct LegacyStatusLine {
+            left: String,
+            right: String,
+        }
+
+        let status = super::StatusLine {
+            left: "L".to_owned(),
+            right: "R".to_owned(),
+            ..super::StatusLine::default()
+        };
+        let bytes = postcard::to_stdvec(&status).expect("status");
+        let legacy = postcard::to_stdvec(&LegacyStatusLine {
+            left: "L".to_owned(),
+            right: "R".to_owned(),
+        })
+        .expect("legacy halves");
+        assert!(bytes.starts_with(&legacy));
+        assert_eq!(
+            postcard::from_bytes::<super::StatusLine>(&bytes).expect("status decodes"),
+            status
+        );
+        assert!(!status.is_empty());
+        assert!(super::StatusLine::default().is_empty());
+    }
+
+    #[test]
+    fn status_rows_accept_zero_through_five_and_reject_a_sixth_before_allocation() {
+        for count in 0..=super::MAX_STATUS_ROWS {
+            let rows = (0..count)
+                .map(|index| {
+                    if index % 2 == 0 {
+                        String::new()
+                    } else {
+                        format!("row {index}")
+                    }
+                })
+                .collect::<Vec<_>>();
+            let message_line = u8::try_from(count.saturating_sub(1)).expect("row index");
+            let bytes = unbounded_status(rows.clone(), message_line);
+            let decoded =
+                postcard::from_bytes::<super::StatusLine>(&bytes).expect("bounded rows decode");
+            assert_eq!(decoded.rows, rows);
+            assert_eq!(decoded.validate(), Ok(()));
+        }
+        let blanks = unbounded_status(vec![String::new(); super::MAX_STATUS_ROWS], 4);
+        let decoded =
+            postcard::from_bytes::<super::StatusLine>(&blanks).expect("blank rows decode");
+        assert_eq!(decoded.rows.len(), super::MAX_STATUS_ROWS);
+        assert_eq!(decoded.validate(), Ok(()));
+
+        let sixth = unbounded_status(vec![String::new(); super::MAX_STATUS_ROWS + 1], 0);
+        assert!(postcard::from_bytes::<super::StatusLine>(&sixth).is_err());
+        let exact = unbounded_status(vec!["x".repeat(super::MAX_STATUS_TEXT_BYTES)], 0);
+        assert!(postcard::from_bytes::<super::StatusLine>(&exact).is_ok());
+        let oversized = unbounded_status(vec!["x".repeat(super::MAX_STATUS_TEXT_BYTES + 1)], 0);
+        assert!(postcard::from_bytes::<super::StatusLine>(&oversized).is_err());
+    }
+
+    #[test]
+    fn status_line_validation_enforces_rows_style_and_message_line_rules() {
+        let mut status = super::StatusLine::default();
+        assert_eq!(status.validate(), Ok(()));
+        status.title = "zz".to_owned();
+        assert_eq!(status.validate(), Ok(()));
+        status.message_line = 1;
+        assert!(status.validate().is_err());
+        status.rows = vec![String::new(), "#[fg=red]row".to_owned()];
+        assert_eq!(status.validate(), Ok(()));
+        status.message_line = 2;
+        assert!(status.validate().is_err());
+        status.message_line = 0;
+        status.base_style = "bg=blue,fg=white".to_owned();
+        assert_eq!(status.validate(), Ok(()));
+        status.base_style = "fg=nope".to_owned();
+        assert!(status.validate().is_err());
+        status.base_style = String::new();
+        status.title = "x".repeat(super::MAX_STATUS_TEXT_BYTES + 1);
+        assert!(status.validate().is_err());
+        status.title = String::new();
+        status.rows = vec![String::new(); super::MAX_STATUS_ROWS + 1];
+        status.message_line = 0;
+        assert!(status.validate().is_err());
+    }
+
+    #[test]
+    fn pane_indicator_labels_are_bounded_at_one_kibibyte() {
+        let indicator = super::PaneIndicator {
+            pane: crate::PaneId(3),
+            index: 1,
+            select_key: b'1',
+            flags: super::PaneIndicator::ACTIVE,
+            label: "x".repeat(super::MAX_PANE_INDICATOR_LABEL_BYTES),
+        };
+        let bytes = postcard::to_stdvec(&indicator).expect("indicator");
+        assert_eq!(
+            postcard::from_bytes::<super::PaneIndicator>(&bytes).expect("indicator decodes"),
+            indicator
+        );
+        assert!(indicator.active());
+        assert_eq!(indicator.selection_key(), Some('1'));
+
+        #[derive(Serialize)]
+        struct UnboundedPaneIndicator {
+            pane: crate::PaneId,
+            index: u32,
+            select_key: u8,
+            flags: u8,
+            label: String,
+        }
+        let oversized = postcard::to_stdvec(&UnboundedPaneIndicator {
+            pane: crate::PaneId(3),
+            index: 1,
+            select_key: 0,
+            flags: 0,
+            label: "x".repeat(super::MAX_PANE_INDICATOR_LABEL_BYTES + 1),
+        })
+        .expect("oversized shape");
+        assert!(postcard::from_bytes::<super::PaneIndicator>(&oversized).is_err());
+    }
+
+    #[test]
+    fn chooser_row_keys_are_bounded_at_sixty_four_bytes() {
+        let tree = super::ChooseTreeItem {
+            label: "dev".to_owned(),
+            detail: "2 windows".to_owned(),
+            target: super::ChooseTreeTarget::Session(crate::SessionId(2)),
+            depth: 0,
+            flags: 0,
+            pane_kind: None,
+            key: "M".repeat(super::MAX_CHOOSE_ITEM_KEY_BYTES),
+        };
+        let bytes = postcard::to_stdvec(&tree).expect("tree item");
+        assert_eq!(
+            postcard::from_bytes::<super::ChooseTreeItem>(&bytes).expect("tree item decodes"),
+            tree
+        );
+
+        let buffer = super::ChooseBufferItem {
+            name: "buffer0001".to_owned(),
+            preview: "hello".to_owned(),
+            size_bytes: 5,
+            created_unix_seconds: 42,
+            key: "0".to_owned(),
+        };
+        let bytes = postcard::to_stdvec(&buffer).expect("buffer item");
+        assert_eq!(
+            postcard::from_bytes::<super::ChooseBufferItem>(&bytes).expect("buffer item decodes"),
+            buffer
+        );
+
+        #[derive(Serialize)]
+        struct UnboundedBufferItem {
+            name: String,
+            preview: String,
+            size_bytes: u64,
+            created_unix_seconds: u64,
+            key: String,
+        }
+        let oversized = postcard::to_stdvec(&UnboundedBufferItem {
+            name: String::new(),
+            preview: String::new(),
+            size_bytes: 0,
+            created_unix_seconds: 0,
+            key: "k".repeat(super::MAX_CHOOSE_ITEM_KEY_BYTES + 1),
+        })
+        .expect("oversized shape");
+        assert!(postcard::from_bytes::<super::ChooseBufferItem>(&oversized).is_err());
+
+        #[derive(Serialize)]
+        struct UnboundedTreeItem {
+            label: String,
+            detail: String,
+            target: super::ChooseTreeTarget,
+            depth: u8,
+            flags: u8,
+            pane_kind: Option<super::ChooseTreePaneKind>,
+            key: String,
+        }
+        let oversized = postcard::to_stdvec(&UnboundedTreeItem {
+            label: String::new(),
+            detail: String::new(),
+            target: super::ChooseTreeTarget::Session(crate::SessionId(2)),
+            depth: 0,
+            flags: 0,
+            pane_kind: None,
+            key: "k".repeat(super::MAX_CHOOSE_ITEM_KEY_BYTES + 1),
+        })
+        .expect("oversized shape");
+        assert!(postcard::from_bytes::<super::ChooseTreeItem>(&oversized).is_err());
+    }
+
+    #[test]
+    fn command_prompt_appends_type_mode_and_no_freeze() {
+        assert_eq!(
+            super::CommandPromptType::default(),
+            super::CommandPromptType::Command
+        );
+        assert_eq!(
+            super::CommandPromptMode::default(),
+            super::CommandPromptMode::Text
+        );
+        assert_eq!(
+            postcard::to_stdvec(&super::CommandPromptType::Search).expect("search"),
+            [1]
+        );
+        assert_eq!(
+            postcard::to_stdvec(&super::CommandPromptMode::BackspaceExit).expect("backspace exit"),
+            [5]
+        );
+        assert!(postcard::from_bytes::<super::CommandPromptType>(&[2]).is_err());
+        assert!(postcard::from_bytes::<super::CommandPromptMode>(&[6]).is_err());
+
+        let state = super::CommandPromptState {
+            prompt: "(search up)".to_owned(),
+            input: "needle".to_owned(),
+            cursor: 6,
+            kind: super::CommandPromptKind::Value,
+            history: Vec::new(),
+            prompt_type: super::CommandPromptType::Search,
+            mode: super::CommandPromptMode::Incremental,
+            no_freeze: true,
+        };
+        let bytes = postcard::to_stdvec(&state).expect("prompt state");
+        assert_eq!(
+            postcard::from_bytes::<super::CommandPromptState>(&bytes).expect("state decodes"),
+            state
+        );
+    }
+
+    #[test]
+    fn command_success_appends_stderr_after_exit_code() {
+        #[derive(Serialize)]
+        struct LegacySuccess {
+            request_id: u64,
+            output: String,
+            exit_code: u8,
+        }
+
+        let success = super::CommandResponse::Success {
+            request_id: 7,
+            output: "out".to_owned(),
+            exit_code: 1,
+            stderr: "err".to_owned(),
+        };
+        let bytes = postcard::to_stdvec(&success).expect("success");
+        let mut legacy = vec![0];
+        legacy.extend(
+            postcard::to_stdvec(&LegacySuccess {
+                request_id: 7,
+                output: "out".to_owned(),
+                exit_code: 1,
+            })
+            .expect("legacy success"),
+        );
+        assert!(bytes.starts_with(&legacy));
+        assert_eq!(
+            postcard::from_bytes::<super::CommandResponse>(&bytes).expect("success decodes"),
+            success
+        );
+    }
+
+    #[test]
+    fn timed_message_identity_and_clear_hold_the_appended_wire_tail() {
+        let message = super::EventPayload::TimedClientMessage {
+            pane: None,
+            kind: super::ClientMessageKind::Info,
+            text: "hello".to_owned(),
+            duration_ms: 750,
+            message_id: 9,
+        };
+        let event = super::Event {
+            sequence: 5,
+            payload: message,
+        };
+        let bytes = postcard::to_stdvec(&event).expect("timed message encodes");
+        assert_eq!(bytes[1], 34);
+        assert_eq!(
+            postcard::from_bytes::<super::Event>(&bytes).expect("timed message decodes"),
+            event
+        );
+
+        let cleared = super::Event {
+            sequence: 6,
+            payload: super::EventPayload::TimedClientMessageCleared { message_id: 9 },
+        };
+        let bytes = postcard::to_stdvec(&cleared).expect("cleared encodes");
+        assert_eq!(bytes[1], 46);
+        assert_eq!(
+            postcard::from_bytes::<super::Event>(&bytes).expect("cleared decodes"),
+            cleared
+        );
+    }
+
+    #[test]
+    fn client_terminal_size_input_holds_wire_tag_seventeen() {
+        assert_eq!(super::CLIENT_TTY_CAPABILITY_PREFIX, "client-tty-v1:");
+        assert_eq!(super::CLIENT_SIZE_CAPABILITY_PREFIX, "client-size-v1:");
+        let input = super::InputMessage::ClientTerminalSize {
+            columns: 120,
+            rows: 40,
+        };
+        let bytes = postcard::to_stdvec(&input).expect("client size encodes");
+        assert_eq!(bytes[0], 17);
+        assert_eq!(
+            postcard::from_bytes::<super::InputMessage>(&bytes).expect("client size decodes"),
+            input
+        );
+    }
+
+    #[test]
+    fn enter_copy_mode_with_holds_wire_tag_twenty_seven() {
+        use zz_terminal::TerminalViewAction;
+
+        assert_eq!(
+            postcard::to_stdvec(&TerminalViewAction::EnterCopyMode).expect("enter")[0],
+            15
+        );
+        assert_eq!(
+            postcard::to_stdvec(&TerminalViewAction::EnterCopyModeScrollExit).expect("scroll exit")
+                [0],
+            26
+        );
+        let action = TerminalViewAction::EnterCopyModeWith {
+            scroll_exit: true,
+            hide_position: true,
+        };
+        let bytes = postcard::to_stdvec(&action).expect("composed enter");
+        assert_eq!(bytes[0], 27);
+        assert_eq!(
+            postcard::from_bytes::<TerminalViewAction>(&bytes).expect("composed enter decodes"),
+            action
+        );
+    }
+
+    #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 70);
+        assert_eq!(super::PROTOCOL_VERSION, 71);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

@@ -4571,6 +4571,7 @@ fn run_terminal(
                             &action,
                             TerminalViewAction::EnterCopyMode
                                 | TerminalViewAction::EnterCopyModeScrollExit
+                                | TerminalViewAction::EnterCopyModeWith { .. }
                         );
                         let clears_history = matches!(&action, TerminalViewAction::ClearHistory);
                         let was_in_copy_mode = active_views
@@ -5642,7 +5643,8 @@ fn apply_view_action(
             Ok(ViewActionResult::OverlaySnapshot)
         }
         enter_action @ (TerminalViewAction::EnterCopyMode
-        | TerminalViewAction::EnterCopyModeScrollExit) => {
+        | TerminalViewAction::EnterCopyModeScrollExit
+        | TerminalViewAction::EnterCopyModeWith { .. }) => {
             if copy_mode.is_none() {
                 drop_view_search(
                     view_id,
@@ -5656,7 +5658,14 @@ fn apply_view_action(
                 terminal,
                 selection,
                 copy_mode,
-                matches!(enter_action, TerminalViewAction::EnterCopyModeScrollExit),
+                matches!(
+                    enter_action,
+                    TerminalViewAction::EnterCopyModeScrollExit
+                        | TerminalViewAction::EnterCopyModeWith {
+                            scroll_exit: true,
+                            ..
+                        }
+                ),
             )?;
             Ok(ViewActionResult::Snapshot)
         }
@@ -10338,7 +10347,11 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
         let total = scrollbar.total.max(1);
         let position = copy_mode.cursor.y.saturating_add(1).min(total);
         match copy_mode.kind {
-            FrozenModeKind::Copy => TerminalMode::Copy { position, total },
+            FrozenModeKind::Copy => TerminalMode::Copy {
+                position,
+                total,
+                hide_position: false,
+            },
             FrozenModeKind::View => TerminalMode::View { position, total },
         }
     } else {
@@ -10469,6 +10482,7 @@ fn copy_mode_snapshot(
             FrozenModeKind::Copy => TerminalMode::Copy {
                 position: mode.cursor.y.saturating_add(1).min(total),
                 total,
+                hide_position: false,
             },
             FrozenModeKind::View => TerminalMode::View {
                 position: mode.cursor.y.saturating_add(1).min(total),

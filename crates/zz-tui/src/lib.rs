@@ -252,6 +252,7 @@ fn execute_new_session(
                     request_id: response_id,
                     output,
                     exit_code,
+                    ..
                 }) if response_id == request_id => {
                     print_command_output(&output)?;
                     if exit_code != 0 {

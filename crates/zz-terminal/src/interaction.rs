@@ -413,6 +413,13 @@ pub enum TerminalViewAction {
     /// Move the live viewport top to an absolute scrollbar offset.
     ScrollToOffset(u32),
     EnterCopyModeScrollExit,
+    /// Enter copy mode with `-e` and `-H` composed. Handled identically to the
+    /// composition of [`Self::EnterCopyMode`] and
+    /// [`Self::EnterCopyModeScrollExit`]; nothing produces it yet.
+    EnterCopyModeWith {
+        scroll_exit: bool,
+        hide_position: bool,
+    },
 }
 
 #[cfg(test)]

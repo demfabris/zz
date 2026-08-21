@@ -7508,6 +7508,7 @@ mod tests {
                         request_id: 1,
                         output: String::new(),
                         exit_code: 0,
+                        stderr: String::new(),
                     }),
                     cx,
                 );
@@ -7587,6 +7588,8 @@ mod tests {
             bell: false,
             dead: false,
             dead_status: None,
+            border_colour: None,
+            active_border_colour: None,
         }
     }
 

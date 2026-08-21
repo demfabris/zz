@@ -194,6 +194,7 @@ impl CommandClient {
                     request_id: response_id,
                     output,
                     exit_code,
+                    ..
                 }) if response_id == request_id => {
                     return if exit_code == 0 {
                         Ok(output)

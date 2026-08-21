@@ -211,7 +211,10 @@ fn render(
     zz_executable: Option<&std::path::Path>,
 ) -> StatusLine {
     if !request.formats.enabled {
-        return StatusLine::default();
+        return StatusLine {
+            position: request.formats.position,
+            ..StatusLine::default()
+        };
     }
     let now = Local::now();
     let mut hooks = DaemonFormatHooks::status(
@@ -239,6 +242,8 @@ fn render(
             &trim_status_left(&right, usize::from(request.formats.right_length)),
             &request.formats.right_style,
         ),
+        position: request.formats.position,
+        ..StatusLine::default()
     }
 }
 

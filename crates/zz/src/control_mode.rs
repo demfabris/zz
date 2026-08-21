@@ -1116,6 +1116,7 @@ mod tests {
                     request_id: 1,
                     output: "one\ntwo\n".to_owned(),
                     exit_code: 7,
+                    stderr: String::new(),
                 },
             )
             .unwrap();
@@ -1160,6 +1161,7 @@ mod tests {
                     request_id: 5,
                     output: "\n".to_owned(),
                     exit_code: 0,
+                    stderr: String::new(),
                 },
             )
             .unwrap();
@@ -1222,6 +1224,7 @@ mod tests {
                     request_id: 5,
                     output: "body\n".to_owned(),
                     exit_code: 0,
+                    stderr: String::new(),
                 },
             )
             .unwrap();
@@ -1391,6 +1394,8 @@ mod tests {
                     bell: true,
                     dead: false,
                     dead_status: None,
+                    border_colour: None,
+                    active_border_colour: None,
                 },
             )]),
             layout_dump: "abcd,80x24,0,0,5".to_owned(),

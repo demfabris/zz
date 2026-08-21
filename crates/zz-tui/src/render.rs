@@ -1346,7 +1346,9 @@ fn status_indicators(model: &Model) -> String {
     if let Some(viewport) = model.active_viewport() {
         match viewport.mode {
             TerminalMode::Live => {}
-            TerminalMode::Copy { position, total } => {
+            TerminalMode::Copy {
+                position, total, ..
+            } => {
                 write!(indicators, "COPY {position}/{total}")
                     .expect("writing to String cannot fail");
             }

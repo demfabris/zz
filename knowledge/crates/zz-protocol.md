@@ -4,7 +4,7 @@ title: zz-protocol crate
 description: The stable, versioned wire vocabulary (IDs, framing, control messages, packed terminal lanes, and mux snapshots) shared by every zz client and the daemon.
 resource: crates/zz-protocol/src/lib.rs
 tags: [protocol, crate, wire, ipc]
-timestamp: 2026-08-19T00:00:00-03:00
+timestamp: 2026-08-21T12:00:00-03:00
 ---
 
 # Overview
@@ -21,7 +21,7 @@ The crate is small and dependency-light: five dependencies, `postcard`, `serde`,
 `thiserror`, and `zz-terminal` (for `TerminalViewport`, `TerminalAppearance`, `PackedCell`, and
 friends that ride the terminal lane). It has no cargo features at all since v43 retired `compress` and its optional
 `zstd`. Because it encodes the wire format, **any encoding-affecting change requires bumping
-`PROTOCOL_VERSION`**, currently 70. See [the wire protocol](/protocol/wire-protocol.md).
+`PROTOCOL_VERSION`**, currently 71. See [the wire protocol](/protocol/wire-protocol.md).
 
 # What it exports
 
@@ -33,7 +33,7 @@ friends that ride the terminal lane). It has no cargo features at all since v43 
 | `framing` | `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, `ProtocolError` | [wire protocol](/protocol/wire-protocol.md) |
 | `id` | `ClientId`, `PaneId`, `SessionId`, `SplitId`, `WindowId` | [stable IDs](/protocol/ids.md) |
 | `key` | `Binding`, `KeyTables`, `KeyEngine`, `KeyDecision`, `canonical_key`, `input_key_name`, `input_typed_text` | [key tables](/tmux/key-tables.md) |
-| `message` | `ProtocolMessage`, `Event`, `EventPayload`, `InputMessage`, `ClientHello`, `ServerHello`, `ServerError`, `ConfigOverrideEntry`, `MuxOptions`/`MuxOptionKey`/`MuxOptionValue`, `PROTOCOL_VERSION`, `NEW_SESSION_ATTACH_CAPABILITY`, `SPLIT_RATIO_BASIS`, choose-tree / choose-buffer / display-panes types | [wire protocol](/protocol/wire-protocol.md) |
+| `message` | `ProtocolMessage`, `Event`, `EventPayload`, `InputMessage`, `ClientHello`, `ServerHello`, `ServerError`, `ConfigOverrideEntry`, `MuxOptions`/`MuxOptionKey`/`MuxOptionValue`, `StatusLine`/`StatusPosition`, `CommandPromptType`/`CommandPromptMode`, `PROTOCOL_VERSION`, `NEW_SESSION_ATTACH_CAPABILITY`, `CLIENT_TTY_CAPABILITY_PREFIX`/`CLIENT_SIZE_CAPABILITY_PREFIX`, `SPLIT_RATIO_BASIS`, choose-tree / choose-buffer / display-panes types | [wire protocol](/protocol/wire-protocol.md) |
 | `snapshot` | `MuxSnapshot`, `SessionSnapshot`, `SessionViewer`, `WindowSnapshot`, `PaneSnapshot`, `LayoutNode`, `Axis`, `BrowserDescriptor`, `AgentDescriptor`, `AgentProvider`, `EditorDescriptor`, `PaneKindSnapshot` | [snapshots](/protocol/snapshots.md) |
 | `terminal_codec` | `encode_protocol_message`, `decode_protocol_frame`, `read_protocol_message`, `write_protocol_message`, and their `_into` buffer-reusing variants | [packed terminal lanes](/protocol/terminal-lanes.md) |
 
@@ -70,15 +70,18 @@ short hostname, bounded at 256 bytes), a capability list, the client's color sch
 appearance plus provenance, the effective `MuxOptions`, the rendered status line, and
 `key_tables` (every live table, refreshed later by `KeyTablesChanged`). Both capability
 vectors deserialize through one bounded visitor: at most 64 entries of at most 256 bytes, rejected
-before the strings materialize. One capability name is a constant here,
-`NEW_SESSION_ATTACH_CAPABILITY` (`new-session-attach-v1`); every other advertised string is a literal
-in [the daemon](/crates/zz-daemon.md). None of them changes an encoding . `TERMINAL_ZSTD_CAPABILITY`
+before the strings materialize. The capability-name constants here are
+`NEW_SESSION_ATTACH_CAPABILITY` (`new-session-attach-v1`), `CLIENT_TERMINAL_CAPABILITY`
+(`client-terminal-v1`), and the v71 value-token prefixes `CLIENT_TTY_CAPABILITY_PREFIX`
+(`client-tty-v1:`) and `CLIENT_SIZE_CAPABILITY_PREFIX` (`client-size-v1:`); every other advertised
+string is a literal in [the daemon](/crates/zz-daemon.md). None of them changes an encoding . `TERMINAL_ZSTD_CAPABILITY`
 and `egress-v1`, the two that did, were removed at v43.
 
-`MuxOptions` is the daemon-owned option surface: fourteen `MuxOptionKey`s, each with a value string
+`MuxOptions` is the daemon-owned option surface: seventeen `MuxOptionKey`s, each with a value string
 and a `MuxOptionSource` provenance. Postcard encodes enum variants by index, so keys are only ever
-appended; `HistoryTrickle` sits last and defaults to `2000`. `Predict` and `BrowserEgress` used to
-follow it and are gone.
+appended; the v71 tail is `Mouse` (published per recipient with the attached session's effective
+value), `EscapeTime`, and `Prefix2` at tags 14-16, with `Prefix2` last defaulting to `None`.
+`Predict` and `BrowserEgress` used to follow `HistoryTrickle` and are gone.
 
 # Streaming repair and presence
 
@@ -109,7 +112,7 @@ or names a window that no longer exists, so removing a focused window needs no s
 | `crates/zz-protocol/src/catalog.rs` | Canonical command names, aliases, descriptions, accepted options, and completion value kinds |
 | `crates/zz-protocol/src/framing.rs` | Length-prefixed envelope, `Lane` tag, reserved flags byte, version check, `ProtocolError`, control-lane `encode/decode/read/write` |
 | `crates/zz-protocol/src/key.rs` | Shared `KeyTables`/`KeyEngine` model, default pane and overlay tables, key folding, typed-text precedence, bind/unbind, and snapshots |
-| `crates/zz-protocol/src/message.rs` | `PROTOCOL_VERSION = 70`, `ProtocolMessage` (including `RequestFull`, `HistoryRequest`, stable client identity, and the Agent runtime messages), `MuxOptionKey`/`MuxOptions` (fourteen keys, including the three agent adapter options), ordered configuration override entries, appearance provenance payloads, `Event`/`EventPayload` (including `TimedClientMessage`, `PrefixCancelled`, `KeyTablesChanged`, `HistoryChunk`, `Detached`, and the Agent payloads), `AgentPaneWire` plus `AgentGitSummary` and their validation, `InputMessage` (including `CancelPrefix`), hello/command/error/UI-state types and their byte bounds |
+| `crates/zz-protocol/src/message.rs` | `PROTOCOL_VERSION = 71`, `ProtocolMessage` (including `RequestFull`, `HistoryRequest`, stable client identity, and the Agent runtime messages), `MuxOptionKey`/`MuxOptions` (seventeen keys, including the three agent adapter options and the v71 `Mouse`/`EscapeTime`/`Prefix2` tail), ordered configuration override entries, appearance provenance payloads, `Event`/`EventPayload` (including `TimedClientMessage` with its v71 `message_id`, `TimedClientMessageCleared`, `PrefixCancelled`, `KeyTablesChanged`, `HistoryChunk`, `Detached`, and the Agent payloads), `AgentPaneWire` plus `AgentGitSummary` and their validation, `InputMessage` (including `CancelPrefix` and `ClientTerminalSize`), hello/command/error/UI-state types and their byte bounds |
 | `crates/zz-protocol/src/id.rs` | The `stable_id!` macro and the five sigil-prefixed `u64` newtype IDs |
 | `crates/zz-protocol/src/terminal_codec.rs` | Terminal-lane packer/unpacker for viewports and patches, plus lane-selecting encode/decode entrypoints and validation |
 | `crates/zz-protocol/src/snapshot.rs` | `MuxSnapshot` and the session/window/pane/layout tree it carries, including automatic-rename and retained-dead metadata, plus per-client window focus and `SessionViewer` presence |

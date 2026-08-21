@@ -4,7 +4,7 @@ title: Mux snapshots (snapshot.rs)
 description: The MuxSnapshot state tree (sessions, windows, recursive split layouts, pane descriptors, behavior flags, per-client focus, and viewer presence) that clients reconcile on attach and after a resync.
 resource: crates/zz-protocol/src/snapshot.rs
 tags: [protocol, snapshot, layout, state, presence]
-timestamp: 2026-08-13T00:00:00Z
+timestamp: 2026-08-21T12:00:00-03:00
 ---
 
 # Overview
@@ -43,7 +43,7 @@ deserializer so hostile nesting is rejected before it can exhaust the receiving 
 | `SessionSnapshot` | `id: SessionId`, `name: String`, `active_window: WindowId`, `windows: Vec<WindowSnapshot>`, `viewers: Vec<SessionViewer>` |
 | `SessionViewer` | `name: String`, `window: WindowId`, `is_self: bool` |
 | `WindowSnapshot` | `id: WindowId`, `index: u32`, `name: String`, `automatic_rename: bool`, `active_pane: PaneId`, `zoomed_pane: Option<PaneId>`, `layout: LayoutNode`, `panes: BTreeMap<PaneId, PaneSnapshot>` |
-| `PaneSnapshot` | `id: PaneId`, `title: String`, `kind: PaneKindSnapshot`, `synchronized_input: bool`, `bell: bool`, `dead: bool`, `dead_status: Option<u32>` |
+| `PaneSnapshot` | `id: PaneId`, `title: String`, `kind: PaneKindSnapshot`, `synchronized_input: bool`, `bell: bool`, `dead: bool`, `dead_status: Option<u32>`, `border_colour: Option<TmuxColour>`, `active_border_colour: Option<TmuxColour>` |
 | `PaneKindSnapshot` | `Picker` \| `Terminal` \| `Browser(BrowserDescriptor)` \| `Agent(AgentDescriptor)` \| `Editor(EditorDescriptor)` |
 | `BrowserDescriptor` | `tabs: Vec<String>`, `active_tab: usize`, `profile: String` |
 | `AgentDescriptor` | `provider: AgentProvider`, `cwd: Option<PathBuf>`, `session_id: Option<String>` |
@@ -54,7 +54,11 @@ number; `automatic_rename` tells presentation surfaces whether the active pane m
 label; `zoomed_pane` records a temporarily maximized pane; `synchronized_input` marks panes receiving
 mirrored keystrokes; `bell` is latched until the pane is read after a BEL. A retained terminal exit
 sets `dead`; `dead_status` contains only a normal exit code and is empty for signals and worker
-failures. Respawn clears both without changing the pane id or layout leaf. `BrowserDescriptor.tabs`
+failures. Respawn clears both without changing the pane id or layout leaf. `border_colour` and
+`active_border_colour` (appended at v71) are the pane's `pane-border-style` /
+`pane-active-border-style` colour overrides; `None` means theme fallback, `TmuxColour::Rgb` values
+above `0xFFFFFF` are rejected on decode, and the daemon stamps both `None` until Wave C9 expands the
+styles. `BrowserDescriptor.tabs`
 is the strip in order (never empty in the type's contract; `url()` returns the active tab or
 `about:blank`). `WindowSnapshot.name` is the user's stable, explicit window name;
 `PaneSnapshot.title` is live presentation metadata. Terminal OSC title changes are synchronized by

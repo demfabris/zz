@@ -57,6 +57,8 @@ pub enum ProtocolError {
     InvalidClientHello(String),
     #[error("invalid configuration override payload: {0}")]
     InvalidConfigOverrides(String),
+    #[error("invalid status line payload: {0}")]
+    InvalidStatusLine(String),
     #[error("invalid GUI request payload: {0}")]
     InvalidGuiRequest(String),
     #[error("invalid paste upload payload: {0}")]

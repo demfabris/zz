@@ -273,7 +273,15 @@ Move the complete parser unit to `crates/zz-protocol/src/style.rs`: `TmuxStyle`,
 named X11 color path. Re-export the same symbols from `zz-mux` so existing consumers do not
 move. Keep the parser tests with the implementation.
 
-### A3. Protocol v71 (parked until core approval)
+### A3. Protocol v71 (shipped 2026-08-21)
+
+Implemented and reviewer-closed 2026-08-21: one append-only bundle, all gates green, an
+independent adversarial review plus a follow-up delta verdict of MERGE-READY. Zero client
+behavior change, with two named exceptions recorded for B1's ledger: `StatusLine.position`
+publishes the real effective value (no client reads it yet), and encode-time
+`StatusLine::validate` failures are discarded at the enqueue seam until B1 surfaces them.
+The three new mux keys are publication-only — `from_config_key` deliberately omits
+`mouse`/`escape-time`/`prefix2` until their consuming waves open the config surface.
 
 The approval audit completed read-only on 2026-08-21. Append the following fields and
 variants as one bump. Postcard structs and enums stay append-only; the manually encoded

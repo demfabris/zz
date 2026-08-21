@@ -737,6 +737,8 @@ mod tests {
                             bell: false,
                             dead: false,
                             dead_status: None,
+                            border_colour: None,
+                            active_border_colour: None,
                         },
                     )]),
                     layout_dump: String::new(),

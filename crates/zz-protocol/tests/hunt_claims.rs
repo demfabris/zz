@@ -4,7 +4,7 @@ use zz_protocol::{
     BrowserDescriptor, ClientHello, ClientInstanceId, ClientKind, CommandResponse, Event,
     EventPayload, GuiResponse, InputMessage, LayoutNode, MuxOptionKey, MuxSnapshot,
     PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PaneSnapshot, PasteUploadPurpose, ProtocolMessage,
-    ServerError, WindowId, WindowSnapshot, encode_protocol_message,
+    ServerError, TmuxColour, WindowId, WindowSnapshot, encode_protocol_message,
 };
 use zz_terminal::TerminalColorScheme;
 
@@ -13,8 +13,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_seventy() {
-    assert_eq!(PROTOCOL_VERSION, 70);
+fn protocol_version_on_this_commit_is_seventy_one() {
+    assert_eq!(PROTOCOL_VERSION, 71);
 }
 
 #[test]
@@ -126,9 +126,10 @@ fn target_lookup_errors_use_tmux_wording() {
 }
 
 #[test]
-fn mux_option_key_has_fourteen_daemon_owned_keys() {
-    assert_eq!(MuxOptionKey::ALL.len(), 14);
+fn mux_option_key_has_seventeen_daemon_owned_keys() {
+    assert_eq!(MuxOptionKey::ALL.len(), 17);
     assert!(MuxOptionKey::ALL.contains(&MuxOptionKey::HistoryTrickle));
+    assert!(MuxOptionKey::ALL.contains(&MuxOptionKey::Prefix2));
 }
 
 #[test]
@@ -146,7 +147,7 @@ fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46, 0x00, 0x00, 0x46, 0x00, 0x00, 0x00, 0x00,
+            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x47, 0x00, 0x00, 0x47, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00,
         ]
     );
@@ -158,6 +159,7 @@ fn command_success_round_trips_output_and_exit_code() {
         request_id: 7,
         output: "job output".to_owned(),
         exit_code: 3,
+        stderr: "job error".to_owned(),
     });
     let frame = encode_protocol_message(&message).expect("encode command response");
     assert_eq!(
@@ -241,6 +243,35 @@ fn pane_snapshot_carries_bell() {
         bell: true,
         dead: false,
         dead_status: None,
+        border_colour: None,
+        active_border_colour: None,
     };
     assert!(snapshot.bell);
+}
+
+#[test]
+fn pane_snapshot_border_colours_round_trip_and_reject_invalid_rgb() {
+    let snapshot = PaneSnapshot {
+        id: PaneId(3),
+        title: "bash".to_owned(),
+        kind: PaneKindSnapshot::Terminal,
+        synchronized_input: false,
+        bell: false,
+        dead: false,
+        dead_status: None,
+        border_colour: Some(TmuxColour::Rgb(0x00ff_00ff)),
+        active_border_colour: Some(TmuxColour::Basic(1)),
+    };
+    let bytes = postcard::to_stdvec(&snapshot).expect("pane snapshot encodes");
+    assert_eq!(
+        postcard::from_bytes::<PaneSnapshot>(&bytes).expect("pane snapshot decodes"),
+        snapshot
+    );
+
+    let hostile = PaneSnapshot {
+        border_colour: Some(TmuxColour::Rgb(0x0100_0000)),
+        ..snapshot
+    };
+    let bytes = postcard::to_stdvec(&hostile).expect("hostile snapshot encodes");
+    assert!(postcard::from_bytes::<PaneSnapshot>(&bytes).is_err());
 }

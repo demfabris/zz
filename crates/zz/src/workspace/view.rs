@@ -1394,7 +1394,7 @@ impl AppView {
             self.pane_indicators = state
                 .indicators
                 .iter()
-                .map(|indicator| (indicator.pane, *indicator))
+                .map(|indicator| (indicator.pane, indicator.clone()))
                 .collect();
             if self.display_panes.is_none() {
                 let mux = self.mux.clone();
@@ -2156,7 +2156,7 @@ impl AppView {
                             .into_any_element(),
                     );
                 }
-                if let Some(indicator) = self.pane_indicators.get(pane).copied() {
+                if let Some(indicator) = self.pane_indicators.get(pane) {
                     overlays.push(self.pane_indicator(indicator, cx).into_any_element());
                 }
                 let drag_state = match drag_layer {
@@ -2342,7 +2342,7 @@ impl AppView {
         }
     }
 
-    fn pane_indicator(&self, indicator: PaneIndicator, cx: &Context<Self>) -> impl IntoElement {
+    fn pane_indicator(&self, indicator: &PaneIndicator, cx: &Context<Self>) -> impl IntoElement {
         let active = indicator.active();
         let key: AnyElement = match indicator
             .selection_key()
@@ -3551,6 +3551,8 @@ mod tests {
                     bell: false,
                     dead: false,
                     dead_status: None,
+                    border_colour: None,
+                    active_border_colour: None,
                 },
             )]
             .into_iter()
@@ -3874,6 +3876,8 @@ mod tests {
             bell: false,
             dead: false,
             dead_status: None,
+            border_colour: None,
+            active_border_colour: None,
         };
         let window = WindowSnapshot {
             id: WindowId(0),

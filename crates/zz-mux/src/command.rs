@@ -369,8 +369,10 @@ pub enum MuxEffect {
         window: Option<WindowId>,
         pane: Option<PaneId>,
     },
+    /// `session` scopes a session-effective write; `None` is a global write.
     MuxOptionChanged {
         option: MuxOptionKey,
+        session: Option<SessionId>,
     },
     AgentPaneRestart {
         pane: PaneId,
@@ -1752,7 +1754,20 @@ impl MuxEngine {
             MuxOptionKey::AgentAutoApprove => {
                 if self.agent.auto_approve { "on" } else { "off" }.to_owned()
             }
+            MuxOptionKey::Mouse => tmux_flag(self.global_mouse).to_owned(),
+            MuxOptionKey::EscapeTime => self.escape_time_ms.to_string(),
+            MuxOptionKey::Prefix2 => self
+                .scalar_option_effective(TmuxOptionTarget::GlobalSession, "prefix2")
+                .unwrap_or("None")
+                .to_owned(),
         }
+    }
+
+    /// The `mouse` value effective for one attached session, or the global
+    /// value for an unattached client.
+    #[must_use]
+    pub fn effective_mouse(&self, session: Option<SessionId>) -> bool {
+        session.map_or(self.global_mouse, |session| self.mouse_for_session(session))
     }
 
     /// What the daemon starts an agent pane's adapter with.
@@ -5477,7 +5492,7 @@ impl MuxEngine {
                     remove_named_option_override(&mut self.stored_scalars.panes, pane, name);
                 }
             }
-            return Ok(Execution::default());
+            return Ok(stored_scalar_execution(name, target));
         }
         let current = self
             .scalar_option_effective(target, name)
@@ -5494,7 +5509,7 @@ impl MuxEngine {
         let next =
             normalize_stored_scalar_value(metadata.kind, appended.as_deref().or(value), current)?;
         self.scalar_table_mut_or_insert(target).insert(name, next);
-        Ok(Execution::default())
+        Ok(stored_scalar_execution(name, target))
     }
 
     fn array_table(&self, target: TmuxOptionTarget) -> Option<&ArrayTable> {
@@ -7233,6 +7248,7 @@ impl MuxEngine {
         };
         Ok(Execution::effect(MuxEffect::MuxOptionChanged {
             option: changed,
+            session: None,
         }))
     }
 
@@ -7308,6 +7324,7 @@ impl MuxEngine {
         };
         Ok(Execution::effect(MuxEffect::MuxOptionChanged {
             option: changed,
+            session: None,
         }))
     }
 
@@ -7387,6 +7404,7 @@ impl MuxEngine {
                 MuxEffect::BufferLimitChanged(limit),
                 MuxEffect::MuxOptionChanged {
                     option: MuxOptionKey::BufferLimit,
+                    session: None,
                 },
             ],
         })
@@ -7473,6 +7491,7 @@ impl MuxEngine {
         self.history_trickle = limit;
         Ok(Execution::effect(MuxEffect::MuxOptionChanged {
             option: MuxOptionKey::HistoryTrickle,
+            session: None,
         }))
     }
 
@@ -7508,6 +7527,7 @@ impl MuxEngine {
                 self.global_history_limit = limit;
                 Ok(Execution::effect(MuxEffect::MuxOptionChanged {
                     option: MuxOptionKey::HistoryLimit,
+                    session: None,
                 }))
             }
             TmuxOptionTarget::Session(session) => {
@@ -8188,6 +8208,7 @@ impl MuxEngine {
                     MuxEffect::WordSeparatorsChanged { session: None },
                     MuxEffect::MuxOptionChanged {
                         option: MuxOptionKey::WordSeparators,
+                        session: None,
                     },
                 ],
             });
@@ -8248,6 +8269,7 @@ impl MuxEngine {
                     MuxEffect::ModeKeysChanged { window: None },
                     MuxEffect::MuxOptionChanged {
                         option: MuxOptionKey::ModeKeys,
+                        session: None,
                     },
                 ],
             });
@@ -8299,6 +8321,7 @@ impl MuxEngine {
                 self.state.set_global_synchronize_panes(next);
                 Ok(Execution::effect(MuxEffect::MuxOptionChanged {
                     option: MuxOptionKey::SynchronizePanes,
+                    session: None,
                 }))
             }
             TmuxOptionTarget::Pane(pane) => {
@@ -8351,13 +8374,14 @@ impl MuxEngine {
                 return already_set_or_quiet(options, "mouse");
             }
         }
-        match target {
+        let scope = match target {
             TmuxOptionTarget::GlobalSession => {
                 self.global_mouse = if unset {
                     DEFAULT_MOUSE
                 } else {
                     parse_tmux_flag_value(value, self.global_mouse)?
                 };
+                None
             }
             TmuxOptionTarget::Session(session) => {
                 if unset {
@@ -8366,10 +8390,14 @@ impl MuxEngine {
                     let next = parse_tmux_flag_value(value, self.mouse_for_session(session))?;
                     self.session_mouse.insert(session, next);
                 }
+                Some(session)
             }
             _ => unreachable!("mouse has session scope"),
-        }
-        Ok(Execution::default())
+        };
+        Ok(Execution::effect(MuxEffect::MuxOptionChanged {
+            option: MuxOptionKey::Mouse,
+            session: scope,
+        }))
     }
 
     fn set_escape_time(
@@ -8391,7 +8419,10 @@ impl MuxEngine {
                 i32::MAX.cast_unsigned(),
             )?
         };
-        Ok(Execution::default())
+        Ok(Execution::effect(MuxEffect::MuxOptionChanged {
+            option: MuxOptionKey::EscapeTime,
+            session: None,
+        }))
     }
 
     fn set_automatic_rename(
@@ -8961,6 +8992,16 @@ fn remove_option_override<K: Copy + Ord, O: Copy + Ord>(
             values.remove(&target);
         }
     }
+}
+
+fn stored_scalar_execution(name: &str, target: TmuxOptionTarget) -> Execution {
+    if name == "prefix2" && target == TmuxOptionTarget::GlobalSession {
+        return Execution::effect(MuxEffect::MuxOptionChanged {
+            option: MuxOptionKey::Prefix2,
+            session: None,
+        });
+    }
+    Execution::default()
 }
 
 fn remove_named_option_override<K: Copy + Ord>(
@@ -15859,6 +15900,7 @@ mod tests {
                 MuxEffect::BufferLimitChanged(3),
                 MuxEffect::MuxOptionChanged {
                     option: MuxOptionKey::BufferLimit,
+                    session: None,
                 },
             ]
         );
@@ -15876,6 +15918,7 @@ mod tests {
                 MuxEffect::BufferLimitChanged(DEFAULT_BUFFER_LIMIT),
                 MuxEffect::MuxOptionChanged {
                     option: MuxOptionKey::BufferLimit,
+                    session: None,
                 },
             ]
         );
@@ -15955,6 +15998,7 @@ mod tests {
             changed.effects,
             [MuxEffect::MuxOptionChanged {
                 option: MuxOptionKey::HistoryTrickle,
+                session: None,
             }]
         );
         assert_eq!(engine.history_trickle(), 500);
@@ -15970,6 +16014,7 @@ mod tests {
             disabled.effects,
             [MuxEffect::MuxOptionChanged {
                 option: MuxOptionKey::HistoryTrickle,
+                session: None,
             }]
         );
         assert_eq!(engine.history_trickle(), 0);
@@ -16311,6 +16356,97 @@ mod tests {
             error,
             ServerError::InvalidCommand(message) if message == "bad value: maybe"
         ));
+    }
+
+    #[test]
+    fn v71_option_writes_emit_scoped_mux_option_effects() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+
+        let global = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "mouse", "off"]),
+            )
+            .unwrap();
+        assert_eq!(
+            global.effects,
+            [MuxEffect::MuxOptionChanged {
+                option: MuxOptionKey::Mouse,
+                session: None,
+            }]
+        );
+        assert_eq!(engine.mux_option_value(MuxOptionKey::Mouse), "off");
+        assert!(!engine.effective_mouse(Some(session)));
+
+        let scoped = engine
+            .execute(&mut context, &command("set-option", &["mouse", "on"]))
+            .unwrap();
+        assert_eq!(
+            scoped.effects,
+            [MuxEffect::MuxOptionChanged {
+                option: MuxOptionKey::Mouse,
+                session: Some(session),
+            }]
+        );
+        assert_eq!(engine.mux_option_value(MuxOptionKey::Mouse), "off");
+        assert!(engine.effective_mouse(Some(session)));
+        assert!(!engine.effective_mouse(None));
+
+        let escape = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "escape-time", "50"]),
+            )
+            .unwrap();
+        assert_eq!(
+            escape.effects,
+            [MuxEffect::MuxOptionChanged {
+                option: MuxOptionKey::EscapeTime,
+                session: None,
+            }]
+        );
+        assert_eq!(engine.mux_option_value(MuxOptionKey::EscapeTime), "50");
+
+        let prefix2 = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "prefix2", "C-a"]),
+            )
+            .unwrap();
+        assert_eq!(
+            prefix2.effects,
+            [MuxEffect::MuxOptionChanged {
+                option: MuxOptionKey::Prefix2,
+                session: None,
+            }]
+        );
+        assert_eq!(engine.mux_option_value(MuxOptionKey::Prefix2), "C-a");
+
+        let session_prefix2 = engine
+            .execute(&mut context, &command("set-option", &["prefix2", "C-s"]))
+            .unwrap();
+        assert!(session_prefix2.effects.is_empty());
+        assert_eq!(engine.mux_option_value(MuxOptionKey::Prefix2), "C-a");
+
+        let unset = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "-u", "prefix2"]),
+            )
+            .unwrap();
+        assert_eq!(
+            unset.effects,
+            [MuxEffect::MuxOptionChanged {
+                option: MuxOptionKey::Prefix2,
+                session: None,
+            }]
+        );
+        assert_eq!(engine.mux_option_value(MuxOptionKey::Prefix2), "None");
     }
 
     #[test]
@@ -19731,6 +19867,7 @@ mod tests {
                 MuxEffect::WordSeparatorsChanged { session: None },
                 MuxEffect::MuxOptionChanged {
                     option: MuxOptionKey::WordSeparators,
+                    session: None,
                 },
             ]
         );
@@ -19871,6 +20008,7 @@ mod tests {
                 MuxEffect::ModeKeysChanged { window: None },
                 MuxEffect::MuxOptionChanged {
                     option: MuxOptionKey::ModeKeys,
+                    session: None,
                 },
             ]
         );

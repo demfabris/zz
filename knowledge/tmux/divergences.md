@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: tmux divergence matrix
-description: "Every known divergence from tmux at the pinned reference commit: the 12 missing commands and why, the 30 implemented commands that still reject tmux flags, behavioral gaps on the implemented surface, the options coverage (all 180 store, 67 behave), and the protocol-level differences."
+description: "Every known divergence from tmux at the pinned reference commit: the 12 missing commands and why, the 30 implemented commands that still reject tmux flags, behavioral gaps on the implemented surface, the options coverage (all 180 store, 76 behave), and the protocol-level differences."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-20T00:00:00-03:00
@@ -218,7 +218,8 @@ daemon-owned command semantics in a client.
 | `aggressive-resize` + `window-size` | Since 2026-08-20 both compose like the pin (`resize.c:366-376`): `aggressive-resize` is a candidate FILTER (ON = clients focused on the window; OFF = zz's viewer set, a per-client-focus stand-in for the pin's linked-window `session_has`), and `window-size` is the AGGREGATION policy — `latest` (default) picks the most-recent-input owner, `largest`/`smallest` aggregate componentwise. ON no longer forces `smallest`; configs relying on that must also set `window-size smallest`. `manual` is stored but behaves as `latest` until `resize-window` exists. | **silent**, bounded |
 | `display-time` | Status-message toasts consume the configured milliseconds. Since 2026-08-20 the omitted `display-panes -d` duration comes from `display-panes-time` like the pin (the old reuse divergence is closed). A zero toast remains until manual dismissal, while tmux dismisses its zero-duration status message on a key. | **silent**, deliberate |
 | `respawn-pane` / `respawn-window` | Dead panes revive with stable pane identity; `respawn-window` keeps its first pane and removes the rest. `-k`, `-c`, repeated `-e NAME=VALUE`, and stored command/cwd reuse are implemented. The pin's `-E` empty-environment flag is cataloged but rejected. | loud for `-E` |
-| Array options | Since the 2026-08-20 Lane-2 sweep all eight real array options (`command-alias`, `codepoint-widths`, `user-keys`, `terminal-overrides`, `terminal-features`, `status-format`, `pane-colours`, `update-environment`) store with the pin's separators, hole reuse, and `name[N]`/`-u name[N]` semantics, and the 68 hook names route to the hook table. None of the eight drives behavior: command dispatch consults the static `COMMAND_SPECS` alias table, never `command-alias`; the status renderer reads `status-left`/`status-right`, never `status-format[]`; and session seeding uses the hardcoded default list (`command.rs:7111`), so `set -g update-environment FOO` changes readback only. Indexed `@`/table scalars follow tmux (`not an array` on set; indexed show reads the scalar). | **silent**, store-only |
+| Array options | Since the 2026-08-20 Lane-2 sweep all eight real array options (`command-alias`, `codepoint-widths`, `user-keys`, `terminal-overrides`, `terminal-features`, `status-format`, `pane-colours`, `update-environment`) store with the pin's separators, hole reuse, and `name[N]`/`-u name[N]` semantics, and the 68 hook names route to the hook table. Since the B1 server slice (2026-08-21) `status-format[]` drives the daemon's personalized `StatusLine.rows` production (sparse indices publish blank rows, a session array overrides the global one whole, scoped writes refresh that session's attached clients); the other seven still drive nothing: command dispatch consults the static `COMMAND_SPECS` alias table, never `command-alias`, and session seeding uses the hardcoded default list (`command.rs:7111`), so `set -g update-environment FOO` changes readback only. Indexed `@`/table scalars follow tmux (`not an array` on set; indexed show reads the scalar). | **silent**, store-only except `status-format[]` |
+| Status-row window-option scoping | tmux resolves `window-status-*`, `pane-status-*`, and `window-pane-*-status-format` per loop item during `status-format` expansion, so a per-window override (`set -w -t work:2 window-status-style 'fg=red'`) styles that window's entry in the row. zz's B1 row expansion resolves those names at global/session-effective scope through a per-client variables map, while the `status_label` path keeps honoring per-window overrides — once B1's client half renders rows, the two surfaces can visibly disagree for windows with local overrides. Resolution path: per-window variable resolution through the loop-item hook seam (`Expander::lookup` already passes the item context), scheduled for B1's client half / wave-close arbitration. | **silent**, bounded |
 | `history-limit` default | zz keeps 10,000 lines for its product default; the pin keeps 2,000. `show-options -g history-limit` prints the effective 10,000 value. | **silent**, deliberate |
 | Plain option listings | No-argument listings contain tmux table names and `@` user names. The six zz-native settings stay available through explicit-name queries and never appear as unknown words in tmux-parsing scripts. | **silent**, zz extension hidden from tmux listings |
 | Session environment updates | Both servers seed their global environment at boot. tmux copies each `update-environment` name from the creating client's environment; zz has no client-environment field and copies from the daemon's boot environment. They differ when the daemon outlives the shell that started it. Missing names become unset markers on both. | **silent**, bounded |
@@ -307,7 +308,7 @@ inside a generic “unsupported formats” claim.
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
 | `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
-# Options: all 180 store, 67 behave
+# Options: all 180 store, 76 behave
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin. Since
 the 2026-08-20 Lane-2 sweep **every one of the 180 stores** with the pin's exact default,
@@ -320,15 +321,18 @@ skipped lines**. That is test-enforced: `tmux_options.rs`
 the eight array options store with indexed semantics, and `set-option <hook-name>` writes
 the hook table — the two paths that used to silently succeed while doing nothing are dead.
 
-**67 behave**, meaning a value change is consumed somewhere outside set/show/inherit/
-readback (consumer-traced 2026-08-20). **113 are store-only.** The earlier "78 behave"
-counted options given a typed home in the honest-knobs/status structs, twelve of which
-nothing reads. `tmux_options::BEHAVES` now distinguishes the 67 consumer-traced names from
-storage-only options and test-pins its count, uniqueness, and membership in the option
-catalog. `tmux_stored_scalar` (63 names) and `tmux_stored_array` (8) remain store-only by
-construction; later consumer waves must move each newly behaving name into `BEHAVES`.
+**76 behave**, meaning a value change is consumed somewhere outside set/show/inherit/
+readback (consumer-traced 2026-08-20; nine status-production names joined in the B1 server
+slice on 2026-08-21 — `status-position` stays out until a client consumes it, since its
+publication is unchanged from A3). **104 are store-only.** The earlier "78 behave" counted
+options given a typed home in the honest-knobs/status structs, twelve of which nothing
+read. `tmux_options::BEHAVES` distinguishes the consumer-traced names from storage-only
+options and test-pins its count, uniqueness, and membership in the option catalog.
+`tmux_stored_scalar` and `tmux_stored_array` storage is store-only by construction until a
+consumer wave wires a name up and moves it into `BEHAVES` (B1 moved six stored scalars and
+the `status-format` array).
 
-**Behaving (67):**
+**Behaving (76):**
 
 - Indexing and sessions: `base-index`, `pane-base-index`, `renumber-windows`,
   `default-size`, `window-size`, `aggressive-resize`, `history-limit` (10,000 product
@@ -354,26 +358,37 @@ construction; later consumer waves must move each newly behaving name into `BEHA
   `status-left-style`/`-right-style`, `status-style`, `status-bg`, `status-fg`,
   `window-status-format`, `window-status-current-format`, `window-status-style`,
   `window-status-current-style`, `window-status-last-style`, `window-status-bell-style`.
+- Status wire production (B1 server slice, 2026-08-21 — the daemon expands these into the
+  personalized v71 `StatusLine` per client; no client renders the result until B1's client
+  half): `status-format[]` (sparse indices publish blank rows, session arrays override
+  whole), `status-justify` (resolved inside the expanded row formats), `message-line`
+  (published clamped to the row count), `pane-status-style`, `pane-status-current-style`,
+  `session-status-style`, `session-status-current-style`, `window-pane-status-format`,
+  `window-pane-current-status-format` (all six resolve inside the default pane/session
+  list rows). `status-position` publishes unchanged from A3 and moves into the roster
+  with B1's client half, when a client consumes it.
 
-**Store-only (113):**
+**Store-only (104):**
 
-- Typed storage that nothing reads (43): `mouse`, `escape-time`, `lock-after-time`,
+- Typed storage that nothing reads (41): `mouse`, `escape-time`, `lock-after-time`,
   `lock-command` (the lock commands are no-ops); `monitor-activity`, `monitor-silence`,
   `monitor-bell`, `activity-action`, `silence-action`; `allow-rename`, `alternate-screen`,
   `scroll-on-clear`, `extended-keys`, `extended-keys-format`, `xterm-keys`, `backspace`,
   `editor`, `assume-paste-time`, `input-buffer-size`, `get-clipboard`,
   `default-client-command`, `fill-character`, `variation-selector-always-wide`;
-  `message-style`, `message-command-style`, `message-format`, `message-line`;
+  `message-style`, `message-command-style`, `message-format`;
   `pane-border-lines`, `pane-border-indicators`, the four `pane-scrollbars*`; the four
-  `prompt-*cursor-*`; `clock-mode-colour`, `clock-mode-style`; `status-justify`,
-  `status-position`, `window-status-separator`, `window-status-activity-style`.
-- Generic scalar storage (62 of the 63 scalar-backed names) plus the eight arrays: everything else in the table,
+  `prompt-*cursor-*`; `clock-mode-colour`, `clock-mode-style`; `status-position`
+  (published on the wire unchanged since A3; consumed by no client until B1's client
+  half); `window-status-separator`, `window-status-activity-style`.
+- Generic scalar storage (56 of the 63 scalar-backed names) plus seven of the eight
+  arrays: everything else in the table,
   including `set-titles`/`set-titles-string`, `prefix2`, `display-panes-format`,
   `remain-on-exit-format`, `visual-activity`/`visual-silence`, `status-keys`, the
   lifecycle trio (`exit-empty`, `exit-unattached`, `destroy-unattached`),
   `pane-border-style`/`pane-active-border-style`,
   `window-style`/`window-active-style`, `mode-style` and the `copy-mode-*` styles,
-  `terminal-overrides[]`, `terminal-features[]`, `command-alias[]`, `status-format[]`,
+  `terminal-overrides[]`, `terminal-features[]`, `command-alias[]`,
   `update-environment[]` (seeding uses the hardcoded default list), `user-keys[]`,
   `pane-colours[]`, `codepoint-widths[]`, the 21 theme-palette options, and the
   `tree-mode-*` trio. Lane assignments live in the drop-in plan's "options residue"
@@ -407,7 +422,8 @@ form) — ledgered for the key-string wave.
 | Binary argv | `-L -S -f -2 -C -u -V -N -c -l` | Closed by 7a (2026-08-18): `-V` (`tmux 3.8-zz`), `-L`/`-S`/`-f`/`-c`/`-N`/`-l`/`-2`/`-u`, tmux-shaped usage and unknown-option lines, pin CMD_STARTSERVER autostart. `-C`/`-CC` are the phase-6 control-mode front-end (row below). |
 | Control mode `-CC` | What iTerm2 integration speaks. | SHIPPED (phase 6 complete 2026-08-18): a stdio front-end speaking the full CC protocol — framing, notifications, `%output` with flow control (pause/age-kill/pacing), `refresh-client -A/-B/-C/-f`. Deliberate divergences, all reviewer-endorsed: blocks are COMPLETE (WAIT commands keep output in-block; after-hooks add no extra block; `%pause`/`%continue` land after the triggering block, not inside); per-client monotonic `n`; zz-lax unquoted `%`-words on the control stdin; automatic-rename transients single-fire. |
 | Session groups | `new-session -t`. | Cataloged, rejected. |
-| Presentation | Status line, prompts, choosers drawn as terminal escapes. | Native chrome on both clients. Since the 2026-08-20 status-bar waves the GUI titlebar strip and tab pills render literal `#[…]` styles and the `status-*`/`window-status-*` style options. The TUI now interprets the daemon-expanded styles in `status-left`, `status-right`, and each window `status_label`, but retains its native three-row sidebar or single bottom row. `status-format[]`, `status-justify`, and `status-position` are stored but not honored (the GUI strip stays top and single-line; the TUI stays bottom and left/right-gapped). Prompts and choosers stay native on both. |
+| `StatusLine.customized` | No equivalent — tmux has no wire and no explicit-write ledger. | zz-native v71 field: true while any explicit `status`, `status-*`, or `status-format` write is in force for the recipient's scope (even when the value equals the default); scalar and whole-array unsets clear their mark, an indexed `status-format[N]` unset keeps it. Gates zz-native status hints only. |
+| Presentation | Status line, prompts, choosers drawn as terminal escapes. | Native chrome on both clients. Since the 2026-08-20 status-bar waves the GUI titlebar strip and tab pills render literal `#[…]` styles and the `status-*`/`window-status-*` style options. The TUI now interprets the daemon-expanded styles in `status-left`, `status-right`, and each window `status_label`, but retains its native three-row sidebar or single bottom row. Since the B1 server slice (2026-08-21) the daemon publishes the personalized `status-format[]` rows, `base_style`, clamped `message-line`, effective `status-position`, and `customized` on the v71 `StatusLine`, with `status-justify` resolved inside the row formats — but no client renders those fields yet, so the GUI strip stays top and single-line and the TUI stays bottom and left/right-gapped until B1's client half. Prompts and choosers stay native on both. |
 
 # Related
 

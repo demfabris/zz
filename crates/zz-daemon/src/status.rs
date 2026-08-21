@@ -16,7 +16,8 @@ use glob::{MatchOptions, Pattern};
 use regex::RegexBuilder;
 use zz_mux::{MuxEngine, StatusContext, StatusFormats, StatusHooks, display_width, expand_status};
 use zz_protocol::{
-    ClientId, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, SessionId, StatusLine, WindowId,
+    ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, SessionId, StatusLine,
+    WindowId,
 };
 use zz_terminal::{CellWidth, TerminalSession, TerminalViewport};
 
@@ -37,6 +38,10 @@ pub(crate) struct StatusRenderer {
 pub(crate) struct StatusRequest {
     pub(crate) client: ClientId,
     pub(crate) formats: StatusFormats,
+    pub(crate) row_formats: BTreeMap<u32, String>,
+    pub(crate) variables: BTreeMap<String, String>,
+    pub(crate) message_line: u8,
+    pub(crate) customized: bool,
     pub(crate) context: StatusContext,
     pub(crate) facts: FormatHookFacts,
 }
@@ -213,13 +218,32 @@ fn render(
     if !request.formats.enabled {
         return StatusLine {
             position: request.formats.position,
+            customized: request.customized,
             ..StatusLine::default()
         };
     }
     let now = Local::now();
+    let (left, right) = {
+        let mut hooks = DaemonFormatHooks::status(
+            &request.facts,
+            &request.context,
+            None,
+            cache,
+            touched,
+            refresh,
+            now,
+            tmux_shim,
+            zz_executable,
+        );
+        (
+            expand_status(&request.formats.left, &request.context, &mut hooks),
+            expand_status(&request.formats.right, &request.context, &mut hooks),
+        )
+    };
     let mut hooks = DaemonFormatHooks::status(
         &request.facts,
         &request.context,
+        Some(&request.variables),
         cache,
         touched,
         refresh,
@@ -227,8 +251,26 @@ fn render(
         tmux_shim,
         zz_executable,
     );
-    let left = expand_status(&request.formats.left, &request.context, &mut hooks);
-    let right = expand_status(&request.formats.right, &request.context, &mut hooks);
+    let base_style = expand_base_status_style(&request.formats, &request.context, &mut hooks);
+    let lines = usize::from(request.formats.lines).min(MAX_STATUS_ROWS);
+    let rows = (0..lines)
+        .map(|index| {
+            let index = u32::try_from(index).expect("status row index fits u32");
+            request
+                .row_formats
+                .get(&index)
+                .map_or_else(String::new, |format| {
+                    expand_status(format, &request.context, &mut hooks)
+                })
+        })
+        .collect::<Vec<_>>();
+    let message_line = if rows.is_empty() {
+        0
+    } else {
+        request
+            .message_line
+            .min(u8::try_from(rows.len() - 1).expect("status row count fits u8"))
+    };
     StatusLine {
         left: wrap_status_style(
             &request.formats,
@@ -242,9 +284,37 @@ fn render(
             &trim_status_left(&right, usize::from(request.formats.right_length)),
             &request.formats.right_style,
         ),
+        title: String::new(),
+        base_style,
+        rows,
         position: request.formats.position,
-        ..StatusLine::default()
+        message_line,
+        customized: request.customized,
     }
+}
+
+fn expand_base_status_style(
+    formats: &StatusFormats,
+    context: &StatusContext,
+    hooks: &mut DaemonFormatHooks<'_>,
+) -> String {
+    let mut style = expand_status(&formats.style, context, hooks);
+    if zz_protocol::parse_style(&style).is_none() {
+        style = String::new();
+    }
+    for (key, value) in [("fg", &formats.foreground), ("bg", &formats.background)] {
+        if value.as_str() != "default" {
+            let separator = if style.is_empty() { "" } else { "," };
+            let addition = format!("{separator}{key}={value}");
+            if style.len() + addition.len() <= MAX_STATUS_TEXT_BYTES {
+                style.push_str(&addition);
+            }
+        }
+    }
+    if zz_protocol::parse_style(&style).is_none() {
+        return String::new();
+    }
+    style
 }
 
 fn wrap_status_style(formats: &StatusFormats, text: &str, side_style: &str) -> String {
@@ -424,6 +494,7 @@ impl<'a> DaemonFormatHooks<'a> {
     fn status(
         facts: &'a FormatHookFacts,
         context: &'a StatusContext,
+        variables: Option<&'a BTreeMap<String, String>>,
         cache: &'a mut BTreeMap<String, String>,
         touched: &'a mut BTreeSet<String>,
         refresh: bool,
@@ -434,7 +505,7 @@ impl<'a> DaemonFormatHooks<'a> {
         Self {
             facts,
             status_context: Some(context),
-            variables: None,
+            variables,
             cache: Some(cache),
             touched: Some(touched),
             refresh,
@@ -857,12 +928,239 @@ mod tests {
                 right_length: u16::MAX,
                 ..StatusFormats::default()
             },
+            row_formats: BTreeMap::new(),
+            variables: BTreeMap::new(),
+            message_line: 0,
+            customized: false,
             context: StatusContext {
                 session_name: "work".to_owned(),
                 ..StatusContext::default()
             },
             facts: FormatHookFacts::default(),
         }
+    }
+
+    fn engine_request(
+        client: u64,
+        engine: &MuxEngine,
+        session: Option<SessionId>,
+    ) -> StatusRequest {
+        let snapshot = engine.state.snapshot();
+        StatusRequest {
+            client: ClientId(client),
+            formats: engine.status_formats_for_session(session),
+            row_formats: engine.status_format_array_for_session(session),
+            variables: engine.status_row_variables_for_session(session),
+            message_line: engine.message_line_for_session(session),
+            customized: engine.status_customized_for_session(session),
+            context: status_context(&snapshot, engine, session, None),
+            facts: FormatHookFacts::default(),
+        }
+    }
+
+    fn execute(engine: &mut MuxEngine, context: &mut zz_mux::ExecutionContext, args: &[&str]) {
+        engine
+            .execute(
+                context,
+                &zz_protocol::CommandInvocation::new(args[0], args[1..].iter().copied()),
+            )
+            .unwrap_or_else(|error| panic!("{args:?}: {error:?}"));
+    }
+
+    #[test]
+    fn personalized_rows_expand_per_session_and_dedupe() {
+        let mut engine = MuxEngine::default();
+        let mut context = zz_mux::ExecutionContext::default();
+        execute(
+            &mut engine,
+            &mut context,
+            &["new-session", "-s", "alpha", "-n", "main"],
+        );
+        let alpha = context.session.expect("alpha session");
+        execute(
+            &mut engine,
+            &mut context,
+            &["new-session", "-d", "-s", "beta", "-n", "logs"],
+        );
+        let beta = engine
+            .state
+            .sessions
+            .iter()
+            .find(|(_, session)| session.name == "beta")
+            .map(|(id, _)| *id)
+            .expect("beta session");
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-g", "status-right", "static"],
+        );
+
+        let requests = [
+            engine_request(1, &engine, Some(alpha)),
+            engine_request(2, &engine, Some(beta)),
+        ];
+        let mut renderer = StatusRenderer::default();
+        let first = renderer.render_changed(&requests, false);
+        assert_eq!(first.len(), 2);
+        let alpha_status = &first[0].1;
+        let beta_status = &first[1].1;
+        assert_eq!(alpha_status.rows.len(), 1);
+        assert!(
+            alpha_status.rows[0].contains("[alpha]"),
+            "row 0 carries status-left: {}",
+            alpha_status.rows[0]
+        );
+        assert!(
+            alpha_status.rows[0].contains("0:main"),
+            "row 0 carries the window list: {}",
+            alpha_status.rows[0]
+        );
+        assert!(
+            alpha_status.rows[0].contains("static"),
+            "row 0 carries status-right: {}",
+            alpha_status.rows[0]
+        );
+        assert!(beta_status.rows[0].contains("[beta]"));
+        assert!(beta_status.rows[0].contains("0:logs"));
+        assert_ne!(alpha_status.rows, beta_status.rows);
+        assert_eq!(alpha_status.validate(), Ok(()));
+        assert_eq!(beta_status.validate(), Ok(()));
+        assert!(renderer.render_changed(&requests, false).is_empty());
+    }
+
+    #[test]
+    fn status_row_counts_follow_the_status_option() {
+        let mut engine = MuxEngine::default();
+        let mut context = zz_mux::ExecutionContext::default();
+        execute(
+            &mut engine,
+            &mut context,
+            &["new-session", "-s", "work", "-n", "main"],
+        );
+        let session = context.session.expect("session id");
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-g", "status", "off"],
+        );
+        let off =
+            StatusRenderer::default().render_initial(&engine_request(1, &engine, Some(session)));
+        assert!(off.rows.is_empty());
+        assert_eq!(off.message_line, 0);
+        assert!(off.customized);
+        assert!(off.is_empty());
+
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-g", "status", "5"],
+        );
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-g", "message-line", "4"],
+        );
+        let five =
+            StatusRenderer::default().render_initial(&engine_request(1, &engine, Some(session)));
+        assert_eq!(five.rows.len(), 5);
+        assert!(five.rows[0].contains("[work]"));
+        assert!(!five.rows[1].is_empty());
+        assert!(!five.rows[2].is_empty());
+        assert_eq!(five.rows[3], "");
+        assert_eq!(five.rows[4], "");
+        assert_eq!(five.message_line, 4);
+        assert_eq!(five.validate(), Ok(()));
+
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-g", "status", "2"],
+        );
+        let two =
+            StatusRenderer::default().render_initial(&engine_request(1, &engine, Some(session)));
+        assert_eq!(two.rows.len(), 2);
+        assert_eq!(
+            two.message_line, 1,
+            "message-line clamps below the row count"
+        );
+        assert_eq!(two.validate(), Ok(()));
+    }
+
+    #[test]
+    fn sparse_session_status_formats_keep_blank_rows_without_compaction() {
+        let mut engine = MuxEngine::default();
+        let mut context = zz_mux::ExecutionContext::default();
+        execute(&mut engine, &mut context, &["new-session", "-s", "work"]);
+        let session = context.session.expect("session id");
+        execute(&mut engine, &mut context, &["set-option", "status", "5"]);
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "status-format[3]", "MARK #S"],
+        );
+        let status =
+            StatusRenderer::default().render_initial(&engine_request(1, &engine, Some(session)));
+        assert_eq!(status.rows, ["", "", "", "MARK work", ""]);
+        assert!(status.customized);
+        assert_eq!(status.validate(), Ok(()));
+    }
+
+    #[test]
+    fn base_style_applies_status_style_then_fg_bg_overrides() {
+        let mut renderer = StatusRenderer::default();
+        let mut styled = request(1, "", "");
+        styled.formats.style = "bg=blue,fg=white".to_owned();
+        styled.formats.foreground = "red".to_owned();
+        let status = renderer.render_initial(&styled);
+        assert_eq!(status.base_style, "bg=blue,fg=white,fg=red");
+        assert_eq!(status.validate(), Ok(()));
+
+        let mut dynamic = request(2, "", "");
+        dynamic.formats.style = "fg=#{?window_zoomed,red,green}".to_owned();
+        dynamic.formats.background = "black".to_owned();
+        let status = renderer.render_initial(&dynamic);
+        assert_eq!(status.base_style, "fg=green,bg=black");
+        assert_eq!(status.validate(), Ok(()));
+    }
+
+    #[test]
+    fn an_unparseable_expanded_status_style_degrades_instead_of_dropping_the_event() {
+        let mut renderer = StatusRenderer::default();
+        let mut broken = request(1, "LEFT", "RIGHT");
+        broken.formats.style = "bg=#{@theme_bg}".to_owned();
+        let status = renderer.render_initial(&broken);
+        assert_eq!(status.base_style, "");
+        assert_eq!(status.rows.len(), 1);
+        assert!(status.left.ends_with("LEFT"));
+        assert!(status.right.ends_with("RIGHT"));
+        assert_eq!(
+            status.validate(),
+            Ok(()),
+            "the event must survive the encode seam"
+        );
+
+        let mut overridden = request(2, "", "");
+        overridden.formats.style = "bg=#{@theme_bg}".to_owned();
+        overridden.formats.foreground = "red".to_owned();
+        let status = renderer.render_initial(&overridden);
+        assert_eq!(status.base_style, "fg=red");
+        assert_eq!(status.validate(), Ok(()));
+    }
+
+    #[test]
+    fn message_line_clamps_against_the_published_row_count() {
+        let mut renderer = StatusRenderer::default();
+        let mut clamped = request(1, "", "");
+        clamped.formats.lines = 2;
+        clamped.message_line = 4;
+        let status = renderer.render_initial(&clamped);
+        assert_eq!(status.rows.len(), 2);
+        assert_eq!(status.message_line, 1);
+
+        let mut disabled = request(2, "", "");
+        disabled.formats.enabled = false;
+        disabled.message_line = 3;
+        assert_eq!(renderer.render_initial(&disabled).message_line, 0);
     }
 
     #[test]

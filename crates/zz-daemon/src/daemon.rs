@@ -1124,9 +1124,15 @@ impl OutboundMailbox {
                 ..
             })
         );
-        let Ok(encoded) = self.encode_message(message) else {
-            log::error!("failed to encode outbound control message");
-            return false;
+        let encoded = match self.encode_message(message) {
+            Ok(encoded) => encoded,
+            Err(error) => {
+                log::error!(
+                    target: "zz_daemon::diagnostics::outbound",
+                    "failed to encode outbound control message: {error}"
+                );
+                return false;
+            }
         };
         let mut state = self.state.lock();
         if state.closed {
@@ -2922,6 +2928,10 @@ impl Shared {
     }
 
     fn refresh_status(&self, refresh: bool) {
+        self.refresh_status_for_sessions(refresh, None);
+    }
+
+    fn refresh_status_for_sessions(&self, refresh: bool, sessions: Option<&BTreeSet<SessionId>>) {
         let requests = {
             let mut inner = self.inner.lock();
             inner.engine.set_format_now(unix_timestamp());
@@ -2931,20 +2941,13 @@ impl Shared {
                 .subscribers
                 .keys()
                 .copied()
-                .map(|client| {
-                    let attached = client_attached_session(&inner, client);
-                    StatusRequest {
-                        client,
-                        formats: inner.engine.status_formats_for_session(attached),
-                        context: status_context(
-                            &snapshot,
-                            &inner.engine,
-                            attached,
-                            client_focused_window_for_attachment(&inner, client),
-                        ),
-                        facts: facts.clone(),
-                    }
+                .filter(|client| {
+                    sessions.is_none_or(|sessions| {
+                        client_attached_session(&inner, *client)
+                            .is_some_and(|session| sessions.contains(&session))
+                    })
                 })
+                .map(|client| status_request(&inner, client, &snapshot, facts.clone()))
                 .collect::<Vec<_>>()
         };
         if requests.is_empty() {
@@ -3246,18 +3249,12 @@ impl Shared {
             status: StatusLine::default(),
             key_tables: inner.engine.keys.snapshot(),
         };
-        let attached = client_attached_session(&inner, client);
-        let request = StatusRequest {
+        let request = status_request(
+            &inner,
             client,
-            formats: inner.engine.status_formats_for_session(attached),
-            context: status_context(
-                &inner.engine.state.snapshot(),
-                &inner.engine,
-                attached,
-                client_focused_window_for_attachment(&inner, client),
-            ),
-            facts: format_hook_facts(&inner),
-        };
+            &inner.engine.state.snapshot(),
+            format_hook_facts(&inner),
+        );
         drop(inner);
         let mut hello = hello;
         hello.status = self.status.lock().render_initial(&request);
@@ -3853,6 +3850,7 @@ impl Shared {
         #[cfg(feature = "agent")]
         let mut agent_options_changed = false;
         let mut status_formats_changed = false;
+        let mut status_refresh_sessions = BTreeSet::new();
         let mut shutdown_requested = false;
         let mut immediate_hooks = Vec::new();
         let mut pending_hook_events = Vec::new();
@@ -4878,7 +4876,12 @@ impl Shared {
                             );
                         }
                     }
-                    MuxEffect::StatusFormatsChanged => status_formats_changed = true,
+                    MuxEffect::StatusFormatsChanged { session } => match session {
+                        Some(session) => {
+                            status_refresh_sessions.insert(*session);
+                        }
+                        None => status_formats_changed = true,
+                    },
                     MuxEffect::Attach {
                         session,
                         detach_others,
@@ -5151,6 +5154,8 @@ impl Shared {
             self.publish_snapshot();
         } else if status_formats_changed {
             self.refresh_status(false);
+        } else if !status_refresh_sessions.is_empty() {
+            self.refresh_status_for_sessions(false, Some(&status_refresh_sessions));
         }
         let mut source_file_error = None;
         for (path, quiet) in source_files {
@@ -16661,6 +16666,30 @@ fn client_focused_window_for_attachment(inner: &ServerState, client: ClientId) -
     client_attached_session(inner, client)
         .and_then(|session| inner.engine.state.sessions.get(&session))
         .map(|session| client_focused_window(inner, client, session))
+}
+
+fn status_request(
+    inner: &ServerState,
+    client: ClientId,
+    snapshot: &MuxSnapshot,
+    facts: FormatHookFacts,
+) -> StatusRequest {
+    let attached = client_attached_session(inner, client);
+    StatusRequest {
+        client,
+        formats: inner.engine.status_formats_for_session(attached),
+        row_formats: inner.engine.status_format_array_for_session(attached),
+        variables: inner.engine.status_row_variables_for_session(attached),
+        message_line: inner.engine.message_line_for_session(attached),
+        customized: inner.engine.status_customized_for_session(attached),
+        context: status_context(
+            snapshot,
+            &inner.engine,
+            attached,
+            client_focused_window_for_attachment(inner, client),
+        ),
+        facts,
+    }
 }
 
 fn resolve_popup_client(
@@ -40833,6 +40862,124 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.attached.get(&SessionId(0)),
             Some(&BTreeSet::from([first, second]))
         );
+    }
+
+    #[test]
+    fn scoped_status_format_writes_refresh_only_that_sessions_clients() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        let alpha_mailbox = OutboundMailbox::new();
+        let (alpha_client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&alpha_mailbox),
+        );
+        let beta_mailbox = OutboundMailbox::new();
+        let (beta_client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&beta_mailbox),
+        );
+        let mut context = ExecutionContext::default();
+        for name in ["alpha", "beta"] {
+            shared
+                .execute(
+                    alpha_client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("new-session", ["-d", "-s", name]),
+                )
+                .expect("seed session");
+        }
+        let mut alpha_context = ExecutionContext::default();
+        shared
+            .attach_target(
+                alpha_client,
+                ClientKind::Interactive,
+                &mut alpha_context,
+                "alpha",
+            )
+            .expect("attach alpha");
+        let mut beta_context = ExecutionContext::default();
+        shared
+            .attach_target(
+                beta_client,
+                ClientKind::Interactive,
+                &mut beta_context,
+                "beta",
+            )
+            .expect("attach beta");
+        take_reliable_messages(&alpha_mailbox);
+        take_reliable_messages(&beta_mailbox);
+
+        shared
+            .execute(
+                alpha_client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-t", "alpha", "status-format[0]", "ALPHA-ROW"],
+                ),
+            )
+            .expect("scoped status-format write");
+
+        let alpha_status = take_reliable_messages(&alpha_mailbox)
+            .into_iter()
+            .find_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::StatusChanged { status },
+                    ..
+                }) => Some(status),
+                _ => None,
+            })
+            .expect("alpha client receives the scoped refresh");
+        assert_eq!(alpha_status.rows, ["ALPHA-ROW"]);
+        assert!(alpha_status.customized);
+        assert!(
+            take_reliable_messages(&beta_mailbox)
+                .into_iter()
+                .all(|message| !matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::StatusChanged { .. },
+                        ..
+                    })
+                )),
+            "the write refreshes only alpha's attached clients"
+        );
+    }
+
+    #[test]
+    fn invalid_status_lines_are_rejected_and_surfaced_at_the_outbound_seam() {
+        let mailbox = OutboundMailbox::new();
+        let status = StatusLine {
+            rows: vec![String::new(); zz_protocol::MAX_STATUS_ROWS + 1],
+            ..StatusLine::default()
+        };
+        assert!(status.validate().is_err());
+        assert!(!mailbox.enqueue_reliable(&Shared::event(EventPayload::StatusChanged { status })));
+
+        let unclamped = StatusLine {
+            rows: vec![String::new()],
+            message_line: 1,
+            ..StatusLine::default()
+        };
+        assert!(unclamped.validate().is_err());
+        assert!(
+            !mailbox.enqueue_reliable(&Shared::event(EventPayload::StatusChanged {
+                status: unclamped,
+            }))
+        );
+
+        assert!(
+            mailbox.enqueue_reliable(&Shared::event(EventPayload::StatusChanged {
+                status: StatusLine::default(),
+            }))
+        );
+        assert_eq!(take_reliable_messages(&mailbox).len(), 1);
     }
 
     #[cfg(unix)]

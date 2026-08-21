@@ -377,7 +377,9 @@ pub enum MuxEffect {
     AgentPaneRestart {
         pane: PaneId,
     },
-    StatusFormatsChanged,
+    StatusFormatsChanged {
+        session: Option<SessionId>,
+    },
     Attach {
         session: SessionId,
         detach_others: bool,
@@ -801,6 +803,8 @@ pub struct MuxEngine {
     session_environments: BTreeMap<SessionId, Environment>,
     status: StatusFormats,
     session_status_options: BTreeMap<SessionId, BTreeMap<StatusOption, String>>,
+    explicit_status_options: BTreeSet<&'static str>,
+    session_explicit_status_options: BTreeMap<SessionId, BTreeSet<&'static str>>,
     window_status: WindowStatusFormats,
     window_status_options: BTreeMap<WindowId, BTreeMap<WindowStatusOption, String>>,
     server_options: ServerOptions,
@@ -976,6 +980,8 @@ impl Default for MuxEngine {
             session_environments: BTreeMap::new(),
             status: StatusFormats::default(),
             session_status_options: BTreeMap::new(),
+            explicit_status_options: BTreeSet::new(),
+            session_explicit_status_options: BTreeMap::new(),
             window_status: WindowStatusFormats::default(),
             window_status_options: BTreeMap::new(),
             server_options: ServerOptions::default(),
@@ -1115,6 +1121,120 @@ impl MuxEngine {
             }
         }
         formats
+    }
+
+    #[must_use]
+    pub fn status_format_array_for_session(
+        &self,
+        session: Option<SessionId>,
+    ) -> BTreeMap<u32, String> {
+        let target = session.map_or(TmuxOptionTarget::GlobalSession, TmuxOptionTarget::Session);
+        self.array_option_readback(target, "status-format", true)
+            .map(|(array, _)| {
+                array
+                    .iter()
+                    .filter_map(|(index, value)| match index {
+                        ArrayIndex::Numeric(index) => Some((*index, value.clone())),
+                        ArrayIndex::Named(_) => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn status_row_variables_for_session(
+        &self,
+        session: Option<SessionId>,
+    ) -> BTreeMap<String, String> {
+        let formats = self.status_formats_for_session(session);
+        let mut variables = BTreeMap::new();
+        for option in [
+            StatusOption::Enabled,
+            StatusOption::Background,
+            StatusOption::Foreground,
+            StatusOption::Interval,
+            StatusOption::Justify,
+            StatusOption::Left,
+            StatusOption::LeftLength,
+            StatusOption::LeftStyle,
+            StatusOption::Position,
+            StatusOption::Right,
+            StatusOption::RightLength,
+            StatusOption::RightStyle,
+            StatusOption::Style,
+        ] {
+            variables.insert(option.as_str().to_owned(), formats.value(option));
+        }
+        for name in [
+            "window-status-format",
+            "window-status-current-format",
+            "window-status-separator",
+            "window-status-style",
+            "window-status-current-style",
+            "window-status-last-style",
+            "window-status-bell-style",
+            "window-status-activity-style",
+            "pane-status-style",
+            "pane-status-current-style",
+            "session-status-style",
+            "session-status-current-style",
+            "window-pane-status-format",
+            "window-pane-current-status-format",
+        ] {
+            if let Some(value) = self.global_tmux_option_value(name) {
+                variables.insert(name.to_owned(), value);
+            }
+        }
+        variables
+    }
+
+    #[must_use]
+    pub fn message_line_for_session(&self, session: Option<SessionId>) -> u8 {
+        session
+            .map_or_else(
+                || self.global_session_options.message_line.clone(),
+                |session| self.session_knobs(session).message_line,
+            )
+            .parse()
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn status_customized_for_session(&self, session: Option<SessionId>) -> bool {
+        !self.explicit_status_options.is_empty()
+            || session.is_some_and(|session| {
+                self.session_explicit_status_options
+                    .get(&session)
+                    .is_some_and(|options| !options.is_empty())
+            })
+    }
+
+    fn mark_explicit_status_option(
+        &mut self,
+        session: Option<SessionId>,
+        name: &'static str,
+        explicit: bool,
+    ) -> bool {
+        match (session, explicit) {
+            (None, true) => self.explicit_status_options.insert(name),
+            (None, false) => self.explicit_status_options.remove(name),
+            (Some(session), true) => self
+                .session_explicit_status_options
+                .entry(session)
+                .or_default()
+                .insert(name),
+            (Some(session), false) => {
+                let Some(options) = self.session_explicit_status_options.get_mut(&session) else {
+                    return false;
+                };
+                let removed = options.remove(name);
+                if options.is_empty() {
+                    self.session_explicit_status_options.remove(&session);
+                }
+                removed
+            }
+        }
     }
 
     #[must_use]
@@ -5591,6 +5711,8 @@ impl MuxEngine {
         let metadata = tmux_stored_array(name).expect("stored array metadata");
         let index = index.map(ArrayIndex::parse);
         let unset = option_is_unset(options);
+        let status_format_before =
+            (name == "status-format").then(|| self.array_option(target, name).cloned());
         let already = self
             .array_option(target, name)
             .is_some_and(|array| index.as_ref().is_none_or(|index| array.contains_key(index)));
@@ -5605,7 +5727,15 @@ impl MuxEngine {
             self.remove_pane_array_overrides(window, name, index.as_ref());
         }
         if unset {
+            let whole = index.is_none();
             self.unset_array_option(target, name, index.as_ref());
+            if let Some(before) = status_format_before {
+                return Ok(self.status_format_execution(
+                    target,
+                    before.as_ref(),
+                    whole.then_some(false),
+                ));
+            }
             return Ok(Execution::default());
         }
         let value = value.ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
@@ -5622,6 +5752,9 @@ impl MuxEngine {
                     .or_insert_with(|| value.to_owned());
             } else {
                 array.insert(index, value.to_owned());
+            }
+            if let Some(before) = status_format_before {
+                return Ok(self.status_format_execution(target, before.as_ref(), Some(true)));
             }
             return Ok(Execution::default());
         }
@@ -5644,7 +5777,32 @@ impl MuxEngine {
             let index = first_free_array_index(array.keys())?;
             array.insert(ArrayIndex::Numeric(index), item.to_owned());
         }
+        if let Some(before) = status_format_before {
+            return Ok(self.status_format_execution(target, before.as_ref(), Some(true)));
+        }
         Ok(Execution::default())
+    }
+
+    fn status_format_execution(
+        &mut self,
+        target: TmuxOptionTarget,
+        before: Option<&StringArray>,
+        explicit: Option<bool>,
+    ) -> Execution {
+        let session = match target {
+            TmuxOptionTarget::GlobalSession => None,
+            TmuxOptionTarget::Session(session) => Some(session),
+            _ => return Execution::default(),
+        };
+        let mut changed = self.array_option(target, "status-format") != before;
+        if let Some(explicit) = explicit {
+            changed |= self.mark_explicit_status_option(session, "status-format", explicit);
+        }
+        if changed {
+            Execution::effect(MuxEffect::StatusFormatsChanged { session })
+        } else {
+            Execution::default()
+        }
     }
 
     fn unset_array_option(
@@ -7730,8 +7888,9 @@ impl MuxEngine {
                     .map_err(ServerError::InvalidCommand)?;
             }
             let changed = self.status_formats_for_session(session) != previous;
-            return Ok(if changed {
-                Execution::effect(MuxEffect::StatusFormatsChanged)
+            let unmarked = self.mark_explicit_status_option(session, option.as_str(), false);
+            return Ok(if changed || unmarked {
+                Execution::effect(MuxEffect::StatusFormatsChanged { session })
             } else {
                 Execution::default()
             });
@@ -7790,8 +7949,9 @@ impl MuxEngine {
         } else {
             self.status = next;
         }
-        Ok(if changed {
-            Execution::effect(MuxEffect::StatusFormatsChanged)
+        let marked = self.mark_explicit_status_option(session, option.as_str(), true);
+        Ok(if changed || marked {
+            Execution::effect(MuxEffect::StatusFormatsChanged { session })
         } else {
             Execution::default()
         })
@@ -7941,13 +8101,15 @@ impl MuxEngine {
         if options.has("-o") && !unset && locally_set {
             return already_set_or_quiet(options, option.as_str());
         }
+        let message_line_before =
+            (option == SessionOption::MessageLine).then(|| self.message_line_for_session(session));
         if unset {
             if let Some(session) = session {
                 remove_option_override(&mut self.session_options, session, option);
             } else {
                 self.global_session_options.reset(option);
             }
-            return Ok(Execution::default());
+            return Ok(self.session_option_execution(session, message_line_before));
         }
         let previous = session.map_or_else(
             || self.global_session_options.clone(),
@@ -7972,7 +8134,21 @@ impl MuxEngine {
         } else {
             self.global_session_options = next;
         }
-        Ok(Execution::default())
+        Ok(self.session_option_execution(session, message_line_before))
+    }
+
+    fn session_option_execution(
+        &self,
+        session: Option<SessionId>,
+        message_line_before: Option<u8>,
+    ) -> Execution {
+        if message_line_before
+            .is_some_and(|before| self.message_line_for_session(session) != before)
+        {
+            Execution::effect(MuxEffect::StatusFormatsChanged { session })
+        } else {
+            Execution::default()
+        }
     }
 
     fn set_window_option(
@@ -18757,6 +18933,297 @@ mod tests {
             Err(ServerError::InvalidCommand(message))
                 if message == "invalid option: status-format[]"
         ));
+    }
+
+    #[test]
+    fn status_format_array_exposes_sparse_session_effective_entries() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.expect("session id");
+
+        let defaults = engine.status_format_array_for_session(None);
+        assert_eq!(
+            defaults.keys().copied().collect::<Vec<_>>(),
+            [0, 1, 2],
+            "the pinned defaults materialize three rows"
+        );
+        assert_eq!(
+            engine.status_format_array_for_session(Some(session)),
+            defaults,
+            "sessions without overrides inherit the global array"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "status-format[4]", "tail"]),
+            )
+            .unwrap();
+        let sparse = engine.status_format_array_for_session(None);
+        assert_eq!(sparse.keys().copied().collect::<Vec<_>>(), [0, 1, 2, 4]);
+        assert!(!sparse.contains_key(&3), "missing indices stay missing");
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["status-format[3]", "local"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["status-format[1]", ""]),
+            )
+            .unwrap();
+        let scoped = engine.status_format_array_for_session(Some(session));
+        assert_eq!(
+            scoped,
+            BTreeMap::from([(1, String::new()), (3, "local".to_owned())]),
+            "a session array overrides whole and keeps explicit-empty rows distinct from unset"
+        );
+        assert_eq!(
+            engine.status_format_array_for_session(None),
+            sparse,
+            "the global array is untouched by session writes"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-u", "status-format"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.status_format_array_for_session(Some(session)),
+            sparse
+        );
+    }
+
+    #[test]
+    fn explicit_status_writes_flip_and_clear_customized() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.expect("session id");
+        assert!(!engine.status_customized_for_session(None));
+        assert!(!engine.status_customized_for_session(Some(session)));
+
+        let same_as_default = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "status", "on"]),
+            )
+            .unwrap();
+        assert_eq!(
+            same_as_default.effects,
+            [MuxEffect::StatusFormatsChanged { session: None }],
+            "an explicit write equal to the default still publishes"
+        );
+        assert!(engine.status_customized_for_session(None));
+        assert!(engine.status_customized_for_session(Some(session)));
+
+        let cleared = engine
+            .execute(&mut context, &command("set-option", &["-gu", "status"]))
+            .unwrap();
+        assert_eq!(
+            cleared.effects,
+            [MuxEffect::StatusFormatsChanged { session: None }]
+        );
+        assert!(!engine.status_customized_for_session(None));
+        assert!(!engine.status_customized_for_session(Some(session)));
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["status-left", "[#S] "]),
+            )
+            .unwrap();
+        assert!(!engine.status_customized_for_session(None));
+        assert!(engine.status_customized_for_session(Some(session)));
+        engine
+            .execute(&mut context, &command("set-option", &["-u", "status-left"]))
+            .unwrap();
+        assert!(!engine.status_customized_for_session(Some(session)));
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["status-format[0]", "row"]),
+            )
+            .unwrap();
+        assert!(engine.status_customized_for_session(Some(session)));
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-u", "status-format"]),
+            )
+            .unwrap();
+        assert!(!engine.status_customized_for_session(Some(session)));
+    }
+
+    #[test]
+    fn status_format_writes_emit_status_effects_with_their_scope() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.expect("session id");
+
+        let global = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "status-format[0]", "global-row"]),
+            )
+            .unwrap();
+        assert_eq!(
+            global.effects,
+            [MuxEffect::StatusFormatsChanged { session: None }]
+        );
+
+        let scoped = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["status-format[3]", "scoped-row"]),
+            )
+            .unwrap();
+        assert_eq!(
+            scoped.effects,
+            [MuxEffect::StatusFormatsChanged {
+                session: Some(session)
+            }]
+        );
+
+        let unchanged = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["status-format[3]", "scoped-row"]),
+            )
+            .unwrap();
+        assert!(unchanged.effects.is_empty());
+
+        let scoped_unset = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-u", "status-format"]),
+            )
+            .unwrap();
+        assert_eq!(
+            scoped_unset.effects,
+            [MuxEffect::StatusFormatsChanged {
+                session: Some(session)
+            }]
+        );
+
+        let global_unset = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-gu", "status-format"]),
+            )
+            .unwrap();
+        assert_eq!(
+            global_unset.effects,
+            [MuxEffect::StatusFormatsChanged { session: None }]
+        );
+    }
+
+    #[test]
+    fn message_line_reads_session_effective_values_and_publishes_changes() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.expect("session id");
+        assert_eq!(engine.message_line_for_session(None), 0);
+        assert_eq!(engine.message_line_for_session(Some(session)), 0);
+
+        let global = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "message-line", "4"]),
+            )
+            .unwrap();
+        assert_eq!(
+            global.effects,
+            [MuxEffect::StatusFormatsChanged { session: None }]
+        );
+        assert_eq!(engine.message_line_for_session(Some(session)), 4);
+
+        let scoped = engine
+            .execute(&mut context, &command("set-option", &["message-line", "2"]))
+            .unwrap();
+        assert_eq!(
+            scoped.effects,
+            [MuxEffect::StatusFormatsChanged {
+                session: Some(session)
+            }]
+        );
+        assert_eq!(engine.message_line_for_session(Some(session)), 2);
+        assert_eq!(engine.message_line_for_session(None), 4);
+        assert!(
+            !engine.status_customized_for_session(Some(session)),
+            "message-line is not part of the status customization ledger"
+        );
+
+        let unset = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-u", "message-line"]),
+            )
+            .unwrap();
+        assert_eq!(
+            unset.effects,
+            [MuxEffect::StatusFormatsChanged {
+                session: Some(session)
+            }]
+        );
+        assert_eq!(engine.message_line_for_session(Some(session)), 4);
+    }
+
+    #[test]
+    fn status_row_variables_carry_session_effective_option_values() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.expect("session id");
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["status-left", "LOCAL "]),
+            )
+            .unwrap();
+
+        let global = engine.status_row_variables_for_session(None);
+        assert_eq!(
+            global.get("status-left").map(String::as_str),
+            Some(crate::tmux_options::STATUS_LEFT_DEFAULT)
+        );
+        assert_eq!(
+            global.get("status-justify").map(String::as_str),
+            Some("left")
+        );
+        assert_eq!(
+            global.get("window-status-format").map(String::as_str),
+            Some(crate::DEFAULT_WINDOW_STATUS_FORMAT)
+        );
+        assert_eq!(
+            global.get("pane-status-current-style").map(String::as_str),
+            Some("underscore")
+        );
+
+        let scoped = engine.status_row_variables_for_session(Some(session));
+        assert_eq!(
+            scoped.get("status-left").map(String::as_str),
+            Some("LOCAL ")
+        );
     }
 
     #[test]

@@ -821,6 +821,15 @@ pub const BEHAVES: &[&str] = &[
     "status-style",
     "status-bg",
     "status-fg",
+    "status-format",
+    "status-justify",
+    "message-line",
+    "pane-status-style",
+    "pane-status-current-style",
+    "session-status-style",
+    "session-status-current-style",
+    "window-pane-status-format",
+    "window-pane-current-status-format",
     "window-status-format",
     "window-status-current-format",
     "window-status-style",
@@ -1318,8 +1327,8 @@ mod tests {
 
     #[test]
     fn behaving_option_roster_is_complete_unique_and_catalogued() {
-        assert_eq!(BEHAVES.len(), 67);
-        assert_eq!(BEHAVES.iter().copied().collect::<BTreeSet<_>>().len(), 67);
+        assert_eq!(BEHAVES.len(), 76);
+        assert_eq!(BEHAVES.iter().copied().collect::<BTreeSet<_>>().len(), 76);
         let catalog = tmux_options()
             .map(|option| option.name)
             .collect::<BTreeSet<_>>();

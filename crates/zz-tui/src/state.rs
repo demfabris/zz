@@ -4,7 +4,8 @@ use zz_client::ClientCore;
 use zz_daemon::{Endpoint, HostEntry};
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, CommandPromptState, DisplayPanesState, MuxSnapshot, PaneId,
-    PaneKindSnapshot, PaneSnapshot, SessionId, SessionSnapshot, StatusLine, WindowSnapshot,
+    PaneKindSnapshot, PaneSnapshot, SessionId, SessionSnapshot, StatusLine, StatusPosition,
+    TmuxRange, WindowSnapshot,
 };
 use zz_terminal::{TerminalAppearance, TerminalViewport};
 
@@ -135,6 +136,88 @@ impl Model {
         }
         self.clamp_sidebar();
         self.recompute_layout();
+    }
+
+    /// Adopts a fresh status publication. Returns whether the block's
+    /// geometry — row count, position, or suppression — changed, which the
+    /// caller must treat as a layout event.
+    pub fn set_status(&mut self, status: StatusLine) -> bool {
+        let previous = (self.status_block_rows(), self.status_top());
+        self.status = status;
+        let changed = previous != (self.status_block_rows(), self.status_top());
+        if changed {
+            self.recompute_layout();
+        }
+        changed
+    }
+
+    /// Rows the tmux status block occupies: the published row count, or zero
+    /// when status is off or the terminal cannot keep one pane-content row.
+    pub fn status_block_rows(&self) -> u16 {
+        let rows = u16::try_from(self.status.rows.len()).unwrap_or(u16::MAX);
+        if rows == 0 || self.size.rows < rows.saturating_add(2) {
+            0
+        } else {
+            rows
+        }
+    }
+
+    pub fn status_top(&self) -> bool {
+        self.status.position == StatusPosition::Top
+    }
+
+    pub fn status_origin_y(&self) -> u16 {
+        if self.status_top() {
+            0
+        } else {
+            self.size.rows.saturating_sub(self.status_block_rows())
+        }
+    }
+
+    /// The main columns the status block spans: everything beside the sidebar.
+    pub fn status_area(&self) -> (u16, u16) {
+        let x = if self.sidebar_visible() {
+            sidebar::WIDTH
+                .saturating_add(sidebar::BORDER_WIDTH)
+                .min(self.size.columns)
+        } else {
+            0
+        };
+        (x, self.size.columns.saturating_sub(x))
+    }
+
+    /// The screen row client messages and the command prompt replace: the
+    /// block's `message_line` row, or one virtual row at the configured
+    /// position while a message or prompt is active with the block hidden.
+    pub fn message_row_y(&self) -> Option<u16> {
+        let block = self.status_block_rows();
+        if block > 0 {
+            let line = u16::from(self.status.message_line).min(block.saturating_sub(1));
+            Some(self.status_origin_y().saturating_add(line))
+        } else if self.command_prompt.is_some() || self.client_message.is_some() {
+            Some(if self.status_top() {
+                0
+            } else {
+                self.size.rows.saturating_sub(1)
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn status_row_at(&self, row: u16) -> Option<usize> {
+        let block = self.status_block_rows();
+        let origin = self.status_origin_y();
+        (block > 0 && row >= origin && row < origin.saturating_add(block))
+            .then(|| usize::from(row - origin))
+    }
+
+    pub fn status_hit_target(&self, index: usize, column: u16) -> Option<TmuxRange> {
+        let (_, width) = self.status_area();
+        let row = self.status.rows.get(index)?;
+        zz_client::compose_status_row(row, width, &self.status.base_style)
+            .hit_target(column)
+            .cloned()
     }
 
     pub fn sidebar_visible(&self) -> bool {
@@ -373,8 +456,13 @@ impl Model {
     }
 
     fn recompute_layout(&mut self) {
-        let canvas =
-            sidebar::canvas_rect(self.size.columns, self.size.rows, self.sidebar_visible());
+        let canvas = sidebar::canvas_rect(
+            self.size.columns,
+            self.size.rows,
+            self.sidebar_visible(),
+            self.status_block_rows(),
+            self.status_top(),
+        );
         self.layout = self
             .window()
             .map_or_else(ResolvedLayout::default, |window| {
@@ -400,5 +488,110 @@ impl Model {
         }
         self.sidebar
             .clamp(rows.len(), sidebar::tree_height(self.size.rows));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zz_protocol::StatusPosition;
+
+    fn make_model(columns: u16, rows: u16) -> Model {
+        let core = ClientCore::new();
+        let endpoint = Endpoint::parse("unix:///tmp/zz-state-test.sock").expect("test endpoint");
+        Model::new(
+            &core,
+            TerminalSize {
+                columns,
+                rows,
+                cell_width_px: 8,
+                cell_height_px: 16,
+            },
+            "host".to_owned(),
+            "host".to_owned(),
+            endpoint.clone(),
+            endpoint,
+            Vec::new(),
+        )
+    }
+
+    fn status(rows: Vec<&str>, position: StatusPosition, message_line: u8) -> StatusLine {
+        StatusLine {
+            rows: rows.into_iter().map(str::to_owned).collect(),
+            position,
+            message_line,
+            ..StatusLine::default()
+        }
+    }
+
+    #[test]
+    fn status_rows_change_geometry_and_report_a_layout_event() {
+        let mut model = make_model(79, 24);
+        assert_eq!(model.status_block_rows(), 0);
+        assert!(model.set_status(status(vec!["row"], StatusPosition::Bottom, 0)));
+        assert_eq!(model.status_block_rows(), 1);
+        assert_eq!(model.status_origin_y(), 23);
+        assert!(!model.set_status(status(vec!["other"], StatusPosition::Bottom, 0)));
+        assert!(model.set_status(status(vec!["a", "b"], StatusPosition::Top, 1)));
+        assert_eq!(model.status_origin_y(), 0);
+        assert!(model.set_status(StatusLine::default()));
+        assert_eq!(model.status_block_rows(), 0);
+    }
+
+    #[test]
+    fn the_block_is_suppressed_when_no_pane_content_row_would_remain() {
+        let mut model = make_model(79, 3);
+        model.set_status(status(vec!["a", "b"], StatusPosition::Bottom, 0));
+        assert_eq!(
+            model.status_block_rows(),
+            0,
+            "3 rows cannot host 2+header+content"
+        );
+
+        let mut roomy = make_model(79, 4);
+        roomy.set_status(status(vec!["a", "b"], StatusPosition::Bottom, 0));
+        assert_eq!(roomy.status_block_rows(), 2);
+    }
+
+    #[test]
+    fn message_row_follows_message_line_and_becomes_virtual_when_off() {
+        let mut model = make_model(79, 24);
+        model.set_status(status(vec!["a", "b", "c"], StatusPosition::Bottom, 1));
+        assert_eq!(model.message_row_y(), Some(22));
+
+        model.set_status(status(vec!["a", "b", "c"], StatusPosition::Top, 2));
+        assert_eq!(model.message_row_y(), Some(2));
+
+        model.set_status(StatusLine::default());
+        assert_eq!(model.message_row_y(), None);
+        model.client_message = Some("hi".to_owned());
+        assert_eq!(model.message_row_y(), Some(23));
+        model.status.position = StatusPosition::Top;
+        assert_eq!(model.message_row_y(), Some(0));
+    }
+
+    #[test]
+    fn status_hit_targets_map_columns_to_window_ranges() {
+        let mut model = make_model(79, 24);
+        model.set_status(status(
+            vec!["#[range=window|2]0:sh#[norange] rest"],
+            StatusPosition::Bottom,
+            0,
+        ));
+        assert_eq!(model.status_row_at(23), Some(0));
+        assert_eq!(model.status_row_at(22), None);
+        assert_eq!(model.status_hit_target(0, 2), Some(TmuxRange::Window(2)));
+        assert_eq!(model.status_hit_target(0, 40), None);
+    }
+
+    #[test]
+    fn the_status_block_spans_only_the_main_columns_beside_the_sidebar() {
+        let model = make_model(100, 30);
+        assert!(model.sidebar_visible());
+        assert_eq!(model.status_area(), (29, 71));
+
+        let narrow = make_model(79, 24);
+        assert!(!narrow.sidebar_visible());
+        assert_eq!(narrow.status_area(), (0, 79));
     }
 }

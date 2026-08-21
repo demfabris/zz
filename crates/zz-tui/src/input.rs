@@ -649,6 +649,21 @@ fn handle_mouse(
     if sidebar_focus_changed {
         model.sidebar.focused = false;
     }
+    if let Some(index) = model.status_row_at(global_row) {
+        let (status_x, _) = model.status_area();
+        if matches!(event.kind, MouseEventKind::Down(MouseButton::Left))
+            && global_column >= status_x
+            && let Some(zz_protocol::TmuxRange::Window(window)) =
+                model.status_hit_target(index, global_column - status_x)
+        {
+            execute_target(client, "select-window", format!(":{window}"))?;
+        }
+        return Ok(if sidebar_focus_changed {
+            InputOutcome::Repaint
+        } else {
+            InputOutcome::None
+        });
+    }
     let Some(entry) = model.pane_at(global_column, global_row) else {
         return Ok(if sidebar_focus_changed {
             InputOutcome::Repaint

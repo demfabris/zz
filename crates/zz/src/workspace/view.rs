@@ -12,14 +12,14 @@ use gpui::{
     Animation, AnimationExt as _, AnyElement, AnyView, AnyWindowHandle, App, Bounds, Context,
     CursorStyle, DragMoveEvent, Entity, EntityId, FocusHandle, IntoElement, KeyUpEvent, Keystroke,
     MouseButton, MouseExitEvent, MouseUpEvent, Pixels, Point, Render, Size, StyleRefinement,
-    Window, div, ease_out_quint, prelude::*, px,
+    TextRun, Window, div, ease_out_quint, prelude::*, px,
 };
 use zz_mux::{display_width, joined_layout, swapped_layout};
 use zz_protocol::{
     AgentCommand, Axis, ClientMessageKind, CommandInvocation, DisplayPanesAction, GuiResponse,
     InputMessage, LayoutNode, MenuState, MuxSnapshot, PROTOCOL_VERSION, PaneId, PaneIndicator,
     PaneKindSnapshot, PopupBorderLines, PopupState, SPLIT_RATIO_BASIS, SessionId, SplitId,
-    WindowId, WindowSnapshot,
+    StatusLine, StatusPosition, WindowId, WindowSnapshot,
 };
 use zz_terminal::KeyAction as TerminalKeyAction;
 use zz_ui::attachment::open_attachment_preview;
@@ -591,6 +591,7 @@ pub struct AppView {
     pane_drop_preview: Rc<Cell<DropPreviewFrame>>,
     pane_layout_override: Option<PaneLayoutOverride>,
     pane_canvas_size: Rc<Cell<Size<Pixels>>>,
+    workspace_canvas_size: Rc<Cell<Size<Pixels>>>,
     prefix_claim: PrefixClaim,
     dialog_prefix_cancel_sent: bool,
     dialog_prefix_cancel_pending: Option<u64>,
@@ -780,6 +781,7 @@ impl AppView {
             pane_drop_preview: Rc::new(Cell::new(DropPreviewFrame::default())),
             pane_layout_override: None,
             pane_canvas_size: Rc::new(Cell::new(Size::default())),
+            workspace_canvas_size: Rc::new(Cell::new(Size::default())),
             prefix_claim: PrefixClaim::default(),
             dialog_prefix_cancel_sent: false,
             dialog_prefix_cancel_pending: None,
@@ -2653,6 +2655,35 @@ impl Render for AppView {
         } else {
             pane_margin
         };
+        let status = self.mux.read(cx).status().clone();
+        let status_appearance = self.mux.read(cx).appearance();
+        let status_block_visible = tmux_status_block_shown(
+            &status,
+            route == WorkspaceRoute::Settings,
+            active_window.is_some(),
+        ) && tmux_status_block_fits(
+            self.workspace_canvas_size.get().height,
+            status.rows.len(),
+            crate::terminal::view::terminal_line_height(&status_appearance),
+        );
+        let status_block_top = status_block_visible && status.position == StatusPosition::Top;
+        let (mut status_block, status_block_height) = if status_block_visible {
+            let canvas_width = self.pane_canvas_size.get().width;
+            let (element, height) =
+                tmux_status_block(&status, canvas_width, &status_appearance, window, cx);
+            (Some(element), height)
+        } else {
+            (None, px(0.))
+        };
+        let canvas_origin = gpui::point(
+            pane_margin,
+            canvas_top
+                + if status_block_top {
+                    status_block_height
+                } else {
+                    px(0.)
+                },
+        );
         let mut overlays = if route == WorkspaceRoute::Settings {
             Vec::new()
         } else {
@@ -2672,16 +2703,17 @@ impl Render for AppView {
             .flatten()
             .collect::<Vec<_>>()
         };
-        if let Some(popup) = self.popup_overlay(gpui::point(pane_margin, canvas_top), window, cx) {
+        if let Some(popup) = self.popup_overlay(canvas_origin, window, cx) {
             overlays.push(popup);
         }
-        if let Some(menu) = self.menu_overlay(gpui::point(pane_margin, canvas_top), window, cx) {
+        if let Some(menu) = self.menu_overlay(canvas_origin, window, cx) {
             overlays.push(menu);
         }
-        if let Some(confirm) = self.confirm_overlay(gpui::point(pane_margin, canvas_top), cx) {
+        if let Some(confirm) = self.confirm_overlay(canvas_origin, cx) {
             overlays.push(confirm);
         }
         let measured_canvas_size = self.pane_canvas_size.clone();
+        let measured_workspace_size = self.workspace_canvas_size.clone();
         let gap_background = crate::theme::chrome_background(cx);
         let content = div()
             .relative()
@@ -2701,15 +2733,28 @@ impl Render for AppView {
                     .top(canvas_top)
                     .right(pane_margin)
                     .bottom(pane_margin)
+                    .flex()
+                    .flex_col()
                     .on_prepaint(move |bounds, _, _| {
-                        measured_canvas_size.set(bounds.size);
+                        measured_workspace_size.set(bounds.size);
                     })
-                    .on_drag_move::<PaneDrag>(cx.listener(Self::on_pane_drag_move))
-                    .on_drop(cx.listener(|view, drag: &PaneDrag, window, cx| {
-                        view.on_pane_drop(*drag, window, cx);
-                    }))
-                    .child(content)
-                    .children(drop_preview),
+                    .children(status_block_top.then(|| status_block.take()).flatten())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .relative()
+                            .on_prepaint(move |bounds, _, _| {
+                                measured_canvas_size.set(bounds.size);
+                            })
+                            .on_drag_move::<PaneDrag>(cx.listener(Self::on_pane_drag_move))
+                            .on_drop(cx.listener(|view, drag: &PaneDrag, window, cx| {
+                                view.on_pane_drop(*drag, window, cx);
+                            }))
+                            .child(content)
+                            .children(drop_preview),
+                    )
+                    .children(status_block),
             );
         layout_corners.round_div(
             app_workspace_surface("app-root", content, overlays, cx)
@@ -2724,6 +2769,86 @@ impl Render for AppView {
             frame_content_corner_radius(cx),
         )
     }
+}
+
+/// Decision 6: at defaults the GUI keeps its native chrome — the tmux block
+/// appears only once a config writes an explicit status option.
+fn tmux_status_block_shown(status: &StatusLine, settings_route: bool, has_window: bool) -> bool {
+    status.customized && !status.rows.is_empty() && !settings_route && has_window
+}
+
+/// The GUI mirror of the status.c rule that the status never takes the last
+/// content row: the block is suppressed when the measured workspace canvas
+/// cannot keep one pane header plus one content row beside it. An unmeasured
+/// canvas (first frame) does not suppress.
+fn tmux_status_block_fits(workspace_height: Pixels, rows: usize, line_height: Pixels) -> bool {
+    if workspace_height <= px(0.) {
+        return true;
+    }
+    workspace_height - line_height * rows >= line_height * 2
+}
+
+fn tmux_status_block(
+    status: &StatusLine,
+    canvas_width: Pixels,
+    appearance: &zz_terminal::TerminalAppearance,
+    window: &mut Window,
+    cx: &App,
+) -> (AnyElement, Pixels) {
+    let font = crate::terminal::view::terminal_font(appearance);
+    let font_size = crate::terminal::view::terminal_font_size(appearance);
+    let line_height = crate::terminal::view::terminal_line_height(appearance);
+    let foreground =
+        crate::theme::tmux_style_colour(&status.base_style, "fg", cx.theme().foreground, cx);
+    let background =
+        crate::theme::tmux_style_colour(&status.base_style, "bg", cx.theme().background, cx);
+    let probe = window.text_system().shape_line(
+        "m".into(),
+        font_size,
+        &[TextRun {
+            len: 1,
+            font: font.clone(),
+            color: foreground,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }],
+        None,
+    );
+    let cell_width = if f32::from(probe.width) > 1.0 {
+        probe.width
+    } else {
+        px(8.0)
+    };
+    let columns = (f32::from(canvas_width) / f32::from(cell_width))
+        .floor()
+        .clamp(2.0, f32::from(u16::MAX)) as u16;
+    let rows = status.rows.iter().map(|row| {
+        let composed = zz_client::compose_status_row(row, columns, &status.base_style);
+        let styled =
+            crate::theme::tmux_styled_segments_text(&composed.segments, foreground, background, cx);
+        div()
+            .h(line_height)
+            .w_full()
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .child(styled.into_styled_text())
+    });
+    let block = div()
+        .id("tmux-status-block")
+        .flex_none()
+        .w_full()
+        .flex()
+        .flex_col()
+        .overflow_hidden()
+        .font(font)
+        .text_size(font_size)
+        .line_height(line_height)
+        .text_color(foreground)
+        .bg(background)
+        .children(rows)
+        .into_any_element();
+    (block, line_height * status.rows.len())
 }
 
 fn popup_frame(
@@ -3037,6 +3162,49 @@ mod tests {
     enum PaneReleaseStep {
         Drop(CommandInvocation),
         Teardown(PaneId),
+    }
+
+    #[test]
+    fn the_tmux_status_block_appears_only_for_customized_status_with_rows() {
+        let customized = StatusLine {
+            rows: vec!["row".to_owned()],
+            customized: true,
+            ..StatusLine::default()
+        };
+        assert!(tmux_status_block_shown(&customized, false, true));
+        assert!(!tmux_status_block_shown(&customized, true, true));
+        assert!(!tmux_status_block_shown(&customized, false, false));
+
+        let default_shaped = StatusLine {
+            rows: vec!["row".to_owned()],
+            ..StatusLine::default()
+        };
+        assert!(
+            !tmux_status_block_shown(&default_shaped, false, true),
+            "decision 6: the GUI keeps zz chrome at defaults"
+        );
+
+        let customized_off = StatusLine {
+            customized: true,
+            ..StatusLine::default()
+        };
+        assert!(!tmux_status_block_shown(&customized_off, false, true));
+    }
+
+    #[test]
+    fn the_status_block_never_takes_the_last_pane_content_row() {
+        let line = px(20.0);
+        assert!(tmux_status_block_fits(px(200.0), 5, line));
+        assert!(
+            !tmux_status_block_fits(px(120.0), 5, line),
+            "status 5 in a short window would leave less than header+content"
+        );
+        assert!(tmux_status_block_fits(px(140.0), 5, line));
+        assert!(!tmux_status_block_fits(px(59.0), 1, line));
+        assert!(
+            tmux_status_block_fits(px(0.0), 5, line),
+            "an unmeasured canvas does not suppress"
+        );
     }
 
     struct PaneReleaseOrderPreview;

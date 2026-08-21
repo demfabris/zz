@@ -4,6 +4,7 @@ use std::{
     io::{self, Write as _},
 };
 
+use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{
     Axis, PaneId, PaneKindSnapshot, StyledSegment, TmuxAttributeState, TmuxColour, TmuxStyle,
     parse_styled_segments,
@@ -53,6 +54,14 @@ impl StyledLine {
         }
     }
 
+    fn from_segments(segments: Vec<StyledSegment>) -> Self {
+        let mut line = Self::default();
+        for segment in segments {
+            line.push_segment(&segment.text, segment.style);
+        }
+        line
+    }
+
     fn plain(value: &str) -> Self {
         let mut line = Self::default();
         line.push_plain(value);
@@ -94,10 +103,6 @@ impl StyledLine {
         self.segments.is_empty()
     }
 
-    fn clear(&mut self) {
-        self.segments.clear();
-    }
-
     fn truncate(&self, width: usize) -> Self {
         let mut truncated = Self::default();
         let mut remaining = width;
@@ -136,7 +141,8 @@ pub(crate) struct Renderer {
     headers: HashMap<PaneId, String>,
     picker_cards: HashMap<PaneId, (Rect, usize)>,
     sidebar_rows: Vec<PaintedSidebarRow>,
-    status: StyledLine,
+    status_rows: Vec<StyledLine>,
+    status_geometry: Option<(u16, u16, u16)>,
     damage: HashMap<PaneId, FrameDamage>,
     browser_placements: HashMap<PaneId, KittyPlacement>,
     browser_painted: HashMap<PaneId, bool>,
@@ -153,7 +159,8 @@ impl Renderer {
             headers: HashMap::new(),
             picker_cards: HashMap::new(),
             sidebar_rows: Vec::new(),
-            status: StyledLine::default(),
+            status_rows: Vec::new(),
+            status_geometry: None,
             damage: HashMap::new(),
             browser_placements: HashMap::new(),
             browser_painted: HashMap::new(),
@@ -166,7 +173,8 @@ impl Renderer {
         self.headers.clear();
         self.picker_cards.clear();
         self.sidebar_rows.clear();
-        self.status.clear();
+        self.status_rows.clear();
+        self.status_geometry = None;
         self.damage.clear();
         self.browser_painted.clear();
         self.kitty.invalidate();
@@ -255,16 +263,18 @@ impl Renderer {
             self.kitty.suspend(&mut self.output);
             self.hide_cursor();
         } else if let Some((pane, viewport)) = &model.command_output {
+            let block = model.status_block_rows();
+            let header_y = if model.status_top() { block } else { 0 };
             let rect = Rect {
                 x: 0,
-                y: 1,
+                y: header_y.saturating_add(1),
                 width: model.size.columns,
-                height: model.size.rows.saturating_sub(2),
+                height: model.size.rows.saturating_sub(block.saturating_add(2)),
             };
             self.paint_header_segment(
                 Rect {
                     x: 0,
-                    y: 0,
+                    y: header_y,
                     width: model.size.columns,
                     height: 1,
                 },
@@ -273,7 +283,7 @@ impl Renderer {
                 model,
             );
             self.paint_terminal(*pane, viewport, rect, force, None);
-            self.paint_status(model);
+            self.paint_status_block_in(model, 0, model.size.columns, force);
             self.output.append(&mut self.queued_control);
             self.kitty.suspend(&mut self.output);
             self.place_viewport_cursor(*pane, viewport, rect, model);
@@ -281,9 +291,8 @@ impl Renderer {
             self.paint_workspace(model, force);
             if model.sidebar_visible() {
                 self.paint_sidebar(model, force);
-            } else {
-                self.paint_status(model);
             }
+            self.paint_status_block(model, force);
             self.output.append(&mut self.queued_control);
             self.reconcile_kitty_images(model);
             self.place_active_cursor(model);
@@ -876,54 +885,98 @@ impl Renderer {
     }
 
     fn paint_status_area(&mut self, model: &Model) {
-        if !model.sidebar_visible() {
-            self.paint_status(model);
-            return;
-        }
-        let tree_height = usize::from(model.sidebar_tree_height());
-        for (offset, text) in sidebar_status_lines(model).into_iter().enumerate() {
-            let index = tree_height.saturating_add(offset);
-            let row = PaintedSidebarRow {
-                text,
-                selected: false,
-                status: true,
-            };
-            if self.sidebar_rows.get(index) == Some(&row) {
-                continue;
-            }
-            write_styled_text(
-                &mut self.output,
-                0,
-                u16::try_from(index).unwrap_or(u16::MAX),
-                &row.text,
-                model.appearance.background,
-                model.appearance.foreground,
-                &model.appearance,
-            );
-            if let Some(cached) = self.sidebar_rows.get_mut(index) {
-                *cached = row;
+        if model.sidebar_visible() {
+            let tree_height = usize::from(model.sidebar_tree_height());
+            for (offset, text) in sidebar_status_lines(model).into_iter().enumerate() {
+                let index = tree_height.saturating_add(offset);
+                let row = PaintedSidebarRow {
+                    text,
+                    selected: false,
+                    status: true,
+                };
+                if self.sidebar_rows.get(index) == Some(&row) {
+                    continue;
+                }
+                write_styled_text(
+                    &mut self.output,
+                    0,
+                    u16::try_from(index).unwrap_or(u16::MAX),
+                    &row.text,
+                    model.appearance.background,
+                    model.appearance.foreground,
+                    &model.appearance,
+                );
+                if let Some(cached) = self.sidebar_rows.get_mut(index) {
+                    *cached = row;
+                }
             }
         }
+        self.paint_status_block(model, false);
     }
 
-    fn paint_status(&mut self, model: &Model) {
-        if model.size.rows == 0 {
+    fn paint_status_block(&mut self, model: &Model, force: bool) {
+        let (x, width) = model.status_area();
+        self.paint_status_block_in(model, x, width, force);
+    }
+
+    fn paint_status_block_in(&mut self, model: &Model, x: u16, width: u16, force: bool) {
+        if model.size.rows == 0 || width == 0 {
             return;
         }
-        let line = status_line(model, model.size.columns);
-        if self.status == line {
-            return;
+        let block = usize::from(model.status_block_rows());
+        let overlay = if model.sidebar_visible() {
+            None
+        } else {
+            status_overlay(model, width)
+        };
+        let origin = model.status_origin_y();
+        let mut lines = Vec::with_capacity(block);
+        for index in 0..block {
+            let row = model.status.rows.get(index).map_or("", String::as_str);
+            let composed = zz_client::compose_status_row(row, width, &model.status.base_style);
+            let mut line = StyledLine::from_segments(composed.segments);
+            if usize::from(model.status.message_line).min(block.saturating_sub(1)) == index {
+                match &overlay {
+                    Some(StatusOverlay::Row(full)) => line = full.clone(),
+                    Some(StatusOverlay::Right(right)) => {
+                        line = overlay_right(&line, right, usize::from(width));
+                    }
+                    None => {}
+                }
+            }
+            lines.push(line);
         }
-        write_styled_text(
-            &mut self.output,
-            0,
-            model.size.rows.saturating_sub(1),
-            &line,
-            model.appearance.background,
-            model.appearance.foreground,
-            &model.appearance,
-        );
-        self.status = line;
+        let geometry = (x, origin, width);
+        let force = force || self.status_geometry != Some(geometry);
+        for (index, line) in lines.iter().enumerate() {
+            if force || self.status_rows.get(index) != Some(line) {
+                write_styled_text(
+                    &mut self.output,
+                    x,
+                    origin.saturating_add(u16::try_from(index).unwrap_or(u16::MAX)),
+                    line,
+                    model.appearance.foreground,
+                    model.appearance.background,
+                    &model.appearance,
+                );
+            }
+        }
+        self.status_rows = lines;
+        self.status_geometry = Some(geometry);
+        if block == 0
+            && let Some(StatusOverlay::Row(line)) = overlay
+            && let Some(y) = model.message_row_y()
+        {
+            write_styled_text(
+                &mut self.output,
+                x,
+                y,
+                &line,
+                model.appearance.foreground,
+                model.appearance.background,
+                &model.appearance,
+            );
+        }
     }
 
     fn paint_chooser(&mut self, model: &Model) {
@@ -1034,7 +1087,8 @@ impl Renderer {
         self.headers.clear();
         self.picker_cards.clear();
         self.sidebar_rows.clear();
-        self.status.clear();
+        self.status_rows.clear();
+        self.status_geometry = None;
     }
 
     fn place_active_cursor(&mut self, model: &Model) {
@@ -1052,15 +1106,22 @@ impl Renderer {
                 .chars()
                 .count()
                 .saturating_add(usize::try_from(prompt.cursor).unwrap_or(usize::MAX));
-            let status_width = if model.sidebar_visible() {
-                sidebar::WIDTH
+            let column = u16::try_from(column).unwrap_or(u16::MAX);
+            let (start, width, row) = if model.sidebar_visible() {
+                (0, sidebar::WIDTH, model.size.rows.saturating_sub(1))
             } else {
-                model.size.columns
+                let Some(row) = model.message_row_y() else {
+                    self.hide_cursor();
+                    return;
+                };
+                let (x, width) = model.status_area();
+                (x, width, row)
             };
-            let column = u16::try_from(column)
-                .unwrap_or(u16::MAX)
-                .min(status_width.saturating_sub(1));
-            write_cursor_position(&mut self.output, column, model.size.rows.saturating_sub(1));
+            write_cursor_position(
+                &mut self.output,
+                start.saturating_add(column.min(width.saturating_sub(1))),
+                row,
+            );
             self.output.extend_from_slice(b"\x1b[6 q\x1b[?25h");
             return;
         }
@@ -1287,7 +1348,11 @@ fn sidebar_status_lines(model: &Model) -> Vec<StyledLine> {
     );
     let message = combine_status(
         &StyledLine::plain(model.client_message.as_deref().unwrap_or_default()),
-        &StyledLine::plain("Ctrl-\\ detach"),
+        &StyledLine::plain(if model.status.customized {
+            ""
+        } else {
+            "Ctrl-\\ detach"
+        }),
         sidebar::WIDTH,
     );
     [base, indicators, message]
@@ -1296,26 +1361,84 @@ fn sidebar_status_lines(model: &Model) -> Vec<StyledLine> {
         .collect()
 }
 
-fn status_line(model: &Model, width: u16) -> StyledLine {
+enum StatusOverlay {
+    Row(StyledLine),
+    Right(StyledLine),
+}
+
+fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
+    let style = overlay_style(&model.appearance);
     if let Some(prompt) = &model.command_prompt {
-        return padded_styled(
-            &StyledLine::plain(&format!("{}{}", prompt.prompt, prompt.input)),
-            width,
-            ' ',
+        let mut line = StyledLine::default();
+        line.push_segment(
+            &padded_segment(&format!("{}{}", prompt.prompt, prompt.input), width, ' '),
+            style,
         );
-    }
-    let mut left = base_status_left(model);
-    let indicators = status_indicators(model);
-    if !indicators.is_empty() {
-        left.push_plain("  ");
-        left.push_plain(&indicators);
+        return Some(StatusOverlay::Row(line));
     }
     if let Some(message) = &model.client_message {
-        left.push_plain("  ");
-        left.push_plain(message);
+        let mut line = StyledLine::default();
+        line.push_segment(&padded_segment(message, width, ' '), style);
+        return Some(StatusOverlay::Row(line));
     }
-    left.push_plain("  Ctrl-\\ detach");
-    combine_status(&left, &StyledLine::parsed(&model.status.right), width)
+    let mut right = status_indicators(model);
+    if !model.status.customized {
+        if !right.is_empty() {
+            right.push_str("  ");
+        }
+        right.push_str("Ctrl-\\ detach");
+    }
+    if right.is_empty() {
+        return None;
+    }
+    let mut line = StyledLine::default();
+    line.push_segment(&format!(" {right} "), style);
+    Some(StatusOverlay::Right(line))
+}
+
+fn overlay_style(appearance: &TerminalAppearance) -> TmuxStyle {
+    TmuxStyle {
+        fg: Some(TmuxColour::Rgb(appearance.background.packed())),
+        bg: Some(TmuxColour::Rgb(appearance.foreground.packed())),
+        ..TmuxStyle::default()
+    }
+}
+
+fn overlay_right(line: &StyledLine, overlay: &StyledLine, width: usize) -> StyledLine {
+    let overlay_width = display_width(overlay);
+    let keep = width.saturating_sub(overlay_width);
+    let mut merged = truncate_display(line, keep);
+    let padding = keep.saturating_sub(display_width(&merged));
+    merged.push_plain(&" ".repeat(padding));
+    merged.append(overlay);
+    merged
+}
+
+fn display_width(line: &StyledLine) -> usize {
+    line.segments
+        .iter()
+        .flat_map(|segment| segment.text.chars())
+        .map(|character| character.width().unwrap_or(0))
+        .sum()
+}
+
+fn truncate_display(line: &StyledLine, width: usize) -> StyledLine {
+    let mut truncated = StyledLine::default();
+    let mut used = 0;
+    for segment in &line.segments {
+        let mut text = String::new();
+        for character in segment.text.chars() {
+            let character_width = character.width().unwrap_or(0);
+            if used + character_width > width {
+                truncated.push_segment(&text, segment.style.clone());
+                return truncated;
+            }
+            used += character_width;
+            text.push(character);
+        }
+        truncated.push_segment(&text, segment.style.clone());
+    }
+    truncated
 }
 
 fn base_status_left(model: &Model) -> StyledLine {
@@ -1753,6 +1876,124 @@ mod tests {
         renderer.paint_terminal(PaneId(1), &viewport, rect, false, None);
 
         assert!(renderer.output.is_empty());
+    }
+
+    fn block_model(columns: u16, rows: u16) -> Model {
+        let core = zz_client::ClientCore::new();
+        let endpoint =
+            zz_daemon::Endpoint::parse("unix:///tmp/zz-render-test.sock").expect("test endpoint");
+        Model::new(
+            &core,
+            crate::tty::TerminalSize {
+                columns,
+                rows,
+                cell_width_px: 8,
+                cell_height_px: 16,
+            },
+            "host".to_owned(),
+            "host".to_owned(),
+            endpoint.clone(),
+            endpoint,
+            Vec::new(),
+        )
+    }
+
+    fn block_status(rows: Vec<&str>, customized: bool) -> zz_protocol::StatusLine {
+        zz_protocol::StatusLine {
+            rows: rows.into_iter().map(str::to_owned).collect(),
+            customized,
+            ..zz_protocol::StatusLine::default()
+        }
+    }
+
+    #[test]
+    fn status_block_paints_daemon_rows_and_blank_rows_carry_base_style() {
+        let mut model = block_model(40, 10);
+        let mut status = block_status(vec!["#[fg=red,bold]HOT", ""], true);
+        status.base_style = "bg=blue".to_owned();
+        model.set_status(status);
+        let mut renderer = Renderer::new();
+        renderer.paint_status_block(&model, true);
+        let output = String::from_utf8(renderer.output).unwrap();
+        let blue = model.appearance.palette[4];
+        let red = model.appearance.palette[1];
+
+        assert!(output.contains("\x1b[9;1H"), "row 8 paints: {output:?}");
+        assert!(
+            output.contains("\x1b[10;1H"),
+            "blank row 9 paints: {output:?}"
+        );
+        assert!(output.contains("HOT"));
+        assert!(output.contains("\x1b[1m"));
+        assert!(output.contains(&format!("48;2;{};{};{}", blue.r, blue.g, blue.b)));
+        assert!(output.contains(&format!("38;2;{};{};{}", red.r, red.g, red.b)));
+        assert!(!output.contains("#["));
+    }
+
+    #[test]
+    fn status_position_top_paints_the_block_at_row_zero() {
+        let mut model = block_model(40, 10);
+        let mut status = block_status(vec!["TOPROW"], true);
+        status.position = zz_protocol::StatusPosition::Top;
+        model.set_status(status);
+        let mut renderer = Renderer::new();
+        renderer.paint_status_block(&model, true);
+        let output = String::from_utf8(renderer.output).unwrap();
+
+        assert!(output.contains("\x1b[1;1H"), "{output:?}");
+        assert!(output.contains("TOPROW"));
+    }
+
+    #[test]
+    fn a_client_message_replaces_the_message_line_row() {
+        let mut model = block_model(40, 10);
+        let mut status = block_status(vec!["ROWZERO", "ROWONE"], true);
+        status.message_line = 1;
+        model.set_status(status);
+        model.client_message = Some("hello message".to_owned());
+        let mut renderer = Renderer::new();
+        renderer.paint_status_block(&model, true);
+        let output = String::from_utf8(renderer.output).unwrap();
+
+        assert!(output.contains("hello message"));
+        assert!(output.contains("ROWZERO"));
+        assert!(!output.contains("ROWONE"), "{output:?}");
+    }
+
+    #[test]
+    fn the_detach_hint_overlays_default_status_but_not_customized_status() {
+        let mut model = block_model(40, 10);
+        model.set_status(block_status(vec!["ROW"], false));
+        let mut renderer = Renderer::new();
+        renderer.paint_status_block(&model, true);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(output.contains("Ctrl-\\ detach"), "{output:?}");
+
+        model.set_status(block_status(vec!["ROW"], true));
+        let mut renderer = Renderer::new();
+        renderer.paint_status_block(&model, true);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(!output.contains("Ctrl-\\ detach"), "{output:?}");
+        assert!(output.contains("ROW"));
+    }
+
+    #[test]
+    fn a_message_with_status_off_paints_one_virtual_row() {
+        let mut model = block_model(40, 10);
+        model.set_status(zz_protocol::StatusLine {
+            customized: true,
+            ..zz_protocol::StatusLine::default()
+        });
+        model.client_message = Some("virtual".to_owned());
+        let mut renderer = Renderer::new();
+        renderer.paint_status_block(&model, true);
+        let output = String::from_utf8(renderer.output).unwrap();
+
+        assert!(
+            output.contains("\x1b[10;1H"),
+            "bottom virtual row: {output:?}"
+        );
+        assert!(output.contains("virtual"));
     }
 
     #[test]

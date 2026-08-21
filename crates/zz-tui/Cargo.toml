@@ -20,6 +20,7 @@ futures-lite.workspace = true
 log.workspace = true
 miniz_oxide = "0.8.9"
 rustix.workspace = true
+unicode-width = "0.2.2"
 zz-daemon = { path = "../zz-daemon", default-features = false }
 zz-protocol = { path = "../zz-protocol" }
 zz-client = { path = "../zz-client" }

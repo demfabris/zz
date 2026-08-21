@@ -10725,6 +10725,7 @@ version = "0.2.0-beta.2"
 dependencies = [
  "log",
  "tempfile",
+ "unicode-width",
  "zz-daemon",
  "zz-protocol",
  "zz-terminal",
@@ -10834,6 +10835,7 @@ dependencies = [
  "log",
  "miniz_oxide",
  "rustix 1.1.4",
+ "unicode-width",
  "zz-client",
  "zz-daemon",
  "zz-protocol",

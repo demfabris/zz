@@ -69,10 +69,24 @@ pub(crate) fn tmux_styled_text(
     base_background: Hsla,
     cx: &App,
 ) -> TmuxStyledText {
+    tmux_styled_segments_text(
+        &parse_styled_segments(value),
+        base_foreground,
+        base_background,
+        cx,
+    )
+}
+
+pub(crate) fn tmux_styled_segments_text(
+    segments: &[zz_mux::StyledSegment],
+    base_foreground: Hsla,
+    base_background: Hsla,
+    cx: &App,
+) -> TmuxStyledText {
     let mut text = String::new();
     let mut highlights = Vec::new();
     let mut background_from_reverse = Vec::new();
-    for segment in parse_styled_segments(value) {
+    for segment in segments {
         let start = text.len();
         text.push_str(&segment.text);
         let highlight = tmux_highlight_style(&segment.style, base_foreground, base_background, cx);

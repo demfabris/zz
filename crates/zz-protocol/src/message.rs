@@ -407,10 +407,11 @@ pub struct StatusLine {
 }
 
 impl StatusLine {
-    /// Whether both halves expanded to nothing.
+    /// Whether the status block is off: zero published rows. Blank rows still
+    /// count — they consume geometry and paint `base_style`.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.left.is_empty() && self.right.is_empty()
+        self.rows.is_empty()
     }
 
     /// Ensure a wire payload stays inside its byte, row, style, and
@@ -2687,8 +2688,16 @@ mod tests {
             postcard::from_bytes::<super::StatusLine>(&bytes).expect("status decodes"),
             status
         );
-        assert!(!status.is_empty());
+        assert!(status.is_empty(), "no rows means the status block is off");
         assert!(super::StatusLine::default().is_empty());
+        assert!(
+            !super::StatusLine {
+                rows: vec![String::new()],
+                ..super::StatusLine::default()
+            }
+            .is_empty(),
+            "a blank row still counts as an on status block"
+        );
     }
 
     #[test]

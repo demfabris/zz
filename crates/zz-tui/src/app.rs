@@ -1154,8 +1154,12 @@ fn handle_core_event(
             Ok(ProtocolOutcome::RepaintAll)
         }
         CoreEvent::StatusChanged => {
-            model.status = lock_core(core).status().clone();
-            Ok(ProtocolOutcome::Repaint)
+            let status = lock_core(core).status().clone();
+            if model.set_status(status) {
+                Ok(ProtocolOutcome::RepaintAll)
+            } else {
+                Ok(ProtocolOutcome::Repaint)
+            }
         }
         CoreEvent::PrefixArmed { armed } => {
             model.prefix_armed = armed;

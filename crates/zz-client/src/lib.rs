@@ -9,9 +9,11 @@
 
 mod chrome;
 mod core;
+mod status;
 
 pub use chrome::{
     BROWSER_TABLE, CHROME_TABLES, ChromeAction, ChromeKey, ChromeKeymap, ChromeProfile,
     SIDEBAR_TABLE, TERMINAL_TABLE, UI_TABLE, UnknownChromeAction,
 };
 pub use core::{ClientCore, CoreEvent, Outbound, ViewportDamage};
+pub use status::{ComposedStatusRow, StatusHitRange, compose_status_row};

@@ -678,8 +678,7 @@ mod daemon_autostart {
             ["set", "-t", "styled", "status-right", "#[bg=blue]RIGHT"].as_slice(),
             [
                 "setw",
-                "-t",
-                "styled:0",
+                "-g",
                 "window-status-current-format",
                 "#[underscore]CUSTOM",
             ]
@@ -754,6 +753,173 @@ mod daemon_autostart {
         );
         assert!(!captured.windows(2).any(|window| window == b"#["));
         assert!(!captured.windows(6).any(|window| window == b"0:main"));
+    }
+
+    fn capture_tui_until(
+        fixture: &Fixture,
+        attach: &[&str],
+        needles: &[&[u8]],
+    ) -> (bool, Vec<u8>, Option<std::process::ExitStatus>) {
+        let Ok((mut master, slave)) = open_pty() else {
+            return (true, Vec::new(), None);
+        };
+        rustix::io::ioctl_fionbio(&master, true).expect("set pty master nonblocking");
+        let stdin = slave.try_clone().expect("clone pty stdin");
+        let stdout = slave.try_clone().expect("clone pty stdout");
+        let mut child = fixture
+            .command()
+            .args(attach)
+            .stdin(Stdio::from(stdin))
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(slave))
+            .spawn()
+            .expect("spawn TUI attach");
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut captured = Vec::new();
+        let mut early_status = None;
+        let rendered = loop {
+            let mut buffer = [0_u8; 4096];
+            match master.read(&mut buffer) {
+                Ok(0) => {}
+                Ok(count) => captured.extend_from_slice(&buffer[..count]),
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                Err(_) => {}
+            }
+            if needles.iter().all(|needle| {
+                captured
+                    .windows(needle.len())
+                    .any(|window| window == *needle)
+            }) {
+                break true;
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+            if let Some(status) = child.try_wait().expect("poll TUI attach") {
+                early_status = Some(status);
+                break false;
+            }
+            thread::sleep(Duration::from_millis(5));
+        };
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(master);
+        (rendered, captured, early_status)
+    }
+
+    fn visible_text_after(captured: &[u8], cursor: &[u8]) -> Vec<String> {
+        let mut collected = Vec::new();
+        let mut search = 0;
+        while let Some(offset) = captured[search..]
+            .windows(cursor.len())
+            .position(|window| window == cursor)
+        {
+            let mut index = search + offset + cursor.len();
+            search = index;
+            let mut text = Vec::new();
+            while index < captured.len() && text.len() < 24 {
+                if captured[index] == 0x1b {
+                    let Some(end) = captured[index..].iter().position(u8::is_ascii_alphabetic)
+                    else {
+                        break;
+                    };
+                    if captured[index + end] == b'H' {
+                        break;
+                    }
+                    index += end + 1;
+                    continue;
+                }
+                text.push(captured[index]);
+                index += 1;
+            }
+            collected.push(String::from_utf8_lossy(&text).into_owned());
+        }
+        collected
+    }
+
+    #[test]
+    fn styled_multi_row_status_renders_two_rows_without_literal_markers() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        for arguments in [
+            ["new-session", "-d", "-s", "multirow", "-n", "main"].as_slice(),
+            ["set", "-g", "status", "2"].as_slice(),
+            ["set", "-g", "status-format[1]", "#[fg=red,bold]ROWTWO"].as_slice(),
+        ] {
+            let output = fixture.run(arguments);
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let (rendered, captured, early_status) = capture_tui_until(
+            &fixture,
+            &["attach-session", "-t", "multirow"],
+            &[b"[multirow]", b"ROWTWO"],
+        );
+        assert!(
+            rendered,
+            "child exited early={early_status:?}; pty output={}",
+            String::from_utf8_lossy(&captured),
+        );
+        assert!(!captured.windows(2).any(|window| window == b"#["));
+        for row in [b"\x1b[23;30H".as_slice(), b"\x1b[24;30H".as_slice()] {
+            assert!(
+                captured.windows(row.len()).any(|window| window == row),
+                "both status rows paint above the last line: {}",
+                String::from_utf8_lossy(&captured),
+            );
+        }
+        assert!(
+            visible_text_after(&captured, b"\x1b[24;30H")
+                .iter()
+                .any(|text| text.starts_with("ROWTWO")),
+            "row 1 carries the second status-format row: {}",
+            String::from_utf8_lossy(&captured),
+        );
+    }
+
+    #[test]
+    fn status_position_top_puts_the_status_block_at_row_zero() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        for arguments in [
+            ["new-session", "-d", "-s", "toppos", "-n", "main"].as_slice(),
+            ["set", "-t", "toppos", "status-position", "top"].as_slice(),
+            ["set", "-t", "toppos", "status-left", "TOPMARK"].as_slice(),
+        ] {
+            let output = fixture.run(arguments);
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let (rendered, captured, early_status) =
+            capture_tui_until(&fixture, &["attach-session", "-t", "toppos"], &[b"TOPMARK"]);
+        assert!(
+            rendered,
+            "child exited early={early_status:?}; pty output={}",
+            String::from_utf8_lossy(&captured),
+        );
+        assert!(!captured.windows(2).any(|window| window == b"#["));
+        assert!(
+            visible_text_after(&captured, b"\x1b[1;30H")
+                .iter()
+                .any(|text| text.starts_with("TOPMARK")),
+            "the status block owns row zero of the main columns: {}",
+            String::from_utf8_lossy(&captured),
+        );
     }
 
     #[test]

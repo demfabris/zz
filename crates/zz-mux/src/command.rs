@@ -19227,6 +19227,40 @@ mod tests {
     }
 
     #[test]
+    fn per_window_status_overrides_reach_the_label_surface_but_not_row_variables() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.expect("session id");
+        let window = context.window.expect("window id");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-window-option",
+                    &["-t", "work:0", "window-status-current-format", "OVERRIDE"],
+                ),
+            )
+            .unwrap();
+
+        let formats = engine.window_status_formats(window);
+        assert_eq!(
+            formats.current_format, "OVERRIDE",
+            "the status_label surface honors the per-window override"
+        );
+        let variables = engine.status_row_variables_for_session(Some(session));
+        assert_eq!(
+            variables
+                .get("window-status-current-format")
+                .map(String::as_str),
+            Some(crate::DEFAULT_WINDOW_STATUS_FORMAT),
+            "the row-loop variables map stays global: the ledgered scoping divergence"
+        );
+    }
+
+    #[test]
     fn lane2_array_storage_and_hook_option_routing_match_the_pin_shapes() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();

@@ -8,6 +8,7 @@ description = "Renderer-free client core: sans-IO protocol reduction shared by e
 publish = false
 
 [dependencies]
+unicode-width = "0.2.2"
 zz-protocol = { path = "../zz-protocol" }
 zz-terminal = { path = "../zz-terminal", default-features = false }
 

@@ -13,7 +13,6 @@ pub(crate) const BORDER_WIDTH: u16 = 1;
 pub(crate) const AUTO_HIDE_COLUMNS: u16 = 80;
 pub(crate) const MIN_MANUAL_COLUMNS: u16 = 50;
 pub(crate) const STATUS_ROWS: u16 = 3;
-const FULL_WIDTH_STATUS_ROWS: u16 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Visibility {
@@ -347,22 +346,24 @@ pub(crate) fn flatten(
     rows
 }
 
-pub(crate) fn canvas_rect(columns: u16, rows: u16, sidebar_visible: bool) -> Rect {
-    if sidebar_visible {
-        let x = WIDTH.saturating_add(BORDER_WIDTH).min(columns);
-        Rect {
-            x,
-            y: 0,
-            width: columns.saturating_sub(x),
-            height: rows,
-        }
+pub(crate) fn canvas_rect(
+    columns: u16,
+    rows: u16,
+    sidebar_visible: bool,
+    status_rows: u16,
+    status_top: bool,
+) -> Rect {
+    let x = if sidebar_visible {
+        WIDTH.saturating_add(BORDER_WIDTH).min(columns)
     } else {
-        Rect {
-            x: 0,
-            y: 0,
-            width: columns,
-            height: rows.saturating_sub(FULL_WIDTH_STATUS_ROWS),
-        }
+        0
+    };
+    let status_rows = status_rows.min(rows);
+    Rect {
+        x,
+        y: if status_top { status_rows } else { 0 },
+        width: columns.saturating_sub(x),
+        height: rows.saturating_sub(status_rows),
     }
 }
 
@@ -561,7 +562,7 @@ mod tests {
         assert!(!state.visible(120));
 
         assert_eq!(
-            canvas_rect(100, 30, true),
+            canvas_rect(100, 30, true, 0, false),
             Rect {
                 x: 29,
                 y: 0,
@@ -570,12 +571,30 @@ mod tests {
             }
         );
         assert_eq!(
-            canvas_rect(70, 20, false),
+            canvas_rect(70, 20, false, 1, false),
             Rect {
                 x: 0,
                 y: 0,
                 width: 70,
                 height: 19,
+            }
+        );
+        assert_eq!(
+            canvas_rect(100, 30, true, 2, true),
+            Rect {
+                x: 29,
+                y: 2,
+                width: 71,
+                height: 28,
+            }
+        );
+        assert_eq!(
+            canvas_rect(70, 20, false, 0, false),
+            Rect {
+                x: 0,
+                y: 0,
+                width: 70,
+                height: 20,
             }
         );
     }

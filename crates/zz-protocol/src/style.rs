@@ -144,9 +144,9 @@ pub enum TmuxRange {
     Left,
     Right,
     Control(u8),
-    Pane(u32),
-    Window(u32),
-    Session(u32),
+    Pane(u64),
+    Window(u64),
+    Session(u64),
     User(String),
     Other {
         kind: String,
@@ -443,11 +443,9 @@ fn parse_range(value: &str) -> Option<TmuxRange> {
         ("control", Some(argument)) => {
             TmuxRange::Control(argument.parse::<u8>().ok().filter(|value| *value <= 9)?)
         }
-        ("pane", Some(argument)) => TmuxRange::Pane(parse_unsigned(argument.strip_prefix('%')?)?),
-        ("window", Some(argument)) => TmuxRange::Window(parse_unsigned(argument)?),
-        ("session", Some(argument)) => {
-            TmuxRange::Session(parse_unsigned(argument.strip_prefix('$')?)?)
-        }
+        ("pane", Some(argument)) => TmuxRange::Pane(parse_id(argument.strip_prefix('%')?)?),
+        ("window", Some(argument)) => TmuxRange::Window(parse_id(argument)?),
+        ("session", Some(argument)) => TmuxRange::Session(parse_id(argument.strip_prefix('$')?)?),
         ("user", Some(argument)) => TmuxRange::User(argument.to_owned()),
         ("left" | "right", Some(_))
         | ("control" | "pane" | "window" | "session" | "user", None) => return None,
@@ -469,6 +467,10 @@ fn parse_percentage(value: &str) -> Option<u8> {
 }
 
 fn parse_unsigned(value: &str) -> Option<u32> {
+    (!value.is_empty()).then(|| value.parse().ok()).flatten()
+}
+
+fn parse_id(value: &str) -> Option<u64> {
     (!value.is_empty()).then(|| value.parse().ok()).flatten()
 }
 
@@ -525,7 +527,10 @@ fn set_all_attributes(attributes: &mut TmuxAttributes, state: TmuxAttributeState
     attributes.noattr = state;
 }
 
-fn apply_style(current: &mut TmuxStyle, delta: &TmuxStyle, base: &TmuxStyle) {
+/// Applies one parsed style delta onto a cumulative style, resolving `default`
+/// colours against `base` — the same folding [`parse_styled_segments`] uses,
+/// exposed for walkers that need the transition at every marker.
+pub fn apply_style(current: &mut TmuxStyle, delta: &TmuxStyle, base: &TmuxStyle) {
     if delta.reset {
         current.fg = base.fg;
         current.bg = base.bg;

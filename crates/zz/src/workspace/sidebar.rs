@@ -2644,6 +2644,43 @@ mod tests {
         );
     }
 
+    #[gpui::test]
+    fn native_status_surfaces_key_on_halves_not_the_rows_authoritative_is_empty(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(zz_ui::init);
+        let default_shaped = StatusLine {
+            left: "[work] 0:main* ".to_owned(),
+            right: "12:00 21-Aug-26".to_owned(),
+            rows: vec!["[work] 0:main*   12:00".to_owned()],
+            ..StatusLine::default()
+        };
+        let rows_only = StatusLine {
+            rows: vec!["#[align=right]clock".to_owned()],
+            ..StatusLine::default()
+        };
+        let off = StatusLine::default();
+        let cx = cx.add_empty_window();
+
+        cx.update(|_, cx| {
+            assert!(!default_shaped.is_empty());
+            assert!(
+                render_strip_status(&default_shaped, cx).is_some(),
+                "a default daemon publication keeps the native strip"
+            );
+            assert!(render_status_section(None, &default_shaped, cx).is_some());
+
+            assert!(!rows_only.is_empty(), "rows alone mean status is on");
+            assert!(
+                render_strip_status(&rows_only, cx).is_none(),
+                "empty halves never resurrect the native strip"
+            );
+
+            assert!(off.is_empty(), "zero rows mean status off");
+            assert!(render_strip_status(&off, cx).is_none());
+        });
+    }
+
     #[test]
     fn sidebar_host_row_formats_the_hostname_with_a_local_fallback() {
         assert_eq!(

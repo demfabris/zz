@@ -55,7 +55,7 @@ pub use snapshot::{
 };
 pub use style::{
     StyledSegment, TmuxAlign, TmuxAttributeState, TmuxAttributes, TmuxColour, TmuxDefaultType,
-    TmuxList, TmuxRange, TmuxStyle, TmuxWidth, parse_style, parse_styled_segments,
+    TmuxList, TmuxRange, TmuxStyle, TmuxWidth, apply_style, parse_style, parse_styled_segments,
     parse_tmux_colour, valid_style,
 };
 pub use terminal_codec::{

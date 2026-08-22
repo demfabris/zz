@@ -104,7 +104,15 @@ The second condition is the change from tmux's `exit-empty`. tmux can key on ses
 its last client exits at the same instant; zz's GUI client outlives its last pane, so zero sessions
 must mean "show the empty workspace", not "kill the server"; otherwise closing the last pane
 strands the window on a dead daemon. Requiring zero interactive clients too makes the daemon exit
-when the app quits instead.
+when the app quits instead. Since Wave C (2026-08-21) the first two conditions are policy: with
+`exit-empty` or `exit-unattached` EXPLICITLY set, `MuxEngine::exit_empty_explicit` /
+`exit_unattached_explicit` replace the latch-and-sessions test with the pin's `server_loop` rule
+(`exit-unattached on` drops the sessions requirement entirely, `exit-empty off` never exits), and
+policy evaluation is suppressed inside the startup bracket so a boot config cannot kill the daemon
+it is configuring. The `subscribers.is_empty()` conjunct is load-bearing and survives every policy.
+A separate sweep, `enforce_destroy_unattached`, reproduces the pin's `server_check_unattached` after
+attach, detach, switch, and unregister when a session's `destroy-unattached` is explicitly set to a
+destroying value.
 
 `request_shutdown_if_empty` takes the whole `&ServerState` (not only `&MuxState`) and is called from
 the `execute` effect loop and `Shared::unregister`. A successful command that leaves any session

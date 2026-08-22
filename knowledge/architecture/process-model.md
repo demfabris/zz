@@ -26,11 +26,14 @@ survive GUI detach while keeping the mux state a single source of truth.
 | CEF browser process | Chromium main/GPU/renderer/utility (zygote) tree | spawned inside a GUI process; not kept alive without a GUI |
 | ACP agent process | Codex or Claude Code reached over stdio JSON-RPC; one process and ACP session belong to one Agent pane | spawned when the pane appears; replaced on provider/config changes; stopped with the pane or daemon |
 
-The daemon's exit rule deliberately differs from tmux's `exit-empty`: destroying the last session is
-not enough while a GUI client is still attached, because that client outlives its last pane and must
-be able to show an empty workspace and make a new session. Quitting the app drops the last
-subscriber and lets the empty daemon exit; live sessions keep it alive across app restarts. The
-opt-in `quit-daemon-on-exit` key makes app quit send `kill-server` regardless. See
+The daemon's default exit rule deliberately differs from tmux's `exit-empty`: destroying the last
+session is not enough while a GUI client is still attached, because that client outlives its last
+pane and must be able to show an empty workspace and make a new session. Quitting the app drops the
+last subscriber and lets the empty daemon exit; live sessions keep it alive across app restarts. The
+opt-in `quit-daemon-on-exit` key makes app quit send `kill-server` regardless. Since Wave C
+(2026-08-21) a config that EXPLICITLY sets `exit-empty`, `exit-unattached`, or
+`destroy-unattached` swaps in the pin's policy for that knob; the zero-subscribers guard survives
+every one of them, so an attached client still never has the daemon die under it. See
 [session persistence](/concepts/session-persistence.md).
 
 A GUI process auto-starts a daemon if none is running, then attaches as a client. The installed

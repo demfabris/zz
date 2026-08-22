@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: tmux divergence matrix
-description: "Every known divergence from tmux at the pinned reference commit: the 12 missing commands and why, the 30 implemented commands that still reject tmux flags, behavioral gaps on the implemented surface, the options coverage (all 180 store, 81 behave), and the protocol-level differences."
+description: "Every known divergence from tmux at the pinned reference commit: the 12 missing commands and why, the 30 implemented commands that still reject tmux flags, behavioral gaps on the implemented surface, the options coverage (all 180 store, 86 behave), and the protocol-level differences."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-20T00:00:00-03:00
@@ -220,12 +220,13 @@ daemon-owned command semantics in a client.
 | `aggressive-resize` + `window-size` | Since 2026-08-20 both compose like the pin (`resize.c:366-376`): `aggressive-resize` is a candidate FILTER (ON = clients focused on the window; OFF = zz's viewer set, a per-client-focus stand-in for the pin's linked-window `session_has`), and `window-size` is the AGGREGATION policy — `latest` (default) picks the most-recent-input owner, `largest`/`smallest` aggregate componentwise. ON no longer forces `smallest`; configs relying on that must also set `window-size smallest`. `manual` is stored but behaves as `latest` until `resize-window` exists. | **silent**, bounded |
 | `display-time` | Status-message toasts consume the configured milliseconds. Since 2026-08-20 the omitted `display-panes -d` duration comes from `display-panes-time` like the pin (the old reuse divergence is closed). A zero toast remains until manual dismissal, while tmux dismisses its zero-duration status message on a key. | **silent**, deliberate |
 | `respawn-pane` / `respawn-window` | Dead panes revive with stable pane identity; `respawn-window` keeps its first pane and removes the rest. `-k`, `-c`, repeated `-e NAME=VALUE`, and stored command/cwd reuse are implemented. The pin's `-E` empty-environment flag is cataloged but rejected. | loud for `-E` |
-| Array options | Since the 2026-08-20 Lane-2 sweep all eight real array options (`command-alias`, `codepoint-widths`, `user-keys`, `terminal-overrides`, `terminal-features`, `status-format`, `pane-colours`, `update-environment`) store with the pin's separators, hole reuse, and `name[N]`/`-u name[N]` semantics, and the 68 hook names route to the hook table. Since the B1 server slice (2026-08-21) `status-format[]` drives the daemon's personalized `StatusLine.rows` production (sparse indices publish blank rows, a session array overrides the global one whole, scoped writes refresh that session's attached clients); the other seven still drive nothing: command dispatch consults the static `COMMAND_SPECS` alias table, never `command-alias`, and session seeding uses the hardcoded default list (`command.rs:7111`), so `set -g update-environment FOO` changes readback only. Indexed `@`/table scalars follow tmux (`not an array` on set; indexed show reads the scalar). | **silent**, store-only except `status-format[]` |
+| Array options | Since the 2026-08-20 Lane-2 sweep all eight real array options (`command-alias`, `codepoint-widths`, `user-keys`, `terminal-overrides`, `terminal-features`, `status-format`, `pane-colours`, `update-environment`) store with the pin's separators, hole reuse, and `name[N]`/`-u name[N]` semantics, and the 68 hook names route to the hook table. Since the B1 server slice (2026-08-21) `status-format[]` drives the daemon's personalized `StatusLine.rows` production (sparse indices publish blank rows, a session array overrides the global one whole, scoped writes refresh that session's attached clients). Wave C added two more consumers (2026-08-21): `command-alias[]` expands one layer before canonical lookup at both dispatch chokepoints (`MuxEngine::expand_command_alias`), and, like the pin's parse-time expansion, `bind-key`/`set-hook`/`default-client-command` STORE the expansion, so `list-keys` and `show-hooks` print `list-windows` for an aliased `lsw` on both servers (differentially pinned). Aliases nested inside a `{ … }` argument of a stored command expand at execution instead of at store time, so their stored text keeps the alias name. Only SINGLE-command alias bodies expand: the pin also accepts a multi-command body (`x=cmd1 ; cmd2`, caller arguments appended to the last, `cmd-parse.c:2317`) and an empty body (silent rc 0), where zz refuses both with `unknown command: <alias>` rc 1 — loud rather than silent, per doctrine, because zz's dispatch chokepoint executes exactly one command. Alias lookup is exact on the typed name in both (a command prefix like `ls` never reaches the alias table). `update-environment[]` drives `seed_session_environment` plus its own readback. The remaining five still drive nothing. Indexed `@`/table scalars follow tmux (`not an array` on set; indexed show reads the scalar). | **silent**, store-only except `status-format[]`, `command-alias[]`, and `update-environment[]` |
 | Status-row window-option scoping | tmux resolves `window-status-*`, `pane-status-*`, and `window-pane-*-status-format` per loop item during `status-format` expansion, so a per-window override (`set -w -t work:2 window-status-style 'fg=red'`) styles that window's entry in the row. zz's B1 row expansion resolves those names at global/session-effective scope through a per-client variables map, while the `status_label` path keeps honoring per-window overrides — since B1's client half renders the rows (2026-08-21), the two surfaces can visibly disagree for windows with local overrides: the rendered status block shows the global/session style while the zz-native label surfaces show the override. Resolution path: per-window variable resolution through the loop-item hook seam (`Expander::lookup` already passes the item context), scheduled for Wave C (the `Expander::lookup` loop-item seam). | **silent**, bounded |
 | Status-block suppression threshold | tmux hides the status line when `tty.sy <= statuslines` (resize.c `CLIENT_STATUSOFF`), so a 3-row terminal with `status 2` still shows both status rows plus one window row. zz panes carry a header row, so the TUI suppresses the block when `rows < statuslines + 2` (one header plus one content row must survive) — in that same 3-row terminal zz shows no status block and gives all rows to the pane. The GUI mirrors the rule against its measured canvas in line-height units. | **silent**, bounded |
 | `history-limit` default | zz keeps 10,000 lines for its product default; the pin keeps 2,000. `show-options -g history-limit` prints the effective 10,000 value. | **silent**, deliberate |
 | Plain option listings | No-argument listings contain tmux table names and `@` user names. The six zz-native settings stay available through explicit-name queries and never appear as unknown words in tmux-parsing scripts. | **silent**, zz extension hidden from tmux listings |
-| Session environment updates | Both servers seed their global environment at boot. tmux copies each `update-environment` name from the creating client's environment; zz has no client-environment field and copies from the daemon's boot environment. They differ when the daemon outlives the shell that started it. Missing names become unset markers on both. | **silent**, bounded |
+| Session environment updates | Both servers seed their global environment at boot. Since Wave C (2026-08-21) zz honors the stored `update-environment` array at session creation like the pin's `environ_update` (`environ.c:186`), including unset markers for names with no value. What still differs is the SOURCE: tmux copies each name from the creating client's environment (`cmd-new-session.c:282`), zz has no client-environment field and copies from the daemon's boot environment. They differ when the daemon outlives the shell that started it. zz reads the global `update-environment` array only; the pin's session-scoped value would bite solely at the attach-time re-seed zz does not perform, so the scope gap is subsumed by the no-re-seed bound. Two consequences of that missing field stay ledgered: `new-session -E`/`attach-session -E` remain cataloged-but-rejected, and zz never re-seeds on attach (the pin re-runs `environ_update` in `cmd-attach-session.c:135`). zz matches the pin's glob-free names; the pin's `fnmatch` patterns in `update-environment` values are not expanded. | **silent**, bounded |
+| Lifecycle trio | `exit-empty`, `exit-unattached`, and `destroy-unattached` are inert until a config EXPLICITLY sets them (presence in the stored-scalar map, not the effective value): unset, zz keeps its persistent-daemon rule, `armed ∧ zero sessions ∧ zero subscribers`. Explicitly set, the pin's `server_loop` (`server.c:281-292`, whose client loop at `:289-292` is the check the subscriber clause below contrasts against) and `server_check_unattached` (`server-fn.c:481`) policies take over — enforced on client departure and command execution, where the pin re-evaluates every loop iteration — with one permanent divergence: the `zero subscribers` conjunct is LOAD-BEARING and survives every policy, because a zz GUI/TUI client can outlive its session where a tmux client cannot, so an attached client must never have the daemon die under it. "Attached" means present in `ServerState::attached` (a client bound to a session); "subscriber" means an Interactive or Control client holding an outbound mailbox. `exit-unattached on` therefore exits when no client is bound to a session AND no client is subscribed, where the pin needs only the former. Policies are also dormant inside the startup bracket so a boot config cannot kill the daemon it is configuring. `destroy-unattached=keep-last`/`keep-group` are decided by linked session groups in the pin (`session_group_contains`); zz has no session groups, so `keep-last` never destroys (every session is effectively the last of its group) and `keep-group` always destroys — both are exact for the ungrouped case, which is every zz session. Session groups stay the permanent compatibility skip. | **silent**, bounded, opt-in |
 | `new-session` attach contract | Closed 2026-08-20. `zz new -s foo` creates and attaches on a TTY, refuses off one with `open terminal failed: not a terminal` and creates nothing, and reproduces the pin's full check order (`-A` delegate ignoring `-d` → duplicate → nested → terminal → `-x`/`-y`). NULL-client callers (config files, hooks) force detached and treat attach as a silent success, matching `cmd-new-session.c:164-167` and `cmd-attach-session.c:71-72`. | closed |
 | `new-session -x -` / `-y -` | The literal `-` is accepted and no longer an error, but it resolves to the 80x24 default instead of the *client's* terminal size (the pin reads `c->tty.sx/sy`, `cmd-new-session.c:216-238`). Detached-with-no-client is identical to the pin; only the with-a-client case differs. Needs the client's terminal size plumbed into the engine. | **silent**, bounded |
 | Nested `new-session` / `attach-session` | The pin refuses with `sessions should be nested with care, unset $TMUX to force` when the calling client's tty is a pane of this server (`server_client_check_nested`, gated at `cmd-new-session.c:191-198`); zz runs a nested TUI instead. `$TMUX` alone is the wrong signal — a fake `$TMUX` on a non-pane pty still attaches on the pin, so this needs the client's tty compared against pane ttys. | loud on the pin, permissive in zz |
@@ -311,7 +312,7 @@ inside a generic “unsupported formats” claim.
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
 | `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
-# Options: all 180 store, 81 behave
+# Options: all 180 store, 86 behave
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin. Since
 the 2026-08-20 Lane-2 sweep **every one of the 180 stores** with the pin's exact default,
@@ -324,11 +325,13 @@ skipped lines**. That is test-enforced: `tmux_options.rs`
 the eight array options store with indexed semantics, and `set-option <hook-name>` writes
 the hook table — the two paths that used to silently succeed while doing nothing are dead.
 
-**81 behave**, meaning a value change is consumed somewhere outside set/show/inherit/
+**86 behave**, meaning a value change is consumed somewhere outside set/show/inherit/
 readback (consumer-traced 2026-08-20; nine status-production names joined in the B1 server
-slice on 2026-08-21, `status-position` joined with B1's client half the same day, and
+slice on 2026-08-21, `status-position` joined with B1's client half the same day,
 `mouse`, `escape-time`, `set-titles`, and `set-titles-string` joined with the B2/B3/title
-slice, also 2026-08-21). **99 are store-only.** The earlier "78 behave" counted
+slice, and `command-alias`, `update-environment`, `exit-empty`, `exit-unattached`, and
+`destroy-unattached` joined with the Wave C alias/environment/lifecycle slice, all
+2026-08-21). **94 are store-only.** The earlier "78 behave" counted
 options given a typed home in the honest-knobs/status structs, twelve of which nothing
 read. `tmux_options::BEHAVES` distinguishes the consumer-traced names from storage-only
 options and test-pins its count, uniqueness, and membership in the option catalog.
@@ -336,7 +339,7 @@ options and test-pins its count, uniqueness, and membership in the option catalo
 consumer wave wires a name up and moves it into `BEHAVES` (B1 moved six stored scalars and
 the `status-format` array).
 
-**Behaving (81):**
+**Behaving (86):**
 
 - Indexing and sessions: `base-index`, `pane-base-index`, `renumber-windows`,
   `default-size`, `window-size`, `aggressive-resize`, `history-limit` (10,000 product
@@ -379,8 +382,15 @@ the `status-format` array).
   `set-titles` and `set-titles-string` (the daemon expands the title per client into
   `StatusLine.title`, publishing even with `status off`; zz-tui writes OSC 2 on non-empty
   changes and the GUI adopts the window title only when the option is explicitly on).
+- Command aliasing, environment, and lifecycle (Wave C, 2026-08-21): `command-alias`
+  (one expansion layer before canonical lookup at both dispatch chokepoints, and at
+  bind-key/set-hook/option-command validation; non-recursive like the pin's
+  `CMD_PARSE_NOALIAS`), `update-environment` (drives `seed_session_environment` and its
+  own readback), and the lifecycle trio `exit-empty`, `exit-unattached`,
+  `destroy-unattached` — all three inert until EXPLICITLY set, and the
+  "zero subscribers" guard survives every policy (see the Lifecycle trio row).
 
-**Store-only (99):**
+**Store-only (94):**
 
 - Typed storage that nothing reads (38): `lock-after-time`,
   `lock-command` (the lock commands are no-ops); `monitor-activity`, `monitor-silence`,
@@ -392,15 +402,13 @@ the `status-format` array).
   `pane-border-lines`, `pane-border-indicators`, the four `pane-scrollbars*`; the four
   `prompt-*cursor-*`; `clock-mode-colour`, `clock-mode-style`;
   `window-status-separator`, `window-status-activity-style`.
-- Generic scalar storage (54 of the 63 scalar-backed names) plus seven of the eight
+- Generic scalar storage (51 of the 63 scalar-backed names) plus five of the eight
   arrays: everything else in the table,
   including `prefix2`, `display-panes-format`,
-  `remain-on-exit-format`, `visual-activity`/`visual-silence`, `status-keys`, the
-  lifecycle trio (`exit-empty`, `exit-unattached`, `destroy-unattached`),
+  `remain-on-exit-format`, `visual-activity`/`visual-silence`, `status-keys`,
   `pane-border-style`/`pane-active-border-style`,
   `window-style`/`window-active-style`, `mode-style` and the `copy-mode-*` styles,
-  `terminal-overrides[]`, `terminal-features[]`, `command-alias[]`,
-  `update-environment[]` (seeding uses the hardcoded default list), `user-keys[]`,
+  `terminal-overrides[]`, `terminal-features[]`, `user-keys[]`,
   `pane-colours[]`, `codepoint-widths[]`, the 21 theme-palette options, and the
   `tree-mode-*` trio. Lane assignments live in the drop-in plan's "options residue"
   section.

@@ -2922,9 +2922,19 @@ impl Shared {
     }
 
     fn should_shutdown_if_empty(&self, state: &ServerState) -> bool {
-        self.exit_empty_armed.load(Ordering::Acquire)
-            && state.engine.state.sessions.is_empty()
-            && state.subscribers.is_empty()
+        if !state.subscribers.is_empty() {
+            return false;
+        }
+        let sessions_empty = state.engine.state.sessions.is_empty();
+        let exit_empty = state.engine.exit_empty_explicit();
+        let exit_unattached = state.engine.exit_unattached_explicit() == Some(true);
+        if exit_empty.is_none() && !exit_unattached {
+            return self.exit_empty_armed.load(Ordering::Acquire) && sessions_empty;
+        }
+        if exit_empty == Some(false) || !*self.startup_ready.lock() {
+            return false;
+        }
+        exit_unattached || sessions_empty
     }
 
     fn refresh_status(&self, refresh: bool) {
@@ -3299,6 +3309,7 @@ impl Shared {
         if detached {
             self.publish_snapshot();
         }
+        self.enforce_destroy_unattached();
         self.fail_gui_requests_for(client);
         self.status.lock().forget(client);
         let (terminals, command_output, popup_waiters, menu_waiters, confirm_waiters, shutdown) = {
@@ -3607,59 +3618,68 @@ impl Shared {
         mux_source: MuxOptionSource,
         client_terminal: ClientTerminal,
     ) -> Result<Execution, DaemonError> {
-        let canonical = canonical_command(&command.name);
+        let expanded = self.inner.lock().engine.expand_command_alias(command);
+        let routed = expanded.as_ref().unwrap_or(command);
+        let canonical = canonical_command(&routed.name);
+        let unattached_watch = {
+            let inner = self.inner.lock();
+            inner
+                .engine
+                .destroy_unattached_explicit_anywhere()
+                .then(|| inner.attached.clone())
+        };
         let preempted = zz_mux::CommandSpec::DAEMON_COMMAND_NAMES
             .contains(&canonical)
             .then(|| {
                 match daemon_command_dispatch(canonical)
                     .expect("daemon command catalog and dispatch must agree")
                 {
-                    DaemonCommandDispatch::CapturePane => self.capture_pane(context, &command.args),
+                    DaemonCommandDispatch::CapturePane => self.capture_pane(context, &routed.args),
                     DaemonCommandDispatch::RunShell => {
-                        self.run_shell(client, kind, context, &command.args)
+                        self.run_shell(client, kind, context, &routed.args)
                     }
                     DaemonCommandDispatch::IfShell => {
-                        self.if_shell(client, kind, context, &command.args)
+                        self.if_shell(client, kind, context, &routed.args)
                     }
-                    DaemonCommandDispatch::AgentSend => self.agent_send(context, &command.args),
+                    DaemonCommandDispatch::AgentSend => self.agent_send(context, &routed.args),
                     DaemonCommandDispatch::SendLastOutput => {
-                        self.send_last_output(context, &command.args)
+                        self.send_last_output(context, &routed.args)
                     }
                     DaemonCommandDispatch::CaptureBrowser => {
-                        self.capture_browser(context, &command.args)
+                        self.capture_browser(context, &routed.args)
                     }
                     DaemonCommandDispatch::DebugMarker => {
-                        Ok(debug_marker(client, context, &command.args))
+                        Ok(debug_marker(client, context, &routed.args))
                     }
                     DaemonCommandDispatch::Tools => Ok(workspace_tools_catalog()),
                     DaemonCommandDispatch::Buffer => {
-                        self.buffer_command(context, canonical, &command.args)
+                        self.buffer_command(context, canonical, &routed.args)
                     }
                     DaemonCommandDispatch::ListClients => {
-                        self.list_clients(context, canonical, &command.args)
+                        self.list_clients(context, canonical, &routed.args)
                     }
                     DaemonCommandDispatch::ShowMessages => {
-                        self.show_messages(canonical, &command.args)
+                        self.show_messages(canonical, &routed.args)
                     }
                     DaemonCommandDispatch::RefreshClient => {
-                        self.refresh_client(client, kind, canonical, &command.args)
+                        self.refresh_client(client, kind, canonical, &routed.args)
                     }
-                    DaemonCommandDispatch::WaitFor => self.wait_for(client, kind, &command.args),
-                    DaemonCommandDispatch::PipePane => self.pipe_pane(context, &command.args),
+                    DaemonCommandDispatch::WaitFor => self.wait_for(client, kind, &routed.args),
+                    DaemonCommandDispatch::PipePane => self.pipe_pane(context, &routed.args),
                     DaemonCommandDispatch::DisplayPopup => {
-                        self.display_popup(client, kind, context, &command.args)
+                        self.display_popup(client, kind, context, &routed.args)
                     }
                     DaemonCommandDispatch::DisplayMenu => {
-                        self.display_menu(client, kind, context, &command.args)
+                        self.display_menu(client, kind, context, &routed.args)
                     }
                     DaemonCommandDispatch::ConfirmBefore => {
-                        self.confirm_before(client, kind, context, &command.args)
+                        self.confirm_before(client, kind, context, &routed.args)
                     }
                     DaemonCommandDispatch::Lock => {
-                        self.lock_command(client, context, canonical, &command.args)
+                        self.lock_command(client, context, canonical, &routed.args)
                     }
                     DaemonCommandDispatch::SwitchClient => {
-                        self.switch_client(client, kind, context, &command.args)
+                        self.switch_client(client, kind, context, &routed.args)
                     }
                 }
             });
@@ -3667,6 +3687,7 @@ impl Shared {
             if result.is_ok() {
                 self.inner.lock().engine.repair_context(context);
             }
+            self.enforce_destroy_unattached_if_changed(unattached_watch);
             return result;
         }
         let generation = self.inner.lock().engine.state.generation();
@@ -3686,7 +3707,19 @@ impl Shared {
         if publish_snapshot {
             self.publish_snapshot();
         }
+        self.enforce_destroy_unattached_if_changed(unattached_watch);
         result
+    }
+
+    fn enforce_destroy_unattached_if_changed(
+        self: &Arc<Self>,
+        before: Option<BTreeMap<SessionId, BTreeSet<ClientId>>>,
+    ) {
+        if let Some(before) = before
+            && self.inner.lock().attached != before
+        {
+            self.enforce_destroy_unattached();
+        }
     }
 
     fn command_hook_context(
@@ -8473,6 +8506,7 @@ impl Shared {
     ) -> Result<MuxSnapshot, ServerError> {
         let (snapshot, events) =
             self.attach_collect_event_hooks(client, session, event_hooks_enabled)?;
+        self.enforce_destroy_unattached();
         self.refresh_control_output_taps();
         self.run_event_hooks(events);
         Ok(snapshot)
@@ -8715,8 +8749,56 @@ impl Shared {
         if detached {
             self.publish_snapshot();
         }
+        self.enforce_destroy_unattached();
         self.refresh_control_output_taps();
         self.run_event_hooks(events);
+    }
+
+    fn enforce_destroy_unattached(self: &Arc<Self>) {
+        let candidates = {
+            let inner = self.inner.lock();
+            if !inner.engine.destroy_unattached_explicit_anywhere() {
+                return;
+            }
+            inner
+                .engine
+                .state
+                .sessions
+                .keys()
+                .filter(|session| !inner.attached.contains_key(session))
+                .filter(|session| {
+                    matches!(
+                        inner
+                            .engine
+                            .destroy_unattached_policy_for_session(**session)
+                            .as_deref(),
+                        Some("on" | "keep-group")
+                    )
+                })
+                .copied()
+                .collect::<Vec<_>>()
+        };
+        for session in candidates {
+            let eligible = {
+                let inner = self.inner.lock();
+                inner.engine.state.sessions.contains_key(&session)
+                    && !inner.attached.contains_key(&session)
+            };
+            if !eligible {
+                continue;
+            }
+            let target = session.to_string();
+            let command = CommandInvocation::new("kill-session", ["-t", target.as_str()]);
+            let mut context = ExecutionContext::default();
+            if let Err(error) = self.execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &command,
+            ) {
+                log::warn!("destroy-unattached could not destroy {target}: {error}");
+            }
+        }
     }
 
     /// Detach every attached client but `stealer`, either across the server or
@@ -37217,6 +37299,300 @@ bind - split-window -v -c "#{pane_current_path}"
                     ))
             );
         }
+    }
+
+    #[test]
+    fn destroy_unattached_policies_fire_only_when_the_last_client_detaches() {
+        for (policy, destroyed) in [
+            (None, false),
+            (Some("off"), false),
+            (Some("keep-last"), false),
+            (Some("on"), true),
+            (Some("keep-group"), true),
+        ] {
+            let shared = Arc::new(Shared::new(1));
+            let (a, _, _) = switch_test_session(&shared, "a");
+            let (b, _, _) = switch_test_session(&shared, "b");
+            let (first, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                Some("first".to_owned()),
+                None,
+                OutboundMailbox::new(),
+            );
+            let (second, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                Some("second".to_owned()),
+                None,
+                OutboundMailbox::new(),
+            );
+            shared.attach(first, b).expect("attach first");
+            shared.attach(second, b).expect("attach second");
+            if let Some(policy) = policy {
+                shared
+                    .execute(
+                        ClientId(u64::MAX),
+                        ClientKind::Command,
+                        &mut ExecutionContext::default(),
+                        &CommandInvocation::new(
+                            "set-option",
+                            ["-t", "b", "destroy-unattached", policy],
+                        ),
+                    )
+                    .expect("set destroy-unattached");
+            }
+            shared.detach(first);
+            assert!(
+                shared.inner.lock().engine.state.sessions.contains_key(&b),
+                "policy {policy:?} destroyed b while a client was still attached"
+            );
+            shared.detach(second);
+            assert_eq!(
+                shared.inner.lock().engine.state.sessions.contains_key(&b),
+                !destroyed,
+                "policy {policy:?}"
+            );
+            assert!(
+                shared.inner.lock().engine.state.sessions.contains_key(&a),
+                "policy {policy:?} leaked onto the session that never set it"
+            );
+            assert!(!shared.stopping.load(Ordering::Acquire));
+        }
+    }
+
+    #[test]
+    fn destroy_unattached_runs_before_the_shutdown_check_in_unregister() {
+        let shared = Arc::new(Shared::new(1));
+        let (b, _, _) = switch_test_session(&shared, "b");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("only".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(client, b).expect("attach");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-g", "destroy-unattached", "on"]),
+            )
+            .expect("set policy");
+        shared.unregister(client);
+        assert!(shared.inner.lock().engine.state.sessions.is_empty());
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn destroy_unattached_composes_with_detach_on_destroy_after_switching() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, _) = switch_test_session(&shared, "a");
+        let (b, _, _) = switch_test_session(&shared, "b");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("mover".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(client, b).expect("attach to b");
+        for (name, value) in [
+            ("destroy-unattached", "on"),
+            ("detach-on-destroy", "previous"),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("set-option", ["-g", name, value]),
+                )
+                .expect("set option");
+        }
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-t", "a"]),
+            )
+            .expect("switch to a");
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.engine.state.sessions.contains_key(&b));
+            assert!(inner.engine.state.sessions.contains_key(&a));
+            assert!(!inner.last_sessions.contains_key(&client));
+        }
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), client),
+            Some(a)
+        );
+        assert!(!shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn command_alias_reaches_daemon_owned_commands() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, _, _) = switch_test_session(&shared, "w");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("gui".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(client, session).expect("attach");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[20]", "lsc=list-clients"],
+                ),
+            )
+            .expect("alias write");
+        let listed = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("lsc", ["-F", "#{client_name}"]),
+            )
+            .expect("alias routed to the daemon-owned command");
+        assert!(listed.output.contains("gui"), "{:?}", listed.output);
+    }
+
+    #[test]
+    fn explicit_exit_empty_off_keeps_an_armed_empty_daemon_alive_until_unset() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        switch_test_session(&shared, "doomed");
+        for (name, args) in [
+            ("set-option", vec!["-s", "exit-empty", "off"]),
+            ("kill-session", vec!["-t", "doomed"]),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(name, args),
+                )
+                .expect("command");
+        }
+        assert!(shared.exit_empty_armed.load(Ordering::Acquire));
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        shared.unregister(client);
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-s", "-u", "exit-empty"]),
+            )
+            .expect("unset restores the latch rule");
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn explicit_exit_empty_on_shuts_down_without_the_session_latch() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-s", "exit-empty", "on"]),
+            )
+            .expect("explicit default write");
+        assert!(!shared.exit_empty_armed.load(Ordering::Acquire));
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn explicit_exit_unattached_exits_with_live_sessions_but_never_under_a_subscriber() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        switch_test_session(&shared, "keeper");
+        let (subscriber, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("gui".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-s", "exit-unattached", "on"]),
+            )
+            .expect("explicit write");
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        shared.unregister(subscriber);
+        assert!(shared.stopping.load(Ordering::Acquire));
+        assert!(!shared.inner.lock().engine.state.sessions.is_empty());
+    }
+
+    #[test]
+    fn lifecycle_policies_stay_dormant_during_the_startup_bracket() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        shared.begin_startup();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-s", "exit-unattached", "on"]),
+            )
+            .expect("boot config write");
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        shared.finish_startup();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("list-sessions", [] as [&str; 0]),
+            )
+            .expect("first post-startup command");
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn unset_lifecycle_trio_keeps_the_armed_latch_rules_intact() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        switch_test_session(&shared, "doomed");
+        let (subscriber, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("gui".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        for (name, args) in [
+            ("list-sessions", vec![]),
+            ("kill-session", vec!["-t", "doomed"]),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(name, args),
+                )
+                .expect("command");
+        }
+        assert!(shared.exit_empty_armed.load(Ordering::Acquire));
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        shared.unregister(subscriber);
+        assert!(shared.stopping.load(Ordering::Acquire));
     }
 
     #[test]

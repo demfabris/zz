@@ -841,6 +841,11 @@ pub const BEHAVES: &[&str] = &[
     "escape-time",
     "set-titles",
     "set-titles-string",
+    "command-alias",
+    "update-environment",
+    "exit-empty",
+    "exit-unattached",
+    "destroy-unattached",
 ];
 
 const OPTION_TABLE_ORDER: &[&str] = &[
@@ -1332,8 +1337,8 @@ mod tests {
 
     #[test]
     fn behaving_option_roster_is_complete_unique_and_catalogued() {
-        assert_eq!(BEHAVES.len(), 81);
-        assert_eq!(BEHAVES.iter().copied().collect::<BTreeSet<_>>().len(), 81);
+        assert_eq!(BEHAVES.len(), 86);
+        assert_eq!(BEHAVES.iter().copied().collect::<BTreeSet<_>>().len(), 86);
         let catalog = tmux_options()
             .map(|option| option.name)
             .collect::<BTreeSet<_>>();

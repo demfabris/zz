@@ -1,0 +1,19 @@
+# One command-alias layer expands before command lookup, appends caller args,
+# reaches daemon-owned commands, stores its expansion in bindings and hooks, and
+# never recurses into a second alias.
+set-option -s command-alias[10] lsw=list-windows
+out: show-options -sv command-alias[10]
+out: lsw -F #{window_name}
+split-pane -d
+set-option -s command-alias[11] chain1=chain2
+set-option -s command-alias[12] chain2=list-sessions
+chain1
+chain2
+set-option -s command-alias[13] grab=capture-pane
+grab -p
+bind-key -T zzc6 F6 lsw
+out: list-keys -T zzc6 -F #{key_string}=#{key_command}
+unbind-key -T zzc6 F6
+set-hook -g session-created lsw
+out: show-hooks -g session-created
+set-hook -gu session-created

@@ -37,8 +37,8 @@ use crate::{
     model::DEFAULT_WINDOW_EXTENT,
     tmux_options::{
         HOOK_NAMES, TmuxArrayValue, TmuxOption, TmuxOptionScope, TmuxStoredScalarKind,
-        UPDATE_ENVIRONMENT_DEFAULT, match_tmux_option, parse_tmux_option, tmux_option_is_hook,
-        tmux_option_table_order, tmux_options, tmux_stored_array, tmux_stored_scalar,
+        match_tmux_option, parse_tmux_option, tmux_option_is_hook, tmux_option_table_order,
+        tmux_options, tmux_stored_array, tmux_stored_scalar,
     },
     valid_style,
 };
@@ -1336,6 +1336,36 @@ impl MuxEngine {
             .to_owned()
     }
 
+    #[must_use]
+    pub fn exit_empty_explicit(&self) -> Option<bool> {
+        self.scalar_option_explicit(TmuxOptionTarget::Server, "exit-empty")
+            .map(|value| value == "on")
+    }
+
+    #[must_use]
+    pub fn exit_unattached_explicit(&self) -> Option<bool> {
+        self.scalar_option_explicit(TmuxOptionTarget::Server, "exit-unattached")
+            .map(|value| value == "on")
+    }
+
+    #[must_use]
+    pub fn destroy_unattached_policy_for_session(&self, session: SessionId) -> Option<String> {
+        self.scalar_option_explicit(TmuxOptionTarget::Session(session), "destroy-unattached")
+            .map(str::to_owned)
+    }
+
+    #[must_use]
+    pub fn destroy_unattached_explicit_anywhere(&self) -> bool {
+        self.stored_scalars
+            .global_session
+            .contains_key("destroy-unattached")
+            || self
+                .stored_scalars
+                .sessions
+                .values()
+                .any(|options| options.contains_key("destroy-unattached"))
+    }
+
     pub fn take_destroyed_sessions(&mut self) -> Vec<(SessionId, String, String)> {
         std::mem::take(&mut self.destroyed_sessions)
     }
@@ -2252,6 +2282,29 @@ impl MuxEngine {
         self.execute_with_shell_validator(context, command, hooks, &mut |_| true)
     }
 
+    #[must_use]
+    pub fn expand_command_alias(&self, command: &CommandInvocation) -> Option<CommandInvocation> {
+        let alias = self
+            .array_option(TmuxOptionTarget::Server, "command-alias")?
+            .values()
+            .find_map(|entry| {
+                let (name, expansion) = entry.split_once('=')?;
+                (name == command.name).then_some(expansion)
+            })?;
+        let parsed = self.parse_config("<command-alias>", alias);
+        if !parsed.diagnostics.is_empty() {
+            return None;
+        }
+        let mut commands = parsed.commands;
+        if commands.len() != 1 {
+            return None;
+        }
+        let mut expanded = commands.remove(0);
+        expanded.args.extend(command.args.iter().cloned());
+        expanded.source.clone_from(&command.source);
+        Some(expanded)
+    }
+
     pub fn execute_with_shell_validator(
         &mut self,
         context: &mut ExecutionContext,
@@ -2260,6 +2313,8 @@ impl MuxEngine {
         default_shell_is_valid: &mut impl FnMut(&str) -> bool,
     ) -> Result<Execution, ServerError> {
         let generation = self.state.generation();
+        let expanded = self.expand_command_alias(command);
+        let command = expanded.as_ref().unwrap_or(command);
         let name = canonical_command(&command.name);
         let mut execution = match name {
             "new-session" => self.new_session(context, &command.args, hooks)?,
@@ -5537,7 +5592,7 @@ impl MuxEngine {
         }
     }
 
-    fn scalar_option_effective(&self, target: TmuxOptionTarget, name: &str) -> Option<&str> {
+    fn scalar_option_explicit(&self, target: TmuxOptionTarget, name: &str) -> Option<&str> {
         if let Some(value) = self
             .scalar_table(target)
             .and_then(|options| options.get(name))
@@ -5557,8 +5612,11 @@ impl MuxEngine {
             | TmuxOptionTarget::GlobalSession
             | TmuxOptionTarget::GlobalWindow => None,
         };
-        inherited
-            .map(String::as_str)
+        inherited.map(String::as_str)
+    }
+
+    fn scalar_option_effective(&self, target: TmuxOptionTarget, name: &str) -> Option<&str> {
+        self.scalar_option_explicit(target, name)
             .or_else(|| tmux_stored_scalar(name).map(|metadata| metadata.default))
     }
 
@@ -6997,7 +7055,10 @@ impl MuxEngine {
             "repeat-time" => self.global_repeat_time_ms.to_string(),
             "set-clipboard" => self.set_clipboard.as_str().to_owned(),
             "synchronize-panes" => tmux_flag(self.state.global_synchronize_panes()).to_owned(),
-            "update-environment" => UPDATE_ENVIRONMENT_DEFAULT.to_owned(),
+            "update-environment" => self
+                .update_environment_names()
+                .collect::<Vec<_>>()
+                .join(" "),
             "word-separators" => self.global_word_separators.clone(),
             "aggressive-resize" => tmux_flag(self.state.global_aggressive_resize()).to_owned(),
             "automatic-rename" => tmux_flag(self.state.global_automatic_rename()).to_owned(),
@@ -7311,9 +7372,17 @@ impl MuxEngine {
         Ok(Execution::default())
     }
 
+    fn update_environment_names(&self) -> impl Iterator<Item = &str> {
+        self.stored_arrays
+            .global_session
+            .get("update-environment")
+            .into_iter()
+            .flat_map(|array| array.values().map(String::as_str))
+    }
+
     fn seed_session_environment(&mut self, session: SessionId) {
-        let environment = UPDATE_ENVIRONMENT_DEFAULT
-            .split_ascii_whitespace()
+        let environment = self
+            .update_environment_names()
             .map(|name| {
                 let value = self
                     .global_environment
@@ -8089,9 +8158,9 @@ impl MuxEngine {
                     }
                 })
                 .transpose()?,
-            ServerOption::DefaultClientCommand => {
-                value.map(normalize_option_command).transpose()?
-            }
+            ServerOption::DefaultClientCommand => value
+                .map(|value| normalize_option_command(self, value))
+                .transpose()?,
             _ => None,
         };
         let value = normalized.as_deref().or(value);
@@ -10635,7 +10704,7 @@ fn bound_commands(
     engine: &MuxEngine,
     tail: &[String],
 ) -> Result<Vec<CommandInvocation>, ServerError> {
-    let commands = if let [argument] = tail
+    let mut commands = if let [argument] = tail
         && let Some(body) = crate::parser::command_block_body(argument)
     {
         let parsed = engine.parse_config("<bind-key>", body);
@@ -10663,6 +10732,7 @@ fn bound_commands(
         }
         commands
     };
+    expand_stored_aliases(engine, &mut commands);
     for command in &commands {
         validate_bound_command(command, "bind-key")?;
     }
@@ -10681,13 +10751,15 @@ fn parse_hook_commands(
     if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
         return Err(ServerError::InvalidCommand(diagnostic.message));
     }
-    for command in &parsed.commands {
+    let mut commands = parsed.commands;
+    expand_stored_aliases(engine, &mut commands);
+    for command in &commands {
         validate_bound_command(command, "set-hook")?;
     }
-    Ok(parsed.commands)
+    Ok(commands)
 }
 
-fn normalize_option_command(value: &str) -> Result<String, ServerError> {
+fn normalize_option_command(engine: &MuxEngine, value: &str) -> Result<String, ServerError> {
     let parsed = crate::parse_config("<set-option>", value);
     if !parsed.diagnostics.is_empty() {
         return Err(ServerError::InvalidCommand("syntax error".to_owned()));
@@ -10696,6 +10768,9 @@ fn normalize_option_command(value: &str) -> Result<String, ServerError> {
         .commands
         .into_iter()
         .map(|mut command| {
+            if let Some(expanded) = engine.expand_command_alias(&command) {
+                command = expanded;
+            }
             command.name = match resolve_command(&command.name) {
                 CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => {
                     name.to_owned()
@@ -10764,6 +10839,14 @@ fn has_unquoted_hook_format(input: &str) -> bool {
         }
     }
     false
+}
+
+fn expand_stored_aliases(engine: &MuxEngine, commands: &mut [CommandInvocation]) {
+    for command in commands {
+        if let Some(expanded) = engine.expand_command_alias(command) {
+            *command = expanded;
+        }
+    }
 }
 
 fn validate_bound_command(command: &CommandInvocation, owner: &str) -> Result<(), ServerError> {
@@ -20087,6 +20170,329 @@ mod tests {
         );
         assert_eq!(environment["KRB5CCNAME"], None);
         assert_eq!(environment["PHASE4D_EXTRA"].as_deref(), Some("global"));
+    }
+
+    #[test]
+    fn command_alias_expands_one_layer_before_canonical_lookup() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        let window = context.window.expect("window");
+
+        engine
+            .execute(&mut context, &command("split-pane", &["-h"]))
+            .expect("default alias reaches split-window");
+        assert_eq!(engine.state.windows[&window].pane_order().len(), 2);
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-s", "command-alias[10]", "dm=display-message -p"],
+                ),
+            )
+            .expect("indexed alias write");
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("dm", &["appended"]))
+                .expect("alias appends caller arguments")
+                .output,
+            "appended"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-s",
+                        "command-alias[11]",
+                        "list-sessions=display-message -p shadowed",
+                    ],
+                ),
+            )
+            .expect("shadowing alias write");
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("list-sessions", &[]))
+                .expect("alias lookup precedes the command table")
+                .output,
+            "shadowed"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "command-alias[12]", "chain1=chain2"]),
+            )
+            .expect("chain alias write");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-s",
+                        "command-alias[13]",
+                        "chain2=display-message -p reached",
+                    ],
+                ),
+            )
+            .expect("chain target write");
+        let error = engine
+            .execute(&mut context, &command("chain1", &[]))
+            .expect_err("the second alias layer must not expand");
+        assert!(
+            matches!(
+                &error,
+                ServerError::InvalidCommand(message) if message == "unknown command: chain2"
+            ),
+            "{error:?}"
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("chain2", &[]))
+                .expect("the first layer still expands")
+                .output,
+            "reached"
+        );
+
+        for (index, value, name) in [
+            ("14", "multi=list-sessions ; list-windows", "multi"),
+            ("15", "empty=", "empty"),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "set-option",
+                        &["-s", &format!("command-alias[{index}]"), value],
+                    ),
+                )
+                .expect("alias write");
+            let error = engine
+                .execute(&mut context, &command(name, &[]))
+                .expect_err("only single-command alias bodies expand");
+            assert!(
+                matches!(
+                    &error,
+                    ServerError::InvalidCommand(message)
+                        if message == &format!("unknown command: {name}")
+                ),
+                "{error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn command_alias_satisfies_bind_hook_and_option_command_validation() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-s", "command-alias[10]", "dm=display-message -p"],
+                ),
+            )
+            .expect("alias write");
+        engine
+            .execute(
+                &mut context,
+                &command("bind-key", &["F5", "split-pane", "-h"]),
+            )
+            .expect("default alias validates at bind time");
+        engine
+            .execute(&mut context, &command("bind-key", &["F6", "dm", "hello"]))
+            .expect("user alias validates at bind time");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-keys",
+                        &["-T", "prefix", "-F", "#{key_string}=#{key_command}"],
+                    ),
+                )
+                .unwrap()
+                .output
+                .lines()
+                .filter(|line| line.starts_with("F5=") || line.starts_with("F6="))
+                .collect::<Vec<_>>(),
+            vec!["F5=split-window -h", "F6=display-message -p hello"]
+        );
+        engine
+            .execute(&mut context, &command("unbind-key", &["F6"]))
+            .expect("aliased binding unbinds");
+        engine
+            .execute(&mut context, &command("bind-key", &["F7", "wibble"]))
+            .expect_err("unknown names still fail bind validation");
+        engine
+            .execute(
+                &mut context,
+                &command("set-hook", &["-g", "session-created", "dm hooked"]),
+            )
+            .expect("user alias validates in hook payloads");
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-hooks", &["-g"]))
+                .unwrap()
+                .output
+                .lines()
+                .filter(|line| line.starts_with("session-created"))
+                .collect::<Vec<_>>(),
+            vec!["session-created[0] display-message -p hooked"]
+        );
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-s", "default-client-command", "split-pane -h"],
+                ),
+            )
+            .expect("option-command normalization expands the alias");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "default-client-command"]),
+                )
+                .unwrap()
+                .output,
+            "split-window -h"
+        );
+    }
+
+    #[test]
+    fn update_environment_writes_drive_seeding_and_readback() {
+        let mut engine = MuxEngine::default();
+        engine.seed_global_environment([("DISPLAY", ":7"), ("PHASE_C7", "seeded")]);
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-g", "update-environment", "PHASE_C7 ABSENT_C7"],
+                ),
+            )
+            .expect("array write");
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-environment", &[]))
+                .unwrap()
+                .output,
+            "-ABSENT_C7\nPHASE_C7=seeded"
+        );
+        assert_eq!(
+            engine
+                .global_tmux_option_value("update-environment")
+                .as_deref(),
+            Some("PHASE_C7 ABSENT_C7")
+        );
+    }
+
+    #[test]
+    fn lifecycle_trio_accessors_report_only_explicit_writes() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        let session = context.session.expect("session");
+
+        assert_eq!(engine.exit_empty_explicit(), None);
+        assert_eq!(engine.exit_unattached_explicit(), None);
+        assert!(!engine.destroy_unattached_explicit_anywhere());
+        assert_eq!(engine.destroy_unattached_policy_for_session(session), None);
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "exit-empty", "on"]),
+            )
+            .expect("explicit default write");
+        assert_eq!(engine.exit_empty_explicit(), Some(true));
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "exit-empty", "off"]),
+            )
+            .expect("explicit off write");
+        assert_eq!(engine.exit_empty_explicit(), Some(false));
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "-u", "exit-empty"]),
+            )
+            .expect("unset");
+        assert_eq!(engine.exit_empty_explicit(), None);
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "exit-unattached", "on"]),
+            )
+            .expect("explicit write");
+        assert_eq!(engine.exit_unattached_explicit(), Some(true));
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "destroy-unattached", "keep-last"]),
+            )
+            .expect("global write");
+        assert!(engine.destroy_unattached_explicit_anywhere());
+        assert_eq!(
+            engine
+                .destroy_unattached_policy_for_session(session)
+                .as_deref(),
+            Some("keep-last")
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-t", "work", "destroy-unattached", "on"]),
+            )
+            .expect("session write");
+        assert_eq!(
+            engine
+                .destroy_unattached_policy_for_session(session)
+                .as_deref(),
+            Some("on")
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "-u", "destroy-unattached"]),
+            )
+            .expect("global unset");
+        assert_eq!(
+            engine
+                .destroy_unattached_policy_for_session(session)
+                .as_deref(),
+            Some("on")
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-u", "-t", "work", "destroy-unattached"]),
+            )
+            .expect("session unset");
+        assert_eq!(engine.destroy_unattached_policy_for_session(session), None);
+        assert!(!engine.destroy_unattached_explicit_anywhere());
     }
 
     #[test]

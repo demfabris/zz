@@ -38,10 +38,12 @@ so terminal signals aimed at the launching client (Ctrl+C, tty hangup) never rea
 | Stop | `kill-server` (never auto-starts a daemon), or nothing-left-to-serve: zero sessions **and** zero interactive clients (`subscribers`), armed once the daemon has created a session; `SocketGuard::Drop` unlinks the Unix socket |
 | Recover | `terminate_incompatible_daemon` safely stops a daemon whose protocol version no longer matches |
 
-zz deliberately diverges from tmux's `exit-empty` here. tmux can key on sessions alone because its
-last client exits at the same instant, dropping the user back in a shell; zz's GUI window outlives
-its last pane. Keying on sessions alone therefore meant closing the last pane killed the daemon and
-left the window on an unrecoverable "zz daemon stopped" screen. Now:
+zz deliberately diverges from tmux's `exit-empty` here by default. tmux can key on sessions alone
+because its last client exits at the same instant, dropping the user back in a shell; zz's GUI
+window outlives its last pane. Keying on sessions alone therefore meant closing the last pane
+killed the daemon and left the window on an unrecoverable "zz daemon stopped" screen. A config that
+EXPLICITLY sets `exit-empty`/`exit-unattached` opts back into the pin's rule (Wave C, 2026-08-21),
+but never past the zero-subscribers guard. Now:
 
 - **Closing the last pane** leaves the daemon up with zero sessions and reveals the existing
   `NewSessionView` **New Session** card. That is the steady state of an empty daemon, not a

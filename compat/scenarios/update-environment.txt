@@ -1,0 +1,8 @@
+# The stored update-environment array drives session seeding: a default name is
+# seeded at defaults, and rewriting the array seeds exactly the listed names.
+new-session -d -s envdefault
+out: show-environment -t envdefault DISPLAY
+set-option -g update-environment ZZ_C7_ABSENT
+new-session -d -s envseed
+out: show-environment -t envseed
+out: show-options -gv update-environment

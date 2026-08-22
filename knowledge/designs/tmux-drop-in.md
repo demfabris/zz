@@ -453,20 +453,27 @@ content contains no literal `#[`, top status occupies row zero, `mouse off` emit
 5. `remain-on-exit-format`: park until the terminal actor has an approved post-worker VT
    injection or frozen-view reconstruction seam. The current retained-pane path marks the
    pane dead after the live PTY/VT actor exits, so the proposed feed path does not exist.
-6. `command-alias`: expand one alias layer before canonical command lookup and in bind-time
-   validation and option-command normalization. Expand before daemon command preemption so
-   aliases can target daemon-owned commands. Parse the stored value with the pinned argv
-   grammar, append caller arguments, and do not recurse. The six stored defaults match the
-   pin and none is duplicated in `CommandSpec.aliases`, so the catalog needs no alias
-   deletion.
-7. `update-environment`: read the global array option during session seeding. Keep the
-   client's environment flags ledgered because the current wire does not carry that
-   environment.
-8. Lifecycle trio: add explicit-set tracking and honor `exit-empty`, `exit-unattached`, and
-   `destroy-unattached` only after the user sets them. Override the current automatic
-   shutdown path with that effective policy. Keep `destroy-unattached=keep-group` ledgered
-   while linked session groups remain the permanent compatibility skip. Test lifecycle
-   behavior in daemon tests so a scenario does not kill its harness.
+6. `command-alias`: **shipped 2026-08-21.** `MuxEngine::expand_command_alias` expands one
+   layer through the config tokenizer, appends caller arguments, and never recurses (the
+   pin's `CMD_PARSE_NOALIAS`). It runs at both dispatch chokepoints — the daemon's
+   preemption fork before `DAEMON_COMMAND_NAMES`, so aliases reach daemon-owned commands,
+   and `execute_with_shell_validator` before canonical lookup — plus bind-key, set-hook,
+   and option-command validation. The six stored defaults match the pin; no catalog alias
+   deletion was needed. Ledgered: control mode's client-side parse pre-check rejects
+   user alias names before dispatch (no wire carries server options to that client).
+7. `update-environment`: **shipped 2026-08-21.** `seed_session_environment` and
+   `global_tmux_option_value` both read the stored array; the frozen constant is gone from
+   `command.rs`. The client-environment flags (`-E`, attach re-seeding, `fnmatch` value
+   patterns) stay ledgered because the wire carries no client environment.
+8. Lifecycle trio: **shipped 2026-08-21.** A dedicated `scalar_option_explicit` accessor
+   over the stored-scalar maps gives presence-means-set semantics at each option's pin
+   scope; `should_shutdown_if_empty` consults `exit_empty_explicit` /
+   `exit_unattached_explicit` and otherwise keeps the latch rule byte-identical, and
+   `enforce_destroy_unattached` reproduces `server_check_unattached` after attach, detach,
+   switch, and unregister. The `subscribers.is_empty()` conjunct survives every policy, and
+   policies are dormant inside the startup bracket. `keep-last`/`keep-group` follow their
+   ungrouped-session reading while linked session groups remain the permanent skip. All of
+   it is covered by in-process daemon tests, never compat scenarios.
 9. Renderer styles:
    - Feed `window-style`, `window-active-style`, `mode-style`, and the three copy-mode styles
      through the existing per-pane appearance bridge.
@@ -478,7 +485,8 @@ content contains no literal `#[`, top status occupies row zero, `mouse off` emit
      option writes.
 
 The full B and C target moves `BEHAVES` from 67 to 105: 12 Wave B consumers and 26 Wave C
-consumers. The C tranche, if approved without `remain-on-exit-format`, stops at 104.
+consumers. The C tranche, if approved without `remain-on-exit-format`, stops at 104. Wave C
+run 1 (items 6, 7, 8) took it 81 to 86.
 Regenerate the option rosters in `knowledge/tmux/divergences.md` and enforce both expected
 deltas in tests.
 
@@ -645,7 +653,8 @@ Each wave closes with:
 - `git diff --check`
 - OKF validation
 - `compat/run.sh --strict-geometry`, followed by a hard postcondition of at least the
-  current 48 scenario rows, zero SKIPs, and no divergences outside the two documented
+  current 50 scenario rows (48 before Wave C run 1 added `command-alias` and
+  `update-environment`), zero SKIPs, and no divergences outside the two documented
   geometry fixtures
 - the `BEHAVES` assertion and option ledger updated
 - the exact unsupported-pair roster and expected tranche delta updated
@@ -1305,9 +1314,11 @@ this list is the campaign-level index of it plus the items that never got a matr
   keep zz's own shapes; the harness and scripts compare through `-F`.
 - Non-UTF-8 argv: pin VIS-octal-escapes (`a\377b`), zz replacement-chars (U+FFFD) —
   `to_string_lossy` at the CLI boundary; OsString plumbing judged not worth it.
-- `update-environment` markers at session create source from the daemon's environment, not
-  the attaching client's (the wire carries no client environ); diverges when the daemon
-  outlives the shell that started it.
+- `update-environment` markers at session create honor the stored array (Wave C run 1) but
+  source from the daemon's environment, not the attaching client's (the wire carries no
+  client environ); diverges when the daemon outlives the shell that started it. The same
+  missing field keeps `-E` rejected, attach re-seeding absent, and `fnmatch` value patterns
+  unexpanded.
 - Two upstream layout bugs refused rather than reproduced (two-pane `main-*` preset,
   mixed-parent `-E` spread) — `known/` scenarios pin them.
 - Grouped sessions / linked windows / socket interop / fleet broadcast — the permanent
@@ -1315,11 +1326,11 @@ this list is the campaign-level index of it plus the items that never got a matr
 
 **Deferred mechanics (owner in parentheses):**
 
-- Array options as a category (`status-format[N]`, `command-alias`, `terminal-features`,
-  `update-environment`, …): all eight store with indexed semantics since the Lane-2 sweep
-  (2026-08-20), none is consumed — dispatch uses the static alias table, the status
-  renderer reads `status-left`/`-right`, and session seeding hardcodes the default
-  `update-environment` list (C3 / TUI phases).
+- Array options as a category (`terminal-features`, `terminal-overrides`, `user-keys`,
+  `pane-colours`, `codepoint-widths`): all eight store with indexed semantics since the
+  Lane-2 sweep (2026-08-20); three are now consumed — `status-format[]` (B1) plus
+  `command-alias[]` and `update-environment[]` (Wave C run 1, 2026-08-21). The remaining
+  five still drive nothing (TUI phases).
 - Styles (`#[…]`, `*-style` options) and `source-file -F/-n/-v` (marked *later* in the
   phase-4 table; styles are TUI-meaningful).
 - `#()` job bodies: both sides strftime the whole string first (pinned by test), but the
@@ -1551,17 +1562,18 @@ tabs stay interactive widgets fed format-expanded labels. All nine alert options
 `prefix-timeout`, `status-keys`, `wrap-search`, `prompt-history-limit`, `history-file`.
 Layout: `main-pane-width/height`, `other-pane-width/height`, `tiled-layout-max-columns`
 (today five hardcoded constants in `layout.rs`), `window-size`, `default-size`. Overlays:
-`display-panes-time/-format`, `remain-on-exit-format`. Shared: `command-alias[]`.
-Maintainer decisions folded in: `pane-border-style`/`pane-active-border-style` HONOR
+`display-panes-time/-format`, `remain-on-exit-format`. Shared: `command-alias[]` (shipped
+2026-08-21). Maintainer decisions folded in: `pane-border-style`/`pane-active-border-style` HONOR
 explicitly-set colors over the theme (attributes beyond color ignored, one divergence
 row); `window-style`/`window-active-style` (inactive-pane dimming) and the
 `mode-style`/`copy-mode-*-style` selection/match/mark styles ALL render in the GUI
 terminal renderer — content styling, no chrome-doctrine conflict. The remaining lifecycle
-flags (`exit-empty`, `exit-unattached`, `destroy-unattached`) must be honored when a config
-EXPLICITLY sets them; defaults keep zz's persistent-daemon behavior. Note
-the daemon already carries the machinery: `should_shutdown_if_empty` = armed ∧ zero
-sessions ∧ zero subscribers — wiring `exit-empty` means exposing that switch, and the
-"attached client keeps the daemon alive" guard stays as a documented divergence. The
+flags (`exit-empty`, `exit-unattached`, `destroy-unattached`) are honored when a config
+EXPLICITLY sets them, defaults keeping zz's persistent-daemon behavior — shipped
+2026-08-21. `should_shutdown_if_empty` still reads armed ∧ zero sessions ∧ zero
+subscribers with nothing set; explicit writes swap in the pin's `server_loop` rule, and the
+"attached client keeps the daemon alive" guard stays as a documented divergence that no
+policy can override. The
 Settings → Advanced `QuitDaemonOnExit` key is a DIFFERENT trigger (app quit, not
 sessions-drained); both axes coexist, the settings description should cross-reference.
 `detach-on-destroy` shipped separately in protocol v70 and follows its pinned default and

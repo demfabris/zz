@@ -65,9 +65,19 @@ pub(crate) struct TerminalGuard {
     original: Termios,
 }
 
+pub(crate) const MOUSE_DISABLE_SEQUENCE: &[u8] = b"\x1b[?1016l\x1b[?1006l\x1b[?1003l";
+
+pub(crate) fn mouse_enable_sequence(pixel_mouse: bool) -> Vec<u8> {
+    let mut sequence = b"\x1b[?1003h\x1b[?1006h".to_vec();
+    if pixel_mouse {
+        sequence.extend_from_slice(b"\x1b[?1016h");
+    }
+    sequence
+}
+
 impl TerminalGuard {
     #[cfg(unix)]
-    pub fn enter() -> io::Result<Self> {
+    pub fn enter(mouse: bool) -> io::Result<Self> {
         let original = rustix::termios::tcgetattr(io::stdin())?;
         let file_probe = probe_file_path();
         remove_file_if_present(&file_probe)?;
@@ -87,9 +97,9 @@ impl TerminalGuard {
             original,
         };
         let mut output = io::stdout().lock();
-        output.write_all(b"\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[?1004h\x1b[?1003h\x1b[?1006h")?;
-        if guard.pixel_mouse {
-            output.write_all(b"\x1b[?1016h")?;
+        output.write_all(b"\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[?1004h")?;
+        if mouse {
+            output.write_all(&mouse_enable_sequence(guard.pixel_mouse))?;
         }
         output.write_all(b"\x1b[?2004h")?;
         if guard.kitty_keyboard {
@@ -105,7 +115,7 @@ impl TerminalGuard {
     }
 
     #[cfg(not(unix))]
-    pub fn enter() -> io::Result<Self> {
+    pub fn enter(_mouse: bool) -> io::Result<Self> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "zz-tui currently requires a Unix terminal",
@@ -189,5 +199,15 @@ mod tests {
         assert_eq!(pixel_cell_extent(1600, 200, 8), 8);
         assert_eq!(pixel_cell_extent(0, 200, 8), 8);
         assert_eq!(pixel_cell_extent(40, 80, 8), 1);
+    }
+
+    #[test]
+    fn mouse_sequences_emit_and_retract_the_tmux_outer_modes() {
+        assert_eq!(mouse_enable_sequence(false), b"\x1b[?1003h\x1b[?1006h");
+        assert_eq!(
+            mouse_enable_sequence(true),
+            b"\x1b[?1003h\x1b[?1006h\x1b[?1016h"
+        );
+        assert_eq!(MOUSE_DISABLE_SEQUENCE, b"\x1b[?1016l\x1b[?1006l\x1b[?1003l");
     }
 }

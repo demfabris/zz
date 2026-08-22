@@ -42,6 +42,7 @@ pub(crate) struct StatusRequest {
     pub(crate) variables: BTreeMap<String, String>,
     pub(crate) message_line: u8,
     pub(crate) customized: bool,
+    pub(crate) title_format: Option<String>,
     pub(crate) context: StatusContext,
     pub(crate) facts: FormatHookFacts,
 }
@@ -215,14 +216,40 @@ fn render(
     tmux_shim: Option<&std::path::Path>,
     zz_executable: Option<&std::path::Path>,
 ) -> StatusLine {
+    let now = Local::now();
+    let title = request
+        .title_format
+        .as_ref()
+        .map_or_else(String::new, |format| {
+            let mut hooks = DaemonFormatHooks::status(
+                &request.facts,
+                &request.context,
+                None,
+                cache,
+                touched,
+                refresh,
+                now,
+                tmux_shim,
+                zz_executable,
+            );
+            let mut title = expand_status(format, &request.context, &mut hooks);
+            if title.len() > MAX_STATUS_TEXT_BYTES {
+                let mut end = MAX_STATUS_TEXT_BYTES;
+                while !title.is_char_boundary(end) {
+                    end -= 1;
+                }
+                title.truncate(end);
+            }
+            title
+        });
     if !request.formats.enabled {
         return StatusLine {
+            title,
             position: request.formats.position,
             customized: request.customized,
             ..StatusLine::default()
         };
     }
-    let now = Local::now();
     let (left, right) = {
         let mut hooks = DaemonFormatHooks::status(
             &request.facts,
@@ -284,7 +311,7 @@ fn render(
             &trim_status_left(&right, usize::from(request.formats.right_length)),
             &request.formats.right_style,
         ),
-        title: String::new(),
+        title,
         base_style,
         rows,
         position: request.formats.position,
@@ -932,6 +959,7 @@ mod tests {
             variables: BTreeMap::new(),
             message_line: 0,
             customized: false,
+            title_format: None,
             context: StatusContext {
                 session_name: "work".to_owned(),
                 ..StatusContext::default()
@@ -953,6 +981,8 @@ mod tests {
             variables: engine.status_row_variables_for_session(session),
             message_line: engine.message_line_for_session(session),
             customized: engine.status_customized_for_session(session),
+            title_format: (session.is_some() && engine.set_titles_for_session(session))
+                .then(|| engine.set_titles_string_for_session(session)),
             context: status_context(&snapshot, engine, session, None),
             facts: FormatHookFacts::default(),
         }
@@ -965,6 +995,55 @@ mod tests {
                 &zz_protocol::CommandInvocation::new(args[0], args[1..].iter().copied()),
             )
             .unwrap_or_else(|error| panic!("{args:?}: {error:?}"));
+    }
+
+    #[test]
+    fn set_titles_expands_per_client_and_survives_status_off() {
+        let mut engine = MuxEngine::default();
+        let mut context = zz_mux::ExecutionContext::default();
+        execute(
+            &mut engine,
+            &mut context,
+            &["new-session", "-s", "alpha", "-n", "main"],
+        );
+        let session = context.session;
+        let mut renderer = StatusRenderer::default();
+
+        let baseline = renderer.render_initial(&engine_request(1, &engine, session));
+        assert_eq!(baseline.title, "");
+
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-g", "set-titles", "on"],
+        );
+        let titled = renderer.render_initial(&engine_request(1, &engine, session));
+        assert!(
+            titled.title.starts_with("alpha:0:main"),
+            "default set-titles-string expands in client context: {}",
+            titled.title
+        );
+
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-g", "set-titles-string", "#S custom"],
+        );
+        let custom = renderer.render_initial(&engine_request(1, &engine, session));
+        assert_eq!(custom.title, "alpha custom");
+
+        execute(&mut engine, &mut context, &["set-option", "status", "off"]);
+        let off = renderer.render_initial(&engine_request(1, &engine, session));
+        assert!(off.rows.is_empty());
+        assert_eq!(off.title, "alpha custom");
+
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-g", "set-titles", "off"],
+        );
+        let untitled = renderer.render_initial(&engine_request(1, &engine, session));
+        assert_eq!(untitled.title, "");
     }
 
     #[test]

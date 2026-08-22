@@ -596,6 +596,7 @@ pub struct AppView {
     dialog_prefix_cancel_sent: bool,
     dialog_prefix_cancel_pending: Option<u64>,
     synchronized_signature: Option<SynchronizeSignature>,
+    applied_window_title: Option<String>,
 }
 
 impl AppView {
@@ -786,6 +787,7 @@ impl AppView {
             dialog_prefix_cancel_sent: false,
             dialog_prefix_cancel_pending: None,
             synchronized_signature: None,
+            applied_window_title: None,
         };
         view.register_agent_panes(cx);
         view
@@ -2509,6 +2511,23 @@ impl AppView {
     }
 }
 
+impl AppView {
+    /// Decision 6: the GUI adopts the daemon-expanded `set-titles` title only
+    /// when the option is explicitly on — the daemon publishes a non-empty
+    /// title exactly then — and reverts to the native title otherwise.
+    fn sync_window_title(&mut self, title: &str, window: &mut Window) {
+        let desired = (!title.is_empty()).then(|| title.to_owned());
+        if self.applied_window_title == desired {
+            return;
+        }
+        match &desired {
+            Some(title) => window.set_window_title(title),
+            None => window.set_window_title("zz"),
+        }
+        self.applied_window_title = desired;
+    }
+}
+
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let started = diagnostics::timer(DIAGNOSTIC_TARGET);
@@ -2656,6 +2675,7 @@ impl Render for AppView {
             pane_margin
         };
         let status = self.mux.read(cx).status().clone();
+        self.sync_window_title(&status.title, window);
         let status_appearance = self.mux.read(cx).appearance();
         let status_block_visible = tmux_status_block_shown(
             &status,

@@ -341,6 +341,18 @@ message-line clamping, base style, title with status off, and rejection before a
 
 ## Wave B - TUI option consumption and attach residue
 
+**Shipped 2026-08-21 in three reviewed runs** (daemon status-row production, the shared
+compositor with both clients rendering, then mouse/escape-time/titles/attach-residue/
+read-only), each closed by an independent adversarial review and a MERGE-READY follow-up.
+`BEHAVES` moved 67 to 81 (+14: the plan's 12 plus the `set-titles` pair the approved order
+folds in from C3); the flag ledger fell 129 to 128 (`attach-session -r`). One brief error
+was caught against the pin mid-wave: the pinned tmux builds with mouse ON by default
+(`TMUX_MOUSE=1`), and zz already matched. Pane-requested mouse forwards with the option
+off, pin-exact. Ledgered bounds: status-row window-option scoping (fix scheduled into
+Wave C via the `Expander::lookup` loop-item seam), the status-block suppression
+threshold, the empty-title expansion edge, read-only decoupled from `ignore-size`, and
+`new-session` inside a pane not yet nested-refusing.
+
 At the source anchor, the TUI ignored `CoreEvent::MuxOptionsChanged`, stored no mux option
 state, and printed daemon-authored `#[style]` markers as text. The safe prelude fixed the
 existing-wire text and style path. This wave adds the remaining option and row contracts.
@@ -604,7 +616,8 @@ Tranches:
   `kill-session -g`, `choose-tree -G`, `command-prompt -P`, `copy-mode -S`,
   `send-keys -M`, `display-message -I`, and `show-messages -T -t`.
 
-The current ledger has 129 unsupported flag pairs across 30 commands. Waves B through D
+The current ledger has 128 unsupported flag pairs across 30 commands (`attach-session -r`
+left it with Wave B's read-only slice). Waves B through D
 remove 15, leaving 114 for G and the parked contracts. The original G list omitted seven
 chooser pairs and four parked `-E` pairs; the unsupported-pair roster replaces prose
 arithmetic as the completion proof. With the seven chooser pairs assigned to G5a and the
@@ -671,7 +684,7 @@ geometry fixtures matched their documented divergences, and all eight plugin smo
 | Lock wire | Exclude it from v71; if F5 is approved, use a separate bump with an explicit client process-execution policy. |
 | Timed messages and prompts | Add daemon-owned per-client presentation freeze, message identity, and explicit clear to v71. Route prompt special keys through the existing pane-targeted input and let the daemon return handled or pass. |
 | `remain-on-exit-format` | Park C5 until terminal core owns a post-worker VT injection or frozen-view reconstruction seam. |
-| F and G grouping | Use the parser foundation and semantic tranches above. Reject the old mechanical-single batch and enforce the 129-pair ledger in code. |
+| F and G grouping | Use the parser foundation and semantic tranches above. Reject the old mechanical-single batch and enforce the 128-pair ledger in code. |
 | Core semantic waves | Park daemon, mux, lifecycle, parser, target, geometry, and command-semantic changes under the unattended boundary. |
 
 ## Hardware smokes

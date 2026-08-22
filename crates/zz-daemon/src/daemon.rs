@@ -3413,6 +3413,15 @@ impl Shared {
         request_id: u64,
         command: &CommandInvocation,
     ) -> CommandResponse {
+        if self.inner.lock().read_only_clients.contains(&client)
+            && !command_is_read_only_safe(command)
+        {
+            return CommandResponse::Error {
+                request_id,
+                error: ServerError::InvalidCommand("client is read-only".to_owned()),
+                output: String::new(),
+            };
+        }
         let client_name = {
             let mut inner = self.inner.lock();
             let client_name = inner
@@ -3906,6 +3915,12 @@ impl Shared {
                 (!format_variables.is_empty()).then_some(&format_variables),
             );
             inner.engine.set_format_now(unix_timestamp());
+            if command_name == "attach-session"
+                && let Some(refusal) = nested_attach_refusal(&inner, client)
+            {
+                return Err(refusal.into());
+            }
+            context.set_client_size(inner.client_sizes.get(&client).copied());
             let previous_client_terminal = context_client_terminal(context);
             set_context_client_terminal(context, client_terminal);
             let execution = inner.engine.execute_with_shell_validator(
@@ -4885,7 +4900,8 @@ impl Shared {
                     MuxEffect::Attach {
                         session,
                         detach_others,
-                    } => attach = Some((*session, *detach_others)),
+                        read_only,
+                    } => attach = Some((*session, *detach_others, *read_only)),
                     MuxEffect::Detach(scope) => {
                         detach = Some(*scope);
                         detached_session = client_attached_session(&inner, client);
@@ -5080,8 +5096,11 @@ impl Shared {
                 }
             }
         }
-        if let Some((session, detach_others)) = attach {
+        if let Some((session, detach_others, read_only)) = attach {
             if client_terminal == ClientTerminal::Present {
+                if read_only {
+                    self.inner.lock().read_only_clients.insert(client);
+                }
                 let (mut snapshot, attach_hook_events) =
                     self.attach_collect_event_hooks(client, session, event_hooks_enabled)?;
                 self.refresh_control_output_taps();
@@ -8654,6 +8673,9 @@ impl Shared {
         }
         let session = {
             let inner = self.inner.lock();
+            if let Some(refusal) = nested_attach_refusal(&inner, client) {
+                return Err(refusal);
+            }
             inner.engine.state.resolve_session(
                 (!target.is_empty()).then_some(target),
                 inner
@@ -8883,6 +8905,15 @@ impl Shared {
             target: "zz_daemon::diagnostics::input",
             "dispatch begin client={client} kind={kind:?} context={context:#?} input={input:#?}"
         );
+        {
+            let inner = self.inner.lock();
+            if inner.read_only_clients.contains(&client) && read_only_blocks_input(&input) {
+                return Ok(());
+            }
+            if terminal_mouse_rejected(&inner, client, &input) {
+                return Ok(());
+            }
+        }
         let generation = self.inner.lock().engine.state.generation();
         let resize_split = matches!(&input, InputMessage::ResizeSplit { .. });
         let copy_mode_change = matches!(
@@ -9644,11 +9675,14 @@ impl Shared {
         input: zz_terminal::KeyInput,
         text_follows: bool,
     ) -> Result<(), DaemonError> {
-        let modal_active = {
+        let (modal_active, read_only) = {
             let inner = self.inner.lock();
-            inner.choose_trees.contains_key(&client)
-                || inner.choose_buffers.contains_key(&client)
-                || inner.display_panes.contains_key(&client)
+            (
+                inner.choose_trees.contains_key(&client)
+                    || inner.choose_buffers.contains_key(&client)
+                    || inner.display_panes.contains_key(&client),
+                inner.read_only_clients.contains(&client),
+            )
         };
         if modal_active {
             if input.action == zz_terminal::KeyAction::Release {
@@ -9656,10 +9690,12 @@ impl Shared {
             }
             return Ok(());
         }
-        if self.input_command_prompt_key(client, kind, context, &input, text_follows) {
+        if !read_only && self.input_command_prompt_key(client, kind, context, &input, text_follows)
+        {
             return Ok(());
         }
-        if input.action != zz_terminal::KeyAction::Release
+        if !read_only
+            && input.action != zz_terminal::KeyAction::Release
             && self.inner.lock().engine.dead_pane_dismisses_on_key(pane)
         {
             let target = pane.to_string();
@@ -9695,7 +9731,7 @@ impl Shared {
         }
         let result = match decision {
             KeyDecision::Pass => {
-                if self.inner.lock().command_outputs.contains_key(&client) {
+                if read_only || self.inner.lock().command_outputs.contains_key(&client) {
                     return Ok(());
                 }
                 self.dispatch_input_key(client, pane, input)
@@ -10213,6 +10249,30 @@ impl Shared {
         commands: &[CommandInvocation],
         repeat_binding: bool,
     ) -> Result<(), DaemonError> {
+        let blocked = {
+            let mut inner = self.inner.lock();
+            (inner.read_only_clients.contains(&client)
+                && !commands.iter().all(command_is_read_only_safe))
+            .then(|| {
+                let duration_ms = client_attached_session(&inner, client).map_or(750, |session| {
+                    inner.engine.display_time_for_session(session)
+                });
+                (duration_ms, next_timed_message_id(&mut inner))
+            })
+        };
+        if let Some((duration_ms, message_id)) = blocked {
+            self.publish_to_client(
+                client,
+                EventPayload::TimedClientMessage {
+                    pane: Some(pane),
+                    kind: ClientMessageKind::Error,
+                    text: "client is read-only".to_owned(),
+                    duration_ms,
+                    message_id,
+                },
+            );
+            return Ok(());
+        }
         let mut output = String::new();
         let mut output_truncated = false;
         for command in commands {
@@ -10600,6 +10660,9 @@ impl Shared {
         total_bytes: u32,
     ) {
         if kind != ClientKind::Interactive {
+            return;
+        }
+        if self.inner.lock().read_only_clients.contains(&client) {
             return;
         }
         if !zz_protocol::paste_upload_extension_is_valid(&extension)
@@ -16549,6 +16612,26 @@ fn resolve_switch_client_target(
         .ok_or_else(|| ServerError::InvalidCommand("no current client".to_owned()))
 }
 
+fn nested_attach_refusal(inner: &ServerState, client: ClientId) -> Option<ServerError> {
+    let tty = inner.client_ttys.get(&client)?;
+    if inner.engine.state.sessions.is_empty() {
+        return None;
+    }
+    inner
+        .terminals
+        .values()
+        .any(|terminal| {
+            terminal
+                .tty()
+                .is_some_and(|pane_tty| pane_tty.as_os_str() == tty.as_str())
+        })
+        .then(|| {
+            ServerError::InvalidCommand(
+                "sessions should be nested with care, unset $TMUX to force".to_owned(),
+            )
+        })
+}
+
 fn format_client_flags(inner: &ServerState, client: ClientId) -> String {
     let mut flags = Vec::new();
     if client_attached_session(inner, client).is_some() {
@@ -16556,9 +16639,6 @@ fn format_client_flags(inner: &ServerState, client: ClientId) -> String {
     }
     if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
         flags.push("control-mode".to_owned());
-    }
-    if inner.read_only_clients.contains(&client) {
-        flags.push("ignore-size".to_owned());
     }
     if inner.client_kinds.get(&client) == Some(&ClientKind::Control)
         && let Some(output) = inner.control_outputs.get(&client)
@@ -16622,6 +16702,9 @@ fn client_format_facts(
     } else {
         None
     };
+    let size = geometry
+        .map(|geometry| (geometry.columns, geometry.rows))
+        .or_else(|| inner.client_sizes.get(&client).copied());
     let format_context = inner
         .engine
         .format_status_context(Some(session), Some(window), None);
@@ -16632,8 +16715,8 @@ fn client_format_facts(
             .cloned()
             .unwrap_or_else(|| format!("device-{}", client.0)),
         session: session_state.name.clone(),
-        width: geometry.map_or(0, |geometry| geometry.columns),
-        height: geometry.map_or(0, |geometry| geometry.rows),
+        width: size.map_or(0, |size| size.0),
+        height: size.map_or(0, |size| size.1),
         termname: String::new(),
         uid: format_context.uid,
         user: format_context.user,
@@ -16675,6 +16758,10 @@ fn status_request(
     facts: FormatHookFacts,
 ) -> StatusRequest {
     let attached = client_attached_session(inner, client);
+    let mut facts = facts;
+    if let Some(session) = attached {
+        facts.client = Some(client_format_facts(inner, client, session));
+    }
     StatusRequest {
         client,
         formats: inner.engine.status_formats_for_session(attached),
@@ -16682,6 +16769,8 @@ fn status_request(
         variables: inner.engine.status_row_variables_for_session(attached),
         message_line: inner.engine.message_line_for_session(attached),
         customized: inner.engine.status_customized_for_session(attached),
+        title_format: (attached.is_some() && inner.engine.set_titles_for_session(attached))
+            .then(|| inner.engine.set_titles_string_for_session(attached)),
         context: status_context(
             snapshot,
             &inner.engine,
@@ -18223,6 +18312,82 @@ fn terminal_view_action_is_input(action: &zz_terminal::TerminalViewAction) -> bo
         | Action::SearchClose
         | Action::Paste(_) => true,
     }
+}
+
+/// The pin's `CMD_READONLY` roster: the commands a read-only client may still
+/// run, from key bindings or its command channel.
+const READ_ONLY_SAFE_COMMANDS: &[&str] = &[
+    "attach-session",
+    "copy-mode",
+    "detach-client",
+    "list-clients",
+    "send-keys",
+    "switch-client",
+];
+
+fn command_is_read_only_safe(command: &CommandInvocation) -> bool {
+    READ_ONLY_SAFE_COMMANDS.contains(&canonical_command(&command.name))
+}
+
+fn read_only_blocks_input(input: &InputMessage) -> bool {
+    match input {
+        InputMessage::Text { .. }
+        | InputMessage::BrowserSurfaceText { .. }
+        | InputMessage::BrowserSurfaceKey { .. }
+        | InputMessage::ChooseTree { .. }
+        | InputMessage::ChooseBuffer { .. }
+        | InputMessage::DisplayPanes { .. }
+        | InputMessage::CommandPrompt { .. }
+        | InputMessage::ResizeSplit { .. }
+        | InputMessage::Popup { .. }
+        | InputMessage::Menu { .. }
+        | InputMessage::Confirm { .. } => true,
+        InputMessage::TerminalView { action, .. } => !matches!(
+            action,
+            zz_terminal::TerminalViewAction::Focus(_)
+                | zz_terminal::TerminalViewAction::ClearLinkHover
+        ),
+        InputMessage::Key { .. }
+        | InputMessage::ResizeTerminal { .. }
+        | InputMessage::ResizeCommandOutput { .. }
+        | InputMessage::CommandOutputView { .. }
+        | InputMessage::CancelPrefix { .. }
+        | InputMessage::ClientTerminalSize { .. } => false,
+    }
+}
+
+fn terminal_view_action_is_mouse(action: &zz_terminal::TerminalViewAction) -> bool {
+    matches!(
+        action,
+        zz_terminal::TerminalViewAction::Mouse(_)
+            | zz_terminal::TerminalViewAction::ScrollWheel { .. }
+    )
+}
+
+fn terminal_mouse_rejected(inner: &ServerState, client: ClientId, input: &InputMessage) -> bool {
+    let (pane, action) = match input {
+        InputMessage::TerminalView { pane, action } => (Some(*pane), action),
+        InputMessage::Popup {
+            action: PopupAction::TerminalView(action),
+        } => (None, action),
+        _ => return false,
+    };
+    if !terminal_view_action_is_mouse(action)
+        || !inner.client_sizes.contains_key(&client)
+        || inner
+            .engine
+            .effective_mouse(client_attached_session(inner, client))
+    {
+        return false;
+    }
+    !pane.is_some_and(|pane| {
+        inner.terminals.get(&pane).is_some_and(|terminal| {
+            terminal
+                .latest_viewport_for(TerminalViewId(client.0))
+                .unwrap_or_else(|| terminal.latest_viewport())
+                .mouse_tracking
+        })
+    })
 }
 
 fn wait_for_terminal_identity(terminal: &TerminalSession) {
@@ -20327,7 +20492,21 @@ fn handle_connection<S: TransportStream>(
             | ProtocolMessage::AgentSessionOp { .. }
             | ProtocolMessage::AgentReplay { .. }
             | ProtocolMessage::AgentAcknowledgePromptRestore { .. }) => {
-                if let Err(error) = handle_agent_message(shared, client, message) {
+                let read_only_blocked =
+                    !matches!(
+                        message,
+                        ProtocolMessage::AgentReplay { .. }
+                            | ProtocolMessage::AgentAcknowledgePromptRestore { .. }
+                    ) && shared.inner.lock().read_only_clients.contains(&client);
+                if read_only_blocked {
+                    let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
+                        CommandResponse::Error {
+                            request_id: 0,
+                            error: ServerError::InvalidCommand("client is read-only".to_owned()),
+                            output: String::new(),
+                        },
+                    ));
+                } else if let Err(error) = handle_agent_message(shared, client, message) {
                     let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
                         CommandResponse::Error {
                             request_id: 0,
@@ -35826,6 +36005,265 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn attach_session_r_marks_the_client_read_only_and_gates_its_routes() {
+        let shared = Arc::new(Shared::new(1));
+        let (_a, _, pane) = switch_test_session(&shared, "A");
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("viewer".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("attach-session", ["-r", "-t", "A"]),
+            )
+            .expect("read-only attach");
+        assert!(shared.inner.lock().read_only_clients.contains(&client));
+        assert_eq!(
+            format_client_flags(&shared.inner.lock(), client),
+            "attached,read-only"
+        );
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane,
+                    text: "blocked".to_owned(),
+                },
+            )
+            .expect("read-only text is dropped at the funnel");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeSplit {
+                    window: WindowId(0),
+                    split: SplitId(0),
+                    ratio_basis_points: 5000,
+                },
+            )
+            .expect("read-only divider drag is dropped at the funnel");
+
+        let blocked = shared.execute_command_request(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            7,
+            &CommandInvocation::new("rename-session", ["renamed"]),
+        );
+        assert!(matches!(
+            blocked,
+            CommandResponse::Error {
+                error: ServerError::InvalidCommand(message),
+                ..
+            } if message == "client is read-only"
+        ));
+        let allowed = shared.execute_command_request(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            8,
+            &CommandInvocation::new("list-clients", ["-F", "#{client_flags}"]),
+        );
+        assert!(matches!(
+            allowed,
+            CommandResponse::Success { output, .. } if output.contains("attached,read-only")
+        ));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-r"]),
+            )
+            .expect("switch-client -r clears read-only");
+        assert!(!shared.inner.lock().read_only_clients.contains(&client));
+    }
+
+    #[test]
+    fn terminal_mouse_is_rejected_only_for_sized_clients_when_mouse_is_off() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, pane) = switch_test_session(&shared, "A");
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("tui".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(client, a).expect("attach");
+        let wheel_for = |pane: PaneId| InputMessage::TerminalView {
+            pane,
+            action: TerminalViewAction::ScrollWheel {
+                lines: 3,
+                input: TerminalMouseInput::new(
+                    TerminalMousePhase::Press,
+                    Some(TerminalMouseButton::ScrollDown),
+                    PointerCellEvent {
+                        column: 1,
+                        row: 1,
+                        click_count: 1,
+                        rectangle: false,
+                    },
+                    24,
+                    18,
+                    128,
+                    72,
+                    8,
+                    18,
+                    Modifiers::default(),
+                    false,
+                ),
+            },
+        };
+        let wheel = wheel_for(pane);
+        {
+            let inner = shared.inner.lock();
+            assert!(!terminal_mouse_rejected(&inner, client, &wheel));
+        }
+        shared.inner.lock().client_sizes.insert(client, (80, 24));
+        {
+            let inner = shared.inner.lock();
+            assert!(!terminal_mouse_rejected(&inner, client, &wheel));
+        }
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-g", "mouse", "off"]),
+            )
+            .expect("turn mouse off");
+        {
+            let inner = shared.inner.lock();
+            assert!(terminal_mouse_rejected(&inner, client, &wheel));
+            let focus = InputMessage::TerminalView {
+                pane,
+                action: TerminalViewAction::Focus(true),
+            };
+            assert!(!terminal_mouse_rejected(&inner, client, &focus));
+        }
+        shared.inner.lock().client_sizes.remove(&client);
+        {
+            let inner = shared.inner.lock();
+            assert!(!terminal_mouse_rejected(&inner, client, &wheel));
+        }
+
+        shared.inner.lock().client_sizes.insert(client, (80, 24));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "tracked"]),
+            )
+            .expect("real session");
+        let tracked_pane = context.pane.expect("real pane");
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&tracked_pane]);
+        {
+            let inner = shared.inner.lock();
+            assert!(
+                terminal_mouse_rejected(&inner, client, &wheel_for(tracked_pane)),
+                "a live pane without app mouse tracking still rejects"
+            );
+        }
+        terminal.send_text("printf '\\033[?1002hMOUSEON\\n'\n");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !terminal.latest_viewport().mouse_tracking {
+            assert!(
+                Instant::now() < deadline,
+                "pane never reported mouse tracking"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        {
+            let inner = shared.inner.lock();
+            assert!(
+                !terminal_mouse_rejected(&inner, client, &wheel_for(tracked_pane)),
+                "an app-requested mouse pane accepts forwarded events while the option is off"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_attach_refuses_when_the_caller_tty_matches_a_pane() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (creator, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                creator,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "outer"]),
+            )
+            .expect("new session");
+        let pane = context.pane.expect("pane");
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        wait_for_terminal_identity(&terminal);
+        let pane_tty = terminal
+            .tty()
+            .expect("pane tty")
+            .to_string_lossy()
+            .into_owned();
+
+        let nested_mailbox = OutboundMailbox::new();
+        let (nested, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("nested".to_owned()),
+            None,
+            Arc::clone(&nested_mailbox),
+        );
+        shared.inner.lock().client_ttys.insert(nested, pane_tty);
+        let mut nested_context = ExecutionContext::default();
+        let refusal = shared
+            .execute(
+                nested,
+                ClientKind::Interactive,
+                &mut nested_context,
+                &CommandInvocation::new("attach-session", ["-t", "outer"]),
+            )
+            .expect_err("nested attach refused");
+        let message = match refusal {
+            DaemonError::Server(ServerError::InvalidCommand(message)) => message,
+            other => panic!("unexpected refusal shape: {other:?}"),
+        };
+        assert_eq!(
+            message,
+            "sessions should be nested with care, unset $TMUX to force"
+        );
+        assert!(matches!(
+            shared.attach_target(nested, ClientKind::Interactive, &mut nested_context, "outer"),
+            Err(ServerError::InvalidCommand(message))
+                if message == "sessions should be nested with care, unset $TMUX to force"
+        ));
+
+        shared.inner.lock().client_ttys.remove(&nested);
+        shared
+            .execute(
+                nested,
+                ClientKind::Interactive,
+                &mut nested_context,
+                &CommandInvocation::new("attach-session", ["-t", "outer"]),
+            )
+            .expect("attach without a tty fact is allowed");
+    }
+
+    #[test]
     fn switch_client_moves_one_client_tracks_last_and_routes_one_attached() {
         let shared = Arc::new(Shared::new(1));
         let (a, _, a_pane) = switch_test_session(&shared, "A");
@@ -36320,7 +36758,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let fields = listed.split('|').collect::<Vec<_>>();
         assert_eq!(
             &fields[..5],
-            ["B", "A", "1", "attached,ignore-size,read-only", "prefix",]
+            ["B", "A", "1", "attached,read-only", "prefix",]
         );
         assert!(fields[5].parse::<u64>().is_ok_and(|time| time > 0));
     }

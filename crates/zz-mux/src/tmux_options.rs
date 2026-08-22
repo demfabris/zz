@@ -321,7 +321,7 @@ pub(crate) fn tmux_stored_scalar(name: &str) -> Option<TmuxStoredScalar> {
         "light-theme-cyan" => ("#{?#{e|>=:#{client_colours},256},darkcyan,cyan}", Colour),
         "light-theme-magenta" => ("#{?#{e|>=:#{client_colours},256},purple4,magenta}", Colour),
         "exit-empty" => ("on", Flag),
-        // prefix2 and the set-titles pair are storage-only until C3 owns behavior and wire.
+        // prefix2 is storage-only until C2 owns behavior and wire.
         "exit-unattached" | "focus-follows-mouse" | "set-titles" => ("off", Flag),
         "destroy-unattached" => ("off", Choice(&["off", "on", "keep-last", "keep-group"])),
         "detach-on-destroy" => (
@@ -837,6 +837,10 @@ pub const BEHAVES: &[&str] = &[
     "window-status-current-style",
     "window-status-last-style",
     "window-status-bell-style",
+    "mouse",
+    "escape-time",
+    "set-titles",
+    "set-titles-string",
 ];
 
 const OPTION_TABLE_ORDER: &[&str] = &[
@@ -1328,8 +1332,8 @@ mod tests {
 
     #[test]
     fn behaving_option_roster_is_complete_unique_and_catalogued() {
-        assert_eq!(BEHAVES.len(), 77);
-        assert_eq!(BEHAVES.iter().copied().collect::<BTreeSet<_>>().len(), 77);
+        assert_eq!(BEHAVES.len(), 81);
+        assert_eq!(BEHAVES.iter().copied().collect::<BTreeSet<_>>().len(), 81);
         let catalog = tmux_options()
             .map(|option| option.name)
             .collect::<BTreeSet<_>>();

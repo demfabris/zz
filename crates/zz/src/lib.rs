@@ -94,7 +94,7 @@ const TMUX_USAGE: &str = concat!(
 );
 #[cfg(not(target_os = "ios"))]
 const NATIVE_ATTACH_USAGE: &str =
-    "zz: usage: zz [--host <name>] attach [--restart-daemon] [session]";
+    "zz: usage: zz [--host <name>] attach [--restart-daemon] [-dr] [session]";
 #[cfg(not(target_os = "ios"))]
 const NATIVE_APP_USAGE: &str = "zz: usage: zz app";
 #[cfg(not(target_os = "ios"))]
@@ -113,6 +113,7 @@ enum Startup {
 struct NativeAttachArguments {
     restart_daemon: bool,
     detach_others: bool,
+    read_only: bool,
     session: Option<String>,
 }
 
@@ -820,9 +821,10 @@ fn run_command_mode(
             session: None,
             restart_daemon: false,
             detach_others: false,
+            read_only: false,
         };
         let reconnect = |path: &Path, client_has_terminal| {
-            connect_interactive_client_with_config_and_terminal(
+            connect_terminal_surface_client_with_config(
                 path,
                 TerminalColorScheme::Dark,
                 mux_config_files,
@@ -865,9 +867,10 @@ fn run_command_mode(
             session: options.session,
             restart_daemon: options.restart_daemon,
             detach_others: options.detach_others,
+            read_only: options.read_only,
         };
         let reconnect = |path: &Path, client_has_terminal| {
-            connect_interactive_client_with_config_and_terminal(
+            connect_terminal_surface_client_with_config(
                 path,
                 TerminalColorScheme::Dark,
                 mux_config_files,
@@ -1082,6 +1085,7 @@ fn parse_native_attach_arguments(
 ) -> Result<NativeAttachArguments, NativeAttachArgumentError> {
     let mut restart_daemon = false;
     let mut detach_others = false;
+    let mut read_only = false;
     let mut target = None;
     let mut positional = None;
     let mut arguments = arguments.into_iter();
@@ -1108,6 +1112,7 @@ fn parse_native_attach_arguments(
             let name = format!("-{option}");
             match option {
                 'd' => detach_others = true,
+                'r' => read_only = true,
                 't' | 'c' | 'f' => {
                     let value_index = index + option.len_utf8();
                     let value = if value_index < options.len() {
@@ -1128,7 +1133,7 @@ fn parse_native_attach_arguments(
                     }
                     break;
                 }
-                'r' | 'x' | 'E' => {
+                'x' | 'E' => {
                     return Err(NativeAttachArgumentError::Command(
                         ServerError::UnsupportedCommand(format!("attach-session {name}")),
                     ));
@@ -1149,6 +1154,7 @@ fn parse_native_attach_arguments(
     Ok(NativeAttachArguments {
         restart_daemon,
         detach_others,
+        read_only,
         session: target.or(positional),
     })
 }
@@ -1818,6 +1824,22 @@ fn connect_interactive_client_with_config_and_terminal(
     )
 }
 
+#[cfg(not(target_os = "ios"))]
+fn connect_terminal_surface_client_with_config(
+    path: &Path,
+    color_scheme: TerminalColorScheme,
+    mux_config_files: &[PathBuf],
+    client_has_terminal: bool,
+) -> Result<InteractiveClient, DaemonError> {
+    connect_or_spawn_daemon(
+        path,
+        Some(color_scheme),
+        mux_config_files,
+        || InteractiveClient::connect_terminal_surface(path, color_scheme, client_has_terminal),
+        InteractiveClient::server_hello,
+    )
+}
+
 #[cfg(target_os = "ios")]
 fn connect_interactive_client(
     path: &Path,
@@ -2034,6 +2056,7 @@ mod tests {
         .unwrap();
         assert!(target.detach_others);
         assert!(target.restart_daemon);
+        assert!(!target.read_only);
         assert_eq!(target.session.as_deref(), Some("work"));
 
         let positional =
@@ -2041,6 +2064,12 @@ mod tests {
         assert!(!positional.detach_others);
         assert!(positional.restart_daemon);
         assert_eq!(positional.session.as_deref(), Some("work"));
+
+        let read_only =
+            parse_native_attach_arguments(["-dr", "-t", "work"].map(str::to_owned)).unwrap();
+        assert!(read_only.detach_others);
+        assert!(read_only.read_only);
+        assert_eq!(read_only.session.as_deref(), Some("work"));
 
         assert!(matches!(
             parse_native_attach_arguments(["-t", "one", "two"].map(str::to_owned)),

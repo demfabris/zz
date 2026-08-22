@@ -1134,7 +1134,6 @@ mod daemon_autostart {
     fn native_attach_rejections_match_the_engine() {
         let fixture = Fixture::new();
         for args in [
-            &["-r"][..],
             &["-x"][..],
             &["-E"][..],
             &["-c", "/tmp"][..],
@@ -1157,6 +1156,201 @@ mod daemon_autostart {
                 assert!(output.stdout.is_empty());
                 assert_eq!(output.stderr, expected.as_bytes());
             }
+        }
+    }
+
+    #[test]
+    fn mouse_option_gates_the_outer_terminal_mouse_modes() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "mousey"]);
+        assert_eq!(created.status.code(), Some(0));
+
+        let (rendered, captured, early_status) = capture_tui_until(
+            &fixture,
+            &["attach-session", "-t", "mousey"],
+            &[b"[mousey]"],
+        );
+        assert!(
+            rendered,
+            "child exited early={early_status:?}; pty output={}",
+            String::from_utf8_lossy(&captured)
+        );
+        assert!(
+            captured
+                .windows(b"\x1b[?1003h".len())
+                .any(|window| window == b"\x1b[?1003h"),
+            "the pinned default keeps mouse on: {}",
+            String::from_utf8_lossy(&captured)
+        );
+
+        let disabled = fixture.run(&["set", "-g", "mouse", "off"]);
+        assert_eq!(disabled.status.code(), Some(0));
+        let (rendered, captured, early_status) = capture_tui_until(
+            &fixture,
+            &["attach-session", "-t", "mousey"],
+            &[b"[mousey]"],
+        );
+        assert!(
+            rendered,
+            "child exited early={early_status:?}; pty output={}",
+            String::from_utf8_lossy(&captured)
+        );
+        assert!(
+            !captured
+                .windows(b"[?1003".len())
+                .any(|window| window == b"[?1003"),
+            "mouse off with no app-requested tracking must emit no outer mouse mode: {}",
+            String::from_utf8_lossy(&captured)
+        );
+    }
+
+    #[test]
+    fn nested_attach_inside_a_pane_prints_the_pinned_refusal() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "outer"]);
+        assert_eq!(created.status.code(), Some(0));
+
+        let nested_attach = format!(
+            "{} -f {} -S {} attach",
+            env!("CARGO_BIN_EXE_zz"),
+            fixture.config.display(),
+            fixture.socket.display(),
+        );
+        let sent = fixture.run(&["send-keys", "-t", "outer", &nested_attach, "Enter"]);
+        assert_eq!(
+            sent.status.code(),
+            Some(0),
+            "stderr: {}",
+            String::from_utf8_lossy(&sent.stderr)
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let captured = fixture.run(&["capture-pane", "-p", "-t", "outer"]);
+            assert_eq!(captured.status.code(), Some(0));
+            let pane_text = String::from_utf8_lossy(&captured.stdout).into_owned();
+            if pane_text.contains("sessions should be nested with care, unset $TMUX to force") {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "nested refusal did not appear; pane content: {pane_text}"
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn read_only_attach_renders_but_typed_keys_never_reach_the_pane() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "ro"]);
+        assert_eq!(created.status.code(), Some(0));
+
+        let attach_and_type = |attach: &[&str], text: &[u8]| -> (bool, Vec<u8>, String) {
+            let Ok((mut master, slave)) = open_pty() else {
+                return (true, Vec::new(), String::new());
+            };
+            rustix::io::ioctl_fionbio(&master, true).expect("set pty master nonblocking");
+            let stdin = slave.try_clone().expect("clone pty stdin");
+            let stdout = slave.try_clone().expect("clone pty stdout");
+            let mut child = fixture
+                .command()
+                .args(attach)
+                .stdin(Stdio::from(stdin))
+                .stdout(Stdio::from(stdout))
+                .stderr(Stdio::from(slave))
+                .spawn()
+                .expect("spawn TUI attach");
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut captured = Vec::new();
+            let rendered = loop {
+                let mut buffer = [0_u8; 4096];
+                match master.read(&mut buffer) {
+                    Ok(0) => {}
+                    Ok(count) => captured.extend_from_slice(&buffer[..count]),
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                    Err(_) => {}
+                }
+                if captured
+                    .windows(b"[ro]".len())
+                    .any(|window| window == b"[ro]")
+                {
+                    break true;
+                }
+                if Instant::now() >= deadline || child.try_wait().expect("poll attach").is_some() {
+                    break false;
+                }
+                thread::sleep(Duration::from_millis(5));
+            };
+            let mut flags = String::new();
+            if rendered {
+                master.write_all(text).expect("type into the attach pty");
+                let settle = Instant::now() + Duration::from_millis(600);
+                while Instant::now() < settle {
+                    let mut buffer = [0_u8; 4096];
+                    match master.read(&mut buffer) {
+                        Ok(count) if count > 0 => captured.extend_from_slice(&buffer[..count]),
+                        _ => thread::sleep(Duration::from_millis(10)),
+                    }
+                }
+                let listed = fixture.run(&["list-clients", "-F", "#{client_flags}"]);
+                flags = String::from_utf8_lossy(&listed.stdout).into_owned();
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            drop(master);
+            (rendered, captured, flags)
+        };
+
+        let (rendered, captured, flags) =
+            attach_and_type(&["attach-session", "-r", "-t", "ro"], b"echo ZZRO\r");
+        if captured.is_empty() && flags.is_empty() && rendered {
+            return;
+        }
+        assert!(
+            rendered,
+            "read-only attach did not render: {}",
+            String::from_utf8_lossy(&captured)
+        );
+        assert!(
+            flags.lines().any(|line| line == "attached,read-only"),
+            "client_flags must report read-only without ignore-size: {flags}"
+        );
+
+        let (rendered, _captured, flags) =
+            attach_and_type(&["attach-session", "-t", "ro"], b"echo ZZRW\r");
+        assert!(rendered, "writable attach did not render");
+        assert!(
+            flags.lines().any(|line| line == "attached"),
+            "plain attach reports no read-only flag: {flags}"
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let captured = fixture.run(&["capture-pane", "-p", "-t", "ro"]);
+            assert_eq!(captured.status.code(), Some(0));
+            let pane_text = String::from_utf8_lossy(&captured.stdout).into_owned();
+            assert!(
+                !pane_text.contains("ZZRO"),
+                "read-only keystrokes reached the pane: {pane_text}"
+            );
+            if pane_text.contains("ZZRW") {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "writable keystrokes never reached the pane: {pane_text}"
+            );
+            thread::sleep(Duration::from_millis(50));
         }
     }
 

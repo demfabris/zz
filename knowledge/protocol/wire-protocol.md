@@ -354,9 +354,10 @@ receiving client's attached session's effective value, so the daemon publishes t
 attach and client switch, recomputes every attached client on a global mouse write, and refreshes only
 the clients attached to a target session on a session-scoped write. Each client's map is
 equality-deduplicated like the status line: a recomputation whose result matches what that client
-already holds sends nothing. `escape-time` and `prefix2` publish the global values; no client
-consumes the three new keys yet, and `from_config_key` deliberately omits them, so `zz/config` cannot
-write them until their consuming waves land.
+already holds sends nothing. `escape-time` and `prefix2` publish the global values. Since the
+2026-08-21 B2/B3 slice zz-tui consumes `mouse` (outer-terminal mouse-mode gating) and `escape-time`
+(the escape fold timeout), and `from_config_key` maps both — `zz/config` can write them with the
+standard reload-reapply semantics. `prefix2` stays publication-only until C2 lands.
 Validation requires exactly those 17 keys and bounds every string to 64 KiB on encode and during
 deserialization.
 
@@ -365,10 +366,12 @@ text, never formats, because `#()` commands run once per `status-interval` on th
 **per client** (a format names the receiving client's own view), so it rides `ServerHello` on connect
 and `publish_to_client` afterwards, and only when the text changed. v70 carried `{ left, right }`;
 v71 appends `title`, `base_style`, `rows: Vec<String>`, `position: StatusPosition` (`Top`/`Bottom`,
-default `Bottom` on wire tag 1), `message_line: u8`, and `customized: bool`. `rows` will become the
-authoritative personalized status block in Wave B1; until then the daemon publishes inert defaults
-(empty rows, empty title and base style, the effective position, message line `0`, `customized`
-false) and `is_empty()` keeps its left/right meaning. Every string field and each row is bounded to
+default `Bottom` on wire tag 1), `message_line: u8`, and `customized: bool`. Since Wave B1 `rows`
+is the authoritative personalized status block, and since the 2026-08-21 title slice `title` carries
+the per-client `set-titles-string` expansion whenever `set-titles` is on for the recipient's session
+— published even while `status off` empties the rows; it stays empty at defaults because
+`set-titles` defaults off. zz-tui writes OSC 2 when a non-empty title changes and the GUI adopts the
+window title only for a non-empty (hence explicitly enabled) value. Every string field and each row is bounded to
 `MAX_STATUS_TEXT_BYTES` (4 KiB) on encode and during deserialization, rows are capped at
 `MAX_STATUS_ROWS` (5) with a sixth rejected before allocation, `base_style` must parse as a style,
 and `message_line` must be `0` with no rows or under `rows.len()` otherwise; `StatusChanged` payloads
@@ -391,6 +394,12 @@ now validate on both encode and decode.
   `TimedClientMessage.message_id` plus `EventPayload::TimedClientMessageCleared` (tag 46); and
   `InputMessage::ClientTerminalSize` (tag 17) beside the new `client-tty-v1:`/`client-size-v1:`
   hello value tokens. Everything ships with inert daemon defaults; consumption lands in Waves B-E.
+  Since 2026-08-21 (B5) terminal-surface clients emit the value tokens — `client-size-v1:` whenever
+  a caller terminal size is discoverable, `client-tty-v1:` only when `$TMUX` marks a nested run and
+  the endpoint is local — and republish `SIGWINCH` changes through `ClientTerminalSize`. The daemon
+  uses the tty for the pinned nested-attach refusal, and the size for `-x -`/`-y -` creation
+  dimensions, `#{client_width}`/`#{client_height}`, and scoping the mouse-off input rejection to
+  terminal surfaces.
 - v70 appends `reason: DetachReason` to `EventPayload::Detached`. The TUI distinguishes requested
   or evicted detaches, destroyed sessions, and server shutdown without adding a second retarget
   message; live client switches still converge through `ProtocolMessage::Attached`.

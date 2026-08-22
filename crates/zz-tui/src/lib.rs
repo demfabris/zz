@@ -43,6 +43,7 @@ pub struct RunOptions {
     pub session: Option<String>,
     pub restart_daemon: bool,
     pub detach_others: bool,
+    pub read_only: bool,
 }
 
 impl Default for RunOptions {
@@ -53,6 +54,7 @@ impl Default for RunOptions {
             session: None,
             restart_daemon: false,
             detach_others: false,
+            read_only: false,
         }
     }
 }
@@ -148,6 +150,7 @@ pub fn run<'a>(request: impl Into<RunRequest<'a>>) -> Result<(), Error> {
         app::InitialAttach::Request {
             target: options.session.clone(),
             detach_others: options.detach_others,
+            read_only: options.read_only,
         },
         resolved.host_label,
         resolved.local_host_label,
@@ -496,7 +499,7 @@ fn spawn_and_connect_daemon(
 
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        match InteractiveClient::connect_with_color_scheme_and_terminal(
+        match InteractiveClient::connect_terminal_surface(
             path,
             TerminalColorScheme::Dark,
             client_has_terminal,

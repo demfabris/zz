@@ -181,6 +181,8 @@ impl MuxOptionKey {
             "agent-command" => Some(Self::AgentCommand),
             "agent-claude-code-command" => Some(Self::AgentClaudeCodeCommand),
             "agent-auto-approve" => Some(Self::AgentAutoApprove),
+            "mouse" => Some(Self::Mouse),
+            "escape-time" => Some(Self::EscapeTime),
             _ => None,
         }
     }
@@ -1175,8 +1177,8 @@ pub enum InputMessage {
     Confirm {
         action: ConfirmAction,
     },
-    /// The client's outer terminal was resized (`SIGWINCH`). Nothing emits
-    /// this yet; the daemon stores the facts per client.
+    /// The client's outer terminal was resized (`SIGWINCH`). The TUI emits it
+    /// after each resize; the daemon stores the facts per client.
     ClientTerminalSize {
         columns: u16,
         rows: u16,
@@ -2589,14 +2591,24 @@ mod tests {
 
     #[test]
     fn v71_mux_option_keys_hold_appended_tags_and_defaults() {
-        for (key, tag, name) in [
-            (MuxOptionKey::Mouse, 14_u8, "mouse"),
-            (MuxOptionKey::EscapeTime, 15, "escape-time"),
-            (MuxOptionKey::Prefix2, 16, "prefix2"),
+        for (key, tag, name, config_key) in [
+            (
+                MuxOptionKey::Mouse,
+                14_u8,
+                "mouse",
+                Some(MuxOptionKey::Mouse),
+            ),
+            (
+                MuxOptionKey::EscapeTime,
+                15,
+                "escape-time",
+                Some(MuxOptionKey::EscapeTime),
+            ),
+            (MuxOptionKey::Prefix2, 16, "prefix2", None),
         ] {
             assert_eq!(postcard::to_stdvec(&key).expect("mux option key"), [tag]);
             assert_eq!(key.as_str(), name);
-            assert_eq!(MuxOptionKey::from_config_key(name), None);
+            assert_eq!(MuxOptionKey::from_config_key(name), config_key);
         }
         let defaults = MuxOptions::default();
         assert_eq!(

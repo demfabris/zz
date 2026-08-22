@@ -608,9 +608,6 @@ fn handle_mouse(
     event: MouseEvent,
     pixel_mouse: bool,
 ) -> Result<InputOutcome, String> {
-    if model.sidebar_edit.is_some() {
-        return Ok(InputOutcome::None);
-    }
     let (global_column, global_row, global_x, global_y) = if pixel_mouse {
         (
             u16::try_from(u32::from(event.column) / model.size.cell_width_px).unwrap_or(u16::MAX),
@@ -626,6 +623,19 @@ fn handle_mouse(
             u32::from(event.row).saturating_mul(model.size.cell_height_px),
         )
     };
+    if !model.mouse_option {
+        if let Some((pane, action)) =
+            app_mouse_forward_action(model, event, global_column, global_row, global_x, global_y)
+        {
+            client
+                .send_input(InputMessage::TerminalView { pane, action })
+                .map_err(|error| error.to_string())?;
+        }
+        return Ok(InputOutcome::None);
+    }
+    if model.sidebar_edit.is_some() {
+        return Ok(InputOutcome::None);
+    }
     if model.sidebar_visible() && global_column < sidebar::WIDTH {
         match event.kind {
             MouseEventKind::ScrollUp => model.scroll_sidebar(-3),
@@ -717,36 +727,17 @@ fn handle_mouse(
     if matches!(event.kind, MouseEventKind::Down(_)) {
         focus_pane(client, entry.pane)?;
     }
-    let column = global_column.saturating_sub(content.x);
-    let row = global_row.saturating_sub(content.y);
-    let x = global_x.saturating_sub(u32::from(content.x).saturating_mul(model.size.cell_width_px));
-    let y = global_y.saturating_sub(u32::from(content.y).saturating_mul(model.size.cell_height_px));
-    let (phase, button) = mouse_routing(event.kind);
-    let input = TerminalMouseInput::new(
-        phase,
-        button,
-        PointerCellEvent {
-            column,
-            row,
-            click_count: u8::from(matches!(event.kind, MouseEventKind::Down(_))),
-            rectangle: false,
-        },
-        x,
-        y,
-        u32::from(content.width).saturating_mul(model.size.cell_width_px),
-        u32::from(content.height).saturating_mul(model.size.cell_height_px),
-        model.size.cell_width_px,
-        model.size.cell_height_px,
-        modifiers(event.modifiers),
-        event.modifiers.contains(KeyModifiers::SHIFT) || !viewport.mouse_tracking,
-    );
-    let action = match event.kind {
-        MouseEventKind::ScrollUp => Some(TerminalViewAction::ScrollWheel { lines: -3, input }),
-        MouseEventKind::ScrollDown => Some(TerminalViewAction::ScrollWheel { lines: 3, input }),
-        MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => None,
-        _ => Some(TerminalViewAction::Mouse(input)),
-    };
-    if let Some(action) = action {
+    let force_selection = event.modifiers.contains(KeyModifiers::SHIFT) || !viewport.mouse_tracking;
+    if let Some(action) = pane_mouse_action(
+        &model.size,
+        event,
+        content,
+        global_column,
+        global_row,
+        global_x,
+        global_y,
+        force_selection,
+    ) {
         client
             .send_input(InputMessage::TerminalView {
                 pane: entry.pane,
@@ -759,6 +750,81 @@ fn handle_mouse(
     } else {
         InputOutcome::None
     })
+}
+
+/// The pin's `forward_key` route for a disabled `mouse` option: the event goes
+/// to the pane under the cursor when that pane's application asked for mouse
+/// reporting, and every chrome branch is skipped.
+pub(crate) fn app_mouse_forward_action(
+    model: &Model,
+    event: MouseEvent,
+    global_column: u16,
+    global_row: u16,
+    global_x: u32,
+    global_y: u32,
+) -> Option<(zz_protocol::PaneId, TerminalViewAction)> {
+    let entry = model.pane_at(global_column, global_row)?;
+    let content = entry.rect.content();
+    if !content.contains(global_column, global_row) {
+        return None;
+    }
+    let viewport = model.viewports.get(&entry.pane)?;
+    if !viewport.mouse_tracking {
+        return None;
+    }
+    let action = pane_mouse_action(
+        &model.size,
+        event,
+        content,
+        global_column,
+        global_row,
+        global_x,
+        global_y,
+        event.modifiers.contains(KeyModifiers::SHIFT),
+    )?;
+    Some((entry.pane, action))
+}
+
+#[expect(clippy::too_many_arguments)]
+fn pane_mouse_action(
+    size: &crate::tty::TerminalSize,
+    event: MouseEvent,
+    content: Rect,
+    global_column: u16,
+    global_row: u16,
+    global_x: u32,
+    global_y: u32,
+    force_selection: bool,
+) -> Option<TerminalViewAction> {
+    let column = global_column.saturating_sub(content.x);
+    let row = global_row.saturating_sub(content.y);
+    let x = global_x.saturating_sub(u32::from(content.x).saturating_mul(size.cell_width_px));
+    let y = global_y.saturating_sub(u32::from(content.y).saturating_mul(size.cell_height_px));
+    let (phase, button) = mouse_routing(event.kind);
+    let input = TerminalMouseInput::new(
+        phase,
+        button,
+        PointerCellEvent {
+            column,
+            row,
+            click_count: u8::from(matches!(event.kind, MouseEventKind::Down(_))),
+            rectangle: false,
+        },
+        x,
+        y,
+        u32::from(content.width).saturating_mul(size.cell_width_px),
+        u32::from(content.height).saturating_mul(size.cell_height_px),
+        size.cell_width_px,
+        size.cell_height_px,
+        modifiers(event.modifiers),
+        force_selection,
+    );
+    match event.kind {
+        MouseEventKind::ScrollUp => Some(TerminalViewAction::ScrollWheel { lines: -3, input }),
+        MouseEventKind::ScrollDown => Some(TerminalViewAction::ScrollWheel { lines: 3, input }),
+        MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => None,
+        _ => Some(TerminalViewAction::Mouse(input)),
+    }
 }
 
 fn focus_pane(client: &InteractiveClient, pane: zz_protocol::PaneId) -> Result<(), String> {

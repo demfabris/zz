@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: tmux divergence matrix
-description: "Every known divergence from tmux at the pinned reference commit: the 12 missing commands and why, the 30 implemented commands that still reject tmux flags, behavioral gaps on the implemented surface, the options coverage (all 180 store, 77 behave), and the protocol-level differences."
+description: "Every known divergence from tmux at the pinned reference commit: the 12 missing commands and why, the 30 implemented commands that still reject tmux flags, behavioral gaps on the implemented surface, the options coverage (all 180 store, 81 behave), and the protocol-level differences."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-20T00:00:00-03:00
@@ -25,7 +25,8 @@ hunt-claim regressions, including two implemented backwards
 
 The counts and flag ledger were refreshed against the live source after Waves 2a and 2b on
 2026-08-20. The pre-wave catalog held 159 unsupported pairs across 38 tmux commands; those
-waves removed 30 pairs, leaving 129 across 30. The zz-only `split-picker` contributes another
+waves removed 30 pairs, and Wave B's read-only slice removed `attach-session -r` on
+2026-08-21, leaving 128 across 30. The zz-only `split-picker` contributes another
 19 markers to a raw catalog grep and is deliberately excluded from tmux compatibility counts.
 
 The one-line read: everything marked **silent** below is a bug by zz's own doctrine (tmux syntax
@@ -110,17 +111,17 @@ semantics on menus stay GUI-native).
 | `link-window` / `unlink-window` | Linked windows and session groups are skipped permanently (drop-in plan decision 3). One window belongs to one session. |
 | `new-pane` / `switch-mode` | The pin's floating-pane family (new in next-3.8). zz has no floating-pane model; the phase-1 picker verb was renamed off `new-pane` so the name stays tmux's. Unassessed beyond that. |
 
-# Flag-level gaps on implemented commands (30 of 80; 129 pairs)
+# Flag-level gaps on implemented commands (30 of 80; 128 pairs)
 
 Being cataloged is not the whole contract: 30 of the 80 implemented tmux commands still
-reject 129 flags the pin accepts, answering `unsupported command: <cmd> -X` rc 1 (and
+reject 128 flags the pin accepts, answering `unsupported command: <cmd> -X` rc 1 (and
 counting as config skips). The catalog declares the unsupported pairs and the mux/daemon
 parsers enforce them. Inventory as of 2026-08-20 (flags in pin spelling; flags marked † are
 gated by decision 3 or by missing context/model support, the rest are plain work):
 
 | Command | Rejected flags |
 | --- | --- |
-| `attach-session` | `-c -E -f -r -x` |
+| `attach-session` | `-c -E -f -x` |
 | `break-pane` | `-a -b`; `-W -x -y -X -Y` † |
 | `capture-pane` | `-C -F -H -L -P -R` |
 | `choose-buffer` | `-F -K -k -N -y` |
@@ -175,7 +176,7 @@ The catalog count does not include syntax zz accepts or parses before diverging:
 
 Four flags are zz extensions on tmux command names even though the pin rejects them:
 `move-pane -p` and `send-keys -C`/`-P`/`-o`. They are compatibility debt, not progress
-against the 129 unsupported pairs.
+against the 128 unsupported pairs.
 
 ## Former Wave 2e ownership (45 pairs)
 
@@ -204,8 +205,8 @@ daemon-owned command semantics in a client.
 | `list-commands` | zz lists implemented commands in tmux's line format. Each usage string reports zz's accepted flags, so affected rows differ from the pin. Unimplemented commands stay absent so feature probes can take their fallback path. | **silent**, deliberate |
 | `list-keys` default formatting | `list-keys -F` expands the pin's per-binding `key_repeat`, `key_note`, `key_prefix`, `key_table`, raw `key_string`, and quoted `key_command` facts. Since 2026-08-20 every stored command renders through the pin's `args_print` model — `#{key_command}`, the bare `list-keys` form, and `show-hooks` alike: canonical names, value-less flags merged first in flag order, valued flags in flag order, `args_escape` quoting (seven pin vectors plus three hook shapes byte-matched). Still missing: the bare form's list-width-aware padding, and zz's default copy-mode tables mark 35 (`copy-mode`) / 76 (`copy-mode-vi`) stock bindings `-r` where the pin marks none — zz's copy-mode model uses the repeat flag, so `#{key_repeat}` and bare listings differ for stock bindings only. | **silent**, deferred |
 | `refresh-client` | `-A`/`-B`/`-C`/`-f`/`-F`/`-t` behave (phase 6: flow control, subscriptions, control-client sizing). Bare redraw, `-S`, and the attached-client redraw/scroll family (`-c -D -L -R -U -l -r` plus the optional positional adjustment) answer `unsupported command: refresh-client interactive behavior`; detached command clients with no target get the pin's exact `no current client`. | loud |
-| `switch-client -c` TTY targets | Client names and zz's synthetic `device-N` ids resolve, including one trailing `:` trimmed like the pin. Native clients do not send an attach-client TTY path, so the pin's full-tty and `/dev/`-stripped aliases cannot resolve. | loud for a TTY-only target |
-| `switch-client -r` | The per-client toggle and `client_readonly`/`client_flags` projection behave. `client_flags` places the modeled bits in pin order: `attached`, `control-mode`, `ignore-size`, control-flow flags, then `read-only`. Input is not gated this wave, so a reported read-only client can still write to panes. | **silent**, deferred |
+| `switch-client -c` TTY targets | Client names and zz's synthetic `device-N` ids resolve, including one trailing `:` trimmed like the pin. Since 2026-08-21 terminal-surface clients send `client-tty-v1:` in the hello only when `$TMUX` marks a nested run (the fact exists for the nested-attach check), so the pin's full-tty and `/dev/`-stripped aliases still do not resolve in general. | loud for a TTY-only target |
+| Read-only clients (`attach-session -r`, `switch-client -r`) | Enforced at the daemon input funnel since 2026-08-21: terminal and browser key/text, paste, mouse, divider resize, prompt/chooser/popup/menu/confirm actions, uploads, and agent prompts are dropped for a read-only client, while output, resize, detach, and the pin's `CMD_READONLY` command roster (`attach-session`, `copy-mode`, `detach-client`, `list-clients`, `send-keys`, `switch-client`) still work; other commands answer the pin's `client is read-only`. `client_flags` reports `read-only` without the pin's coupled `ignore-size` — zz sizes every client individually, so the pin's `CLIENT_IGNORESIZE` half of `-r` has no zz meaning. The pin's same-uid check on re-marking a read-only client is skipped (single-user daemon). | **silent** only on the dropped-input feedback (tmux also drops silently) |
 | `switch-client -E` | Accepted as a no-op because zz does not retain the attaching client's environment; the same missing model already bounds session `update-environment` seeding. | **silent**, bounded |
 | Session current window across clients | tmux stores one current window on the session, so `select-window` or `switch-client -t session:window` moves every client attached there. zz keeps `focused_windows` per client by design. One client can change windows without moving its peers, and peer rows from `list-clients -F '#{window_index}'` can differ from the pin. | **silent**, deliberate zz extension |
 | `#{client_flags}` unmodeled flags | zz emits `attached` and every modeled control/read-only flag in the pin's sequence. It omits `focused` because the daemon does not track terminal focus, and it omits the pin's `UTF-8` client flag because UTF-8 is a fixed protocol contract rather than client state. | **silent**, bounded |
@@ -213,13 +214,14 @@ daemon-owned command semantics in a client.
 | Native chooser status | `choose-tree` and `choose-buffer` implement `-f`/`-O`/`-r`, including tmux's default orders, hierarchy pruning, and zero-match fallback to the unfiltered chooser. The native overlay does not show tmux's `filter: no matches` status after that fallback. | **silent**, cosmetic |
 | `capture-pane` routing | `-p` and `-T` are accepted but inert. A bare capture prints instead of filling the default buffer, while `-b name -p` stores instead of printing. | **silent** |
 | `source-file` | Parse diagnostics are shaped like the pin's (`path:line: message`) but travel as client-event warnings, so control-mode and GUI clients see them (`%config-error`) while the plain CLI exits 0 with empty stderr where the pin prints the line and exits 1. Closing it requires changing the CLI event-routing behavior and adding direct diagnostic coverage. `-` stdin refused loudly; `-t`/`-F`/`-n`/`-v` rejected as unsupported. Globbing works. | **silent** on the CLI, loud elsewhere |
-| `mouse` / `escape-time` | Both options have typed storage, pin defaults, inheritance, unset, and readback. Nothing consumes either: the desktop GUI ignores them, `MuxOptionKey` carries neither on the wire, and zz-tui — the attach surface the alias lives on — does not depend on zz-mux and reads no tmux option at all (its mouse handling is terminal-capability-driven, unconditional). | **silent**, store-only |
+| `mouse` / `escape-time` | Behaving since 2026-08-21 (Wave B2/B3). zz-tui gates the outer-terminal mouse modes (`?1003h`/`?1006h`/`?1016h`) on the session-effective `Mouse` value from the v71 publication, emits/retracts them live on `MuxOptionsChanged` (the pin's default is on: the reference builds with `-DTMUX_MOUSE=1`), and the daemon drops mouse-originated `TerminalView` input from terminal-surface clients when the effective value is off; the GUI's native mouse stays ungated per decision 6. With the option off, an application inside a pane can still use the mouse exactly as the pin documents (`options-table.c` mouse help; `server-client.c` forward_key): the outer modes also follow the active pane's own `mouse_tracking`, events forward straight to the tracking pane under the cursor with every chrome branch skipped, and the daemon admits them for panes whose app requested tracking. Chrome mouse (status clicks, sidebar, dividers, focus clicks) remains available only while the option is on — matching the pin, whose mouse key bindings also fire only then. `escape-time` replaces the TUI's old 25 ms escape fold timeout (pin default 10 ms, 0 clamps to 1 like `tty_keys_next`). Both keys are config-writable through `MuxOptionKey::from_config_key` with the standard reload-reapply semantics. | none — behaving |
+| `set-titles` empty expansion | With `set-titles on` and a `set-titles-string` that expands to the empty string, zz publishes an empty `StatusLine.title`: the GUI reverts to its native title and zz-tui writes no OSC, where the pin's `server_client_set_title` would set an empty terminal title. Empty doubles as the "option off" wire state, so this narrow edge is deliberate. | **silent**, narrow and deliberate |
 | `automatic-rename` / `automatic-rename-format` | `automatic-rename` gates the desktop's active-pane-derived tab label, and explicit `rename-window`, `new-window -n`, or the first-window name pins a window-local `off`. zz does not mutate `Window.name` every 500 ms, so `#{window_name}` remains the explicit model name, and the stored format string is not evaluated by the presentation-only renamer. | **silent**, bounded |
 | `aggressive-resize` + `window-size` | Since 2026-08-20 both compose like the pin (`resize.c:366-376`): `aggressive-resize` is a candidate FILTER (ON = clients focused on the window; OFF = zz's viewer set, a per-client-focus stand-in for the pin's linked-window `session_has`), and `window-size` is the AGGREGATION policy — `latest` (default) picks the most-recent-input owner, `largest`/`smallest` aggregate componentwise. ON no longer forces `smallest`; configs relying on that must also set `window-size smallest`. `manual` is stored but behaves as `latest` until `resize-window` exists. | **silent**, bounded |
 | `display-time` | Status-message toasts consume the configured milliseconds. Since 2026-08-20 the omitted `display-panes -d` duration comes from `display-panes-time` like the pin (the old reuse divergence is closed). A zero toast remains until manual dismissal, while tmux dismisses its zero-duration status message on a key. | **silent**, deliberate |
 | `respawn-pane` / `respawn-window` | Dead panes revive with stable pane identity; `respawn-window` keeps its first pane and removes the rest. `-k`, `-c`, repeated `-e NAME=VALUE`, and stored command/cwd reuse are implemented. The pin's `-E` empty-environment flag is cataloged but rejected. | loud for `-E` |
 | Array options | Since the 2026-08-20 Lane-2 sweep all eight real array options (`command-alias`, `codepoint-widths`, `user-keys`, `terminal-overrides`, `terminal-features`, `status-format`, `pane-colours`, `update-environment`) store with the pin's separators, hole reuse, and `name[N]`/`-u name[N]` semantics, and the 68 hook names route to the hook table. Since the B1 server slice (2026-08-21) `status-format[]` drives the daemon's personalized `StatusLine.rows` production (sparse indices publish blank rows, a session array overrides the global one whole, scoped writes refresh that session's attached clients); the other seven still drive nothing: command dispatch consults the static `COMMAND_SPECS` alias table, never `command-alias`, and session seeding uses the hardcoded default list (`command.rs:7111`), so `set -g update-environment FOO` changes readback only. Indexed `@`/table scalars follow tmux (`not an array` on set; indexed show reads the scalar). | **silent**, store-only except `status-format[]` |
-| Status-row window-option scoping | tmux resolves `window-status-*`, `pane-status-*`, and `window-pane-*-status-format` per loop item during `status-format` expansion, so a per-window override (`set -w -t work:2 window-status-style 'fg=red'`) styles that window's entry in the row. zz's B1 row expansion resolves those names at global/session-effective scope through a per-client variables map, while the `status_label` path keeps honoring per-window overrides — since B1's client half renders the rows (2026-08-21), the two surfaces can visibly disagree for windows with local overrides: the rendered status block shows the global/session style while the zz-native label surfaces show the override. Resolution path: per-window variable resolution through the loop-item hook seam (`Expander::lookup` already passes the item context), scheduled for wave-close arbitration. | **silent**, bounded |
+| Status-row window-option scoping | tmux resolves `window-status-*`, `pane-status-*`, and `window-pane-*-status-format` per loop item during `status-format` expansion, so a per-window override (`set -w -t work:2 window-status-style 'fg=red'`) styles that window's entry in the row. zz's B1 row expansion resolves those names at global/session-effective scope through a per-client variables map, while the `status_label` path keeps honoring per-window overrides — since B1's client half renders the rows (2026-08-21), the two surfaces can visibly disagree for windows with local overrides: the rendered status block shows the global/session style while the zz-native label surfaces show the override. Resolution path: per-window variable resolution through the loop-item hook seam (`Expander::lookup` already passes the item context), scheduled for Wave C (the `Expander::lookup` loop-item seam). | **silent**, bounded |
 | Status-block suppression threshold | tmux hides the status line when `tty.sy <= statuslines` (resize.c `CLIENT_STATUSOFF`), so a 3-row terminal with `status 2` still shows both status rows plus one window row. zz panes carry a header row, so the TUI suppresses the block when `rows < statuslines + 2` (one header plus one content row must survive) — in that same 3-row terminal zz shows no status block and gives all rows to the pane. The GUI mirrors the rule against its measured canvas in line-height units. | **silent**, bounded |
 | `history-limit` default | zz keeps 10,000 lines for its product default; the pin keeps 2,000. `show-options -g history-limit` prints the effective 10,000 value. | **silent**, deliberate |
 | Plain option listings | No-argument listings contain tmux table names and `@` user names. The six zz-native settings stay available through explicit-name queries and never appear as unknown words in tmux-parsing scripts. | **silent**, zz extension hidden from tmux listings |
@@ -309,7 +311,7 @@ inside a generic “unsupported formats” claim.
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
 | `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
-# Options: all 180 store, 77 behave
+# Options: all 180 store, 81 behave
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin. Since
 the 2026-08-20 Lane-2 sweep **every one of the 180 stores** with the pin's exact default,
@@ -322,10 +324,11 @@ skipped lines**. That is test-enforced: `tmux_options.rs`
 the eight array options store with indexed semantics, and `set-option <hook-name>` writes
 the hook table — the two paths that used to silently succeed while doing nothing are dead.
 
-**77 behave**, meaning a value change is consumed somewhere outside set/show/inherit/
+**81 behave**, meaning a value change is consumed somewhere outside set/show/inherit/
 readback (consumer-traced 2026-08-20; nine status-production names joined in the B1 server
-slice on 2026-08-21, and `status-position` joined with B1's client half the same day, when
-both clients started honoring it). **103 are store-only.** The earlier "78 behave" counted
+slice on 2026-08-21, `status-position` joined with B1's client half the same day, and
+`mouse`, `escape-time`, `set-titles`, and `set-titles-string` joined with the B2/B3/title
+slice, also 2026-08-21). **99 are store-only.** The earlier "78 behave" counted
 options given a typed home in the honest-knobs/status structs, twelve of which nothing
 read. `tmux_options::BEHAVES` distinguishes the consumer-traced names from storage-only
 options and test-pins its count, uniqueness, and membership in the option catalog.
@@ -333,7 +336,7 @@ options and test-pins its count, uniqueness, and membership in the option catalo
 consumer wave wires a name up and moves it into `BEHAVES` (B1 moved six stored scalars and
 the `status-format` array).
 
-**Behaving (77):**
+**Behaving (81):**
 
 - Indexing and sessions: `base-index`, `pane-base-index`, `renumber-windows`,
   `default-size`, `window-size`, `aggressive-resize`, `history-limit` (10,000 product
@@ -370,10 +373,16 @@ the `status-format` array).
   `pane-status-current-style`, `session-status-style`, `session-status-current-style`,
   `window-pane-status-format`, `window-pane-current-status-format` (all six resolve
   inside the default pane/session list rows).
+- Terminal surface and titles (B2/B3 + the C3 title source, 2026-08-21): `mouse` and
+  `escape-time` (zz-tui consumes the session-effective values; the daemon rejects mouse
+  input from terminal-surface clients when off — see the `mouse` / `escape-time` row),
+  `set-titles` and `set-titles-string` (the daemon expands the title per client into
+  `StatusLine.title`, publishing even with `status off`; zz-tui writes OSC 2 on non-empty
+  changes and the GUI adopts the window title only when the option is explicitly on).
 
-**Store-only (103):**
+**Store-only (99):**
 
-- Typed storage that nothing reads (40): `mouse`, `escape-time`, `lock-after-time`,
+- Typed storage that nothing reads (38): `lock-after-time`,
   `lock-command` (the lock commands are no-ops); `monitor-activity`, `monitor-silence`,
   `monitor-bell`, `activity-action`, `silence-action`; `allow-rename`, `alternate-screen`,
   `scroll-on-clear`, `extended-keys`, `extended-keys-format`, `xterm-keys`, `backspace`,
@@ -383,9 +392,9 @@ the `status-format` array).
   `pane-border-lines`, `pane-border-indicators`, the four `pane-scrollbars*`; the four
   `prompt-*cursor-*`; `clock-mode-colour`, `clock-mode-style`;
   `window-status-separator`, `window-status-activity-style`.
-- Generic scalar storage (56 of the 63 scalar-backed names) plus seven of the eight
+- Generic scalar storage (54 of the 63 scalar-backed names) plus seven of the eight
   arrays: everything else in the table,
-  including `set-titles`/`set-titles-string`, `prefix2`, `display-panes-format`,
+  including `prefix2`, `display-panes-format`,
   `remain-on-exit-format`, `visual-activity`/`visual-silence`, `status-keys`, the
   lifecycle trio (`exit-empty`, `exit-unattached`, `destroy-unattached`),
   `pane-border-style`/`pane-active-border-style`,

@@ -362,13 +362,15 @@ accepts their spellings, which is what makes a Ghostty file importable, but they
 
 ## Daemon-owned mux option keys
 
-The fourteen mux keys are also transported raw and in file order. The daemon turns each entry into a
+The sixteen mux keys are also transported raw and in file order. The daemon turns each entry into a
 global `set-option`, so repeated keys retain normal last-writer behavior and invalid entries produce
-a daemon diagnostic without blocking later entries. The wire's `MuxOptions` map carries three more
-keys since v71 — `mouse`, `escape-time`, and `prefix2` — but those are publication-only:
-`MuxOptionKey::from_config_key` deliberately does not map them, so a `zz/config` line naming one is
-ignored with a diagnostic exactly as before the bump. The consuming waves open that config surface
-when they take ownership of the behavior.
+a daemon diagnostic without blocking later entries. `mouse` and `escape-time` joined the
+config-writable roster on 2026-08-21 when Wave B2/B3 took ownership of their behavior; a reload
+reapplies them exactly like the existing keys (`from_config_key` routes the entry, the daemon
+replays it as a global `set-option` with `Override` provenance, and unset restores the underlay).
+The wire's `MuxOptions` map still carries one publication-only key, `prefix2`:
+`MuxOptionKey::from_config_key` deliberately does not map it, so a `zz/config` line naming it is
+ignored with a diagnostic until C2 takes ownership.
 
 | Key | Built-in default | Accepted value / effect |
 | --- | --- | --- |
@@ -386,6 +388,8 @@ when they take ownership of the behavior.
 | `agent-command` | `npx -y @agentclientprotocol/codex-acp@1.3.0` | Nonempty command string or an `AcpAgentConfig` JSON object (`{"command", "args", "env"}`), up to 4 KiB; what the daemon spawns for a Codex pane |
 | `agent-claude-code-command` | `npx -y @agentclientprotocol/claude-agent-acp@0.68.0` | Same, for Claude Code panes |
 | `agent-auto-approve` | `on` | flag value; when on, a kinded `session/request_permission` is answered daemon-side with the agent's preferred allow option (`allow_always`, else `allow_once`) and the tool call is still published to the stream. A request with no allow option always falls through to the permission wizard |
+| `mouse` | `on` (the pin builds with `-DTMUX_MOUSE=1`) | flag value; session-effective per client on the wire. zz-tui gates its outer-terminal mouse modes on it and the daemon rejects mouse input from terminal-surface clients when off; the GUI's native mouse is ungated (decision 6) |
+| `escape-time` | `10` | integer milliseconds; zz-tui's escape-sequence fold timeout (`0` clamps to 1 like the pin's `tty_keys_next`) |
 
 The three agent keys became mux options when the [Agent pane](/concepts/agent-pane.md)'s ACP runtime
 moved into the daemon at wire v53 . the daemon spawns the adapter, so the daemon owns what it spawns.

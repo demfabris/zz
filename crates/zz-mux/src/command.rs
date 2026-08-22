@@ -170,6 +170,7 @@ pub struct ExecutionContext {
     pub window: Option<WindowId>,
     pub pane: Option<PaneId>,
     client_terminal: ClientTerminal,
+    client_size: Option<(u16, u16)>,
     repeat_binding: bool,
     pub no_hooks: bool,
     pub format_variables: BTreeMap<String, String>,
@@ -190,6 +191,7 @@ impl Default for ExecutionContext {
             window: None,
             pane: None,
             client_terminal: ClientTerminal::Present,
+            client_size: None,
             repeat_binding: false,
             no_hooks: false,
             format_variables: BTreeMap::new(),
@@ -241,6 +243,15 @@ impl ExecutionContext {
 
     pub fn set_no_client(&mut self) {
         self.client_terminal = ClientTerminal::NoClient;
+    }
+
+    #[must_use]
+    pub fn client_size(&self) -> Option<(u16, u16)> {
+        self.client_size
+    }
+
+    pub fn set_client_size(&mut self, size: Option<(u16, u16)>) {
+        self.client_size = size;
     }
 
     #[must_use]
@@ -383,6 +394,7 @@ pub enum MuxEffect {
     Attach {
         session: SessionId,
         detach_others: bool,
+        read_only: bool,
     },
     Detach(DetachScope),
     SourceFile {
@@ -1198,6 +1210,20 @@ impl MuxEngine {
             )
             .parse()
             .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn set_titles_for_session(&self, session: Option<SessionId>) -> bool {
+        let target = session.map_or(TmuxOptionTarget::GlobalSession, TmuxOptionTarget::Session);
+        self.scalar_option_effective(target, "set-titles") == Some("on")
+    }
+
+    #[must_use]
+    pub fn set_titles_string_for_session(&self, session: Option<SessionId>) -> String {
+        let target = session.map_or(TmuxOptionTarget::GlobalSession, TmuxOptionTarget::Session);
+        self.scalar_option_effective(target, "set-titles-string")
+            .unwrap_or_default()
+            .to_owned()
     }
 
     #[must_use]
@@ -2476,6 +2502,7 @@ impl MuxEngine {
                 return Ok(Execution::effect(MuxEffect::Attach {
                     session,
                     detach_others: options.has("-D"),
+                    read_only: false,
                 }));
             }
         }
@@ -2490,7 +2517,8 @@ impl MuxEngine {
         if !detached {
             require_client_terminal(context)?;
         }
-        let extent = initial_window_extent(&options, self.global_default_size())?;
+        let extent =
+            initial_window_extent(&options, self.global_default_size(), context.client_size())?;
         let (inherit_cwd_from, cwd) =
             spawn_cwd_source(self, &options, context.pane, &PaneKind::Terminal, hooks);
         let base_index = self.global_base_index;
@@ -2549,6 +2577,7 @@ impl MuxEngine {
             effects.push(MuxEffect::Attach {
                 session,
                 detach_others: false,
+                read_only: false,
             });
         }
         Ok(Execution { output, effects })
@@ -2692,6 +2721,7 @@ impl MuxEngine {
         Ok(Execution::effect(MuxEffect::Attach {
             session,
             detach_others,
+            read_only: options.has("-r"),
         }))
     }
 
@@ -9177,6 +9207,13 @@ fn stored_scalar_execution(name: &str, target: TmuxOptionTarget) -> Execution {
             session: None,
         });
     }
+    if matches!(name, "set-titles" | "set-titles-string") {
+        let session = match target {
+            TmuxOptionTarget::Session(session) => Some(session),
+            _ => None,
+        };
+        return Execution::effect(MuxEffect::StatusFormatsChanged { session });
+    }
     Execution::default()
 }
 
@@ -9668,11 +9705,27 @@ fn split_size(options: &Options) -> Option<SplitSize<'_>> {
     )
 }
 
-fn initial_window_extent(options: &Options, default_size: &str) -> Result<(u16, u16), ServerError> {
+fn initial_window_extent(
+    options: &Options,
+    default_size: &str,
+    client_size: Option<(u16, u16)>,
+) -> Result<(u16, u16), ServerError> {
     let default = parse_default_size(default_size).unwrap_or(DEFAULT_WINDOW_EXTENT);
     Ok((
-        initial_window_dimension(options, "-x", default.0, "width")?,
-        initial_window_dimension(options, "-y", default.1, "height")?,
+        initial_window_dimension(
+            options,
+            "-x",
+            default.0,
+            client_size.map_or(DEFAULT_WINDOW_EXTENT.0, |size| size.0),
+            "width",
+        )?,
+        initial_window_dimension(
+            options,
+            "-y",
+            default.1,
+            client_size.map_or(DEFAULT_WINDOW_EXTENT.1, |size| size.1),
+            "height",
+        )?,
     ))
 }
 
@@ -9699,17 +9752,14 @@ fn initial_window_dimension(
     options: &Options,
     option: &str,
     default: u16,
+    dash: u16,
     dimension: &str,
 ) -> Result<u16, ServerError> {
     let Some(value) = options.value(option) else {
         return Ok(default);
     };
     if value == "-" {
-        return Ok(match dimension {
-            "width" => DEFAULT_WINDOW_EXTENT.0,
-            "height" => DEFAULT_WINDOW_EXTENT.1,
-            _ => default,
-        });
+        return Ok(dash);
     }
     match value.parse::<i128>() {
         Ok(number) if number < 1 => Err(ServerError::InvalidCommand(format!(
@@ -11212,6 +11262,7 @@ mod tests {
                 MuxEffect::Attach {
                     session: attached,
                     detach_others: false,
+                    read_only: false,
                 },
                 MuxEffect::SnapshotChanged,
             ] if *created == pane && *attached == session
@@ -11646,6 +11697,102 @@ mod tests {
     }
 
     #[test]
+    fn dash_creation_dimensions_use_the_caller_terminal_size() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        context.set_client_size(Some((132, 43)));
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "sized", "-x", "-", "-y", "-"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.state.windows[&context.window.unwrap()]
+                .layout
+                .extent(),
+            (132, 43)
+        );
+        context.set_client_size(None);
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-s", "sizeless", "-x", "-", "-y", "-"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.state.windows[&context.window.unwrap()]
+                .layout
+                .extent(),
+            (80, 24)
+        );
+    }
+
+    #[test]
+    fn set_titles_readers_resolve_scope_and_emit_status_effects() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+
+        assert!(!engine.set_titles_for_session(Some(session)));
+        assert_eq!(
+            engine.set_titles_string_for_session(Some(session)),
+            "#S:#I:#W - \"#T\" #{session_alerts}"
+        );
+
+        let global = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "set-titles", "on"]),
+            )
+            .unwrap();
+        assert_eq!(
+            global.effects,
+            [MuxEffect::StatusFormatsChanged { session: None }]
+        );
+        assert!(engine.set_titles_for_session(Some(session)));
+        assert!(engine.set_titles_for_session(None));
+
+        let scoped = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["set-titles-string", "#S custom"]),
+            )
+            .unwrap();
+        assert_eq!(
+            scoped.effects,
+            [MuxEffect::StatusFormatsChanged {
+                session: Some(session),
+            }]
+        );
+        assert_eq!(
+            engine.set_titles_string_for_session(Some(session)),
+            "#S custom"
+        );
+        assert_eq!(
+            engine.set_titles_string_for_session(None),
+            "#S:#I:#W - \"#T\" #{session_alerts}"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-u", "set-titles-string"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.set_titles_string_for_session(Some(session)),
+            "#S:#I:#W - \"#T\" #{session_alerts}"
+        );
+    }
+
+    #[test]
     fn projected_client_extent_preserves_split_and_zoom_geometry() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -11771,6 +11918,7 @@ mod tests {
             [MuxEffect::Attach {
                 session,
                 detach_others: false,
+                read_only: false,
             }]
         );
         assert_eq!(context.session, Some(session));
@@ -11788,6 +11936,7 @@ mod tests {
             [MuxEffect::Attach {
                 session,
                 detach_others: false,
+                read_only: false,
             }]
         );
 
@@ -11802,6 +11951,7 @@ mod tests {
             [MuxEffect::Attach {
                 session,
                 detach_others: true,
+                read_only: false,
             }]
         );
 
@@ -12311,6 +12461,7 @@ mod tests {
             [MuxEffect::Attach {
                 session,
                 detach_others: true,
+                read_only: false,
             }]
         );
     }

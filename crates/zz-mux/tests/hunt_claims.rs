@@ -1468,7 +1468,7 @@ fn attach_session_reports_the_client_flags_it_cannot_honor() {
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
-    for flag in ["-r", "-x", "-E"] {
+    for flag in ["-x", "-E"] {
         let error = engine
             .execute(
                 &mut context,

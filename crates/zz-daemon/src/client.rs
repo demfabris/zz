@@ -109,6 +109,7 @@ impl CommandClient {
             None,
             false,
             true,
+            TerminalFactsScope::Full,
         )?;
         Ok(Self::from_connected(connected))
     }
@@ -126,6 +127,7 @@ impl CommandClient {
                     None,
                     false,
                     false,
+                    TerminalFactsScope::Full,
                 )?;
                 Ok(Self::from_connected(connected))
             }
@@ -147,6 +149,7 @@ impl CommandClient {
                         None,
                         false,
                         false,
+                        TerminalFactsScope::SizeOnly,
                     )?;
                     Ok(Self::from_connected_with_ssh(connected, ssh_forward))
                 }
@@ -248,6 +251,7 @@ impl InteractiveClient {
             None,
             false,
             false,
+            TerminalFactsScope::None,
         )?;
         Ok(Self::from_connected(connected))
     }
@@ -256,7 +260,13 @@ impl InteractiveClient {
         path: &Path,
         color_scheme: TerminalColorScheme,
     ) -> Result<Self, DaemonError> {
-        Self::connect_endpoint(&Endpoint::Local(path.to_owned()), color_scheme)
+        Self::connect_endpoint_with_prompts_and_terminal(
+            &Endpoint::Local(path.to_owned()),
+            color_scheme,
+            None,
+            true,
+            false,
+        )
     }
 
     pub fn connect_with_color_scheme_and_terminal(
@@ -264,10 +274,28 @@ impl InteractiveClient {
         color_scheme: TerminalColorScheme,
         client_has_terminal: bool,
     ) -> Result<Self, DaemonError> {
-        Self::connect_endpoint_with_terminal(
+        Self::connect_endpoint_with_prompts_and_terminal(
             &Endpoint::Local(path.to_owned()),
             color_scheme,
+            None,
             client_has_terminal,
+            false,
+        )
+    }
+
+    /// Connect a raw-terminal attach surface: the hello carries the caller's
+    /// terminal size, and the caller's tty when `$TMUX` marks a nested run.
+    pub fn connect_terminal_surface(
+        path: &Path,
+        color_scheme: TerminalColorScheme,
+        client_has_terminal: bool,
+    ) -> Result<Self, DaemonError> {
+        Self::connect_endpoint_with_prompts_and_terminal(
+            &Endpoint::Local(path.to_owned()),
+            color_scheme,
+            None,
+            client_has_terminal,
+            true,
         )
     }
 
@@ -275,7 +303,7 @@ impl InteractiveClient {
         endpoint: &Endpoint,
         color_scheme: TerminalColorScheme,
     ) -> Result<Self, DaemonError> {
-        Self::connect_endpoint_with_prompts(endpoint, color_scheme, None)
+        Self::connect_endpoint_with_prompts_and_terminal(endpoint, color_scheme, None, true, true)
     }
 
     pub fn connect_endpoint_with_terminal(
@@ -288,6 +316,7 @@ impl InteractiveClient {
             color_scheme,
             None,
             client_has_terminal,
+            true,
         )
     }
 
@@ -299,7 +328,13 @@ impl InteractiveClient {
         color_scheme: TerminalColorScheme,
         prompts: Option<crate::askpass::SshPrompts>,
     ) -> Result<Self, DaemonError> {
-        Self::connect_endpoint_with_prompts_and_terminal(endpoint, color_scheme, prompts, true)
+        Self::connect_endpoint_with_prompts_and_terminal(
+            endpoint,
+            color_scheme,
+            prompts,
+            true,
+            false,
+        )
     }
 
     fn connect_endpoint_with_prompts_and_terminal(
@@ -307,6 +342,7 @@ impl InteractiveClient {
         color_scheme: TerminalColorScheme,
         prompts: Option<crate::askpass::SshPrompts>,
         client_has_terminal: bool,
+        terminal_surface: bool,
     ) -> Result<Self, DaemonError> {
         let device_name = short_device_name();
         match endpoint {
@@ -320,6 +356,11 @@ impl InteractiveClient {
                     Some(color_scheme),
                     client_has_terminal,
                     false,
+                    if terminal_surface {
+                        TerminalFactsScope::Full
+                    } else {
+                        TerminalFactsScope::None
+                    },
                 )?;
                 Ok(Self::from_connected(connected))
             }
@@ -335,6 +376,11 @@ impl InteractiveClient {
                         Some(color_scheme),
                         client_has_terminal,
                         false,
+                        if terminal_surface {
+                            TerminalFactsScope::SizeOnly
+                        } else {
+                            TerminalFactsScope::None
+                        },
                     )?;
                     let mut client = Self::from_connected(connected);
                     client.russh_forward = Some(russh_forward);
@@ -352,6 +398,11 @@ impl InteractiveClient {
                         Some(color_scheme),
                         client_has_terminal,
                         false,
+                        if terminal_surface {
+                            TerminalFactsScope::SizeOnly
+                        } else {
+                            TerminalFactsScope::None
+                        },
                     )?;
                     Ok(Self::from_connected_with_ssh(connected, ssh_forward))
                 }
@@ -438,12 +489,19 @@ impl InteractiveClient {
         &self,
         session: impl Into<String>,
         detach_others: bool,
+        read_only: bool,
     ) -> Result<(), DaemonError> {
         let session = session.into();
-        if !detach_others {
+        if !detach_others && !read_only {
             return self.attach(session);
         }
-        let mut args = vec!["-d".to_owned()];
+        let mut args = Vec::new();
+        if detach_others {
+            args.push("-d".to_owned());
+        }
+        if read_only {
+            args.push("-r".to_owned());
+        }
         if !session.is_empty() {
             args.extend(["-t".to_owned(), session]);
         }
@@ -755,6 +813,65 @@ impl<S: TransportStream> ProtocolSender<S> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TerminalFactsScope {
+    None,
+    SizeOnly,
+    Full,
+}
+
+#[cfg(unix)]
+fn caller_terminal_size() -> Option<(u16, u16)> {
+    let size = rustix::termios::tcgetwinsize(std::io::stdout()).ok()?;
+    (size.ws_col > 0 && size.ws_row > 0).then_some((size.ws_col, size.ws_row))
+}
+
+#[cfg(not(unix))]
+fn caller_terminal_size() -> Option<(u16, u16)> {
+    None
+}
+
+#[cfg(unix)]
+fn caller_tty() -> Option<String> {
+    use std::os::fd::AsFd as _;
+
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    let stderr = std::io::stderr();
+    for fd in [stdin.as_fd(), stdout.as_fd(), stderr.as_fd()] {
+        if let Ok(name) = rustix::termios::ttyname(fd, Vec::new()) {
+            return name.into_string().ok();
+        }
+    }
+    None
+}
+
+#[cfg(not(unix))]
+fn caller_tty() -> Option<String> {
+    None
+}
+
+fn terminal_facts_capabilities(scope: TerminalFactsScope, capabilities: &mut Vec<String>) {
+    if scope == TerminalFactsScope::None {
+        return;
+    }
+    if let Some((columns, rows)) = caller_terminal_size() {
+        capabilities.push(format!(
+            "{}{columns}x{rows}",
+            ClientHello::CLIENT_SIZE_CAPABILITY_PREFIX
+        ));
+    }
+    if scope == TerminalFactsScope::Full
+        && std::env::var("TMUX").is_ok_and(|value| !value.is_empty())
+        && let Some(tty) = caller_tty()
+    {
+        capabilities.push(format!(
+            "{}{tty}",
+            ClientHello::CLIENT_TTY_CAPABILITY_PREFIX
+        ));
+    }
+}
+
 fn connect<T: Transport>(
     endpoint: &T::Endpoint,
     endpoint_display: impl fmt::Display,
@@ -763,6 +880,7 @@ fn connect<T: Transport>(
     color_scheme: Option<TerminalColorScheme>,
     client_has_terminal: bool,
     send_origin: bool,
+    terminal_facts: TerminalFactsScope,
 ) -> Result<Connected<T::Stream>, DaemonError> {
     let stream = T::connect(endpoint)?;
     connect_stream(
@@ -773,9 +891,11 @@ fn connect<T: Transport>(
         color_scheme,
         client_has_terminal,
         send_origin,
+        terminal_facts,
     )
 }
 
+#[expect(clippy::too_many_arguments)]
 fn connect_stream<S: TransportStream>(
     stream: S,
     endpoint_display: impl fmt::Display,
@@ -784,6 +904,7 @@ fn connect_stream<S: TransportStream>(
     color_scheme: Option<TerminalColorScheme>,
     client_has_terminal: bool,
     send_origin: bool,
+    terminal_facts: TerminalFactsScope,
 ) -> Result<Connected<S>, DaemonError> {
     let started = diagnostic_timer();
     let mut reader = ProtocolReceiver::new(stream.try_clone()?);
@@ -806,6 +927,7 @@ fn connect_stream<S: TransportStream>(
     if kind == ClientKind::Interactive && client_has_terminal {
         capabilities.push(ClientHello::CLIENT_TERMINAL_CAPABILITY.to_owned());
     }
+    terminal_facts_capabilities(terminal_facts, &mut capabilities);
     writer.send(&ProtocolMessage::ClientHello(ClientHello {
         protocol_version: PROTOCOL_VERSION,
         client_instance_id: client_instance_id(),

@@ -4,7 +4,7 @@ use std::{
     mem,
     sync::{
         Arc, Mutex, MutexGuard,
-        atomic::{AtomicBool, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
         mpsc,
     },
     thread,
@@ -406,6 +406,7 @@ pub(crate) enum InitialAttach {
     Request {
         target: Option<String>,
         detach_others: bool,
+        read_only: bool,
     },
     AlreadyAttached {
         session: zz_protocol::SessionId,
@@ -423,10 +424,11 @@ pub(crate) fn run(
     fleet_hosts: Vec<HostEntry>,
     browser_provider: Option<Box<dyn BrowserFrameProvider>>,
 ) -> Result<(), String> {
-    let (attach_target, detach_others, initial_messages, attempt) = match initial_attach {
+    let (attach_target, attach_flags, initial_messages, attempt) = match initial_attach {
         InitialAttach::Request {
             target,
             detach_others,
+            read_only,
         } => {
             let attempt = if target.is_some() {
                 AttachAttempt::Explicit
@@ -435,7 +437,7 @@ pub(crate) fn run(
             };
             (
                 target.unwrap_or_default(),
-                Some(detach_others),
+                Some((detach_others, read_only)),
                 Vec::new(),
                 attempt,
             )
@@ -445,15 +447,20 @@ pub(crate) fn run(
         }
     };
     let size = TerminalSize::detect().map_err(|error| error.to_string())?;
+    let read_only = attach_flags.is_some_and(|(_, read_only)| read_only);
     let mut core = seeded_core(initial.server_hello().clone());
     let mut client = Arc::new(initial);
-    if let Some(detach_others) = detach_others {
+    if let Some((detach_others, read_only)) = attach_flags {
         client
-            .attach_session(attach_target.clone(), detach_others)
+            .attach_session(attach_target.clone(), detach_others, read_only)
             .map_err(|error| error.to_string())?;
     }
 
-    let mut terminal = TerminalGuard::enter().map_err(|error| error.to_string())?;
+    let escape_time = Arc::new(AtomicU64::new(escape_timeout_ms(
+        lock_core(&core).mux_options(),
+    )));
+    let mut terminal = TerminalGuard::enter(mouse_option_enabled(lock_core(&core).mux_options()))
+        .map_err(|error| error.to_string())?;
     let pixel_mouse = terminal.pixel_mouse();
     let mut model = Model::new(
         &lock_core(&core),
@@ -485,7 +492,7 @@ pub(crate) fn run(
         Arc::clone(&kitty_images),
         Arc::clone(&kitty_gate),
     )?;
-    spawn_terminal_reader(events.clone())?;
+    spawn_terminal_reader(events.clone(), Arc::clone(&escape_time))?;
 
     let mut attempt = attempt;
     let mut creating_default = false;
@@ -520,6 +527,9 @@ pub(crate) fn run(
                 for (pane, frame) in frames.take() {
                     model.viewports.insert(pane, frame.viewport);
                     renderer.note_frame(pane, frame.damage);
+                }
+                if let Some(sequence) = sync_mouse_modes(&mut model, pixel_mouse) {
+                    renderer.queue_control(sequence);
                 }
                 renderer
                     .paint_frames(&model)
@@ -603,6 +613,14 @@ pub(crate) fn run(
                     }
                     InputOutcome::Resize(size) => {
                         model.set_size(size);
+                        if size.columns > 0 && size.rows > 0 {
+                            client
+                                .send_input(InputMessage::ClientTerminalSize {
+                                    columns: size.columns,
+                                    rows: size.rows,
+                                })
+                                .map_err(|error| error.to_string())?;
+                        }
                         send_resizes_and_sync_browser(
                             &mut model,
                             &client,
@@ -617,7 +635,7 @@ pub(crate) fn run(
                     InputOutcome::SwitchHost(host) => {
                         let label = host.label.clone();
                         match prepare_host_switch(&endpoint, host, |target| {
-                            prepare_connection(target, String::new())
+                            prepare_connection(target, String::new(), false)
                         }) {
                             Ok(HostSwitchDecision::Current) => {}
                             Err(error) => {
@@ -651,6 +669,12 @@ pub(crate) fn run(
                                     renderer.reset_kitty_images();
                                     endpoint = next_endpoint;
                                     model.set_connected_host(host, &lock_core(&core));
+                                    refresh_terminal_options(&mut model, &core, &escape_time);
+                                    if let Some(sequence) =
+                                        sync_mouse_modes(&mut model, pixel_mouse)
+                                    {
+                                        renderer.queue_control(sequence);
+                                    }
                                     model.client_message = Some(format!("connected to {label}"));
                                     attempt = AttachAttempt::Default;
                                     creating_default = false;
@@ -682,6 +706,14 @@ pub(crate) fn run(
                     }
                     CoreEvent::PaneRemoved { pane } => renderer.remove_kitty_pane(*pane),
                     _ => {}
+                }
+                if matches!(
+                    &*event,
+                    CoreEvent::MuxOptionsChanged
+                        | CoreEvent::HelloReceived
+                        | CoreEvent::Attached { .. }
+                ) {
+                    refresh_terminal_options(&mut model, &core, &escape_time);
                 }
                 match handle_core_event(
                     &mut model,
@@ -716,6 +748,12 @@ pub(crate) fn run(
                     }
                     ProtocolOutcome::Exit(reason) => break Ok(reason),
                 }
+                if let Some(sequence) = sync_mouse_modes(&mut model, pixel_mouse) {
+                    renderer.queue_control(sequence);
+                    renderer
+                        .paint(&model, false)
+                        .map_err(|error| error.to_string())?;
+                }
             }
             MainEvent::Disconnected { connection, error } => {
                 if connection != connection_id {
@@ -730,6 +768,7 @@ pub(crate) fn run(
                 let Ok(replacement) = prepare_connection(
                     &endpoint,
                     session.map_or_else(String::new, |session| session.to_string()),
+                    read_only,
                 ) else {
                     break Ok(TuiExit::ServerExitedUnexpectedly);
                 };
@@ -757,6 +796,10 @@ pub(crate) fn run(
                 browser.reset_connection();
                 renderer.reset_kitty_images();
                 model.reset_connection(&lock_core(&core));
+                refresh_terminal_options(&mut model, &core, &escape_time);
+                if let Some(sequence) = sync_mouse_modes(&mut model, pixel_mouse) {
+                    renderer.queue_control(sequence);
+                }
                 model.client_message = Some("reconnected".to_owned());
                 renderer.invalidate();
                 renderer
@@ -766,6 +809,14 @@ pub(crate) fn run(
             MainEvent::Resize => {
                 if let Ok(size) = TerminalSize::detect() {
                     model.set_size(size);
+                    if size.columns > 0 && size.rows > 0 {
+                        client
+                            .send_input(InputMessage::ClientTerminalSize {
+                                columns: size.columns,
+                                rows: size.rows,
+                            })
+                            .map_err(|error| error.to_string())?;
+                    }
                     send_resizes_and_sync_browser(
                         &mut model,
                         &client,
@@ -806,13 +857,20 @@ fn connect(endpoint: &Endpoint) -> Result<InteractiveClient, String> {
 fn prepare_connection(
     endpoint: &Endpoint,
     attach_target: String,
+    read_only: bool,
 ) -> Result<PreparedConnection, String> {
     let client = connect(endpoint)?;
     let core = seeded_core(client.server_hello().clone());
     let client = Arc::new(client);
-    client
-        .attach(attach_target)
-        .map_err(|error| error.to_string())?;
+    if read_only {
+        client
+            .attach_session(attach_target, false, true)
+            .map_err(|error| error.to_string())?;
+    } else {
+        client
+            .attach(attach_target)
+            .map_err(|error| error.to_string())?;
+    }
     Ok(PreparedConnection { client, core })
 }
 
@@ -828,6 +886,45 @@ fn seeded_core(hello: ServerHello) -> Arc<Mutex<ClientCore>> {
 
 fn lock_core(core: &Mutex<ClientCore>) -> MutexGuard<'_, ClientCore> {
     core.lock().expect("client core poisoned")
+}
+
+pub(crate) fn mouse_option_enabled(options: &zz_protocol::MuxOptions) -> bool {
+    options
+        .get(zz_protocol::MuxOptionKey::Mouse)
+        .is_some_and(|option| option.value == "on")
+}
+
+fn escape_timeout_ms(options: &zz_protocol::MuxOptions) -> u64 {
+    options
+        .get(zz_protocol::MuxOptionKey::EscapeTime)
+        .and_then(|option| option.value.parse::<u64>().ok())
+        .unwrap_or(10)
+        .max(1)
+}
+
+fn refresh_terminal_options(model: &mut Model, core: &Mutex<ClientCore>, escape_time: &AtomicU64) {
+    let core = lock_core(core);
+    let options = core.mux_options();
+    escape_time.store(escape_timeout_ms(options), Ordering::Relaxed);
+    model.mouse_option = mouse_option_enabled(options);
+}
+
+/// The pin's `server_client_reset_state`: outer mouse modes follow the option,
+/// or the active pane's own request while the option is off.
+fn sync_mouse_modes(model: &mut Model, pixel_mouse: bool) -> Option<Vec<u8>> {
+    let desired = model.mouse_option
+        || model
+            .active_viewport()
+            .is_some_and(|viewport| viewport.mouse_tracking);
+    if desired == model.mouse_modes_active {
+        return None;
+    }
+    model.mouse_modes_active = desired;
+    Some(if desired {
+        crate::tty::mouse_enable_sequence(pixel_mouse)
+    } else {
+        crate::tty::MOUSE_DISABLE_SEQUENCE.to_vec()
+    })
 }
 
 fn prepare_host_switch<T>(
@@ -1007,7 +1104,10 @@ fn spawn_protocol_reader(
     Ok(ProtocolReader { cancelled })
 }
 
-fn spawn_terminal_reader(events: mpsc::Sender<MainEvent>) -> Result<(), String> {
+fn spawn_terminal_reader(
+    events: mpsc::Sender<MainEvent>,
+    escape_time: Arc<AtomicU64>,
+) -> Result<(), String> {
     let (bytes_sender, bytes_receiver) = mpsc::sync_channel::<Result<Vec<u8>, String>>(16);
     thread::Builder::new()
         .name("zz-tui-stdin".to_owned())
@@ -1041,7 +1141,8 @@ fn spawn_terminal_reader(events: mpsc::Sender<MainEvent>) -> Result<(), String> 
             let mut parser = EventParser::default();
             loop {
                 let received = if parser.has_pending_escape() {
-                    match bytes_receiver.recv_timeout(Duration::from_millis(25)) {
+                    let timeout = Duration::from_millis(escape_time.load(Ordering::Relaxed));
+                    match bytes_receiver.recv_timeout(timeout) {
                         Ok(bytes) => Ok(bytes),
                         Err(mpsc::RecvTimeoutError::Timeout) => {
                             let mut decoded = Vec::new();
@@ -1338,6 +1439,15 @@ fn handle_command_response(
             error: ServerError::PaneExited(_) | ServerError::PaneNotAttached(_),
             ..
         } => Ok(ProtocolOutcome::None),
+        CommandResponse::Error {
+            request_id: 0,
+            error: ServerError::InvalidCommand(message),
+            ..
+        } if model.attached_session.is_none()
+            && message == "sessions should be nested with care, unset $TMUX to force" =>
+        {
+            Err(message)
+        }
         CommandResponse::Error { error, .. } => {
             model.client_message = Some(error.tmux_message());
             Ok(ProtocolOutcome::Repaint)
@@ -1510,6 +1620,166 @@ fn send_resizes(model: &mut Model, client: &InteractiveClient) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn paned_model() -> (Model, zz_protocol::PaneId) {
+        let core = ClientCore::new();
+        let endpoint = Endpoint::parse("unix:///tmp/zz-app-mouse-test.sock").expect("endpoint");
+        let mut model = Model::new(
+            &core,
+            crate::tty::TerminalSize {
+                columns: 79,
+                rows: 24,
+                cell_width_px: 8,
+                cell_height_px: 16,
+            },
+            "host".to_owned(),
+            "host".to_owned(),
+            endpoint.clone(),
+            endpoint,
+            Vec::new(),
+        );
+        let session = zz_protocol::SessionId(1);
+        let window = zz_protocol::WindowId(1);
+        let pane = zz_protocol::PaneId(7);
+        model.attached_session = Some(session);
+        model.update_snapshot(Arc::new(zz_protocol::MuxSnapshot {
+            generation: 1,
+            sessions: vec![zz_protocol::SessionSnapshot {
+                id: session,
+                name: "s".to_owned(),
+                active_window: window,
+                windows: vec![zz_protocol::WindowSnapshot {
+                    id: window,
+                    index: 0,
+                    name: "w".to_owned(),
+                    automatic_rename: true,
+                    active_pane: pane,
+                    zoomed_pane: None,
+                    layout: zz_protocol::LayoutNode::Pane(pane),
+                    panes: std::collections::BTreeMap::new(),
+                    layout_dump: String::new(),
+                    visible_layout_dump: String::new(),
+                    status_label: String::new(),
+                }],
+                viewers: Vec::new(),
+            }],
+            focused_window: Some(window),
+        }));
+        (model, pane)
+    }
+
+    fn tracking_viewport(tracking: bool) -> zz_terminal::TerminalViewport {
+        let mut viewport =
+            zz_terminal::TerminalViewport::blank(79, 22, zz_terminal::SessionStatus::Running);
+        viewport.mouse_tracking = tracking;
+        viewport
+    }
+
+    #[test]
+    fn app_requested_mouse_lights_the_outer_modes_while_the_option_is_off() {
+        let (mut model, pane) = paned_model();
+        model.mouse_option = false;
+        model.mouse_modes_active = false;
+
+        assert!(sync_mouse_modes(&mut model, false).is_none());
+
+        model.viewports.insert(pane, tracking_viewport(true));
+        assert_eq!(
+            sync_mouse_modes(&mut model, false).as_deref(),
+            Some(b"\x1b[?1003h\x1b[?1006h".as_slice())
+        );
+        assert!(model.mouse_modes_active);
+        assert!(sync_mouse_modes(&mut model, false).is_none());
+
+        model.viewports.insert(pane, tracking_viewport(false));
+        assert_eq!(
+            sync_mouse_modes(&mut model, false).as_deref(),
+            Some(crate::tty::MOUSE_DISABLE_SEQUENCE)
+        );
+        assert!(!model.mouse_modes_active);
+
+        model.mouse_option = true;
+        assert_eq!(
+            sync_mouse_modes(&mut model, true).as_deref(),
+            Some(b"\x1b[?1003h\x1b[?1006h\x1b[?1016h".as_slice())
+        );
+    }
+
+    #[test]
+    fn mouse_off_forwards_only_to_a_tracking_pane_and_skips_chrome() {
+        let (mut model, pane) = paned_model();
+        model.mouse_option = false;
+        let event = crate::terminal_event::MouseEvent {
+            kind: crate::terminal_event::MouseEventKind::Down(
+                crate::terminal_event::MouseButton::Left,
+            ),
+            column: 5,
+            row: 2,
+            modifiers: crate::terminal_event::KeyModifiers::NONE,
+        };
+
+        assert!(
+            crate::input::app_mouse_forward_action(&model, event, 5, 2, 40, 32).is_none(),
+            "no viewport yet: nothing forwards"
+        );
+
+        model.viewports.insert(pane, tracking_viewport(false));
+        assert!(
+            crate::input::app_mouse_forward_action(&model, event, 5, 2, 40, 32).is_none(),
+            "a pane that did not request mouse receives nothing"
+        );
+
+        model.viewports.insert(pane, tracking_viewport(true));
+        let (target, action) = crate::input::app_mouse_forward_action(&model, event, 5, 2, 40, 32)
+            .expect("tracking pane receives the event");
+        assert_eq!(target, pane);
+        assert!(matches!(
+            action,
+            zz_terminal::TerminalViewAction::Mouse(input)
+                if !input.force_selection()
+        ));
+
+        assert!(
+            crate::input::app_mouse_forward_action(&model, event, 5, 0, 40, 0).is_none(),
+            "the pane header row is not content: nothing forwards"
+        );
+    }
+
+    #[test]
+    fn escape_timeout_honors_the_pinned_default_and_live_values() {
+        let mut options = zz_protocol::MuxOptions::default();
+        assert_eq!(escape_timeout_ms(&options), 10);
+        options.set(
+            zz_protocol::MuxOptionKey::EscapeTime,
+            "0",
+            zz_protocol::MuxOptionSource::RuntimeCommand,
+        );
+        assert_eq!(escape_timeout_ms(&options), 1);
+        options.set(
+            zz_protocol::MuxOptionKey::EscapeTime,
+            "50",
+            zz_protocol::MuxOptionSource::RuntimeCommand,
+        );
+        assert_eq!(escape_timeout_ms(&options), 50);
+        options.set(
+            zz_protocol::MuxOptionKey::EscapeTime,
+            "bogus",
+            zz_protocol::MuxOptionSource::RuntimeCommand,
+        );
+        assert_eq!(escape_timeout_ms(&options), 10);
+    }
+
+    #[test]
+    fn mouse_gate_follows_the_effective_option_value() {
+        let mut options = zz_protocol::MuxOptions::default();
+        assert!(mouse_option_enabled(&options));
+        options.set(
+            zz_protocol::MuxOptionKey::Mouse,
+            "off",
+            zz_protocol::MuxOptionSource::RuntimeCommand,
+        );
+        assert!(!mouse_option_enabled(&options));
+    }
 
     #[test]
     fn tui_exit_notices_and_codes_match_tmux() {

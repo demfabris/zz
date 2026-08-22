@@ -146,6 +146,7 @@ pub(crate) struct Renderer {
     damage: HashMap<PaneId, FrameDamage>,
     browser_placements: HashMap<PaneId, KittyPlacement>,
     browser_painted: HashMap<PaneId, bool>,
+    last_title: String,
     kitty: KittyBridge,
 }
 
@@ -164,6 +165,7 @@ impl Renderer {
             damage: HashMap::new(),
             browser_placements: HashMap::new(),
             browser_painted: HashMap::new(),
+            last_title: String::new(),
             kitty: KittyBridge::default(),
         }
     }
@@ -253,6 +255,20 @@ impl Renderer {
     pub fn paint(&mut self, model: &Model, force: bool) -> io::Result<()> {
         self.output.clear();
         self.output.extend_from_slice(b"\x1b[?2026h\x1b[?25l");
+        if model.status.title != self.last_title {
+            if !model.status.title.is_empty() {
+                self.output.extend_from_slice(b"\x1b]2;");
+                self.output.extend(
+                    model
+                        .status
+                        .title
+                        .bytes()
+                        .filter(|byte| *byte >= 0x20 && *byte != 0x7f),
+                );
+                self.output.push(0x07);
+            }
+            self.last_title.clone_from(&model.status.title);
+        }
         if force {
             clear_screen(&mut self.output, model.appearance.background);
         }

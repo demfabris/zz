@@ -7,12 +7,12 @@ use std::{
 
 use zz_protocol::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, COMMAND_SPECS, ChooseTreeKind,
-    CommandInvocation, CommandResolution, CommandSpec, DAEMON_COMMAND_SPECS,
-    DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
-    DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES,
-    MAX_GUI_TEXT_BYTES, MuxOptionKey, PaneId, PaneKindSnapshot, PopupBorderLines, ServerError,
-    SessionId, TerminalUiCommand, WindowId, canonical_key, normalize_browser_profile_name,
-    resolve_command,
+    CommandInvocation, CommandPromptMode, CommandPromptType, CommandResolution, CommandSpec,
+    DAEMON_COMMAND_SPECS, DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND,
+    DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken,
+    MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, PaneId, PaneKindSnapshot,
+    PopupBorderLines, ServerError, SessionId, TerminalUiCommand, WindowId, canonical_key,
+    normalize_browser_profile_name, resolve_command,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, DEFAULT_HISTORY_LIMIT,
@@ -336,6 +336,9 @@ pub enum MuxEffect {
         prompt: String,
         input: String,
         template: Option<String>,
+        prompt_type: CommandPromptType,
+        mode: CommandPromptMode,
+        no_freeze: bool,
     },
     ChooseTree {
         pane: PaneId,
@@ -5196,6 +5199,16 @@ impl MuxEngine {
                 "command-prompt accepts at most one template".to_owned(),
             ));
         }
+        let prompt_type = match options.value("-T") {
+            None | Some("command") => CommandPromptType::Command,
+            Some("search") => CommandPromptType::Search,
+            Some(other) => {
+                return Err(ServerError::InvalidCommand(format!(
+                    "unknown type: {other}"
+                )));
+            }
+        };
+        let mode = command_prompt_mode(&options);
         let prompt = options.value("-p").unwrap_or(":").to_owned();
         let input = self.expand_prompt_input(context, options.value("-I").unwrap_or_default())?;
         let template = positional.first().cloned();
@@ -5222,6 +5235,9 @@ impl MuxEngine {
             prompt,
             input,
             template,
+            prompt_type,
+            mode,
+            no_freeze: options.has("-C"),
         }))
     }
 
@@ -10403,6 +10419,24 @@ fn key_table(options: &Options) -> &str {
     options
         .value("-T")
         .unwrap_or(if options.has("-n") { "root" } else { "prefix" })
+}
+
+/// `cmd_command_prompt_exec`'s mode ladder: the first flag present wins in the
+/// order `-1`, `-N`, `-i`, `-k`, `-e`, and `-C` is orthogonal to all of them.
+fn command_prompt_mode(options: &Options) -> CommandPromptMode {
+    if options.has("-1") {
+        CommandPromptMode::Single
+    } else if options.has("-N") {
+        CommandPromptMode::Numeric
+    } else if options.has("-i") {
+        CommandPromptMode::Incremental
+    } else if options.has("-k") {
+        CommandPromptMode::Key
+    } else if options.has("-e") {
+        CommandPromptMode::BackspaceExit
+    } else {
+        CommandPromptMode::Text
+    }
 }
 
 fn parse_command_options(
@@ -21994,6 +22028,9 @@ mod tests {
                 prompt: "window name".to_owned(),
                 input: "scratch".to_owned(),
                 template: Some("new-window -n %%".to_owned()),
+                prompt_type: CommandPromptType::Command,
+                mode: CommandPromptMode::Text,
+                no_freeze: false,
             }]
         );
 
@@ -22018,6 +22055,9 @@ mod tests {
                 prompt: ":".to_owned(),
                 input: "work tree / editor pane".to_owned(),
                 template: Some("rename-window -- '%%'".to_owned()),
+                prompt_type: CommandPromptType::Command,
+                mode: CommandPromptMode::Text,
+                no_freeze: false,
             }]
         );
         assert!(matches!(
@@ -22027,6 +22067,71 @@ mod tests {
             ),
             Err(ServerError::UnsupportedCommand(message))
                 if message == "command-prompt -F"
+        ));
+    }
+
+    #[test]
+    fn command_prompt_resolves_the_pinned_mode_ladder() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        let mode = |engine: &mut MuxEngine, context: &mut ExecutionContext, flags: &[&str]| {
+            let execution = engine
+                .execute(context, &command("command-prompt", flags))
+                .expect("prompt effect");
+            match execution.effects.into_iter().next().expect("one effect") {
+                MuxEffect::CommandPrompt {
+                    mode,
+                    prompt_type,
+                    no_freeze,
+                    ..
+                } => (mode, prompt_type, no_freeze),
+                other => panic!("unexpected effect {other:?}"),
+            }
+        };
+
+        for (flags, expected) in [
+            (
+                &["-1", "-N", "-i", "-k", "-e"][..],
+                CommandPromptMode::Single,
+            ),
+            (&["-N", "-i", "-k", "-e"], CommandPromptMode::Numeric),
+            (&["-i", "-k", "-e"], CommandPromptMode::Incremental),
+            (&["-k", "-e"], CommandPromptMode::Key),
+            (&["-e"], CommandPromptMode::BackspaceExit),
+            (&[], CommandPromptMode::Text),
+        ] {
+            let (resolved, prompt_type, no_freeze) = mode(&mut engine, &mut context, flags);
+            assert_eq!(resolved, expected, "flags {flags:?}");
+            assert_eq!(prompt_type, CommandPromptType::Command, "flags {flags:?}");
+            assert!(!no_freeze, "flags {flags:?}");
+        }
+
+        assert_eq!(
+            mode(&mut engine, &mut context, &["-1", "-C"]),
+            (CommandPromptMode::Single, CommandPromptType::Command, true),
+        );
+        assert_eq!(
+            mode(&mut engine, &mut context, &["-T", "search"]),
+            (CommandPromptMode::Text, CommandPromptType::Search, false),
+        );
+        assert_eq!(
+            mode(&mut engine, &mut context, &["-T", "command", "-k"]),
+            (CommandPromptMode::Key, CommandPromptType::Command, false),
+        );
+        assert!(matches!(
+            engine.execute(&mut context, &command("command-prompt", &["-T", "bogus"])),
+            Err(ServerError::InvalidCommand(message)) if message == "unknown type: bogus"
+        ));
+        for parked in ["-F", "-l", "-P"] {
+            assert!(matches!(
+                engine.execute(&mut context, &command("command-prompt", &[parked])),
+                Err(ServerError::UnsupportedCommand(message))
+                    if message == format!("command-prompt {parked}")
+            ));
+        }
+        assert!(matches!(
+            engine.execute(&mut context, &command("command-prompt", &["-t", "%1"])),
+            Err(ServerError::UnsupportedCommand(message)) if message == "command-prompt -t"
         ));
     }
 

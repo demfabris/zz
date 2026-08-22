@@ -391,7 +391,10 @@ now validate on both encode and decode.
   (`title`, `base_style`, bounded `rows`, `position`, `message_line`, `customized`);
   `PaneIndicator.label` (≤1 KiB, `Copy` dropped); `PaneSnapshot.{border_colour,
   active_border_colour}: Option<TmuxColour>` with validated colour serialization (`Rgb` over
-  `0xFFFFFF` rejected on decode); `CommandPromptState.{prompt_type, mode, no_freeze}`;
+  `0xFFFFFF` rejected on decode); `CommandPromptState.{prompt_type, mode, no_freeze}`, consumed
+  since Wave D's final run (D1) — `mode` is what tells a client to stop editing and relay raw
+  presses on the pane-targeted `InputMessage::Key` for `-1`/`-N`/`-k`, and there is deliberately
+  no prompt-key action;
   `TerminalMode::Copy.hide_position` (one canonical bool byte on the terminal lane; `View` stays
   17 bytes) and `TerminalViewAction::EnterCopyModeWith` (tag 27); `key` on `ChooseTreeItem` and
   `ChooseBufferItem` (≤64 B); `CommandResponse::Success.stderr`;

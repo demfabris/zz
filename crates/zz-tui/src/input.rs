@@ -4,7 +4,7 @@ use zz_daemon::{
 };
 use zz_protocol::{
     ChooseBufferAction, ChooseTreeAction, CommandInvocation, CommandPromptAction,
-    DisplayPanesAction, InputMessage, MAX_COMMAND_PROMPT_BYTES,
+    CommandPromptMode, DisplayPanesAction, InputMessage, MAX_COMMAND_PROMPT_BYTES,
 };
 use zz_terminal::{
     CopyModeAction, KeyAction, KeyCode, KeyInput, Modifiers, PointerCellEvent, TerminalMouseButton,
@@ -462,12 +462,38 @@ fn handle_picker_key(
     Ok(InputOutcome::Repaint)
 }
 
+/// `-1`, `-N` and `-k` are decided key by key inside the daemon, so the TUI
+/// stops editing and relays the press on the pane-targeted key path instead.
+const fn prompt_relays_keys(mode: CommandPromptMode) -> bool {
+    matches!(
+        mode,
+        CommandPromptMode::Single | CommandPromptMode::Numeric | CommandPromptMode::Key
+    )
+}
+
 fn handle_command_prompt(
     model: &mut Model,
     client: &InteractiveClient,
     event: KeyEvent,
 ) -> Result<InputOutcome, String> {
     if event.kind == KeyEventKind::Release {
+        return Ok(InputOutcome::None);
+    }
+    let mode = model
+        .command_prompt
+        .as_ref()
+        .expect("command prompt checked above")
+        .mode;
+    if prompt_relays_keys(mode) {
+        if let Some(pane) = model.active_pane() {
+            client
+                .send_input(InputMessage::Key {
+                    pane,
+                    input: key_input(event),
+                    text_follows: false,
+                })
+                .map_err(|error| error.to_string())?;
+        }
         return Ok(InputOutcome::None);
     }
     let state = model
@@ -510,8 +536,12 @@ fn handle_command_prompt(
                 state.input.replace_range(start..end, "");
                 state.cursor -= 1;
                 changed = true;
+                None
+            } else if mode == CommandPromptMode::BackspaceExit && state.input.is_empty() {
+                Some(CommandPromptAction::Close)
+            } else {
+                None
             }
-            None
         }
         TerminalKeyCode::Delete => {
             let start = scalar_byte_index(&state.input, state.cursor);
@@ -573,6 +603,9 @@ fn handle_paste(
         return Ok(InputOutcome::None);
     }
     if let Some(state) = model.command_prompt.as_mut() {
+        if prompt_relays_keys(state.mode) {
+            return Ok(InputOutcome::None);
+        }
         let available = MAX_COMMAND_PROMPT_BYTES.saturating_sub(state.input.len());
         let mut end = text.len().min(available);
         while !text.is_char_boundary(end) {
@@ -1027,6 +1060,27 @@ mod tests {
         assert_eq!(input.key, KeyCode::Character('a'));
         assert_eq!(input.text.as_deref(), Some("A"));
         assert!(input.modifiers.shift());
+    }
+
+    /// `-1`, `-N` and `-k` are decided key by key inside the daemon, so the
+    /// TUI must stop editing and relay their presses; text modes keep the
+    /// local editor.
+    #[test]
+    fn key_reading_prompt_modes_relay_instead_of_editing() {
+        for mode in [
+            CommandPromptMode::Single,
+            CommandPromptMode::Numeric,
+            CommandPromptMode::Key,
+        ] {
+            assert!(prompt_relays_keys(mode), "{mode:?}");
+        }
+        for mode in [
+            CommandPromptMode::Text,
+            CommandPromptMode::Incremental,
+            CommandPromptMode::BackspaceExit,
+        ] {
+            assert!(!prompt_relays_keys(mode), "{mode:?}");
+        }
     }
 
     #[test]

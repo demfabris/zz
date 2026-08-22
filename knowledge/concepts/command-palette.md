@@ -38,7 +38,11 @@ daemon authoritative over parsing, template expansion, history, and execution.
 
 Any daemon flow that currently opens a `command-prompt` triggers the palette identically: `C-b :`
 opens a bare `Command` prompt; tmux `command-prompt` supports `-b`/`-p`/`-I`/one `%%` template
-argument (see the [tmux command set](/tmux/commands.md)); binding-driven
+argument plus the mode flags `-1`/`-N`/`-i`/`-k`/`-e`, `-C`, and `-T` (see the
+[tmux command set](/tmux/commands.md)). The three key-reading modes (`-1`, `-N`, `-k`) are
+decided key by key inside the daemon, so the palette and the TUI stop editing locally and relay
+the raw press on the pane-targeted key path instead of sending `CommandPromptAction::Update`;
+`CommandPromptState.mode` is the switch. Binding-driven
 flows like the default `C-b $` (rename-session), `C-b ,` (rename-window), and sidebar `r` action
 open a pre-filled `Value` prompt whose label and current value come from the daemon. The daemon remains the sole
 owner of *when* a prompt opens, its label, its initial content and cursor, and (per prompt kind)

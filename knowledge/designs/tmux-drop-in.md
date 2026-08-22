@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux drop-in plan
 description: "The alias-tmux=zz plan: 100% of tmux's command grammar, options, formats, and geometry on tmux names, zz power moved to superset verbs, exec commands behind an import-time consent gate — nine phases ending at the TTY attach contract, one permanent skip (linked windows), one explicit non-goal (real-tmux socket interop)."
-status: Original nine phases shipped 2026-08-20; campaign planned against 57ae502, safe prelude shipped, core campaign approved 2026-08-21 and in execution
+status: Original nine phases shipped 2026-08-20; the approved core campaign (A3 → B/C → E → D2/D4/D3/D1) closed 2026-08-22 in eleven reviewed slices; F and G tranches and the parked contracts await their own approvals
 tags:
 - tmux
 - compatibility
@@ -176,6 +176,32 @@ smoke, a live `allow-passthrough` image smoke, the DCS-filter bench A/B, and an 
 
 # Final compatibility campaign (planned at `57ae502`)
 
+**CLOSED 2026-08-22.** The approved order `A3 → B with C3 title production → C except C5 →
+E → D2 → D4 → D3 → D1` shipped in eleven slices, each implemented from a settled brief,
+reviewed independently read-only against the pinned tmux source, iterated on findings, and
+committed only after a MERGE-READY follow-up verdict. Measured results: `BEHAVES` 67 → 104
+(the recomputed C target, 105 minus parked C5); unsupported command-and-flag pairs 129 →
+113 across 29 commands, now MACHINE-ENFORCED by
+`the_unsupported_flag_ledger_matches_the_catalog` (a literal roster cross-checked against
+the catalog in both directions — it has already caught three moves); differential corpus 48
+→ 56 scenarios, zero SKIPs; protocol v71 shipped as one append-only bundle whose every
+field is now consumed.
+
+The campaign's own discipline held: divergences are ledgered rather than silent, with three
+lapses caught and fixed in-wave. Six times an implementer measured the pinned binary and
+found the brief wrong — mouse defaults ON in next-3.8, `display-panes-format`'s real
+default, `\;` chain-stop semantics, the freeze not being hermetic, prompt-vs-message freeze
+stickiness, and refusal tests that never existed — and each time the measurement won.
+
+Live residues a heavy tmux user could still meet, all ledgered in
+[the divergence matrix](/tmux/divergences.md): per-window copy-mode styles that store but
+do not recolour, border-style owner granularity on nested layouts, and `source-file`'s
+parse-abort semantics (one typo leaves zz with a fully-applied config and the pin with
+none). Scheduled, not silent: the bell attach-clear convergence, F6's harness fix (which
+also restores differential coverage for copy-mode, choosers, and prompts — none of which
+can ride the corpus today because all three refuse non-interactive clients), and F0's
+dispatcher collapse plus its inherited roster.
+
 This campaign closes items 3 through 6 from the live queue, then works through the
 remaining flag ledger. File-and-line anchors in this section refer to commit `57ae502`.
 Before each wave starts, revalidate its anchors and assumptions against the current tree.
@@ -226,8 +252,9 @@ behavior is settled.
    later size changes use the v71 client-size input. Park `remain-on-exit-format` until
    terminal core owns a post-worker VT injection or frozen-view reconstruction seam.
 
-The starting ledger has 129 unsupported command-and-flag pairs. Waves B through D remove
-15, leaving 114. The revised G plan assigns 85 implementations and names 29 parked pairs,
+The starting ledger has 129 unsupported command-and-flag pairs. Waves B through D removed
+16, leaving 113 (the pre-wave estimate said 15 and 114; the difference is arithmetic, not a
+missed pair). The revised G plan assigns 85 implementations and names 29 parked pairs,
 including the four client-environment flags and `split-window -I` omitted from the first
 count.
 
@@ -542,11 +569,69 @@ deltas in tests.
 
 ## Wave D - daemon-owned interactive state
 
-1. Implement `command-prompt -1 -k -N -T -i -C -e` in the daemon-owned prompt state
-   machine. Clients render state and forward raw keys. Keep Command and Search histories
-   separate; run special modes through the pane-targeted key path; let numeric mode submit
-   and pass its first non-digit into normal input. Plain prompts use the shared per-client
-   freeze lifecycle, while incremental and `-C` prompts keep publishing terminal frames.
+1. **Shipped 2026-08-22.** `command-prompt -1 -k -N -T -i -C -e` on the v71 prompt fields,
+   with no wire change. `CommandPrompt` per client now carries `prompt_type`, `mode`,
+   `no_freeze` and `last`, and the mux resolves the pin's ladder verbatim
+   (`cmd_command_prompt_exec`: `-1` then `-N` then `-i` then `-k` then `-e`, `-C` orthogonal;
+   measured pair by pair on the pin, including `-1` beating `-N` on a digit and `-k` beating
+   `-e` on `C-g`). `-T` maps `command`/`search` and answers `unknown type: %s` at rc 1 for
+   anything else, exactly as measured.
+   **The three key-reading modes are daemon-owned**, so both clients stop editing and relay
+   the press on the existing pane-targeted `InputMessage::Key` (no prompt-key action, as A3
+   decided): `-k` answers with `input_key_name`, `-1` folds one key into a character through
+   the pin's normalisation (BSpace to `DEL`, control to `0x1f`, arrows ignored) and closes
+   with NOTHING submitted when the buffer is not exactly one character — the `-1 -I abc`
+   quirk, measured — and `-N` collects digits and returns the pin's
+   `PROMPT_KEY_NOT_HANDLED` so the first non-digit both submits and reaches the key tables.
+   A relayed character's trailing text half is repaid through the existing `suppressed_text`
+   ledger, so nothing types into the pane behind the prompt; a PASSED-THROUGH character is
+   deliberately not suppressed, because that is the pin's `window_pane_key`.
+   `-i` starts with an empty buffer and `-I` in `pr->last`, fires `=` before the first key
+   (`prompt_incremental_start`, measured as `I[=]` appearing with no key pressed), fires
+   `prefix + buffer` on every edit through both the key path and the client `Update` action,
+   flips the prefix on `C-r`/`C-s`, closes on `Up`/`Down`/`PPage`/`NPage`, and treats Enter
+   as history-plus-close because every edit already ran.
+   **The freeze composes with Wave D run 3's through one predicate**:
+   `client_terminal_publication_frozen` now reads `message.freeze || prompt.freeze` against
+   the same single `.filter(...)` on `publish_terminal_for_pane`, and the prompt half lives on
+   the `command_prompts` record that already exists rather than a second parallel map — the
+   reviewer's ruling was "not `client_messages`, and one predicate", and `command_prompts` is
+   the parallel record, with a lifetime identical to the freeze it carries. Every retire of a
+   freezing prompt pushes one full latest viewport per visible pane (`resume_client_terminals`,
+   `CLIENT_ALLREDRAWFLAGS`), and raising a prompt clears the message it covers, matching
+   `status_prompt_set`'s `status_message_clear`.
+   **This is the one place D1 changes an existing prompt's behaviour**, and it is intended:
+   a plain `C-b :` now stops terminal frames for the client that opened it, because that is
+   what the pin does (measured). The brief's "zero visible change for prompts that use none of
+   the new flags" is about the prompt's own presentation and editing, which are untouched;
+   item 2 of this wave asked for the freeze explicitly. Worth watching in the GUI, where the
+   palette is a large modal a user may keep open far longer than tmux's one-line prompt.
+   Command and Search histories are separate rings, persisted in the pin's `type:entry` file
+   format that zz already wrote and half-read. Ledger 120 -> 113.
+   **`-l`, `-F` and `-t` stay rejected on purpose** (`-P` stays parked). `-l` opts out of a
+   comma-split multi-prompt chain zz does not implement, so accepting it would advertise a
+   feature; `-F` needs the pin's full `format_single_from_target` over the template and zz's
+   prompt-side expander understands only `#S`/`#W`; `-t` belongs to the client-fanout
+   contract. All three are in the divergence matrix with their reasons.
+   **One finding worth carrying forward**: the prompt path has a stickiness analogous to
+   `display-message -N`'s, and it is worse. `status_message_clear` drops `TTY_FREEZE` only
+   `if (c->prompt == NULL)`, so a message's freeze survives the message whenever any prompt is
+   open — including a `-C` prompt that asked not to freeze. Measured: a `-C` prompt ticking
+   normally, a `-d 0` message freezing it, the dismissing key delivering exactly one catch-up
+   frame and then nothing until the prompt closed. zz's predicate is derived rather than
+   latched and resumes immediately; the divergence is deliberate and ledgered.
+   No corpus scenario: `command-prompt` refuses every non-interactive client
+   (`command-prompt requires an interactive client`), so it is unreachable from
+   `compat/diff-scenario.sh`'s bare CLI for the same reason copy mode and the choosers are —
+   F6 is the fix for all three. Every pin measurement in this run used the nested rig, and had
+   to `set -g status-keys emacs` first, because the pin picks vi prompt keys from `$EDITOR`
+   (`tmux.c:543-554`) — which also means zz's `status-keys`/`mode-keys` defaults diverge from
+   the pin's on any box with `EDITOR=vim`, now recorded in the matrix. Two more prompt
+   divergences were found and left alone rather than fixed under a zero-visible-change brief:
+   the pin's prompt LABEL carries a trailing space and becomes `(<command name>) ` when a
+   template is given with no `-p`, and `-N`'s pass-through runs its two commands in the
+   opposite order because the pin's interleave is a `cmdq_insert_after` artifact. Both are in
+   the matrix; the label one is a three-line pickup for the F error/label tranche.
 2. **Shipped 2026-08-22.** `copy-mode -H` rides the v71 `EnterCopyModeWith
    { scroll_exit, hide_position }` action (tag 27, previously produced by nothing): the mux
    emits it only when `-H` is present, so `-e` alone and bare entry keep their old variants
@@ -620,11 +705,21 @@ deltas in tests.
    `-N` is ledgered as `unsupported command: <cmd> -NN`, the pin's `MODE_TREE_PREVIEW_BIG`
    (`args_has(args, 'N') > 1`), which zz has no presentation for.
 
-D2, D3 and D4 have shipped. Implement D1 next, reusing D3's freeze lifecycle: the pin's
-`status_prompt_set` raises the same `TTY_FREEZE` unless `PROMPT_INCREMENTAL` or
-`PROMPT_NOFREEZE` is set, and `status_prompt_clear` releases it with the same
-`CLIENT_ALLREDRAWFLAGS`. Use control-mode and PTY tests for interactive prompt behavior, then
-delete the matching refusal assertions.
+**Wave D is complete.** All four items shipped 2026-08-22, and with it the approved campaign
+order `A3 -> B/C -> E -> D2/D4/D3/D1`. Two notes for whoever picks up F:
+
+- The brief for D1 asked for "control-mode and PTY tests" and for deleting "the matching
+  refusal assertions". Neither existed in the shape the brief assumed. `command-prompt`
+  refuses control clients outright (`cmd_display_message_exec`'s sibling rule), so the honest
+  control-mode coverage is that refusal, now asserted for `Command` AND `Control`; and the
+  only refusal test in the tree was a single `-F` assertion inside
+  `command_prompt_builds_a_native_client_effect`, which still holds because `-F` is still
+  rejected. The mechanical sweep that really guards the flags is
+  `the_unsupported_flag_ledger_matches_the_catalog`, and it was updated in the same change.
+  The PTY coverage is real: the freeze tests drive a live PTY through
+  `attached_message_fixture` and assert on the publication gate.
+- The deadline-dispatcher collapse F0 schedules is still at three threads. D1 added no fourth
+  — a prompt has no timer.
 
 ## Wave E - `source-file` CLI diagnostics
 
@@ -695,7 +790,8 @@ behavior, not flags — and `catalog.rs` has no diff this wave.
    holds all 122 pairs as a literal and cross-checks both directions against
    `COMMAND_SPECS` + `DAEMON_COMMAND_SPECS`, excluding the fourteen zz-native names derived
    against the pin's `cmd_table`. F0 inherits it rather than rebuilding it. (The roster's
-   count is now 120 after Wave D run 2 took `display-message -C -d`.) **Also in F0's
+   count is now 113: run 3 took `display-message -C -d` and the final run took
+   `command-prompt -1 -C -e -i -k -N -T`.) **Also in F0's
    housekeeping: collapse the three near-identical deadline dispatcher threads**
    (`zz-display-panes`, `zz-monitor-silence`, `zz-client-message`, each ~70 lines differing
    only in key type and two closures) into one `run_deadline_dispatcher<K>` with token
@@ -789,10 +885,12 @@ Tranches:
   `kill-session -g`, `choose-tree -G`, `command-prompt -P`, `copy-mode -S`,
   `send-keys -M`, `display-message -I`, and `show-messages -T -t`.
 
-The current ledger has 122 unsupported flag pairs across 29 commands (`attach-session -r`
-left it with Wave B's read-only slice, `send-prefix -2` with Wave C run 2, and `copy-mode -H`
-plus `-K`/`-N` on both choosers with Wave D run 1). The rest of Wave D removes 9 more,
-leaving 114 for G and the parked contracts. The original G list omitted seven
+The ledger now holds 113 unsupported flag pairs across 29 commands. Wave D is complete:
+`attach-session -r` left with Wave B's read-only slice, `send-prefix -2` with Wave C run 2,
+`copy-mode -H` plus `-K`/`-N` on both choosers with Wave D run 1, `display-message -C -d`
+with run 3, and `command-prompt -1 -C -e -i -k -N -T` with the final run —
+the plan's "leaving 114" was arithmetic drift, not a missed pair: 129 - 1 - 1 - 5 - 2 - 7
+is 113. The original G list omitted seven
 chooser pairs and four parked `-E` pairs; the unsupported-pair roster replaces prose
 arithmetic as the completion proof. With the seven chooser pairs assigned to G5a and the
 current `-E`, streaming, and explicit parked sets unchanged, the planned result is 85

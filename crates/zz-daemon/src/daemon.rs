@@ -506,11 +506,20 @@ fn take_client_message(inner: &mut ServerState, client: ClientId) -> Option<Acti
     inner.client_messages.remove(&client)
 }
 
+/// The pin keeps one `TTY_FREEZE` bit and both `status_message_set` and
+/// `status_prompt_set` raise it, so zz reads the same gate off both records:
+/// a frozen message or a freezing prompt suppresses terminal publication.
+/// Unlike the pin this is derived rather than latched — see the message-freeze
+/// stickiness note in `knowledge/tmux/divergences.md`.
 fn client_terminal_publication_frozen(inner: &ServerState, client: ClientId) -> bool {
     inner
         .client_messages
         .get(&client)
         .is_some_and(|message| message.freeze)
+        || inner
+            .command_prompts
+            .get(&client)
+            .is_some_and(CommandPrompt::freezes)
 }
 
 fn push_server_message(inner: &mut ServerState, text: String) -> u64 {
@@ -3049,8 +3058,10 @@ impl Shared {
                 .map(|path| (path, inner.engine.prompt_history_limit()))
         };
         if let Some((path, limit)) = history_settings {
-            let history = load_command_prompt_history(&path, limit);
-            self.inner.lock().command_history = history;
+            let (command, search) = load_command_prompt_history(&path, limit);
+            let mut inner = self.inner.lock();
+            inner.command_history = command;
+            inner.search_history = search;
         }
         // Building the runtime is what warms the adapter cache, so a daemon
         // that has agent panes enabled pays the npx download before the first
@@ -4364,6 +4375,9 @@ impl Shared {
         let mut display_panes_deadline = None;
         let mut client_message_retires = Vec::new();
         let mut client_message_schedule = None;
+        let mut resume_client_terminals = false;
+        let mut incremental_start = None;
+        let mut prompt_cleared_message = None;
         let mut activity_requeues = Vec::new();
         let mut silence_schedules = Vec::new();
         let mut monitor_silence_changed = false;
@@ -5100,6 +5114,7 @@ impl Shared {
                             &mut direct_events,
                             &mut retired_command_outputs,
                             &mut retired_popups,
+                            &mut resume_client_terminals,
                         );
                         inner.swallowed_keys.remove(&client);
                         direct_events.push(EventPayload::FocusSidebar);
@@ -5108,6 +5123,9 @@ impl Shared {
                         prompt,
                         input,
                         template,
+                        prompt_type,
+                        mode,
+                        no_freeze,
                     } => {
                         if kind != ClientKind::Interactive
                             || !inner.subscribers.contains_key(&client)
@@ -5124,13 +5142,31 @@ impl Shared {
                             &mut direct_events,
                             &mut retired_command_outputs,
                             &mut retired_popups,
+                            &mut resume_client_terminals,
                         );
                         if !inner.command_prompts.contains_key(&client) {
-                            let prompt =
-                                CommandPrompt::new(prompt.clone(), input.clone(), template.clone());
-                            let state = prompt.state(&inner.command_history);
+                            let prompt = CommandPrompt::new(
+                                prompt.clone(),
+                                input.clone(),
+                                template.clone(),
+                                *prompt_type,
+                                *mode,
+                                *no_freeze,
+                            );
+                            // `status_prompt_set` clears any message first, and
+                            // its own freeze then decides the gate.
+                            prompt_cleared_message = take_client_message(&mut inner, client);
+                            let state = prompt.state(prompt_history(&inner, prompt.prompt_type));
+                            let fired =
+                                (prompt.mode == CommandPromptMode::Incremental).then(|| {
+                                    CommandPromptSubmission {
+                                        input: format!("={}", prompt.input),
+                                        template: prompt.template.clone(),
+                                    }
+                                });
                             inner.command_prompts.insert(client, prompt);
                             direct_events.push(EventPayload::CommandPrompt { state: Some(state) });
+                            incremental_start = fired;
                         }
                     }
                     MuxEffect::ChooseTree {
@@ -5172,6 +5208,7 @@ impl Shared {
                             &mut direct_events,
                             &mut retired_command_outputs,
                             &mut retired_popups,
+                            &mut resume_client_terminals,
                         );
                         inner.swallowed_keys.remove(&client);
                         inner.suppressed_text.remove(&client);
@@ -5218,6 +5255,7 @@ impl Shared {
                             &mut direct_events,
                             &mut retired_command_outputs,
                             &mut retired_popups,
+                            &mut resume_client_terminals,
                         );
                         inner.swallowed_keys.remove(&client);
                         inner.suppressed_text.remove(&client);
@@ -5251,6 +5289,7 @@ impl Shared {
                             &mut direct_events,
                             &mut retired_command_outputs,
                             &mut retired_popups,
+                            &mut resume_client_terminals,
                         );
                         let _ = take_display_panes(&mut inner, client);
                         inner.swallowed_keys.remove(&client);
@@ -5706,6 +5745,12 @@ impl Shared {
         for retired in client_message_retires {
             self.retire_client_message(client, retired, false);
         }
+        if let Some(retired) = prompt_cleared_message {
+            self.retire_client_message(client, retired, true);
+        }
+        if resume_client_terminals {
+            self.resume_client_terminals(client);
+        }
         if let Some(deadline) = client_message_schedule {
             let _ = self
                 .client_message_deadline_tx
@@ -5855,6 +5900,12 @@ impl Shared {
             self.refresh_control_output_taps();
         }
         self.run_event_hooks(pending_hook_events);
+        // `prompt_incremental_start` fires the callback from inside
+        // `status_prompt_set`, and the callback queues its command behind the
+        // item that raised the prompt. Running it last is that ordering.
+        if let Some(submission) = incremental_start {
+            self.submit_command_prompt(client, kind, context, &submission);
+        }
         source_file_error.map_or(Ok(execution), Err)
     }
 
@@ -8097,6 +8148,7 @@ impl Shared {
             let mut events = Vec::new();
             let mut outputs = Vec::new();
             let mut popups = Vec::new();
+            let mut resume_terminals = false;
             {
                 let mut inner = self.inner.lock();
                 dismiss_overlays(
@@ -8106,10 +8158,14 @@ impl Shared {
                     &mut events,
                     &mut outputs,
                     &mut popups,
+                    &mut resume_terminals,
                 );
             }
             for event in events {
                 self.publish_to_client(target_client, event);
+            }
+            if resume_terminals {
+                self.resume_client_terminals(target_client);
             }
             for (owner, output) in outputs {
                 Self::retire_command_output(owner, output);
@@ -8656,6 +8712,7 @@ impl Shared {
         let mut events = Vec::new();
         let mut outputs = Vec::new();
         let mut popups = Vec::new();
+        let mut resume_terminals = false;
         {
             let mut inner = self.inner.lock();
             dismiss_overlays(
@@ -8665,6 +8722,7 @@ impl Shared {
                 &mut events,
                 &mut outputs,
                 &mut popups,
+                &mut resume_terminals,
             );
             inner.confirms.insert(
                 target_client,
@@ -8682,6 +8740,9 @@ impl Shared {
         }
         for (owner, popup) in popups {
             Self::retire_popup(owner, popup, true);
+        }
+        if resume_terminals {
+            self.resume_client_terminals(target_client);
         }
         self.publish_to_client(target_client, EventPayload::Confirm { state: Some(state) });
         if parsed.background || !matches!(kind, ClientKind::Command | ClientKind::Control) {
@@ -9636,7 +9697,7 @@ impl Shared {
                 InputMessage::BrowserSurfaceText { pane, text } => {
                     self.reject_invalid_browser_surface_input(client, pane)?;
                     self.note_terminal_input(client, pane);
-                    self.input_browser_surface_text(client, pane, &text)?;
+                    self.input_browser_surface_text(client, kind, context, pane, &text)?;
                 }
                 InputMessage::BrowserSurfaceKey {
                     pane,
@@ -10218,7 +10279,7 @@ impl Shared {
                 return Ok(());
             }
         }
-        if text.is_empty() || self.input_command_prompt_text(client, text) {
+        if text.is_empty() || self.input_command_prompt_text(client, kind, context, text) {
             return Ok(());
         }
         let command_output_active = self.inner.lock().command_outputs.contains_key(&client);
@@ -10268,7 +10329,7 @@ impl Shared {
                     if self.inner.lock().command_prompts.contains_key(&client) {
                         let remaining = &text[offset + character.len_utf8()..];
                         if !remaining.is_empty() {
-                            self.input_command_prompt_text(client, remaining);
+                            self.input_command_prompt_text(client, kind, context, remaining);
                         }
                         break;
                     }
@@ -10283,8 +10344,10 @@ impl Shared {
     }
 
     fn input_browser_surface_text(
-        &self,
+        self: &Arc<Self>,
         client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
         pane: PaneId,
         text: &str,
     ) -> Result<(), DaemonError> {
@@ -10295,7 +10358,8 @@ impl Shared {
                 || inner.display_panes.contains_key(&client)
                 || inner.command_outputs.contains_key(&client)
         };
-        if blocked || text.is_empty() || self.input_command_prompt_text(client, text) {
+        if blocked || text.is_empty() || self.input_command_prompt_text(client, kind, context, text)
+        {
             return Ok(());
         }
         self.dispatch_input_text(client, pane, &mut None, text)
@@ -11035,22 +11099,41 @@ impl Shared {
         Ok(())
     }
 
-    fn input_command_prompt_text(&self, client: ClientId, text: &str) -> bool {
+    fn input_command_prompt_text(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        text: &str,
+    ) -> bool {
         let result = {
             let mut inner = self.inner.lock();
-            let history = command_prompt_history_snapshot(&inner.command_history);
-            let Some(prompt) = inner.command_prompts.get_mut(&client) else {
+            let Some(prompt) = inner.command_prompts.get(&client) else {
                 return false;
             };
+            if prompt.reads_raw_keys() {
+                return true;
+            }
+            let history =
+                command_prompt_history_snapshot(prompt_history(&inner, prompt.prompt_type));
+            let prompt = inner
+                .command_prompts
+                .get_mut(&client)
+                .expect("prompt checked above");
             if prompt.insert(text) {
-                Ok(prompt.state(&history))
+                let incremental = prompt.mode == CommandPromptMode::Incremental;
+                Ok((prompt.state(&history), incremental))
             } else {
                 Err(())
             }
         };
         match result {
-            Ok(state) => {
+            Ok((state, incremental)) => {
+                let fired = incremental.then(|| format!("={}", state.input));
                 self.publish_to_client(client, EventPayload::CommandPrompt { state: Some(state) });
+                if let Some(input) = fired {
+                    self.run_command_prompt_template(client, kind, context, input);
+                }
             }
             Err(()) => {
                 self.publish_to_client(
@@ -11077,46 +11160,133 @@ impl Shared {
         input: &zz_terminal::KeyInput,
         text_follows: bool,
     ) -> bool {
-        let (event, submission, limit_exceeded) = {
+        let outcome = {
             let mut inner = self.inner.lock();
             let Some(mut prompt) = inner.command_prompts.remove(&client) else {
                 return false;
             };
-            let action =
-                command_prompt_key(&mut prompt, input, text_follows, &inner.command_history);
-            match action {
+            let raw_mode = prompt.reads_raw_keys();
+            let prompt_type = prompt.prompt_type;
+            // The history borrow has to end before an arm can put the prompt
+            // back, so the republished state is built while it is still live.
+            let (action, state) = {
+                let history = prompt_history(&inner, prompt_type);
+                let action = command_prompt_key(&mut prompt, input, text_follows, history);
+                let state = matches!(
+                    action,
+                    PromptKeyAction::Updated | PromptKeyAction::Incremental(_)
+                )
+                .then(|| prompt.state(history));
+                (action, state)
+            };
+            let consumed_character = raw_mode
+                && text_follows
+                && matches!(input.key, zz_terminal::KeyCode::Character(_))
+                && action != PromptKeyAction::SubmitAndPass;
+            let outcome = match action {
                 PromptKeyAction::Handled => {
                     inner.command_prompts.insert(client, prompt);
-                    (None, None, false)
+                    PromptKeyOutcome::default()
                 }
                 PromptKeyAction::Updated => {
-                    let state = prompt.state(&inner.command_history);
                     inner.command_prompts.insert(client, prompt);
-                    (Some(Some(state)), None, false)
+                    PromptKeyOutcome {
+                        event: PromptWireUpdate::Republish(Box::new(
+                            state.expect("an updated prompt built its state"),
+                        )),
+                        ..PromptKeyOutcome::default()
+                    }
                 }
                 PromptKeyAction::LimitExceeded => {
                     inner.command_prompts.insert(client, prompt);
-                    (None, None, true)
+                    PromptKeyOutcome {
+                        limit_exceeded: true,
+                        ..PromptKeyOutcome::default()
+                    }
                 }
-                PromptKeyAction::Close => (Some(None), None, false),
-                PromptKeyAction::Submit => {
-                    let submission = (!prompt.input.is_empty() || prompt.template.is_some())
-                        .then_some(CommandPromptSubmission {
-                            input: prompt.input,
-                            template: prompt.template,
+                PromptKeyAction::Incremental(prefix) => {
+                    let fired = CommandPromptSubmission {
+                        input: format!("{prefix}{}", prompt.input),
+                        template: prompt.template.clone(),
+                    };
+                    inner.command_prompts.insert(client, prompt);
+                    PromptKeyOutcome {
+                        event: PromptWireUpdate::Republish(Box::new(
+                            state.expect("an incremental edit built its state"),
+                        )),
+                        submission: Some(fired),
+                        ..PromptKeyOutcome::default()
+                    }
+                }
+                PromptKeyAction::Close => PromptKeyOutcome {
+                    event: PromptWireUpdate::Retire,
+                    retired: prompt.freezes(),
+                    ..PromptKeyOutcome::default()
+                },
+                PromptKeyAction::SubmitIncremental => PromptKeyOutcome {
+                    event: PromptWireUpdate::Retire,
+                    retired: prompt.freezes(),
+                    remember: (!prompt.input.is_empty()).then_some((prompt_type, prompt.input)),
+                    ..PromptKeyOutcome::default()
+                },
+                PromptKeyAction::SubmitAnswer(answer) => PromptKeyOutcome {
+                    event: PromptWireUpdate::Retire,
+                    retired: prompt.freezes(),
+                    submission: Some(CommandPromptSubmission {
+                        input: answer,
+                        template: prompt.template,
+                    }),
+                    ..PromptKeyOutcome::default()
+                },
+                PromptKeyAction::Submit | PromptKeyAction::SubmitAndPass => {
+                    let retired = prompt.freezes();
+                    let submission =
+                        (!prompt.input.is_empty() || prompt.template.is_some()).then(|| {
+                            CommandPromptSubmission {
+                                input: prompt.input.clone(),
+                                template: prompt.template.clone(),
+                            }
                         });
-                    (Some(None), submission, false)
+                    PromptKeyOutcome {
+                        event: PromptWireUpdate::Retire,
+                        retired,
+                        remember: (!prompt.input.is_empty()).then_some((prompt_type, prompt.input)),
+                        submission,
+                        pass: action == PromptKeyAction::SubmitAndPass,
+                        limit_exceeded: false,
+                    }
                 }
+            };
+            if consumed_character && let zz_terminal::KeyCode::Character(character) = input.key {
+                *inner
+                    .suppressed_text
+                    .entry(client)
+                    .or_default()
+                    .entry(character)
+                    .or_default() += 1;
             }
+            outcome
         };
 
-        if let Some(state) = event {
-            self.publish_to_client(client, EventPayload::CommandPrompt { state });
+        match outcome.event {
+            PromptWireUpdate::Silent => {}
+            PromptWireUpdate::Republish(state) => self.publish_to_client(
+                client,
+                EventPayload::CommandPrompt {
+                    state: Some(*state),
+                },
+            ),
+            PromptWireUpdate::Retire => {
+                self.publish_to_client(client, EventPayload::CommandPrompt { state: None });
+            }
         }
-        if let Some(submission) = &submission {
-            self.record_command_history(&submission.input);
+        if outcome.retired {
+            self.resume_client_terminals(client);
         }
-        if limit_exceeded {
+        if let Some((prompt_type, input)) = &outcome.remember {
+            self.record_prompt_history(*prompt_type, input);
+        }
+        if outcome.limit_exceeded {
             self.publish_to_client(
                 client,
                 EventPayload::ClientMessage {
@@ -11129,10 +11299,34 @@ impl Shared {
                 },
             );
         }
-        if let Some(submission) = submission {
+        if let Some(submission) = outcome.submission {
             self.submit_command_prompt(client, kind, context, &submission);
         }
-        true
+        !outcome.pass
+    }
+
+    /// `-i`'s per-edit fire: the template runs against the prefixed buffer
+    /// while the prompt stays open, the pin's `prompt_fire_callback` with
+    /// `PROMPT_KEY_HANDLED`.
+    fn run_command_prompt_template(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        input: String,
+    ) {
+        let template = self
+            .inner
+            .lock()
+            .command_prompts
+            .get(&client)
+            .and_then(|prompt| prompt.template.clone());
+        self.submit_command_prompt(
+            client,
+            kind,
+            context,
+            &CommandPromptSubmission { input, template },
+        );
     }
 
     fn input_command_prompt_action(
@@ -11151,9 +11345,19 @@ impl Shared {
 
         match action {
             CommandPromptAction::Update { input, cursor } => {
-                let mut inner = self.inner.lock();
-                if let Some(prompt) = inner.command_prompts.get_mut(&client) {
-                    prompt.replace_input(input, cursor)?;
+                let fired = {
+                    let mut inner = self.inner.lock();
+                    match inner.command_prompts.get_mut(&client) {
+                        Some(prompt) => {
+                            prompt.replace_input(input, cursor)?;
+                            (prompt.mode == CommandPromptMode::Incremental)
+                                .then(|| format!("={}", prompt.input))
+                        }
+                        None => None,
+                    }
+                };
+                if let Some(input) = fired {
+                    self.run_command_prompt_template(client, kind, context, input);
                 }
             }
             CommandPromptAction::Submit { input } => {
@@ -11164,52 +11368,74 @@ impl Shared {
                     ))
                     .into());
                 }
-                let submission = {
+                let (submission, remembered, prompt_type, retired) = {
                     let mut inner = self.inner.lock();
                     let Some(mut prompt) = inner.command_prompts.remove(&client) else {
                         return Ok(());
                     };
                     let cursor = u32::try_from(input.chars().count()).unwrap_or(u32::MAX);
                     prompt.replace_input(input, cursor)?;
-                    (!prompt.input.is_empty() || prompt.template.is_some()).then_some(
-                        CommandPromptSubmission {
-                            input: prompt.input,
-                            template: prompt.template,
-                        },
-                    )
+                    let retired = prompt.freezes();
+                    let prompt_type = prompt.prompt_type;
+                    // `-i` already ran the template on every edit; its Enter
+                    // only records history and closes.
+                    let submission = (prompt.mode != CommandPromptMode::Incremental
+                        && (!prompt.input.is_empty() || prompt.template.is_some()))
+                    .then_some(CommandPromptSubmission {
+                        input: prompt.input.clone(),
+                        template: prompt.template,
+                    });
+                    let remembered = (!prompt.input.is_empty()).then_some(prompt.input);
+                    (submission, remembered, prompt_type, retired)
                 };
-                if let Some(submission) = &submission {
-                    self.record_command_history(&submission.input);
+                if let Some(remembered) = &remembered {
+                    self.record_prompt_history(prompt_type, remembered);
                 }
                 self.publish_to_client(client, EventPayload::CommandPrompt { state: None });
+                if retired {
+                    self.resume_client_terminals(client);
+                }
                 if let Some(submission) = submission {
                     self.submit_command_prompt(client, kind, context, &submission);
                 }
             }
             CommandPromptAction::Close => {
-                if self.inner.lock().command_prompts.remove(&client).is_some() {
+                let retired = self.inner.lock().command_prompts.remove(&client);
+                if let Some(retired) = retired {
                     self.publish_to_client(client, EventPayload::CommandPrompt { state: None });
+                    if retired.freezes() {
+                        self.resume_client_terminals(client);
+                    }
                 }
             }
         }
         Ok(())
     }
 
-    fn record_command_history(&self, input: &str) {
+    fn record_prompt_history(&self, prompt_type: CommandPromptType, input: &str) {
         if input.is_empty() {
             return;
         }
         let save = {
             let mut inner = self.inner.lock();
             let limit = inner.engine.prompt_history_limit();
-            if !add_command_prompt_history(&mut inner.command_history, input, limit) {
+            let history = match prompt_type {
+                CommandPromptType::Command => &mut inner.command_history,
+                CommandPromptType::Search => &mut inner.search_history,
+            };
+            if !add_command_prompt_history(history, input, limit) {
                 return;
             }
-            prompt_history_path(inner.engine.history_file())
-                .map(|path| (path, inner.command_history.clone()))
+            prompt_history_path(inner.engine.history_file()).map(|path| {
+                (
+                    path,
+                    inner.command_history.clone(),
+                    inner.search_history.clone(),
+                )
+            })
         };
-        if let Some((path, history)) = save {
-            save_command_prompt_history(&path, &history);
+        if let Some((path, command, search)) = save {
+            save_command_prompt_history(&path, &command, &search);
         }
     }
 
@@ -12179,7 +12405,7 @@ impl Shared {
             let choose_tree_closed = inner.choose_trees.remove(&client).is_some();
             let choose_buffer_closed = inner.choose_buffers.remove(&client).is_some();
             let display_panes_closed = take_display_panes(&mut inner, client).is_some();
-            let command_prompt_closed = inner.command_prompts.remove(&client).is_some();
+            let command_prompt_closed = inner.command_prompts.remove(&client);
             let replaced = inner.command_outputs.remove(&client);
             let previous_key_table = replaced.as_ref().map_or_else(
                 || {
@@ -12226,8 +12452,11 @@ impl Shared {
         if display_panes_closed {
             self.publish_to_client(client, EventPayload::DisplayPanes { state: None });
         }
-        if command_prompt_closed {
+        if let Some(closed) = command_prompt_closed {
             self.publish_to_client(client, EventPayload::CommandPrompt { state: None });
+            if closed.freezes() {
+                self.resume_client_terminals(client);
+            }
         }
         if let Some(replaced) = replaced {
             replaced.terminal.view_action(
@@ -15551,6 +15780,7 @@ struct ServerState {
     menus: BTreeMap<ClientId, MenuSession>,
     confirms: BTreeMap<ClientId, ConfirmSession>,
     command_history: Vec<String>,
+    search_history: Vec<String>,
     message_log: VecDeque<ServerMessage>,
     next_message_number: u64,
     next_timed_message_id: u64,
@@ -16960,9 +17190,13 @@ fn dismiss_overlays(
     events: &mut Vec<EventPayload>,
     retired: &mut Vec<(ClientId, RetiredCommandOutput)>,
     retired_popups: &mut Vec<(ClientId, RetiredPopup)>,
+    resume_terminals: &mut bool,
 ) {
-    if raising != Some(Overlay::CommandPrompt) && inner.command_prompts.remove(&client).is_some() {
+    if raising != Some(Overlay::CommandPrompt)
+        && let Some(prompt) = inner.command_prompts.remove(&client)
+    {
         events.push(EventPayload::CommandPrompt { state: None });
+        *resume_terminals |= prompt.freezes();
     }
     if raising != Some(Overlay::ChooseTree) && inner.choose_trees.remove(&client).is_some() {
         events.push(EventPayload::ChooseTree { state: None });
@@ -17051,10 +17285,29 @@ struct CommandPrompt {
     template: Option<String>,
     history_index: Option<usize>,
     history_draft: String,
+    prompt_type: CommandPromptType,
+    mode: CommandPromptMode,
+    no_freeze: bool,
+    /// `prompt_create`'s `pr->last`: under `-i` the initial input seeds this
+    /// instead of the buffer, and `C-r`/`C-s` restore it into an empty buffer.
+    last: String,
 }
 
 impl CommandPrompt {
-    fn new(prompt: String, input: String, template: Option<String>) -> Self {
+    fn new(
+        prompt: String,
+        input: String,
+        template: Option<String>,
+        prompt_type: CommandPromptType,
+        mode: CommandPromptMode,
+        no_freeze: bool,
+    ) -> Self {
+        let incremental = mode == CommandPromptMode::Incremental;
+        let (input, last) = if incremental {
+            (String::new(), input)
+        } else {
+            (input, String::new())
+        };
         let cursor = input.len();
         Self {
             prompt,
@@ -17063,6 +17316,10 @@ impl CommandPrompt {
             cursor,
             template,
             history_index: None,
+            prompt_type,
+            mode,
+            no_freeze,
+            last,
         }
     }
 
@@ -17072,6 +17329,21 @@ impl CommandPrompt {
         } else {
             CommandPromptKind::Command
         }
+    }
+
+    /// `status_prompt_set`: the prompt raises `TTY_FREEZE` unless it is
+    /// incremental or `-C` asked it not to.
+    const fn freezes(&self) -> bool {
+        !self.no_freeze && !matches!(self.mode, CommandPromptMode::Incremental)
+    }
+
+    /// `-1`, `-N` and `-k` read key codes rather than committed text, so the
+    /// text half of a split key press must not reach the buffer.
+    const fn reads_raw_keys(&self) -> bool {
+        matches!(
+            self.mode,
+            CommandPromptMode::Single | CommandPromptMode::Numeric | CommandPromptMode::Key
+        )
     }
 
     fn state(&self, history: &[String]) -> CommandPromptState {
@@ -17085,9 +17357,9 @@ impl CommandPrompt {
             } else {
                 Vec::new()
             },
-            prompt_type: CommandPromptType::Command,
-            mode: CommandPromptMode::Text,
-            no_freeze: false,
+            prompt_type: self.prompt_type,
+            mode: self.mode,
+            no_freeze: self.no_freeze,
         }
     }
 
@@ -17118,6 +17390,22 @@ impl CommandPrompt {
         self.cursor += text.len();
         self.finish_edit();
         true
+    }
+
+    /// `prompt_key`'s `C-r`/`C-s`: an empty incremental buffer is refilled from
+    /// `pr->last` and searches forward again, otherwise the direction prefix
+    /// changes and the buffer stands.
+    fn incremental_prefix(&mut self, backward: bool) -> char {
+        if self.input.is_empty() {
+            self.input.clone_from(&self.last);
+            self.cursor = self.input.len();
+            self.finish_edit();
+            '='
+        } else if backward {
+            '-'
+        } else {
+            '+'
+        }
     }
 
     fn move_left(&mut self) -> bool {
@@ -17301,11 +17589,20 @@ fn command_prompt_history_snapshot(history: &[String]) -> Vec<String> {
     snapshot
 }
 
+/// `prompt_hlist[PROMPT_NTYPES]`: command and search prompts keep separate
+/// rings, and `-T` alone decides which one a prompt reads and writes.
+fn prompt_history(inner: &ServerState, prompt_type: CommandPromptType) -> &[String] {
+    match prompt_type {
+        CommandPromptType::Command => &inner.command_history,
+        CommandPromptType::Search => &inner.search_history,
+    }
+}
+
 fn command_prompt_state(inner: &ServerState, client: ClientId) -> Option<CommandPromptState> {
     inner
         .command_prompts
         .get(&client)
-        .map(|prompt| prompt.state(&inner.command_history))
+        .map(|prompt| prompt.state(prompt_history(inner, prompt.prompt_type)))
 }
 
 fn char_index_to_byte(input: &str, index: usize) -> Option<usize> {
@@ -17330,18 +17627,55 @@ fn next_char_boundary(text: &str, index: usize) -> usize {
         .map_or(text.len(), |(offset, _)| index + offset)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// `prompt_key`'s return, split by what the daemon owes the client afterwards.
+/// `Handled`, `Updated` and `LimitExceeded` keep the prompt; everything else
+/// retires it. Only `SubmitAndPass` is the pin's `PROMPT_KEY_NOT_HANDLED`, the
+/// one answer that lets the key go on to the key tables.
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum PromptKeyAction {
     Handled,
     Updated,
     Close,
     Submit,
+    /// `-i`: Enter records history and closes, because every edit already ran.
+    SubmitIncremental,
+    /// `-1`/`-k`: the answer is the key itself, not the buffer, and the pin
+    /// records history only for Enter.
+    SubmitAnswer(String),
+    /// `-N`: the buffer runs and the key still reaches the key tables.
+    SubmitAndPass,
+    /// `-i`: the template runs against this prefix plus the buffer and the
+    /// prompt stays open.
+    Incremental(char),
     LimitExceeded,
 }
 
 struct CommandPromptSubmission {
     input: String,
     template: Option<String>,
+}
+
+/// What the wire owes the client about the prompt after one key press.
+#[derive(Default)]
+enum PromptWireUpdate {
+    /// The prompt neither changed nor closed, so nothing is published.
+    #[default]
+    Silent,
+    Republish(Box<CommandPromptState>),
+    Retire,
+}
+
+/// What one key press owes the client once the prompt lock is released.
+#[derive(Default)]
+struct PromptKeyOutcome {
+    event: PromptWireUpdate,
+    /// The retired prompt was freezing, so the client owes a full viewport.
+    retired: bool,
+    remember: Option<(CommandPromptType, String)>,
+    submission: Option<CommandPromptSubmission>,
+    /// The pin's `PROMPT_KEY_NOT_HANDLED`: the key goes on to the key tables.
+    pass: bool,
+    limit_exceeded: bool,
 }
 
 fn append_command_prompt_output(output: &mut String, piece: &str) -> bool {
@@ -18332,6 +18666,79 @@ fn truncate_pane_indicator_label(mut label: String) -> String {
     label
 }
 
+/// `prompt_key`'s three head branches, taken before any editing: `-k` answers
+/// with the key's own name, `-N` collects digits and hands the first non-digit
+/// back to the key tables, and `-1` folds one key into a character and submits
+/// it — with the pin's quirk that a buffer seeded by `-I` can never be one
+/// character long, so the prompt closes with nothing submitted.
+fn command_prompt_raw_key(
+    prompt: &mut CommandPrompt,
+    input: &zz_terminal::KeyInput,
+) -> PromptKeyAction {
+    // The pin has no platform modifier, and `input_key_name` spells such a
+    // chord as nothing at all, so a raw mode must not answer with it.
+    if input.modifiers.platform() {
+        return PromptKeyAction::Handled;
+    }
+    match prompt.mode {
+        CommandPromptMode::Key => {
+            PromptKeyAction::SubmitAnswer(input_key_name(input).into_string())
+        }
+        CommandPromptMode::Numeric => match input.key {
+            zz_terminal::KeyCode::Character(character)
+                if character.is_ascii_digit()
+                    && !input.modifiers.control()
+                    && !input.modifiers.alt() =>
+            {
+                let mut encoded = [0_u8; 4];
+                if prompt.insert(character.encode_utf8(&mut encoded)) {
+                    PromptKeyAction::Updated
+                } else {
+                    PromptKeyAction::LimitExceeded
+                }
+            }
+            _ => PromptKeyAction::SubmitAndPass,
+        },
+        _ => {
+            let Some(character) = single_key_character(input) else {
+                return PromptKeyAction::Handled;
+            };
+            let mut encoded = [0_u8; 4];
+            if !prompt.insert(character.encode_utf8(&mut encoded)) {
+                return PromptKeyAction::LimitExceeded;
+            }
+            if prompt.input.chars().count() == 1 {
+                PromptKeyAction::SubmitAnswer(prompt.input.clone())
+            } else {
+                PromptKeyAction::Close
+            }
+        }
+    }
+}
+
+/// `prompt_key`'s `PROMPT_SINGLE` normalisation: backspace becomes `DEL`, a
+/// control chord masks down to `0x1f`, and anything the pin cannot squeeze into
+/// one character (arrows, function keys) leaves the prompt untouched.
+fn single_key_character(input: &zz_terminal::KeyInput) -> Option<char> {
+    match input.key {
+        zz_terminal::KeyCode::Backspace => Some('\u{7f}'),
+        zz_terminal::KeyCode::Escape => Some('\u{1b}'),
+        zz_terminal::KeyCode::Enter => Some('\r'),
+        zz_terminal::KeyCode::Tab => Some('\t'),
+        zz_terminal::KeyCode::Character(character) if input.modifiers.control() => character
+            .is_ascii()
+            .then(|| char::from(character.to_ascii_uppercase() as u8 & 0x1f)),
+        zz_terminal::KeyCode::Character(character) => Some(
+            if input.modifiers.shift() && character.is_ascii_lowercase() {
+                character.to_ascii_uppercase()
+            } else {
+                character
+            },
+        ),
+        _ => None,
+    }
+}
+
 fn command_prompt_key(
     prompt: &mut CommandPrompt,
     input: &zz_terminal::KeyInput,
@@ -18341,6 +18748,35 @@ fn command_prompt_key(
     if input.action == zz_terminal::KeyAction::Release {
         return PromptKeyAction::Handled;
     }
+    if prompt.reads_raw_keys() {
+        return command_prompt_raw_key(prompt, input);
+    }
+    let incremental = prompt.mode == CommandPromptMode::Incremental;
+    if incremental
+        && matches!(
+            input.key,
+            zz_terminal::KeyCode::ArrowUp
+                | zz_terminal::KeyCode::ArrowDown
+                | zz_terminal::KeyCode::PageUp
+                | zz_terminal::KeyCode::PageDown
+        )
+    {
+        return PromptKeyAction::Close;
+    }
+    let action = command_prompt_edit_key(prompt, input, text_follows, history);
+    match action {
+        PromptKeyAction::Updated if incremental => PromptKeyAction::Incremental('='),
+        PromptKeyAction::Submit if incremental => PromptKeyAction::SubmitIncremental,
+        other => other,
+    }
+}
+
+fn command_prompt_edit_key(
+    prompt: &mut CommandPrompt,
+    input: &zz_terminal::KeyInput,
+    text_follows: bool,
+    history: &[String],
+) -> PromptKeyAction {
     let changed = |changed| {
         if changed {
             PromptKeyAction::Updated
@@ -18352,10 +18788,18 @@ fn command_prompt_key(
     let alt = input.modifiers.alt();
     let platform = input.modifiers.platform();
 
+    let backspace = |prompt: &mut CommandPrompt| {
+        if prompt.mode == CommandPromptMode::BackspaceExit && prompt.input.is_empty() {
+            PromptKeyAction::Close
+        } else {
+            changed(prompt.delete_backward())
+        }
+    };
+
     match input.key {
         zz_terminal::KeyCode::Enter => PromptKeyAction::Submit,
         zz_terminal::KeyCode::Escape => PromptKeyAction::Close,
-        zz_terminal::KeyCode::Backspace => changed(prompt.delete_backward()),
+        zz_terminal::KeyCode::Backspace => backspace(prompt),
         zz_terminal::KeyCode::Delete => changed(prompt.delete_forward()),
         zz_terminal::KeyCode::Home => changed({
             let changed = prompt.cursor != 0;
@@ -18399,12 +18843,15 @@ fn command_prompt_key(
                 'f' => changed(prompt.move_right()),
                 'p' => changed(prompt.history_up(history)),
                 'n' => changed(prompt.history_down(history)),
-                'h' => changed(prompt.delete_backward()),
+                'h' => backspace(prompt),
                 'd' => changed(prompt.delete_forward()),
                 'u' => changed(prompt.clear()),
                 'k' => changed(prompt.delete_to_end()),
                 'w' => changed(prompt.delete_previous_word()),
                 'c' | 'g' | '[' => PromptKeyAction::Close,
+                letter @ ('r' | 's') if prompt.mode == CommandPromptMode::Incremental => {
+                    PromptKeyAction::Incremental(prompt.incremental_prefix(letter == 'r'))
+                }
                 _ => PromptKeyAction::Handled,
             }
         }
@@ -22007,19 +22454,24 @@ fn prompt_history_path(path: &str) -> Option<PathBuf> {
     }
 }
 
-fn load_command_prompt_history(path: &Path, limit: usize) -> Vec<String> {
+/// `prompt_load_history`: each line is `type:entry`, and `prompt_add_typed_history`
+/// files an untyped line under `command` for backward compatibility.
+fn load_command_prompt_history(path: &Path, limit: usize) -> (Vec<String>, Vec<String>) {
     let Ok(contents) = fs::read_to_string(path) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
-    let mut history = Vec::new();
+    let mut command = Vec::new();
+    let mut search = Vec::new();
     for line in contents.split('\n').filter(|line| !line.is_empty()) {
-        if let Some(command) = line.strip_prefix("command:") {
-            add_command_prompt_history(&mut history, command, limit);
-        } else if !line.starts_with("search:") {
-            add_command_prompt_history(&mut history, line, limit);
+        if let Some(entry) = line.strip_prefix("command:") {
+            add_command_prompt_history(&mut command, entry, limit);
+        } else if let Some(entry) = line.strip_prefix("search:") {
+            add_command_prompt_history(&mut search, entry, limit);
+        } else {
+            add_command_prompt_history(&mut command, line, limit);
         }
     }
-    history
+    (command, search)
 }
 
 fn add_command_prompt_history(history: &mut Vec<String>, input: &str, limit: usize) -> bool {
@@ -22034,10 +22486,13 @@ fn add_command_prompt_history(history: &mut Vec<String>, input: &str, limit: usi
     removed != 0 || (added && limit != 0)
 }
 
-fn save_command_prompt_history(path: &Path, history: &[String]) {
+fn save_command_prompt_history(path: &Path, command: &[String], search: &[String]) {
     let mut contents = String::new();
-    for entry in history {
+    for entry in command {
         let _ = writeln!(contents, "command:{entry}");
+    }
+    for entry in search {
+        let _ = writeln!(contents, "search:{entry}");
     }
     if let Err(error) = fs::write(path, contents) {
         log::debug!("failed to save prompt history {}: {error}", path.display());
@@ -27375,6 +27830,523 @@ mod tests {
             )
             .expect("display message");
         assert!(!shared.inner.lock().client_messages.contains_key(&client));
+    }
+
+    fn prompt_state(shared: &Arc<Shared>, client: ClientId) -> Option<CommandPromptState> {
+        command_prompt_state(&shared.inner.lock(), client)
+    }
+
+    /// `prompt_key`'s head branches: `-1` folds one key into a character and
+    /// submits it, `-k` submits the key's own name, and `-N` collects digits
+    /// and returns `PROMPT_KEY_NOT_HANDLED` for the first non-digit so the key
+    /// still reaches the key tables. Measured on the pin: `-1` with `z` ran
+    /// `GOT[z]`, `-k` with `C-g` ran `KEY[C-g]`, and `-N` fed `1`, `2`, `z` ran
+    /// both `NUM[12]` and the binding on `z`.
+    #[test]
+    fn prompt_modes_read_keys_the_way_the_pin_does() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "prompt-modes", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+
+        let press = |shared: &Arc<Shared>, context: &mut ExecutionContext, input: KeyInput| {
+            let text_follows = matches!(input.key, KeyCode::Character(_))
+                && input.modifiers == Modifiers::default();
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::Key {
+                        pane,
+                        input,
+                        text_follows,
+                    },
+                )
+                .expect("prompt key");
+        };
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["-1", "-p", "one", "rename-window %%"]),
+            )
+            .expect("single prompt");
+        assert_eq!(
+            prompt_state(&shared, client).expect("raised").mode,
+            CommandPromptMode::Single
+        );
+        press(&shared, &mut context, chooser_key_press("z"));
+        assert!(prompt_state(&shared, client).is_none());
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&context.window.expect("window")].name,
+            "z"
+        );
+        // The trailing text half of that split press must not reach the pane.
+        assert_eq!(
+            shared.inner.lock().suppressed_text[&client],
+            BTreeMap::from([('z', 1)])
+        );
+        shared.inner.lock().suppressed_text.remove(&client);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["-k", "-p", "key", "rename-window %%"]),
+            )
+            .expect("key prompt");
+        press(
+            &shared,
+            &mut context,
+            test_key(
+                KeyCode::Character('g'),
+                Modifiers::new(false, true, false, false),
+                None,
+            ),
+        );
+        assert!(prompt_state(&shared, client).is_none());
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&context.window.expect("window")].name,
+            "C-g"
+        );
+
+        // `-k` has no cancel: Escape is just another key with a name. A
+        // platform chord has no name in zz's grammar, so it is ignored rather
+        // than submitted as the empty string.
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["-k", "-p", "key", "rename-window %%"]),
+            )
+            .expect("key prompt");
+        press(
+            &shared,
+            &mut context,
+            test_key(
+                KeyCode::Character('z'),
+                Modifiers::new(false, false, false, true),
+                None,
+            ),
+        );
+        assert!(prompt_state(&shared, client).is_some());
+        press(
+            &shared,
+            &mut context,
+            test_key(KeyCode::Escape, Modifiers::default(), None),
+        );
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&context.window.expect("window")].name,
+            "Escape"
+        );
+
+        // The pin appends the key to whatever `-I` seeded, then refuses to
+        // submit a buffer that is not exactly one character long.
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "command-prompt",
+                    ["-1", "-I", "abc", "-p", "one", "rename-window %%"],
+                ),
+            )
+            .expect("seeded single prompt");
+        press(&shared, &mut context, chooser_key_press("z"));
+        assert!(prompt_state(&shared, client).is_none());
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&context.window.expect("window")].name,
+            "Escape",
+            "a seeded -1 buffer closes without submitting anything"
+        );
+        shared.inner.lock().suppressed_text.remove(&client);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("bind-key", ["-n", "z", "rename-window", "passed-through"]),
+            )
+            .expect("bind the pass-through key");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "command-prompt",
+                    ["-N", "-p", "num", "select-window -t %%"],
+                ),
+            )
+            .expect("numeric prompt");
+        press(&shared, &mut context, chooser_key_press("1"));
+        press(&shared, &mut context, chooser_key_press("2"));
+        assert_eq!(
+            prompt_state(&shared, client).expect("still open").input,
+            "12"
+        );
+        assert_eq!(
+            shared.inner.lock().suppressed_text[&client],
+            BTreeMap::from([('1', 1), ('2', 1)])
+        );
+        shared.inner.lock().suppressed_text.remove(&client);
+        press(&shared, &mut context, chooser_key_press("z"));
+        assert!(prompt_state(&shared, client).is_none());
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&context.window.expect("window")].name,
+            "passed-through",
+            "the first non-digit submits the prompt and still runs its own binding"
+        );
+    }
+
+    /// `-e` is `PROMPT_BSPACE_EXIT`: a backspace on an empty buffer ends the
+    /// prompt with nothing submitted, where a plain prompt swallows it.
+    #[test]
+    fn a_backspace_exit_prompt_ends_on_an_empty_backspace() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "bspace-exit", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        let backspace = |shared: &Arc<Shared>, context: &mut ExecutionContext| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::Key {
+                        pane,
+                        input: test_key(KeyCode::Backspace, Modifiers::default(), None),
+                        text_follows: false,
+                    },
+                )
+                .expect("backspace");
+        };
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["-p", "plain"]),
+            )
+            .expect("plain prompt");
+        backspace(&shared, &mut context);
+        assert!(prompt_state(&shared, client).is_some());
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::CommandPrompt {
+                    action: CommandPromptAction::Close,
+                },
+            )
+            .expect("close plain prompt");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["-e", "-I", "ab", "-p", "exit"]),
+            )
+            .expect("backspace-exit prompt");
+        backspace(&shared, &mut context);
+        backspace(&shared, &mut context);
+        assert_eq!(prompt_state(&shared, client).expect("still open").input, "");
+        backspace(&shared, &mut context);
+        assert!(prompt_state(&shared, client).is_none());
+    }
+
+    /// `prompt_hlist[PROMPT_NTYPES]`: `-T` alone picks the ring. Measured on
+    /// the pin, a `search` entry never appears above a command prompt and vice
+    /// versa.
+    #[test]
+    fn command_and_search_prompt_histories_never_mix() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "prompt-history", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        let submit =
+            |shared: &Arc<Shared>, context: &mut ExecutionContext, args: &[&str], value: &str| {
+                shared
+                    .execute(
+                        client,
+                        ClientKind::Interactive,
+                        context,
+                        &CommandInvocation::new("command-prompt", args.iter().copied()),
+                    )
+                    .expect("prompt");
+                shared
+                    .input(
+                        client,
+                        ClientKind::Interactive,
+                        context,
+                        InputMessage::CommandPrompt {
+                            action: CommandPromptAction::Submit {
+                                input: value.to_owned(),
+                            },
+                        },
+                    )
+                    .expect("submit");
+            };
+
+        submit(
+            &shared,
+            &mut context,
+            &["-T", "search", "list-panes"],
+            "needle",
+        );
+        submit(&shared, &mut context, &["list-panes"], "ccc");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.command_history, ["ccc"]);
+            assert_eq!(inner.search_history, ["needle"]);
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["-T", "search"]),
+            )
+            .expect("search prompt");
+        let state = prompt_state(&shared, client).expect("search prompt");
+        assert_eq!(state.prompt_type, CommandPromptType::Search);
+        assert_eq!(state.history, ["needle"]);
+        assert_eq!(state.kind, CommandPromptKind::Command);
+    }
+
+    /// `status_prompt_set` raises the same `TTY_FREEZE` as a message unless the
+    /// prompt is incremental or `-C` opted out, and `status_prompt_clear`
+    /// releases it with `CLIENT_ALLREDRAWFLAGS`. Measured on the pin: a plain
+    /// prompt pinned the view at `TICK10` while the pane really reached
+    /// `TICK42`, then jumped to `TICK64` on close; `-C` ticked 64 to 96 and
+    /// `-i` ticked 10 to 42 throughout.
+    #[test]
+    fn a_plain_prompt_freezes_publication_and_its_clear_resumes_it() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, terminal) = attached_message_fixture(&shared, "prompt-freeze", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        let viewport = terminal
+            .latest_viewport_for(TerminalViewId(client.0))
+            .unwrap_or_else(|| terminal.latest_viewport());
+
+        for (flags, frozen) in [
+            (&["-p", "plain"][..], true),
+            (&["-C", "-p", "flowing"], false),
+            (&["-i", "-p", "search", "list-panes"], false),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("command-prompt", flags.iter().copied()),
+                )
+                .expect("prompt");
+            assert_eq!(
+                client_terminal_publication_frozen(&shared.inner.lock(), client),
+                frozen,
+                "flags {flags:?}"
+            );
+            drain_terminal_lane(&mailbox);
+            shared.publish_terminal_for_pane(
+                pane,
+                client,
+                TerminalFanout::Full,
+                &viewport,
+                &terminal,
+            );
+            assert_eq!(
+                mailbox.state.lock().terminals.contains_key(&pane),
+                !frozen,
+                "flags {flags:?}"
+            );
+
+            drain_terminal_lane(&mailbox);
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::CommandPrompt {
+                        action: CommandPromptAction::Close,
+                    },
+                )
+                .expect("close prompt");
+            assert!(prompt_state(&shared, client).is_none());
+            assert!(!client_terminal_publication_frozen(
+                &shared.inner.lock(),
+                client
+            ));
+            assert_eq!(
+                mailbox.state.lock().terminals.contains_key(&pane),
+                frozen,
+                "closing a frozen prompt owes one full latest viewport, flags {flags:?}"
+            );
+        }
+    }
+
+    /// The pin's `status_prompt_set` calls `status_message_clear` first, so the
+    /// prompt's own flags decide the gate rather than inheriting the message's.
+    /// zz's predicate is derived rather than latched, which is where it
+    /// deliberately diverges: see `client_terminal_publication_frozen`.
+    #[test]
+    fn a_prompt_clears_the_message_it_covers_and_owns_the_freeze() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "prompt-over-message", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "0", "sticky"]),
+            )
+            .expect("display message");
+        let armed = armed_client_message(&shared, client);
+        assert!(armed.freeze);
+        take_reliable_messages(&mailbox);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["-C", "-p", "flowing"]),
+            )
+            .expect("no-freeze prompt");
+        assert!(!shared.inner.lock().client_messages.contains_key(&client));
+        assert_eq!(
+            cleared_message_ids(&take_reliable_messages(&mailbox)),
+            vec![armed.token]
+        );
+        assert!(!client_terminal_publication_frozen(
+            &shared.inner.lock(),
+            client
+        ));
+
+        shared.detach(client);
+        assert!(!shared.inner.lock().command_prompts.contains_key(&client));
+        assert!(!client_terminal_publication_frozen(
+            &shared.inner.lock(),
+            client
+        ));
+    }
+
+    /// `prompt_incremental_start` fires `=` before the first key, `prompt_key`
+    /// fires `prefix + buffer` on every edit, and Enter only records history —
+    /// the template does not run again. Measured on the pin: raising
+    /// `command-prompt -i -p I 'display-message -d 0 I[%%]'` printed `I[=]`
+    /// with no key pressed, then `I[=a]`, `I[=ab]`, `I[=a]` on backspace.
+    #[test]
+    fn an_incremental_prompt_fires_on_entry_and_on_every_edit() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "incremental", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "command-prompt",
+                    ["-i", "-I", "seed", "-p", "search", "rename-window -- %%"],
+                ),
+            )
+            .expect("incremental prompt");
+        let window = context.window.expect("window");
+        // `-I` seeds `pr->last`, not the buffer, and the entry fire runs with
+        // an empty buffer.
+        assert_eq!(prompt_state(&shared, client).expect("raised").input, "");
+        assert_eq!(shared.inner.lock().engine.state.windows[&window].name, "=");
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: chooser_key_press("a"),
+                    text_follows: false,
+                },
+            )
+            .expect("type into the incremental prompt");
+        assert_eq!(prompt_state(&shared, client).expect("open").input, "a");
+        assert_eq!(shared.inner.lock().engine.state.windows[&window].name, "=a");
+
+        // `C-r` on an empty buffer restores `pr->last`; on a full one it only
+        // flips the direction prefix.
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: test_key(
+                        KeyCode::Character('r'),
+                        Modifiers::new(false, true, false, false),
+                        None,
+                    ),
+                    text_follows: false,
+                },
+            )
+            .expect("reverse search");
+        assert_eq!(shared.inner.lock().engine.state.windows[&window].name, "-a");
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: test_key(KeyCode::Enter, Modifiers::default(), None),
+                    text_follows: false,
+                },
+            )
+            .expect("close the incremental prompt");
+        assert!(prompt_state(&shared, client).is_none());
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&window].name,
+            "-a",
+            "Enter records history and closes without running the template again"
+        );
+        assert_eq!(shared.inner.lock().command_history, ["a"]);
     }
 
     fn attached_message_fixture(
@@ -33765,27 +34737,37 @@ bind - split-window -v -c "#{pane_current_path}"
 
         let directory = tempfile::tempdir().expect("prompt history directory");
         let path = directory.path().join("history");
-        save_command_prompt_history(&path, &["alpha".to_owned(), "beta".to_owned()]);
+        save_command_prompt_history(
+            &path,
+            &["alpha".to_owned(), "beta".to_owned()],
+            &["needle".to_owned()],
+        );
         assert_eq!(
             fs::read_to_string(&path).expect("saved prompt history"),
-            "command:alpha\ncommand:beta\n"
+            "command:alpha\ncommand:beta\nsearch:needle\n"
         );
         fs::write(
             &path,
             "command:one\nsearch:skip\nlegacy:raw\nplain\ncommand:one\n",
         )
         .expect("legacy prompt history");
-        assert_eq!(
-            load_command_prompt_history(&path, 3),
-            ["legacy:raw", "plain", "one"]
-        );
+        let (command, search) = load_command_prompt_history(&path, 3);
+        assert_eq!(command, ["legacy:raw", "plain", "one"]);
+        assert_eq!(search, ["skip"]);
         assert!(prompt_history_path("relative/history").is_none());
         assert_eq!(prompt_history_path(path.to_str().unwrap()), Some(path));
     }
 
     #[test]
     fn command_prompt_editor_preserves_unicode_boundaries_and_history_drafts() {
-        let mut prompt = CommandPrompt::new(":".to_owned(), "α beta".to_owned(), None);
+        let mut prompt = CommandPrompt::new(
+            ":".to_owned(),
+            "α beta".to_owned(),
+            None,
+            CommandPromptType::Command,
+            CommandPromptMode::Text,
+            false,
+        );
         assert_eq!(prompt.state(&[]).cursor, 6);
         assert!(prompt.delete_previous_word());
         assert_eq!(prompt.input, "α ");
@@ -34010,16 +34992,21 @@ bind - split-window -v -c "#{pane_current_path}"
     fn command_prompt_rejects_command_only_clients() {
         let shared = Arc::new(Shared::new(1));
         let mut context = ExecutionContext::default();
-        assert!(matches!(
-            shared.execute(
-                ClientId(7),
-                ClientKind::Command,
-                &mut context,
-                &CommandInvocation::new("command-prompt", [] as [&str; 0]),
-            ),
-            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
-                if message.contains("interactive client")
-        ));
+        for kind in [ClientKind::Command, ClientKind::Control] {
+            assert!(
+                matches!(
+                    shared.execute(
+                        ClientId(7),
+                        kind,
+                        &mut context,
+                        &CommandInvocation::new("command-prompt", ["-k"]),
+                    ),
+                    Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                        if message.contains("interactive client")
+                ),
+                "{kind:?}"
+            );
+        }
     }
 
     #[test]
@@ -37496,7 +38483,14 @@ bind - split-window -v -c "#{pane_current_path}"
 
         shared.inner.lock().command_prompts.insert(
             client,
-            CommandPrompt::new("prompt".to_owned(), String::new(), None),
+            CommandPrompt::new(
+                "prompt".to_owned(),
+                String::new(),
+                None,
+                CommandPromptType::Command,
+                CommandPromptMode::Text,
+                false,
+            ),
         );
         shared
             .execute(
@@ -38038,7 +39032,14 @@ bind - split-window -v -c "#{pane_current_path}"
 
         shared.inner.lock().command_prompts.insert(
             client,
-            CommandPrompt::new("prompt".to_owned(), String::new(), None),
+            CommandPrompt::new(
+                "prompt".to_owned(),
+                String::new(),
+                None,
+                CommandPromptType::Command,
+                CommandPromptMode::Text,
+                false,
+            ),
         );
         shared
             .execute(

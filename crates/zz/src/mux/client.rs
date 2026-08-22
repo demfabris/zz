@@ -2420,6 +2420,24 @@ impl MuxClient {
         self.core.attached_session()
     }
 
+    /// The pane a pane-targeted [`InputMessage`] should name: the active pane
+    /// of the focused window in the attached session.
+    #[must_use]
+    pub(crate) fn active_pane(&self) -> Option<PaneId> {
+        let attached = self.attached_session()?;
+        let snapshot = self.snapshot();
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == attached)?;
+        let focused_window = snapshot.focused_window_for(session);
+        session
+            .windows
+            .iter()
+            .find(|window| window.id == focused_window)
+            .map(|window| window.active_pane)
+    }
+
     pub(crate) fn send_input(&self, input: InputMessage) -> bool {
         let started = diagnostics::timer(DIAGNOSTIC_TARGET);
         log::trace!(target: "zz::diagnostics::mux", "send_input begin input={input:#?}");

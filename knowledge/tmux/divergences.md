@@ -27,8 +27,9 @@ The counts and flag ledger were refreshed against the live source after Waves 2a
 2026-08-20. The pre-wave catalog held 159 unsupported pairs across 38 tmux commands; those
 waves removed 30 pairs, Wave B's read-only slice removed `attach-session -r` on
 2026-08-21, Wave C run 2 removed `send-prefix -2` the same day, and Wave D run 1 removed
-`copy-mode -H` plus `-K`/`-N` on both choosers on 2026-08-22, and Wave D run 3 removed
-`display-message -C`/`-d` the same day, leaving 120 across
+`copy-mode -H` plus `-K`/`-N` on both choosers on 2026-08-22, Wave D run 3 removed
+`display-message -C`/`-d` the same day, and Wave D's final run removed the seven
+`command-prompt` mode flags, leaving 113 across
 29. The zz-only `split-picker` contributes another
 19 markers to a raw catalog grep and is deliberately excluded from tmux compatibility counts.
 
@@ -114,10 +115,10 @@ semantics on menus stay GUI-native).
 | `link-window` / `unlink-window` | Linked windows and session groups are skipped permanently (drop-in plan decision 3). One window belongs to one session. |
 | `new-pane` / `switch-mode` | The pin's floating-pane family (new in next-3.8). zz has no floating-pane model; the phase-1 picker verb was renamed off `new-pane` so the name stays tmux's. Unassessed beyond that. |
 
-# Flag-level gaps on implemented commands (29 of 80; 120 pairs)
+# Flag-level gaps on implemented commands (29 of 80; 113 pairs)
 
 Being cataloged is not the whole contract: 29 of the 80 implemented tmux commands still
-reject 120 flags the pin accepts, answering `unsupported command: <cmd> -X` rc 1 (and
+reject 113 flags the pin accepts, answering `unsupported command: <cmd> -X` rc 1 (and
 counting as config skips). The catalog declares the unsupported pairs and the mux/daemon
 parsers enforce them. Inventory as of 2026-08-22 (flags in pin spelling; flags marked † are
 gated by decision 3 or by missing context/model support, the rest are plain work):
@@ -130,7 +131,7 @@ gated by decision 3 or by missing context/model support, the rest are plain work
 | `choose-buffer` | `-F -k -y` |
 | `choose-tree` | `-F -h -k -y`; `-G` † |
 | `clear-history` | `-H` |
-| `command-prompt` | `-1 -C -e -F -i -k -l -N -t -T`; `-P` † |
+| `command-prompt` | `-F -l -t`; `-P` † |
 | `copy-mode` | `-k -s`; `-S` † |
 | `detach-client` | `-E -t -P` |
 | `display-message` | `-a -c -l -N -v`; `-I` † |
@@ -158,7 +159,7 @@ gated by decision 3 or by missing context/model support, the rest are plain work
 the exact catalog-declared places its output differs from the pin's.
 
 **This table is enforced, not just published.** `the_unsupported_flag_ledger_matches_the_catalog`
-(`crates/zz-mux/tests/catalog_floor.rs`) carries the same 120 pairs as a literal roster and
+(`crates/zz-mux/tests/catalog_floor.rs`) carries the same 113 pairs as a literal roster and
 cross-checks it against `COMMAND_SPECS` + `DAEMON_COMMAND_SPECS` in both directions, so
 implementing a flag without updating this table fails the build, and so does adding a
 rejection the table never declared. The counts are derived from that literal rather than
@@ -205,6 +206,60 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   keystroke for — `M-C-a` and other orderings, `Space`, key names zz does not model — is
   drawn by the pin and blank in zz. Conservative by choice: a key zz could never deliver
   would be a dead shortcut.
+- `command-prompt` never comma-splits `-p` or `-I`, so `-p 'a,b'` raises ONE prompt labelled
+  `a,b` where the pin chains two and feeds their answers to `%1` and `%2`. zz's behaviour is
+  exactly the pin's `-l`, which is why `-l` stays REJECTED rather than accepted as a no-op:
+  accepting it would advertise an opt-out from a chain zz cannot run. `cmd_command_prompt_exec`
+  builds `cdata->prompts[]` by `strsep(&next_prompt, ",")` and
+  `cmd_command_prompt_callback` walks `cdata->current` toward `cdata->count`; zz has neither.
+  `-F` stays rejected for the same honesty reason: the pin expands the template through
+  `format_single_from_target`, and zz's only prompt-side expander (`expand_prompt_input`)
+  understands `#S` and `#W` and nothing else, so accepting `-F` would silently drop every
+  other format. `-t` stays rejected with the rest of the client-fanout contract.
+- `command-prompt` draws a different LABEL from the pin in two of three cases, found while
+  measuring the mode flags and left alone because D1's brief required zero visible change for
+  prompts using none of the new flags. `cmd_command_prompt_exec` appends a trailing space to
+  every label it builds (`xasprintf(&tmp, "%s ", prompt)`) EXCEPT the bare `:` default, and
+  when there is no `-p` but there IS a template it labels the prompt `(<first command name>) `
+  rather than `:`. Measured: `-p lbl` then `q` drew `lbl q`, a bare `command-prompt
+  'display-message ...'` drew `(display-message) q`, and a bare `command-prompt` drew `:q`. zz
+  draws `lblq`, `:q` and `:q`. Cosmetic, three lines to fix in `MuxEngine::command_prompt`, and
+  a natural pickup for the F error/label tranche.
+- `command-prompt -N`'s pass-through runs in the opposite order to the pin. Both sides submit
+  the collected digits AND process the non-digit key normally; the pin's cmdq runs the passed
+  key's binding first (measured: a `-N` prompt fed `1`, `2`, `z` with `z` bound logged
+  `ZBOUND` before `NUM[12]`, because `cmd_command_prompt_callback` uses
+  `cmdq_insert_after` on the already-waiting item while the key callback is appended), and zz
+  submits first because `input_command_prompt_key` completes before it answers "pass". zz has
+  no command queue to reproduce the interleave, and the observable contract — both commands
+  run — holds.
+- `command-prompt -k` answers with `input_key_name`, which spells a space as `" "` where the
+  pin's `key_string_lookup_key` spells it `Space`. Same narrow-vocabulary rule as the chooser
+  `-K` gutter above.
+- `command-prompt` edits with emacs keys only. The pin routes every prompt key through
+  `prompt_translate_key` first when `status-keys` is `vi`, and `tmux.c:543-554` rewrites
+  `status-keys` AND `mode-keys` to `vi` at startup whenever the basename of `$VISUAL`/`$EDITOR`
+  contains `vi` — so a developer box with `EDITOR=nvim` silently runs a vi prompt even though
+  the options table default is emacs. zz's prompt has no vi mode. Pre-existing; recorded here
+  because it is why every pin measurement in this row had to `set -g status-keys emacs` first,
+  and because it makes `status-keys`/`mode-keys` defaults environment-dependent in a way zz
+  does not reproduce at all. The sharpest symptom: in vi mode Escape enters
+  `PROMPT_COMMANDMODE` instead of closing the prompt, so `command-prompt` on such a box has no
+  one-key cancel at all. Note also that `prompt_draw` branches only on `PROMPT_COMMANDMODE`
+  and `PROMPT_QUOTENEXT` — none of D1's mode flags change how a prompt is DRAWN, which is why
+  the TUI's status-line prompt needed no rendering change to stay faithful and only the GPUI
+  palette, a zz-native modal, adjusted its affordances.
+- The freeze a message raises is DERIVED in zz and LATCHED in the pin, and they part company in
+  one place. `status_message_clear` only drops `TTY_FREEZE` `if (c->prompt == NULL)`, so
+  clearing a message while ANY prompt is open leaves the client frozen — including a
+  `command-prompt -C` or `-i` prompt that explicitly asked not to freeze. Measured on the
+  nested rig: with a `-C` prompt open the view ticked `TICK62` to `TICK77`, a `display-message
+  -d 0` stalled it, the dismissing key delivered exactly one catch-up frame (`TICK91`) and then
+  NOTHING until the prompt closed (`TICK144`). zz's `client_terminal_publication_frozen` reads
+  `message.freeze || prompt.freeze` fresh on every publication, so retiring the message
+  resumes the client immediately. This is the prompt path's analogue of the
+  `display-message -N` stickiness recorded for Wave D run 3, and zz diverges deliberately:
+  reproducing it would mean latching a flag zz has no other reason to keep.
 - `list-keys <key>` rejects the positional key filter.
 - `send-keys -H` rejects bytes `80` through `ff`.
 - Bind-time validation checks names and catalog flags but still misses complete positional
@@ -214,7 +269,7 @@ The catalog count does not include syntax zz accepts or parses before diverging:
 
 Four flags are zz extensions on tmux command names even though the pin rejects them:
 `move-pane -p` and `send-keys -C`/`-P`/`-o`. They are compatibility debt, not progress
-against the 120 unsupported pairs.
+against the 113 unsupported pairs.
 
 ## Former Wave 2e ownership (38 pairs)
 
@@ -223,7 +278,7 @@ the work belongs to the server:
 
 | Command family | Server/core | Client/presentation | Parked on missing context/model |
 | --- | --- | --- | --- |
-| `command-prompt` | `-F -l -t` | `-1 -C -e -i -k -N -T` | `-P` pane-rendered prompt |
+| `command-prompt` | `-F -l -t` | ~~`-1 -C -e -i -k -N -T`~~ shipped | `-P` pane-rendered prompt |
 | `copy-mode` | `-k -s` | . | `-S` bound mouse-slider context |
 | `send-keys` | `-c -F -K -R` | . | `-M` originating mouse event |
 | `display-message` | `-a -c -l -N -v` | . | `-I` CLI stdin/protocol stream |
@@ -233,10 +288,13 @@ the work belongs to the server:
 
 That is **24 server/core**, **7 client/presentation**, and **7 parked** pairs, and the three
 numbers reconcile against the enforced roster above command by command. Wave D run 1 shipped
-`-K`/`-N` on both choosers out of the middle column and run 3 shipped `display-message -d` out
-of the first and `-C` out of the second. The TUI queue should contain only the middle
-column; moving the first column there would duplicate daemon-owned command semantics in a
-client.
+`-K`/`-N` on both choosers out of the middle column, run 3 shipped `display-message -d` out
+of the first and `-C` out of the second, and the final run cleared `command-prompt`'s whole
+middle column — the mode flags turned out to be daemon-owned rather than client work, which
+is why they landed with a state machine in `zz-daemon` and only a key-relay branch in each
+client. **The middle column is now empty**, so the TUI queue this table existed to define is
+closed and everything left in it belongs to F and G. Moving the first column into a client
+queue would duplicate daemon-owned command semantics in a client.
 
 # Divergences on the implemented surface
 

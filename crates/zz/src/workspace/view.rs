@@ -931,19 +931,7 @@ impl AppView {
     }
 
     fn active_pane(&self, cx: &App) -> Option<PaneId> {
-        let mux = self.mux.read(cx);
-        let attached = mux.attached_session()?;
-        let snapshot = mux.snapshot();
-        let session = snapshot
-            .sessions
-            .iter()
-            .find(|session| session.id == attached)?;
-        let focused_window = snapshot.focused_window_for(session);
-        let window = session
-            .windows
-            .iter()
-            .find(|window| window.id == focused_window)?;
-        Some(window.active_pane)
+        self.mux.read(cx).active_pane()
     }
 
     #[cfg_attr(target_os = "ios", allow(dead_code))]

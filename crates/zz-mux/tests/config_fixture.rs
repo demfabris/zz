@@ -65,6 +65,9 @@ fn existing_tmux_config_applies_supported_subset_and_skips_the_rest() {
                 prompt: ":".to_owned(),
                 input: input.to_owned(),
                 template: Some(template.to_owned()),
+                prompt_type: zz_protocol::CommandPromptType::Command,
+                mode: zz_protocol::CommandPromptMode::Text,
+                no_freeze: false,
             }]
         );
     }

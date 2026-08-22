@@ -31,7 +31,7 @@ const ZZ_NATIVE_COMMANDS: &[&str] = &[
 ];
 
 /// Every tmux flag zz catalogues as unsupported, command by command — the
-/// roster `knowledge/tmux/divergences.md` publishes as "120 pairs across 29
+/// roster `knowledge/tmux/divergences.md` publishes as "113 pairs across 29
 /// commands".
 ///
 /// The counts alone cannot police this: a wave that implements one flag while
@@ -46,12 +46,7 @@ const UNSUPPORTED_FLAG_LEDGER: &[(&str, &[&str])] = &[
     ("choose-buffer", &["-F", "-k", "-y"]),
     ("choose-tree", &["-F", "-G", "-h", "-k", "-y"]),
     ("clear-history", &["-H"]),
-    (
-        "command-prompt",
-        &[
-            "-1", "-C", "-F", "-N", "-P", "-T", "-e", "-i", "-k", "-l", "-t",
-        ],
-    ),
+    ("command-prompt", &["-F", "-P", "-l", "-t"]),
     ("copy-mode", &["-S", "-k", "-s"]),
     ("detach-client", &["-E", "-P", "-t"]),
     ("display-message", &["-I", "-N", "-a", "-c", "-l", "-v"]),
@@ -84,7 +79,7 @@ const UNSUPPORTED_FLAG_LEDGER: &[(&str, &[&str])] = &[
     ("unbind-key", &["-a", "-q"]),
 ];
 
-const LEDGER_PAIRS: usize = 120;
+const LEDGER_PAIRS: usize = 113;
 const LEDGER_COMMANDS: usize = 29;
 
 fn catalogued_specs() -> BTreeMap<&'static str, &'static zz_protocol::CommandSpec> {

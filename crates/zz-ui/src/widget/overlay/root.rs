@@ -250,6 +250,23 @@ impl Root {
         cx.notify();
     }
 
+    /// Retire the notifications tagged with `key`, playing their dismiss
+    /// animation. Returns whether any were showing.
+    pub fn dismiss_notification(
+        &mut self,
+        key: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let dismissed = self
+            .notification
+            .update(cx, |list, cx| list.dismiss_key(key, window, cx));
+        if dismissed {
+            cx.notify();
+        }
+        dismissed
+    }
+
     /// Drop every notification, without playing their dismiss animation.
     pub fn clear_notifications(&mut self, cx: &mut Context<Self>) {
         self.notification.update(cx, NotificationList::clear);

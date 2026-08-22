@@ -1,0 +1,21 @@
+# display-message takes the pin's no-freeze flag and delay value, and rejects a
+# bad delay with strtonum's three classes. The freeze itself needs an attached
+# client, which this harness has none of, so the CLI-observable half is what is
+# pinned here: acceptance, exit class, and -p output.
+display-message hello
+display-message -C hello
+display-message -d 500 hello
+display-message -d 0 hello
+display-message -C -d 500 hello
+display-message -d 4294967295 hello
+display-message -d +5 hello
+display-message -d abc hello
+display-message -d 5.5 hello
+display-message -d 0x10 hello
+display-message -d -5 hello
+display-message -d 4294967296 hello
+display-message -d 99999999999999999999999999 hello
+display-message -p -d abc hello
+out: display-message -p -C hello
+out: display-message -p -d 500 hello
+out: display-message -p -d 0 hello

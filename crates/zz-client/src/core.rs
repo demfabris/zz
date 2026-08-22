@@ -87,6 +87,14 @@ pub enum CoreEvent {
         kind: ClientMessageKind,
         text: String,
         duration_ms: Option<u32>,
+        /// Present only for daemon-timed messages, which are the only ones the
+        /// daemon can retire early with [`CoreEvent::ClientMessageCleared`].
+        message_id: Option<u64>,
+    },
+    /// The daemon retired the identified message. Surfaces must drop it only
+    /// when the identity still matches what they are showing.
+    ClientMessageCleared {
+        message_id: u64,
     },
     Clipboard {
         pane: PaneId,
@@ -591,6 +599,7 @@ impl ClientCore {
                     kind,
                     text,
                     duration_ms: None,
+                    message_id: None,
                 });
             }
             EventPayload::TimedClientMessage {
@@ -598,14 +607,19 @@ impl ClientCore {
                 kind,
                 text,
                 duration_ms,
-                ..
+                message_id,
             } => {
                 self.events.push_back(CoreEvent::ClientMessage {
                     pane,
                     kind,
                     text,
                     duration_ms: Some(duration_ms),
+                    message_id: Some(message_id),
                 });
+            }
+            EventPayload::TimedClientMessageCleared { message_id } => {
+                self.events
+                    .push_back(CoreEvent::ClientMessageCleared { message_id });
             }
             EventPayload::Clipboard {
                 pane,
@@ -731,8 +745,7 @@ impl ClientCore {
             | EventPayload::PaneOutputState { .. }
             | EventPayload::PaneOutputAged { .. }
             | EventPayload::ControlFlags { .. }
-            | EventPayload::SubscriptionChanged { .. }
-            | EventPayload::TimedClientMessageCleared { .. } => {}
+            | EventPayload::SubscriptionChanged { .. } => {}
         }
     }
 
@@ -910,6 +923,49 @@ mod tests {
             events.push(event);
         }
         events
+    }
+
+    /// Identity has to reach every surface: the timed message carries the id
+    /// the daemon can retire it by, the untimed one carries none, and the clear
+    /// arrives as its own event rather than folded into a message.
+    #[test]
+    fn timed_messages_carry_their_identity_and_the_clear_arrives_on_its_own() {
+        let mut core = ClientCore::new();
+        core.handle_message(event(EventPayload::TimedClientMessage {
+            pane: None,
+            kind: ClientMessageKind::Info,
+            text: "timed".to_owned(),
+            duration_ms: 750,
+            message_id: 12,
+        }));
+        core.handle_message(event(EventPayload::ClientMessage {
+            pane: None,
+            kind: ClientMessageKind::Warning,
+            text: "untimed".to_owned(),
+        }));
+        core.handle_message(event(EventPayload::TimedClientMessageCleared {
+            message_id: 12,
+        }));
+        assert_eq!(
+            drain(&mut core),
+            vec![
+                CoreEvent::ClientMessage {
+                    pane: None,
+                    kind: ClientMessageKind::Info,
+                    text: "timed".to_owned(),
+                    duration_ms: Some(750),
+                    message_id: Some(12),
+                },
+                CoreEvent::ClientMessage {
+                    pane: None,
+                    kind: ClientMessageKind::Warning,
+                    text: "untimed".to_owned(),
+                    duration_ms: None,
+                    message_id: None,
+                },
+                CoreEvent::ClientMessageCleared { message_id: 12 },
+            ]
+        );
     }
 
     #[test]

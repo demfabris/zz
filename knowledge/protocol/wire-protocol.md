@@ -205,8 +205,11 @@ becomes `%output`; `PaneOutputState { pane, paused }` and `PaneOutputAged { pane
 `ControlFlags { wait_exit, pause_after_ms, no_output }` (v67) echoes the client's
 `refresh-client -f` flags; and `SubscriptionChanged { name, session, window, window_index, pane, value }`
 (v68) reports a `refresh-client -B` format subscription's value change. v71 appends
-`TimedClientMessageCleared { message_id }` at tag 46 — the daemon's explicit early clear for one
-timed message; nothing emits it until Wave D3.
+`TimedClientMessageCleared { message_id }` at tag 46 — the daemon's explicit clear for one
+timed message, produced since Wave D3 by the `zz-client-message` deadline dispatcher when a
+`display-message` timer expires and by the input path when a key dismisses the message.
+Surfaces must match the identity before dropping anything, so a retired message's clear can
+never take down the message that replaced it.
 
 The three payloads `TerminalViewport`, `TerminalPatch`, and `CommandOutput { viewport: Some(..) }` are
 diverted to the [Terminal lane](/protocol/terminal-lanes.md) by `encode_protocol_message`; all other

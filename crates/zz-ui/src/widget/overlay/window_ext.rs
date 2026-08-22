@@ -37,6 +37,10 @@ pub trait WindowExt: Sized {
 
     fn push_notification(&mut self, notification: Notification, cx: &mut App);
 
+    /// Retire the notifications pushed with [`Notification::key`] equal to
+    /// `key`. Returns whether any were showing.
+    fn dismiss_notification(&mut self, key: &str, cx: &mut App) -> bool;
+
     fn clear_notifications(&mut self, cx: &mut App);
 
     /// The live toasts, oldest first.
@@ -90,6 +94,12 @@ impl WindowExt for Window {
         Root::update(self, cx, |root, window, cx| {
             root.push_notification(notification, window, cx);
         });
+    }
+
+    fn dismiss_notification(&mut self, key: &str, cx: &mut App) -> bool {
+        Root::update(self, cx, |root, window, cx| {
+            root.dismiss_notification(key, window, cx)
+        })
     }
 
     fn clear_notifications(&mut self, cx: &mut App) {

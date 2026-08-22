@@ -658,6 +658,14 @@ pub(crate) struct ClientNotification {
     pub(crate) kind: ClientMessageKind,
     pub(crate) text: String,
     pub(crate) duration_ms: Option<u32>,
+    /// Set for daemon-timed messages so an explicit clear can retire exactly
+    /// this toast.
+    pub(crate) message_id: Option<u64>,
+}
+
+/// The daemon retired an identified timed message before its duration ran out.
+pub(crate) struct ClientNotificationCleared {
+    pub(crate) message_id: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2323,6 +2331,7 @@ impl MuxClient {
             kind,
             text: text.into(),
             duration_ms: None,
+            message_id: None,
         });
     }
 
@@ -3581,12 +3590,17 @@ impl MuxClient {
                 kind,
                 text,
                 duration_ms,
+                message_id,
                 ..
             } => cx.emit(ClientNotification {
                 kind,
                 text,
                 duration_ms,
+                message_id,
             }),
+            CoreEvent::ClientMessageCleared { message_id } => {
+                cx.emit(ClientNotificationCleared { message_id });
+            }
             CoreEvent::Clipboard { target, text, .. } => {
                 if !text.is_empty() {
                     let item = ClipboardItem::new_string(text);
@@ -4078,6 +4092,7 @@ impl MuxClient {
 }
 
 impl EventEmitter<ClientNotification> for MuxClient {}
+impl EventEmitter<ClientNotificationCleared> for MuxClient {}
 
 impl EventEmitter<AttachmentPreviewRequest> for MuxClient {}
 

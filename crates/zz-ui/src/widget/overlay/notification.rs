@@ -49,6 +49,7 @@ type ContentBuilder =
 /// A single toast. Push one with [`crate::WindowExt::push_notification`].
 pub struct Notification {
     type_: Option<NotificationType>,
+    key: Option<SharedString>,
     title: Option<SharedString>,
     message: Option<SharedString>,
     content_builder: Option<ContentBuilder>,
@@ -63,6 +64,7 @@ impl Notification {
     pub fn new() -> Self {
         Self {
             type_: None,
+            key: None,
             title: None,
             message: None,
             content_builder: None,
@@ -97,6 +99,14 @@ impl Notification {
         Self::new()
             .message(message)
             .with_type(NotificationType::Error)
+    }
+
+    /// Tag the toast so a later
+    /// [`crate::WindowExt::dismiss_notification`] can retire exactly this one.
+    #[must_use]
+    pub fn key(mut self, key: impl Into<SharedString>) -> Self {
+        self.key = Some(key.into());
+        self
     }
 
     #[must_use]
@@ -332,6 +342,25 @@ impl NotificationList {
         }
 
         cx.notify();
+    }
+
+    /// Play the dismiss animation on every toast carrying `key`.
+    pub(super) fn dismiss_key(
+        &mut self,
+        key: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let matches = self
+            .entries
+            .iter()
+            .filter(|entry| entry.view.read(cx).key.as_deref() == Some(key))
+            .map(|entry| entry.view.clone())
+            .collect::<Vec<_>>();
+        for view in &matches {
+            view.update(cx, |note, cx| note.dismiss(window, cx));
+        }
+        !matches.is_empty()
     }
 
     pub(super) fn clear(&mut self, cx: &mut Context<Self>) {

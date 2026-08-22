@@ -28,7 +28,7 @@ use crate::{
         FILE_PROBE_IMAGE_ID, FrameTransport, KittyImageAssembler, KittyImageData, PROBE_IMAGE_ID,
     },
     render::{FrameDamage, Renderer, merge_damage},
-    state::{HostSwitch, Model},
+    state::{ClientMessage, HostSwitch, Model},
     terminal_event::{Event as TerminalEvent, EventParser},
     tty::{TerminalGuard, TerminalSize},
 };
@@ -504,10 +504,16 @@ pub(crate) fn run(
 
     let outcome = loop {
         let now = Instant::now();
+        if model.expire_client_message(now) {
+            renderer
+                .paint(&model, false)
+                .map_err(|error| error.to_string())?;
+        }
+        let now = Instant::now();
         let event = if browser.should_pump(now) {
             None
         } else {
-            receive_main_event(&incoming, browser.wait(now))?
+            receive_main_event(&incoming, message_wait(&model, browser.wait(now), now))?
         };
         let Some(event) = event else {
             if pump_browser_provider(&mut browser, &mut renderer, &model, &client, Instant::now())?
@@ -639,8 +645,9 @@ pub(crate) fn run(
                         }) {
                             Ok(HostSwitchDecision::Current) => {}
                             Err(error) => {
-                                model.client_message =
-                                    Some(format!("could not connect to {label}: {error}"));
+                                model.client_message = Some(ClientMessage::local(format!(
+                                    "could not connect to {label}: {error}"
+                                )));
                                 renderer
                                     .paint(&model, false)
                                     .map_err(|paint| paint.to_string())?;
@@ -659,8 +666,9 @@ pub(crate) fn run(
                                     &kitty_gate,
                                 );
                                 if let Err(error) = replacement {
-                                    model.client_message =
-                                        Some(format!("could not switch to {label}: {error}"));
+                                    model.client_message = Some(ClientMessage::local(format!(
+                                        "could not switch to {label}: {error}"
+                                    )));
                                     renderer
                                         .paint(&model, false)
                                         .map_err(|paint| paint.to_string())?;
@@ -675,7 +683,8 @@ pub(crate) fn run(
                                     {
                                         renderer.queue_control(sequence);
                                     }
-                                    model.client_message = Some(format!("connected to {label}"));
+                                    model.client_message =
+                                        Some(ClientMessage::local(format!("connected to {label}")));
                                     attempt = AttachAttempt::Default;
                                     creating_default = false;
                                     remembered_session = None;
@@ -800,7 +809,7 @@ pub(crate) fn run(
                 if let Some(sequence) = sync_mouse_modes(&mut model, pixel_mouse) {
                     renderer.queue_control(sequence);
                 }
-                model.client_message = Some("reconnected".to_owned());
+                model.client_message = Some(ClientMessage::local("reconnected"));
                 renderer.invalidate();
                 renderer
                     .paint(&model, true)
@@ -1288,9 +1297,26 @@ fn handle_core_event(
             model.display_panes = lock_core(core).display_panes().cloned();
             Ok(ProtocolOutcome::RepaintAll)
         }
-        CoreEvent::ClientMessage { text, .. } => {
-            model.client_message = Some(text);
+        CoreEvent::ClientMessage {
+            text,
+            duration_ms,
+            message_id,
+            ..
+        } => {
+            model.client_message = Some(ClientMessage::timed(
+                text,
+                message_id,
+                duration_ms,
+                Instant::now(),
+            ));
             Ok(ProtocolOutcome::Repaint)
+        }
+        CoreEvent::ClientMessageCleared { message_id } => {
+            if model.clear_client_message(message_id) {
+                Ok(ProtocolOutcome::Repaint)
+            } else {
+                Ok(ProtocolOutcome::None)
+            }
         }
         CoreEvent::PaneRemoved { pane } => {
             model.viewports.remove(&pane);
@@ -1321,7 +1347,8 @@ fn handle_core_event(
             Osc52::Empty => Ok(ProtocolOutcome::None),
             Osc52::Encoded(output) => Ok(ProtocolOutcome::QueueControl(output)),
             Osc52::TooLarge => {
-                model.client_message = Some("clipboard payload exceeds 1 MiB".to_owned());
+                model.client_message =
+                    Some(ClientMessage::local("clipboard payload exceeds 1 MiB"));
                 Ok(ProtocolOutcome::Repaint)
             }
         },
@@ -1349,7 +1376,8 @@ fn handle_core_event(
             Ok(ProtocolOutcome::None)
         }
         CoreEvent::TerminalUiCommand { .. } => {
-            model.client_message = Some("terminal search is unsupported here".to_owned());
+            model.client_message =
+                Some(ClientMessage::local("terminal search is unsupported here"));
             Ok(ProtocolOutcome::Repaint)
         }
         CoreEvent::CommandResponse(response) => {
@@ -1449,13 +1477,27 @@ fn handle_command_response(
             Err(message)
         }
         CommandResponse::Error { error, .. } => {
-            model.client_message = Some(error.tmux_message());
+            model.client_message = Some(ClientMessage::local(error.tmux_message()));
             Ok(ProtocolOutcome::Repaint)
         }
         CommandResponse::Success { .. } => {
             model.client_message = None;
             Ok(ProtocolOutcome::Repaint)
         }
+    }
+}
+
+/// Tighten the browser's wait so the loop wakes up when a message's own
+/// duration runs out. Producers that carry no daemon deadline — the alert and
+/// read-only paths — expire on this timer alone.
+fn message_wait(model: &Model, wait: BrowserWait, now: Instant) -> BrowserWait {
+    let Some(deadline) = model.client_message_deadline() else {
+        return wait;
+    };
+    let remaining = deadline.saturating_duration_since(now);
+    match wait {
+        BrowserWait::Blocking => BrowserWait::Timeout(remaining),
+        BrowserWait::Timeout(timeout) => BrowserWait::Timeout(timeout.min(remaining)),
     }
 }
 

@@ -564,15 +564,43 @@ deltas in tests.
    the pane in tmux — so every step of a CLI-driven scenario diverges on exit class before any
    flag matters. Ledgered under accepted-grammar divergences, and scheduled as F6, which
    fixes the harness rather than the model; the same gate keeps the choosers off the corpus.
-3. Implement `display-message -C` as tmux's `no_freeze` behavior: keep terminal updates
-   flowing while the status message is displayed. Plain `display-message` freezes
-   presentation for that client, and clear resumes it with a full latest viewport. `-C`
-   does not clear the message. Cover positive timers, duration zero and key clear,
-   replacement-message timer safety, and TUI clearing. Audit facts: today the client owns
-   the timer and the TUI drops `duration_ms` entirely (messages pin forever), so D3
-   includes TUI timer/clear consumption; the daemon-owned `DisplayPanesDeadline`
-   dispatcher is the working precedent for daemon-side deadlines, but it stores one
-   deadline per client, so per-message identity still needs its own state.
+3. **Shipped 2026-08-22.** `display-message -C` and `-d` ride the v71 timed-message
+   lifecycle. The daemon now assigns the identity, owns the timer, and owns the freeze:
+   `ActiveClientMessage { token, deadline, freeze }` per client is the pin's
+   `c->message_string` + `c->message_timer` + `TTY_FREEZE` triple, `arm_client_message`
+   mirrors `status_message_set` (no `-d` means `display-time`, `delay > 0` arms the timer,
+   `delay == 0` installs none and waits for a key, `-C` is the `no_freeze` argument) and
+   `retire_client_message` mirrors `status_message_clear`. A `zz-client-message` dispatcher
+   thread keyed per client — the `zz-monitor-silence` template, token-validated at both
+   schedule and expiry — fires `expire_client_message`, which publishes
+   `TimedClientMessageCleared { message_id }`, tag 46's first producer.
+   **What the freeze suppresses is exactly one thing**: `publish_terminal_for_pane` skips
+   the subscriber while the client holds a frozen message, the zz analogue of
+   `tty_client_ready` returning 0 under `TTY_FREEZE`. PTY parsing, the mux model, copy
+   session reconciliation and the pane-mode hooks all stay live, and every retire of a
+   frozen record pushes one full latest viewport per visible pane through `send_full` —
+   `status_message_clear`'s `CLIENT_ALLREDRAWFLAGS`, "was frozen and may have changed".
+   Measured on a nested rig (inner server attached from an outer pane, capturing the outer
+   pane): a plain `-d 3000` pinned the outer capture at `TICK56` for the whole window and
+   then jumped straight to `TICK73`, while `-C -d 3000` kept ticking throughout; the inner
+   `capture-pane` read `TICK219` while the wire still showed `TICK212`, proving parsing
+   never stopped. Also measured and matched: replacing a frozen message pushes one
+   catch-up frame and re-freezes, a key retires the message and unfreezes, `-d 0` pins
+   until a key, `-C` never stops the timer, and `-d` validates with the pin's `strtonum`
+   strings (`delay invalid` / `too small` / `too large`) over `0..=4294967295`.
+   Only `InputMessage::Key` dismisses: zz splits one physical press into `Key` plus a
+   trailing `Text` whose suppression happens later in `input_text`, so letting `Text`
+   dismiss would let a key bound to `display-message` wipe the message it had just raised
+   (pinned by `a_bound_key_that_displays_a_message_survives_its_own_trailing_text`).
+   Control clients are excluded outright, matching the pin: `cmd_display_message_exec`
+   routes `CLIENT_CONTROL` through `server_client_print` and never reaches
+   `status_message_set`, so `%message` keeps carrying no duration and gets no clear.
+   Residues, all bounded: zz's alert/read-only message producers keep client-side timing
+   and never freeze (the pin's `alerts.c:318` does call `status_message_set` with
+   `no_freeze` clear), `display-popup` frames are not frozen, and `-N` stays unsupported —
+   the pin's `message_ignore_keys` is sticky client state that `delay == 0` skips writing,
+   so a `-N -d 5000` leaves a later plain `-d 0` message un-clearable by key, measured on
+   the pin. Ledger 122 → 120.
 4. **Shipped 2026-08-22.** `choose-tree`/`choose-buffer -K -N`. The daemon fills the v71
    `ChooseTreeItem.key`/`ChooseBufferItem.key` per visible row with the pin's stock ladder —
    `0`-`9`, then `M-a`-`M-z`, then nothing from row 36 on — which the pin reaches through
@@ -592,8 +620,10 @@ deltas in tests.
    `-N` is ledgered as `unsupported command: <cmd> -NN`, the pin's `MODE_TREE_PREVIEW_BIG`
    (`args_has(args, 'N') > 1`), which zz has no presentation for.
 
-D2 and D4 shipped before the shared freeze work. Implement D3 next, then reuse
-its lifecycle in D1. Use control-mode and PTY tests for interactive prompt behavior, then
+D2, D3 and D4 have shipped. Implement D1 next, reusing D3's freeze lifecycle: the pin's
+`status_prompt_set` raises the same `TTY_FREEZE` unless `PROMPT_INCREMENTAL` or
+`PROMPT_NOFREEZE` is set, and `status_prompt_clear` releases it with the same
+`CLIENT_ALLREDRAWFLAGS`. Use control-mode and PTY tests for interactive prompt behavior, then
 delete the matching refusal assertions.
 
 ## Wave E - `source-file` CLI diagnostics
@@ -664,7 +694,15 @@ behavior, not flags — and `catalog.rs` has no diff this wave.
    — `the_unsupported_flag_ledger_matches_the_catalog` in `crates/zz-mux/tests/catalog_floor.rs`
    holds all 122 pairs as a literal and cross-checks both directions against
    `COMMAND_SPECS` + `DAEMON_COMMAND_SPECS`, excluding the fourteen zz-native names derived
-   against the pin's `cmd_table`. F0 inherits it rather than rebuilding it.
+   against the pin's `cmd_table`. F0 inherits it rather than rebuilding it. (The roster's
+   count is now 120 after Wave D run 2 took `display-message -C -d`.) **Also in F0's
+   housekeeping: collapse the three near-identical deadline dispatcher threads**
+   (`zz-display-panes`, `zz-monitor-silence`, `zz-client-message`, each ~70 lines differing
+   only in key type and two closures) into one `run_deadline_dispatcher<K>` with token
+   validation and weak-`Arc` shutdown baked in once. Deliberately not done inside Waves C or
+   D — collapsing them there would have reopened three independently reviewed surfaces for no
+   behavioral gain — but three is the threshold at which a fix in one silently fails to reach
+   the others, and D1 or the F tranche may make it four.
 1. Error contract, after F0: centralize pinned unknown-flag, missing-value, too-few and
    too-many argument, alias, and usage fallback shapes. Treat this as a command-semantics
    tranche rather than a text-only cleanup.
@@ -781,10 +819,11 @@ Each wave closes with:
 - `git diff --check`
 - OKF validation
 - `compat/run.sh --strict-geometry`, followed by a hard postcondition of at least the
-  current 55 scenario rows (48 before Wave C run 1 added `command-alias` and
+  current 56 scenario rows (48 before Wave C run 1 added `command-alias` and
   `update-environment`, 50 before run 2 added `alerts` and `prefix2`, 52 before run 3
   added `display-panes-format` and `renderer-styles`, 54 before Wave E added
-  `smoke/source-file-diagnostics`), zero SKIPs, and no
+  `smoke/source-file-diagnostics`, 55 before Wave D run 3 added `display-message`),
+  zero SKIPs, and no
   divergences outside the two documented geometry fixtures
 - the `BEHAVES` assertion and option ledger updated
 - the exact unsupported-pair roster and expected tranche delta updated

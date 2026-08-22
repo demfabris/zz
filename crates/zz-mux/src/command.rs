@@ -361,7 +361,12 @@ pub enum MuxEffect {
     DisplayMessage {
         pane: Option<PaneId>,
         text: String,
+        /// Milliseconds to show the message; zero waits for a key like the
+        /// pin's `status_message_set` with `delay == 0`.
         duration_ms: u32,
+        /// False for `display-message -C`, the pin's `no_freeze` argument:
+        /// terminal updates keep reaching the client while the message shows.
+        freeze: bool,
     },
     BufferLimitChanged(usize),
     /// `None` updates every session that inherits the global value.
@@ -5374,18 +5379,28 @@ impl MuxEngine {
             }
             positional.join(" ")
         };
+        let delay = options
+            .value("-d")
+            .map(|value| parse_strtonum(value, 0, i64::from(u32::MAX), "delay"))
+            .transpose()?;
         let text = expand_format_time_with_hooks(&format, self, format_context, hooks);
         if options.has("-p") {
             Ok(Execution::output(text))
         } else {
-            let duration_ms = pane.map_or(self.global_display_time_ms, |pane| {
-                self.display_time_for_pane(pane)
-                    .expect("display-message pane was resolved")
-            });
+            let duration_ms = delay.map_or_else(
+                || {
+                    pane.map_or(self.global_display_time_ms, |pane| {
+                        self.display_time_for_pane(pane)
+                            .expect("display-message pane was resolved")
+                    })
+                },
+                |delay| u32::try_from(delay).expect("delay was bounded to u32"),
+            );
             Ok(Execution::effect(MuxEffect::DisplayMessage {
                 pane,
                 text,
                 duration_ms,
+                freeze: !options.has("-C"),
             }))
         }
     }
@@ -10517,6 +10532,34 @@ fn reject_positionals(command: &str, positional: &[String]) -> Result<(), Server
     }
 }
 
+/// The pin's `args_strtonum` (arguments.c) over OpenBSD `strtonum`: a leading
+/// sign and digits only, with `invalid` for anything unparseable and
+/// `too small`/`too large` for both range and overflow rejections.
+fn parse_strtonum(
+    value: &str,
+    minimum: i64,
+    maximum: i64,
+    label: &str,
+) -> Result<i64, ServerError> {
+    let trimmed = value.trim_start();
+    let (negative, digits) = trimmed.strip_prefix('-').map_or_else(
+        || (false, trimmed.strip_prefix('+').unwrap_or(trimmed)),
+        |digits| (true, digits),
+    );
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(ServerError::InvalidCommand(format!("{label} invalid")));
+    }
+    let magnitude = digits.parse::<i128>().unwrap_or(i128::MAX);
+    let number = if negative { -magnitude } else { magnitude };
+    if number < i128::from(minimum) {
+        return Err(ServerError::InvalidCommand(format!("{label} too small")));
+    }
+    if number > i128::from(maximum) {
+        return Err(ServerError::InvalidCommand(format!("{label} too large")));
+    }
+    Ok(i64::try_from(number).expect("the value was bounded to i64 limits"))
+}
+
 fn parse_resize_adjustment(value: &str) -> Result<i32, ServerError> {
     value
         .parse::<i32>()
@@ -13946,6 +13989,7 @@ mod tests {
                 pane: Some(first),
                 text: format!("hello {first} 0"),
                 duration_ms: 750,
+                freeze: true,
             }]
         );
 
@@ -13962,8 +14006,85 @@ mod tests {
                 pane: None,
                 text: "[] :, current pane ".to_owned(),
                 duration_ms: 750,
+                freeze: true,
             }]
         );
+    }
+
+    /// `-C` is the pin's `no_freeze` argument to `status_message_set` and `-d`
+    /// its `delay`: `-1` (absent) falls back to `display-time`, zero installs no
+    /// timer, and the bounds are `strtonum(value, 0, UINT_MAX)`.
+    #[test]
+    fn display_message_takes_the_pins_no_freeze_flag_and_delay_value() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "timed"]))
+            .expect("create session");
+
+        for (arguments, duration_ms, freeze) in [
+            (vec!["plain"], 750, true),
+            (vec!["-C", "flowing"], 750, false),
+            (vec!["-d", "1500", "delayed"], 1500, true),
+            (vec!["-d", "0", "pinned"], 0, true),
+            (vec!["-C", "-d", "4294967295", "both"], u32::MAX, false),
+            (vec!["-d", "+5", "signed"], 5, true),
+        ] {
+            let execution = engine
+                .execute(&mut context, &command("display-message", &arguments))
+                .expect("display message");
+            assert!(
+                matches!(
+                    execution.effects.as_slice(),
+                    [MuxEffect::DisplayMessage {
+                        duration_ms: actual,
+                        freeze: actual_freeze,
+                        ..
+                    }] if *actual == duration_ms && *actual_freeze == freeze
+                ),
+                "display-message {arguments:?} produced {:?}",
+                execution.effects
+            );
+        }
+    }
+
+    #[test]
+    fn display_message_delay_reports_the_pins_strtonum_failures() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "timed"]))
+            .expect("create session");
+
+        for (arguments, message) in [
+            (vec!["-d", "abc", "x"], "delay invalid"),
+            (vec!["-d", "5.5", "x"], "delay invalid"),
+            (vec!["-d", "0x10", "x"], "delay invalid"),
+            (vec!["-d", "", "x"], "delay invalid"),
+            (vec!["-d", "-5", "x"], "delay too small"),
+            (vec!["-d", "4294967296", "x"], "delay too large"),
+            (
+                vec!["-d", "99999999999999999999999999", "x"],
+                "delay too large",
+            ),
+            (vec!["-p", "-d", "abc", "x"], "delay invalid"),
+        ] {
+            assert!(
+                matches!(
+                    engine.execute(&mut context, &command("display-message", &arguments)),
+                    Err(ServerError::InvalidCommand(ref actual)) if actual == message
+                ),
+                "display-message {arguments:?} did not answer {message}"
+            );
+        }
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("display-message", &["-d", "abc", "-F", "x", "y"]),
+            ),
+            Err(ServerError::InvalidCommand(ref actual))
+                if actual == "only one of -F or argument must be given"
+        ));
     }
 
     #[test]

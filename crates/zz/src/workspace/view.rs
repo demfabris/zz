@@ -58,7 +58,10 @@ use crate::{
     diagnostics,
     editor::EditorView,
     mux::{
-        client::{AttachmentPreviewRequest, ClientNotification, MuxClient, SshPromptRequest},
+        client::{
+            AttachmentPreviewRequest, ClientNotification, ClientNotificationCleared, MuxClient,
+            SshPromptRequest,
+        },
         hosts::HostId,
         nav::{TreeTarget, kill_target_command},
         prefix::{PrefixClaim, PressDisposition, keystroke_is, terminal_key_input},
@@ -658,7 +661,19 @@ impl AppView {
                     }
                     None => notification,
                 };
+                let notification = match event.message_id {
+                    Some(message_id) => notification.key(timed_message_key(message_id)),
+                    None => notification,
+                };
                 window.push_notification(notification, cx);
+            },
+        )
+        .detach();
+        cx.subscribe_in(
+            &mux,
+            window,
+            |_, _, event: &ClientNotificationCleared, window, cx| {
+                window.dismiss_notification(&timed_message_key(event.message_id), cx);
             },
         )
         .detach();
@@ -3174,6 +3189,12 @@ fn drop_preview_bounds(slot: Bounds<Pixels>, zone: DropZone, divider: Pixels) ->
             gpui::size(pane.size.width, half_height - divider),
         ),
     }
+}
+
+/// Toast tag for a daemon-timed message, so an explicit clear retires exactly
+/// the toast that message raised.
+fn timed_message_key(message_id: u64) -> String {
+    format!("timed-message-{message_id}")
 }
 
 fn take_pane_drag(state: &mut Option<PaneDragState>) -> Option<PaneId> {

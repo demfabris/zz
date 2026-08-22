@@ -1,4 +1,8 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use zz_client::ClientCore;
 use zz_daemon::{Endpoint, HostEntry};
@@ -25,6 +29,37 @@ pub(crate) struct HostSwitch {
     pub endpoint: Endpoint,
 }
 
+/// One status-line message. Daemon-timed messages carry the `message_id` the
+/// daemon can retire them by and the duration it published; messages the TUI
+/// raises itself carry neither and stay up until something replaces them.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ClientMessage {
+    pub text: String,
+    pub id: Option<u64>,
+    pub expires_at: Option<Instant>,
+}
+
+impl ClientMessage {
+    pub fn local(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            id: None,
+            expires_at: None,
+        }
+    }
+
+    /// A zero duration is the pin's `delay == 0`: no timer, dismissed by a key.
+    pub fn timed(text: String, id: Option<u64>, duration_ms: Option<u32>, now: Instant) -> Self {
+        Self {
+            text,
+            id,
+            expires_at: duration_ms
+                .filter(|duration_ms| *duration_ms != 0)
+                .map(|duration_ms| now + Duration::from_millis(u64::from(duration_ms))),
+        }
+    }
+}
+
 /// Presentation state plus cheap caches of the reduced protocol state that
 /// [`ClientCore`] owns. Caches are refreshed from the core when its events
 /// arrive so painting and input never take the core lock.
@@ -42,7 +77,7 @@ pub(crate) struct Model {
     pub choose_tree: Option<ChooseTreeState>,
     pub choose_buffer: Option<ChooseBufferState>,
     pub display_panes: Option<DisplayPanesState>,
-    pub client_message: Option<String>,
+    pub client_message: Option<ClientMessage>,
     pub chrome: zz_client::ChromeKeymap,
     pub sidebar: sidebar::State,
     pub sidebar_edit: Option<SidebarEdit>,
@@ -188,6 +223,41 @@ impl Model {
             0
         };
         (x, self.size.columns.saturating_sub(x))
+    }
+
+    /// Drop the message once its published duration has run out. The daemon
+    /// owns the authoritative timer for `display-message` and clears by
+    /// identity; this covers the producers that publish only a duration.
+    pub fn expire_client_message(&mut self, now: Instant) -> bool {
+        let expired = self
+            .client_message
+            .as_ref()
+            .and_then(|message| message.expires_at)
+            .is_some_and(|expires_at| expires_at <= now);
+        if expired {
+            self.client_message = None;
+        }
+        expired
+    }
+
+    /// Retire a message the daemon cleared, but only while the identity still
+    /// matches what is on screen: an old timer must never take down the
+    /// message that replaced it.
+    pub fn clear_client_message(&mut self, message_id: u64) -> bool {
+        let matches = self
+            .client_message
+            .as_ref()
+            .is_some_and(|message| message.id == Some(message_id));
+        if matches {
+            self.client_message = None;
+        }
+        matches
+    }
+
+    pub fn client_message_deadline(&self) -> Option<Instant> {
+        self.client_message
+            .as_ref()
+            .and_then(|message| message.expires_at)
     }
 
     /// The screen row client messages and the command prompt replace: the
@@ -537,6 +607,58 @@ mod tests {
         }
     }
 
+    /// Two retirement paths, one rule: a message goes away on its own duration
+    /// or on a clear whose identity still matches. A stale clear must not take
+    /// down the message that replaced it, and the TUI must stop pinning timed
+    /// messages forever.
+    #[test]
+    fn a_timed_message_expires_on_its_duration_and_clears_only_by_identity() {
+        let mut model = make_model(80, 24);
+        let start = Instant::now();
+
+        model.client_message = Some(ClientMessage::timed(
+            "first".to_owned(),
+            Some(7),
+            Some(750),
+            start,
+        ));
+        assert_eq!(
+            model.client_message_deadline(),
+            Some(start + Duration::from_millis(750))
+        );
+        assert!(!model.expire_client_message(start + Duration::from_millis(749)));
+        assert!(model.client_message.is_some());
+        assert!(model.expire_client_message(start + Duration::from_millis(750)));
+        assert!(model.client_message.is_none());
+
+        model.client_message = Some(ClientMessage::timed(
+            "second".to_owned(),
+            Some(8),
+            Some(750),
+            start,
+        ));
+        assert!(!model.clear_client_message(7));
+        assert!(model.client_message.is_some());
+        assert!(model.clear_client_message(8));
+        assert!(model.client_message.is_none());
+
+        model.client_message = Some(ClientMessage::timed(
+            "pinned".to_owned(),
+            Some(9),
+            Some(0),
+            start,
+        ));
+        assert_eq!(model.client_message_deadline(), None);
+        assert!(!model.expire_client_message(start + Duration::from_hours(1)));
+        assert!(model.clear_client_message(9));
+
+        model.client_message = Some(ClientMessage::local("local"));
+        assert_eq!(model.client_message_deadline(), None);
+        assert!(!model.expire_client_message(start + Duration::from_hours(1)));
+        assert!(!model.clear_client_message(9));
+        assert!(model.client_message.is_some());
+    }
+
     #[test]
     fn status_rows_change_geometry_and_report_a_layout_event() {
         let mut model = make_model(79, 24);
@@ -577,7 +699,7 @@ mod tests {
 
         model.set_status(StatusLine::default());
         assert_eq!(model.message_row_y(), None);
-        model.client_message = Some("hi".to_owned());
+        model.client_message = Some(ClientMessage::local("hi"));
         assert_eq!(model.message_row_y(), Some(23));
         model.status.position = StatusPosition::Top;
         assert_eq!(model.message_row_y(), Some(0));

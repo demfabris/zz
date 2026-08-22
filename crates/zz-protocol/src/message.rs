@@ -2048,8 +2048,10 @@ pub enum EventPayload {
         pane: Option<PaneId>,
         value: String,
     },
-    /// The daemon explicitly retired the identified timed message before its
-    /// duration elapsed. Nothing emits this yet.
+    /// The daemon retired the identified timed message: its duration ran out,
+    /// or a key dismissed it. Surfaces drop the message only while the identity
+    /// still matches what they are showing, so a retired message's timer can
+    /// never take down the message that replaced it.
     TimedClientMessageCleared {
         message_id: u64,
     },

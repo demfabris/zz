@@ -210,7 +210,9 @@ The daemon is thread-per-connection with dedicated writer and per-pane watcher t
 | `zz-client-writer-{id}` | `handle_connection` | Drain that client's `OutboundMailbox` via `write_outbound`, write framed bytes to the stream |
 | `zz-pane-{n}` | `watch_terminal` | Consume one `TerminalSession`'s events, revalidate actor identity, persist changed OSC titles, diff viewports, fan out |
 | `zz-output-{id}` | `watch_command_output` | Stream one client's command-output-view terminal events |
-| `zz-display-panes-{id}` | `watch_display_panes_timeout` | Time out one client's `display-panes` overlay |
+| `zz-display-panes` | `start_display_panes_deadline_dispatcher` | One deadline per client: time out `display-panes` overlays, token-validated against `ServerState.display_panes` |
+| `zz-monitor-silence` | `start_silence_deadline_dispatcher` | One deadline per window: fire `monitor-silence` alerts and re-arm, whole-struct-validated against `ServerState.silence_deadlines` |
+| `zz-client-message` | `start_client_message_deadline_dispatcher` | One deadline per client: retire that client's `display-message` status message, token-validated against `ServerState.client_messages` |
 | `zz-daemon-diagnostics` | `start_diagnostic_sampler` | Periodic state snapshot logging (only when trace logging is on) |
 | `zz-daemon-status` | `start_status_sampler` | Re-render the [status line](/tmux/status-line.md) every `status-interval`, re-running its `#()` commands |
 | `zz-daemon-signals` (Unix) | `DaemonSignalGuard` | Wait for `SIGTERM`/`SIGINT` or ordinary shutdown cancellation, then request the same graceful stop as `kill-server` |
@@ -273,8 +275,15 @@ A `zz-pane-{n}` watcher walks the pane's per-view viewports (`TerminalViewId(cli
 attached client), diffs each against that view's previous viewport, and produces either a full
 `EventPayload::TerminalViewport` or a smaller `EventPayload::TerminalPatch`. It calls
 `publish_terminal_for_pane` per view, which delivers **only to a client attached to the session that
-owns the pane and only while the pane is visible to that client** (`visible_terminals`, honoring its
-focused window and zoom). `enqueue_terminal` validates that a patch's base generation matches the
+owns the pane, only while the pane is visible to that client** (`visible_terminals`, honoring its
+focused window and zoom), **and only while that client is not frozen**. The freeze is the whole
+mechanism behind an ordinary [`display-message`](/tmux/commands.md): while
+`ServerState.client_messages` holds a frozen record for the client, this one gate drops the frame
+and nothing else changes — the PTY keeps parsing, the watcher keeps diffing, the mux model and the
+pane-mode hooks stay live, and only this client stops receiving. It is the zz analogue of the pin's
+`TTY_FREEZE` making `tty_client_ready` return 0. Retiring a frozen message publishes one full
+latest viewport per visible pane through `send_full` before patches resume, matching
+`status_message_clear`'s `CLIENT_ALLREDRAWFLAGS`. `enqueue_terminal` validates that a patch's base generation matches the
 last delivered
 generation (`delivered_terminals`); a mismatch returns `NeedsFull` and the patch is promoted to a
 full viewport via `replace_terminal`. Completed frame buffers are recycled (bounded pool:

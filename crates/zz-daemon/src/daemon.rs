@@ -474,6 +474,45 @@ fn schedule_window_silence(inner: &mut ServerState, window: WindowId) -> Option<
     Some(arm_silence_deadline(inner, window, seconds))
 }
 
+/// The pin's `status_message_set`: replace whatever the client was showing,
+/// arm a timer only for a positive delay (zero waits for a key), and raise the
+/// freeze unless `display-message -C` asked for `no_freeze`.
+fn arm_client_message(
+    inner: &mut ServerState,
+    client: ClientId,
+    token: u64,
+    duration_ms: u32,
+    freeze: bool,
+) -> (Option<ActiveClientMessage>, Option<ClientMessageDeadline>) {
+    let deadline =
+        (duration_ms != 0).then(|| Instant::now() + Duration::from_millis(u64::from(duration_ms)));
+    let previous = inner.client_messages.insert(
+        client,
+        ActiveClientMessage {
+            token,
+            deadline,
+            freeze,
+        },
+    );
+    let schedule = deadline.map(|deadline| ClientMessageDeadline {
+        client,
+        token,
+        deadline,
+    });
+    (previous, schedule)
+}
+
+fn take_client_message(inner: &mut ServerState, client: ClientId) -> Option<ActiveClientMessage> {
+    inner.client_messages.remove(&client)
+}
+
+fn client_terminal_publication_frozen(inner: &ServerState, client: ClientId) -> bool {
+    inner
+        .client_messages
+        .get(&client)
+        .is_some_and(|message| message.freeze)
+}
+
 fn push_server_message(inner: &mut ServerState, text: String) -> u64 {
     let number = inner.next_message_number;
     inner.next_message_number = inner.next_message_number.wrapping_add(1);
@@ -2115,6 +2154,9 @@ struct Shared {
         Mutex<Option<crossbeam_channel::Receiver<DisplayPanesDeadlineCommand>>>,
     silence_deadline_tx: crossbeam_channel::Sender<SilenceDeadlineCommand>,
     silence_deadline_rx: Mutex<Option<crossbeam_channel::Receiver<SilenceDeadlineCommand>>>,
+    client_message_deadline_tx: crossbeam_channel::Sender<ClientMessageDeadlineCommand>,
+    client_message_deadline_rx:
+        Mutex<Option<crossbeam_channel::Receiver<ClientMessageDeadlineCommand>>>,
     stopping: AtomicBool,
     startup_ready: Mutex<bool>,
     startup_changed: Condvar,
@@ -2596,6 +2638,28 @@ enum SilenceDeadlineCommand {
     Cancel { window: WindowId, token: u64 },
 }
 
+/// One client's live status message: the pin's `c->message_string` plus
+/// `c->message_timer` and the `TTY_FREEZE` bit `status_message_set` raises,
+/// keyed by the `message_id` the client already received.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ActiveClientMessage {
+    token: u64,
+    deadline: Option<Instant>,
+    freeze: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ClientMessageDeadline {
+    client: ClientId,
+    token: u64,
+    deadline: Instant,
+}
+
+enum ClientMessageDeadlineCommand {
+    Schedule(ClientMessageDeadline),
+    Cancel { client: ClientId, token: u64 },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct KittyImageKey {
     pane: PaneId,
@@ -2898,6 +2962,8 @@ impl Shared {
         }
         let (display_panes_deadline_tx, display_panes_deadline_rx) = crossbeam_channel::unbounded();
         let (silence_deadline_tx, silence_deadline_rx) = crossbeam_channel::unbounded();
+        let (client_message_deadline_tx, client_message_deadline_rx) =
+            crossbeam_channel::unbounded();
         Self {
             inner: Mutex::new(state),
             pipe_effects: Mutex::new(()),
@@ -2914,6 +2980,8 @@ impl Shared {
             display_panes_deadline_rx: Mutex::new(Some(display_panes_deadline_rx)),
             silence_deadline_tx,
             silence_deadline_rx: Mutex::new(Some(silence_deadline_rx)),
+            client_message_deadline_tx,
+            client_message_deadline_rx: Mutex::new(Some(client_message_deadline_rx)),
             stopping: AtomicBool::new(false),
             startup_ready: Mutex::new(true),
             startup_changed: Condvar::new(),
@@ -2963,6 +3031,7 @@ impl Shared {
     ) -> Result<(), DaemonError> {
         self.start_display_panes_deadline_dispatcher()?;
         self.start_silence_deadline_dispatcher()?;
+        self.start_client_message_deadline_dispatcher()?;
         let mut context = ExecutionContext::default();
         if load_user_config {
             if let Some(configs) = mux_config_files {
@@ -3144,6 +3213,90 @@ impl Shared {
                                 .is_some_and(|deadline| deadline.token == token)
                             {
                                 deadlines.remove(&window);
+                            }
+                        }
+                    }
+                }
+            })
+            .map_err(|error| DaemonError::Thread(error.to_string()))?;
+        ready_rx
+            .recv()
+            .map_err(|error| DaemonError::Thread(error.to_string()))
+    }
+
+    /// Owns the pin's per-client `message_timer`. Keyed per client and
+    /// token-validated on both schedule and expiry so a retired message's
+    /// deadline can never retire the message that replaced it.
+    fn start_client_message_deadline_dispatcher(self: &Arc<Self>) -> Result<(), DaemonError> {
+        let Some(receiver) = self.client_message_deadline_rx.lock().take() else {
+            return Ok(());
+        };
+        let shared = Arc::downgrade(self);
+        let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
+        thread::Builder::new()
+            .name("zz-client-message".to_owned())
+            .spawn(move || {
+                if ready_tx.send(()).is_err() {
+                    return;
+                }
+                let mut deadlines = BTreeMap::<ClientId, ClientMessageDeadline>::new();
+                loop {
+                    let next = deadlines
+                        .values()
+                        .min_by_key(|deadline| deadline.deadline)
+                        .copied();
+                    let command = if let Some(next) = next {
+                        let now = Instant::now();
+                        if next.deadline <= now {
+                            deadlines.remove(&next.client);
+                            let Some(shared) = shared.upgrade() else {
+                                return;
+                            };
+                            shared.expire_client_message(next, now);
+                            continue;
+                        }
+                        match receiver.recv_deadline(next.deadline) {
+                            Ok(command) => command,
+                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                                deadlines.remove(&next.client);
+                                let Some(shared) = shared.upgrade() else {
+                                    return;
+                                };
+                                shared.expire_client_message(next, Instant::now());
+                                continue;
+                            }
+                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
+                        }
+                    } else {
+                        let Ok(command) = receiver.recv() else {
+                            return;
+                        };
+                        command
+                    };
+                    match command {
+                        ClientMessageDeadlineCommand::Schedule(deadline) => {
+                            let Some(shared) = shared.upgrade() else {
+                                return;
+                            };
+                            if shared
+                                .inner
+                                .lock()
+                                .client_messages
+                                .get(&deadline.client)
+                                .is_some_and(|current| {
+                                    current.token == deadline.token
+                                        && current.deadline == Some(deadline.deadline)
+                                })
+                            {
+                                deadlines.insert(deadline.client, deadline);
+                            }
+                        }
+                        ClientMessageDeadlineCommand::Cancel { client, token } => {
+                            if deadlines
+                                .get(&client)
+                                .is_some_and(|deadline| deadline.token == token)
+                            {
+                                deadlines.remove(&client);
                             }
                         }
                     }
@@ -4209,6 +4362,8 @@ impl Shared {
         let mut pipes_to_close = Vec::new();
         let mut pipe_taps_to_rearm = Vec::new();
         let mut display_panes_deadline = None;
+        let mut client_message_retires = Vec::new();
+        let mut client_message_schedule = None;
         let mut activity_requeues = Vec::new();
         let mut silence_schedules = Vec::new();
         let mut monitor_silence_changed = false;
@@ -5131,6 +5286,7 @@ impl Shared {
                         pane,
                         text,
                         duration_ms,
+                        freeze,
                     } => {
                         push_server_message(&mut inner, text.clone());
                         let message_id = next_timed_message_id(&mut inner);
@@ -5141,6 +5297,17 @@ impl Shared {
                             duration_ms: *duration_ms,
                             message_id,
                         });
+                        if inner.client_kinds.get(&client) == Some(&ClientKind::Interactive) {
+                            let (previous, schedule) = arm_client_message(
+                                &mut inner,
+                                client,
+                                message_id,
+                                *duration_ms,
+                                *freeze,
+                            );
+                            client_message_retires.extend(previous);
+                            client_message_schedule = schedule;
+                        }
                     }
                     MuxEffect::BufferLimitChanged(limit) => {
                         inner.automatic_paste_buffer_limit = AutomaticPasteBufferLimit(*limit);
@@ -5535,6 +5702,14 @@ impl Shared {
         }
         for event in direct_events {
             self.publish_to_client(client, event);
+        }
+        for retired in client_message_retires {
+            self.retire_client_message(client, retired, false);
+        }
+        if let Some(deadline) = client_message_schedule {
+            let _ = self
+                .client_message_deadline_tx
+                .send(ClientMessageDeadlineCommand::Schedule(deadline));
         }
         if let Some(deadline) = display_panes_deadline {
             self.display_panes_deadline_tx
@@ -9309,6 +9484,16 @@ impl Shared {
         inner.choose_trees.remove(&client);
         inner.choose_buffers.remove(&client);
         let _ = take_display_panes(&mut inner, client);
+        if let Some(message) = take_client_message(&mut inner, client)
+            && message.deadline.is_some()
+        {
+            let _ =
+                self.client_message_deadline_tx
+                    .try_send(ClientMessageDeadlineCommand::Cancel {
+                        client,
+                        token: message.token,
+                    });
+        }
         let command_output = take_command_output(&mut inner, client);
         let popup = take_popup(&mut inner, client);
         let menu = inner.menus.remove(&client);
@@ -9393,7 +9578,7 @@ impl Shared {
             target: "zz_daemon::diagnostics::input",
             "dispatch begin client={client} kind={kind:?} context={context:#?} input={input:#?}"
         );
-        {
+        let dismisses_message = {
             let inner = self.inner.lock();
             if inner.read_only_clients.contains(&client) && read_only_blocks_input(&input) {
                 return Ok(());
@@ -9401,6 +9586,12 @@ impl Shared {
             if terminal_mouse_rejected(&inner, client, &input) {
                 return Ok(());
             }
+            inner.client_messages.contains_key(&client)
+                && !inner.read_only_clients.contains(&client)
+                && input_dismisses_client_message(&input)
+        };
+        if dismisses_message {
+            self.dismiss_client_message(client);
         }
         let generation = self.inner.lock().engine.state.generation();
         let resize_split = matches!(&input, InputMessage::ResizeSplit { .. });
@@ -13469,6 +13660,7 @@ impl Shared {
                             .get(&client)
                             .is_some_and(|visible| visible.contains(&pane))
                 })
+                .filter(|_| !client_terminal_publication_frozen(&inner, client))
                 .and_then(|_| inner.subscribers.get(&client).cloned());
             let mode_event = mode_changed
                 .then(|| MuxHookSnapshot::capture(&inner.engine))
@@ -13659,6 +13851,87 @@ impl Shared {
         if let Some(hook) = hook {
             self.run_event_hooks(vec![hook]);
         }
+    }
+
+    /// The pin's `status_message_clear`: drop the record, cancel its timer, and
+    /// when the client was frozen publish one full latest viewport before
+    /// patches resume — `CLIENT_ALLREDRAWFLAGS`, "was frozen and may have
+    /// changed". `notify` carries the wire clear; a message that is being
+    /// replaced does not get one because the replacement already retires it.
+    fn retire_client_message(
+        self: &Arc<Self>,
+        client: ClientId,
+        retired: ActiveClientMessage,
+        notify: bool,
+    ) {
+        if retired.deadline.is_some() {
+            let _ = self
+                .client_message_deadline_tx
+                .send(ClientMessageDeadlineCommand::Cancel {
+                    client,
+                    token: retired.token,
+                });
+        }
+        if notify {
+            self.publish_to_client(
+                client,
+                EventPayload::TimedClientMessageCleared {
+                    message_id: retired.token,
+                },
+            );
+        }
+        if retired.freeze {
+            self.resume_client_terminals(client);
+        }
+    }
+
+    fn resume_client_terminals(self: &Arc<Self>, client: ClientId) {
+        let (outbound, panes) = {
+            let inner = self.inner.lock();
+            let Some(outbound) = inner.subscribers.get(&client).cloned() else {
+                return;
+            };
+            let panes = client_attached_session(&inner, client)
+                .map(|session| visible_terminal_panes(&inner, client, session))
+                .unwrap_or_default();
+            (outbound, panes)
+        };
+        for pane in panes {
+            self.send_full(client, pane, &outbound);
+        }
+    }
+
+    fn expire_client_message(self: &Arc<Self>, scheduled: ClientMessageDeadline, now: Instant) {
+        let retired = {
+            let mut inner = self.inner.lock();
+            let due = inner
+                .client_messages
+                .get(&scheduled.client)
+                .is_some_and(|current| {
+                    current.token == scheduled.token
+                        && current.deadline == Some(scheduled.deadline)
+                        && scheduled.deadline <= now
+                });
+            if !due {
+                return;
+            }
+            take_client_message(&mut inner, scheduled.client)
+        };
+        if let Some(retired) = retired {
+            self.retire_client_message(scheduled.client, retired, true);
+        }
+    }
+
+    /// The pin's `server_client_handle_key0`: a key press clears the message and
+    /// then goes on to be processed normally.
+    fn dismiss_client_message(self: &Arc<Self>, client: ClientId) {
+        let Some(retired) = ({
+            let mut inner = self.inner.lock();
+            take_client_message(&mut inner, client)
+        }) else {
+            return;
+        };
+        self.retire_client_message(client, retired, true);
     }
 
     fn expire_window_silence(self: &Arc<Self>, scheduled: SilenceDeadline, now: Instant) {
@@ -15273,6 +15546,7 @@ struct ServerState {
     display_panes: BTreeMap<ClientId, DisplayPanesSession>,
     silence_deadlines: BTreeMap<WindowId, SilenceDeadline>,
     next_silence_token: u64,
+    client_messages: BTreeMap<ClientId, ActiveClientMessage>,
     popups: BTreeMap<ClientId, PopupSession>,
     menus: BTreeMap<ClientId, MenuSession>,
     confirms: BTreeMap<ClientId, ConfirmSession>,
@@ -19237,6 +19511,20 @@ const READ_ONLY_SAFE_COMMANDS: &[&str] = &[
 
 fn command_is_read_only_safe(command: &CommandInvocation) -> bool {
     READ_ONLY_SAFE_COMMANDS.contains(&canonical_command(&command.name))
+}
+
+/// The pin retires a status message on the key presses that reach
+/// `server_client_handle_key0`, and read-only clients skip that whole block.
+///
+/// Only `Key` counts. zz splits one physical press into `Key` plus an optional
+/// trailing `Text`, and a binding that ran `display-message` suppresses that
+/// text later, in `input_text` — so letting `Text` dismiss would let a bound
+/// key's own trailing character wipe the message it had just raised.
+fn input_dismisses_client_message(input: &InputMessage) -> bool {
+    match input {
+        InputMessage::Key { input, .. } => input.action != zz_terminal::KeyAction::Release,
+        _ => false,
+    }
 }
 
 fn read_only_blocks_input(input: &InputMessage) -> bool {
@@ -26751,6 +27039,393 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(ids, [1, 2]);
+    }
+
+    fn armed_client_message(shared: &Arc<Shared>, client: ClientId) -> ActiveClientMessage {
+        shared.inner.lock().client_messages[&client]
+    }
+
+    fn cleared_message_ids(messages: &[ProtocolMessage]) -> Vec<u64> {
+        messages
+            .iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::TimedClientMessageCleared { message_id },
+                    ..
+                }) => Some(*message_id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The pin re-arms one `c->message_timer` per client, so a replaced
+    /// message's timer is deleted outright. zz cannot delete across a channel,
+    /// so identity has to do the same job: the stale deadline must be inert.
+    #[test]
+    fn a_replaced_message_survives_the_deadline_it_replaced() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("display-message", ["-d", "5000", "first"]),
+            )
+            .expect("first message");
+        let first = armed_client_message(&shared, client);
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("display-message", ["-d", "5000", "second"]),
+            )
+            .expect("second message");
+        let second = armed_client_message(&shared, client);
+        assert_ne!(first.token, second.token);
+        take_reliable_messages(&mailbox);
+
+        let stale = ClientMessageDeadline {
+            client,
+            token: first.token,
+            deadline: first.deadline.expect("first message armed a deadline"),
+        };
+        shared.expire_client_message(stale, Instant::now());
+        assert_eq!(armed_client_message(&shared, client), second);
+        assert!(cleared_message_ids(&take_reliable_messages(&mailbox)).is_empty());
+
+        let live = ClientMessageDeadline {
+            client,
+            token: second.token,
+            deadline: second.deadline.expect("second message armed a deadline"),
+        };
+        shared.expire_client_message(live, live.deadline);
+        assert!(!shared.inner.lock().client_messages.contains_key(&client));
+        assert_eq!(
+            cleared_message_ids(&take_reliable_messages(&mailbox)),
+            vec![second.token]
+        );
+    }
+
+    /// Two clients, one session, one message: the pin raises `TTY_FREEZE` on
+    /// `c->tty` alone, so only the requesting client stops receiving frames.
+    #[test]
+    fn an_ordinary_message_freezes_only_the_requesting_client() {
+        let shared = Arc::new(Shared::new(1));
+        let frozen_mailbox = OutboundMailbox::new();
+        let live_mailbox = OutboundMailbox::new();
+        let (frozen, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&frozen_mailbox),
+        );
+        let (live, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&live_mailbox),
+        );
+        let (session, pane, terminal) =
+            attached_message_fixture(&shared, "freeze", &[frozen, live]);
+
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        shared
+            .execute(
+                frozen,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "5000", "frozen"]),
+            )
+            .expect("display message");
+        let armed = armed_client_message(&shared, frozen);
+        assert!(armed.freeze);
+        {
+            let inner = shared.inner.lock();
+            assert!(client_terminal_publication_frozen(&inner, frozen));
+            assert!(!client_terminal_publication_frozen(&inner, live));
+        }
+
+        let viewport = terminal
+            .latest_viewport_for(TerminalViewId(frozen.0))
+            .unwrap_or_else(|| terminal.latest_viewport());
+        drain_terminal_lane(&frozen_mailbox);
+        drain_terminal_lane(&live_mailbox);
+        shared.publish_terminal_for_pane(pane, frozen, TerminalFanout::Full, &viewport, &terminal);
+        shared.publish_terminal_for_pane(pane, live, TerminalFanout::Full, &viewport, &terminal);
+        assert!(frozen_mailbox.state.lock().terminals.is_empty());
+        assert!(live_mailbox.state.lock().terminals.contains_key(&pane));
+
+        drain_terminal_lane(&frozen_mailbox);
+        take_reliable_messages(&frozen_mailbox);
+        let live_deadline = ClientMessageDeadline {
+            client: frozen,
+            token: armed.token,
+            deadline: armed.deadline.expect("armed deadline"),
+        };
+        shared.expire_client_message(live_deadline, live_deadline.deadline);
+        assert_eq!(
+            cleared_message_ids(&take_reliable_messages(&frozen_mailbox)),
+            vec![armed.token]
+        );
+        assert!(
+            frozen_mailbox.state.lock().terminals.contains_key(&pane),
+            "clearing a frozen message publishes one full latest viewport"
+        );
+        assert!(!client_terminal_publication_frozen(
+            &shared.inner.lock(),
+            frozen
+        ));
+
+        drain_terminal_lane(&frozen_mailbox);
+        shared.publish_terminal_for_pane(pane, frozen, TerminalFanout::Full, &viewport, &terminal);
+        assert!(frozen_mailbox.state.lock().terminals.contains_key(&pane));
+        let _ = session;
+    }
+
+    /// `display-message -C` is the pin's `no_freeze` argument: the message and
+    /// its timer are unchanged, only the freeze is skipped.
+    #[test]
+    fn display_message_dash_c_never_freezes_and_still_times_out() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, terminal) = attached_message_fixture(&shared, "no-freeze", &[client]);
+
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-C", "-d", "5000", "flowing"]),
+            )
+            .expect("display message");
+        let armed = armed_client_message(&shared, client);
+        assert!(!armed.freeze);
+        assert!(armed.deadline.is_some());
+        assert!(!client_terminal_publication_frozen(
+            &shared.inner.lock(),
+            client
+        ));
+
+        let viewport = terminal
+            .latest_viewport_for(TerminalViewId(client.0))
+            .unwrap_or_else(|| terminal.latest_viewport());
+        drain_terminal_lane(&mailbox);
+        shared.publish_terminal_for_pane(pane, client, TerminalFanout::Full, &viewport, &terminal);
+        assert!(mailbox.state.lock().terminals.contains_key(&pane));
+    }
+
+    /// The pin's `delay == 0` installs no timer at all and waits for a key.
+    #[test]
+    fn a_zero_duration_message_installs_no_timer_and_a_key_clears_it() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "zero-delay", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "0", "pinned"]),
+            )
+            .expect("display message");
+        let armed = armed_client_message(&shared, client);
+        assert_eq!(armed.deadline, None);
+        assert!(armed.freeze);
+        take_reliable_messages(&mailbox);
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: chooser_key_press("q"),
+                    text_follows: false,
+                },
+            )
+            .expect("deliver key");
+        assert!(!shared.inner.lock().client_messages.contains_key(&client));
+        assert_eq!(
+            cleared_message_ids(&take_reliable_messages(&mailbox)),
+            vec![armed.token]
+        );
+    }
+
+    /// zz splits one physical press into `Key` plus a trailing `Text`, and the
+    /// suppression of that text happens later, in `input_text`. So a key bound
+    /// to `display-message` must not have its own trailing character wipe the
+    /// message it just raised.
+    #[test]
+    fn a_bound_key_that_displays_a_message_survives_its_own_trailing_text() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "bound-key", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    ["-n", "d", "display-message", "-d", "5000", "bound"],
+                ),
+            )
+            .expect("bind the key");
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: chooser_key_press("d"),
+                    text_follows: true,
+                },
+            )
+            .expect("press the bound key");
+        let armed = armed_client_message(&shared, client);
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane,
+                    text: "d".to_owned(),
+                },
+            )
+            .expect("deliver the trailing text");
+        assert_eq!(armed_client_message(&shared, client), armed);
+    }
+
+    /// No deadline may outlive its client: detaching drops the record so the
+    /// dispatcher's entry can never fire against a gone client.
+    #[test]
+    fn detaching_drops_the_message_and_its_deadline_stays_inert() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "detach-message", &[client]);
+
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "5000", "going"]),
+            )
+            .expect("display message");
+        let armed = armed_client_message(&shared, client);
+        shared.detach(client);
+        assert!(!shared.inner.lock().client_messages.contains_key(&client));
+        take_reliable_messages(&mailbox);
+
+        shared.expire_client_message(
+            ClientMessageDeadline {
+                client,
+                token: armed.token,
+                deadline: armed.deadline.expect("armed deadline"),
+            },
+            Instant::now(),
+        );
+        assert!(cleared_message_ids(&take_reliable_messages(&mailbox)).is_empty());
+    }
+
+    /// A control client takes the pin's `server_client_print` branch and never
+    /// reaches `status_message_set`, so it gets `%message` and nothing else.
+    #[test]
+    fn a_control_client_gets_no_timer_and_no_freeze() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Control,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("display-message", ["-d", "5000", "control"]),
+            )
+            .expect("display message");
+        assert!(!shared.inner.lock().client_messages.contains_key(&client));
+    }
+
+    fn attached_message_fixture(
+        shared: &Arc<Shared>,
+        name: &str,
+        clients: &[ClientId],
+    ) -> (SessionId, PaneId, Arc<TerminalSession>) {
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", name]),
+            )
+            .expect("create message session");
+        let session = context.session.expect("message session");
+        let pane = context.pane.expect("message pane");
+        for client in clients {
+            shared.attach(*client, session).expect("attach client");
+        }
+        let deadline = Instant::now() + Duration::from_secs(30);
+        for client in clients {
+            loop {
+                let ready = shared.inner.lock().terminals[&pane]
+                    .latest_viewport_for(TerminalViewId(client.0))
+                    .is_some();
+                if ready {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "terminal {pane} did not publish its attached viewport"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        (session, pane, terminal)
+    }
+
+    fn drain_terminal_lane(mailbox: &OutboundMailbox) {
+        let mut state = mailbox.state.lock();
+        let bytes = state
+            .terminals
+            .values()
+            .map(|pending| pending.encoded.len())
+            .sum::<usize>();
+        state.queued_bytes = state.queued_bytes.saturating_sub(bytes);
+        state.terminals.clear();
+        state.terminal_order.clear();
     }
 
     fn two_session_pair(

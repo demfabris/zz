@@ -1413,7 +1413,12 @@ fn sidebar_status_lines(model: &Model) -> Vec<StyledLine> {
         ' ',
     );
     let message = combine_status(
-        &StyledLine::plain(model.client_message.as_deref().unwrap_or_default()),
+        &StyledLine::plain(
+            model
+                .client_message
+                .as_ref()
+                .map_or("", |message| message.text.as_str()),
+        ),
         &StyledLine::plain(if model.status.customized {
             ""
         } else {
@@ -1444,7 +1449,7 @@ fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
     }
     if let Some(message) = &model.client_message {
         let mut line = StyledLine::default();
-        line.push_segment(&padded_segment(message, width, ' '), style);
+        line.push_segment(&padded_segment(&message.text, width, ' '), style);
         return Some(StatusOverlay::Row(line));
     }
     let mut right = status_indicators(model);
@@ -1837,6 +1842,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::state::ClientMessage;
     use zz_terminal::{CellWidth, SessionStatus, TerminalDictionary};
 
     fn styled_viewport() -> TerminalViewport {
@@ -2049,7 +2055,7 @@ mod tests {
         let mut status = block_status(vec!["ROWZERO", "ROWONE"], true);
         status.message_line = 1;
         model.set_status(status);
-        model.client_message = Some("hello message".to_owned());
+        model.client_message = Some(ClientMessage::local("hello message"));
         let mut renderer = Renderer::new();
         renderer.paint_status_block(&model, true);
         let output = String::from_utf8(renderer.output).unwrap();
@@ -2083,7 +2089,7 @@ mod tests {
             customized: true,
             ..zz_protocol::StatusLine::default()
         });
-        model.client_message = Some("virtual".to_owned());
+        model.client_message = Some(ClientMessage::local("virtual"));
         let mut renderer = Renderer::new();
         renderer.paint_status_block(&model, true);
         let output = String::from_utf8(renderer.output).unwrap();

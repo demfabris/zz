@@ -20,7 +20,7 @@ use crate::{
     layout::Rect,
     picker::{self, Action as PickerAction},
     sidebar::{self, EditKind as SidebarEditKind, Target as SidebarTarget},
-    state::{HostSwitch, Model},
+    state::{ClientMessage, HostSwitch, Model},
     terminal_event::{
         Event as TerminalEvent, KeyCode as TerminalKeyCode, KeyEvent, KeyEventKind, KeyModifiers,
         MouseButton, MouseEvent, MouseEventKind,
@@ -369,24 +369,28 @@ fn commit_sidebar_edit(model: &mut Model, client: &InteractiveClient) -> Result<
             let (name, endpoint) = match parse_add_host_input(&buffer) {
                 Ok(parsed) => parsed,
                 Err(error) => {
-                    model.client_message = Some(error);
+                    model.client_message = Some(ClientMessage::local(error));
                     return Ok(());
                 }
             };
             if let Err(error) = write_fleet_host(&name, &endpoint) {
-                model.client_message = Some(format!("could not write zz/config: {error}"));
+                model.client_message = Some(ClientMessage::local(format!(
+                    "could not write zz/config: {error}"
+                )));
                 return Ok(());
             }
             let (hosts, _) = match configured_fleet_hosts() {
                 Ok(configured) => configured,
                 Err(error) => {
-                    model.client_message = Some(format!("could not read zz/config: {error}"));
+                    model.client_message = Some(ClientMessage::local(format!(
+                        "could not read zz/config: {error}"
+                    )));
                     return Ok(());
                 }
             };
             model.refresh_fleet_hosts(hosts);
             model.sidebar_edit = None;
-            model.client_message = Some(format!("host {name} added"));
+            model.client_message = Some(ClientMessage::local(format!("host {name} added")));
         }
     }
     Ok(())

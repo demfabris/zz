@@ -365,6 +365,176 @@ mod daemon_autostart {
         assert!(listed.stderr.is_empty());
     }
 
+    fn source_directory(fixture: &Fixture, name: &str) -> PathBuf {
+        let directory = fixture.config.with_file_name(name);
+        std::fs::create_dir_all(&directory).expect("source fixture directory");
+        directory
+    }
+
+    fn write_source(directory: &Path, name: &str, body: &str) -> String {
+        let path = directory.join(name);
+        std::fs::write(&path, body).expect("write source fixture");
+        path.to_str().expect("UTF-8 source fixture path").to_owned()
+    }
+
+    #[test]
+    fn source_file_diagnostics_split_stdout_stderr_and_the_exit_code() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert_eq!(
+            fixture
+                .run(&["new-session", "-d", "-s", "diagnostics"])
+                .status
+                .code(),
+            Some(0)
+        );
+        let directory = source_directory(&fixture, "diagnostics");
+        let bad = write_source(&directory, "bad.conf", "wibble\n");
+        let missing = directory
+            .join("missing.conf")
+            .to_str()
+            .expect("UTF-8 missing path")
+            .to_owned();
+
+        let pattern = directory.join("bad*.conf");
+        let globbed = fixture.run(&[
+            "source-file",
+            pattern.to_str().expect("UTF-8 source glob pattern"),
+        ]);
+        assert_eq!(globbed.status.code(), Some(1));
+        assert_eq!(
+            globbed.stdout,
+            format!("{bad}:1: unknown command: wibble\n").into_bytes()
+        );
+        assert!(globbed.stderr.is_empty());
+
+        let quiet_miss = fixture.run(&["source-file", "-q", &missing]);
+        assert_eq!(quiet_miss.status.code(), Some(0));
+        assert!(quiet_miss.stdout.is_empty());
+        assert!(quiet_miss.stderr.is_empty());
+
+        let loud_miss = fixture.run(&["source-file", &missing]);
+        assert_eq!(loud_miss.status.code(), Some(1));
+        assert!(loud_miss.stdout.is_empty());
+        assert_eq!(
+            loud_miss.stderr,
+            format!("No such file or directory: {missing}\n").into_bytes()
+        );
+
+        let mixed = fixture.run(&["source-file", &bad, &missing]);
+        assert_eq!(mixed.status.code(), Some(1));
+        assert_eq!(
+            mixed.stdout,
+            format!("{bad}:1: unknown command: wibble\n").into_bytes()
+        );
+        assert_eq!(
+            mixed.stderr,
+            format!("No such file or directory: {missing}\n").into_bytes()
+        );
+
+        let quiet_mixed = fixture.run(&["source-file", "-q", &bad, &missing]);
+        assert_eq!(quiet_mixed.status.code(), Some(1));
+        assert_eq!(
+            quiet_mixed.stdout,
+            format!("{bad}:1: unknown command: wibble\n").into_bytes()
+        );
+        assert!(quiet_mixed.stderr.is_empty());
+
+        let leaf = write_source(&directory, "leaf.conf", "wibble\nwibble\nblorp\n");
+        let entry = write_source(&directory, "entry.conf", &format!("source-file {leaf}\n"));
+        let second = write_source(&directory, "second.conf", "flurb\n");
+        let nested = fixture.run(&["source-file", &entry, &second]);
+        assert_eq!(nested.status.code(), Some(1));
+        assert_eq!(
+            nested.stdout,
+            format!(
+                "{leaf}:1: unknown command: wibble\n\
+                 {leaf}:2: unknown command: wibble\n\
+                 {leaf}:3: unknown command: blorp\n\
+                 {second}:1: unknown command: flurb\n"
+            )
+            .into_bytes()
+        );
+        assert!(nested.stderr.is_empty());
+
+        let unsupported = write_source(
+            &directory,
+            "unsupported.conf",
+            "source-file -v nested.conf\nset-option -g @loaded yes\n",
+        );
+        let skipped = fixture.run(&["source-file", &unsupported]);
+        assert_eq!(skipped.status.code(), Some(0));
+        assert!(skipped.stdout.is_empty());
+        assert_eq!(
+            skipped.stderr,
+            b"skipped 1 unsupported tmux command: source-file -v\n"
+        );
+        let loaded = fixture.run(&["show-options", "-gqv", "@loaded"]);
+        assert_eq!(loaded.status.code(), Some(0));
+        assert_eq!(loaded.stdout, b"yes\n");
+
+        let chained = fixture.run(&[
+            "source-file",
+            &bad,
+            ";",
+            "display-message",
+            "-p",
+            "after-the-diagnostic",
+        ]);
+        assert_eq!(chained.status.code(), Some(1));
+        assert_eq!(
+            chained.stdout,
+            format!("{bad}:1: unknown command: wibble\nafter-the-diagnostic\n").into_bytes()
+        );
+        assert!(chained.stderr.is_empty());
+
+        let stopped = fixture.run(&[
+            "kill-window",
+            "-t",
+            "nosuchwindow",
+            ";",
+            "display-message",
+            "-p",
+            "never-runs",
+        ]);
+        assert_eq!(stopped.status.code(), Some(1));
+        assert!(stopped.stdout.is_empty());
+        assert_eq!(stopped.stderr, b"can't find window: nosuchwindow\n");
+    }
+
+    #[test]
+    fn source_file_of_the_default_config_stays_silent() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let config_home = source_directory(&fixture, "xdg-config");
+        let default_config = config_home.join("zz").join("mux.conf");
+        std::fs::create_dir_all(default_config.parent().expect("default config parent"))
+            .expect("default config directory");
+        std::fs::write(&default_config, b"wibble\n").expect("write default mux config");
+        let started = fixture
+            .command()
+            .env("XDG_CONFIG_HOME", &config_home)
+            .arg("start-server")
+            .output()
+            .expect("run zz start-server");
+        assert_eq!(started.status.code(), Some(0));
+
+        let sourced = fixture
+            .command()
+            .env("XDG_CONFIG_HOME", &config_home)
+            .arg("source-file")
+            .arg(&default_config)
+            .output()
+            .expect("run zz source-file on the default config");
+        assert_eq!(sourced.status.code(), Some(0));
+        assert!(sourced.stdout.is_empty());
+        assert!(sourced.stderr.is_empty());
+    }
+
     #[test]
     fn detached_new_session_accepts_dash_dimensions() {
         let fixture = Fixture::new();

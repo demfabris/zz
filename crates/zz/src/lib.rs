@@ -52,7 +52,8 @@ use zz_browser::{BrowserBootstrap, BrowserError, BrowserRuntime};
 use zz_daemon::default_socket_path;
 #[cfg(not(target_os = "ios"))]
 use zz_daemon::{
-    CommandClient, Daemon, Endpoint, classify_local_connect_error, terminate_incompatible_daemon,
+    CommandClient, CommandOutcome, Daemon, Endpoint, classify_local_connect_error,
+    terminate_incompatible_daemon,
 };
 use zz_daemon::{DaemonError, InteractiveClient};
 #[cfg(not(target_os = "ios"))]
@@ -918,14 +919,13 @@ fn run_command_mode(
     }
     match execute_command_chain(
         std::iter::once(invocation).chain(commands),
-        |command| client.execute(command),
-        |output| print_command_output(&output),
+        |command| client.execute_streams(command),
+        |outcome| {
+            print_command_output(&outcome.stdout);
+            print_command_error(&outcome.stderr);
+        },
     ) {
-        Ok(()) => Some(ExitCode::SUCCESS),
-        Err(DaemonError::CommandExit { output, exit_code }) => {
-            print_command_output(&output);
-            Some(ExitCode::from(exit_code))
-        }
+        Ok(exit_code) => Some(ExitCode::from(exit_code)),
         Err(DaemonError::CommandFailed { output, error }) => {
             print_command_output(&output);
             eprintln!("{}", command_error_message(&error));
@@ -961,16 +961,25 @@ fn split_command_chain(arguments: &[String]) -> Vec<CommandInvocation> {
         .collect()
 }
 
+/// Run every member of a `\;` chain, emitting each one's streams as it lands.
+/// The pin stops a chain only when a command itself fails (`cmdq_next` drops
+/// the rest of the group on `CMD_RETURN_ERROR`), never merely because the
+/// client's exit status went nonzero, and the last nonzero status wins.
 #[cfg(not(target_os = "ios"))]
 fn execute_command_chain<E>(
     commands: impl IntoIterator<Item = CommandInvocation>,
-    mut execute: impl FnMut(CommandInvocation) -> Result<String, E>,
-    mut output: impl FnMut(String),
-) -> Result<(), E> {
+    mut execute: impl FnMut(CommandInvocation) -> Result<CommandOutcome, E>,
+    mut emit: impl FnMut(&CommandOutcome),
+) -> Result<u8, E> {
+    let mut exit_code = 0;
     for command in commands {
-        output(execute(command)?);
+        let outcome = execute(command)?;
+        emit(&outcome);
+        if outcome.exit_code != 0 {
+            exit_code = outcome.exit_code;
+        }
     }
-    Ok(())
+    Ok(exit_code)
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1245,6 +1254,19 @@ fn print_command_output(output: &str) {
         let _ = stdout.write_all(b"\n");
     }
     let _ = stdout.flush();
+}
+
+#[cfg(not(target_os = "ios"))]
+fn print_command_error(output: &str) {
+    if output.is_empty() {
+        return;
+    }
+    let mut stderr = io::stderr().lock();
+    let _ = stderr.write_all(output.as_bytes());
+    if !output.ends_with('\n') {
+        let _ = stderr.write_all(b"\n");
+    }
+    let _ = stderr.flush();
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1917,12 +1939,12 @@ mod tests {
     use zz_terminal::TerminalColorScheme;
 
     use super::{
-        ApplicationArgumentError, TMUX_USAGE, TMUX_VERSION_OUTPUT, application_arguments,
-        application_working_directory, command_chain_uses_tui, command_error_message,
-        daemon_is_missing, execute_command_chain, implicit_tmux_endpoint_conflict,
-        is_kill_server_command, new_session_uses_tui, parse_native_attach_arguments,
-        protocol_version_output, run_command_mode, split_command_chain, terminal_color_scheme,
-        tmux_command_starts_server,
+        ApplicationArgumentError, CommandOutcome, TMUX_USAGE, TMUX_VERSION_OUTPUT,
+        application_arguments, application_working_directory, command_chain_uses_tui,
+        command_error_message, daemon_is_missing, execute_command_chain,
+        implicit_tmux_endpoint_conflict, is_kill_server_command, new_session_uses_tui,
+        parse_native_attach_arguments, protocol_version_output, run_command_mode,
+        split_command_chain, terminal_color_scheme, tmux_command_starts_server,
     };
     #[cfg(unix)]
     use super::{tmux_label_socket_path, tmux_socket_root};
@@ -2116,16 +2138,61 @@ mod tests {
             |command| {
                 seen.push(command.name.clone());
                 match command.name.as_str() {
-                    "first" => Ok("first output\n".to_owned()),
+                    "first" => Ok(CommandOutcome {
+                        stdout: "first output\n".to_owned(),
+                        ..CommandOutcome::default()
+                    }),
                     "fail" => Err(17_u8),
                     _ => panic!("command after the failure executed"),
                 }
             },
-            |text| output.push(text),
+            |outcome| output.push(outcome.stdout.clone()),
         );
         assert_eq!(result, Err(17));
         assert_eq!(seen, ["first", "fail"]);
         assert_eq!(output, ["first output\n"]);
+    }
+
+    /// The pin keeps running a chain after a nonzero exit and reports the last
+    /// nonzero status: `cmdq_next` drops the rest of the group only on
+    /// `CMD_RETURN_ERROR`, while `c->retval` is simply overwritten.
+    #[test]
+    fn command_chains_continue_past_a_nonzero_exit_and_keep_the_last_status() {
+        let commands = split_command_chain(&["three", ";", "zero", ";", "five"].map(str::to_owned));
+        let mut seen = Vec::new();
+        let mut streams = Vec::new();
+        let result = execute_command_chain::<u8>(
+            commands,
+            |command| {
+                seen.push(command.name.clone());
+                Ok(match command.name.as_str() {
+                    "three" => CommandOutcome {
+                        stdout: "three out\n".to_owned(),
+                        stderr: "three err\n".to_owned(),
+                        exit_code: 3,
+                    },
+                    "zero" => CommandOutcome {
+                        stdout: "zero out\n".to_owned(),
+                        ..CommandOutcome::default()
+                    },
+                    _ => CommandOutcome {
+                        exit_code: 5,
+                        ..CommandOutcome::default()
+                    },
+                })
+            },
+            |outcome| streams.push((outcome.stdout.clone(), outcome.stderr.clone())),
+        );
+        assert_eq!(result, Ok(5));
+        assert_eq!(seen, ["three", "zero", "five"]);
+        assert_eq!(
+            streams,
+            [
+                ("three out\n".to_owned(), "three err\n".to_owned()),
+                ("zero out\n".to_owned(), String::new()),
+                (String::new(), String::new()),
+            ]
+        );
     }
 
     #[test]

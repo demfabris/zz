@@ -91,6 +91,14 @@ impl TransportStream for ClientStream {
 
 static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Both output streams and the exit status of one completed command.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CommandOutcome {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: u8,
+}
+
 pub struct CommandClient {
     reader: ProtocolReceiver<LocalStream>,
     writer: ProtocolSender<LocalStream>,
@@ -184,7 +192,29 @@ impl CommandClient {
         &self.hello
     }
 
+    /// Run one command and keep only its stdout, folding a nonzero exit into
+    /// `DaemonError::CommandExit`. Callers that need the command's stderr or
+    /// that must treat a nonzero exit as a completed command use
+    /// [`CommandClient::execute_streams`].
     pub fn execute(&mut self, command: CommandInvocation) -> Result<String, DaemonError> {
+        let outcome = self.execute_streams(command)?;
+        if outcome.exit_code == 0 {
+            Ok(outcome.stdout)
+        } else {
+            Err(DaemonError::CommandExit {
+                output: outcome.stdout,
+                exit_code: outcome.exit_code,
+            })
+        }
+    }
+
+    /// Run one command and keep all three of its streams. A command that ran to
+    /// completion is `Ok` whatever its exit status; `Err` stays reserved for
+    /// dispatch, transport, and server failures.
+    pub fn execute_streams(
+        &mut self,
+        command: CommandInvocation,
+    ) -> Result<CommandOutcome, DaemonError> {
         let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
         self.writer
             .send(&ProtocolMessage::CommandRequest(CommandRequest {
@@ -197,13 +227,13 @@ impl CommandClient {
                     request_id: response_id,
                     output,
                     exit_code,
-                    ..
+                    stderr,
                 }) if response_id == request_id => {
-                    return if exit_code == 0 {
-                        Ok(output)
-                    } else {
-                        Err(DaemonError::CommandExit { output, exit_code })
-                    };
+                    return Ok(CommandOutcome {
+                        stdout: output,
+                        stderr,
+                        exit_code,
+                    });
                 }
                 ProtocolMessage::CommandResponse(CommandResponse::Error {
                     request_id: response_id,

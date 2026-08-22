@@ -569,10 +569,22 @@ delete the matching refusal assertions.
 
 ## Wave E - `source-file` CLI diagnostics
 
-**Parked after source and live-behavior revalidation 2026-08-21.** A3 adds the response
-stderr channel needed for mixed output and for the zz-only unsupported summary. CLI text
-classification remains rejected because it would leak daemon semantics into presentation
-code.
+**Shipped 2026-08-22.** A3's `CommandResponse::Success.stderr` now carries source-file
+diagnostics for Command clients only, routed by a per-request `CommandStreams` slot in
+`ServerState` that models the pin's per-client stdout/stderr files and `c->retval`.
+`CommandClient::execute_streams` is the stream-aware result; `CommandClient::execute` keeps
+the output-only shape for every existing consumer. CLI text classification stayed rejected.
+
+**One brief-versus-pin correction, in the pin's favour.** The plan said the CLI should stop a
+`\;` chain on the first nonzero exit. The pin does not: `cmdq_next` drops the rest of a group
+only when a command returns `CMD_RETURN_ERROR`, while a nonzero exit merely overwrites
+`c->retval`. `cmd_source_file_exec` returns `CMD_RETURN_WAIT` once any file matched, so
+`tmux source-file bad.conf \; display-message -p AFTER` prints the diagnostic AND `AFTER` at
+rc 1; `run-shell 'exit 3' \; display-message -p AFTER` likewise runs both at rc 3, and a chain
+member that fails outright (`kill-window -t nosuch`) does stop the chain at rc 1. zz now
+matches: the chain stops on a response `Error`, a nonzero exit lets the chain continue, and
+the LAST nonzero exit wins. Keeping the stop-on-nonzero rule would have opened a brand-new
+divergence in the very command this wave fixed.
 
 Two audit facts shape this wave: Command clients are never subscribed to the event stream
 at all (`daemon.rs` subscribes Interactive and Control only), so the CLI cannot receive
@@ -591,11 +603,27 @@ config with supported tmux behavior continues to load.
 
 Add a stream-aware command result while preserving the current output-only client API.
 Treat completed commands with exit 1 as successful protocol responses; reserve response
-errors for dispatch, transport, and server failures. The CLI prints both streams and stops
-a command chain on nonzero. Add CLI coverage for the glob-resolved matched path plus
+errors for dispatch, transport, and server failures. The CLI prints both streams and follows
+the pin's chain rule above. CLI coverage landed for the glob-resolved matched path plus
 `:1: unknown command: wibble` on stdout with exit 1, the mixed-stream matrix, nested and
-multiple inputs, the default-config path, Control `%config-error`, and a smoke scenario that
-stages its fixture. `source-file -` remains in the separate G6 streaming contract.
+multiple inputs, the default-config path, Control `%config-error`, and the
+`smoke/source-file-diagnostics` scenario, whose fixture drives the plain CLI on both sides
+from a `run-shell` job and diffs stdout, stderr, and exit code byte-for-byte. `source-file -`
+remains in the separate G6 streaming contract; it now refuses on stderr at rc 1.
+
+The prose sniffer is pinned from both sides rather than retired:
+`config_diagnostics_pin_the_control_mode_sniffer_wording` (zz-daemon) locks what the config
+loader emits and `every_daemon_config_diagnostic_reaches_the_config_error_channel`
+(`control_mode.rs`) locks what `is_config_message` accepts. A typed wire marker is still the
+better fix and still needs a protocol bump.
+
+Two residues stay open, both ledgered rather than forced: a RELATIVE source path resolves
+against the daemon's cwd and prints unresolved where the pin prefixes the client's cwd, and
+zz emits one diagnostic per invalid line and keeps loading where a single parse error aborts
+the pin's whole file with exactly one cause. The second is `cmd_parse_from_buffer` abort
+semantics, not diagnostic routing; the compat scenario therefore compares absolute paths
+only. The flag ledger is untouched at 127 pairs across 29 commands — diagnostics are
+behavior, not flags — and `catalog.rs` has no diff this wave.
 
 ## Wave F - shared contracts and optional semantics
 
@@ -686,8 +714,8 @@ implemented and 29 parked.
 
 The completed safe prelude is `0 -> A1 -> A2 -> B1-existing-wire`. After core approval, run
 `A3 -> B with C3 title production -> C except C5 -> E -> D2 -> D4 -> D3 -> D1`. E proves the
-new response streams without interactive state. D3 establishes the freeze lifecycle before
-D1 reuses it for prompts.
+new response streams without interactive state, and shipped 2026-08-22; D2 is next. D3
+establishes the freeze lifecycle before D1 reuses it for prompts.
 
 Continue with `F0 -> F1 -> F2 -> F3 -> F4 -> G1 -> G2 -> G3a -> independent G3b -> G3c ->
 G4 -> G5a..G5f`. C5 and its G3b dependents wait for a terminal injection design. F5 plus
@@ -703,9 +731,10 @@ Each wave closes with:
 - `git diff --check`
 - OKF validation
 - `compat/run.sh --strict-geometry`, followed by a hard postcondition of at least the
-  current 54 scenario rows (48 before Wave C run 1 added `command-alias` and
+  current 55 scenario rows (48 before Wave C run 1 added `command-alias` and
   `update-environment`, 50 before run 2 added `alerts` and `prefix2`, 52 before run 3
-  added `display-panes-format` and `renderer-styles`), zero SKIPs, and no
+  added `display-panes-format` and `renderer-styles`, 54 before Wave E added
+  `smoke/source-file-diagnostics`), zero SKIPs, and no
   divergences outside the two documented geometry fixtures
 - the `BEHAVES` assertion and option ledger updated
 - the exact unsupported-pair roster and expected tranche delta updated

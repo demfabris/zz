@@ -3759,6 +3759,11 @@ impl Shared {
                 .unwrap_or_else(|| format!("device-{}", client.0));
             let command = command_log_line(command);
             push_server_message(&mut inner, format!("{client_name} command: {command}"));
+            if kind == ClientKind::Command {
+                inner
+                    .command_streams
+                    .insert(client, CommandStreams::default());
+            }
             client_name
         };
         let response = match self.execute(client, kind, context, command) {
@@ -3796,6 +3801,10 @@ impl Shared {
                     output: String::new(),
                 }
             }
+        };
+        let response = match self.inner.lock().command_streams.remove(&client) {
+            Some(streams) if !streams.is_empty() => merge_command_streams(response, &streams),
+            _ => response,
         };
         let output = match &response {
             CommandResponse::Success { output, .. } | CommandResponse::Error { output, .. } => {
@@ -5575,22 +5584,27 @@ impl Shared {
                     EventPayload::ClientMessage {
                         pane: context.pane,
                         kind: ClientMessageKind::Warning,
-                        text: "source-file from standard input is not supported".to_owned(),
+                        text: STANDARD_INPUT_SOURCE_WARNING.to_owned(),
                     },
                 );
+                self.record_command_stderr(client, STANDARD_INPUT_SOURCE_WARNING);
+                self.record_command_failure(client);
                 continue;
             }
             let path = expand_path(&path);
             let matches = source_glob_matches(&path);
             for error in &matches.errors {
+                let text = source_glob_error_warning(&path, error);
                 self.publish_to_client(
                     client,
                     EventPayload::ClientMessage {
                         pane: context.pane,
                         kind: ClientMessageKind::Warning,
-                        text: format!("source-file glob error for {}: {error}", path.display()),
+                        text: text.clone(),
                     },
                 );
+                self.record_command_stderr(client, &text);
+                self.record_command_failure(client);
             }
             if matches.paths.is_empty() && matches.errors.is_empty() {
                 if !quiet {
@@ -5599,9 +5613,11 @@ impl Shared {
                         EventPayload::ClientMessage {
                             pane: context.pane,
                             kind: ClientMessageKind::Warning,
-                            text: format!("no such file: {}", path.display()),
+                            text: no_such_file_warning(&path),
                         },
                     );
+                    self.record_command_stderr(client, &missing_source_error(&path));
+                    self.record_command_failure(client);
                 }
                 continue;
             }
@@ -5623,6 +5639,13 @@ impl Shared {
                         continue;
                     }
                     self.apply_stored_mux_config_overrides("source-file-replay");
+                    for diagnostic in report.diagnostics() {
+                        self.record_command_stdout(client, diagnostic);
+                        self.record_command_failure(client);
+                    }
+                    if let Some(skipped) = report.skipped_summary() {
+                        self.record_command_stderr(client, &skipped);
+                    }
                     if let Some(summary) = report.message() {
                         self.publish_to_client(
                             client,
@@ -13180,6 +13203,31 @@ impl Shared {
         }
     }
 
+    /// Append one line to the running Command request's stdout. Interactive and
+    /// Control clients hold no slot, so this is a no-op for them.
+    fn record_command_stdout(&self, client: ClientId, line: &str) {
+        if let Some(streams) = self.inner.lock().command_streams.get_mut(&client) {
+            streams.stdout.push_str(line);
+            streams.stdout.push('\n');
+        }
+    }
+
+    /// Append one line to the running Command request's stderr.
+    fn record_command_stderr(&self, client: ClientId, line: &str) {
+        if let Some(streams) = self.inner.lock().command_streams.get_mut(&client) {
+            streams.stderr.push_str(line);
+            streams.stderr.push('\n');
+        }
+    }
+
+    /// Raise the running Command request's exit status, mirroring the pin's
+    /// `c->retval = 1`.
+    fn record_command_failure(&self, client: ClientId) {
+        if let Some(streams) = self.inner.lock().command_streams.get_mut(&client) {
+            streams.exit_code = 1;
+        }
+    }
+
     /// Publish the complete option map with the recipient's session-effective
     /// `mouse` value stamped in, skipping recipients whose published map is
     /// already equal. `sessions` narrows the recipients to clients attached to
@@ -14326,21 +14374,18 @@ impl Shared {
                 let mut source_error = None;
                 for (source, quiet) in source_effects {
                     if source == "-" {
-                        log::warn!("source-file from standard input is not supported");
-                        report.note_invalid_command(
-                            &command,
-                            "source-file from standard input is not supported",
-                        );
+                        log::warn!("{STANDARD_INPUT_SOURCE_WARNING}");
+                        report.note_invalid_command(&command, STANDARD_INPUT_SOURCE_WARNING);
                         continue;
                     }
                     let source = expand_relative(path, &source);
                     let matches = source_glob_matches(&source);
                     for error in &matches.errors {
-                        log::warn!("source-file glob error for {}: {error}", source.display());
+                        log::warn!("{}", source_glob_error_warning(&source, error));
                     }
                     if matches.paths.is_empty() && matches.errors.is_empty() {
                         if !quiet {
-                            log::warn!("no such file: {}", source.display());
+                            log::warn!("{}", no_such_file_warning(&source));
                         }
                         continue;
                     }
@@ -15005,6 +15050,7 @@ struct ConfigLoadReport {
     skipped: Vec<String>,
     invalid_count: usize,
     invalid: Vec<String>,
+    diagnostics: Vec<String>,
 }
 
 impl ConfigLoadReport {
@@ -15019,6 +15065,7 @@ impl ConfigLoadReport {
 
     fn note_invalid(&mut self, message: &str) {
         self.invalid_count += 1;
+        self.diagnostics.push(message.to_owned());
         if !self.invalid.iter().any(|existing| existing == message) {
             self.invalid.push(message.to_owned());
         }
@@ -15035,6 +15082,12 @@ impl ConfigLoadReport {
         }
     }
 
+    /// Every invalid-line diagnostic in encounter order, duplicates kept. The
+    /// summary channels de-duplicate and cap; the CLI stream does neither.
+    fn diagnostics(&self) -> &[String] {
+        &self.diagnostics
+    }
+
     fn message(&self) -> Option<String> {
         if self.skipped_count == 0 && self.invalid_count == 1 {
             return self.invalid.first().cloned();
@@ -15042,18 +15095,24 @@ impl ConfigLoadReport {
         self.summary()
     }
 
+    fn skipped_summary(&self) -> Option<String> {
+        (self.skipped_count != 0).then(|| {
+            format!(
+                "skipped {} unsupported tmux command{}: {}",
+                self.skipped_count,
+                if self.skipped_count == 1 { "" } else { "s" },
+                Self::summary_names(&self.skipped),
+            )
+        })
+    }
+
     fn summary(&self) -> Option<String> {
         if self.skipped_count == 0 && self.invalid_count == 0 {
             return None;
         }
         let mut parts = Vec::new();
-        if self.skipped_count != 0 {
-            parts.push(format!(
-                "skipped {} unsupported tmux command{}: {}",
-                self.skipped_count,
-                if self.skipped_count == 1 { "" } else { "s" },
-                Self::summary_names(&self.skipped),
-            ));
+        if let Some(skipped) = self.skipped_summary() {
+            parts.push(skipped);
         }
         if self.invalid_count != 0 {
             parts.push(format!(
@@ -15082,6 +15141,23 @@ impl ConfigLoadReport {
             names.push_str(", …");
         }
         names
+    }
+}
+
+/// The response streams a Command client accumulates while one request runs.
+/// It models the pin's per-client `stdout`/`stderr` files and `c->retval`: a
+/// slot exists only for the duration of a Command client's request, so every
+/// other client kind — and every daemon-internal execution — records nothing.
+#[derive(Default)]
+struct CommandStreams {
+    stdout: String,
+    stderr: String,
+    exit_code: u8,
+}
+
+impl CommandStreams {
+    fn is_empty(&self) -> bool {
+        self.stdout.is_empty() && self.stderr.is_empty() && self.exit_code == 0
     }
 }
 
@@ -15154,6 +15230,7 @@ struct ServerState {
     terminals: BTreeMap<PaneId, Arc<TerminalSession>>,
     terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,
     command_outputs: BTreeMap<ClientId, CommandOutputSession>,
+    command_streams: BTreeMap<ClientId, CommandStreams>,
     subscribers: BTreeMap<ClientId, Arc<OutboundMailbox>>,
     attached: BTreeMap<SessionId, BTreeSet<ClientId>>,
     visible_terminals: BTreeMap<ClientId, BTreeSet<PaneId>>,
@@ -19395,6 +19472,43 @@ fn select_if_shell_branch(positional: &[String], truthy: bool) -> Option<&str> {
     .map(String::as_str)
 }
 
+fn merge_command_streams(response: CommandResponse, streams: &CommandStreams) -> CommandResponse {
+    match response {
+        CommandResponse::Success {
+            request_id,
+            mut output,
+            exit_code,
+            mut stderr,
+        } => {
+            append_inserted_output(&mut output, &streams.stdout);
+            stderr.push_str(&streams.stderr);
+            let exit_code = if exit_code == 0 {
+                streams.exit_code
+            } else {
+                exit_code
+            };
+            CommandResponse::Success {
+                request_id,
+                output,
+                exit_code,
+                stderr,
+            }
+        }
+        CommandResponse::Error {
+            request_id,
+            error,
+            mut output,
+        } => {
+            append_inserted_output(&mut output, &streams.stdout);
+            CommandResponse::Error {
+                request_id,
+                error,
+                output,
+            }
+        }
+    }
+}
+
 fn append_inserted_output(output: &mut String, addition: &str) {
     if addition.is_empty() {
         return;
@@ -21494,6 +21608,24 @@ fn save_command_prompt_history(path: &Path, history: &[String]) {
 struct SourceGlobMatches {
     paths: Vec<PathBuf>,
     errors: Vec<String>,
+}
+
+/// Control mode reconstructs `%config-error` by sniffing these three strings
+/// (`is_config_message` in `crates/zz/src/control_mode.rs`), so they are pinned
+/// by `config_diagnostics_pin_the_control_mode_sniffer_wording`. The CLI stream
+/// carries the pin's own `strerror(ENOENT)` shape instead.
+const STANDARD_INPUT_SOURCE_WARNING: &str = "source-file from standard input is not supported";
+
+fn no_such_file_warning(path: &Path) -> String {
+    format!("no such file: {}", path.display())
+}
+
+fn source_glob_error_warning(path: &Path, error: &str) -> String {
+    format!("source-file glob error for {}: {error}", path.display())
+}
+
+fn missing_source_error(path: &Path) -> String {
+    format!("No such file or directory: {}", path.display())
 }
 
 fn source_glob_matches(path: &Path) -> SourceGlobMatches {
@@ -25547,6 +25679,205 @@ mod tests {
                 }) if text.contains("source-file from standard input is not supported")
             )
         }));
+    }
+
+    #[test]
+    fn source_file_diagnostics_split_streams_for_command_clients_only() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let bad = directory.path().join("bad.conf");
+        fs::write(&bad, "wibble\nwibble\n").expect("invalid source fixture");
+        let bad = bad.display().to_string();
+        let missing = directory.path().join("missing.conf").display().to_string();
+        let unsupported = directory.path().join("unsupported.conf");
+        fs::write(&unsupported, "source-file -v nested.conf\n").expect("unsupported source");
+        let unsupported = unsupported.display().to_string();
+
+        let shared = Arc::new(Shared::new(63));
+        let mailbox = OutboundMailbox::new();
+        let (interactive, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+
+        let invalid = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            1,
+            &CommandInvocation::new("source-file", [&bad]),
+        );
+        assert_eq!(
+            invalid,
+            CommandResponse::Success {
+                request_id: 1,
+                output: format!(
+                    "{bad}:1: unknown command: wibble\n{bad}:2: unknown command: wibble\n"
+                ),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+
+        let quiet = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            2,
+            &CommandInvocation::new("source-file", ["-q", &missing]),
+        );
+        assert_eq!(
+            quiet,
+            CommandResponse::Success {
+                request_id: 2,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+
+        let loud = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            3,
+            &CommandInvocation::new("source-file", [&bad, &missing]),
+        );
+        assert_eq!(
+            loud,
+            CommandResponse::Success {
+                request_id: 3,
+                output: format!(
+                    "{bad}:1: unknown command: wibble\n{bad}:2: unknown command: wibble\n"
+                ),
+                exit_code: 1,
+                stderr: format!("No such file or directory: {missing}\n"),
+            }
+        );
+
+        let skipped = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            4,
+            &CommandInvocation::new("source-file", [&unsupported]),
+        );
+        assert_eq!(
+            skipped,
+            CommandResponse::Success {
+                request_id: 4,
+                output: String::new(),
+                exit_code: 0,
+                stderr: "skipped 1 unsupported tmux command: source-file -v\n".to_owned(),
+            }
+        );
+
+        assert!(shared.inner.lock().command_streams.is_empty());
+
+        take_reliable_messages(&mailbox);
+        let mut interactive_context = ExecutionContext::default();
+        let attended = shared.execute_command_request(
+            interactive,
+            ClientKind::Interactive,
+            &mut interactive_context,
+            5,
+            &CommandInvocation::new("source-file", [&bad, &missing]),
+        );
+        assert_eq!(
+            attended,
+            CommandResponse::Success {
+                request_id: 5,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let warnings = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Warning,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            warnings,
+            [
+                format!(
+                    "2 invalid lines: {bad}:1: unknown command: wibble, \
+                     {bad}:2: unknown command: wibble"
+                ),
+                format!("no such file: {missing}"),
+            ]
+        );
+    }
+
+    /// `is_config_message` in `crates/zz/src/control_mode.rs` reconstructs
+    /// control mode's `%config-error` by sniffing this wording. Rewording any
+    /// producer without teaching that sniffer silently kills the channel, so
+    /// both sides of the contract are pinned: this test locks what the daemon
+    /// emits, `config_messages_include_the_source_line_shape` locks what the
+    /// sniffer accepts. A typed wire marker would retire both, but it needs a
+    /// protocol bump.
+    #[test]
+    fn config_diagnostics_pin_the_control_mode_sniffer_wording() {
+        let mut report = ConfigLoadReport::default();
+        report.note_invalid_at("/tmp/mux.conf", 1, "unknown command: wibble");
+        assert_eq!(
+            report.message().as_deref(),
+            Some("/tmp/mux.conf:1: unknown command: wibble")
+        );
+        assert_eq!(
+            report.diagnostics(),
+            ["/tmp/mux.conf:1: unknown command: wibble"]
+        );
+
+        let mut report = ConfigLoadReport::default();
+        report.note_skip("focus-events");
+        assert_eq!(
+            report.skipped_summary().as_deref(),
+            Some("skipped 1 unsupported tmux command: focus-events")
+        );
+        assert_eq!(report.message(), report.skipped_summary());
+        report.note_skip("status-keys");
+        assert_eq!(
+            report.skipped_summary().as_deref(),
+            Some("skipped 2 unsupported tmux commands: focus-events, status-keys")
+        );
+
+        let mut report = ConfigLoadReport::default();
+        report.note_skip("focus-events");
+        report.note_invalid_at("/tmp/mux.conf", 3, "unknown command: wibble");
+        assert_eq!(
+            report.message().as_deref(),
+            Some(
+                "skipped 1 unsupported tmux command: focus-events; \
+                 1 invalid line: /tmp/mux.conf:3: unknown command: wibble"
+            )
+        );
+
+        assert_eq!(
+            no_such_file_warning(Path::new("/tmp/mux.conf")),
+            "no such file: /tmp/mux.conf"
+        );
+        assert_eq!(
+            source_glob_error_warning(Path::new("/tmp/["), "Pattern syntax error"),
+            "source-file glob error for /tmp/[: Pattern syntax error"
+        );
+        assert_eq!(
+            STANDARD_INPUT_SOURCE_WARNING,
+            "source-file from standard input is not supported"
+        );
+        assert_eq!(
+            missing_source_error(Path::new("/tmp/mux.conf")),
+            "No such file or directory: /tmp/mux.conf"
+        );
     }
 
     #[test]

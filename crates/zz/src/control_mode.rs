@@ -1459,6 +1459,33 @@ mod tests {
         ));
     }
 
+    /// Every warning the daemon's config loader can publish, verbatim. The
+    /// daemon side is pinned by
+    /// `config_diagnostics_pin_the_control_mode_sniffer_wording`; if a producer
+    /// is reworded there, that test fails first and this one records what
+    /// `%config-error` depends on. A typed wire marker would retire the sniffer
+    /// entirely, but it needs a protocol bump.
+    #[test]
+    fn every_daemon_config_diagnostic_reaches_the_config_error_channel() {
+        for text in [
+            "/tmp/mux.conf:1: unknown command: wibble",
+            "skipped 1 unsupported tmux command: focus-events",
+            "skipped 2 unsupported tmux commands: focus-events, status-keys",
+            "skipped 1 unsupported tmux command: focus-events; \
+             1 invalid line: /tmp/mux.conf:3: unknown command: wibble",
+            "2 invalid lines: /tmp/mux.conf:1: unknown command: wibble, \
+             /tmp/mux.conf:2: unknown command: blorp",
+            "no such file: /tmp/mux.conf",
+            "source-file glob error for /tmp/[: Pattern syntax error",
+            "source-file from standard input is not supported",
+        ] {
+            assert!(is_config_message(text), "{text}");
+        }
+        assert!(!is_config_message(
+            "Reloaded zz configuration; skipped 1 unsupported tmux command: focus-events"
+        ));
+    }
+
     #[test]
     fn dropping_a_double_writer_without_exit_still_terminates_the_dcs() {
         let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));

@@ -356,8 +356,9 @@ the clients attached to a target session on a session-scoped write. Each client'
 equality-deduplicated like the status line: a recomputation whose result matches what that client
 already holds sends nothing. `escape-time` and `prefix2` publish the global values. Since the
 2026-08-21 B2/B3 slice zz-tui consumes `mouse` (outer-terminal mouse-mode gating) and `escape-time`
-(the escape fold timeout), and `from_config_key` maps both — `zz/config` can write them with the
-standard reload-reapply semantics. `prefix2` stays publication-only until C2 lands.
+(the escape fold timeout); since Wave C run 2 the same day, `prefix2` feeds the shared key tables
+(either prefix arms) and the GPUI client's local prefix claim. `from_config_key` maps all three —
+`zz/config` can write them with the standard reload-reapply semantics.
 Validation requires exactly those 17 keys and bounds every string to 64 KiB on encode and during
 deserialization.
 

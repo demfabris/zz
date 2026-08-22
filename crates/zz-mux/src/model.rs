@@ -225,6 +225,12 @@ pub struct Window {
     pub name: String,
     pub created: u64,
     pub activity: u64,
+    /// The pin's `WINLINK_ACTIVITY`: output landed here and nobody has been
+    /// back since. Server-side only; formats and labels carry it to clients.
+    pub activity_flag: bool,
+    /// The pin's `WINLINK_SILENCE`: the monitor-silence deadline expired and
+    /// nobody has been back since.
+    pub silence_flag: bool,
     pub active_pane: PaneId,
     pub zoomed_pane: Option<PaneId>,
     pub layout: CellLayout,
@@ -393,6 +399,8 @@ impl MuxState {
             name: index.to_string(),
             created,
             activity: created,
+            activity_flag: false,
+            silence_flag: false,
             active_pane: pane_id,
             zoomed_pane: None,
             layout: CellLayout::new(pane_id, extent.0, extent.1),
@@ -508,6 +516,8 @@ impl MuxState {
             name: name.unwrap_or_else(|| index.to_string()),
             created,
             activity: created,
+            activity_flag: false,
+            silence_flag: false,
             active_pane: pane_id,
             zoomed_pane: None,
             layout: CellLayout::new(pane_id, extent.0, extent.1),
@@ -770,7 +780,7 @@ impl MuxState {
             session.active_window = fallback;
             session.last_window = None;
             self.touch_window_activity(fallback);
-            self.clear_window_bells(fallback);
+            self.clear_window_alerts(fallback);
         }
 
         if source_session != destination_session {
@@ -779,7 +789,7 @@ impl MuxState {
                 self.sessions.remove(&source_session);
             } else if let Some(fallback) = source_fallback {
                 self.touch_window_activity(fallback);
-                self.clear_window_bells(fallback);
+                self.clear_window_alerts(fallback);
             }
         }
         self.sort_session_windows(destination_session);
@@ -1063,7 +1073,7 @@ impl MuxState {
             self.sessions.remove(&removed.session);
         } else if let Some(window) = activated {
             self.touch_window_activity(window);
-            self.clear_window_bells(window);
+            self.clear_window_alerts(window);
         }
         self.bump_generation();
         Ok(removed_panes)
@@ -1126,7 +1136,7 @@ impl MuxState {
             .activate_window(window);
         if changed {
             self.touch_window_activity(window);
-            self.clear_window_bells(window);
+            self.clear_window_alerts(window);
         }
         changed
     }
@@ -1137,7 +1147,7 @@ impl MuxState {
             .expect("session exists")
             .activate_window(window);
         self.touch_window_activity(window);
-        self.clear_window_bells(window);
+        self.clear_window_alerts(window);
     }
 
     fn touch_window_activity(&mut self, window: WindowId) {
@@ -1148,11 +1158,41 @@ impl MuxState {
             .activity = activity;
     }
 
-    fn clear_window_bells(&mut self, window: WindowId) {
+    fn clear_window_alerts(&mut self, window: WindowId) {
         let panes = self.windows[&window].pane_order.clone();
         for pane in panes {
             self.set_pane_bell(pane, false);
         }
+        self.set_window_activity_flag(window, false);
+        self.set_window_silence_flag(window, false);
+    }
+
+    /// Set or clear a window's pin-`WINLINK_ACTIVITY` flag, reporting whether
+    /// it moved. A window that already left is not an error.
+    pub fn set_window_activity_flag(&mut self, window: WindowId, raised: bool) -> bool {
+        let Some(window_state) = self.windows.get_mut(&window) else {
+            return false;
+        };
+        if window_state.activity_flag == raised {
+            return false;
+        }
+        window_state.activity_flag = raised;
+        self.bump_generation();
+        true
+    }
+
+    /// Set or clear a window's pin-`WINLINK_SILENCE` flag, reporting whether
+    /// it moved. A window that already left is not an error.
+    pub fn set_window_silence_flag(&mut self, window: WindowId, raised: bool) -> bool {
+        let Some(window_state) = self.windows.get_mut(&window) else {
+            return false;
+        };
+        if window_state.silence_flag == raised {
+            return false;
+        }
+        window_state.silence_flag = raised;
+        self.bump_generation();
+        true
     }
 
     pub fn select_pane(&mut self, pane: PaneId) -> Result<(), ServerError> {
@@ -2972,6 +3012,8 @@ impl MuxState {
                 name: window_name,
                 created,
                 activity: created,
+                activity_flag: false,
+                silence_flag: false,
                 active_pane: pane,
                 zoomed_pane: None,
                 layout: CellLayout::new(pane, inherited_extent.0, inherited_extent.1),
@@ -3002,7 +3044,7 @@ impl MuxState {
         }
         if let Some(window) = activated {
             self.touch_window_activity(window);
-            self.clear_window_bells(window);
+            self.clear_window_alerts(window);
         }
         if source_session != destination_session
             && self.sessions[&source_session].windows.is_empty()
@@ -3145,7 +3187,7 @@ impl MuxState {
         };
         if let Some(window) = activated {
             self.touch_window_activity(window);
-            self.clear_window_bells(window);
+            self.clear_window_alerts(window);
         }
         self.bump_generation();
         Ok(())
@@ -5975,5 +6017,34 @@ mod tests {
         assert!(!state.set_pane_bell(pane, false));
 
         assert!(!state.set_pane_bell(PaneId(9999), false));
+    }
+
+    #[test]
+    fn window_alert_flags_move_on_transition_and_clear_on_activation() {
+        let mut state = MuxState::default();
+        let (session, first, _) = state.create_session("work").unwrap();
+        let (second, _) = state
+            .create_window_at(session, None, None, PaneKind::Terminal, false)
+            .unwrap();
+
+        let generation = state.generation();
+        assert!(state.set_window_activity_flag(second, true));
+        assert!(state.set_window_silence_flag(second, true));
+        assert!(state.generation() > generation);
+        assert!(state.windows[&second].activity_flag);
+        assert!(state.windows[&second].silence_flag);
+
+        let generation = state.generation();
+        assert!(!state.set_window_activity_flag(second, true));
+        assert!(!state.set_window_silence_flag(second, true));
+        assert_eq!(state.generation(), generation);
+
+        assert!(state.activate_window(session, second));
+        assert!(!state.windows[&second].activity_flag);
+        assert!(!state.windows[&second].silence_flag);
+
+        assert!(!state.set_window_activity_flag(WindowId(9999), true));
+        assert!(!state.set_window_silence_flag(WindowId(9999), true));
+        let _ = first;
     }
 }

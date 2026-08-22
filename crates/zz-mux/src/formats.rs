@@ -92,6 +92,7 @@ pub struct StatusContext {
     pub window_active_clients_list: String,
     pub window_active_sessions: usize,
     pub window_active_sessions_list: String,
+    pub window_activity_alert: bool,
     pub window_bell: bool,
     pub window_end: Option<bool>,
     pub window_height: Option<u16>,
@@ -103,6 +104,7 @@ pub struct StatusContext {
     pub window_linked_sessions_list: String,
     pub window_name: String,
     pub window_panes: usize,
+    pub window_silence_alert: bool,
     pub window_stack_index: usize,
     pub window_start: Option<bool>,
     pub window_visible_layout: String,
@@ -233,6 +235,7 @@ enum FormatBacking {
     WindowActiveClientsList,
     WindowActiveSessions,
     WindowActiveSessionsList,
+    WindowActivityFlag,
     WindowBell,
     WindowEnd,
     WindowFlags,
@@ -248,6 +251,7 @@ enum FormatBacking {
     WindowName,
     WindowPanes,
     WindowRawFlags,
+    WindowSilenceFlag,
     WindowStackIndex,
     WindowStart,
     WindowVisibleLayout,
@@ -458,7 +462,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
         WindowActiveSessionsList
     ),
     variable!("window_activity", Window, Time, Empty),
-    variable!("window_activity_flag", Window, Zero),
+    variable!("window_activity_flag", Window, WindowActivityFlag),
     variable!("window_bell_flag", Window, WindowBell),
     variable!("window_bigger", Window, Empty),
     variable!("window_cell_height", Window, Zero),
@@ -486,7 +490,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("window_offset_y", Window, Empty),
     variable!("window_panes", Window, WindowPanes),
     variable!("window_raw_flags", Window, WindowRawFlags),
-    variable!("window_silence_flag", Window, Zero),
+    variable!("window_silence_flag", Window, WindowSilenceFlag),
     variable!("window_stack_index", Window, WindowStackIndex),
     variable!("window_start_flag", Window, WindowStart),
     variable!("window_visible_layout", Window, WindowVisibleLayout),
@@ -625,7 +629,13 @@ impl StatusContext {
             FormatBacking::WindowActiveSessionsList => {
                 Cow::Borrowed(self.window_active_sessions_list.as_str())
             }
+            FormatBacking::WindowActivityFlag => {
+                Cow::Borrowed(bool_string(self.window_activity_alert))
+            }
             FormatBacking::WindowBell => Cow::Borrowed(bool_string(self.window_bell)),
+            FormatBacking::WindowSilenceFlag => {
+                Cow::Borrowed(bool_string(self.window_silence_alert))
+            }
             FormatBacking::WindowEnd => optional_bool(self.window_end),
             FormatBacking::WindowFlags => Cow::Owned(self.window_flags(true)),
             FormatBacking::WindowFormat => {
@@ -658,8 +668,14 @@ impl StatusContext {
 
     fn window_flags(&self, escape: bool) -> String {
         let mut flags = String::new();
+        if self.window_activity_alert {
+            flags.push('#');
+        }
         if self.window_bell {
             flags.push('!');
+        }
+        if self.window_silence_alert {
+            flags.push('~');
         }
         if self.window_active.unwrap_or(false) {
             flags.push('*');
@@ -823,23 +839,52 @@ impl MuxEngine {
             .iter()
             .filter_map(|window| self.state.windows.get(window).map(|window| window.index))
             .max();
-        let bell_windows = session
+        let mut alert_windows = session
             .windows
             .iter()
             .filter_map(|window| self.state.windows.get(window))
-            .filter(|window| window.panes.values().any(|pane| pane.bell))
+            .filter_map(|window| {
+                let bell = window.panes.values().any(|pane| pane.bell);
+                (window.activity_flag || bell || window.silence_flag).then_some((
+                    window.index,
+                    window.activity_flag,
+                    bell,
+                    window.silence_flag,
+                ))
+            })
             .collect::<Vec<_>>();
+        alert_windows.sort_unstable_by_key(|(index, ..)| *index);
         context.session_bell = session
             .windows
             .first()
             .and_then(|window| self.state.windows.get(window))
             .is_some_and(|window| window.panes.values().any(|pane| pane.bell));
-        if !bell_windows.is_empty() {
-            context.session_alert.push('!');
+        for (_, activity, bell, silence) in &alert_windows {
+            if *activity && !context.session_alert.contains('#') {
+                context.session_alert.push('#');
+            }
+            if *bell && !context.session_alert.contains('!') {
+                context.session_alert.push('!');
+            }
+            if *silence && !context.session_alert.contains('~') {
+                context.session_alert.push('~');
+            }
         }
-        context.session_alerts = bell_windows
+        context.session_alerts = alert_windows
             .iter()
-            .map(|window| format!("{}!", window.index))
+            .map(|(index, activity, bell, silence)| {
+                let mut entry = index.to_string();
+                if *activity {
+                    entry.push('#');
+                }
+                if *bell {
+                    entry.push('!');
+                }
+                if *silence {
+                    entry.push('~');
+                }
+                entry
+            })
             .collect::<Vec<_>>()
             .join(",");
         let mut stack = context
@@ -872,6 +917,8 @@ impl MuxEngine {
             |pane| CellLayout::new(pane, width, height).dump(),
         );
         context.window_bell = window.panes.values().any(|pane| pane.bell);
+        context.window_activity_alert = window.activity_flag;
+        context.window_silence_alert = window.silence_flag;
         context.window_last = Some(session.last_window() == Some(window.id));
         context.window_start = Some(session.windows.first() == Some(&window.id));
         context.window_end = Some(session.windows.last() == Some(&window.id));

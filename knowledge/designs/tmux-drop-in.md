@@ -113,7 +113,8 @@ grammar" holds at the verb level, not yet at the flag level.
 corpus data: Oh My Tmux, fzf-tmux, tmux-sessionizer, and the seven pinned plugins):
 
 0. ~~**Oh My Tmux into the smoke corpus**~~ — SHIPPED 2026-08-20 (scenario green: 15 steps,
-   zero divergences; after Wave 2a, zz's baseline is one skip: `send-prefix -2`).
+   zero divergences; after Wave 2a, zz's baseline was one skip, `send-prefix -2`, driven
+   to zero by Wave C run 2 on 2026-08-21).
    Flushed out and fixed the same day: shell jobs missing the
    `set-environment` overlay, and stored-command rendering ignoring `args_print`.
 1. ~~**`switch-client` and `detach-on-destroy`** (v70)~~ — **SHIPPED 2026-08-20**.
@@ -145,13 +146,16 @@ corpus data: Oh My Tmux, fzf-tmux, tmux-sessionizer, and the seven pinned plugin
    surface (the nested-tty refusal,
    `-x -`/`-y -` from the client's size — `ClientHello` carries no
    size today).
-4. **The C3 knob batch** (v71) — `monitor-activity`/`monitor-silence` with the `#`/`~`
-   window flags and `activity-action`/`visual-activity`, the `set-titles` pair, `prefix2`
-   (Oh My Tmux's `send-prefix -2`), `display-panes-format`, `remain-on-exit-format`,
-   parse-time `command-alias`, honoring a user's `update-environment` list at seeding
-   (today hardcoded), the remaining lifecycle trio when explicitly set, and the renderer styles
-   fabrico already decided (`pane-*border-style` colors, `window-style`/
-   `window-active-style` dimming, `mode-style`). Add the `BEHAVES` list + drift test.
+4. **The C3 knob batch** (v71) — largely landed: run 1 (2026-08-21) shipped parse-time
+   `command-alias`, the `update-environment` seeding list, and the lifecycle trio; run 2
+   (same day) shipped the full alert set (`monitor-*`, `*-action`, `visual-*`, the
+   `#`/`~` window flags, `window-status-activity-style`) and `prefix2` with
+   `send-prefix -2` (Oh My Tmux's smoke is zero-warning). The `set-titles` pair shipped
+   with the B2/B3/title slice. Still open from this batch: `display-panes-format`,
+   `remain-on-exit-format` (parked on the terminal injection seam), and the renderer
+   styles fabrico already decided (`pane-*border-style` colors, `window-style`/
+   `window-active-style` dimming, `mode-style`). The `BEHAVES` drift test tracks each
+   slice.
 5. **`source-file` diagnostics on the CLI** — exit 1 with the pin's `path:line: message`
    where today the plain CLI exits 0 silent. Revalidation found that parse and glob failures
    fit the current response types, but the zz-only unsupported summary cannot reach stderr
@@ -280,8 +284,9 @@ independent adversarial review plus a follow-up delta verdict of MERGE-READY. Ze
 behavior change, with two named exceptions recorded for B1's ledger: `StatusLine.position`
 publishes the real effective value (no client reads it yet), and encode-time
 `StatusLine::validate` failures are discarded at the enqueue seam until B1 surfaces them.
-The three new mux keys are publication-only — `from_config_key` deliberately omits
-`mouse`/`escape-time`/`prefix2` until their consuming waves open the config surface.
+The three new mux keys shipped publication-only — `from_config_key` deliberately omitted
+`mouse`/`escape-time`/`prefix2` until their consuming waves opened the config surface
+(B2/B3 opened the first two; Wave C run 2 opened `prefix2`).
 
 The approval audit completed read-only on 2026-08-21. Append the following fields and
 variants as one bump. Postcard structs and enums stay append-only; the manually encoded
@@ -434,17 +439,32 @@ content contains no literal `#[`, top status occupies row zero, `mouse off` emit
 
 ## Wave C - C3 knob batch
 
-1. Alerts: generalize `raise_pane_bell` into an alert path for bell, activity, and silence.
-   Track per-window activity and silence flags, reset silence deadlines on output, aggregate
-   pane state, and clear flags on selection. Generalize the client-keyed display-panes
-   deadline code or add a pane/window timer owner. Expose `#` and `~` through formats, apply
-   `window-status-activity-style`, and fire the alert hooks. Move `monitor-activity`,
-   `monitor-silence`, `monitor-bell`, `activity-action`, `silence-action`, `visual-activity`,
-   `visual-silence`, and `window-status-activity-style` into `BEHAVES` and add deterministic
-   differential scenarios.
-2. `prefix2` and `send-prefix -2`: store a second prefix in the shared key tables, arm and
-   re-arm on either prefix, publish it through `MuxOptionKey::Prefix2`, and send nothing when
-   the second prefix is unset. Remove Oh My Tmux's last expected warning.
+1. Alerts: **shipped 2026-08-21 (run 2).** The bell path generalized into the pin's
+   alerts.c model: `monitor-bell` gates `raise_pane_bell`, PTY output (the coalesced
+   `output_activity` seam) raises the per-window activity flag, and `monitor-silence`
+   arms per-window deadlines on a dedicated dispatcher thread copied from the
+   display-panes pattern (`SilenceDeadline` keyed by window, token-validated, re-armed
+   on output, selection, expiry, and any `monitor-silence` write via
+   `MuxEffect::MonitorSilenceChanged` — the pin's `alerts_reset_all`). Selection clears
+   flags then requeues activity like `session_set_current`; the `*-action` and
+   `visual-*` options gate hooks and per-client ring/message delivery through the shared
+   `window_alert_notifications` fanout with the pin's message texts. Formats:
+   `window_activity_flag`/`window_silence_flag` backed for real, `#`/`!`/`~` in
+   `window_flags` in pin order, `session_alert`/`session_alerts` aggregate all three,
+   and `window-status-activity-style` layers into the status label where the bell style
+   does (bell wins when not `default`). Everything is inert at defaults: no timers, no
+   flag writes, and the bell path unchanged with `monitor-bell on`. Silence TIMING is
+   daemon-test-only; the `alerts` differential scenario covers flags, actions, readback,
+   and format output with timing-free triggers.
+2. `prefix2` and `send-prefix -2`: **shipped 2026-08-21 (run 2).** `KeyTables` carries an
+   optional canonical second prefix (`set_prefix2` never touches bindings — the pin has
+   no stock `send-prefix -2` binding), both `KeyEngine` arming sites accept either
+   prefix, and the GPUI client claims prefix2 keystrokes beside the primary. The value
+   lives in the `prefix2` stored scalar, syncs into the key tables on every
+   global-session write, publishes through `MuxOptionKey::Prefix2`, and became
+   config-writable (`from_config_key`). `send-prefix -2` sends the second prefix and is
+   a silent rc-0 no-op while unset, matching the pin's `KEYC_NONE` injection. Oh My
+   Tmux's smoke baseline is zero warnings.
 3. `set-titles` and `set-titles-string`: execute this source half before B4's client sinks.
    Expand the title per client and publish it independently of status visibility.
 4. `display-panes-format`: expand the format per pane into `PaneIndicator.label`. Both
@@ -486,7 +506,8 @@ content contains no literal `#[`, top status occupies row zero, `mouse off` emit
 
 The full B and C target moves `BEHAVES` from 67 to 105: 12 Wave B consumers and 26 Wave C
 consumers. The C tranche, if approved without `remain-on-exit-format`, stops at 104. Wave C
-run 1 (items 6, 7, 8) took it 81 to 86.
+run 1 (items 6, 7, 8) took it 81 to 86; run 2 (items 1 and 2) took it 86 to 95 and dropped
+the flag ledger to 127 across 29 (`send-prefix -2`).
 Regenerate the option rosters in `knowledge/tmux/divergences.md` and enforce both expected
 deltas in tests.
 
@@ -624,9 +645,9 @@ Tranches:
   `kill-session -g`, `choose-tree -G`, `command-prompt -P`, `copy-mode -S`,
   `send-keys -M`, `display-message -I`, and `show-messages -T -t`.
 
-The current ledger has 128 unsupported flag pairs across 30 commands (`attach-session -r`
-left it with Wave B's read-only slice). Waves B through D
-remove 15, leaving 114 for G and the parked contracts. The original G list omitted seven
+The current ledger has 127 unsupported flag pairs across 29 commands (`attach-session -r`
+left it with Wave B's read-only slice, `send-prefix -2` with Wave C run 2). Waves B through
+D remove 14 more, leaving 114 for G and the parked contracts. The original G list omitted seven
 chooser pairs and four parked `-E` pairs; the unsupported-pair roster replaces prose
 arithmetic as the completion proof. With the seven chooser pairs assigned to G5a and the
 current `-E`, streaming, and explicit parked sets unchanged, the planned result is 85
@@ -653,9 +674,9 @@ Each wave closes with:
 - `git diff --check`
 - OKF validation
 - `compat/run.sh --strict-geometry`, followed by a hard postcondition of at least the
-  current 50 scenario rows (48 before Wave C run 1 added `command-alias` and
-  `update-environment`), zero SKIPs, and no divergences outside the two documented
-  geometry fixtures
+  current 52 scenario rows (48 before Wave C run 1 added `command-alias` and
+  `update-environment`, 50 before run 2 added `alerts` and `prefix2`), zero SKIPs, and no
+  divergences outside the two documented geometry fixtures
 - the `BEHAVES` assertion and option ledger updated
 - the exact unsupported-pair roster and expected tranche delta updated
 - `knowledge/tmux/divergences.md`, this plan, and `knowledge/log.md` updated
@@ -1184,8 +1205,8 @@ appendix: arity/flag rejection wording, the `usage:` fallback, and the
   `58a3dcc`). Oh My Tmux's `.tmux.conf` pipes *itself* through `sh` and locates itself as
   `~/.tmux.conf`, so the harness stages the corpus file verbatim (`conf: ~/…` resolves
   against the scratch HOME) with its stock `.tmux.conf.local` beside it (`stage:`). Its zz
-  warning line — now one skip, `send-prefix -2` — is the campaign's
-  baseline to drive to zero. Adding it flushed out two real defects on
+  warning line — zero since Wave C run 2 landed `send-prefix -2` (2026-08-21) — was the
+  campaign's baseline to drive to zero. Adding it flushed out two real defects on
   first contact: shell jobs never received the `set-environment` overlay (so Oh My Tmux's
   `$TMUX_PROGRAM`-chained bootstrap silently never ran), and every stored-command renderer
   ignored the pin's `args_print` shape (flag grouping and order, canonical names,

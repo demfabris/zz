@@ -819,12 +819,19 @@ impl AppView {
             cx.stop_propagation();
             return;
         }
-        let (armed, prefix) = {
+        let (armed, prefix, prefix2) = {
             let mux = self.mux.read(cx);
-            (mux.prefix_armed(), mux.canonical_prefix())
+            (
+                mux.prefix_armed(),
+                mux.canonical_prefix(),
+                mux.canonical_prefix2(),
+            )
         };
         let claimed = armed
             || prefix
+                .as_deref()
+                .is_some_and(|prefix| keystroke_is(keystroke, prefix))
+            || prefix2
                 .as_deref()
                 .is_some_and(|prefix| keystroke_is(keystroke, prefix));
         if !claimed {

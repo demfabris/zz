@@ -1278,10 +1278,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "send-prefix",
         aliases: &[],
         description: "Send the prefix key to a pane",
-        usage: "[-t target-pane]",
+        usage: "[-2] [-t target-pane]",
         options: &[
+            CommandOptionSpec::flag("-2", "send the secondary prefix key"),
             CommandOptionSpec::value("-t", Pane, "target pane"),
-            CommandOptionSpec::unsupported_flag("-2"),
         ],
         positionals: &[],
         variadic: None,

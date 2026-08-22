@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: tmux divergence matrix
-description: "Every known divergence from tmux at the pinned reference commit: the 12 missing commands and why, the 30 implemented commands that still reject tmux flags, behavioral gaps on the implemented surface, the options coverage (all 180 store, 86 behave), and the protocol-level differences."
+description: "Every known divergence from tmux at the pinned reference commit: the 12 missing commands and why, the 29 implemented commands that still reject tmux flags, behavioral gaps on the implemented surface, the options coverage (all 180 store, 95 behave), and the protocol-level differences."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-20T00:00:00-03:00
@@ -25,8 +25,9 @@ hunt-claim regressions, including two implemented backwards
 
 The counts and flag ledger were refreshed against the live source after Waves 2a and 2b on
 2026-08-20. The pre-wave catalog held 159 unsupported pairs across 38 tmux commands; those
-waves removed 30 pairs, and Wave B's read-only slice removed `attach-session -r` on
-2026-08-21, leaving 128 across 30. The zz-only `split-picker` contributes another
+waves removed 30 pairs, Wave B's read-only slice removed `attach-session -r` on
+2026-08-21, and Wave C run 2 removed `send-prefix -2` the same day, leaving 127 across
+29. The zz-only `split-picker` contributes another
 19 markers to a raw catalog grep and is deliberately excluded from tmux compatibility counts.
 
 The one-line read: everything marked **silent** below is a bug by zz's own doctrine (tmux syntax
@@ -111,10 +112,10 @@ semantics on menus stay GUI-native).
 | `link-window` / `unlink-window` | Linked windows and session groups are skipped permanently (drop-in plan decision 3). One window belongs to one session. |
 | `new-pane` / `switch-mode` | The pin's floating-pane family (new in next-3.8). zz has no floating-pane model; the phase-1 picker verb was renamed off `new-pane` so the name stays tmux's. Unassessed beyond that. |
 
-# Flag-level gaps on implemented commands (30 of 80; 128 pairs)
+# Flag-level gaps on implemented commands (29 of 80; 127 pairs)
 
-Being cataloged is not the whole contract: 30 of the 80 implemented tmux commands still
-reject 128 flags the pin accepts, answering `unsupported command: <cmd> -X` rc 1 (and
+Being cataloged is not the whole contract: 29 of the 80 implemented tmux commands still
+reject 127 flags the pin accepts, answering `unsupported command: <cmd> -X` rc 1 (and
 counting as config skips). The catalog declares the unsupported pairs and the mux/daemon
 parsers enforce them. Inventory as of 2026-08-20 (flags in pin spelling; flags marked † are
 gated by decision 3 or by missing context/model support, the rest are plain work):
@@ -145,7 +146,6 @@ gated by decision 3 or by missing context/model support, the rest are plain work
 | `resize-pane` | `-M -T` |
 | `select-pane` | `-d -e -g -M -m -P` |
 | `send-keys` | `-c -F -K -R`; `-M` † |
-| `send-prefix` | `-2` |
 | `set-buffer` | `-t -n -w` |
 | `show-messages` | `-J`; `-T -t` † |
 | `source-file` | `-t -F -n -v` |
@@ -176,7 +176,7 @@ The catalog count does not include syntax zz accepts or parses before diverging:
 
 Four flags are zz extensions on tmux command names even though the pin rejects them:
 `move-pane -p` and `send-keys -C`/`-P`/`-o`. They are compatibility debt, not progress
-against the 128 unsupported pairs.
+against the 127 unsupported pairs.
 
 ## Former Wave 2e ownership (45 pairs)
 
@@ -240,7 +240,7 @@ daemon-owned command semantics in a client.
 | Command-name abbreviation | CLOSED by wave 7d (2026-08-18): zz implements the pin's `cmd_find` contract (cmd.c:470-508) — exact alias wins outright, a unique prefix over the alphabetical name table resolves (engine and daemon dispatch alike), several matches answer the pin's byte-exact `ambiguous command: <name>, could be: <list>`. Reviewer-swept every 2..N prefix of all 92 pin names: resolution classes match; remaining textual differences are the ledgered arity/flag wording (7c). Prefixes resolving to catalogued-but-unimplemented commands answer `unsupported command: <canonical>`. | closed |
 | `set prefix` key validation | zz rejects unresolvable bare keys with the pin's `bad key: <value>` but silently accepts unresolvable `C-`/`M-` keys the pin rejects (`C-zz`): a typo'd prefix is accepted and never fires. Full strictness needs the pin's `key_string_table` breadth (`^a` caret form, `BTab`, the KP family) — a partial tightening would loudly reject pin-valid keys instead, so this waits for a key-string parity wave. | **silent** edge |
 | Error-shape residue (post-7b) | Grep-facing error classes are pin-bare and byte-exact since wave 7b (2026-08-18): the twelve `options-values.sh` regress strings, `can't find session/window/pane:`, `unknown command:`, `already set:`, `open terminal failed: not a terminal`, show-messages pairs, `%config-error <file>:<line>:`. Catalogued-but-unimplemented commands/options answer `unsupported command: <name>` — a zz-only condition the pin would instead run. Arity/flag rejections and usage fallbacks keep zz wording (`<cmd> does not support -X` vs the pin's `command <cmd>: unknown flag -X`; no `usage:` fallback) pending per-command arity metadata (7c). | loud |
-| Alerts | Bell path only: `bell-action` and `visual-bell` behave on the pin's alerts.c model (C1, 2026-08-20). `monitor-activity`/`monitor-silence`/`monitor-bell`, `activity-action`/`silence-action`, and `visual-activity`/`visual-silence` store and read back but drive nothing — the bell path stays unconditional (`honest_knobs.rs:764`) and no activity/silence timers exist. Matches tmux defaults; an explicit `monitor-activity on` is silently inert. | **silent**, store-only |
+| Alerts | Full alerts.c model since Wave C run 2 (2026-08-21): `monitor-bell` gates the bell path, `monitor-activity` raises the activity flag from PTY output, and `monitor-silence` arms per-window daemon deadlines that re-arm on output and expiry. `activity-action`/`silence-action` and `visual-activity`/`visual-silence` gate the `alert-activity`/`alert-silence` hooks and per-client ring/message delivery exactly like `bell-action`/`visual-bell`, with the pin's message texts (`Activity in current window` / `Activity in window %d`, same for Silence). Window selection clears alert flags then requeues activity (the pin's `session_set_current`), so a monitored window selected in an unattached session keeps its flag like the pin. Flags surface through `#{window_flags}` (`#`/`!`/`~` in pin order), `window_activity_flag`/`window_silence_flag`, `session_alert`/`session_alerts`, and the `window-status-activity-style` label layer (bell style wins when not `default`). Remaining deltas: attach clears activity/silence but not bell flags on the current window — a one-flag change at the existing attach seam held back only because `monitor-bell` defaults on and the wave was otherwise inert at defaults; SCHEDULED to converge with the next slice that owns bell behavior, not a permanent divergence. `session_activity_flag`/`session_silence_flag` still expand to `0`, action gating and message text use each client's focused window where the pin has one session-level current window, and a same-value `monitor-silence` rewrite does not re-arm timers where the pin's `alerts_reset_all` runs on every write (no realistic observation: it needs a tight same-value rewrite loop racing a live countdown). | **silent**, bounded |
 | `select-layout main-*` with 2 panes | The pin never sizes the lone "other" pane (layout-set.c:264-269, :458-463), leaving stale geometry that fails tmux's own `layout_check`; zz sizes it (80x24 → main 80x22 + other 80x1). Deliberate: zz refuses to reproduce an upstream bug. | **silent**, zz more correct |
 | `select-layout -E` on a mixed parent | The pin spreads only leaf children (layout.c `layout_cell_is_tiled`) but divides the parent's full extent among them, so a parent mixing leaves with nested nodes gets corrupt sums (observed: 40+42+39 in an 80-wide window, last pane at xoff 84). Every later operation on that corrupted window keeps diverging: one `-E` produced four geometry divergences, three downstream, so the known scenario has one causal step but the divergence is not bounded to it. zz refuses that spread and stops the walk where the pin stops. All-leaf parents are exact (48 pin fixtures + `known/known-spread-mixed.txt`). | **silent**, zz more correct |
 | `select-layout` strings with zero-sized leaves | The pin accepts a leaf with width or height zero. zz rejects it to preserve the `PANE_MINIMUM` invariant. | **loud**, zz more correct |
@@ -251,7 +251,7 @@ daemon-owned command semantics in a client.
 | Detached `split-window` while zoomed | tmux pops zoom before the split (cmd-split-window.c:239). zz preserves zoom for `split-window -d` while it changes the hidden layout. A focused split and every non-`-Z` `resize-pane` unzoom first on both sides. | **silent** |
 | `move-pane` on tiled panes | The pin reserves `move-pane` for floating targets and returns `pane is not floating` for a tiled target (cmd-join-pane.c:428-431). zz has no floating panes and keeps `move-pane` as an alias of `join-pane`. | loud |
 | Attached-GUI `#{pane_width}` | Formats report the engine's cell allocation while PTYs are still sized by client pixel measurement, so a drawn pane's format can drift a cell from `tput cols` until the client-reported window size lands. Headless is exact. | **silent**, bounded |
-| `#{window_flags}` | zz emits `!` bell, `*` current, `-` last, and `Z` zoomed in tmux order. `#` activity, `~` silence, and `M` marked remain absent because zz does not model those states. | **silent** |
+| `#{window_flags}` | zz emits `#` activity, `!` bell, `~` silence, `*` current, `-` last, and `Z` zoomed in tmux order (Wave C run 2 backed activity and silence). `M` marked remains absent because zz does not model the marked pane. | **silent**, `M` only |
 | `send-keys -N` (no keys) | Arms the **invoking client's** count prefix; tmux stores it on the pane mode, so another client's (or a Command client's) `-N` is a silent no-op in zz. | **silent** edge |
 | `send-keys -X` | `select-line`/`copy-end-of-line` ignore counts; flags written after the verb (`-X copy-selection -C`) parse as positionals; no "not in a mode" error. | **silent** |
 | `send-keys -H` | Bytes `80`–`ff` refused; tmux writes the raw byte (`KeyToken::Literal` carries UTF-8). | loud |
@@ -312,7 +312,7 @@ inside a generic “unsupported formats” claim.
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
 | `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
-# Options: all 180 store, 86 behave
+# Options: all 180 store, 95 behave
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin. Since
 the 2026-08-20 Lane-2 sweep **every one of the 180 stores** with the pin's exact default,
@@ -330,8 +330,9 @@ readback (consumer-traced 2026-08-20; nine status-production names joined in the
 slice on 2026-08-21, `status-position` joined with B1's client half the same day,
 `mouse`, `escape-time`, `set-titles`, and `set-titles-string` joined with the B2/B3/title
 slice, and `command-alias`, `update-environment`, `exit-empty`, `exit-unattached`, and
-`destroy-unattached` joined with the Wave C alias/environment/lifecycle slice, all
-2026-08-21). **94 are store-only.** The earlier "78 behave" counted
+`destroy-unattached` joined with the Wave C alias/environment/lifecycle slice, and the
+nine alert/prefix2 names joined with Wave C run 2, all 2026-08-21). **85 are store-only.**
+The earlier "78 behave" counted
 options given a typed home in the honest-knobs/status structs, twelve of which nothing
 read. `tmux_options::BEHAVES` distinguishes the consumer-traced names from storage-only
 options and test-pins its count, uniqueness, and membership in the option catalog.
@@ -339,7 +340,7 @@ options and test-pins its count, uniqueness, and membership in the option catalo
 consumer wave wires a name up and moves it into `BEHAVES` (B1 moved six stored scalars and
 the `status-format` array).
 
-**Behaving (86):**
+**Behaving (95):**
 
 - Indexing and sessions: `base-index`, `pane-base-index`, `renumber-windows`,
   `default-size`, `window-size`, `aggressive-resize`, `history-limit` (10,000 product
@@ -354,7 +355,10 @@ the `status-format` array).
   `cursor-colour` (per-pane appearance clones; a zz-config `cursor-blink` override still
   outranks the blink half), `synchronize-panes`.
 - Names and alerts: `automatic-rename`, `automatic-rename-format`, `bell-action`,
-  `visual-bell`.
+  `visual-bell`; since Wave C run 2 (2026-08-21) the full alert set: `monitor-bell`,
+  `monitor-activity`, `monitor-silence` (per-window daemon deadlines),
+  `activity-action`/`silence-action`, `visual-activity`/`visual-silence`, and
+  `window-status-activity-style` (see the Alerts row).
 - Overlays and buffers: `display-time`, `display-panes-time`, `message-limit`,
   `buffer-limit`, `set-clipboard`, `copy-command`, and the seven `menu-*`/`popup-*`
   style and border options.
@@ -389,23 +393,26 @@ the `status-format` array).
   own readback), and the lifecycle trio `exit-empty`, `exit-unattached`,
   `destroy-unattached` — all three inert until EXPLICITLY set, and the
   "zero subscribers" guard survives every policy (see the Lifecycle trio row).
+- Keys (Wave C run 2, 2026-08-21): `prefix2` — stored as a global-session scalar,
+  synced into the shared `KeyTables` so either prefix arms the prefix table, published
+  through `MuxOptionKey::Prefix2` and config-writable via `from_config_key`;
+  `send-prefix -2` sends it and is a silent success while it is unset, like the pin.
 
-**Store-only (94):**
+**Store-only (85):**
 
-- Typed storage that nothing reads (38): `lock-after-time`,
-  `lock-command` (the lock commands are no-ops); `monitor-activity`, `monitor-silence`,
-  `monitor-bell`, `activity-action`, `silence-action`; `allow-rename`, `alternate-screen`,
+- Typed storage that nothing reads (32): `lock-after-time`,
+  `lock-command` (the lock commands are no-ops); `allow-rename`, `alternate-screen`,
   `scroll-on-clear`, `extended-keys`, `extended-keys-format`, `xterm-keys`, `backspace`,
   `editor`, `assume-paste-time`, `input-buffer-size`, `get-clipboard`,
   `default-client-command`, `fill-character`, `variation-selector-always-wide`;
   `message-style`, `message-command-style`, `message-format`;
   `pane-border-lines`, `pane-border-indicators`, the four `pane-scrollbars*`; the four
   `prompt-*cursor-*`; `clock-mode-colour`, `clock-mode-style`;
-  `window-status-separator`, `window-status-activity-style`.
-- Generic scalar storage (51 of the 63 scalar-backed names) plus five of the eight
+  `window-status-separator`.
+- Generic scalar storage (48 of the 63 scalar-backed names) plus five of the eight
   arrays: everything else in the table,
-  including `prefix2`, `display-panes-format`,
-  `remain-on-exit-format`, `visual-activity`/`visual-silence`, `status-keys`,
+  including `display-panes-format`,
+  `remain-on-exit-format`, `status-keys`,
   `pane-border-style`/`pane-active-border-style`,
   `window-style`/`window-active-style`, `mode-style` and the `copy-mode-*` styles,
   `terminal-overrides[]`, `terminal-features[]`, `user-keys[]`,

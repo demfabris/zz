@@ -27,6 +27,17 @@ impl BellAction {
         }
     }
 
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(Self::None),
+            "any" => Some(Self::Any),
+            "current" => Some(Self::Current),
+            "other" => Some(Self::Other),
+            _ => None,
+        }
+    }
+
     const fn toggled(self) -> Self {
         match self {
             Self::None => Self::Any,
@@ -61,6 +72,16 @@ impl VisualBell {
     #[must_use]
     pub const fn shows_message(self) -> bool {
         matches!(self, Self::On | Self::Both)
+    }
+
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "off" => Some(Self::Off),
+            "on" => Some(Self::On),
+            "both" => Some(Self::Both),
+            _ => None,
+        }
     }
 
     const fn toggled(self) -> Self {
@@ -761,7 +782,6 @@ pub(crate) struct WindowOptions {
     pub(crate) clock_mode_style: String,
     pub(crate) fill_character: String,
     pub(crate) monitor_activity: bool,
-    // Store-only until C3; the bell path remains unconditional.
     pub(crate) monitor_bell: bool,
     pub(crate) monitor_silence_seconds: u32,
     pub(crate) pane_border_indicators: String,
@@ -1257,25 +1277,14 @@ fn parse_bell_action(value: Option<&str>, current: BellAction) -> Result<BellAct
     let Some(value) = value else {
         return Ok(current.toggled());
     };
-    match value {
-        "none" => Ok(BellAction::None),
-        "any" => Ok(BellAction::Any),
-        "current" => Ok(BellAction::Current),
-        "other" => Ok(BellAction::Other),
-        _ => Err(format!("unknown value: {value}")),
-    }
+    BellAction::parse(value).ok_or_else(|| format!("unknown value: {value}"))
 }
 
 fn parse_visual_bell(value: Option<&str>, current: VisualBell) -> Result<VisualBell, String> {
     let Some(value) = value else {
         return Ok(current.toggled());
     };
-    match value {
-        "off" => Ok(VisualBell::Off),
-        "on" => Ok(VisualBell::On),
-        "both" => Ok(VisualBell::Both),
-        _ => Err(format!("unknown value: {value}")),
-    }
+    VisualBell::parse(value).ok_or_else(|| format!("unknown value: {value}"))
 }
 
 fn parse_window_size(value: Option<&str>, current: WindowSize) -> Result<WindowSize, String> {

@@ -373,6 +373,9 @@ pub enum MuxEffect {
     AggressiveResizeChanged {
         window: Option<WindowId>,
     },
+    /// A `monitor-silence` write landed at any scope; the daemon re-arms every
+    /// window's silence deadline, the pin's `alerts_reset_all`.
+    MonitorSilenceChanged,
     WindowSizeChanged {
         window: Option<WindowId>,
     },
@@ -1317,6 +1320,60 @@ impl MuxEngine {
     #[must_use]
     pub fn visual_bell_for_session(&self, session: SessionId) -> VisualBell {
         self.session_knobs(session).visual_bell
+    }
+
+    #[must_use]
+    pub fn activity_action_for_session(&self, session: SessionId) -> BellAction {
+        BellAction::parse(&self.session_knobs(session).activity_action).unwrap_or(BellAction::Other)
+    }
+
+    #[must_use]
+    pub fn silence_action_for_session(&self, session: SessionId) -> BellAction {
+        BellAction::parse(&self.session_knobs(session).silence_action).unwrap_or(BellAction::Other)
+    }
+
+    #[must_use]
+    pub fn visual_activity_for_session(&self, session: SessionId) -> VisualBell {
+        self.scalar_option_effective(TmuxOptionTarget::Session(session), "visual-activity")
+            .and_then(VisualBell::parse)
+            .unwrap_or(VisualBell::Off)
+    }
+
+    #[must_use]
+    pub fn visual_silence_for_session(&self, session: SessionId) -> VisualBell {
+        self.scalar_option_effective(TmuxOptionTarget::Session(session), "visual-silence")
+            .and_then(VisualBell::parse)
+            .unwrap_or(VisualBell::Off)
+    }
+
+    fn window_option_override(&self, window: WindowId, option: WindowOption) -> Option<&str> {
+        self.window_options
+            .get(&window)?
+            .get(&option)
+            .map(String::as_str)
+    }
+
+    #[must_use]
+    pub fn monitor_activity_for_window(&self, window: WindowId) -> bool {
+        self.window_option_override(window, WindowOption::MonitorActivity)
+            .map_or(self.global_window_options.monitor_activity, |value| {
+                value == "on"
+            })
+    }
+
+    #[must_use]
+    pub fn monitor_bell_for_window(&self, window: WindowId) -> bool {
+        self.window_option_override(window, WindowOption::MonitorBell)
+            .map_or(self.global_window_options.monitor_bell, |value| {
+                value == "on"
+            })
+    }
+
+    #[must_use]
+    pub fn monitor_silence_for_window(&self, window: WindowId) -> u32 {
+        self.window_option_override(window, WindowOption::MonitorSilence)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(self.global_window_options.monitor_silence_seconds)
     }
 
     #[must_use]
@@ -4831,9 +4888,17 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, _) = parse_command_options("send-prefix", args)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let key = if options.has("-2") {
+            let Some(prefix2) = self.keys.prefix2() else {
+                return Ok(Execution::default());
+            };
+            prefix2.to_owned()
+        } else {
+            self.keys.prefix().to_owned()
+        };
         Ok(Execution::effect(MuxEffect::SendKeys {
             pane,
-            keys: vec![KeyToken::Named(self.keys.prefix().to_owned())],
+            keys: vec![KeyToken::Named(key)],
         }))
     }
 
@@ -5700,6 +5765,7 @@ impl MuxEngine {
                     remove_named_option_override(&mut self.stored_scalars.panes, pane, name);
                 }
             }
+            self.sync_prefix2_from_store(name);
             return Ok(stored_scalar_execution(name, target));
         }
         let current = self
@@ -5717,7 +5783,18 @@ impl MuxEngine {
         let next =
             normalize_stored_scalar_value(metadata.kind, appended.as_deref().or(value), current)?;
         self.scalar_table_mut_or_insert(target).insert(name, next);
+        self.sync_prefix2_from_store(name);
         Ok(stored_scalar_execution(name, target))
+    }
+
+    fn sync_prefix2_from_store(&mut self, name: &str) {
+        if name != "prefix2" {
+            return;
+        }
+        let effective = self
+            .scalar_option_effective(TmuxOptionTarget::GlobalSession, "prefix2")
+            .map(str::to_owned);
+        self.keys.set_prefix2(effective.as_deref());
     }
 
     fn array_table(&self, target: TmuxOptionTarget) -> Option<&ArrayTable> {
@@ -8310,6 +8387,7 @@ impl MuxEngine {
             return Ok(Execution::default());
         }
         match option {
+            WindowOption::MonitorSilence => Ok(Execution::effect(MuxEffect::MonitorSilenceChanged)),
             WindowOption::WindowSize => {
                 Ok(Execution::effect(MuxEffect::WindowSizeChanged { window }))
             }
@@ -16836,12 +16914,24 @@ mod tests {
             }]
         );
         assert_eq!(engine.mux_option_value(MuxOptionKey::Prefix2), "C-a");
+        assert_eq!(engine.keys.prefix2(), Some("C-a"));
+        let sent = engine
+            .execute(&mut context, &command("send-prefix", &["-2"]))
+            .unwrap();
+        assert_eq!(
+            sent.effects,
+            [MuxEffect::SendKeys {
+                pane: context.pane.unwrap(),
+                keys: vec![KeyToken::Named("C-a".to_owned())],
+            }]
+        );
 
         let session_prefix2 = engine
             .execute(&mut context, &command("set-option", &["prefix2", "C-s"]))
             .unwrap();
         assert!(session_prefix2.effects.is_empty());
         assert_eq!(engine.mux_option_value(MuxOptionKey::Prefix2), "C-a");
+        assert_eq!(engine.keys.prefix2(), Some("C-a"));
 
         let unset = engine
             .execute(
@@ -16857,6 +16947,12 @@ mod tests {
             }]
         );
         assert_eq!(engine.mux_option_value(MuxOptionKey::Prefix2), "None");
+        assert_eq!(engine.keys.prefix2(), None);
+        let unset_send = engine
+            .execute(&mut context, &command("send-prefix", &["-2"]))
+            .unwrap();
+        assert!(unset_send.effects.is_empty());
+        assert!(unset_send.output.is_empty());
     }
 
     #[test]
@@ -17833,7 +17929,7 @@ mod tests {
     }
 
     #[test]
-    fn lane2_monitor_options_store_read_back_unset_and_validate_without_effects() {
+    fn monitor_options_store_read_back_unset_validate_and_emit_the_silence_effect() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
 
@@ -17859,13 +17955,19 @@ mod tests {
             &["-g", "silence-action", "none"],
             &["-gw", "monitor-activity", "on"],
             &["-gw", "monitor-bell", "off"],
-            &["-gw", "monitor-silence", "30"],
         ] {
             let execution = engine
                 .execute(&mut context, &command("set-option", args))
                 .unwrap();
             assert!(execution.effects.is_empty());
         }
+        let silence = engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-gw", "monitor-silence", "30"]),
+            )
+            .unwrap();
+        assert_eq!(silence.effects, [MuxEffect::MonitorSilenceChanged]);
         for (flags, name, expected) in [
             ("-gv", "activity-action", "any"),
             ("-gv", "silence-action", "none"),

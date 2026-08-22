@@ -183,6 +183,7 @@ impl MuxOptionKey {
             "agent-auto-approve" => Some(Self::AgentAutoApprove),
             "mouse" => Some(Self::Mouse),
             "escape-time" => Some(Self::EscapeTime),
+            "prefix2" => Some(Self::Prefix2),
             _ => None,
         }
     }
@@ -2604,7 +2605,12 @@ mod tests {
                 "escape-time",
                 Some(MuxOptionKey::EscapeTime),
             ),
-            (MuxOptionKey::Prefix2, 16, "prefix2", None),
+            (
+                MuxOptionKey::Prefix2,
+                16,
+                "prefix2",
+                Some(MuxOptionKey::Prefix2),
+            ),
         ] {
             assert_eq!(postcard::to_stdvec(&key).expect("mux option key"), [tag]);
             assert_eq!(key.as_str(), name);

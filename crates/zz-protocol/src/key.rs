@@ -39,6 +39,7 @@ impl Binding {
 #[derive(Debug)]
 pub struct KeyTables {
     prefix: String,
+    prefix2: Option<String>,
     tables: BTreeMap<String, BTreeMap<String, Binding>>,
 }
 
@@ -46,6 +47,7 @@ impl Default for KeyTables {
     fn default() -> Self {
         let mut tables = Self {
             prefix: "C-b".to_owned(),
+            prefix2: None,
             tables: BTreeMap::new(),
         };
         for (key, command) in [
@@ -392,6 +394,7 @@ impl KeyTables {
     pub fn empty() -> Self {
         Self {
             prefix: "C-b".to_owned(),
+            prefix2: None,
             tables: BTreeMap::new(),
         }
     }
@@ -419,6 +422,27 @@ impl KeyTables {
     #[must_use]
     pub fn prefix(&self) -> &str {
         &self.prefix
+    }
+
+    #[must_use]
+    pub fn prefix2(&self) -> Option<&str> {
+        self.prefix2.as_deref()
+    }
+
+    /// Set or clear the secondary prefix. The pin's default bindings carry no
+    /// `send-prefix -2` entry, so unlike [`Self::set_prefix`] this never
+    /// touches the tables.
+    pub fn set_prefix2(&mut self, prefix2: Option<&str>) {
+        self.prefix2 = prefix2
+            .filter(|key| !key.eq_ignore_ascii_case("none"))
+            .map(canonical_key);
+    }
+
+    /// Whether a canonical key arms the prefix table: the prefix or, when
+    /// set, the secondary prefix.
+    #[must_use]
+    pub fn is_prefix(&self, key: &str) -> bool {
+        key == self.prefix || self.prefix2.as_deref() == Some(key)
     }
 
     /// Change the effective prefix, carrying a stock `send-prefix` binding with
@@ -674,7 +698,7 @@ impl KeyEngine {
                 return (KeyDecision::Ignore, false);
             }
         }
-        if self.table.is_none() && key == tables.prefix {
+        if self.table.is_none() && tables.is_prefix(&key) {
             self.table = Some("prefix".to_owned());
             self.repeat_deadline = None;
             self.prefix_deadline = (!prefix_timeout.is_zero()).then_some(now + prefix_timeout);
@@ -703,7 +727,7 @@ impl KeyEngine {
             self.repeat_deadline = None;
             self.prefix_deadline = None;
             self.last_repeat_key = None;
-            if key == tables.prefix {
+            if tables.is_prefix(&key) {
                 self.table = Some("prefix".to_owned());
                 self.prefix_deadline = (!prefix_timeout.is_zero()).then_some(now + prefix_timeout);
                 return (KeyDecision::Prefix, false);
@@ -1239,6 +1263,48 @@ mod tests {
             Some(vec![CommandInvocation::new("new-window", [] as [&str; 0])])
         );
         assert!(tables.get("prefix", "C-a").is_none());
+    }
+
+    #[test]
+    fn a_second_prefix_arms_and_rearms_without_touching_bindings() {
+        let mut tables = KeyTables::default();
+        assert_eq!(tables.prefix2(), None);
+        assert_eq!(
+            KeyEngine::default().handle(&tables, "C-a"),
+            KeyDecision::Pass
+        );
+
+        tables.set_prefix2(Some("Ctrl-a"));
+        assert_eq!(tables.prefix2(), Some("C-a"));
+        assert!(tables.get("prefix", "C-a").is_none());
+        assert!(
+            tables
+                .get("prefix", "C-b")
+                .is_some_and(Binding::is_send_prefix)
+        );
+
+        let mut engine = KeyEngine::default();
+        assert_eq!(engine.handle(&tables, "C-a"), KeyDecision::Prefix);
+        assert!(matches!(
+            engine.handle(&tables, "c"),
+            KeyDecision::Commands(_)
+        ));
+        assert_eq!(engine.handle(&tables, "C-b"), KeyDecision::Prefix);
+        assert_eq!(engine.handle(&tables, "C-a"), KeyDecision::Ignore);
+
+        tables.set_prefix2(None);
+        assert_eq!(tables.prefix2(), None);
+        let mut engine = KeyEngine::default();
+        assert_eq!(engine.handle(&tables, "C-a"), KeyDecision::Pass);
+    }
+
+    #[test]
+    fn a_none_valued_second_prefix_reads_as_unset() {
+        let mut tables = KeyTables::default();
+        tables.set_prefix2(Some("None"));
+        assert_eq!(tables.prefix2(), None);
+        tables.set_prefix2(Some("none"));
+        assert_eq!(tables.prefix2(), None);
     }
 
     #[test]

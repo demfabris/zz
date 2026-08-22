@@ -1,0 +1,18 @@
+# prefix2 storage, canonicalization, bind of send-prefix -2, and the pin's
+# silent no-op when -2 fires with prefix2 unset. Arming itself is interactive
+# and lives in the shared key-contract tests.
+out: show-options -gv prefix2
+set-option -g prefix2 C-a
+out: show-options -gv prefix2
+set-option -g prefix2 Ctrl-b
+out: show-options -gv prefix2
+set-option -g prefix2 C-a
+bind-key -T pfx2 z send-prefix -2
+out: list-keys -T pfx2 -F #{key_table}|#{key_string}|#{key_repeat}|#{key_command}
+send-prefix -2 -t w:0
+out: show-options -gv prefix2
+set-option -g -u prefix2
+out: show-options -gv prefix2
+send-prefix -2 -t w:0
+set-option -g prefix2 not-a-key
+out: show-options -gv prefix2

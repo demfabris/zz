@@ -1,0 +1,62 @@
+# Alert flags, actions, and readback on the pin's alerts.c model. Timing-free
+# triggers only: PTY echo through a quiet `cat` pane raises activity and bell,
+# select-window exercises the clear-then-requeue seam (sessions here are never
+# attached, so the pin re-raises on selection while monitoring stays on), and
+# silence TIMING stays in daemon tests.
+out: show-window-options -gv monitor-activity
+out: show-window-options -gv monitor-bell
+out: show-window-options -gv monitor-silence
+out: show-options -gv activity-action
+out: show-options -gv silence-action
+out: show-options -gv visual-activity
+out: show-options -gv visual-silence
+out: show-window-options -gv window-status-activity-style
+set-option -g activity-action current
+out: show-options -gv activity-action
+set-option -g silence-action none
+out: show-options -gv silence-action
+set-option -g visual-activity both
+out: show-options -gv visual-activity
+set-option -g visual-silence on
+out: show-options -gv visual-silence
+set-window-option -g monitor-silence 60
+out: show-window-options -gv monitor-silence
+set-window-option -g -u monitor-silence
+out: show-window-options -gv monitor-silence
+set-window-option -g window-status-activity-style fg=yellow,bold
+out: show-window-options -gv window-status-activity-style
+set-window-option -g -u window-status-activity-style
+set-option -g -u activity-action
+set-option -g -u silence-action
+set-option -g -u visual-activity
+set-option -g -u visual-silence
+new-window -d -t w: -n quiet cat
+set-window-option -t w:1 monitor-activity on
+out: display-message -p -t w:1 #{window_activity_flag}#{window_bell_flag}#{window_silence_flag}
+send-keys -t w:1 -l ping
+out: display-message -p -t w:1 #{window_activity_flag}
+out: display-message -p -t w:0 #{session_alerts}
+out: display-message -p -t w:0 #{session_alert}
+out: list-windows -t w -F #{window_index}|#{window_flags}
+select-window -t w:1
+out: display-message -p -t w:1 #{window_activity_flag}
+set-window-option -t w:1 monitor-activity off
+out: display-message -p -t w:1 #{window_activity_flag}
+select-window -t w:0
+select-window -t w:1
+out: display-message -p -t w:1 #{window_activity_flag}
+out: display-message -p -t w:0 [#{session_alerts}]
+send-keys -t w:1 -H 07
+send-keys -t w:1 Enter
+out: display-message -p -t w:1 #{window_bell_flag}
+set-window-option -t w:1 monitor-activity on
+send-keys -t w:1 -l pong
+out: display-message -p -t w:1 #{window_activity_flag}
+out: display-message -p -t w:0 #{session_alerts}
+out: display-message -p -t w:0 #{session_alert}
+out: list-windows -t w -F #{window_index}|#{window_flags}
+set-window-option -t w:1 monitor-activity off
+select-window -t w:0
+select-window -t w:1
+out: display-message -p -t w:1 #{window_activity_flag}#{window_bell_flag}#{window_silence_flag}
+out: display-message -p -t w:0 [#{session_alerts}]

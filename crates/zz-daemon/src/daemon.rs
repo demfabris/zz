@@ -372,6 +372,107 @@ fn next_timed_message_id(inner: &mut ServerState) -> u64 {
     inner.next_timed_message_id
 }
 
+#[derive(Clone, Copy)]
+struct WindowAlert {
+    session: SessionId,
+    window: WindowId,
+    pane: PaneId,
+    window_index: u32,
+    label: &'static str,
+    hook_name: &'static str,
+    action: zz_mux::BellAction,
+    visual: zz_mux::VisualBell,
+    session_current: bool,
+}
+
+fn window_alert_notifications(
+    inner: &mut ServerState,
+    alert: WindowAlert,
+) -> (Option<PendingHookEvent>, Vec<(ClientId, Vec<EventPayload>)>) {
+    let WindowAlert {
+        session,
+        window,
+        pane,
+        window_index,
+        label,
+        hook_name,
+        action,
+        visual,
+        session_current,
+    } = alert;
+    let hook = action.applies(session_current).then(|| {
+        let snapshot = MuxHookSnapshot::capture(&inner.engine);
+        PendingHookEvent::pane(hook_name, pane, &snapshot.panes[&pane], &snapshot)
+    });
+    let duration_ms = inner.engine.display_time_for_session(session);
+    let mut notifications = inner
+        .attached
+        .get(&session)
+        .into_iter()
+        .flatten()
+        .filter(|client| {
+            inner.client_kinds.get(*client) != Some(&ClientKind::Control)
+                && inner.subscribers.contains_key(*client)
+        })
+        .filter_map(|client| {
+            let session_state = &inner.engine.state.sessions[&session];
+            let current = client_focused_window(inner, *client, session_state) == window;
+            action.applies(current).then(|| {
+                let mut events = Vec::with_capacity(2);
+                if visual.rings() {
+                    events.push(EventPayload::Bell { pane });
+                }
+                if visual.shows_message() {
+                    let text = if current {
+                        format!("{label} in current window")
+                    } else {
+                        format!("{label} in window {window_index}")
+                    };
+                    events.push(EventPayload::TimedClientMessage {
+                        pane: Some(pane),
+                        kind: ClientMessageKind::Info,
+                        text,
+                        duration_ms,
+                        message_id: 0,
+                    });
+                }
+                (*client, events)
+            })
+        })
+        .collect::<Vec<_>>();
+    for (_, events) in &mut notifications {
+        for event in events {
+            if let EventPayload::TimedClientMessage { message_id, .. } = event {
+                *message_id = next_timed_message_id(inner);
+            }
+        }
+    }
+    (hook, notifications)
+}
+
+fn arm_silence_deadline(
+    inner: &mut ServerState,
+    window: WindowId,
+    seconds: u32,
+) -> SilenceDeadline {
+    inner.next_silence_token = inner.next_silence_token.wrapping_add(1);
+    let deadline = SilenceDeadline {
+        window,
+        token: inner.next_silence_token,
+        deadline: Instant::now() + Duration::from_secs(u64::from(seconds)),
+    };
+    inner.silence_deadlines.insert(window, deadline);
+    deadline
+}
+
+fn schedule_window_silence(inner: &mut ServerState, window: WindowId) -> Option<SilenceDeadline> {
+    let seconds = inner.engine.monitor_silence_for_window(window);
+    if seconds == 0 {
+        return None;
+    }
+    Some(arm_silence_deadline(inner, window, seconds))
+}
+
 fn push_server_message(inner: &mut ServerState, text: String) -> u64 {
     let number = inner.next_message_number;
     inner.next_message_number = inner.next_message_number.wrapping_add(1);
@@ -1891,6 +1992,8 @@ struct Shared {
     display_panes_deadline_tx: crossbeam_channel::Sender<DisplayPanesDeadlineCommand>,
     display_panes_deadline_rx:
         Mutex<Option<crossbeam_channel::Receiver<DisplayPanesDeadlineCommand>>>,
+    silence_deadline_tx: crossbeam_channel::Sender<SilenceDeadlineCommand>,
+    silence_deadline_rx: Mutex<Option<crossbeam_channel::Receiver<SilenceDeadlineCommand>>>,
     stopping: AtomicBool,
     startup_ready: Mutex<bool>,
     startup_changed: Condvar,
@@ -2360,6 +2463,18 @@ enum DisplayPanesDeadlineCommand {
     Cancel { client: ClientId, token: u64 },
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct SilenceDeadline {
+    window: WindowId,
+    token: u64,
+    deadline: Instant,
+}
+
+enum SilenceDeadlineCommand {
+    Schedule(SilenceDeadline),
+    Cancel { window: WindowId, token: u64 },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct KittyImageKey {
     pane: PaneId,
@@ -2661,6 +2776,7 @@ impl Shared {
                 .set(option, value, MuxOptionSource::Default);
         }
         let (display_panes_deadline_tx, display_panes_deadline_rx) = crossbeam_channel::unbounded();
+        let (silence_deadline_tx, silence_deadline_rx) = crossbeam_channel::unbounded();
         Self {
             inner: Mutex::new(state),
             pipe_effects: Mutex::new(()),
@@ -2675,6 +2791,8 @@ impl Shared {
             status: Mutex::new(StatusRenderer::default()),
             display_panes_deadline_tx,
             display_panes_deadline_rx: Mutex::new(Some(display_panes_deadline_rx)),
+            silence_deadline_tx,
+            silence_deadline_rx: Mutex::new(Some(silence_deadline_rx)),
             stopping: AtomicBool::new(false),
             startup_ready: Mutex::new(true),
             startup_changed: Condvar::new(),
@@ -2723,6 +2841,7 @@ impl Shared {
         mux_config_files: Option<&[PathBuf]>,
     ) -> Result<(), DaemonError> {
         self.start_display_panes_deadline_dispatcher()?;
+        self.start_silence_deadline_dispatcher()?;
         let mut context = ExecutionContext::default();
         if load_user_config {
             if let Some(configs) = mux_config_files {
@@ -2826,6 +2945,84 @@ impl Shared {
                                 .is_some_and(|deadline| deadline.token == token)
                             {
                                 deadlines.remove(&client);
+                            }
+                        }
+                    }
+                }
+            })
+            .map_err(|error| DaemonError::Thread(error.to_string()))?;
+        ready_rx
+            .recv()
+            .map_err(|error| DaemonError::Thread(error.to_string()))
+    }
+
+    fn start_silence_deadline_dispatcher(self: &Arc<Self>) -> Result<(), DaemonError> {
+        let Some(receiver) = self.silence_deadline_rx.lock().take() else {
+            return Ok(());
+        };
+        let shared = Arc::downgrade(self);
+        let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
+        thread::Builder::new()
+            .name("zz-monitor-silence".to_owned())
+            .spawn(move || {
+                if ready_tx.send(()).is_err() {
+                    return;
+                }
+                let mut deadlines = BTreeMap::<WindowId, SilenceDeadline>::new();
+                loop {
+                    let next = deadlines
+                        .values()
+                        .min_by_key(|deadline| deadline.deadline)
+                        .copied();
+                    let command = if let Some(next) = next {
+                        let now = Instant::now();
+                        if next.deadline <= now {
+                            deadlines.remove(&next.window);
+                            let Some(shared) = shared.upgrade() else {
+                                return;
+                            };
+                            shared.expire_window_silence(next, now);
+                            continue;
+                        }
+                        match receiver.recv_deadline(next.deadline) {
+                            Ok(command) => command,
+                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                                deadlines.remove(&next.window);
+                                let Some(shared) = shared.upgrade() else {
+                                    return;
+                                };
+                                shared.expire_window_silence(next, Instant::now());
+                                continue;
+                            }
+                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
+                        }
+                    } else {
+                        let Ok(command) = receiver.recv() else {
+                            return;
+                        };
+                        command
+                    };
+                    match command {
+                        SilenceDeadlineCommand::Schedule(deadline) => {
+                            let Some(shared) = shared.upgrade() else {
+                                return;
+                            };
+                            if shared
+                                .inner
+                                .lock()
+                                .silence_deadlines
+                                .get(&deadline.window)
+                                .is_some_and(|current| *current == deadline)
+                            {
+                                deadlines.insert(deadline.window, deadline);
+                            }
+                        }
+                        SilenceDeadlineCommand::Cancel { window, token } => {
+                            if deadlines
+                                .get(&window)
+                                .is_some_and(|deadline| deadline.token == token)
+                            {
+                                deadlines.remove(&window);
                             }
                         }
                     }
@@ -3882,6 +4079,9 @@ impl Shared {
         let mut pipes_to_close = Vec::new();
         let mut pipe_taps_to_rearm = Vec::new();
         let mut display_panes_deadline = None;
+        let mut activity_requeues = Vec::new();
+        let mut silence_schedules = Vec::new();
+        let mut monitor_silence_changed = false;
         let mut attach = None;
         let mut detach = None;
         let mut detached_session = None;
@@ -4004,6 +4204,16 @@ impl Shared {
                         .then_some((*session, state.active_window))
                 })
                 .collect::<Vec<_>>();
+            for (_, window) in &changed_windows {
+                if let Some(deadline) = schedule_window_silence(&mut inner, *window) {
+                    silence_schedules.push(deadline);
+                }
+                if inner.engine.monitor_activity_for_window(*window)
+                    && let Some(state) = inner.engine.state.windows.get(window)
+                {
+                    activity_requeues.push((*window, state.active_pane));
+                }
+            }
             for (session, focused_window) in changed_windows {
                 let attached = inner.attached.get(&session).cloned().unwrap_or_default();
                 if attached.contains(&client) {
@@ -4924,6 +5134,7 @@ impl Shared {
                             );
                         }
                     }
+                    MuxEffect::MonitorSilenceChanged => monitor_silence_changed = true,
                     MuxEffect::StatusFormatsChanged { session } => match session {
                         Some(session) => {
                             status_refresh_sessions.insert(*session);
@@ -5180,6 +5391,17 @@ impl Shared {
                 .map_err(|_| {
                     DaemonError::Thread("display-panes deadline dispatcher stopped".to_owned())
                 })?;
+        }
+        if monitor_silence_changed {
+            self.reset_all_silence_timers();
+        }
+        for deadline in silence_schedules {
+            let _ = self
+                .silence_deadline_tx
+                .send(SilenceDeadlineCommand::Schedule(deadline));
+        }
+        for (window, pane) in activity_requeues {
+            self.raise_window_activity(window, pane);
         }
         #[cfg(feature = "agent")]
         {
@@ -8591,6 +8813,22 @@ impl Shared {
             }
         }
         inner.engine.mark_session_active(session);
+        if let Some(active_window) = inner
+            .engine
+            .state
+            .sessions
+            .get(&session)
+            .map(|state| state.active_window)
+        {
+            inner
+                .engine
+                .state
+                .set_window_activity_flag(active_window, false);
+            inner
+                .engine
+                .state
+                .set_window_silence_flag(active_window, false);
+        }
         let visible = visible_terminal_panes(&inner, client, session);
         affected_panes.extend(visible.iter().copied());
         inner.visible_terminals.insert(client, visible);
@@ -12391,7 +12629,7 @@ impl Shared {
             .tty()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let (changed, events, refresh_activity_choosers) = {
+        let (changed, events, refresh_activity_choosers, alert_window, silence_schedule) = {
             let mut inner = self.inner.lock();
             if !inner
                 .terminals
@@ -12400,8 +12638,16 @@ impl Shared {
             {
                 return;
             }
+            let mut alert_window = None;
+            let mut silence_schedule = None;
             if output_activity {
                 inner.engine.state.touch_window_activity_for_pane(pane);
+                if let Some(window) = inner.engine.state.window_for_pane(pane) {
+                    silence_schedule = schedule_window_silence(&mut inner, window);
+                    if inner.engine.monitor_activity_for_window(window) {
+                        alert_window = Some(window);
+                    }
+                }
             }
             let refresh_activity_choosers = output_activity
                 && inner
@@ -12434,8 +12680,18 @@ impl Shared {
                 changed,
                 mux_hook_events(&before, &after, ""),
                 refresh_activity_choosers,
+                alert_window,
+                silence_schedule,
             )
         };
+        if let Some(deadline) = silence_schedule {
+            let _ = self
+                .silence_deadline_tx
+                .send(SilenceDeadlineCommand::Schedule(deadline));
+        }
+        if let Some(window) = alert_window {
+            self.raise_window_activity(window, pane);
+        }
         if changed {
             self.publish_snapshot();
         } else if refresh_activity_choosers {
@@ -13051,70 +13307,42 @@ impl Shared {
             };
             let session = window_state.session;
             let window_index = window_state.index;
-            let current = inner.engine.state.sessions[&session].active_window == window;
-            let attached = inner
-                .attached
-                .get(&session)
-                .is_some_and(|clients| !clients.is_empty());
-            let suppressed = current && attached;
-            let snapshot_changed = if suppressed {
-                false
+            if inner.engine.monitor_bell_for_window(window) {
+                let current = inner.engine.state.sessions[&session].active_window == window;
+                let attached = inner
+                    .attached
+                    .get(&session)
+                    .is_some_and(|clients| !clients.is_empty());
+                let suppressed = current && attached;
+                let snapshot_changed = if suppressed {
+                    false
+                } else {
+                    inner.engine.state.set_pane_bell(pane, true)
+                };
+                let clear_terminal = suppressed
+                    .then(|| inner.terminals.get(&pane).cloned())
+                    .flatten();
+                let action = inner.engine.bell_action_for_session(session);
+                let visual = inner.engine.visual_bell_for_session(session);
+                let (hook, notifications) = window_alert_notifications(
+                    &mut inner,
+                    WindowAlert {
+                        session,
+                        window,
+                        pane,
+                        window_index,
+                        label: "Bell",
+                        hook_name: "alert-bell",
+                        action,
+                        visual,
+                        session_current: current,
+                    },
+                );
+                (snapshot_changed, clear_terminal, hook, notifications)
             } else {
-                inner.engine.state.set_pane_bell(pane, true)
-            };
-            let clear_terminal = suppressed
-                .then(|| inner.terminals.get(&pane).cloned())
-                .flatten();
-            let action = inner.engine.bell_action_for_session(session);
-            let hook = action.applies(current).then(|| {
-                let snapshot = MuxHookSnapshot::capture(&inner.engine);
-                PendingHookEvent::pane("alert-bell", pane, &snapshot.panes[&pane], &snapshot)
-            });
-            let visual = inner.engine.visual_bell_for_session(session);
-            let duration_ms = inner.engine.display_time_for_session(session);
-            let mut notifications = inner
-                .attached
-                .get(&session)
-                .into_iter()
-                .flatten()
-                .filter(|client| {
-                    inner.client_kinds.get(*client) != Some(&ClientKind::Control)
-                        && inner.subscribers.contains_key(*client)
-                })
-                .filter_map(|client| {
-                    let session_state = &inner.engine.state.sessions[&session];
-                    let current = client_focused_window(&inner, *client, session_state) == window;
-                    action.applies(current).then(|| {
-                        let mut events = Vec::with_capacity(2);
-                        if visual.rings() {
-                            events.push(EventPayload::Bell { pane });
-                        }
-                        if visual.shows_message() {
-                            let text = if current {
-                                "Bell in current window".to_owned()
-                            } else {
-                                format!("Bell in window {window_index}")
-                            };
-                            events.push(EventPayload::TimedClientMessage {
-                                pane: Some(pane),
-                                kind: ClientMessageKind::Info,
-                                text,
-                                duration_ms,
-                                message_id: 0,
-                            });
-                        }
-                        (*client, events)
-                    })
-                })
-                .collect::<Vec<_>>();
-            for (_, events) in &mut notifications {
-                for event in events {
-                    if let EventPayload::TimedClientMessage { message_id, .. } = event {
-                        *message_id = next_timed_message_id(&mut inner);
-                    }
-                }
+                let clear_terminal = inner.terminals.get(&pane).cloned();
+                (false, clear_terminal, None, Vec::new())
             }
-            (snapshot_changed, clear_terminal, hook, notifications)
         };
         if snapshot_changed {
             self.publish_snapshot();
@@ -13129,6 +13357,192 @@ impl Shared {
         }
         if let Some(hook) = hook {
             self.run_event_hooks(vec![hook]);
+        }
+    }
+
+    fn raise_window_activity(self: &Arc<Self>, window: WindowId, pane: PaneId) {
+        let (snapshot_changed, hook, notifications) = {
+            let mut inner = self.inner.lock();
+            if !inner.engine.monitor_activity_for_window(window) {
+                return;
+            }
+            let Some(window_state) = inner.engine.state.windows.get(&window) else {
+                return;
+            };
+            if window_state.activity_flag {
+                return;
+            }
+            let session = window_state.session;
+            let window_index = window_state.index;
+            let Some(session_state) = inner.engine.state.sessions.get(&session) else {
+                return;
+            };
+            let current = session_state.active_window == window;
+            let attached = inner
+                .attached
+                .get(&session)
+                .is_some_and(|clients| !clients.is_empty());
+            let suppressed = current && attached;
+            let snapshot_changed = if suppressed {
+                false
+            } else {
+                inner.engine.state.set_window_activity_flag(window, true)
+            };
+            let action = inner.engine.activity_action_for_session(session);
+            let visual = inner.engine.visual_activity_for_session(session);
+            let (hook, notifications) = window_alert_notifications(
+                &mut inner,
+                WindowAlert {
+                    session,
+                    window,
+                    pane,
+                    window_index,
+                    label: "Activity",
+                    hook_name: "alert-activity",
+                    action,
+                    visual,
+                    session_current: current,
+                },
+            );
+            (snapshot_changed, hook, notifications)
+        };
+        if snapshot_changed {
+            self.publish_snapshot();
+        }
+        for (client, events) in notifications {
+            for event in events {
+                self.publish_to_client(client, event);
+            }
+        }
+        if let Some(hook) = hook {
+            self.run_event_hooks(vec![hook]);
+        }
+    }
+
+    fn expire_window_silence(self: &Arc<Self>, scheduled: SilenceDeadline, now: Instant) {
+        let (snapshot_changed, hook, notifications, rearm) = {
+            let mut inner = self.inner.lock();
+            let due = inner
+                .silence_deadlines
+                .get(&scheduled.window)
+                .is_some_and(|current| *current == scheduled && scheduled.deadline <= now);
+            if !due {
+                return;
+            }
+            inner.silence_deadlines.remove(&scheduled.window);
+            let seconds = inner.engine.monitor_silence_for_window(scheduled.window);
+            if seconds == 0 {
+                return;
+            }
+            let Some(window_state) = inner.engine.state.windows.get(&scheduled.window) else {
+                return;
+            };
+            let session = window_state.session;
+            let window_index = window_state.index;
+            let pane = window_state.active_pane;
+            let latched = window_state.silence_flag;
+            let rearm = arm_silence_deadline(&mut inner, scheduled.window, seconds);
+            if latched {
+                (false, None, Vec::new(), Some(rearm))
+            } else {
+                let Some(session_state) = inner.engine.state.sessions.get(&session) else {
+                    return;
+                };
+                let current = session_state.active_window == scheduled.window;
+                let attached = inner
+                    .attached
+                    .get(&session)
+                    .is_some_and(|clients| !clients.is_empty());
+                let suppressed = current && attached;
+                let snapshot_changed = if suppressed {
+                    false
+                } else {
+                    inner
+                        .engine
+                        .state
+                        .set_window_silence_flag(scheduled.window, true)
+                };
+                let action = inner.engine.silence_action_for_session(session);
+                let visual = inner.engine.visual_silence_for_session(session);
+                let (hook, notifications) = window_alert_notifications(
+                    &mut inner,
+                    WindowAlert {
+                        session,
+                        window: scheduled.window,
+                        pane,
+                        window_index,
+                        label: "Silence",
+                        hook_name: "alert-silence",
+                        action,
+                        visual,
+                        session_current: current,
+                    },
+                );
+                (snapshot_changed, hook, notifications, Some(rearm))
+            }
+        };
+        if let Some(rearm) = rearm {
+            let _ = self
+                .silence_deadline_tx
+                .send(SilenceDeadlineCommand::Schedule(rearm));
+        }
+        if snapshot_changed {
+            self.publish_snapshot();
+        }
+        for (client, events) in notifications {
+            for event in events {
+                self.publish_to_client(client, event);
+            }
+        }
+        if let Some(hook) = hook {
+            self.run_event_hooks(vec![hook]);
+        }
+    }
+
+    fn reset_all_silence_timers(&self) {
+        let (schedules, cancels) = {
+            let mut inner = self.inner.lock();
+            let windows = inner
+                .engine
+                .state
+                .windows
+                .keys()
+                .copied()
+                .collect::<Vec<_>>();
+            let mut schedules = Vec::new();
+            let mut cancels = inner
+                .silence_deadlines
+                .keys()
+                .filter(|window| !inner.engine.state.windows.contains_key(window))
+                .copied()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .filter_map(|window| inner.silence_deadlines.remove(&window))
+                .collect::<Vec<_>>();
+            for window in windows {
+                let seconds = inner.engine.monitor_silence_for_window(window);
+                if seconds == 0 {
+                    if let Some(deadline) = inner.silence_deadlines.remove(&window) {
+                        cancels.push(deadline);
+                    }
+                } else {
+                    schedules.push(arm_silence_deadline(&mut inner, window, seconds));
+                }
+            }
+            (schedules, cancels)
+        };
+        for deadline in cancels {
+            let _ = self
+                .silence_deadline_tx
+                .send(SilenceDeadlineCommand::Cancel {
+                    window: deadline.window,
+                    token: deadline.token,
+                });
+        }
+        for deadline in schedules {
+            let _ = self
+                .silence_deadline_tx
+                .send(SilenceDeadlineCommand::Schedule(deadline));
         }
     }
 
@@ -14579,6 +14993,8 @@ struct ServerState {
     choose_trees: BTreeMap<ClientId, ChooseTreeSession>,
     choose_buffers: BTreeMap<ClientId, ChooseBufferSession>,
     display_panes: BTreeMap<ClientId, DisplayPanesSession>,
+    silence_deadlines: BTreeMap<WindowId, SilenceDeadline>,
+    next_silence_token: u64,
     popups: BTreeMap<ClientId, PopupSession>,
     menus: BTreeMap<ClientId, MenuSession>,
     confirms: BTreeMap<ClientId, ConfirmSession>,
@@ -17201,9 +17617,17 @@ fn expand_window_status_style(
         let last = expand_status(&formats.last_style, context, hooks);
         append_window_status_style(&mut style, &last);
     }
+    let mut bell_styled = false;
     if context.window_bell {
         let bell = expand_status(&formats.bell_style, context, hooks);
-        append_window_status_style(&mut style, &bell);
+        if bell != "default" && !bell.is_empty() {
+            append_window_status_style(&mut style, &bell);
+            bell_styled = true;
+        }
+    }
+    if !bell_styled && (context.window_activity_alert || context.window_silence_alert) {
+        let activity = expand_status(&formats.activity_style, context, hooks);
+        append_window_status_style(&mut style, &activity);
     }
     style
 }
@@ -41258,6 +41682,200 @@ bind - split-window -v -c "#{pane_current_path}"
             client_focused_window_for_attachment(&shared.inner.lock(), first_client),
             context.window
         );
+    }
+
+    #[test]
+    fn monitor_bell_off_silences_the_whole_bell_path() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (_client, mut context, _first, second) = belled_session(&shared, &mailbox);
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["-g", "monitor-bell", "off"]),
+            )
+            .expect("disable monitor-bell");
+        take_reliable_messages(&mailbox);
+        shared.raise_pane_bell(second);
+        let messages = take_reliable_messages(&mailbox);
+        assert!(bell_events(&messages).is_empty());
+        assert!(bell_messages(&messages).is_empty());
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(second)
+                .expect("second pane")
+                .bell
+        );
+    }
+
+    fn window_activity_flag(shared: &Arc<Shared>, window: WindowId) -> bool {
+        shared.inner.lock().engine.state.windows[&window].activity_flag
+    }
+
+    fn window_silence_flag(shared: &Arc<Shared>, window: WindowId) -> bool {
+        shared.inner.lock().engine.state.windows[&window].silence_flag
+    }
+
+    #[test]
+    fn activity_flag_rides_the_monitor_gate_suppression_and_selection_clear() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, mut context, first, second) = belled_session(&shared, &mailbox);
+        let (first_window, second_window) = {
+            let inner = shared.inner.lock();
+            (
+                inner.engine.state.window_for_pane(first).expect("first"),
+                inner.engine.state.window_for_pane(second).expect("second"),
+            )
+        };
+        shared.raise_window_activity(second_window, second);
+        assert!(!window_activity_flag(&shared, second_window));
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["-g", "monitor-activity", "on"]),
+            )
+            .expect("enable monitor-activity");
+        take_reliable_messages(&mailbox);
+        shared.raise_window_activity(second_window, second);
+        assert!(window_activity_flag(&shared, second_window));
+
+        shared.raise_window_activity(first_window, first);
+        assert!(!window_activity_flag(&shared, first_window));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("select-window", ["-t", ":1"]),
+            )
+            .expect("select the flagged window");
+        assert!(!window_activity_flag(&shared, second_window));
+    }
+
+    #[test]
+    fn activity_action_and_visual_activity_fan_out_with_pin_texts() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (_client, mut context, _first, second) = belled_session(&shared, &mailbox);
+        let (second_window, second_index) = {
+            let inner = shared.inner.lock();
+            let window = inner.engine.state.window_for_pane(second).expect("second");
+            (window, inner.engine.state.windows[&window].index)
+        };
+        for (command, arguments) in [
+            ("set-window-option", ["-g", "monitor-activity", "on"]),
+            ("set-option", ["-g", "activity-action", "any"]),
+            ("set-option", ["-g", "visual-activity", "both"]),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(command, arguments),
+                )
+                .expect("configure activity alerts");
+        }
+        take_reliable_messages(&mailbox);
+        shared.raise_window_activity(second_window, second);
+        let messages = take_reliable_messages(&mailbox);
+        assert_eq!(bell_events(&messages), vec![second]);
+        assert_eq!(
+            bell_messages(&messages),
+            vec![(
+                Some(second),
+                format!("Activity in window {second_index}"),
+                750,
+            )]
+        );
+
+        shared.raise_window_activity(second_window, second);
+        let latched = take_reliable_messages(&mailbox);
+        assert!(bell_events(&latched).is_empty());
+        assert!(bell_messages(&latched).is_empty());
+    }
+
+    #[test]
+    fn monitor_silence_arms_resets_expires_and_cancels_deterministically() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (_client, mut context, _first, second) = belled_session(&shared, &mailbox);
+        let second_window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(second)
+            .expect("second window");
+        assert!(shared.inner.lock().silence_deadlines.is_empty());
+
+        for (command, arguments) in [
+            ("set-window-option", ["-g", "monitor-silence", "1"]),
+            ("set-option", ["-g", "silence-action", "any"]),
+            ("set-option", ["-g", "visual-silence", "on"]),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(command, arguments),
+                )
+                .expect("configure silence alerts");
+        }
+        let deadline = {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.silence_deadlines.len(), 2);
+            inner.silence_deadlines[&second_window]
+        };
+        take_reliable_messages(&mailbox);
+
+        let stale = SilenceDeadline {
+            token: deadline.token.wrapping_add(1),
+            ..deadline
+        };
+        shared.expire_window_silence(stale, deadline.deadline);
+        assert!(!window_silence_flag(&shared, second_window));
+
+        shared.expire_window_silence(deadline, deadline.deadline);
+        assert!(window_silence_flag(&shared, second_window));
+        let second_index = shared.inner.lock().engine.state.windows[&second_window].index;
+        let messages = take_reliable_messages(&mailbox);
+        assert_eq!(
+            bell_messages(&messages),
+            vec![(
+                Some(second),
+                format!("Silence in window {second_index}"),
+                750,
+            )]
+        );
+        let rearmed = shared.inner.lock().silence_deadlines[&second_window];
+        assert_ne!(rearmed.token, deadline.token);
+
+        shared.expire_window_silence(rearmed, rearmed.deadline);
+        let latched = take_reliable_messages(&mailbox);
+        assert!(bell_messages(&latched).is_empty());
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["-g", "monitor-silence", "0"]),
+            )
+            .expect("disable monitor-silence");
+        assert!(shared.inner.lock().silence_deadlines.is_empty());
     }
 
     #[test]

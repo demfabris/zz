@@ -1,7 +1,7 @@
 ---
 type: Subsystem
 title: Key tables (key.rs)
-description: Root/prefix/copy-mode/chooser key resolution with the default C-b prefix, canonical and shifted key encoding, bind/unbind, send-prefix, numeric vi counts, pending jump-key capture, and wire publication of every table.
+description: Root/prefix/copy-mode/chooser key resolution with the default C-b prefix and optional prefix2, canonical and shifted key encoding, bind/unbind, send-prefix (-2), numeric vi counts, pending jump-key capture, and wire publication of every table.
 resource: crates/zz-protocol/src/key.rs
 tags: [tmux, keys, bindings, prefix, copy-mode, choosers]
 timestamp: 2026-08-14T00:00:00Z
@@ -41,17 +41,19 @@ app and the TUI, which contain no chooser key maps at all.
 | Type | Shape | Purpose |
 | --- | --- | --- |
 | `Binding` | `{ commands: Vec<CommandInvocation>, repeat: bool, note: Option<String> }` | What a key runs; `repeat` keeps the prefix table active (tmux `-r`); `note` is a `-N` description. |
-| `KeyTables` | `{ prefix: String, tables: BTreeMap<String, BTreeMap<String, Binding>> }` | Named tables; default `prefix` is `"C-b"`. |
+| `KeyTables` | `{ prefix: String, prefix2: Option<String>, tables: BTreeMap<String, BTreeMap<String, Binding>> }` | Named tables; default `prefix` is `"C-b"`, `prefix2` defaults unset. |
 | `KeyEngine` | `{ table, pending, repeat_count, repeat_deadline }` | Per-client mode: `None` = root, `Some("prefix")` after prefix, `pending` = awaiting a jump target key, `repeat_count` = buffered vi digits, and `repeat_deadline` bounds a repeatable binding sequence. |
 | `KeyDecision` | `Pass` \| `Prefix` \| `Ignore` \| `Commands(Vec<CommandInvocation>)` | Result of one keypress. |
 
 # Root vs prefix tables and default prefix
 
 The default prefix is **`C-b`** (settable via `set-option prefix …` or `set_prefix`, which runs the
-key through `canonical_key`). Resolution in `KeyEngine::handle`:
+key through `canonical_key`). An optional second prefix arms the same table: `set-option -g
+prefix2 <key>` stores the scalar and syncs `KeyTables::set_prefix2` (default `None` = unset; a
+literal `None` value also reads as unset). Resolution in `KeyEngine::handle`:
 
-- In root mode (`table == None`), a key equal to the prefix returns `Prefix` and switches to the
-  `prefix` table. Otherwise the `root` table is consulted; an unbound root key returns `Pass`
+- In root mode (`table == None`), a key equal to either prefix (`KeyTables::is_prefix`) returns
+  `Prefix` and switches to the `prefix` table. Otherwise the `root` table is consulted; an unbound root key returns `Pass`
   (goes to the routed pane sinks).
 - In the `prefix` table, a bound key runs its commands; a **non-repeat** binding then drops back to
   root, while a **repeat** (`-r`) binding stays in `prefix` so e.g. `C-b M-Left M-Left` keeps
@@ -119,6 +121,9 @@ Prefix table (partial, the canonical zz set):
 The prefix key itself is bound to **`send-prefix`** in the prefix table, matching tmux's stock
 `bind C-b send-prefix`, so `<prefix> <prefix>` delivers one literal prefix keystroke to the pane.
 `set-option prefix` carries that binding to the new key unless the user has rebound it.
+`prefix2` carries no stock binding and `set_prefix2` never touches the tables, matching the pin's
+default bindings; `send-prefix -2` sends the second prefix, and is a silent success while
+`prefix2` is unset (the pin injects `KEYC_NONE`, which writes nothing).
 
 Browser page input is the root-table exception. The desktop Browser sends ordinary page keys and
 committed text through the protocol's Browser-surface variants, which go directly to the

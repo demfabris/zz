@@ -362,19 +362,19 @@ accepts their spellings, which is what makes a Ghostty file importable, but they
 
 ## Daemon-owned mux option keys
 
-The sixteen mux keys are also transported raw and in file order. The daemon turns each entry into a
-global `set-option`, so repeated keys retain normal last-writer behavior and invalid entries produce
-a daemon diagnostic without blocking later entries. `mouse` and `escape-time` joined the
-config-writable roster on 2026-08-21 when Wave B2/B3 took ownership of their behavior; a reload
-reapplies them exactly like the existing keys (`from_config_key` routes the entry, the daemon
-replays it as a global `set-option` with `Override` provenance, and unset restores the underlay).
-The wire's `MuxOptions` map still carries one publication-only key, `prefix2`:
-`MuxOptionKey::from_config_key` deliberately does not map it, so a `zz/config` line naming it is
-ignored with a diagnostic until C2 takes ownership.
+The seventeen mux keys are also transported raw and in file order. The daemon turns each entry into
+a global `set-option`, so repeated keys retain normal last-writer behavior and invalid entries
+produce a daemon diagnostic without blocking later entries. `mouse` and `escape-time` joined the
+config-writable roster on 2026-08-21 when Wave B2/B3 took ownership of their behavior, and
+`prefix2` — the last publication-only key — joined the same day when Wave C run 2 took ownership of
+second-prefix arming and `send-prefix -2`; a reload reapplies them exactly like the existing keys
+(`from_config_key` routes the entry, the daemon replays it as a global `set-option` with
+`Override` provenance, and unset restores the underlay).
 
 | Key | Built-in default | Accepted value / effect |
 | --- | --- | --- |
 | `prefix` | `C-b` | tmux-style prefix key name; canonicalization is owned by `KeyTables::set_prefix` |
+| `prefix2` | `None` | optional second prefix key (or `None`); arms the prefix table beside `prefix` and feeds `send-prefix -2`; canonicalization is owned by `KeyTables::set_prefix2` |
 | `mode-keys` | `emacs` | `vi` or `emacs`; retargets native copy-mode tables |
 | `history-limit` | `10000` | integer `0..=1000000`; inherited by newly created panes |
 | `word-separators` | tmux punctuation set | one-line string up to 8 KiB; updates live terminal word selection |

@@ -26,7 +26,8 @@ hunt-claim regressions, including two implemented backwards
 The counts and flag ledger were refreshed against the live source after Waves 2a and 2b on
 2026-08-20. The pre-wave catalog held 159 unsupported pairs across 38 tmux commands; those
 waves removed 30 pairs, Wave B's read-only slice removed `attach-session -r` on
-2026-08-21, and Wave C run 2 removed `send-prefix -2` the same day, leaving 127 across
+2026-08-21, Wave C run 2 removed `send-prefix -2` the same day, and Wave D run 1 removed
+`copy-mode -H` plus `-K`/`-N` on both choosers on 2026-08-22, leaving 122 across
 29. The zz-only `split-picker` contributes another
 19 markers to a raw catalog grep and is deliberately excluded from tmux compatibility counts.
 
@@ -112,12 +113,12 @@ semantics on menus stay GUI-native).
 | `link-window` / `unlink-window` | Linked windows and session groups are skipped permanently (drop-in plan decision 3). One window belongs to one session. |
 | `new-pane` / `switch-mode` | The pin's floating-pane family (new in next-3.8). zz has no floating-pane model; the phase-1 picker verb was renamed off `new-pane` so the name stays tmux's. Unassessed beyond that. |
 
-# Flag-level gaps on implemented commands (29 of 80; 127 pairs)
+# Flag-level gaps on implemented commands (29 of 80; 122 pairs)
 
 Being cataloged is not the whole contract: 29 of the 80 implemented tmux commands still
-reject 127 flags the pin accepts, answering `unsupported command: <cmd> -X` rc 1 (and
+reject 122 flags the pin accepts, answering `unsupported command: <cmd> -X` rc 1 (and
 counting as config skips). The catalog declares the unsupported pairs and the mux/daemon
-parsers enforce them. Inventory as of 2026-08-20 (flags in pin spelling; flags marked † are
+parsers enforce them. Inventory as of 2026-08-22 (flags in pin spelling; flags marked † are
 gated by decision 3 or by missing context/model support, the rest are plain work):
 
 | Command | Rejected flags |
@@ -125,11 +126,11 @@ gated by decision 3 or by missing context/model support, the rest are plain work
 | `attach-session` | `-c -E -f -x` |
 | `break-pane` | `-a -b`; `-W -x -y -X -Y` † |
 | `capture-pane` | `-C -F -H -L -P -R` |
-| `choose-buffer` | `-F -K -k -N -y` |
-| `choose-tree` | `-F -h -K -k -N -y`; `-G` † |
+| `choose-buffer` | `-F -k -y` |
+| `choose-tree` | `-F -h -k -y`; `-G` † |
 | `clear-history` | `-H` |
 | `command-prompt` | `-1 -C -e -F -i -k -l -N -t -T`; `-P` † |
-| `copy-mode` | `-k -H -s`; `-S` † |
+| `copy-mode` | `-k -s`; `-S` † |
 | `detach-client` | `-E -t -P` |
 | `display-message` | `-a -C -c -d -l -N -v`; `-I` † |
 | `display-panes` | `-N -t` |
@@ -155,6 +156,16 @@ gated by decision 3 or by missing context/model support, the rest are plain work
 `list-commands` prints each command's usage with zz's accepted flags, so the rows above are
 the exact catalog-declared places its output differs from the pin's.
 
+**This table is enforced, not just published.** `the_unsupported_flag_ledger_matches_the_catalog`
+(`crates/zz-mux/tests/catalog_floor.rs`) carries the same 122 pairs as a literal roster and
+cross-checks it against `COMMAND_SPECS` + `DAEMON_COMMAND_SPECS` in both directions, so
+implementing a flag without updating this table fails the build, and so does adding a
+rejection the table never declared. The counts are derived from that literal rather than
+asserted on their own, because a total survives one flag landing while another regresses. The
+same file names the fourteen zz-native commands the count excludes — derived against the pin's
+`cmd_table`, so `split-picker`'s markers stay out of tmux arithmetic by rule instead of by
+memory. Update the roster and this table together.
+
 ## Accepted grammar that still diverges
 
 The catalog count does not include syntax zz accepts or parses before diverging:
@@ -167,6 +178,32 @@ The catalog count does not include syntax zz accepts or parses before diverging:
 - `capture-pane -p` and `-T` parse but do not affect behavior. Routing looks only at whether
   `-b` is present: bare capture prints instead of filling the default buffer, while
   `-b name -p` stores instead of printing.
+- The two zz clients disagree about an empty chooser key column. `mode_tree_draw` sizes the
+  gutter from the widest key and omits it entirely when no row has one; the TUI matches, but
+  the GPUI chooser reserves a fixed 46px cell per row, so a `-K` format that resolves on NO
+  row leaves an empty gutter in the GUI and none in the TUI. Cosmetic, reachable only through
+  an all-invalid `-K`, and recorded because two zz surfaces rendering the same daemon state
+  differently is the kind of drift this matrix exists to hold.
+- `copy-mode` (every flag, including bare) exits 1 with `pane is not attached: %N` when no
+  client is attached to the target pane, where the pin sets the mode regardless — the mode
+  lives on the pane in tmux and on the per-client terminal view in zz
+  (`MuxEffect::TerminalView` resolves a target client and errors on an empty set). The same
+  gate keeps `choose-tree`/`choose-buffer` at `choose-* requires an interactive client`. This
+  is why no copy-mode or chooser behavior can ride the differential corpus, which drives both
+  sides through a bare CLI against a headless server: every step would diverge on exit class
+  before any flag mattered. Found 2026-08-22 while trying to add a `copy-mode -H` scenario.
+- `choose-tree`/`choose-buffer` accept one `-N` as a no-op — zz's choosers are native
+  surfaces with no preview pane, so "no preview" is already their only layout — and reject a
+  repeated `-N` as `unsupported command: <cmd> -NN`, the pin's `MODE_TREE_PREVIEW_BIG`
+  (`args_has(args, 'N') > 1` in `mode_tree_start`), which has no zz presentation. `-K` expands
+  per row, and the two sides discard different expansions: the pin drops what
+  `key_string_lookup_string` cannot PARSE (`KEYC_UNKNOWN` -> `KEYC_NONE`), never testing
+  whether anything can press the result, while zz drops what falls outside its own input
+  vocabulary (`zz_protocol::is_key_name`, defined as exactly the grammar `input_key_name`
+  emits). zz's gate is strictly the narrower one, so a spelling tmux parses but zz has no
+  keystroke for — `M-C-a` and other orderings, `Space`, key names zz does not model — is
+  drawn by the pin and blank in zz. Conservative by choice: a key zz could never deliver
+  would be a dead shortcut.
 - `list-keys <key>` rejects the positional key filter.
 - `send-keys -H` rejects bytes `80` through `ff`.
 - Bind-time validation checks names and catalog flags but still misses complete positional
@@ -176,7 +213,7 @@ The catalog count does not include syntax zz accepts or parses before diverging:
 
 Four flags are zz extensions on tmux command names even though the pin rejects them:
 `move-pane -p` and `send-keys -C`/`-P`/`-o`. They are compatibility debt, not progress
-against the 127 unsupported pairs.
+against the 122 unsupported pairs.
 
 ## Former Wave 2e ownership (45 pairs)
 
@@ -186,7 +223,7 @@ the work belongs to the server:
 | Command family | Server/core | Client/presentation | Parked on missing context/model |
 | --- | --- | --- | --- |
 | `command-prompt` | `-F -l -t` | `-1 -C -e -i -k -N -T` | `-P` pane-rendered prompt |
-| `copy-mode` | `-k -s` | `-H` indicator visibility | `-S` bound mouse-slider context |
+| `copy-mode` | `-k -s` | . | `-S` bound mouse-slider context |
 | `send-keys` | `-c -F -K -R` | . | `-M` originating mouse event |
 | `display-message` | `-a -c -d -l -N -v` | `-C` | `-I` CLI stdin/protocol stream |
 | chooser residue | tree `-F -h -k -y`; buffer `-F -k -y` | `-K -N` on both | tree `-G` session groups |

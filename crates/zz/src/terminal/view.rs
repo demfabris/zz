@@ -102,13 +102,16 @@ fn mode_indicator(mode: TerminalMode, unseen_output: u32) -> Option<ModeIndicato
         }),
         TerminalMode::Live => None,
         TerminalMode::Copy {
-            position, total, ..
+            position,
+            total,
+            hide_position,
         } => Some(ModeIndicator {
             label: Some("COPY MODE"),
-            detail: if unseen_output == 0 {
-                format!("{position}/{total}")
-            } else {
-                format!("{position}/{total}  ·  +{unseen_output} output")
+            detail: match (hide_position, unseen_output) {
+                (true, 0) => String::new(),
+                (true, unseen) => format!("+{unseen} output"),
+                (false, 0) => format!("{position}/{total}"),
+                (false, unseen) => format!("{position}/{total}  ·  +{unseen} output"),
             },
         }),
         TerminalMode::View { position, total } => Some(ModeIndicator {
@@ -2845,6 +2848,38 @@ mod tests {
             })
         );
         assert_eq!(mode_indicator(TerminalMode::Live, 0), None);
+    }
+
+    #[test]
+    fn hide_position_drops_the_copy_position_and_keeps_the_rest() {
+        assert_eq!(
+            mode_indicator(
+                TerminalMode::Copy {
+                    position: 42,
+                    total: 900,
+                    hide_position: true,
+                },
+                0,
+            ),
+            Some(ModeIndicator {
+                label: Some("COPY MODE"),
+                detail: String::new(),
+            })
+        );
+        assert_eq!(
+            mode_indicator(
+                TerminalMode::Copy {
+                    position: 42,
+                    total: 900,
+                    hide_position: true,
+                },
+                3,
+            ),
+            Some(ModeIndicator {
+                label: Some("COPY MODE"),
+                detail: "+3 output".to_owned(),
+            })
+        );
     }
 
     #[test]

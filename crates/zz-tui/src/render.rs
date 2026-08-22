@@ -1069,6 +1069,7 @@ impl Renderer {
             } else {
                 1
             };
+            let key_column = chooser_key_column(state.items.iter().map(|item| item.key.as_str()));
             for (index, item) in state.items.iter().enumerate() {
                 let row = start_row + u16::try_from(index).unwrap_or(u16::MAX);
                 if row >= model.size.rows.saturating_sub(1) {
@@ -1080,7 +1081,8 @@ impl Renderer {
                     " "
                 };
                 let indent = "  ".repeat(usize::from(item.depth));
-                let text = format!("{marker} {indent}{}  {}", item.label, item.detail);
+                let key = chooser_key_cell(&item.key, key_column);
+                let text = format!("{marker} {key}{indent}{}  {}", item.label, item.detail);
                 write_colored_text(
                     &mut self.output,
                     0,
@@ -1112,6 +1114,7 @@ impl Renderer {
             } else {
                 1
             };
+            let key_column = chooser_key_column(state.items.iter().map(|item| item.key.as_str()));
             for (index, item) in state.items.iter().enumerate() {
                 let row = start_row + u16::try_from(index).unwrap_or(u16::MAX);
                 if row >= model.size.rows.saturating_sub(1) {
@@ -1122,8 +1125,9 @@ impl Renderer {
                 } else {
                     " "
                 };
+                let key = chooser_key_cell(&item.key, key_column);
                 let text = format!(
-                    "{marker} {}  {} bytes  {}",
+                    "{marker} {key}{}  {} bytes  {}",
                     item.name, item.size_bytes, item.preview
                 );
                 write_colored_text(
@@ -1517,6 +1521,29 @@ fn base_status_left(model: &Model) -> StyledLine {
     left
 }
 
+/// Width of the shortcut gutter, empty when no row has one. `mode_tree_draw`
+/// sizes it from the widest key plus the two parentheses and a trailing space,
+/// and rows without a key pad to the same column.
+fn chooser_key_column<'a>(keys: impl Iterator<Item = &'a str>) -> usize {
+    keys.filter(|key| !key.is_empty())
+        .map(|key| key.chars().count() + 3)
+        .max()
+        .unwrap_or(0)
+}
+
+fn chooser_key_cell(key: &str, column: usize) -> String {
+    if column == 0 {
+        return String::new();
+    }
+    let cell = if key.is_empty() {
+        String::new()
+    } else {
+        format!("({key})")
+    };
+    let padding = column.saturating_sub(cell.chars().count());
+    format!("{cell}{}", " ".repeat(padding))
+}
+
 fn append_status_label(line: &mut StyledLine, value: &str) {
     let label = StyledLine::parsed(value);
     if label.is_empty() {
@@ -1526,20 +1553,30 @@ fn append_status_label(line: &mut StyledLine, value: &str) {
     line.append(&label);
 }
 
+/// The mode badge for the status row. `copy-mode -H` suppresses the position
+/// and nothing else, matching the `!data->hide_position` guard that decides
+/// whether `window_copy_write_line` draws `copy-mode-position-format` at all.
+fn mode_indicator(mode: TerminalMode) -> String {
+    match mode {
+        TerminalMode::Live => String::new(),
+        TerminalMode::Copy {
+            hide_position: true,
+            ..
+        } => "COPY".to_owned(),
+        TerminalMode::Copy {
+            position, total, ..
+        } => format!("COPY {position}/{total}"),
+        TerminalMode::View { position, total } => format!("VIEW {position}/{total}"),
+    }
+}
+
 fn status_indicators(model: &Model) -> String {
     let mut indicators = String::new();
     if let Some(viewport) = model.active_viewport() {
         match viewport.mode {
             TerminalMode::Live => {}
-            TerminalMode::Copy {
-                position, total, ..
-            } => {
-                write!(indicators, "COPY {position}/{total}")
-                    .expect("writing to String cannot fail");
-            }
-            TerminalMode::View { position, total } => {
-                write!(indicators, "VIEW {position}/{total}")
-                    .expect("writing to String cannot fail");
+            TerminalMode::Copy { .. } | TerminalMode::View { .. } => {
+                indicators.push_str(&mode_indicator(viewport.mode));
             }
         }
         if let Some(search) = viewport.search {
@@ -2098,5 +2135,89 @@ mod tests {
 
         renderer.remove_browser_frame(pane);
         assert!(!renderer.browser_frame_live(pane));
+    }
+    #[test]
+    fn copy_mode_hides_only_its_position_when_the_daemon_asks() {
+        assert_eq!(
+            mode_indicator(TerminalMode::Copy {
+                position: 3,
+                total: 40,
+                hide_position: false,
+            }),
+            "COPY 3/40"
+        );
+        assert_eq!(
+            mode_indicator(TerminalMode::Copy {
+                position: 3,
+                total: 40,
+                hide_position: true,
+            }),
+            "COPY"
+        );
+        assert_eq!(
+            mode_indicator(TerminalMode::View {
+                position: 3,
+                total: 40,
+            }),
+            "VIEW 3/40"
+        );
+        assert_eq!(mode_indicator(TerminalMode::Live), "");
+    }
+
+    #[test]
+    fn the_chooser_key_gutter_sizes_once_and_pads_keyless_rows() {
+        assert_eq!(chooser_key_column(["0", "M-a", ""].into_iter()), 6);
+        assert_eq!(chooser_key_column(["", ""].into_iter()), 0);
+        assert_eq!(chooser_key_cell("0", 6), "(0)   ");
+        assert_eq!(chooser_key_cell("M-a", 6), "(M-a) ");
+        assert_eq!(chooser_key_cell("", 6), "      ");
+        assert_eq!(chooser_key_cell("", 0), "");
+        assert_eq!(chooser_key_cell("0", 0), "");
+    }
+
+    #[test]
+    fn the_chooser_paints_every_row_key_in_its_gutter() {
+        let mut model = block_model(60, 12);
+        model.choose_tree = Some(zz_protocol::ChooseTreeState {
+            items: vec![
+                zz_protocol::ChooseTreeItem {
+                    label: "alpha".to_owned(),
+                    detail: "1 window".to_owned(),
+                    target: zz_protocol::ChooseTreeTarget::Session(zz_protocol::SessionId(1)),
+                    depth: 0,
+                    flags: 0,
+                    pane_kind: None,
+                    key: "0".to_owned(),
+                },
+                zz_protocol::ChooseTreeItem {
+                    label: "beta".to_owned(),
+                    detail: "1 window".to_owned(),
+                    target: zz_protocol::ChooseTreeTarget::Session(zz_protocol::SessionId(2)),
+                    depth: 0,
+                    flags: 0,
+                    pane_kind: None,
+                    key: "M-a".to_owned(),
+                },
+                zz_protocol::ChooseTreeItem {
+                    label: "gamma".to_owned(),
+                    detail: "1 window".to_owned(),
+                    target: zz_protocol::ChooseTreeTarget::Session(zz_protocol::SessionId(3)),
+                    depth: 0,
+                    flags: 0,
+                    pane_kind: None,
+                    key: String::new(),
+                },
+            ],
+            search: None,
+            selected: 0,
+            kind: zz_protocol::ChooseTreeKind::Windows,
+        });
+        let mut renderer = Renderer::new();
+        renderer.paint_chooser(&model);
+        let output = String::from_utf8(renderer.output).unwrap();
+
+        assert!(output.contains("(0)   alpha"), "{output}");
+        assert!(output.contains("(M-a) beta"), "{output}");
+        assert!(output.contains("      gamma"), "{output}");
     }
 }

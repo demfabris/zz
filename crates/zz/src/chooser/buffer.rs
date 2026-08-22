@@ -119,6 +119,7 @@ fn buffer_row(
     buffer_chooser_row(
         BufferChooser::ROW_ID,
         index,
+        item.key,
         item.name,
         item.preview,
         format_buffer_size(item.size_bytes),

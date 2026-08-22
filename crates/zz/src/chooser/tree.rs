@@ -163,6 +163,7 @@ fn tree_row_element(
     tree_chooser_row(
         TreeChooser::ROW_ID,
         index,
+        item.key,
         target,
         item.label,
         item.detail,

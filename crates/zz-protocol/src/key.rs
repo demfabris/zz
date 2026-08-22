@@ -941,6 +941,42 @@ pub fn input_typed_text(input: &KeyInput) -> Option<&str> {
     (!text.is_empty() && !text.chars().any(char::is_control)).then_some(text)
 }
 
+/// Whether `value` spells a key some [`KeyInput`] can produce, in exactly the
+/// grammar [`input_key_name`] emits. Callers that resolve a key from user text
+/// — chooser row shortcuts, for one — follow the pin's rule that a spelling
+/// nothing can press means no key at all, the way `key_string_lookup_string`
+/// answers `KEYC_UNKNOWN` in key-string.c. Canonicalize with [`canonical_key`]
+/// first: this accepts only the `C-` before `M-` order the emitter uses.
+#[must_use]
+pub fn is_key_name(value: &str) -> bool {
+    let rest = value.strip_prefix("C-").unwrap_or(value);
+    let rest = rest.strip_prefix("M-").unwrap_or(rest);
+    let mut characters = rest.chars();
+    if let (Some(character), None) = (characters.next(), characters.next()) {
+        return !character.is_control();
+    }
+    if let Some(number) = rest.strip_prefix('F') {
+        return matches!(number.parse::<u8>(), Ok(1..=12));
+    }
+    matches!(
+        rest,
+        "BSpace"
+            | "Enter"
+            | "Tab"
+            | "Escape"
+            | "DC"
+            | "IC"
+            | "Home"
+            | "End"
+            | "PPage"
+            | "NPage"
+            | "Up"
+            | "Down"
+            | "Left"
+            | "Right"
+    )
+}
+
 /// Fold a tmux key spelling into its canonical form: `Ctrl-`/`Alt-` become
 /// `C-`/`M-` and `Space` becomes a literal space, on both sides of any
 /// modifier chain.
@@ -2203,5 +2239,59 @@ mod tests {
             engine.handle(&tables, "l"),
             KeyDecision::Commands(_)
         ));
+    }
+    #[test]
+    fn key_names_accept_only_spellings_a_press_can_produce() {
+        for name in [
+            "0", "9", "a", "M-a", "M-z", "C-a", "C-M-a", " ", "é", "Enter", "BSpace", "Escape",
+            "PPage", "NPage", "Up", "Down", "Left", "Right", "DC", "IC", "Home", "End", "F1",
+            "F12", "M-Enter",
+        ] {
+            assert!(is_key_name(name), "{name} names a pressable key");
+        }
+        for name in [
+            "", "10", "M-", "C-", "None", "nope", "F0", "F13", "M-C-a", "Space", "\u{1}",
+        ] {
+            assert!(!is_key_name(name), "{name} names no pressable key");
+        }
+    }
+
+    #[test]
+    fn every_pressable_key_name_validates_as_one() {
+        let inputs = [
+            KeyCode::Character('a'),
+            KeyCode::Backspace,
+            KeyCode::Enter,
+            KeyCode::Tab,
+            KeyCode::Escape,
+            KeyCode::Delete,
+            KeyCode::Insert,
+            KeyCode::Home,
+            KeyCode::End,
+            KeyCode::PageUp,
+            KeyCode::PageDown,
+            KeyCode::ArrowUp,
+            KeyCode::ArrowDown,
+            KeyCode::ArrowLeft,
+            KeyCode::ArrowRight,
+            KeyCode::Function(1),
+            KeyCode::Function(12),
+        ];
+        for key in inputs {
+            for modifiers in [
+                Modifiers::default(),
+                Modifiers::new(false, true, false, false),
+                Modifiers::new(false, false, true, false),
+                Modifiers::new(false, true, true, false),
+            ] {
+                let name = input_key_name(&press(key, modifiers, None));
+                assert!(
+                    is_key_name(name.as_str()),
+                    "{} came out of input_key_name",
+                    name.as_str(),
+                );
+                assert_eq!(canonical_key(name.as_str()), name.as_str());
+            }
+        }
     }
 }

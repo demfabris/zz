@@ -1,5 +1,10 @@
-use zz_mux::{COMMAND_SPECS, DetachScope, ExecutionContext, MuxEffect, MuxEngine, parse_config};
-use zz_protocol::{Axis, CommandInvocation, KeyToken, LayoutNode, PaneId, ServerError};
+use zz_mux::{
+    COMMAND_SPECS, DetachScope, ExecutionContext, MuxEffect, MuxEngine, TmuxSort, TmuxSortOrder,
+    parse_config,
+};
+use zz_protocol::{
+    Axis, ChooseTreeKind, CommandInvocation, KeyToken, LayoutNode, PaneId, ServerError,
+};
 use zz_terminal::{CopyModeAction, TerminalViewAction};
 
 fn command(name: &str, args: &[&str]) -> CommandInvocation {
@@ -94,12 +99,26 @@ fn catalog_covers_the_options_the_handlers_read() {
             .is_some()
     );
     assert!(spec("send-keys").option("-H").is_some());
-    for flag in ["-d", "-e", "-M", "-q"] {
+    for flag in ["-d", "-e", "-H", "-M", "-q"] {
         assert!(
             spec("copy-mode")
                 .option(flag)
                 .is_some_and(|option| !option.unsupported),
             "copy-mode catalog is missing supported {flag}"
+        );
+    }
+    for name in ["choose-tree", "choose-buffer"] {
+        assert!(
+            spec(name)
+                .option("-N")
+                .is_some_and(|option| !option.unsupported && option.value.is_none()),
+            "{name} catalogs -N as a bare flag so a repeat can be counted"
+        );
+        assert!(
+            spec(name)
+                .option("-K")
+                .is_some_and(|option| !option.unsupported && option.value.is_some()),
+            "{name} catalogs -K so its key format cannot leak into the template"
         );
     }
     assert!(spec("detach-client").option("-a").is_some());
@@ -1278,6 +1297,140 @@ fn copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit() {
             action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
         }]
     );
+}
+
+#[test]
+fn copy_mode_composes_hide_position_with_scroll_exit() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let pane = context.pane.unwrap();
+    let enter = |engine: &mut MuxEngine, context: &mut ExecutionContext, flags: &[&str]| {
+        engine
+            .execute(context, &command("copy-mode", flags))
+            .unwrap()
+            .effects
+    };
+
+    assert_eq!(
+        enter(&mut engine, &mut context, &[]),
+        [MuxEffect::TerminalView {
+            pane,
+            action: TerminalViewAction::EnterCopyMode,
+        }]
+    );
+    assert_eq!(
+        enter(&mut engine, &mut context, &["-e"]),
+        [MuxEffect::TerminalView {
+            pane,
+            action: TerminalViewAction::EnterCopyModeScrollExit,
+        }]
+    );
+    assert_eq!(
+        enter(&mut engine, &mut context, &["-H"]),
+        [MuxEffect::TerminalView {
+            pane,
+            action: TerminalViewAction::EnterCopyModeWith {
+                scroll_exit: false,
+                hide_position: true,
+            },
+        }]
+    );
+    for flags in [&["-eH"][..], &["-He"][..], &["-e", "-H"][..]] {
+        assert_eq!(
+            enter(&mut engine, &mut context, flags),
+            [MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::EnterCopyModeWith {
+                    scroll_exit: true,
+                    hide_position: true,
+                },
+            }],
+            "copy-mode {flags:?} composes both flags"
+        );
+    }
+
+    assert_eq!(
+        enter(&mut engine, &mut context, &["-Hd"]),
+        [
+            MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::EnterCopyModeWith {
+                    scroll_exit: false,
+                    hide_position: true,
+                },
+            },
+            MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::CopyMode(CopyModeAction::PageDown),
+            },
+        ]
+    );
+    assert_eq!(
+        enter(&mut engine, &mut context, &["-qH"]),
+        [MuxEffect::TerminalView {
+            pane,
+            action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
+        }]
+    );
+}
+
+#[test]
+fn choosers_take_a_key_format_and_refuse_the_large_preview() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let pane = context.pane.unwrap();
+
+    let tree = engine
+        .execute(
+            &mut context,
+            &command("choose-tree", &["-N", "-K", "#{line}"]),
+        )
+        .unwrap();
+    assert_eq!(
+        tree.effects,
+        [MuxEffect::ChooseTree {
+            pane,
+            kind: ChooseTreeKind::Panes,
+            sessions_only: false,
+            filter: None,
+            sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+            key_format: Some("#{line}".to_owned()),
+        }]
+    );
+
+    let buffer = engine
+        .execute(&mut context, &command("choose-buffer", &["-N", "-K", "x"]))
+        .unwrap();
+    assert_eq!(
+        buffer.effects,
+        [MuxEffect::ChooseBuffer {
+            pane,
+            filter: None,
+            sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Creation)).unwrap(),
+            key_format: Some("x".to_owned()),
+        }]
+    );
+
+    for (name, flags) in [
+        ("choose-tree", &["-NN"][..]),
+        ("choose-tree", &["-N", "-N"][..]),
+        ("choose-buffer", &["-NN"][..]),
+        ("choose-buffer", &["-N", "-N"][..]),
+    ] {
+        assert_eq!(
+            engine
+                .execute(&mut context, &command(name, flags))
+                .unwrap_err(),
+            ServerError::UnsupportedCommand(format!("{name} -NN")),
+            "{name} {flags:?} must ledger the pin's large preview"
+        );
+    }
 }
 
 #[test]

@@ -255,9 +255,37 @@ pub enum ChooserPaneKind {
     Editor,
 }
 
+/// The shortcut gutter every chooser row carries, blank when this row has no
+/// key. `mode_tree_draw` gives the whole list one key column and pads the rows
+/// without a shortcut to the same width, so the labels stay aligned.
+fn chooser_key_label(key: &str) -> SharedString {
+    if key.is_empty() {
+        SharedString::default()
+    } else {
+        SharedString::from(format!("({key})"))
+    }
+}
+
+fn chooser_key_cell(
+    key: &SharedString,
+    theme: ChooserRowTheme,
+    font_family: SharedString,
+) -> impl IntoElement {
+    div()
+        .w(px(46.0))
+        .flex_none()
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .font_family(font_family)
+        .text_size(crate::rems_from_px(10.0))
+        .text_color(theme.muted_foreground)
+        .child(chooser_key_label(key))
+}
+
 pub fn tree_chooser_row(
     id: &'static str,
     index: usize,
+    key: impl Into<SharedString>,
     target: impl Into<SharedString>,
     label: impl Into<SharedString>,
     detail: impl Into<SharedString>,
@@ -272,12 +300,14 @@ pub fn tree_chooser_row(
     let font_family = font_family.into();
     chooser_row(id, index, selected, theme.selection_background)
         .pr(px(10.0))
-        .pl(px(10.0 + f32::from(depth) * 18.0))
+        .pl(px(10.0))
         .child(
             div()
                 .w_full()
                 .flex()
                 .items_center()
+                .child(chooser_key_cell(&key.into(), theme, font_family.clone()))
+                .child(div().w(px(f32::from(depth) * 18.0)).flex_none())
                 .child(
                     div()
                         .w(px(18.0))
@@ -364,6 +394,7 @@ pub fn tree_chooser_row(
 pub fn buffer_chooser_row(
     id: &'static str,
     index: usize,
+    key: impl Into<SharedString>,
     name: impl Into<SharedString>,
     preview: impl Into<SharedString>,
     size: impl Into<SharedString>,
@@ -382,6 +413,7 @@ pub fn buffer_chooser_row(
                 .flex()
                 .items_center()
                 .gap(px(12.0))
+                .child(chooser_key_cell(&key.into(), theme, font_family.clone()))
                 .child(
                     div()
                         .w(px(142.0))
@@ -462,4 +494,16 @@ fn chooser_shadow(cx: &App) -> Vec<BoxShadow> {
             inset: false,
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::chooser_key_label;
+
+    #[test]
+    fn row_shortcuts_wear_the_parentheses_mode_tree_draws() {
+        assert_eq!(chooser_key_label("0").as_ref(), "(0)");
+        assert_eq!(chooser_key_label("M-a").as_ref(), "(M-a)");
+        assert_eq!(chooser_key_label("").as_ref(), "");
+    }
 }

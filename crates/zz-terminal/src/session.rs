@@ -1886,6 +1886,7 @@ struct CopyModeState {
     cursor: PointCoordinate,
     viewport_offset: u32,
     scroll_exit: bool,
+    hide_position: bool,
     selection: Option<ModeSelection>,
     mark: Option<PointCoordinate>,
     last_jump: Option<CopyJump>,
@@ -3714,6 +3715,7 @@ fn output_view_state(terminal: &mut Terminal<'_, '_>) -> Result<TerminalViewStat
         terminal,
         &mut active.selection,
         &mut active.copy_mode,
+        false,
         false,
     )?;
     let mode = active
@@ -5677,6 +5679,13 @@ fn apply_view_action(
                             ..
                         }
                 ),
+                matches!(
+                    enter_action,
+                    TerminalViewAction::EnterCopyModeWith {
+                        hide_position: true,
+                        ..
+                    }
+                ),
             )?;
             Ok(ViewActionResult::Snapshot)
         }
@@ -6027,6 +6036,7 @@ fn enter_copy_mode(
     selection: &mut Option<SelectionState>,
     copy_mode: &mut CopyModeSlot,
     scroll_exit: bool,
+    hide_position: bool,
 ) -> Result<(), WorkerError> {
     if copy_mode.is_some() {
         return Ok(());
@@ -6047,6 +6057,7 @@ fn enter_copy_mode(
         cursor,
         viewport_offset,
         scroll_exit,
+        hide_position,
         selection: None,
         mark: None,
         last_jump: None,
@@ -10361,7 +10372,7 @@ fn build_snapshot<'alloc: 'callbacks, 'callbacks>(
             FrozenModeKind::Copy => TerminalMode::Copy {
                 position,
                 total,
-                hide_position: false,
+                hide_position: copy_mode.hide_position,
             },
             FrozenModeKind::View => TerminalMode::View { position, total },
         }
@@ -10493,7 +10504,7 @@ fn copy_mode_snapshot(
             FrozenModeKind::Copy => TerminalMode::Copy {
                 position: mode.cursor.y.saturating_add(1).min(total),
                 total,
-                hide_position: false,
+                hide_position: mode.hide_position,
             },
             FrozenModeKind::View => TerminalMode::View {
                 position: mode.cursor.y.saturating_add(1).min(total),
@@ -10829,6 +10840,7 @@ mod tests {
             &mut live_selection,
             &mut copy_mode,
             scroll_exit,
+            false,
         )
         .expect("copy mode");
         let mode = copy_mode.as_mut().expect("mode");
@@ -13959,7 +13971,8 @@ mod tests {
         terminal.vt_write(b"foo..bar baz");
         let mut selection = None;
         let mut copy_mode = None;
-        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false).expect("copy mode");
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
         let mode = copy_mode.as_mut().expect("mode");
         let row = (0..mode.revision.total_rows())
             .find(|row| mode.revision.first_char(PointCoordinate { x: 0, y: *row }) == Some('f'))
@@ -14009,7 +14022,8 @@ mod tests {
         terminal.vt_write(b"foo..bar baz (a[b]c)");
         let mut selection = None;
         let mut copy_mode = None;
-        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false).expect("copy mode");
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
         let mode = copy_mode.as_mut().expect("mode");
         let row = (0..mode.revision.total_rows())
             .find(|row| mode.revision.first_char(PointCoordinate { x: 0, y: *row }) == Some('f'))
@@ -14189,7 +14203,8 @@ mod tests {
         terminal.vt_write(b"one\r\ntwo\r\nthree");
         let mut selection = None;
         let mut copy_mode = None;
-        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false).expect("copy mode");
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
         let mode = copy_mode.as_mut().expect("mode");
         move_copy_cursor(mode, &CopyModeAction::Up, &WordSeparators::default());
         let point = mode.cursor;
@@ -14285,17 +14300,46 @@ mod tests {
         let mut selection = None;
         let mut copy_mode = None;
 
-        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false).expect("plain entry");
-        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, true)
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("plain entry");
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, true, false)
             .expect("repeated scroll-exit entry");
         assert!(!copy_mode.as_ref().expect("mode").scroll_exit);
 
         copy_mode = None;
-        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, true)
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, true, false)
             .expect("scroll-exit entry");
-        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false)
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
             .expect("repeated plain entry");
         assert!(copy_mode.as_ref().expect("mode").scroll_exit);
+    }
+
+    #[test]
+    fn hide_position_latches_on_entry_and_leaves_scroll_exit_alone() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 8,
+            rows: 2,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        for (scroll_exit, hide_position) in
+            [(false, false), (true, false), (false, true), (true, true)]
+        {
+            let mut selection = None;
+            let mut copy_mode = None;
+            enter_copy_mode(
+                &mut terminal,
+                &mut selection,
+                &mut copy_mode,
+                scroll_exit,
+                hide_position,
+            )
+            .expect("copy mode");
+            let mode = copy_mode.as_ref().expect("mode");
+            assert_eq!(mode.scroll_exit, scroll_exit);
+            assert_eq!(mode.hide_position, hide_position);
+            assert_eq!(mode.kind, FrozenModeKind::Copy);
+        }
     }
 
     #[test]
@@ -14354,7 +14398,8 @@ mod tests {
 
         let mut selection = None;
         let mut copy_mode = None;
-        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false).expect("copy mode");
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
         let copy_maximum = copy_mode
             .as_ref()
             .expect("copy mode")
@@ -14475,8 +14520,14 @@ mod tests {
         terminal.vt_write(expected.as_bytes());
         let mut live_selection = None;
         let mut copy_mode = None;
-        enter_copy_mode(&mut terminal, &mut live_selection, &mut copy_mode, false)
-            .expect("copy mode");
+        enter_copy_mode(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            false,
+            false,
+        )
+        .expect("copy mode");
         let row = (0..copy_mode.as_ref().expect("mode").revision.total_rows())
             .find(|row| {
                 copy_mode
@@ -14557,8 +14608,14 @@ mod tests {
         terminal.vt_write(b"abcdef");
         let mut live_selection = None;
         let mut copy_mode = None;
-        enter_copy_mode(&mut terminal, &mut live_selection, &mut copy_mode, false)
-            .expect("copy mode");
+        enter_copy_mode(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            false,
+            false,
+        )
+        .expect("copy mode");
         let row = copy_mode.as_ref().expect("mode").cursor.y;
         let selection = ModeSelection {
             anchor: PointCoordinate { x: 0, y: row },
@@ -14668,8 +14725,14 @@ mod tests {
         terminal.vt_write(b"  one\r\n\r\ntwo\r\nthree\r\n\r\nfour");
         let mut live_selection = None;
         let mut copy_mode = None;
-        enter_copy_mode(&mut terminal, &mut live_selection, &mut copy_mode, false)
-            .expect("copy mode");
+        enter_copy_mode(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            false,
+            false,
+        )
+        .expect("copy mode");
         let row_with = |mode: &CopyModeState, needle: char| {
             (0..mode.revision.total_rows())
                 .find(|row| {
@@ -14850,7 +14913,8 @@ mod tests {
         terminal.vt_write(b"one\r\ntwo\r\nthree");
         let mut selection = None;
         let mut copy_mode = None;
-        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false).expect("copy mode");
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
         let mut origin = None;
 
         let initial = search_selection_policy(
@@ -14898,7 +14962,7 @@ mod tests {
         terminal.vt_write(b"old-one\r\nold-two\r\n\x1b[1;31mfrozen-marker\x1b[0m");
         let mut selection = None;
         let mut mode = None;
-        enter_copy_mode(&mut terminal, &mut selection, &mut mode, false).expect("copy mode");
+        enter_copy_mode(&mut terminal, &mut selection, &mut mode, false, false).expect("copy mode");
         let mut view = TerminalViewState::for_screen(Screen::Primary);
         view.copy_mode = mode;
         let mut render_state = RenderState::new().expect("render state");

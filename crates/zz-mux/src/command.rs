@@ -343,6 +343,7 @@ pub enum MuxEffect {
         sessions_only: bool,
         filter: Option<String>,
         sort: TmuxSort,
+        key_format: Option<String>,
     },
     FocusSidebar {
         pane: PaneId,
@@ -351,6 +352,7 @@ pub enum MuxEffect {
         pane: PaneId,
         filter: Option<String>,
         sort: TmuxSort,
+        key_format: Option<String>,
     },
     DisplayPanes {
         pane: PaneId,
@@ -5126,7 +5128,12 @@ impl MuxEngine {
         }
         let mut effects = vec![MuxEffect::TerminalView {
             pane,
-            action: if options.has("-e") {
+            action: if options.has("-H") {
+                TerminalViewAction::EnterCopyModeWith {
+                    scroll_exit: options.has("-e"),
+                    hide_position: true,
+                }
+            } else if options.has("-e") {
                 TerminalViewAction::EnterCopyModeScrollExit
             } else {
                 TerminalViewAction::EnterCopyMode
@@ -5272,6 +5279,7 @@ impl MuxEngine {
                 "choose-tree command templates are not supported yet".to_owned(),
             ));
         }
+        reject_large_preview("choose-tree", &options)?;
         let sort = TmuxSort::parse(
             options.value("-O"),
             options.has("-r"),
@@ -5287,6 +5295,7 @@ impl MuxEngine {
             sessions_only: options.has("-s"),
             filter: options.value("-f").map(str::to_owned),
             sort,
+            key_format: options.value("-K").map(str::to_owned),
         }))
     }
 
@@ -5317,6 +5326,7 @@ impl MuxEngine {
                 "choose-buffer command templates are not supported yet".to_owned(),
             ));
         }
+        reject_large_preview("choose-buffer", &options)?;
         let sort = TmuxSort::parse(
             options.value("-O"),
             options.has("-r"),
@@ -5326,6 +5336,7 @@ impl MuxEngine {
             pane,
             filter: options.value("-f").map(str::to_owned),
             sort,
+            key_format: options.value("-K").map(str::to_owned),
         }))
     }
 
@@ -10343,6 +10354,13 @@ impl Options {
         self.flags.iter().any(|candidate| candidate == flag)
     }
 
+    fn count(&self, flag: &str) -> usize {
+        self.flags
+            .iter()
+            .filter(|candidate| *candidate == flag)
+            .count()
+    }
+
     fn value(&self, option: &str) -> Option<&str> {
         self.values
             .iter()
@@ -10476,6 +10494,17 @@ fn required_arg<'a>(
     args.get(index)
         .map(String::as_str)
         .ok_or_else(|| ServerError::InvalidCommand(format!("{option} requires an argument")))
+}
+
+/// One `-N` asks a chooser for no preview, which is the only layout zz's
+/// choosers have; a repeated `-N` is the pin's large-preview mode
+/// (`MODE_TREE_PREVIEW_BIG` in `mode_tree_start`, selected by
+/// `args_has(args, 'N') > 1`), and zz has no presentation to match it with.
+fn reject_large_preview(command: &str, options: &Options) -> Result<(), ServerError> {
+    if options.count("-N") > 1 {
+        return Err(ServerError::UnsupportedCommand(format!("{command} -NN")));
+    }
+    Ok(())
 }
 
 fn reject_positionals(command: &str, positional: &[String]) -> Result<(), ServerError> {
@@ -21900,6 +21929,7 @@ mod tests {
                 sessions_only: true,
                 filter: None,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+                key_format: None,
             }]
         );
         assert_eq!(
@@ -21919,6 +21949,7 @@ mod tests {
                 sessions_only: false,
                 filter: Some("#{pane_active}".to_owned()),
                 sort: TmuxSort::parse(Some("name"), true, Some(TmuxSortOrder::Index)).unwrap(),
+                key_format: None,
             }]
         );
         assert_eq!(
@@ -21940,6 +21971,7 @@ mod tests {
                 sessions_only: false,
                 filter: None,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+                key_format: None,
             }]
         );
 
@@ -21954,6 +21986,7 @@ mod tests {
                 sessions_only: true,
                 filter: None,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+                key_format: None,
             }]
         );
         assert!(matches!(
@@ -21993,6 +22026,7 @@ mod tests {
                 pane,
                 filter: None,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Creation)).unwrap(),
+                key_format: None,
             }]
         );
         assert!(matches!(

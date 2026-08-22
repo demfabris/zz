@@ -547,8 +547,23 @@ deltas in tests.
    separate; run special modes through the pane-targeted key path; let numeric mode submit
    and pass its first non-digit into normal input. Plain prompts use the shared per-client
    freeze lifecycle, while incremental and `-C` prompts keep publishing terminal frames.
-2. Implement `copy-mode -H` through a `hide_position` field that suppresses the copy
-   position in both clients.
+2. **Shipped 2026-08-22.** `copy-mode -H` rides the v71 `EnterCopyModeWith
+   { scroll_exit, hide_position }` action (tag 27, previously produced by nothing): the mux
+   emits it only when `-H` is present, so `-e` alone and bare entry keep their old variants
+   byte for byte. `CopyModeState` latches `hide_position` at entry beside `scroll_exit`, both
+   snapshot builders publish it on `TerminalMode::Copy`, and the two clients drop the
+   position text alone — the TUI's badge becomes `COPY`, the GPUI tag keeps `COPY MODE` and
+   any `+N output`. That is exactly what the pin hides: `window_copy_init` reads
+   `args_has(args, 'H')` into `data->hide_position` and `window_copy_write_line` guards the
+   whole `copy-mode-position-format` draw on `!data->hide_position`, measured on the pin as
+   the top-right `HH:MM [N/M]` overlay vanishing with nothing else moving. The state is
+   observable nowhere else: neither side exposes it to formats (`#{?hide_position,…}` is not
+   a pin format, and zz pins `pane_in_mode`/`pane_mode`), so coverage is unit and daemon
+   tests only. A corpus scenario was attempted and withdrawn: zz's `copy-mode` exits 1 with `pane is not attached: %N` whenever no client is
+   attached to the target pane — the mode lives on the per-client terminal view in zz and on
+   the pane in tmux — so every step of a CLI-driven scenario diverges on exit class before any
+   flag matters. Ledgered under accepted-grammar divergences, and scheduled as F6, which
+   fixes the harness rather than the model; the same gate keeps the choosers off the corpus.
 3. Implement `display-message -C` as tmux's `no_freeze` behavior: keep terminal updates
    flowing while the status message is displayed. Plain `display-message` freezes
    presentation for that client, and clear resumes it with a full latest viewport. `-C`
@@ -558,12 +573,26 @@ deltas in tests.
    includes TUI timer/clear consumption; the daemon-owned `DisplayPanesDeadline`
    dispatcher is the working precedent for daemon-side deadlines, but it stores one
    deadline per client, so per-message identity still needs its own state.
-4. Implement `choose-tree` and `choose-buffer -K -N`: the daemon expands a key for each row,
-   the key selects the row, and both clients show it. One `-N` disables preview; repeated
-   `-NN` selects tmux's large-preview mode. zz can accept the no-preview case and must ledger
-   large preview until it has a matching presentation.
+4. **Shipped 2026-08-22.** `choose-tree`/`choose-buffer -K -N`. The daemon fills the v71
+   `ChooseTreeItem.key`/`ChooseBufferItem.key` per visible row with the pin's stock ladder —
+   `0`-`9`, then `M-a`-`M-z`, then nothing from row 36 on — which the pin reaches through
+   `WINDOW_TREE_DEFAULT_KEY_FORMAT`/`WINDOW_BUFFER_DEFAULT_KEY_FORMAT`, whose `#{line}`
+   arithmetic expands to the identical strings that `mode_tree_build_lines` hard-codes as its
+   no-callback fallback. Keys are assigned always, not only under `-K`: the pin's choosers
+   always pass a key callback, and a live pin draws `(0)`, `(M-a)` on every row by default.
+   `-K` replaces the ladder with a per-row format expansion in that row's own context
+   (session, window, or pane, mirroring `window_tree_get_key`'s `format_defaults` by item
+   type; `#{line}` is the row index); an expansion that names no pressable key becomes no key,
+   the way `key_string_lookup_string` answers `KEYC_UNKNOWN`. A press scans the rows before
+   the navigation table and activates the FIRST row holding that key, so a `-K j` shadows
+   "down" exactly as `mode_tree_key` does by breaking on the first match and rewriting the key
+   to `\r`; a chooser mid-search keeps typing instead. Both clients draw the key in a gutter
+   sized once for the list, blank for keyless rows. One `-N` is accepted as a no-op — zz's
+   choosers have no preview pane, so no-preview is already their only layout — and a repeated
+   `-N` is ledgered as `unsupported command: <cmd> -NN`, the pin's `MODE_TREE_PREVIEW_BIG`
+   (`args_has(args, 'N') > 1`), which zz has no presentation for.
 
-Implement and review D2 and D4 before the shared freeze work. Implement D3 next, then reuse
+D2 and D4 shipped before the shared freeze work. Implement D3 next, then reuse
 its lifecycle in D1. Use control-mode and PTY tests for interactive prompt behavior, then
 delete the matching refusal assertions.
 
@@ -630,8 +659,12 @@ behavior, not flags — and `catalog.rs` has no diff this wave.
 0. Shared parser and count foundation: give daemon and mux handlers one catalog-driven
    option and positional parser. Put reusable parsing beside `CommandSpec` in `zz-protocol`
    or export one deliberate mux API. Add positional minima and maxima, then route the four
-   daemon parser exceptions through it. Add a machine-enforced unsupported-pair roster and
-   exact per-wave deltas; `BEHAVES` cannot measure flag work.
+   daemon parser exceptions through it. Add exact per-wave deltas; `BEHAVES` cannot measure
+   flag work. **The machine-enforced unsupported-pair roster shipped early, with Wave D run 1**
+   — `the_unsupported_flag_ledger_matches_the_catalog` in `crates/zz-mux/tests/catalog_floor.rs`
+   holds all 122 pairs as a literal and cross-checks both directions against
+   `COMMAND_SPECS` + `DAEMON_COMMAND_SPECS`, excluding the fourteen zz-native names derived
+   against the pin's `cmd_table`. F0 inherits it rather than rebuilding it.
 1. Error contract, after F0: centralize pinned unknown-flag, missing-value, too-few and
    too-many argument, alias, and usage fallback shapes. Treat this as a command-semantics
    tranche rather than a text-only cleanup.
@@ -651,6 +684,22 @@ behavior, not flags — and `catalog.rs` has no diff this wave.
    approval together with `detach-client -E`. Settle target fanout, stale unlock rejection,
    reconnect cleanup, input gating, shell/cwd/environment, process failure, raw-mode restore,
    hooks, and `lock-after-time`. Keep the GUI behavior ledgered until it owns a lock flow.
+6. Teach the differential harness to attach a client, restoring the copy-mode and chooser
+   lane. This is a HARNESS fix, not a model change: zz's `copy-mode` exits 1 with `pane is not
+   attached: %N` whenever no client is attached to the target pane — the mode lives on the
+   per-client terminal view in zz and on the pane in tmux — and the choosers refuse with
+   `choose-* requires an interactive client`. `compat/diff-scenario.sh` drives a bare CLI
+   against a headless server, so every step of such a scenario diverges on exit class before
+   any flag matters, and Wave D run 1's `copy-mode-flags` scenario was written and withdrawn
+   for exactly that reason. Wave D run 1 proved the fix is achievable without touching zz's
+   client model: nesting the run inside an outer multiplexer pane gives the inner server a
+   real attached client and made every pin measurement in that wave possible, including
+   reading mode screens that `capture-pane` cannot see because it reads `wp->base`. Do this
+   before the copy-mode-adjacent tranches: D1, D3, and the F and G work all touch prompts,
+   copy mode, or choosers, and each would otherwise land unit-tests-only. Note the reporting
+   hazard while it stands — in the divergence matrix an absent row normally means "checked and
+   matching", and here it means "unverifiable by the primary instrument", which is a much
+   weaker claim than silence implies.
 
 ## Wave G - remaining server and engine flags
 
@@ -702,9 +751,10 @@ Tranches:
   `kill-session -g`, `choose-tree -G`, `command-prompt -P`, `copy-mode -S`,
   `send-keys -M`, `display-message -I`, and `show-messages -T -t`.
 
-The current ledger has 127 unsupported flag pairs across 29 commands (`attach-session -r`
-left it with Wave B's read-only slice, `send-prefix -2` with Wave C run 2). Waves B through
-D remove 14 more, leaving 114 for G and the parked contracts. The original G list omitted seven
+The current ledger has 122 unsupported flag pairs across 29 commands (`attach-session -r`
+left it with Wave B's read-only slice, `send-prefix -2` with Wave C run 2, and `copy-mode -H`
+plus `-K`/`-N` on both choosers with Wave D run 1). The rest of Wave D removes 9 more,
+leaving 114 for G and the parked contracts. The original G list omitted seven
 chooser pairs and four parked `-E` pairs; the unsupported-pair roster replaces prose
 arithmetic as the completion proof. With the seven chooser pairs assigned to G5a and the
 current `-E`, streaming, and explicit parked sets unchanged, the planned result is 85
@@ -714,7 +764,7 @@ implemented and 29 parked.
 
 The completed safe prelude is `0 -> A1 -> A2 -> B1-existing-wire`. After core approval, run
 `A3 -> B with C3 title production -> C except C5 -> E -> D2 -> D4 -> D3 -> D1`. E proves the
-new response streams without interactive state, and shipped 2026-08-22; D2 is next. D3
+new response streams without interactive state, and shipped 2026-08-22, as did D2 and D4. D3
 establishes the freeze lifecycle before D1 reuses it for prompts.
 
 Continue with `F0 -> F1 -> F2 -> F3 -> F4 -> G1 -> G2 -> G3a -> independent G3b -> G3c ->

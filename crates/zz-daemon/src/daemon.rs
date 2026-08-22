@@ -34,13 +34,14 @@ use zz_protocol::{
     CommandPromptKind, CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest,
     CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState, DisplayPanesAction,
     DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES,
-    MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES,
-    MAX_WINDOW_STATUS_LABEL_BYTES, MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource,
-    MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId,
-    PaneIndicator, PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction,
-    PopupBorderLines, PopupState, ProtocolError, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError,
-    ServerHello, SessionId, SessionViewer, SplitId, StatusLine, WindowId,
-    encode_protocol_message_into, encode_terminal_viewport_event_into, read_protocol_message_into,
+    MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
+    MAX_PANE_INDICATOR_LABEL_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MenuAction, MenuItem, MenuState,
+    MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY,
+    PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot, PasteUploadPurpose,
+    PastedImageFormat, PopupAction, PopupBorderLines, PopupState, ProtocolError, ProtocolMessage,
+    SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId, SessionViewer, SplitId, StatusLine,
+    WindowId, canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into,
+    is_key_name, read_protocol_message_into,
 };
 use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
@@ -4983,6 +4984,7 @@ impl Shared {
                         sessions_only,
                         filter,
                         sort,
+                        key_format,
                     } => {
                         if kind != ClientKind::Interactive
                             || !inner.subscribers.contains_key(&client)
@@ -5003,6 +5005,7 @@ impl Shared {
                             &facts,
                             filter.clone(),
                             *sort,
+                            key_format.clone(),
                         )?;
                         if attached_session != Some(chooser.source_session) {
                             return Err(ServerError::PaneNotAttached(*pane).into());
@@ -5021,7 +5024,12 @@ impl Shared {
                         inner.choose_trees.insert(client, chooser);
                         direct_events.push(EventPayload::ChooseTree { state: Some(state) });
                     }
-                    MuxEffect::ChooseBuffer { pane, filter, sort } => {
+                    MuxEffect::ChooseBuffer {
+                        pane,
+                        filter,
+                        sort,
+                        key_format,
+                    } => {
                         if kind != ClientKind::Interactive
                             || !inner.subscribers.contains_key(&client)
                         {
@@ -5040,6 +5048,7 @@ impl Shared {
                             &facts,
                             filter.clone(),
                             *sort,
+                            key_format.clone(),
                         )?
                         else {
                             continue;
@@ -10304,13 +10313,20 @@ impl Shared {
             let action = match action {
                 ChooseTreeAction::Key(input) => {
                     let searching = chooser.search.is_some();
-                    let Some(action) =
+                    if let Some(row) =
+                        chooser_row_for_key(&chooser.rendered.items, &input, searching, |item| {
+                            &item.key
+                        })
+                    {
+                        ChooseTreeAction::ActivateIndex(row)
+                    } else if let Some(action) =
                         choose_tree_key_action(&inner.engine.keys, &input, searching)
-                    else {
+                    {
+                        action
+                    } else {
                         inner.choose_trees.insert(client, chooser);
                         return Ok(());
-                    };
-                    action
+                    }
                 }
                 action => action,
             };
@@ -10373,13 +10389,20 @@ impl Shared {
             let action = match action {
                 ChooseBufferAction::Key(input) => {
                     let searching = chooser.search.is_some();
-                    let Some(action) =
+                    if let Some(row) =
+                        chooser_row_for_key(&chooser.rendered.items, &input, searching, |item| {
+                            &item.key
+                        })
+                    {
+                        ChooseBufferAction::PasteIndex(row)
+                    } else if let Some(action) =
                         choose_buffer_key_action(&inner.engine.keys, &input, searching)
-                    else {
+                    {
+                        action
+                    } else {
                         inner.choose_buffers.insert(client, chooser);
                         return Ok(());
-                    };
-                    action
+                    }
                 }
                 action => action,
             };
@@ -15600,6 +15623,7 @@ struct ChooseBufferSession {
     source_session: SessionId,
     filter: Option<String>,
     sort: TmuxSort,
+    key_format: Option<String>,
     names: Vec<String>,
     selected: Option<String>,
     search: Option<ChooseBufferSearchState>,
@@ -15616,6 +15640,7 @@ impl ChooseBufferSession {
         facts: &FormatHookFacts,
         filter: Option<String>,
         sort: TmuxSort,
+        key_format: Option<String>,
     ) -> Result<Option<Self>, ServerError> {
         let source_window = engine
             .state
@@ -15630,6 +15655,7 @@ impl ChooseBufferSession {
             source_session,
             filter,
             sort,
+            key_format,
             names: Vec::new(),
             selected: None,
             search: None,
@@ -15695,8 +15721,31 @@ impl ChooseBufferSession {
             visible = filtered(false);
         }
         let mut items = Vec::with_capacity(visible.len().min(MAX_CHOOSE_BUFFER_ITEMS));
-        for buffer in visible.into_iter().take(MAX_CHOOSE_BUFFER_ITEMS) {
+        for (line, buffer) in visible
+            .into_iter()
+            .take(MAX_CHOOSE_BUFFER_ITEMS)
+            .enumerate()
+        {
             self.names.push(buffer.name.clone());
+            let key = match (self.key_format.as_deref(), source_context.as_ref()) {
+                (None, _) => default_chooser_row_key(line),
+                (Some(format), Some(source_context)) => {
+                    let row_facts = FormatHookFacts {
+                        buffer: Some(buffer_format_facts(buffer)),
+                        ..facts.clone()
+                    };
+                    let variables = chooser_row_variables(line);
+                    let mut hooks =
+                        DaemonFormatHooks::command_with_variables(&row_facts, &variables);
+                    parsed_chooser_row_key(&engine.expand_pane_format(
+                        format,
+                        source_context,
+                        attached_session,
+                        &mut hooks,
+                    ))
+                }
+                (Some(_), None) => String::new(),
+            };
             items.push(ChooseBufferItem {
                 name: bounded_choose_buffer_name(&buffer.name),
                 preview: bounded_choose_buffer_preview(&buffer.data),
@@ -15706,7 +15755,7 @@ impl ChooseBufferSession {
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs(),
-                key: String::new(),
+                key,
             });
         }
         let previous_index = usize::try_from(self.rendered.selected).unwrap_or(usize::MAX);
@@ -15944,6 +15993,7 @@ struct ChooseTreeSession {
     sessions_only: bool,
     filter: Option<String>,
     sort: TmuxSort,
+    key_format: Option<String>,
     expanded_sessions: BTreeSet<SessionId>,
     expanded_windows: BTreeSet<zz_protocol::WindowId>,
     selected: Option<ChooseTreeTarget>,
@@ -15962,6 +16012,7 @@ impl ChooseTreeSession {
         facts: &FormatHookFacts,
         filter: Option<String>,
         sort: TmuxSort,
+        key_format: Option<String>,
     ) -> Result<Self, ServerError> {
         let source_window = engine
             .state
@@ -15996,6 +16047,7 @@ impl ChooseTreeSession {
             sessions_only,
             filter,
             sort,
+            key_format,
             expanded_sessions,
             expanded_windows,
             selected,
@@ -16146,6 +16198,47 @@ impl ChooseTreeSession {
         branches
     }
 
+    /// A `-K` format expands in the row's own context, the way
+    /// `window_tree_get_key` seeds `format_defaults` from the item type before
+    /// expanding `data->key_format`.
+    fn assign_row_keys(
+        &self,
+        items: &mut [ChooseTreeItem],
+        engine: &MuxEngine,
+        attached_session: Option<SessionId>,
+        facts: &FormatHookFacts,
+    ) {
+        let Some(format) = self.key_format.as_deref() else {
+            for (line, item) in items.iter_mut().enumerate() {
+                item.key = default_chooser_row_key(line);
+            }
+            return;
+        };
+        for (line, item) in items.iter_mut().enumerate() {
+            let context = match item.target {
+                ChooseTreeTarget::Session(session) => {
+                    Some(ExecutionContext::new(Some(session), None, None))
+                }
+                ChooseTreeTarget::Window(window) => engine
+                    .state
+                    .windows
+                    .get(&window)
+                    .map(|entry| ExecutionContext::new(Some(entry.session), Some(window), None)),
+                ChooseTreeTarget::Pane(pane) => ExecutionContext::for_pane(&engine.state, pane),
+            };
+            item.key = context.map_or_else(String::new, |context| {
+                let variables = chooser_row_variables(line);
+                let mut hooks = DaemonFormatHooks::command_with_variables(facts, &variables);
+                parsed_chooser_row_key(&engine.expand_pane_format(
+                    format,
+                    &context,
+                    attached_session,
+                    &mut hooks,
+                ))
+            });
+        }
+    }
+
     fn rebuild(
         &mut self,
         engine: &MuxEngine,
@@ -16254,6 +16347,8 @@ impl ChooseTreeSession {
                 }
             }
         }
+
+        self.assign_row_keys(&mut items, engine, attached_session, facts);
 
         let fallback = state.window_for_pane(self.source_pane).map(|window| {
             if self.sessions_only {
@@ -19241,6 +19336,63 @@ fn find_buffer<'a>(inner: &'a ServerState, name: Option<&str>) -> Option<&'a Pas
         .paste_buffers
         .iter()
         .find(|buffer| name.map_or(buffer.automatic, |name| buffer.name == name))
+}
+
+/// The row a keystroke selects, or `None` when nothing claims it. `mode_tree_key`
+/// scans every line for the first item holding that key and turns the press into
+/// `\r` right there, so a row shortcut beats the navigation table and the FIRST
+/// of several duplicate rows wins. The scan sits below the prompt handling, so a
+/// chooser mid-search keeps typing into the query instead.
+fn chooser_row_for_key<T>(
+    items: &[T],
+    input: &zz_terminal::KeyInput,
+    searching: bool,
+    key: impl Fn(&T) -> &str,
+) -> Option<u32> {
+    if searching {
+        return None;
+    }
+    let pressed = input_key_name(input);
+    let pressed = pressed.as_str();
+    if pressed.is_empty() {
+        return None;
+    }
+    let row = items
+        .iter()
+        .position(|item| !key(item).is_empty() && key(item) == pressed)?;
+    u32::try_from(row).ok()
+}
+
+/// The pin's stock chooser shortcut ladder: `0`-`9`, then `M-a`-`M-z`, then
+/// nothing at all from row 36 on. `mode_tree_build_lines` spells it inline as
+/// the fallback for modes with no key callback, and `choose-tree` /
+/// `choose-buffer` reach the identical ladder through
+/// `WINDOW_TREE_DEFAULT_KEY_FORMAT` / `WINDOW_BUFFER_DEFAULT_KEY_FORMAT`,
+/// whose `#{line}` arithmetic produces exactly these strings.
+fn default_chooser_row_key(line: usize) -> String {
+    match line {
+        0..=9 => line.to_string(),
+        10..=35 => {
+            let offset = u8::try_from(line - 10).expect("a row below 36 fits a byte");
+            format!("M-{}", char::from(b'a' + offset))
+        }
+        _ => String::new(),
+    }
+}
+
+/// A `-K` expansion becomes a shortcut only when it names a key some client can
+/// actually press. The pin drops the rest the same way: `key_string_lookup_string`
+/// answers `KEYC_UNKNOWN` and `mode_tree_build_lines` stores `KEYC_NONE`.
+fn parsed_chooser_row_key(expanded: &str) -> String {
+    let canonical = canonical_key(expanded);
+    if canonical.len() > MAX_CHOOSE_ITEM_KEY_BYTES || !is_key_name(&canonical) {
+        return String::new();
+    }
+    canonical
+}
+
+fn chooser_row_variables(line: usize) -> BTreeMap<String, String> {
+    BTreeMap::from([("line".to_owned(), line.to_string())])
 }
 
 fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
@@ -32060,6 +32212,57 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn copy_mode_dash_h_publishes_a_hidden_position_and_nothing_else() {
+        for (name, copy_args, hidden) in [
+            ("copy-hide-plain", &[][..], false),
+            ("copy-hide-scroll", &["-e"][..], false),
+            ("copy-hide-only", &["-H"][..], true),
+            ("copy-hide-both", &["-eH"][..], true),
+        ] {
+            let (shared, client, mut context, pane, terminal, _mailbox) = copy_mode_fixture(
+                name,
+                "i=0; while [ $i -lt 12 ]; do printf 'line-%02d\\n' \"$i\"; i=$((i+1)); done",
+            );
+            let view = TerminalViewId(client.0);
+            let target = pane.to_string();
+            let args = copy_args
+                .iter()
+                .copied()
+                .chain(["-t", target.as_str()])
+                .collect::<Vec<_>>();
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("copy-mode", args),
+                )
+                .expect("enter copy mode");
+            wait_for_view_mode(&terminal, view, "copy mode did not freeze", |mode| {
+                matches!(mode, TerminalMode::Copy { .. })
+            });
+            let mode = terminal
+                .latest_viewport_for(view)
+                .expect("frozen viewport")
+                .mode;
+            let TerminalMode::Copy {
+                position,
+                total,
+                hide_position,
+            } = mode
+            else {
+                panic!("{name} did not publish copy mode");
+            };
+            assert_eq!(hide_position, hidden, "{name} published the wrong -H state");
+            assert!(total > 0, "{name} lost its position denominator");
+            assert!(
+                position <= total,
+                "{name} published a position past its total"
+            );
+        }
+    }
+
+    #[test]
     fn copy_mode_scroll_exit_reconciles_the_client_copy_session() {
         for (name, copy_args, exits) in [
             ("copy-scroll-exit", &["-e"][..], true),
@@ -33169,6 +33372,7 @@ bind - split-window -v -c "#{pane_current_path}"
             &facts,
             None,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+            None,
         )
         .expect("chooser");
 
@@ -33257,6 +33461,7 @@ bind - split-window -v -c "#{pane_current_path}"
             &FormatHookFacts::default(),
             None,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Creation)).unwrap(),
+            None,
         )
         .expect("valid pane")
         .expect("nonempty chooser");
@@ -33286,6 +33491,227 @@ bind - split-window -v -c "#{pane_current_path}"
         ));
     }
 
+    fn chooser_key_press(name: &str) -> KeyInput {
+        let (key, modifiers) = match name.strip_prefix("M-") {
+            Some(rest) => (rest, Modifiers::new(false, false, true, false)),
+            None => (name, Modifiers::default()),
+        };
+        KeyInput {
+            action: KeyAction::Press,
+            key: KeyCode::Character(key.chars().next().expect("a single-character key")),
+            modifiers,
+            text: (modifiers == Modifiers::default()).then(|| key.to_owned().into_boxed_str()),
+            unshifted_codepoint: None,
+        }
+    }
+
+    #[test]
+    fn chooser_rows_wear_the_pin_key_ladder_and_run_out_at_thirty_six() {
+        let mut engine = MuxEngine::default();
+        let (first, _, first_pane) = engine.state.create_session("s00").expect("first session");
+        for index in 1..40 {
+            engine
+                .state
+                .create_session(format!("s{index:02}"))
+                .expect("session");
+        }
+        let facts = FormatHookFacts::default();
+        let chooser = ChooseTreeSession::new(
+            ChooseTreeKind::Windows,
+            true,
+            first_pane,
+            &engine,
+            Some(first),
+            &facts,
+            None,
+            TmuxSort::parse(None, false, Some(TmuxSortOrder::Name)).unwrap(),
+            None,
+        )
+        .expect("session chooser");
+        let keys = chooser
+            .rendered
+            .items
+            .iter()
+            .map(|item| item.key.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(keys.len(), 40);
+        assert_eq!(
+            &keys[..10],
+            ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        );
+        assert_eq!(keys[10], "M-a");
+        assert_eq!(keys[35], "M-z");
+        assert!(
+            keys[36..].iter().all(|key| key.is_empty()),
+            "the pin stops assigning keys past row 36"
+        );
+
+        for (row, key) in keys.iter().enumerate() {
+            if key.is_empty() {
+                continue;
+            }
+            assert_eq!(
+                chooser_row_for_key(
+                    &chooser.rendered.items,
+                    &chooser_key_press(key),
+                    false,
+                    |item| { &item.key }
+                ),
+                u32::try_from(row).ok(),
+                "row {row} must answer to {key}"
+            );
+        }
+        assert_eq!(
+            chooser_row_for_key(
+                &chooser.rendered.items,
+                &chooser_key_press("0"),
+                true,
+                |item| { &item.key }
+            ),
+            None,
+            "a chooser mid-search keeps typing into its query"
+        );
+    }
+
+    #[test]
+    fn chooser_key_formats_expand_per_row_and_drop_unpressable_keys() {
+        let mut engine = MuxEngine::default();
+        let (first, _, first_pane) = engine.state.create_session("alpha").expect("first session");
+        for name in ["beta", "gamma"] {
+            engine.state.create_session(name).expect("session");
+        }
+        let facts = FormatHookFacts::default();
+        let keys = |format: &str| {
+            ChooseTreeSession::new(
+                ChooseTreeKind::Windows,
+                true,
+                first_pane,
+                &engine,
+                Some(first),
+                &facts,
+                None,
+                TmuxSort::parse(None, false, Some(TmuxSortOrder::Name)).unwrap(),
+                Some(format.to_owned()),
+            )
+            .expect("session chooser")
+            .rendered
+            .items
+            .into_iter()
+            .map(|item| item.key)
+            .collect::<Vec<_>>()
+        };
+
+        assert_eq!(keys("#{line}"), ["0", "1", "2"]);
+        assert_eq!(keys("x"), ["x", "x", "x"]);
+        assert_eq!(keys("notakey"), ["", "", ""]);
+        assert_eq!(keys(""), ["", "", ""]);
+        assert_eq!(keys("C-a"), ["C-a", "C-a", "C-a"]);
+        assert_eq!(keys("Alt-b"), ["M-b", "M-b", "M-b"]);
+        assert_eq!(
+            keys("#{?#{==:#{session_name},beta},z,}"),
+            ["", "z", ""],
+            "a key format expands in each row's own context"
+        );
+    }
+
+    #[test]
+    fn a_duplicate_row_key_activates_the_first_row_that_holds_it() {
+        let mut engine = MuxEngine::default();
+        let (first, _, first_pane) = engine.state.create_session("alpha").expect("first session");
+        for name in ["beta", "gamma"] {
+            engine.state.create_session(name).expect("session");
+        }
+        let facts = FormatHookFacts::default();
+        let mut chooser = ChooseTreeSession::new(
+            ChooseTreeKind::Windows,
+            true,
+            first_pane,
+            &engine,
+            Some(first),
+            &facts,
+            None,
+            TmuxSort::parse(None, false, Some(TmuxSortOrder::Name)).unwrap(),
+            Some("x".to_owned()),
+        )
+        .expect("session chooser");
+        chooser
+            .apply(ChooseTreeAction::Next, &engine, Some(first), &facts)
+            .expect("move off the first row");
+        assert_eq!(chooser.rendered.selected, 1);
+
+        let row = chooser_row_for_key(
+            &chooser.rendered.items,
+            &chooser_key_press("x"),
+            false,
+            |item| &item.key,
+        )
+        .expect("a duplicate key still claims a row");
+        assert_eq!(row, 0, "mode_tree_key breaks on the first match");
+        assert!(matches!(
+            chooser
+                .apply(
+                    ChooseTreeAction::ActivateIndex(row),
+                    &engine,
+                    Some(first),
+                    &facts
+                )
+                .expect("activate the keyed row"),
+            ChooseTreeResult::Activate(target) if target == ChooseTreeTarget::Session(first)
+        ));
+    }
+
+    #[test]
+    fn buffer_chooser_rows_carry_the_same_key_ladder() {
+        let mut engine = MuxEngine::default();
+        let (session, _, pane) = engine.state.create_session("work").expect("session");
+        let buffers = (0..12)
+            .map(|index| PasteBuffer {
+                name: format!("buffer{index}"),
+                data: Arc::from(format!("payload {index}").into_bytes()),
+                created: UNIX_EPOCH + Duration::from_secs(100 + index),
+                automatic: false,
+                utf8: true,
+            })
+            .collect::<Vec<_>>();
+        let facts = FormatHookFacts::default();
+        let keys = |key_format: Option<&str>| {
+            ChooseBufferSession::new(
+                pane,
+                &engine,
+                &buffers,
+                Some(session),
+                &facts,
+                None,
+                TmuxSort::parse(None, false, Some(TmuxSortOrder::Name)).unwrap(),
+                key_format.map(str::to_owned),
+            )
+            .expect("valid pane")
+            .expect("nonempty chooser")
+            .rendered
+            .items
+            .into_iter()
+            .map(|item| item.key)
+            .collect::<Vec<_>>()
+        };
+
+        let stock = keys(None);
+        assert_eq!(
+            &stock[..10],
+            ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        );
+        assert_eq!(&stock[10..], ["M-a", "M-b"]);
+        assert_eq!(
+            keys(Some("#{?#{==:#{buffer_name},buffer3},q,}"))
+                .iter()
+                .filter(|key| !key.is_empty())
+                .count(),
+            1,
+            "a buffer key format sees each row's own buffer"
+        );
+        assert!(keys(Some("nope")).iter().all(String::is_empty));
+    }
+
     #[test]
     fn chooser_specs_sort_filter_and_fall_back_when_filters_match_nothing() {
         let mut engine = MuxEngine::default();
@@ -33302,6 +33728,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &facts,
                 filter.map(str::to_owned),
                 TmuxSort::parse(None, reversed, Some(TmuxSortOrder::Index)).unwrap(),
+                None,
             )
             .expect("session chooser")
             .rendered
@@ -33336,6 +33763,7 @@ bind - split-window -v -c "#{pane_current_path}"
             &facts,
             None,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+            None,
         )
         .expect("collapsed session chooser");
         collapsed_sessions
@@ -33358,6 +33786,7 @@ bind - split-window -v -c "#{pane_current_path}"
             &facts,
             None,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+            None,
         )
         .expect("collapsed window chooser");
         assert_eq!(
@@ -33384,6 +33813,7 @@ bind - split-window -v -c "#{pane_current_path}"
             &facts,
             None,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+            None,
         )
         .expect("default chooser");
         assert_eq!(
@@ -33415,6 +33845,7 @@ bind - split-window -v -c "#{pane_current_path}"
             &facts,
             Some("#{==:#{buffer_name},older}".to_owned()),
             TmuxSort::parse(None, true, Some(TmuxSortOrder::Creation)).unwrap(),
+            None,
         )
         .expect("valid source")
         .expect("filtered chooser");
@@ -33428,6 +33859,7 @@ bind - split-window -v -c "#{pane_current_path}"
             &facts,
             Some("0".to_owned()),
             TmuxSort::parse(None, true, Some(TmuxSortOrder::Creation)).unwrap(),
+            None,
         )
         .expect("valid source")
         .expect("fallback chooser");
@@ -41023,6 +41455,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &facts,
                 None,
                 TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+                None,
             )
             .expect("chooser");
             inner.choose_trees.insert(client, chooser);

@@ -17,7 +17,7 @@ pub use framing::{MAX_ENCODED_FRAME_BYTES, MAX_FRAME_BYTES, ProtocolError};
 pub use id::{ClientId, ClientInstanceId, PaneId, SessionId, SplitId, WindowId};
 pub use key::{
     Binding, KeyDecision, KeyEngine, KeyName, KeyTables, canonical_key, input_key_name,
-    input_typed_text,
+    input_typed_text, is_key_name,
 };
 pub use message::{
     AgentCommand, AgentConnectionPhase, AgentGitSummary, AgentImage, AgentPaneWire,
